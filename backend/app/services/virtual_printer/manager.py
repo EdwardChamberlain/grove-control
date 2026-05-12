@@ -217,9 +217,18 @@ class VirtualPrinterInstance:
         else:
             await self._queue_file(file_path, source_ip)
 
-        # Reset MQTT status back to IDLE
+        # Signal job completion to the slicer. Send-flow slicers don't watch the
+        # post-upload state and would be happy with anything; the Print flow
+        # (intended for proxy-mode VPs, but users sometimes click it against
+        # queue/immediate/review modes too — #1280) watches the gcode_state
+        # cycle and only releases its in-flight-job lock when it sees FINISH.
+        # Going PREPARE → IDLE wedges the slicer's UI at "Downloading...(0%)"
+        # and blocks the next dispatch with "busy with another print job".
+        # PREPARE → FINISH satisfies both flows. prepare_percent=100 also
+        # unfreezes the slicer's "Downloading X%" progress bar which it ticks
+        # against the same field during the upload window.
         if self._mqtt and file_path.suffix.lower() == ".3mf":
-            self._mqtt.set_gcode_state("IDLE")
+            self._mqtt.set_gcode_state("FINISH", filename=file_path.name, prepare_percent="100")
 
     async def on_print_command(self, filename: str, data: dict) -> None:
         """Handle print command from MQTT."""

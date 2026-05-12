@@ -172,6 +172,41 @@ class TestVirtualPrinterInstance:
             mock_archive.assert_called_once_with(file_path, "192.168.1.100")
 
     @pytest.mark.asyncio
+    async def test_on_file_received_signals_FINISH_to_slicer(self, instance):
+        """Regression #1280: when a slicer's Print flow uploads to a non-proxy VP,
+        the VP must transition gcode_state PREPARE → FINISH so the slicer's
+        in-flight-job lock releases. Going PREPARE → IDLE wedges Orca at
+        "Downloading...(0%)" and blocks the next dispatch with "busy with
+        another print job".
+
+        Send-flow slicers don't watch the post-upload state, so this is a
+        no-op behavior change for them.
+        """
+        instance.mode = "immediate"
+        instance._mqtt = MagicMock()
+        instance._mqtt.set_gcode_state = MagicMock()
+        file_path = Path("/tmp/test.3mf")  # nosec B108
+
+        with patch.object(instance, "_archive_file", new_callable=AsyncMock):
+            await instance.on_file_received(file_path, "192.168.1.100")
+
+        instance._mqtt.set_gcode_state.assert_called_once_with("FINISH", filename="test.3mf", prepare_percent="100")
+
+    @pytest.mark.asyncio
+    async def test_on_file_received_non_3mf_does_not_touch_state(self, instance):
+        """Non-3MF uploads (e.g., a job's auxiliary files) must not transition
+        the visible state — the slicer is only tracking the .3mf upload."""
+        instance.mode = "immediate"
+        instance._mqtt = MagicMock()
+        instance._mqtt.set_gcode_state = MagicMock()
+        file_path = Path("/tmp/test.gcode")  # nosec B108
+
+        with patch.object(instance, "_archive_file", new_callable=AsyncMock):
+            await instance.on_file_received(file_path, "192.168.1.100")
+
+        instance._mqtt.set_gcode_state.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_archive_file_skips_non_3mf(self, instance):
         """Verify non-3MF files are skipped and cleaned up."""
         instance._session_factory = MagicMock()
