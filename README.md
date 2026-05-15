@@ -18,7 +18,6 @@
   <a href="https://github.com/maziggy/bambuddy/stargazers"><img src="https://img.shields.io/github/stars/maziggy/bambuddy?style=flat-square" alt="Stars"></a>
   <a href="https://github.com/maziggy/bambuddy/issues"><img src="https://img.shields.io/github/issues/maziggy/bambuddy?style=flat-square" alt="Issues"></a>
   <a href="https://discord.gg/aFS3ZfScHM"><img src="https://img.shields.io/discord/1461241694715645994?style=flat-square&logo=discord&logoColor=white&label=Discord&color=5865F2" alt="Discord"></a>
-  <a href="https://forum.bambuddy.cool"><img src="https://img.shields.io/badge/Forum-bambuddy.cool-00adef?style=flat-square&logo=discourse&logoColor=white" alt="Forum"></a>
   <a href="https://github.com/sponsors/maziggy"><img src="https://img.shields.io/badge/GitHub_Sponsors-Sponsor-ea4aaa?style=flat-square&logo=github-sponsors&logoColor=white" alt="GitHub Sponsors"></a>
   <a href="https://sponsors.bambuddy.cool"><img src="https://img.shields.io/badge/Sponsors_Portal-sponsors.bambuddy.cool-2dd4bf?style=flat-square&logo=heart&logoColor=white" alt="Sponsors Portal"></a>
   <a href="https://ko-fi.com/maziggy"><img src="https://img.shields.io/badge/Ko--fi-Support-ff5e5b?style=flat-square&logo=ko-fi&logoColor=white" alt="Ko-fi" target=_blank></a>
@@ -30,7 +29,6 @@
   <a href="#-screenshots">Screenshots</a> •
   <a href="#-quick-start">Quick Start</a> •
   <a href="http://wiki.bambuddy.cool">Documentation</a> •
-  <a href="https://forum.bambuddy.cool">Forum</a> •
   <a href="https://discord.gg/aFS3ZfScHM">Discord</a> •
   <a href="#-contributing">Contributing</a>
 </p>
@@ -66,24 +64,6 @@ Two leading 3D-printing publications independently concluded that Bambuddy's fea
 > *"The list of functions seems so extensive that it even goes beyond what Bambu Lab offers in its own cloud."* — [3Druck.com](https://3druck.com/en/programs/bambuddy-open-source-tool-replaces-bambu-cloud-for-management-and-automation-of-3d-print-jobs-38153226/)
 
 📄 **[See all press coverage →](https://bambuddy.cool/press.html)**
-
----
-
-## 📣 Contributors Wanted — Help Shape Bambuddy
-
-Bambuddy is a community-driven project and I'm **actively looking for contributors** — especially for two areas I can't cover alone:
-
-- 📝 **Documentation writers** — help improve the wiki, guides, and feature docs so new users have a smooth onboarding
-- ⚙️ **Discourse admin** — our **Discourse forum** is now live at [forum.bambuddy.cool](https://forum.bambuddy.cool) but still needs to be configured, themed, and tuned (categories, permissions, SSO, email, plugins, backups). If you know Discourse or want to dig in, I'd love your help.
-- 💬 **Forum moderators** — help welcome newcomers, answer questions, and keep discussions healthy on the new forum
-
-You don't need to be a developer for the docs or moderator roles. If you enjoy writing, helping others, or keeping a community friendly, you're exactly who we're looking for.
-
-**Get in touch:**
-- 🗣️ [Forum](https://forum.bambuddy.cool) — chats, longer discussions, guides, and community Q&A
-- 💬 [Discord](https://discord.gg/aFS3ZfScHM) — fastest way to chat
-- 🐙 [GitHub Discussions](https://github.com/maziggy/bambuddy/discussions) — open a thread
-- 📧 **martin@bambuddy.cool** — email Martin directly (no GitHub or Discord needed)
 
 ---
 
@@ -705,16 +685,14 @@ Full documentation available at **[wiki.bambuddy.cool](http://wiki.bambuddy.cool
 
 ## 🤝 Contributing
 
-Contributions welcome! **I'm especially looking for help with documentation and our new [Discourse forum](https://forum.bambuddy.cool)** — see [Contributors Wanted](#-contributors-wanted--help-shape-bambuddy) above. Other ways to help:
+Contributions welcome! Ways to help:
 
 1. **📝 Document** — Improve the wiki and guides *(urgently needed!)*
-2. **⚙️ Admin Discourse** — Help configure and tune the [forum](https://forum.bambuddy.cool) *(urgently needed!)*
-3. **💬 Moderate** — Welcome newcomers and keep [forum](https://forum.bambuddy.cool) discussions healthy *(urgently needed!)*
-4. **Test** — Report issues with your printer model
-5. **Translate** — Add new languages
-6. **Code** — Submit PRs for bugs or features
+2. **Test** — Report issues with your printer model
+3. **Translate** — Add new languages
+4. **Code** — Submit PRs for bugs or features
 
-Not sure where to start? Reach out on [Discord](https://discord.gg/aFS3ZfScHM), post on the [forum](https://forum.bambuddy.cool), or email **martin@bambuddy.cool** — I'll help you find something that fits.
+Not sure where to start? Reach out on [Discord](https://discord.gg/aFS3ZfScHM) or email **martin@bambuddy.cool** — I'll help you find something that fits.
 
 ```bash
 # Development setup
@@ -763,7 +741,6 @@ Sponsors get listed in [BACKERS.md](BACKERS.md). Need commercial support (SLA, m
 <p align="center">
   Made with ❤️ for the 3D printing community
   <br><br>
-  <a href="https://forum.bambuddy.cool">Forum</a> •
   <a href="https://discord.gg/aFS3ZfScHM">Join our Discord</a> •
   <a href="https://github.com/maziggy/bambuddy/issues">Report Bug</a> •
   <a href="https://github.com/maziggy/bambuddy/issues">Request Feature</a> •
