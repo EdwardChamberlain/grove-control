@@ -2860,7 +2860,7 @@ export default {
       checkEmail: 'Prüfen Sie Ihre E-Mail ({{email}}) für einen 6-stelligen Code',
       enterTotpHint: 'Geben Sie den 6-stelligen Code aus Ihrer Authenticator-App ein',
       accessToken: 'Zugriffstoken',
-      accessTokenHint: 'Fügen Sie Ihr Bambu Lab Zugriffstoken ein (aus Bambu Studio)',
+      accessTokenHint: 'Fügen Sie Ihr Bambu-Cloud-Zugriffstoken ein. Konten der Region China müssen diesen Weg nutzen (telefonnummerngebunden — kein E-Mail-Login). Im Wiki steht, wie Sie das Token aus den MakerWorld-Cookies auslesen.',
       back: 'Zurück',
       loginButton: 'Anmelden',
       verifyButton: 'Bestätigen',

@@ -2848,7 +2848,7 @@ export default {
       checkEmail: '检查您的邮箱 ({{email}}) 获取 6 位验证码',
       enterTotpHint: '输入验证器应用中的 6 位代码',
       accessToken: '访问令牌',
-      accessTokenHint: '粘贴您的拓竹访问令牌（来自 Bambu Studio）',
+      accessTokenHint: '粘贴您的拓竹云访问令牌。中国大陆账号（绑定手机号、无邮箱登录）只能使用此方式登录。可从 MakerWorld 浏览器 Cookie 中获取令牌，详见 Wiki。',
       back: '返回',
       loginButton: '登录',
       verifyButton: '验证',

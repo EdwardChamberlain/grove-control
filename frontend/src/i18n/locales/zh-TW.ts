@@ -2848,7 +2848,7 @@ export default {
       checkEmail: '檢查您的信箱 ({{email}}) 獲取 6 位驗證碼',
       enterTotpHint: '輸入驗證器 App 中的 6 位驗證碼',
       accessToken: '存取權杖',
-      accessTokenHint: '貼上您的拓竹存取權杖（來自 Bambu Studio）',
+      accessTokenHint: '貼上您的拓竹雲端存取權杖。中國大陸帳號（綁定手機號碼、無 Email 登入）僅能使用此方式登入。可從 MakerWorld 瀏覽器 Cookie 取得權杖，詳見 Wiki。',
       back: '返回',
       loginButton: '登入',
       verifyButton: '驗證',

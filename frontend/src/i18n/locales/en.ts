@@ -2863,7 +2863,7 @@ export default {
       checkEmail: 'Check your email ({{email}}) for a 6-digit code',
       enterTotpHint: 'Enter the 6-digit code from your authenticator app',
       accessToken: 'Access Token',
-      accessTokenHint: 'Paste your Bambu Lab access token (from Bambu Studio)',
+      accessTokenHint: 'Paste your Bambu Cloud access token. China-region accounts must use this path (phone-bound — email login unavailable). See the wiki for how to retrieve the token from MakerWorld cookies.',
       back: 'Back',
       loginButton: 'Login',
       verifyButton: 'Verify',

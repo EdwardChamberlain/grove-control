@@ -2860,7 +2860,7 @@ export default {
       checkEmail: 'メール ({{email}}) に届いた6桁のコードを入力してください',
       enterTotpHint: '認証アプリの6桁のコードを入力してください',
       accessToken: 'アクセストークン',
-      accessTokenHint: 'Bambu Labのアクセストークンを貼り付け（Bambu Studioから取得）',
+      accessTokenHint: 'Bambu Cloud のアクセストークンを貼り付けてください。中国リージョンのアカウントはこの方法のみ利用可能です（電話番号認証のためメールログイン不可）。トークンの取得方法は MakerWorld の Cookie から（Wiki を参照）。',
       back: '戻る',
       loginButton: 'ログイン',
       verifyButton: '認証',

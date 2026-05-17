@@ -2849,7 +2849,7 @@ export default {
       checkEmail: 'Code envoyé à {{email}}',
       enterTotpHint: 'Entrez le code 2FA',
       accessToken: 'Jeton d\'accès (Access Token)',
-      accessTokenHint: 'Collez le jeton (depuis Bambu Studio)',
+      accessTokenHint: 'Collez votre jeton Bambu Cloud. Les comptes de la région Chine doivent passer par ici (liés à un numéro de téléphone — pas de connexion par e-mail). Le wiki explique comment récupérer le jeton depuis les cookies MakerWorld.',
       back: 'Retour',
       loginButton: 'Connexion',
       verifyButton: 'Vérifier',

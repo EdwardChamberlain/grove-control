@@ -2848,7 +2848,7 @@ export default {
       checkEmail: 'Verifique seu email ({{email}}) para um código de 6 dígitos',
       enterTotpHint: 'Digite o código de 6 dígitos do seu aplicativo autenticador',
       accessToken: 'Token de Acesso',
-      accessTokenHint: 'Cole seu token de acesso Bambu Lab (do Bambu Studio)',
+      accessTokenHint: 'Cole seu token de acesso da Bambu Cloud. Contas da região China precisam usar este caminho (vinculadas ao celular — login por e-mail indisponível). Veja no wiki como obter o token dos cookies do MakerWorld.',
       back: 'Voltar',
       loginButton: 'Entrar',
       verifyButton: 'Verificar',
