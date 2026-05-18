@@ -496,11 +496,24 @@ class TestSpoolmanInventoryCRUD:
         spoolman_settings,
         mock_spoolman_client,
     ):
-        """POST /spoolman/inventory/spools/{id}/reset-usage zeroes used_weight in Spoolman."""
+        """POST /spoolman/inventory/spools/{id}/reset-usage zeroes used_weight in Spoolman.
+
+        Parity with internal mode (#1390): the InventorySpool response
+        carries `weight_used = label - remaining` and
+        `weight_used_baseline = weight_used - real_used_weight`, so the
+        displayed consumed counter (weight_used - baseline) reads 0
+        while remaining (= label - weight_used) preserves Spoolman's
+        independent remaining_weight field.
+        """
         response = await async_client.post("/api/v1/spoolman/inventory/spools/42/reset-usage")
 
         assert response.status_code == 200
-        assert response.json()["weight_used"] == 0
+        body = response.json()
+        # Sample spool: label=1000, remaining=750, used_weight=0 after Spoolman reset.
+        assert body["weight_used"] == 250.0, "synthetic weight_used = label - remaining"
+        assert body["weight_used_baseline"] == 250.0, "baseline absorbs the reset"
+        assert body["weight_used"] - body["weight_used_baseline"] == 0, "displayed consumed = 0"
+        assert body["label_weight"] - body["weight_used"] == 750, "remaining unchanged"
         mock_spoolman_client.reset_spool_usage.assert_called_once_with(42)
 
     @pytest.mark.asyncio

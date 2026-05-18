@@ -580,7 +580,18 @@ async def update_spool(
     cur_color = (cur_filament.get("color_hex") or "808080").upper().removeprefix("#")
     rgba = data.rgba if data.rgba is not None else (cur_color + "FF")
     label_weight = data.label_weight if data.label_weight is not None else int(cur_filament.get("weight") or 1000)
-    weight_used = data.weight_used if data.weight_used is not None else float(current.get("used_weight") or 0)
+    # Default weight_used from the synthetic mapping (label - remaining) so an
+    # edit that doesn't touch the weight field preserves Spoolman's real
+    # remaining_weight after a "Reset usage to 0" — the previous code read
+    # Spoolman's used_weight directly, which is 0 post-reset, so
+    # `remaining = label - 0 = 1000` would overwrite the real remaining
+    # the next time the user edited any other field (#1390).
+    cur_remaining_raw = current.get("remaining_weight")
+    if cur_remaining_raw is not None:
+        synthetic_used = max(0.0, float(label_weight) - float(cur_remaining_raw))
+    else:
+        synthetic_used = float(current.get("used_weight") or 0)
+    weight_used = data.weight_used if data.weight_used is not None else synthetic_used
     note = data.note if data.note is not None else current.get("comment")
     storage_location_changed = "storage_location" in data.model_fields_set
     storage_location = data.storage_location if storage_location_changed else None

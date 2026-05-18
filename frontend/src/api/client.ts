@@ -2408,6 +2408,12 @@ export interface InventorySpool {
   core_weight: number;
   core_weight_catalog_id: number | null;
   weight_used: number;
+  // Anchor for the resettable "Total Consumed" display (#1390). The
+  // counter shown on the Inventory page is `weight_used - weight_used_baseline`;
+  // remaining is still `label_weight - weight_used`, so "Reset usage to 0"
+  // zeroes the counter without disturbing remaining. Optional for back-compat
+  // with rows from a pre-migration DB snapshot — default to 0.
+  weight_used_baseline?: number;
   slicer_filament: string | null;
   slicer_filament_name: string | null;
   nozzle_temp_min: number | null;
