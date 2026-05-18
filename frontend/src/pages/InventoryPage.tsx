@@ -710,8 +710,14 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
     },
   });
 
-  const activeSpoolIds = useMemo(
-    () => (spools ?? []).filter((s) => !s.archived_at).map((s) => s.id),
+  // Spool IDs the "Reset all usage" button bulk-targets. Includes archived
+  // spools too — without them, the broadened "Total Consumed" stat (which
+  // sums archived consumption per the #1390 follow-up) would stay non-zero
+  // after a Reset-all click, surprising the user. Backend reset endpoints
+  // (both internal and Spoolman) already accept archived IDs without a
+  // route-level guard, so this just removes the frontend filter.
+  const resetableSpoolIds = useMemo(
+    () => (spools ?? []).map((s) => s.id),
     [spools],
   );
 
@@ -759,7 +765,14 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
     },
   });
 
-  // Stats calculation (active spools only)
+  // Stats calculation.
+  //
+  // "Total Consumed" sums over ALL spools (active AND archived) because it's
+  // a running counter — past consumption of a now-archived spool is real
+  // history and silently dropping it on archive made the running total
+  // collapse mysteriously (#1390 follow-up). The other aggregates
+  // (totalWeight, lowStock, byMaterial, activeCount) describe what's
+  // currently in active inventory and stay active-only.
   const stats = useMemo(() => {
     if (!spools) return null;
     let totalWeight = 0;
@@ -768,14 +781,16 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
     let activeCount = 0;
     const byMaterial: Record<string, { count: number; weight: number }> = {};
     for (const s of spools) {
+      // "Total Consumed" is the resettable counter (weight_used - baseline)
+      // rather than raw weight_used so the per-spool / bulk eraser zeroes
+      // the stat without inflating remaining back to label_weight (#1390).
+      // Computed before the archived-skip below so archived consumption
+      // stays in the running total.
+      totalConsumed += Math.max(0, s.weight_used - (s.weight_used_baseline ?? 0));
       if (s.archived_at) continue;
       activeCount++;
       const remaining = Math.max(0, s.label_weight - s.weight_used);
       totalWeight += remaining;
-      // "Total Consumed" is the resettable counter (weight_used - baseline)
-      // rather than raw weight_used so the per-spool / bulk eraser zeroes
-      // the stat without inflating remaining back to label_weight (#1390).
-      totalConsumed += Math.max(0, s.weight_used - (s.weight_used_baseline ?? 0));
       const pct = s.label_weight > 0 ? (remaining / s.label_weight) * 100 : 0;
       const threshold = s.low_stock_threshold_pct ?? lowStockThreshold;
       if (pct < threshold) lowStock++;
@@ -1127,7 +1142,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
                 <TrendingDown className="w-4 h-4 text-blue-400" />
                 <span className="text-xs text-bambu-gray font-medium uppercase tracking-wide">{t('inventory.totalConsumed')}</span>
               </div>
-              {stats.totalConsumed > 0 && activeSpoolIds.length > 0 && (
+              {stats.totalConsumed > 0 && resetableSpoolIds.length > 0 && (
                 <button
                   onClick={() => setConfirmAction({ type: 'reset-all-usage' })}
                   className="p-1 text-bambu-gray hover:text-red-400 rounded transition-colors"
@@ -1860,7 +1875,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
             confirmAction.type === 'delete' ? t('inventory.deleteConfirm') :
             confirmAction.type === 'archive' ? t('inventory.archiveConfirm') :
             confirmAction.type === 'reset-usage' ? t('inventory.resetUsageConfirm') :
-            t('inventory.resetAllUsageConfirm', { count: activeSpoolIds.length })
+            t('inventory.resetAllUsageConfirm', { count: resetableSpoolIds.length })
           }
           confirmText={
             confirmAction.type === 'delete' ? t('common.delete') :
@@ -1876,7 +1891,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
             } else if (confirmAction.type === 'reset-usage') {
               resetUsageMutation.mutate(confirmAction.spoolId);
             } else {
-              bulkResetUsageMutation.mutate(activeSpoolIds);
+              bulkResetUsageMutation.mutate(resetableSpoolIds);
             }
             setConfirmAction(null);
           }}
@@ -2136,7 +2151,11 @@ function SpoolTableRow({
               <Printer className="w-4 h-4" />
             </button>
           )}
-          {onResetUsage && !spool.archived_at && spool.weight_used > 0 && (
+          {onResetUsage && spool.weight_used > 0 && (
+            // Eraser also shows on archived spools (#1390 follow-up):
+            // archived consumed weight now counts in "Total Consumed", so
+            // the user needs a way to zero an archived spool's tracking
+            // counter individually without having to un-archive it first.
             <button onClick={onResetUsage} className="p-1.5 text-bambu-gray hover:text-orange-400 rounded transition-colors" title={t('inventory.resetUsageTooltip')}>
               <Eraser className="w-4 h-4" />
             </button>
