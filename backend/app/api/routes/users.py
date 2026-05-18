@@ -41,6 +41,7 @@ from backend.app.services.email_service import (
     get_smtp_settings,
     send_email,
 )
+from backend.app.services.finance_defaults import ensure_user_finance_defaults
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -166,6 +167,8 @@ async def create_user(
         new_user.groups = list(groups)
 
     db.add(new_user)
+    await db.flush()
+    await ensure_user_finance_defaults(db, new_user)
     await db.commit()
     await db.refresh(new_user)
 
@@ -287,6 +290,8 @@ async def update_user(
                     detail="Cannot remove the last admin user from Administrators",
                 )
         user.groups = list(groups)
+
+    await ensure_user_finance_defaults(db, user)
 
     await db.commit()
     result = await db.execute(select(User).where(User.id == user_id).options(selectinload(User.groups)))

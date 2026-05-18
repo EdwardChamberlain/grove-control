@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from fastapi import HTTPException
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +18,7 @@ from backend.app.core.config import settings
 from backend.app.core.database import async_session, run_with_retry
 from backend.app.core.tasks import spawn_background_task
 from backend.app.models.archive import PrintArchive
+from backend.app.models.finance import CostCenter, CostCenterMember
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
 from backend.app.models.printer import Printer
@@ -26,6 +28,7 @@ from backend.app.models.smart_plug import SmartPlug
 from backend.app.models.spool_assignment import SpoolAssignment
 from backend.app.models.spoolman_slot_assignment import SpoolmanSlotAssignment
 from backend.app.services import drying_preflight
+from backend.app.models.user import User
 from backend.app.services.bambu_ftp import (
     UploadCancelled,
     cache_3mf_download,
@@ -39,6 +42,7 @@ from backend.app.services.chamber_heat_soak import ChamberHeatSoak, abort_heat_s
 from backend.app.services.filament_deficit import compute_deficit_for_queue_item
 from backend.app.services.filament_requirements import canonical_filament_type
 from backend.app.services.ha_sensor_manager import ha_sensor_manager
+from backend.app.services.finance_budget import validate_print_budget
 from backend.app.services.notification_service import notification_service
 from backend.app.services.printer_manager import (
     printer_manager,
@@ -3464,6 +3468,43 @@ class PrintScheduler:
             # publishing the print command.
             await db.commit()
 
+        try:
+            queue_user = await db.get(User, item.created_by_id) if item.created_by_id is not None else None
+            if queue_user is not None and item.cost_center_id is not None and not queue_user.is_admin:
+                center = await db.scalar(
+                    select(CostCenter).where(CostCenter.id == item.cost_center_id).with_for_update()
+                )
+                if not center:
+                    raise HTTPException(status_code=404, detail="Cost center not found")
+                if not center.is_active:
+                    raise HTTPException(status_code=400, detail="Cost center is inactive")
+                if center.is_private:
+                    if center.owner_user_id != queue_user.id:
+                        raise HTTPException(status_code=403, detail="You cannot print with this private cost center")
+                else:
+                    member = await db.scalar(
+                        select(CostCenterMember).where(
+                            CostCenterMember.cost_center_id == item.cost_center_id,
+                            CostCenterMember.user_id == queue_user.id,
+                        )
+                    )
+                    if not member or not member.can_print:
+                        raise HTTPException(status_code=403, detail="You cannot print with this cost center")
+            await validate_print_budget(
+                db,
+                cost_center_id=item.cost_center_id,
+                estimated_cost=item.estimated_cost,
+                current_user=queue_user,
+                exclude_queue_item_id=item.id,
+            )
+        except HTTPException as exc:
+            item.status = "failed"
+            item.error_message = getattr(exc, "detail", str(exc))
+            item.completed_at = datetime.now(timezone.utc)
+            await db.commit()
+            logger.error("Queue item %s: Budget check failed: %s", item.id, item.error_message)
+            await self._power_off_if_needed(db, item)
+            return
         # Get printer first (needed for both paths)
         result = await db.execute(select(Printer).where(Printer.id == item.printer_id))
         printer = result.scalar_one_or_none()
@@ -3538,6 +3579,7 @@ class PrintScheduler:
                     original_filename=filename,
                     created_by_id=item.created_by_id,
                     project_id=item.project_id,
+                    cost_center_id=item.cost_center_id,
                 )
                 if archive:
                     item.archive_id = archive.id
@@ -3907,6 +3949,7 @@ class PrintScheduler:
                 archive.id,
                 ams_mapping=ams_mapping,
                 created_by_id=item.created_by_id,
+                cost_center_id=item.cost_center_id,
                 plate_id=item.plate_id,
             )
 
