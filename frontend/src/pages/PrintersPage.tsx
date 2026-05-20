@@ -1,6 +1,15 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { compareFwVersions } from '../utils/firmwareVersion';
 import { formatPrintName } from '../utils/printName';
+import { computePopoverPosition } from '../utils/popoverPosition';
+
+// AMS drying popover dimensions — w-[240px] on the popover, estimated height
+// covers header + filament select + temp slider + duration + rotate-tray
+// toggle + buttons. Over-estimating is fine (flip-above kicks in slightly
+// earlier); under-estimating leaves the popover clipped off the bottom (the
+// original bug at #1447).
+const DRYING_POPOVER_WIDTH = 240;
+const DRYING_POPOVER_ESTIMATED_HEIGHT = 320;
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../contexts/ThemeContext';
@@ -3486,7 +3495,7 @@ function PrinterCard({
                                           setDryingPopoverModuleType(ams.module_type);
                                           setDryingPopoverAmsId(ams.id);
                                           const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                          setDryingPopoverPos({ top: rect.bottom + 4, left: Math.max(8, rect.right - 240) });
+                                          setDryingPopoverPos(computePopoverPosition({ triggerRect: rect, popoverWidth: DRYING_POPOVER_WIDTH, estimatedHeight: DRYING_POPOVER_ESTIMATED_HEIGHT }));
                                         }
                                       }}
                                       className={`flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] transition-colors ${
@@ -3999,7 +4008,7 @@ function PrinterCard({
                                         setDryingPopoverModuleType(ams.module_type);
                                         setDryingPopoverAmsId(ams.id);
                                         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                        setDryingPopoverPos({ top: rect.bottom + 4, left: Math.max(8, rect.right - 240) });
+                                        setDryingPopoverPos(computePopoverPosition({ triggerRect: rect, popoverWidth: DRYING_POPOVER_WIDTH, estimatedHeight: DRYING_POPOVER_ESTIMATED_HEIGHT }));
                                       }
                                     }}
                                     className={`flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] transition-colors ${
