@@ -124,6 +124,12 @@ export default {
 
   // Printers page
   printers: {
+    addPreflight: {
+      checking: 'Comprobando la conexión...',
+      warning: 'Algunas comprobaciones de conexión fallaron. Esta impresora podría aparecer como desconectada. Revisa las comprobaciones de abajo, soluciona lo que puedas o guárdala de todos modos.',
+      back: 'Atrás',
+      saveAnyway: 'Guardar de todos modos',
+    },
     title: 'Impresoras',
     addPrinter: 'Añadir impresora',
     editPrinter: 'Editar impresora',
@@ -5543,6 +5549,54 @@ export default {
     },
   },
 
+  systemHealth: {
+    sectionTitle: 'Estado del sistema',
+    sectionDescription: 'Analiza los registros recientes en busca de problemas conocidos que normalmente puedes resolver tú mismo, antes de que se conviertan en un ticket de soporte.',
+    rescan: 'Volver a analizar',
+    clean: 'No se encontraron problemas conocidos en las últimas {{times}} entradas de registro.',
+    logUnavailable: 'El registro en archivo está desactivado, por lo que no se pueden analizar los registros. Activa el registro en archivo para usar esta comprobación.',
+    learnMore: 'Cómo solucionarlo',
+    fixLabel: 'Solución:',
+    occurrences: 'Visto {{times}}× — última vez a las {{lastSeen}}',
+    category: {
+      layer8: 'Puedes solucionarlo',
+      environment: 'Entorno',
+      bug: 'Por favor, repórtalo',
+    },
+    signature: {
+      'ftp-auth-rejected': {
+        name: 'La impresora rechazó el código de acceso',
+        cause: 'La impresora rechazó el inicio de sesión de transferencia de archivos. El código de acceso es incorrecto o cambió tras activar el Modo Desarrollador.',
+        fix: 'Vuelve a copiar el código de acceso desde la pantalla de la impresora (ajustes de LAN) y actualízalo en los ajustes de la impresora en Bambuddy.',
+      },
+      'ftp-connection-timeout': {
+        name: 'Se agotó el tiempo de la conexión de transferencia de archivos',
+        cause: 'Bambuddy no pudo alcanzar el puerto de transferencia de archivos de la impresora (FTPS 990). El puerto está bloqueado, o la impresora está apagada o en otra subred.',
+        fix: 'Asegúrate de que nada bloquee el puerto 990 entre Bambuddy y la impresora, y de que ambos estén en la misma red.',
+      },
+      'ftp-ssl-error': {
+        name: 'Falló el protocolo de enlace seguro de transferencia de archivos',
+        cause: 'El protocolo de enlace TLS con el servidor de transferencia de archivos de la impresora falló. Suele deberse a un cortafuegos o a un firmware de impresora desactualizado.',
+        fix: 'Actualiza el firmware de la impresora y comprueba que ningún cortafuegos o proxy intercepte la conexión en el puerto 990.',
+      },
+      'mqtt-connection-flapping': {
+        name: 'La conexión con la impresora se cae continuamente',
+        cause: 'La conexión de control (MQTT 8883) se desconecta y reconecta repetidamente, normalmente por una red débil o un puerto parcialmente bloqueado.',
+        fix: 'Comprueba la señal Wi-Fi en la impresora, usa preferentemente una conexión por cable y asegúrate de que el puerto 8883 sea accesible de forma fiable.',
+      },
+      'camera-connection-refused': {
+        name: 'Transmisión de cámara inaccesible',
+        cause: 'No se pudo acceder a la cámara en vivo en el puerto RTSPS 322. El puerto está bloqueado, o la cámara o la vista en vivo por LAN están desactivadas en la impresora.',
+        fix: 'Activa la cámara y la vista en vivo por LAN en la impresora y asegúrate de que el puerto 322 no esté bloqueado. Esto no afecta a la impresión.',
+      },
+      'database-locked': {
+        name: 'Conflictos de escritura en la base de datos',
+        cause: 'La base de datos SQLite presenta errores "database is locked" bajo carga, algo habitual al usar varias impresoras a la vez.',
+        fix: 'Cambia Bambuddy a una base de datos PostgreSQL externa. Consulta la guía de PostgreSQL en la documentación.',
+      },
+    },
+  },
+
   vpDiagnostic: {
     title: 'Comprobación de configuración — {{name}}',
     runButton: 'Ejecutar comprobación de configuración',
@@ -5597,6 +5651,8 @@ export default {
   },
 
   bugReport: {
+    logHealthSummary: 'Se encontraron problemas conocidos en tus registros',
+    logHealthIntro: 'Los registros recientes coinciden con problemas conocidos. Revisa las soluciones de abajo: resolverlas podría arreglar tu problema sin un informe de error. Aun así, puedes enviar un informe abajo.',
     title: 'Informar de un error',
     description: 'Descripción',
     descriptionPlaceholder: '¿Qué salió mal? Describa el problema...',

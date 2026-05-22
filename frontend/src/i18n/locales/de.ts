@@ -124,6 +124,12 @@ export default {
 
   // Printers page
   printers: {
+    addPreflight: {
+      checking: 'Verbindung wird geprüft...',
+      warning: 'Einige Verbindungsprüfungen sind fehlgeschlagen. Dieser Drucker wird möglicherweise als offline angezeigt. Prüfe die Punkte unten, behebe was möglich ist, oder speichere trotzdem.',
+      back: 'Zurück',
+      saveAnyway: 'Trotzdem speichern',
+    },
     title: 'Drucker',
     addPrinter: 'Drucker hinzufügen',
     editPrinter: 'Drucker bearbeiten',
@@ -5534,6 +5540,54 @@ export default {
     },
   },
 
+  systemHealth: {
+    sectionTitle: 'Systemzustand',
+    sectionDescription: 'Durchsucht aktuelle Logs nach bekannten Problemen, die du meist selbst beheben kannst, bevor daraus ein Support-Ticket wird.',
+    rescan: 'Erneut prüfen',
+    clean: 'Keine bekannten Probleme in den letzten {{times}} Log-Einträgen gefunden.',
+    logUnavailable: 'Die Protokollierung in Dateien ist deaktiviert, daher können keine Logs durchsucht werden. Aktiviere die Datei-Protokollierung, um diese Prüfung zu nutzen.',
+    learnMore: 'Lösung anzeigen',
+    fixLabel: 'Lösung:',
+    occurrences: '{{times}}× aufgetreten — zuletzt um {{lastSeen}}',
+    category: {
+      layer8: 'Das kannst du beheben',
+      environment: 'Umgebung',
+      bug: 'Bitte melden',
+    },
+    signature: {
+      'ftp-auth-rejected': {
+        name: 'Drucker hat den Zugriffscode abgelehnt',
+        cause: 'Der Drucker hat die Anmeldung für die Dateiübertragung abgelehnt. Der Zugriffscode ist falsch oder hat sich nach dem Umschalten des Entwicklermodus geändert.',
+        fix: 'Kopiere den Zugriffscode erneut vom Druckerbildschirm (LAN-Einstellungen) und aktualisiere ihn in den Druckereinstellungen in Bambuddy.',
+      },
+      'ftp-connection-timeout': {
+        name: 'Zeitüberschreitung bei der Dateiübertragung',
+        cause: 'Bambuddy konnte den Dateiübertragungs-Port des Druckers (FTPS 990) nicht erreichen. Der Port ist blockiert, oder der Drucker ist aus oder in einem anderen Subnetz.',
+        fix: 'Stelle sicher, dass Port 990 zwischen Bambuddy und dem Drucker nicht blockiert wird und beide im selben Netzwerk sind.',
+      },
+      'ftp-ssl-error': {
+        name: 'Sicherer Dateiübertragungs-Handshake fehlgeschlagen',
+        cause: 'Der TLS-Handshake mit dem Dateiübertragungs-Server des Druckers ist fehlgeschlagen. Häufig liegt das an einer Firewall oder veralteter Drucker-Firmware.',
+        fix: 'Aktualisiere die Drucker-Firmware und prüfe, dass keine Firewall oder Proxy die Verbindung auf Port 990 abfängt.',
+      },
+      'mqtt-connection-flapping': {
+        name: 'Druckerverbindung bricht ständig ab',
+        cause: 'Die Steuerverbindung (MQTT 8883) trennt und verbindet sich wiederholt — meist wegen einer schwachen Netzwerkverbindung oder eines teilweise blockierten Ports.',
+        fix: 'Prüfe das WLAN-Signal am Drucker, bevorzuge eine Kabelverbindung und stelle sicher, dass Port 8883 zuverlässig erreichbar ist.',
+      },
+      'camera-connection-refused': {
+        name: 'Kamera-Stream nicht erreichbar',
+        cause: 'Die Live-Kamera war auf Port RTSPS 322 nicht erreichbar. Der Port ist blockiert, oder die Kamera bzw. die LAN-Liveansicht ist am Drucker deaktiviert.',
+        fix: 'Aktiviere Kamera und LAN-Liveansicht am Drucker und stelle sicher, dass Port 322 nicht blockiert ist. Das Drucken ist davon nicht betroffen.',
+      },
+      'database-locked': {
+        name: 'Datenbank-Schreibkonflikte',
+        cause: 'Die SQLite-Datenbank meldet unter Last "database is locked"-Fehler — häufig beim Betrieb mehrerer Drucker gleichzeitig.',
+        fix: 'Stelle Bambuddy auf eine externe PostgreSQL-Datenbank um. Siehe die PostgreSQL-Anleitung in der Dokumentation.',
+      },
+    },
+  },
+
   vpDiagnostic: {
     title: 'Einrichtungsprüfung — {{name}}',
     runButton: 'Einrichtungsprüfung ausführen',
@@ -5588,6 +5642,8 @@ export default {
   },
 
   bugReport: {
+    logHealthSummary: 'Bekannte Probleme in deinen Logs gefunden',
+    logHealthIntro: 'Aktuelle Logs entsprechen bekannten Problemen. Sieh dir die Lösungen unten an — sie zu beheben könnte dein Problem ohne Fehlerbericht lösen. Du kannst unten trotzdem einen Bericht senden.',
     title: 'Fehler melden',
     description: 'Beschreibung',
     descriptionPlaceholder: 'Was ist schiefgelaufen? Bitte beschreiben Sie das Problem...',

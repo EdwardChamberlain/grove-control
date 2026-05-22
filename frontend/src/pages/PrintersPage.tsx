@@ -75,7 +75,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { api, discoveryApi, firmwareApi, withStreamToken, ApiError } from '../api/client';
 import { formatDateOnly, formatETA, formatDuration, parseUTCDate } from '../utils/date';
-import type { Printer, PrinterCreate, PrinterStatus, AMSUnit, DiscoveredPrinter, FirmwareUpdateInfo, FirmwareUploadStatus, LinkedSpoolInfo, SpoolAssignment, HMSError, InventorySpool, SmartPlug } from '../api/client';
+import type { Printer, PrinterCreate, PrinterStatus, AMSUnit, DiscoveredPrinter, FirmwareUpdateInfo, FirmwareUploadStatus, LinkedSpoolInfo, SpoolAssignment, HMSError, InventorySpool, SmartPlug, PrinterDiagnosticResult } from '../api/client';
 import { Card, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -101,7 +101,7 @@ import { getGlobalTrayId, getFillBarColor, getSpoolmanFillLevel, getFallbackSpoo
 import { getPrinterImage, getWifiStrength, filterCompatibleQueueItems } from '../utils/printer';
 import { FilamentSlotCircle } from '../components/FilamentSlotCircle';
 import { Collapsible } from '../components/Collapsible';
-import { ConnectionDiagnosticModal } from '../components/ConnectionDiagnostic';
+import { ConnectionDiagnosticModal, DiagnosticChecklist } from '../components/ConnectionDiagnostic';
 import { getColorName, parseFilamentColor, isLightColor } from '../utils/colors';
 
 export interface SpoolmanSlotAssignmentRow {
@@ -5595,6 +5595,13 @@ function AddPrinterModal({
   const [scanProgress, setScanProgress] = useState({ scanned: 0, total: 0 });
   const [showDiagnostic, setShowDiagnostic] = useState(false);
 
+  // Setup-time pre-flight: run the connection diagnostic on save and warn
+  // (not block) when checks fail, so the user doesn't add a printer that
+  // immediately shows offline. checkingSave = probe in flight; saveWarning =
+  // failed result awaiting an explicit "save anyway".
+  const [checkingSave, setCheckingSave] = useState(false);
+  const [saveWarning, setSaveWarning] = useState<PrinterDiagnosticResult | null>(null);
+
   // Fetch discovery info on mount
   useEffect(() => {
     discoveryApi.getInfo().then(info => {
@@ -5610,6 +5617,27 @@ function AddPrinterModal({
 
   // Filter out already-added printers
   const newPrinters = discovered.filter(p => !existingSerials.includes(p.serial));
+
+  const handleAddSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCheckingSave(true);
+    try {
+      const result = await api.diagnoseConnection({
+        ip_address: form.ip_address.trim(),
+        serial_number: form.serial_number.trim() || undefined,
+        access_code: form.access_code || undefined,
+      });
+      if (result.checks.some((c) => c.status === 'fail')) {
+        setSaveWarning(result);
+        return;
+      }
+    } catch {
+      // Diagnostic infrastructure failed — never block the save on it.
+    } finally {
+      setCheckingSave(false);
+    }
+    onAdd(form);
+  };
 
   const startDiscovery = async () => {
     setDiscoveryError('');
@@ -5828,13 +5856,7 @@ function AddPrinterModal({
               </p>
             )}
           </div>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              onAdd(form);
-            }}
-            className="space-y-4"
-          >
+          <form onSubmit={handleAddSubmit} className="space-y-4">
             <div>
               <label className="block text-sm text-bambu-gray mb-1">{t('printers.name')}</label>
               <input
@@ -5945,14 +5967,37 @@ function AddPrinterModal({
               <Stethoscope className="w-4 h-4" />
               {t('diagnostic.runButton')}
             </button>
-            <div className="flex gap-3 pt-2">
-              <Button type="button" variant="secondary" onClick={onClose} className="flex-1">
-                {t('common.cancel')}
-              </Button>
-              <Button type="submit" className="flex-1">
-                {t('printers.addPrinter')}
-              </Button>
-            </div>
+            {saveWarning ? (
+              <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 p-3 space-y-3">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0 text-amber-400" />
+                  <p className="text-sm text-amber-300">{t('printers.addPreflight.warning')}</p>
+                </div>
+                <DiagnosticChecklist result={saveWarning} />
+                <div className="flex gap-3">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setSaveWarning(null)}
+                    className="flex-1"
+                  >
+                    {t('printers.addPreflight.back')}
+                  </Button>
+                  <Button type="button" onClick={() => onAdd(form)} className="flex-1">
+                    {t('printers.addPreflight.saveAnyway')}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex gap-3 pt-2">
+                <Button type="button" variant="secondary" onClick={onClose} className="flex-1">
+                  {t('common.cancel')}
+                </Button>
+                <Button type="submit" disabled={checkingSave} className="flex-1">
+                  {checkingSave ? t('printers.addPreflight.checking') : t('printers.addPrinter')}
+                </Button>
+              </div>
+            )}
           </form>
         </CardContent>
       </Card>
@@ -6271,6 +6316,11 @@ function EditPrinterModal({
     auto_archive: printer.auto_archive,
   });
 
+  // Setup-time pre-flight — same warn-on-save as the Add-Printer dialog, so an
+  // edit that breaks connectivity (e.g. a mistyped IP) is caught before save.
+  const [checkingSave, setCheckingSave] = useState(false);
+  const [saveWarning, setSaveWarning] = useState<PrinterDiagnosticResult | null>(null);
+
   const updateMutation = useMutation({
     mutationFn: (data: Partial<PrinterCreate>) => api.updatePrinter(printer.id, data),
     onSuccess: () => {
@@ -6290,8 +6340,7 @@ function EditPrinterModal({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const doSave = () => {
     const data: Partial<PrinterCreate> = {
       name: form.name,
       ip_address: form.ip_address,
@@ -6304,6 +6353,27 @@ function EditPrinterModal({
       data.access_code = form.access_code;
     }
     updateMutation.mutate(data);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCheckingSave(true);
+    try {
+      const result = await api.diagnoseConnection({
+        ip_address: form.ip_address.trim(),
+        serial_number: printer.serial_number,
+        access_code: form.access_code || undefined,
+      });
+      if (result.checks.some((c) => c.status === 'fail')) {
+        setSaveWarning(result);
+        return;
+      }
+    } catch {
+      // Diagnostic infrastructure failed — never block the save on it.
+    } finally {
+      setCheckingSave(false);
+    }
+    doSave();
   };
 
   return (
@@ -6414,14 +6484,50 @@ function EditPrinterModal({
                 {t('printers.modal.autoArchiveLabel')}
               </label>
             </div>
-            <div className="flex gap-3 pt-4">
-              <Button type="button" variant="secondary" onClick={onClose} className="flex-1">
-                {t('common.cancel')}
-              </Button>
-              <Button type="submit" className="flex-1" disabled={updateMutation.isPending}>
-                {updateMutation.isPending ? t('common.saving') : t('printers.modal.saveChanges')}
-              </Button>
-            </div>
+            {saveWarning ? (
+              <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 p-3 space-y-3">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0 text-amber-400" />
+                  <p className="text-sm text-amber-300">{t('printers.addPreflight.warning')}</p>
+                </div>
+                <DiagnosticChecklist result={saveWarning} />
+                <div className="flex gap-3">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setSaveWarning(null)}
+                    className="flex-1"
+                  >
+                    {t('printers.addPreflight.back')}
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={doSave}
+                    className="flex-1"
+                    disabled={updateMutation.isPending}
+                  >
+                    {t('printers.addPreflight.saveAnyway')}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex gap-3 pt-4">
+                <Button type="button" variant="secondary" onClick={onClose} className="flex-1">
+                  {t('common.cancel')}
+                </Button>
+                <Button
+                  type="submit"
+                  className="flex-1"
+                  disabled={updateMutation.isPending || checkingSave}
+                >
+                  {checkingSave
+                    ? t('printers.addPreflight.checking')
+                    : updateMutation.isPending
+                      ? t('common.saving')
+                      : t('printers.modal.saveChanges')}
+                </Button>
+              </div>
+            )}
           </form>
         </CardContent>
       </Card>

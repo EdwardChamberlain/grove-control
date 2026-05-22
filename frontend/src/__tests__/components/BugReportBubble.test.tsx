@@ -282,4 +282,36 @@ describe('BugReportBubble', () => {
     // Single problem → the checklist is expanded without a click.
     expect(await screen.findByText(/Found problems that explain/)).toBeInTheDocument();
   });
+
+  it('shows the log-health panel when the scan finds known issues', async () => {
+    const user = userEvent.setup();
+    setupDiagnosticEndpoints([{ id: 1, name: 'Solo Printer' }], { 1: 'ok' });
+    server.use(
+      http.get('*/system/health', () =>
+        HttpResponse.json({
+          findings: [
+            {
+              signature_id: 'ftp-auth-rejected',
+              severity: 'error',
+              category: 'layer8',
+              wiki_anchor: 'wrong-access-code',
+              count: 3,
+              first_seen: '2026-05-22 09:00:00,000',
+              last_seen: '2026-05-22 10:00:00,000',
+              sample: 'FTP connection permission error to [IP]',
+            },
+          ],
+          scanned_entries: 500,
+          log_available: true,
+          summary: { total: 1, layer8: 1, environment: 0, bug: 0 },
+        })
+      )
+    );
+
+    render(<BugReportBubble />);
+    await user.click(screen.getByRole('button'));
+
+    expect(await screen.findByText('Known issues found in your logs')).toBeInTheDocument();
+    expect(screen.getByText('Printer rejected the access code')).toBeInTheDocument();
+  });
 });

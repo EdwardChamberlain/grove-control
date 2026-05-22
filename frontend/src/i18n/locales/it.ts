@@ -124,6 +124,12 @@ export default {
 
   // Printers page
   printers: {
+    addPreflight: {
+      checking: 'Verifica della connessione...',
+      warning: 'Alcuni controlli di connessione non sono riusciti. Questa stampante potrebbe risultare offline. Controlla le verifiche qui sotto, risolvi ciò che puoi oppure salva comunque.',
+      back: 'Indietro',
+      saveAnyway: 'Salva comunque',
+    },
     title: 'Stampanti',
     addPrinter: 'Aggiungi Stampante',
     editPrinter: 'Modifica Stampante',
@@ -5523,6 +5529,54 @@ export default {
     },
   },
 
+  systemHealth: {
+    sectionTitle: 'Stato del sistema',
+    sectionDescription: 'Analizza i log recenti alla ricerca di problemi noti che di solito puoi risolvere da solo, prima che diventino un ticket di assistenza.',
+    rescan: 'Analizza di nuovo',
+    clean: 'Nessun problema noto trovato nelle ultime {{times}} voci di log.',
+    logUnavailable: 'La registrazione su file è disattivata, quindi i log non possono essere analizzati. Attiva la registrazione su file per usare questo controllo.',
+    learnMore: 'Come risolvere',
+    fixLabel: 'Soluzione:',
+    occurrences: 'Visto {{times}}× — ultima volta alle {{lastSeen}}',
+    category: {
+      layer8: 'Puoi risolverlo tu',
+      environment: 'Ambiente',
+      bug: 'Segnalalo, per favore',
+    },
+    signature: {
+      'ftp-auth-rejected': {
+        name: 'La stampante ha rifiutato il codice di accesso',
+        cause: 'La stampante ha rifiutato l\'accesso per il trasferimento file. Il codice di accesso è errato oppure è cambiato dopo aver attivato la Modalità Sviluppatore.',
+        fix: 'Ricopia il codice di accesso dallo schermo della stampante (impostazioni LAN) e aggiornalo nelle impostazioni della stampante in Bambuddy.',
+      },
+      'ftp-connection-timeout': {
+        name: 'Timeout della connessione di trasferimento file',
+        cause: 'Bambuddy non è riuscito a raggiungere la porta di trasferimento file della stampante (FTPS 990). La porta è bloccata, oppure la stampante è spenta o in un\'altra sottorete.',
+        fix: 'Assicurati che nulla blocchi la porta 990 tra Bambuddy e la stampante e che entrambi siano sulla stessa rete.',
+      },
+      'ftp-ssl-error': {
+        name: 'Handshake sicuro del trasferimento file non riuscito',
+        cause: 'L\'handshake TLS con il server di trasferimento file della stampante non è riuscito. Spesso è dovuto a un firewall o a un firmware della stampante obsoleto.',
+        fix: 'Aggiorna il firmware della stampante e verifica che nessun firewall o proxy intercetti la connessione sulla porta 990.',
+      },
+      'mqtt-connection-flapping': {
+        name: 'La connessione alla stampante cade di continuo',
+        cause: 'La connessione di controllo (MQTT 8883) si disconnette e si riconnette ripetutamente, di solito per una rete debole o una porta parzialmente bloccata.',
+        fix: 'Controlla il segnale Wi-Fi vicino alla stampante, preferisci una connessione cablata e assicurati che la porta 8883 sia raggiungibile in modo affidabile.',
+      },
+      'camera-connection-refused': {
+        name: 'Flusso della telecamera non raggiungibile',
+        cause: 'Non è stato possibile raggiungere la telecamera dal vivo sulla porta RTSPS 322. La porta è bloccata, oppure la telecamera o la visione dal vivo via LAN è disattivata sulla stampante.',
+        fix: 'Attiva la telecamera e la visione dal vivo via LAN sulla stampante e assicurati che la porta 322 non sia bloccata. Questo non influisce sulla stampa.',
+      },
+      'database-locked': {
+        name: 'Conflitti di scrittura nel database',
+        cause: 'Il database SQLite presenta errori "database is locked" sotto carico, comune quando si usano più stampanti contemporaneamente.',
+        fix: 'Passa Bambuddy a un database PostgreSQL esterno. Consulta la guida PostgreSQL nella documentazione.',
+      },
+    },
+  },
+
   vpDiagnostic: {
     title: 'Controllo configurazione — {{name}}',
     runButton: 'Esegui controllo configurazione',
@@ -5577,6 +5631,8 @@ export default {
   },
 
   bugReport: {
+    logHealthSummary: 'Trovati problemi noti nei tuoi log',
+    logHealthIntro: 'I log recenti corrispondono a problemi noti. Controlla le soluzioni qui sotto: risolverle potrebbe sistemare il problema senza una segnalazione di bug. Puoi comunque inviare una segnalazione qui sotto.',
     title: 'Segnala un bug',
     description: 'Descrizione',
     descriptionPlaceholder: 'Cosa è andato storto? Descrivi il problema...',

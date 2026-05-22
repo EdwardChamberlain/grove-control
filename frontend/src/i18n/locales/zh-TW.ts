@@ -124,6 +124,12 @@ export default {
 
   // Printers page
   printers: {
+    addPreflight: {
+      checking: '正在檢查連線...',
+      warning: '部分連線檢查未通過。此印表機可能顯示為離線。請查看下方的檢查項目，盡量修復，或仍然儲存。',
+      back: '返回',
+      saveAnyway: '仍然儲存',
+    },
     title: '印表機',
     addPrinter: '新增印表機',
     editPrinter: '編輯印表機',
@@ -5522,6 +5528,54 @@ export default {
     },
   },
 
+  systemHealth: {
+    sectionTitle: '系統健康',
+    sectionDescription: '掃描最近的日誌以找出已知問題，在它們演變成支援工單之前，通常你可以自行解決。',
+    rescan: '重新掃描',
+    clean: '在最近 {{times}} 筆日誌中未發現已知問題。',
+    logUnavailable: '檔案日誌記錄已停用，因此無法掃描日誌。請啟用檔案日誌以使用此檢查。',
+    learnMore: '如何解決',
+    fixLabel: '解決方法：',
+    occurrences: '出現 {{times}} 次 — 最近一次 {{lastSeen}}',
+    category: {
+      layer8: '你可以自行解決',
+      environment: '環境',
+      bug: '請回報此問題',
+    },
+    signature: {
+      'ftp-auth-rejected': {
+        name: '印表機拒絕了存取碼',
+        cause: '印表機拒絕了檔案傳輸登入。存取碼錯誤，或在切換開發者模式後已變更。',
+        fix: '從印表機螢幕（區域網路設定）重新複製存取碼，並在 Bambuddy 的印表機設定中更新。',
+      },
+      'ftp-connection-timeout': {
+        name: '檔案傳輸連線逾時',
+        cause: 'Bambuddy 無法連線印表機的檔案傳輸連接埠（FTPS 990）。該連接埠被封鎖，或印表機已關機或位於其他子網路。',
+        fix: '請確認 Bambuddy 與印表機之間的 990 連接埠未被封鎖，且兩者位於同一網路。',
+      },
+      'ftp-ssl-error': {
+        name: '安全檔案傳輸交握失敗',
+        cause: '與印表機檔案傳輸伺服器的 TLS 交握失敗。通常是防火牆或印表機韌體過舊所致。',
+        fix: '請更新印表機韌體，並檢查沒有防火牆或代理伺服器攔截 990 連接埠上的連線。',
+      },
+      'mqtt-connection-flapping': {
+        name: '印表機連線反覆中斷',
+        cause: '控制連線（MQTT 8883）反覆中斷並重新連線——通常是網路訊號弱或連接埠被部分封鎖所致。',
+        fix: '請檢查印表機附近的 Wi-Fi 訊號，盡量使用有線連線，並確認 8883 連接埠能夠穩定連線。',
+      },
+      'camera-connection-refused': {
+        name: '無法存取攝影機串流',
+        cause: '無法在 RTSPS 322 連接埠連線即時攝影機。該連接埠被封鎖，或印表機上的攝影機或區域網路即時影像已關閉。',
+        fix: '請在印表機上啟用攝影機和區域網路即時影像，並確認 322 連接埠未被封鎖。這不會影響列印。',
+      },
+      'database-locked': {
+        name: '資料庫寫入衝突',
+        cause: '在負載下 SQLite 資料庫出現 "database is locked" 錯誤——同時使用多台印表機時較為常見。',
+        fix: '請將 Bambuddy 切換到外部 PostgreSQL 資料庫。參見文件中的 PostgreSQL 指南。',
+      },
+    },
+  },
+
   vpDiagnostic: {
     title: '設定檢查 — {{name}}',
     runButton: '執行設定檢查',
@@ -5576,6 +5630,8 @@ export default {
   },
 
   bugReport: {
+    logHealthSummary: '在你的日誌中發現了已知問題',
+    logHealthIntro: '最近的日誌與已知問題相符。請查看下方的解決方法——解決它們可能無需提交錯誤報告即可解決你的問題。你仍然可以在下方提交報告。',
     title: '報告錯誤',
     description: '描述',
     descriptionPlaceholder: '出了什麼問題？請描述問題...',

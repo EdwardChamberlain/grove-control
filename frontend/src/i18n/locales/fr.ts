@@ -124,6 +124,12 @@ export default {
 
   // Printers page
   printers: {
+    addPreflight: {
+      checking: 'Vérification de la connexion...',
+      warning: 'Certaines vérifications de connexion ont échoué. Cette imprimante pourrait apparaître hors ligne. Examinez les vérifications ci-dessous, corrigez ce que vous pouvez, ou enregistrez quand même.',
+      back: 'Retour',
+      saveAnyway: 'Enregistrer quand même',
+    },
     title: 'Imprimantes',
     addPrinter: 'Ajouter une imprimante',
     editPrinter: 'Modifier l\'imprimante',
@@ -5524,6 +5530,54 @@ export default {
     },
   },
 
+  systemHealth: {
+    sectionTitle: 'État du système',
+    sectionDescription: 'Analyse les journaux récents à la recherche de problèmes connus que vous pouvez généralement résoudre vous-même, avant qu\'ils ne deviennent un ticket de support.',
+    rescan: 'Relancer l\'analyse',
+    clean: 'Aucun problème connu trouvé dans les {{times}} dernières entrées de journal.',
+    logUnavailable: 'La journalisation dans un fichier est désactivée, les journaux ne peuvent donc pas être analysés. Activez la journalisation dans un fichier pour utiliser cette vérification.',
+    learnMore: 'Comment corriger',
+    fixLabel: 'Correctif :',
+    occurrences: 'Vu {{times}}× — dernière fois à {{lastSeen}}',
+    category: {
+      layer8: 'Vous pouvez corriger ceci',
+      environment: 'Environnement',
+      bug: 'Merci de le signaler',
+    },
+    signature: {
+      'ftp-auth-rejected': {
+        name: 'L\'imprimante a refusé le code d\'accès',
+        cause: 'L\'imprimante a refusé la connexion de transfert de fichiers. Le code d\'accès est incorrect, ou il a changé après l\'activation du mode développeur.',
+        fix: 'Recopiez le code d\'accès depuis l\'écran de l\'imprimante (paramètres LAN) et mettez-le à jour dans les paramètres de l\'imprimante dans Bambuddy.',
+      },
+      'ftp-connection-timeout': {
+        name: 'Délai de connexion de transfert de fichiers dépassé',
+        cause: 'Bambuddy n\'a pas pu atteindre le port de transfert de fichiers de l\'imprimante (FTPS 990). Le port est bloqué, ou l\'imprimante est éteinte ou sur un autre sous-réseau.',
+        fix: 'Assurez-vous que rien ne bloque le port 990 entre Bambuddy et l\'imprimante, et que les deux sont sur le même réseau.',
+      },
+      'ftp-ssl-error': {
+        name: 'Échec de la négociation sécurisée du transfert de fichiers',
+        cause: 'La négociation TLS avec le serveur de transfert de fichiers de l\'imprimante a échoué. C\'est souvent dû à un pare-feu ou à un micrologiciel d\'imprimante obsolète.',
+        fix: 'Mettez à jour le micrologiciel de l\'imprimante et vérifiez qu\'aucun pare-feu ou proxy n\'intercepte la connexion sur le port 990.',
+      },
+      'mqtt-connection-flapping': {
+        name: 'La connexion à l\'imprimante se coupe sans cesse',
+        cause: 'La connexion de contrôle (MQTT 8883) se déconnecte et se reconnecte à répétition — généralement à cause d\'un réseau faible ou d\'un port partiellement bloqué.',
+        fix: 'Vérifiez le signal Wi-Fi près de l\'imprimante, privilégiez une connexion filaire et assurez-vous que le port 8883 est accessible de façon fiable.',
+      },
+      'camera-connection-refused': {
+        name: 'Flux de la caméra inaccessible',
+        cause: 'La caméra en direct n\'a pas pu être atteinte sur le port RTSPS 322. Le port est bloqué, ou la caméra ou la vue en direct par LAN est désactivée sur l\'imprimante.',
+        fix: 'Activez la caméra et la vue en direct par LAN sur l\'imprimante, et assurez-vous que le port 322 n\'est pas bloqué. Cela n\'affecte pas l\'impression.',
+      },
+      'database-locked': {
+        name: 'Conflits d\'écriture dans la base de données',
+        cause: 'La base de données SQLite rencontre des erreurs "database is locked" sous charge — fréquent lorsque plusieurs imprimantes sont utilisées en même temps.',
+        fix: 'Faites passer Bambuddy à une base de données PostgreSQL externe. Consultez le guide PostgreSQL dans la documentation.',
+      },
+    },
+  },
+
   vpDiagnostic: {
     title: 'Vérification de configuration — {{name}}',
     runButton: 'Lancer la vérification',
@@ -5578,6 +5632,8 @@ export default {
   },
 
   bugReport: {
+    logHealthSummary: 'Problèmes connus trouvés dans vos journaux',
+    logHealthIntro: 'Les journaux récents correspondent à des problèmes connus. Consultez les correctifs ci-dessous — les résoudre pourrait régler votre problème sans rapport de bogue. Vous pouvez tout de même envoyer un rapport ci-dessous.',
     title: 'Signaler un bug',
     description: 'Description',
     descriptionPlaceholder: 'Qu\'est-ce qui n\'a pas fonctionné ? Veuillez décrire le problème...',

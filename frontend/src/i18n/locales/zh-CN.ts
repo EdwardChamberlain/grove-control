@@ -124,6 +124,12 @@ export default {
 
   // Printers page
   printers: {
+    addPreflight: {
+      checking: '正在检查连接...',
+      warning: '部分连接检查未通过。此打印机可能显示为离线。请查看下方的检查项，尽量修复，或仍然保存。',
+      back: '返回',
+      saveAnyway: '仍然保存',
+    },
     title: '打印机',
     addPrinter: '添加打印机',
     editPrinter: '编辑打印机',
@@ -5522,6 +5528,54 @@ export default {
     },
   },
 
+  systemHealth: {
+    sectionTitle: '系统健康',
+    sectionDescription: '扫描最近的日志以发现已知问题，在它们演变成支持工单之前，通常你可以自行解决。',
+    rescan: '重新扫描',
+    clean: '在最近 {{times}} 条日志中未发现已知问题。',
+    logUnavailable: '文件日志记录已禁用，因此无法扫描日志。请启用文件日志以使用此检查。',
+    learnMore: '如何解决',
+    fixLabel: '解决方法：',
+    occurrences: '出现 {{times}} 次 — 最近一次 {{lastSeen}}',
+    category: {
+      layer8: '你可以自行解决',
+      environment: '环境',
+      bug: '请反馈此问题',
+    },
+    signature: {
+      'ftp-auth-rejected': {
+        name: '打印机拒绝了访问码',
+        cause: '打印机拒绝了文件传输登录。访问码错误，或在切换开发者模式后已更改。',
+        fix: '从打印机屏幕（局域网设置）重新复制访问码，并在 Bambuddy 的打印机设置中更新它。',
+      },
+      'ftp-connection-timeout': {
+        name: '文件传输连接超时',
+        cause: 'Bambuddy 无法连接打印机的文件传输端口（FTPS 990）。该端口被阻止，或打印机已关机或位于其他子网。',
+        fix: '请确保 Bambuddy 与打印机之间的 990 端口未被阻止，并且两者位于同一网络。',
+      },
+      'ftp-ssl-error': {
+        name: '安全文件传输握手失败',
+        cause: '与打印机文件传输服务器的 TLS 握手失败。通常是防火墙或打印机固件过旧所致。',
+        fix: '请更新打印机固件，并检查没有防火墙或代理拦截 990 端口上的连接。',
+      },
+      'mqtt-connection-flapping': {
+        name: '打印机连接反复断开',
+        cause: '控制连接（MQTT 8883）反复断开并重连——通常是网络信号弱或端口被部分阻止所致。',
+        fix: '请检查打印机附近的 Wi-Fi 信号，尽量使用有线连接，并确保 8883 端口能够稳定连接。',
+      },
+      'camera-connection-refused': {
+        name: '无法访问摄像头视频流',
+        cause: '无法在 RTSPS 322 端口连接实时摄像头。该端口被阻止，或打印机上的摄像头或局域网实时画面已关闭。',
+        fix: '请在打印机上启用摄像头和局域网实时画面，并确保 322 端口未被阻止。这不会影响打印。',
+      },
+      'database-locked': {
+        name: '数据库写入冲突',
+        cause: '在负载下 SQLite 数据库出现 "database is locked" 错误——同时使用多台打印机时较为常见。',
+        fix: '请将 Bambuddy 切换到外部 PostgreSQL 数据库。参见文档中的 PostgreSQL 指南。',
+      },
+    },
+  },
+
   vpDiagnostic: {
     title: '设置检查 — {{name}}',
     runButton: '运行设置检查',
@@ -5576,6 +5630,8 @@ export default {
   },
 
   bugReport: {
+    logHealthSummary: '在你的日志中发现了已知问题',
+    logHealthIntro: '最近的日志与已知问题相符。请查看下方的解决方法——解决它们可能无需提交错误报告即可解决你的问题。你仍然可以在下方提交报告。',
     title: '报告错误',
     description: '描述',
     descriptionPlaceholder: '出了什么问题？请描述问题...',

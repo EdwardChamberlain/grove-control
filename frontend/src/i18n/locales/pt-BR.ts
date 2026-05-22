@@ -124,6 +124,12 @@ export default {
 
   // Printers page
   printers: {
+    addPreflight: {
+      checking: 'Verificando a conexão...',
+      warning: 'Algumas verificações de conexão falharam. Esta impressora pode aparecer como offline. Revise as verificações abaixo, corrija o que puder ou salve mesmo assim.',
+      back: 'Voltar',
+      saveAnyway: 'Salvar mesmo assim',
+    },
     title: 'Impressoras',
     addPrinter: 'Adicionar Impressora',
     editPrinter: 'Editar Impressora',
@@ -5523,6 +5529,54 @@ export default {
     },
   },
 
+  systemHealth: {
+    sectionTitle: 'Saúde do sistema',
+    sectionDescription: 'Analisa os logs recentes em busca de problemas conhecidos que você normalmente pode resolver sozinho, antes que virem um chamado de suporte.',
+    rescan: 'Analisar novamente',
+    clean: 'Nenhum problema conhecido encontrado nas últimas {{times}} entradas de log.',
+    logUnavailable: 'O registro em arquivo está desativado, então os logs não podem ser analisados. Ative o registro em arquivo para usar esta verificação.',
+    learnMore: 'Como corrigir',
+    fixLabel: 'Correção:',
+    occurrences: 'Visto {{times}}× — última vez às {{lastSeen}}',
+    category: {
+      layer8: 'Você pode corrigir isto',
+      environment: 'Ambiente',
+      bug: 'Por favor, relate isto',
+    },
+    signature: {
+      'ftp-auth-rejected': {
+        name: 'A impressora rejeitou o código de acesso',
+        cause: 'A impressora recusou o login de transferência de arquivos. O código de acesso está errado ou mudou após alternar o Modo Desenvolvedor.',
+        fix: 'Copie novamente o código de acesso da tela da impressora (configurações de LAN) e atualize-o nas configurações da impressora no Bambuddy.',
+      },
+      'ftp-connection-timeout': {
+        name: 'Tempo limite da conexão de transferência de arquivos',
+        cause: 'O Bambuddy não conseguiu acessar a porta de transferência de arquivos da impressora (FTPS 990). A porta está bloqueada, ou a impressora está desligada ou em outra sub-rede.',
+        fix: 'Verifique se nada bloqueia a porta 990 entre o Bambuddy e a impressora e se ambos estão na mesma rede.',
+      },
+      'ftp-ssl-error': {
+        name: 'Falha no handshake seguro de transferência de arquivos',
+        cause: 'O handshake TLS com o servidor de transferência de arquivos da impressora falhou. Geralmente é causado por um firewall ou firmware desatualizado da impressora.',
+        fix: 'Atualize o firmware da impressora e verifique se nenhum firewall ou proxy intercepta a conexão na porta 990.',
+      },
+      'mqtt-connection-flapping': {
+        name: 'A conexão com a impressora cai repetidamente',
+        cause: 'A conexão de controle (MQTT 8883) desconecta e reconecta repetidamente — geralmente por uma rede fraca ou uma porta parcialmente bloqueada.',
+        fix: 'Verifique o sinal de Wi-Fi perto da impressora, prefira uma conexão com fio e certifique-se de que a porta 8883 esteja acessível de forma confiável.',
+      },
+      'camera-connection-refused': {
+        name: 'Transmissão da câmera inacessível',
+        cause: 'Não foi possível acessar a câmera ao vivo na porta RTSPS 322. A porta está bloqueada, ou a câmera ou a visualização ao vivo via LAN está desativada na impressora.',
+        fix: 'Ative a câmera e a visualização ao vivo via LAN na impressora e verifique se a porta 322 não está bloqueada. Isso não afeta a impressão.',
+      },
+      'database-locked': {
+        name: 'Conflitos de gravação no banco de dados',
+        cause: 'O banco de dados SQLite apresenta erros "database is locked" sob carga — comum ao usar várias impressoras ao mesmo tempo.',
+        fix: 'Migre o Bambuddy para um banco de dados PostgreSQL externo. Consulte o guia do PostgreSQL na documentação.',
+      },
+    },
+  },
+
   vpDiagnostic: {
     title: 'Verificação de configuração — {{name}}',
     runButton: 'Executar verificação de configuração',
@@ -5577,6 +5631,8 @@ export default {
   },
 
   bugReport: {
+    logHealthSummary: 'Problemas conhecidos encontrados nos seus logs',
+    logHealthIntro: 'Os logs recentes correspondem a problemas conhecidos. Veja as correções abaixo — resolvê-las pode solucionar seu problema sem um relatório de bug. Você ainda pode enviar um relatório abaixo.',
     title: 'Reportar um bug',
     description: 'Descrição',
     descriptionPlaceholder: 'O que deu errado? Por favor, descreva o problema...',

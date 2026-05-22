@@ -213,6 +213,35 @@ export interface PrinterDiagnosticResult {
   checks: DiagnosticCheck[];
 }
 
+// --- Log-health scan: self-service triage on the System page + bug reporter.
+// The backend matches recent logs against a curated known-issue catalog;
+// human-readable cause/fix text is rendered from i18n keys keyed by signature_id.
+export type LogFindingSeverity = 'error' | 'warning';
+export type LogFindingCategory = 'layer8' | 'environment' | 'bug';
+
+export interface LogFinding {
+  signature_id: string;
+  severity: LogFindingSeverity;
+  category: LogFindingCategory;
+  wiki_anchor: string;
+  count: number;
+  first_seen: string;
+  last_seen: string;
+  sample: string;
+}
+
+export interface SystemHealthResult {
+  findings: LogFinding[];
+  scanned_entries: number;
+  log_available: boolean;
+  summary: {
+    total: number;
+    layer8: number;
+    environment: number;
+    bug: number;
+  };
+}
+
 // Long-lived camera-stream tokens (#1108). The `token` field is populated
 // only on the create response — listing endpoints set it to null because
 // the plaintext value is shown to the user exactly once.
@@ -5351,6 +5380,7 @@ export const api = {
 
   // System Info
   getSystemInfo: () => request<SystemInfo>('/system/info'),
+  getSystemHealth: () => request<SystemHealthResult>('/system/health'),
   getStorageUsage: (options?: { refresh?: boolean }) => {
     const params = new URLSearchParams();
     if (options?.refresh) {
