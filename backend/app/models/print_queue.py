@@ -65,6 +65,10 @@ class PrintQueueItem(Base):
     # Auto-print G-code injection (#422)
     gcode_injection: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Printer-card direct uploads create transient library rows. When this is
+    # true, the scheduler deletes the source row/files after archiving a copy.
+    cleanup_library_after_dispatch: Mapped[bool] = mapped_column(Boolean, default=False)
+
     # Print options
     bed_levelling: Mapped[bool] = mapped_column(Boolean, default=True)
     flow_cali: Mapped[bool] = mapped_column(Boolean, default=False)

@@ -46,6 +46,9 @@ class PrintQueueItemCreate(BaseModel):
     quantity: int = 1
     # Project to associate the resulting archive with
     project_id: int | None = None
+    # Direct printer-card uploads are temporary library files. The scheduler
+    # deletes them after creating the durable archive copy.
+    cleanup_library_after_dispatch: bool = False
 
 
 class PrintQueueItemUpdate(BaseModel):
@@ -140,6 +143,7 @@ class PrintQueueItemResponse(BaseModel):
 
     # Auto-print G-code injection
     gcode_injection: bool = False
+    cleanup_library_after_dispatch: bool = False
 
     class Config:
         from_attributes = True

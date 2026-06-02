@@ -672,7 +672,6 @@ export default {
     printTime: 'Print Time',
     filamentUsed: 'Filament Used',
     cost: 'Cost',
-    reprint: 'Reprint',
     preview: 'Preview',
     deleteArchive: 'Delete Archive',
     deleteConfirm: 'Are you sure you want to delete this archive?',
@@ -719,7 +718,6 @@ export default {
     },
     menu: {
       print: 'Print',
-      schedule: 'Schedule',
       openInBambuStudio: 'Open in Slicer',
       slice: 'Slice',
       externalLink: 'External Link',
@@ -813,9 +811,6 @@ export default {
       noFileForReprint: 'No 3MF file available — the file could not be downloaded from the printer when the print was recorded',
       noPermissionEdit: 'You do not have permission to edit archives',
       noPermissionDelete: 'You do not have permission to delete archives',
-      reprint: 'Reprint',
-      schedulePrint: 'Schedule Print',
-      schedule: 'Schedule',
       openInBambuStudio: 'Open in Slicer',
       openInBambuStudioToSlice: 'Open in Slicer to slice',
       slice: 'Slice',
@@ -930,7 +925,6 @@ export default {
   queue: {
     title: 'Print Queue',
     subtitle: 'Schedule and manage your print jobs',
-    addToQueue: 'Add to Queue',
     filamentShort: {
       rowBadge: 'Insufficient filament for the assigned spool',
       rowTooltip: 'The dispatch scheduler flagged this item. Click Play to see the per-slot deficit and decide whether to print anyway.',
@@ -941,13 +935,7 @@ export default {
       printAnyway: 'Print Anyway',
     },
     // Print modal
-    print: 'Print',
-    reprint: 'Re-print',
-    schedulePrint: 'Schedule Print',
     editQueueItem: 'Edit Queue Item',
-    printToPrinters: 'Print to {{count}} Printers',
-    queueToPrinters: 'Queue to {{count}} Printers',
-    queueSelectedPlates: 'Queue {{count}} Plates',
     selectAllPlates: 'Select All {{count}} Plates',
     deselectAll: 'Deselect All',
     printQueued: 'Print queued',
@@ -1057,7 +1045,6 @@ export default {
     // Actions
     actions: {
       stopPrint: 'Stop Print',
-      startPrint: 'Start Print',
       requeue: 'Re-queue',
     },
     // Bulk edit
@@ -3111,8 +3098,6 @@ export default {
     changeLink: 'Change Link...',
     linkTo: 'Link to...',
     linkToProjectOrArchive: 'Link to project or archive',
-    addToQueue: 'Add to Queue',
-    schedulePrint: 'Schedule',
     generateThumbnail: 'Generate Thumbnail',
     generateThumbnails: 'Generate Thumbnails',
     generateThumbnailsForMissing: 'Generate thumbnails for STL files missing them',
@@ -3366,8 +3351,6 @@ export default {
       fileCount: '{{count}} file(s)',
       empty: 'No folders linked. Go to File Manager and link a folder to this project.',
       noFiles: 'No files in this folder.',
-      print: 'Print Now',
-      addToQueue: 'Add to Queue',
     },
     bom: {
       title: 'Bill of Materials',
@@ -3896,7 +3879,6 @@ export default {
 
   // Print modal
   printModal: {
-    title: 'Start Print',
     selectPrinter: 'Select Printer',
     selectPlate: 'Select Plate',
     filamentMapping: 'Filament Mapping',
@@ -3908,8 +3890,6 @@ export default {
     vibrationCalibration: 'Vibration Calibration',
     layerInspection: 'First Layer Inspection',
     timelapse: 'Timelapse',
-    startPrint: 'Start Print',
-    addToQueue: 'Add to Queue',
     cancel: 'Cancel',
     noPrintersAvailable: 'No printers available',
     printerBusy: 'Printer is busy',

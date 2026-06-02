@@ -672,7 +672,6 @@ export default {
     printTime: 'Tempo de impressão',
     filamentUsed: 'Filamento usado',
     cost: 'Custo',
-    reprint: 'Reimprimir',
     preview: 'Pré-visualizar',
     deleteArchive: 'Excluir arquivo',
     deleteConfirm: 'Tem certeza de que deseja excluir este arquivo?',
@@ -719,7 +718,6 @@ export default {
     },
     menu: {
       print: 'Imprimir',
-      schedule: 'Agendar',
       openInBambuStudio: 'Abrir no Slicer',
       slice: 'Fatiar',
       externalLink: 'Link externo',
@@ -813,9 +811,6 @@ export default {
       noFileForReprint: 'Nenhum arquivo 3MF disponível — o arquivo não pôde ser baixado da impressora quando a impressão foi registrada',
       noPermissionEdit: 'Você não tem permissão para editar arquivos',
       noPermissionDelete: 'Você não tem permissão para excluir arquivos',
-      reprint: 'Reimprimir',
-      schedulePrint: 'Agendar impressão',
-      schedule: 'Agendar',
       openInBambuStudio: 'Abrir no Bambu Studio',
       openInBambuStudioToSlice: 'Abrir no Bambu Studio para fatiar',
       slice: 'Fatiar',
@@ -939,15 +934,8 @@ export default {
     },
     title: 'Fila de Impressão',
     subtitle: 'Agende e gerencie seus trabalhos de impressão',
-    addToQueue: 'Adicionar à Fila',
     // Print modal
-    print: 'Imprimir',
-    reprint: 'Reimprimir',
-    schedulePrint: 'Agendar Impressão',
     editQueueItem: 'Editar Item da Fila',
-    printToPrinters: 'Imprimir para {{count}} Impressoras',
-    queueToPrinters: 'Adicionar à Fila para {{count}} Impressoras',
-    queueSelectedPlates: 'Adicionar {{count}} placas à fila',
     selectAllPlates: 'Selecionar todas as {{count}} placas',
     deselectAll: 'Desmarcar tudo',
     printQueued: 'Impressão adicionada à fila',
@@ -1057,7 +1045,6 @@ export default {
     // Actions
     actions: {
       stopPrint: 'Parar Impressão',
-      startPrint: 'Iniciar Impressão',
       requeue: 'Reenfileirar',
     },
     // Bulk edit
@@ -3096,8 +3083,6 @@ export default {
     changeLink: 'Alterar link...',
     linkTo: 'Vincular a...',
     linkToProjectOrArchive: 'Vincular a projeto ou arquivo',
-    addToQueue: 'Adicionar à fila',
-    schedulePrint: 'Agendar impressão',
     generateThumbnail: 'Gerar miniatura',
     generateThumbnails: 'Gerar miniaturas',
     generateThumbnailsForMissing: 'Gerar miniaturas para arquivos STL que não possuem',
@@ -3351,8 +3336,6 @@ export default {
       fileCount: '{{count}} arquivo(s)',
       empty: 'Nenhuma pasta vinculada. Vá para o Gerenciador de Arquivos e vincule uma pasta a este projeto.',
       noFiles: 'Nenhum arquivo nesta pasta.',
-      print: 'Imprimir agora',
-      addToQueue: 'Adicionar à fila',
     },
     bom: {
       title: 'Lista de Materiais',
@@ -3872,7 +3855,6 @@ export default {
 
   // Print modal
   printModal: {
-    title: 'Iniciar Impressão',
     selectPrinter: 'Selecionar Impressora',
     selectPlate: 'Selecionar Placa',
     filamentMapping: 'Mapeamento de Filamento',
@@ -3884,8 +3866,6 @@ export default {
     vibrationCalibration: 'Calibração de Vibração',
     layerInspection: 'Inspeção da Primeira Camada',
     timelapse: 'Timelapse',
-    startPrint: 'Iniciar Impressão',
-    addToQueue: 'Adicionar à Fila',
     cancel: 'Cancelar',
     noPrintersAvailable: 'Nenhuma impressora disponível',
     printerBusy: 'Impressora ocupada',

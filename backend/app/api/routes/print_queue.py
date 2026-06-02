@@ -221,6 +221,7 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
         "been_jumped": item.been_jumped,
         # Auto-print G-code injection
         "gcode_injection": item.gcode_injection,
+        "cleanup_library_after_dispatch": item.cleanup_library_after_dispatch,
     }
     response = PrintQueueItemResponse(**item_dict)
     if item.archive:
@@ -393,6 +394,11 @@ async def add_to_queue(
         archive = result.scalar_one_or_none()
         if not archive:
             raise HTTPException(400, "Archive not found")
+        if current_user is not None:
+            can_reprint_all = current_user.has_permission(Permission.ARCHIVES_REPRINT_ALL.value)
+            can_reprint_own = current_user.has_permission(Permission.ARCHIVES_REPRINT_OWN.value)
+            if not can_reprint_all and not (can_reprint_own and archive.created_by_id == current_user.id):
+                raise HTTPException(403, "You can only print your own archives")
 
     # Validate library file exists (if provided) and get it for filament extraction
     library_file = None
@@ -538,6 +544,7 @@ async def add_to_queue(
             timelapse=data.timelapse,
             use_ams=data.use_ams,
             gcode_injection=data.gcode_injection,
+            cleanup_library_after_dispatch=data.cleanup_library_after_dispatch,
             project_id=data.project_id,
             position=max_pos + 1 + i,
             status="pending",

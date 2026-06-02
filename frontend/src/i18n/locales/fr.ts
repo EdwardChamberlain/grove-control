@@ -672,7 +672,6 @@ export default {
     printTime: 'Temps d\'impression',
     filamentUsed: 'Filament utilisé',
     cost: 'Coût',
-    reprint: 'Réimprimer',
     preview: 'Aperçu',
     deleteArchive: 'Supprimer l\'archive',
     deleteConfirm: 'Supprimer cette archive ?',
@@ -719,7 +718,6 @@ export default {
     },
     menu: {
       print: 'Imprimer',
-      schedule: 'Planifier',
       openInBambuStudio: 'Ouvrir dans le Slicer',
       slice: 'Découper',
       externalLink: 'Lien externe',
@@ -813,9 +811,6 @@ export default {
       noFileForReprint: 'Aucun fichier 3MF disponible — le fichier n\'a pas pu être téléchargé depuis l\'imprimante lors de l\'enregistrement',
       noPermissionEdit: 'Pas d\'autorisation de modification',
       noPermissionDelete: 'Pas d\'autorisation de suppression',
-      reprint: 'Réimprimer',
-      schedulePrint: 'Planifier',
-      schedule: 'Planifier',
       openInBambuStudio: 'Ouvrir dans le Slicer',
       openInBambuStudioToSlice: 'Ouvrir dans le Slicer pour découper',
       slice: 'Découper',
@@ -939,15 +934,8 @@ export default {
     },
     title: 'File d\'attente',
     subtitle: 'Gérez vos travaux d\'impression',
-    addToQueue: 'Ajouter à la file',
     // Print modal
-    print: 'Imprimer',
-    reprint: 'Réimprimer',
-    schedulePrint: 'Planifier',
     editQueueItem: 'Modifier l\'élément',
-    printToPrinters: 'Imprimer sur {{count}} imprimantes',
-    queueToPrinters: 'Ajouter à la file pour {{count}} imprimantes',
-    queueSelectedPlates: 'Ajouter {{count}} plaques à la file',
     selectAllPlates: 'Sélectionner les {{count}} plaques',
     deselectAll: 'Tout désélectionner',
     printQueued: 'Impression ajoutée à la file',
@@ -1057,7 +1045,6 @@ export default {
     // Actions
     actions: {
       stopPrint: 'Arrêter',
-      startPrint: 'Démarrer',
       requeue: 'Remettre en file',
     },
     // Bulk edit
@@ -3097,8 +3084,6 @@ export default {
     changeLink: 'Modifier lien...',
     linkTo: 'Lier à...',
     linkToProjectOrArchive: 'Lier à projet ou archive',
-    addToQueue: 'Ajouter à la file',
-    schedulePrint: 'Planifier',
     generateThumbnail: 'Générer vignette',
     generateThumbnails: 'Générer vignettes',
     generateThumbnailsForMissing: 'Vignettes STL manquantes',
@@ -3352,8 +3337,6 @@ export default {
       fileCount: '{{count}} fichier(s)',
       empty: 'Aucun dossier lié.',
       noFiles: 'Aucun fichier dans ce dossier.',
-      print: 'Imprimer maintenant',
-      addToQueue: 'Ajouter à la file',
     },
     bom: {
       title: 'BOM (Liste matériel)',
@@ -3873,7 +3856,6 @@ export default {
 
   // Print modal
   printModal: {
-    title: 'Lancer l\'impression',
     selectPrinter: 'Choisir l\'imprimante',
     selectPlate: 'Choisir le plateau',
     filamentMapping: 'Mapping Filament',
@@ -3885,8 +3867,6 @@ export default {
     vibrationCalibration: 'Vibration (Input Shaper)',
     layerInspection: 'Inspection 1ère couche',
     timelapse: 'Time-lapse',
-    startPrint: 'Démarrer',
-    addToQueue: 'Ajouter à la file',
     cancel: 'Annuler',
     noPrintersAvailable: 'Aucune imprimante disponible',
     printerBusy: 'L\'imprimante est occupée',
