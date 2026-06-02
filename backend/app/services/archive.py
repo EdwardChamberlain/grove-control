@@ -188,49 +188,78 @@ class ThreeMFParser:
                             self.metadata["sliced_for_model"] = normalized
                         break
 
-                # Find the plate element (single-plate exports only have one plate)
-                plate = root.find(".//plate")
+                # Loop every <plate> so multi-plate exports get summed file-level
+                # totals. Pre-fix, this used `root.find(".//plate")` which
+                # returned only the first plate — file-level `print_time_seconds`
+                # / `filament_used_grams` reflected plate 1 alone, and the
+                # archive card / project rollup under-reported by the number
+                # of plates (#1593). Per-plate breakdown is still served by
+                # the dedicated `/plates` endpoint.
+                plates = root.findall(".//plate")
+                summed_time = 0
+                summed_grams = 0.0
+                any_time_seen = False
+                any_grams_seen = False
 
-                if plate is not None:
-                    # Extract metadata from plate element
+                for plate in plates:
+                    # Plate-level fields that only make sense at the file
+                    # level when there's exactly one plate. ``plate_number``
+                    # / ``_plate_index`` describe which plate the export
+                    # represents — meaningless for an all-plates 3MF, so we
+                    # only record them in the single-plate case. ``bed_type``
+                    # is also single-valued; we take the first plate's value
+                    # as a best-effort default for the archive metadata.
+                    plate_index_value: int | None = None
                     for meta in plate.findall("metadata"):
                         key = meta.get("key")
                         value = meta.get("value")
                         if key == "index" and value:
-                            # Extract plate index - this tells us which plate was exported
                             try:
-                                extracted_index = int(value)
-                                # Set plate_number if not already set from filename
-                                if not self.plate_number:
-                                    self.plate_number = extracted_index
-                                # Store in metadata for print_name generation
-                                self.metadata["_plate_index"] = extracted_index
+                                plate_index_value = int(value)
                             except ValueError:
                                 pass  # Skip non-numeric plate index
                         elif key == "prediction" and value:
-                            self.metadata["print_time_seconds"] = int(value)
+                            try:
+                                summed_time += int(value)
+                                any_time_seen = True
+                            except ValueError:
+                                pass
                         elif key == "weight" and value:
-                            self.metadata["filament_used_grams"] = float(value)
-                        elif key == "curr_bed_type" and value:
+                            try:
+                                summed_grams += float(value)
+                                any_grams_seen = True
+                            except ValueError:
+                                pass
+                        elif key == "curr_bed_type" and value and "bed_type" not in self.metadata:
                             self.metadata["bed_type"] = value
 
-                    # Extract printable objects for skip object functionality
-                    # Objects are stored as <object identify_id="123" name="Part1" skipped="false" />
-                    printable_objects = {}
-                    for obj in plate.findall("object"):
-                        identify_id = obj.get("identify_id")
-                        name = obj.get("name")
-                        skipped = obj.get("skipped", "false")
+                    # Per-plate object lists are only kept at the file level
+                    # when there's one plate — the skip-object affordance
+                    # operates on the plate being printed, which is the
+                    # `/plates` endpoint's job for multi-plate exports.
+                    if len(plates) == 1:
+                        if plate_index_value is not None:
+                            if not self.plate_number:
+                                self.plate_number = plate_index_value
+                            self.metadata["_plate_index"] = plate_index_value
 
-                        # Only include objects that are not pre-skipped
-                        if identify_id and name and skipped.lower() != "true":
-                            try:
-                                printable_objects[int(identify_id)] = name
-                            except ValueError:
-                                pass  # Skip objects with non-numeric identify_id
+                        printable_objects: dict[int, str] = {}
+                        for obj in plate.findall("object"):
+                            identify_id = obj.get("identify_id")
+                            name = obj.get("name")
+                            skipped = obj.get("skipped", "false")
+                            if identify_id and name and skipped.lower() != "true":
+                                try:
+                                    printable_objects[int(identify_id)] = name
+                                except ValueError:
+                                    pass  # Skip objects with non-numeric identify_id
+                        if printable_objects:
+                            self.metadata["printable_objects"] = printable_objects
 
-                    if printable_objects:
-                        self.metadata["printable_objects"] = printable_objects
+                if any_time_seen:
+                    self.metadata["print_time_seconds"] = summed_time
+                if any_grams_seen:
+                    self.metadata["filament_used_grams"] = round(summed_grams, 2)
 
                 # Get filament info from filaments ACTUALLY USED in the print
                 # slice_info has <filament id="1" type="PLA" color="#FFFFFF" used_g="100" />

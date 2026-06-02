@@ -20,6 +20,7 @@ from backend.app.core.database import get_db
 from backend.app.core.permissions import Permission
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile, LibraryFolder
+from backend.app.models.print_log import PrintLogEntry
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.project import Project
 from backend.app.models.project_bom import ProjectBOMItem
@@ -48,40 +49,66 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/projects", tags=["projects"])
 
 
+_FAILURE_STATUSES = ("failed", "aborted", "cancelled", "stopped")
+
+
 async def compute_project_stats(
     db: AsyncSession, project_id: int, target_count: int | None = None, target_parts_count: int | None = None
 ) -> ProjectStats:
-    """Compute statistics for a project."""
-    # Count total archives (distinct print jobs)
-    total_result = await db.execute(select(func.count(PrintArchive.id)).where(PrintArchive.project_id == project_id))
-    total_archives = total_result.scalar() or 0
+    """Compute statistics for a project.
 
-    # Sum total items (using quantity field)
-    total_items_result = await db.execute(
-        select(func.coalesce(func.sum(PrintArchive.quantity), 0)).where(PrintArchive.project_id == project_id)
-    )
-    total_items = total_items_result.scalar() or 0
+    Aggregates from ``print_log_entries`` joined to ``print_archives`` so
+    every actual run contributes — pre-fix this counted ``print_archives``
+    (one row per file), which under-reported every reprint by collapsing
+    runs back into the source file (#1593). The Archive Print Log view
+    already drives off the same source (``archives.py::list_archives_slim``),
+    so project stats now stay aligned with the per-archive numbers.
 
-    # Count failed archives (number of print jobs) - includes all failure states
-    failed_result = await db.execute(
-        select(func.count(PrintArchive.id)).where(
-            PrintArchive.project_id == project_id,
-            PrintArchive.status.in_(["failed", "aborted", "cancelled", "stopped"]),
-        )
-    )
-    failed_prints = failed_result.scalar() or 0
-
-    # Sum print time, filament, and energy
-    sums_result = await db.execute(
+    Orphan log entries (``archive_id IS NULL`` after archive deletion via
+    ``ON DELETE SET NULL``) are excluded by the inner join — they can't
+    be attributed to a project.
+    """
+    # Per-run aggregates from print_log_entries joined on archive_id so
+    # the WHERE filters by archives.project_id. Each run's duration,
+    # filament, cost, and energy come from the log row, not the source
+    # archive — so multi-plate 3MFs and reprints both count correctly.
+    log_stats_result = await db.execute(
         select(
-            func.coalesce(func.sum(PrintArchive.print_time_seconds), 0).label("total_time"),
-            func.coalesce(func.sum(PrintArchive.filament_used_grams), 0).label("total_filament"),
-            func.coalesce(func.sum(PrintArchive.cost), 0).label("total_filament_cost"),
-            func.coalesce(func.sum(PrintArchive.energy_kwh), 0).label("total_energy"),
-            func.coalesce(func.sum(PrintArchive.energy_cost), 0).label("total_energy_cost"),
-        ).where(PrintArchive.project_id == project_id)
+            func.count(PrintLogEntry.id).label("total_runs"),
+            func.coalesce(func.sum(PrintLogEntry.duration_seconds), 0).label("total_time"),
+            func.coalesce(func.sum(PrintLogEntry.filament_used_grams), 0).label("total_filament"),
+            func.coalesce(func.sum(PrintLogEntry.cost), 0).label("total_filament_cost"),
+            func.coalesce(func.sum(PrintLogEntry.energy_kwh), 0).label("total_energy"),
+            func.coalesce(func.sum(PrintLogEntry.energy_cost), 0).label("total_energy_cost"),
+        )
+        .join(PrintArchive, PrintArchive.id == PrintLogEntry.archive_id)
+        .where(PrintArchive.project_id == project_id)
     )
-    sums = sums_result.first()
+    log_stats = log_stats_result.first()
+    total_archives = int(log_stats.total_runs or 0)
+
+    # Total items the project has produced or attempted: sum of quantity
+    # per run (each run contributes its archive's quantity). The total/
+    # completed/failed splits are all per-run, not per-file.
+    items_split_result = await db.execute(
+        select(
+            func.coalesce(func.sum(PrintArchive.quantity), 0).label("total_items"),
+            func.coalesce(
+                func.sum(case((PrintLogEntry.status == "completed", PrintArchive.quantity), else_=0)),
+                0,
+            ).label("completed_items"),
+            func.coalesce(
+                func.sum(case((PrintLogEntry.status.in_(_FAILURE_STATUSES), 1), else_=0)),
+                0,
+            ).label("failed_runs"),
+        )
+        .join(PrintArchive, PrintArchive.id == PrintLogEntry.archive_id)
+        .where(PrintArchive.project_id == project_id)
+    )
+    items_split = items_split_result.first()
+    total_items = int(items_split.total_items or 0)
+    completed_items = int(items_split.completed_items or 0)
+    failed_prints = int(items_split.failed_runs or 0)
 
     # Count queued items
     queued_result = await db.execute(
@@ -98,15 +125,6 @@ async def compute_project_stats(
         )
     )
     in_progress_prints = in_progress_result.scalar() or 0
-
-    # Sum completed items (parts) - sum of quantities for actually printed jobs
-    completed_items_result = await db.execute(
-        select(func.coalesce(func.sum(PrintArchive.quantity), 0)).where(
-            PrintArchive.project_id == project_id,
-            PrintArchive.status == "completed",
-        )
-    )
-    completed_items = int(completed_items_result.scalar() or 0)
 
     # Calculate progress for plates (target_count vs total_archives)
     progress_percent = None
@@ -141,13 +159,13 @@ async def compute_project_stats(
         failed_prints=int(failed_prints),
         queued_prints=queued_prints,
         in_progress_prints=in_progress_prints,
-        total_print_time_hours=round((sums.total_time or 0) / 3600, 2),
-        total_filament_grams=round(sums.total_filament or 0, 2),
+        total_print_time_hours=round((log_stats.total_time or 0) / 3600, 2),
+        total_filament_grams=round(log_stats.total_filament or 0, 2),
         progress_percent=progress_percent,
         parts_progress_percent=parts_progress_percent,
-        estimated_cost=round((sums.total_filament_cost or 0), 2),
-        total_energy_kwh=round((sums.total_energy or 0), 3),
-        total_energy_cost=round((sums.total_energy_cost or 0), 3),
+        estimated_cost=round((log_stats.total_filament_cost or 0), 2),
+        total_energy_kwh=round((log_stats.total_energy or 0), 3),
+        total_energy_cost=round((log_stats.total_energy_cost or 0), 3),
         remaining_prints=remaining_prints,
         remaining_parts=remaining_parts,
         bom_total_items=bom_stats.total or 0,
@@ -172,20 +190,34 @@ async def list_projects(
     result = await db.execute(query)
     projects = result.scalars().all()
 
-    # Compute quick stats for each project
+    # Compute quick stats for each project. Same per-run aggregation as
+    # ``compute_project_stats`` — counts and quantities come from
+    # ``print_log_entries`` joined to ``print_archives`` so reprints and
+    # multi-plate prints contribute every run, not just the source file
+    # (#1593). Quick stats and the full stats endpoint must agree.
     response = []
     for project in projects:
-        # Get archive count (number of print jobs)
-        archive_count_result = await db.execute(
-            select(func.count(PrintArchive.id)).where(PrintArchive.project_id == project.id)
+        log_quick_result = await db.execute(
+            select(
+                func.count(PrintLogEntry.id).label("archive_count"),
+                func.coalesce(func.sum(PrintArchive.quantity), 0).label("total_items"),
+                func.coalesce(
+                    func.sum(case((PrintLogEntry.status == "completed", PrintArchive.quantity), else_=0)),
+                    0,
+                ).label("completed_count"),
+                func.coalesce(
+                    func.sum(case((PrintLogEntry.status.in_(_FAILURE_STATUSES), 1), else_=0)),
+                    0,
+                ).label("failed_count"),
+            )
+            .join(PrintArchive, PrintArchive.id == PrintLogEntry.archive_id)
+            .where(PrintArchive.project_id == project.id)
         )
-        archive_count = archive_count_result.scalar() or 0
-
-        # Get total items (sum of quantities)
-        total_items_result = await db.execute(
-            select(func.coalesce(func.sum(PrintArchive.quantity), 0)).where(PrintArchive.project_id == project.id)
-        )
-        total_items = int(total_items_result.scalar() or 0)
+        log_quick = log_quick_result.first()
+        archive_count = int(log_quick.archive_count or 0)
+        total_items = int(log_quick.total_items or 0)
+        completed_count = int(log_quick.completed_count or 0)
+        failed_count = int(log_quick.failed_count or 0)
 
         # Get queue count
         queue_count_result = await db.execute(
@@ -195,24 +227,6 @@ async def list_projects(
             )
         )
         queue_count = queue_count_result.scalar() or 0
-
-        # Sum completed parts (quantities) - only actually printed jobs
-        completed_result = await db.execute(
-            select(func.coalesce(func.sum(PrintArchive.quantity), 0)).where(
-                PrintArchive.project_id == project.id,
-                PrintArchive.status == "completed",
-            )
-        )
-        completed_count = int(completed_result.scalar() or 0)
-
-        # Sum failed parts (quantities) - includes all failure states
-        failed_result = await db.execute(
-            select(func.coalesce(func.sum(PrintArchive.quantity), 0)).where(
-                PrintArchive.project_id == project.id,
-                PrintArchive.status.in_(["failed", "aborted", "cancelled", "stopped"]),
-            )
-        )
-        failed_count = int(failed_result.scalar() or 0)
 
         # Plates progress: archive_count / target_count
         progress_percent = None

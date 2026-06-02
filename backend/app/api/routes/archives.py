@@ -948,6 +948,23 @@ async def get_archive_stats(
             *base_conditions,
         )
     )
+    # Accuracy is meaningful only when the estimate roughly describes the
+    # work the run actually performed. Two shapes produce wildly-off ratios
+    # that are pure noise:
+    #   - multi-plate ``.gcode.3mf`` printed plate-by-plate: each run's
+    #     actual is one plate, the archive's estimate is the sum across
+    #     plates (post-#1593 parser fix), so the ratio is roughly N×100%
+    #     for an N-plate file. Pre-fix this shape was also broken, just
+    #     less dramatically — the estimate was plate-1-only so the ratio
+    #     was meaningless rather than N×.
+    #   - manual interventions / purge waste blowing the actual far past
+    #     the estimate.
+    # Clamp to the [50%, 200%] band so the printer-level average reflects
+    # real slicer-vs-reality drift, not multi-plate accounting or one-off
+    # outliers. Single-plate archives — the case the metric is actually
+    # designed for — stay fully included.
+    _ACCURACY_BAND_LO = 50.0
+    _ACCURACY_BAND_HI = 200.0
     average_accuracy = None
     accuracy_by_printer: dict[str, float] = {}
     accuracies: list[float] = []
@@ -960,6 +977,8 @@ async def get_archive_stats(
         if not actual_seconds or not estimate_seconds:
             continue
         accuracy = (estimate_seconds / actual_seconds) * 100
+        if accuracy < _ACCURACY_BAND_LO or accuracy > _ACCURACY_BAND_HI:
+            continue
         accuracies.append(accuracy)
         printer_key = str(run_printer_id) if run_printer_id else "unknown"
         printer_accuracies.setdefault(printer_key, []).append(accuracy)
