@@ -192,7 +192,7 @@ Optional but recommended — drop the [`slicer-api/` Compose stack](slicer-api/R
 
 ### 📁 File Manager (Library)
 - Upload and organize sliced files (3MF, gcode, STL)
-- **External folder mounting** - Mount host directories (NAS, USB, network shares) without copying files
+- **External folder mounting** - Mount host directories (NAS, USB, network shares) without copying files. Operator-controlled via the `BAMBUDDY_EXTERNAL_ROOTS` env var (colon-separated allowlist of host paths users are permitted to register; empty by default to disable the feature). See [Docker → External library folders](https://wiki.bambuddy.cool/getting-started/docker/#external-library-folders-bambuddy_external_roots).
 - **STL thumbnail generation** - Auto-generate previews for STL files on upload or batch generate for existing files
 - ZIP file extraction with folder structure preservation
 - Option to create folder from ZIP filename
@@ -626,6 +626,16 @@ uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
 Open **http://localhost:8000** and add your printer!
 
 > **Need detailed instructions?** See the [Installation Guide](http://wiki.bambuddy.cool/getting-started/installation/)
+
+### Windows Native Installation
+
+Windows PowerShell (run as Administrator — the installer self-elevates via UAC if not):
+
+```powershell
+powershell -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/maziggy/bambuddy/main/install/windows-installer.ps1 -OutFile windows-installer.ps1; .\windows-installer.ps1"
+```
+
+> Installs Bambuddy natively on Windows using Git, Python, a virtual environment, separate data/log directories, and optional NSSM Windows Service registration. See the [Windows Installer Guide](http://wiki.bambuddy.cool/getting-started/windows-installer/) for parameters and unattended-install options.
 
 ### Enabling Developer Mode
 
