@@ -64,7 +64,7 @@ export const DEFAULT_PRINT_OPTIONS: PrintOptions = {
 /**
  * Schedule type for queue items.
  */
-export type ScheduleType = 'asap' | 'scheduled' | 'manual';
+export type ScheduleType = 'asap' | 'queue' | 'scheduled';
 
 /**
  * Schedule options for queue items.
@@ -72,6 +72,7 @@ export type ScheduleType = 'asap' | 'scheduled' | 'manual';
 export interface ScheduleOptions {
   scheduleType: ScheduleType;
   scheduledTime: string;
+  requireManualStart: boolean;
   requirePreviousSuccess: boolean;
   autoOffAfter: boolean;
   gcodeInjection: boolean;
@@ -86,6 +87,7 @@ export interface ScheduleOptions {
 export const DEFAULT_SCHEDULE_OPTIONS: ScheduleOptions = {
   scheduleType: 'asap',
   scheduledTime: '',
+  requireManualStart: false,
   requirePreviousSuccess: false,
   autoOffAfter: false,
   gcodeInjection: false,

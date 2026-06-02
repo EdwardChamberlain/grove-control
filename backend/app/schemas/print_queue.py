@@ -28,6 +28,8 @@ class PrintQueueItemCreate(BaseModel):
     require_previous_success: bool = False
     auto_off_after: bool = False  # Power off printer after print completes
     manual_start: bool = False  # Requires manual trigger to start (staged)
+    insert_at_top: bool = False  # Insert ahead of other pending items in the same queue scope
+    insert_position: int | None = None  # 1-indexed insertion position for priority queueing
     # AMS mapping: list of global tray IDs for each filament slot
     # Format: [5, -1, 2, -1] where position = slot_id-1, value = global tray ID (-1 = unused)
     ams_mapping: list[int] | None = None

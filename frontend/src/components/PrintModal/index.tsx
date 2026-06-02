@@ -108,10 +108,8 @@ export function PrintModal({
 
   const [scheduleOptions, setScheduleOptions] = useState<ScheduleOptions>(() => {
     if (mode === 'edit-queue-item' && queueItem) {
-      let scheduleType: ScheduleType = 'asap';
-      if (queueItem.manual_start) {
-        scheduleType = 'manual';
-      } else if (queueItem.scheduled_time && !isPlaceholderDate(queueItem.scheduled_time)) {
+      let scheduleType: ScheduleType = 'queue';
+      if (queueItem.scheduled_time && !isPlaceholderDate(queueItem.scheduled_time)) {
         scheduleType = 'scheduled';
       }
 
@@ -125,6 +123,7 @@ export function PrintModal({
       return {
         scheduleType,
         scheduledTime,
+        requireManualStart: queueItem.manual_start,
         requirePreviousSuccess: queueItem.require_previous_success,
         autoOffAfter: queueItem.auto_off_after,
         gcodeInjection: queueItem.gcode_injection ?? false,
@@ -630,6 +629,21 @@ export function PrintModal({
 
     const filamentOverridesArray = buildFilamentOverridesArray();
 
+    const asapInsertionCounts = new Map<string, number>();
+
+    const applyAsapInsertion = (
+      queueData: PrintQueueItemCreate,
+      printerId: number | null,
+      itemCount = 1,
+    ) => {
+      if (scheduleOptions.scheduleType !== 'asap') return;
+      const scopeKey = printerId !== null ? `printer:${printerId}` : 'unassigned';
+      const insertPosition = (asapInsertionCounts.get(scopeKey) ?? 0) + 1;
+      queueData.insert_at_top = true;
+      queueData.insert_position = insertPosition;
+      asapInsertionCounts.set(scopeKey, insertPosition + itemCount - 1);
+    };
+
     // Common queue data for add-to-queue and edit modes
     const getQueueData = (printerId: number | null, plateOverride?: number | null): PrintQueueItemCreate => ({
       printer_id: assignmentMode === 'printer' ? printerId : null,
@@ -642,7 +656,7 @@ export function PrintModal({
       require_previous_success: scheduleOptions.requirePreviousSuccess,
       auto_off_after: scheduleOptions.autoOffAfter,
       gcode_injection: scheduleOptions.gcodeInjection,
-      manual_start: scheduleOptions.scheduleType === 'manual',
+      manual_start: scheduleOptions.scheduleType === 'queue' && scheduleOptions.requireManualStart,
       ams_mapping: printerId ? getMappingForPrinter(printerId) : undefined,
       plate_id: plateOverride !== undefined ? plateOverride : selectedPlate,
       scheduled_time: scheduleOptions.scheduleType === 'scheduled' && scheduleOptions.scheduledTime
@@ -672,7 +686,7 @@ export function PrintModal({
               require_previous_success: scheduleOptions.requirePreviousSuccess,
               auto_off_after: scheduleOptions.autoOffAfter,
               gcode_injection: scheduleOptions.gcodeInjection,
-              manual_start: scheduleOptions.scheduleType === 'manual',
+              manual_start: scheduleOptions.scheduleType === 'queue' && scheduleOptions.requireManualStart,
               ams_mapping: undefined,
               plate_id: plateId,
               scheduled_time: scheduleOptions.scheduleType === 'scheduled' && scheduleOptions.scheduledTime
@@ -685,6 +699,7 @@ export function PrintModal({
             // Add-to-queue mode with model-based assignment
             const queueData = getQueueData(null, plateId);
             if (effectiveQuantity > 1) queueData.quantity = effectiveQuantity;
+            applyAsapInsertion(queueData, null, effectiveQuantity);
             await addToQueueMutation.mutateAsync(queueData);
           }
           results.success++;
@@ -726,7 +741,7 @@ export function PrintModal({
                 require_previous_success: scheduleOptions.requirePreviousSuccess,
                 auto_off_after: scheduleOptions.autoOffAfter,
                 gcode_injection: scheduleOptions.gcodeInjection,
-                manual_start: scheduleOptions.scheduleType === 'manual',
+                manual_start: scheduleOptions.scheduleType === 'queue' && scheduleOptions.requireManualStart,
                 ams_mapping: printerMapping,
                 plate_id: plateId,
                 scheduled_time: scheduleOptions.scheduleType === 'scheduled' && scheduleOptions.scheduledTime
@@ -739,6 +754,7 @@ export function PrintModal({
               // New print mode, staggered print, or edit mode with additional entries
               const queueData = getQueueData(printerId, plateId);
               if (effectiveQuantity > 1) queueData.quantity = effectiveQuantity;
+              applyAsapInsertion(queueData, printerId, effectiveQuantity);
               // Apply stagger offset for groups after the first
               if (useStagger) {
                 const groupIndex = Math.floor(i / scheduleOptions.staggerGroupSize);
