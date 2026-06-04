@@ -2835,9 +2835,62 @@ export default {
     title: 'Profile',
     subtitle: 'Verwalten Sie Ihre Slicer-Voreinstellungen und Druckvorschub-Kalibrierungen',
     tabs: {
-      cloud: 'Cloud-Profile',
+      bambuCloud: 'Bambu Cloud',
+      orcaCloud: 'Orca Cloud',
       local: 'Lokale Profile',
       kprofiles: 'K-Profile',
+    },
+    orcaCloud: {
+      connectedAs: 'Verbunden als',
+      logout: 'Trennen',
+      noLogoutPermission: 'Sie haben keine Berechtigung zum Trennen',
+      noConnectPermission: 'Sie haben keine Berechtigung, sich mit Orca Cloud zu verbinden',
+      retry: 'Erneut versuchen',
+      back: 'Andere Anmeldemethode verwenden',
+      connect: {
+        title: 'Mit Orca Cloud verbinden',
+        description: 'Melden Sie sich bei Ihrem Orca Cloud-Konto an, um Ihre Slicer-Profile in Bambuddy zu synchronisieren.',
+      },
+      providers: {
+        google: 'Mit Google anmelden',
+        apple: 'Mit Apple anmelden',
+        github: 'Mit GitHub anmelden',
+        email: 'Mit E-Mail und Passwort anmelden',
+      },
+      password: {
+        title: 'Mit E-Mail und Passwort anmelden',
+        email: 'E-Mail',
+        emailPlaceholder: 'sie@beispiel.de',
+        password: 'Passwort',
+        submit: 'Anmelden',
+      },
+      paste: {
+        title: 'Anmeldung abschließen',
+        step1: 'Ein neuer Tab wurde mit der Orca Cloud-Anmeldeseite geöffnet. Melden Sie sich mit Ihrem Orca-Konto an.',
+        step2: 'Ihr Browser wird zu einer "localhost"-URL umgeleitet, die nicht geladen werden kann. Das ist normal — die URL ist es, was wir brauchen.',
+        step3: 'Kopieren Sie die gesamte URL aus der Adressleiste Ihres Browsers und fügen Sie sie unten ein.',
+        signInUrl: 'Falls sich der Anmelde-Tab nicht geöffnet hat, klicken Sie auf diese URL:',
+        label: 'Callback-URL hier einfügen',
+        placeholder: 'http://localhost:41172/callback?code=...&state=...',
+        submit: 'Verbindung abschließen',
+      },
+      profiles: {
+        title: 'Ihre Orca Cloud-Profile ({{count}})',
+        refresh: 'Aktualisieren',
+        empty: 'Noch keine Profile in Ihrem Orca Cloud-Konto gefunden.',
+      },
+      toast: {
+        connected: 'Mit Orca Cloud verbunden als {{email}}',
+        disconnected: 'Verbindung zu Orca Cloud getrennt',
+      },
+      errors: {
+        startFailed: 'Anmeldevorgang für Orca Cloud konnte nicht gestartet werden.',
+        finishFailed: 'Orca Cloud-Anmeldung konnte nicht abgeschlossen werden.',
+        passwordFailed: 'Anmeldung mit dieser E-Mail und diesem Passwort fehlgeschlagen.',
+        passwordEmpty: 'Bitte geben Sie sowohl E-Mail als auch Passwort ein.',
+        emptyPaste: 'Bitte fügen Sie die Callback-URL aus Ihrem Browser ein.',
+        noCode: 'Diese URL sieht nicht wie ein Orca Cloud-Callback aus (kein code-Parameter). Kopieren Sie die vollständige URL aus der Adressleiste.',
+      },
     },
     localProfiles: {
       title: 'Lokale Profile',
@@ -3483,13 +3536,19 @@ export default {
     failedToast: 'Slicen von {{name}} fehlgeschlagen: {{detail}}',
     tier: {
       local: 'Importiert',
-      cloud: 'Cloud',
+      cloud: 'Bambu Cloud',
+      orcaCloud: 'Orca Cloud',
       standard: 'Standard',
     },
     cloud: {
-      notAuthenticated: 'In Bambu Cloud anmelden (Einstellungen → Profile → Cloud), um deine Cloud-Profile zu sehen.',
+      notAuthenticated: 'In Bambu Cloud anmelden (Einstellungen → Profile → Bambu Cloud), um deine Cloud-Profile zu sehen.',
       expired: 'Bambu-Cloud-Sitzung abgelaufen — erneut anmelden, um die Cloud-Profile zu aktualisieren.',
       unreachable: 'Bambu Cloud ist gerade nicht erreichbar. Lokale und Standard-Profile funktionieren weiterhin.',
+    },
+    orcaCloud: {
+      notAuthenticated: 'Bei Orca Cloud anmelden (Profile → Orca Cloud), um Ihre Orca-Profile zu sehen.',
+      expired: 'Orca Cloud-Sitzung abgelaufen — erneut anmelden, um die Orca-Profile zu aktualisieren.',
+      unreachable: 'Orca Cloud ist derzeit nicht erreichbar. Andere Profile funktionieren weiterhin.',
     },
     bedType: {
       label: 'Druckbett',
@@ -4111,7 +4170,7 @@ export default {
     scheduledBackupFailed: 'Backup fehlgeschlagen',
     nextBackup: 'Nächstes Backup',
     backupSize: 'Größe',
-    utc: 'UTC',
+    localTimeHint: 'Ortszeit ({{tz}})',
     defaultPathLabel: 'Standard:',
 
     // Category labels
@@ -5511,6 +5570,8 @@ export default {
   diagnostic: {
     modalTitle: 'Verbindungsdiagnose — {{name}}',
     running: 'Diagnose läuft...',
+    runningElapsed: 'Diagnose läuft... ({{elapsed}}s)',
+    waitingForReportHint: 'Warten darauf, dass der Drucker einen Statusbericht sendet — kann bis zu {{max}} Sekunden dauern.',
     runFailed: 'Diagnose konnte nicht ausgeführt werden: {{error}}',
     retry: 'Erneut ausführen',
     runButton: 'Diagnose ausführen',
@@ -5560,6 +5621,12 @@ export default {
         title: 'LAN-Entwicklermodus',
         pass: 'Der Entwicklermodus ist aktiviert.',
         fail: 'Der Entwicklermodus ist am Drucker AUS. Aktivieren Sie ihn in den LAN-Einstellungen des Druckers — und bestätigen Sie mit OK. Ohne ihn starten Drucke nicht.',
+        skip: 'Konnte nicht geprüft werden — erfordert eine aktive Verbindung zum Drucker.',
+      },
+      printer_publishing: {
+        title: 'Drucker sendet Statusmeldungen',
+        pass: 'Der Drucker sendet Statusmeldungen — AMS, Filamente und K-Profile werden korrekt zum Slicer gespiegelt.',
+        fail: 'Der MQTT-Broker hat die Verbindung akzeptiert, der Drucker sendet aber keine Statusmeldungen. Fast immer liegt eine falsche oder falsch geschriebene Seriennummer vor — das Topic device/<serial>/report unterscheidet Groß- und Kleinschreibung. Prüfen Sie die Seriennummer in den Druckereinstellungen gegen die Anzeige am Drucker.',
         skip: 'Konnte nicht geprüft werden — erfordert eine aktive Verbindung zum Drucker.',
       },
     },

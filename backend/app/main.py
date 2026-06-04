@@ -45,6 +45,7 @@ from backend.app.api.routes import (
     notification_templates,
     notifications,
     obico,
+    orca_cloud,
     pending_uploads,
     print_log,
     print_queue,
@@ -4444,6 +4445,34 @@ _ams_alarm_cooldown: dict[str, datetime] = {}
 AMS_ALARM_COOLDOWN_MINUTES = 60  # Don't send same alarm more than once per hour
 
 
+def _ams_has_filament(ams_data: dict) -> bool:
+    """True if this AMS unit has at least one tray slot holding filament.
+
+    Bambu firmware reports loaded slots via `tray_exist_bits`, a per-AMS hex
+    bitmap (one bit per tray slot — bit set = spool present). Empty AMS units
+    still report sensor readings, but those readings are ambient and not
+    actionable: no filament to dry, no humidity to push down. #1619 — gate
+    humidity/temperature alarms on this check so empty units don't generate
+    hourly noise. Sensor history still records regardless so the UI charts
+    stay continuous.
+
+    Fallback path inspects the `tray` array's `tray_type` fields for setups
+    where `tray_exist_bits` is missing (some early-connection pushall shapes).
+    """
+    bits = ams_data.get("tray_exist_bits")
+    if isinstance(bits, str) and bits.strip():
+        try:
+            return int(bits, 16) > 0
+        except ValueError:
+            pass
+    trays = ams_data.get("tray")
+    if isinstance(trays, list):
+        return any(
+            isinstance(t, dict) and isinstance(t.get("tray_type"), str) and t["tray_type"].strip() for t in trays
+        )
+    return False
+
+
 async def record_ams_history():
     """Background task to record AMS humidity and temperature data."""
     logger = logging.getLogger(__name__)
@@ -4540,6 +4569,16 @@ async def record_ams_history():
                             ams_label = f"HT-{chr(65 + (ams_id - 128))}"
                         else:
                             ams_label = f"AMS-{chr(65 + ams_id)}"
+
+                        # Skip alarm dispatch for empty AMS units — humidity /
+                        # temperature readings are ambient with no filament to
+                        # protect, and the hourly notification just becomes
+                        # noise. Sensor history was already recorded above so
+                        # the UI charts stay continuous (#1619). Per-AMS check
+                        # so a multi-AMS setup with one loaded + one empty
+                        # still alarms on the loaded unit.
+                        if not _ams_has_filament(ams_data):
+                            continue
 
                         # Check humidity alarm (only if above threshold)
                         if humidity is not None and humidity > humidity_threshold:
@@ -5739,6 +5778,7 @@ app.include_router(inventory.router, prefix=app_settings.api_prefix)
 app.include_router(labels.router, prefix=app_settings.api_prefix)
 app.include_router(settings_routes.router, prefix=app_settings.api_prefix)
 app.include_router(cloud.router, prefix=app_settings.api_prefix)
+app.include_router(orca_cloud.router, prefix=app_settings.api_prefix)
 app.include_router(local_presets.router, prefix=app_settings.api_prefix)
 app.include_router(smart_plugs.router, prefix=app_settings.api_prefix)
 app.include_router(print_log.router, prefix=app_settings.api_prefix)

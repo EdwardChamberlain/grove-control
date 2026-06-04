@@ -1,6 +1,6 @@
 // Bambuddy Service Worker
-const CACHE_NAME = 'bambuddy-v28';
-const STATIC_CACHE = 'bambuddy-static-v27';
+const CACHE_NAME = 'bambuddy-v29';
+const STATIC_CACHE = 'bambuddy-static-v28';
 
 // Static assets to cache on install
 const STATIC_ASSETS = [
@@ -31,23 +31,46 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
-// Activate event - clean up old caches
+// Activate event - clean up old caches, then force-reload any controlled
+// windows so they pick up the new bundle. Important for the SpoolBuddy kiosk
+// (Pi + Chromium-in-kiosk-mode, no devtools, no manual reload control):
+// without this hop, restarting Chromium installs the new SW but the existing
+// document keeps running the previously-cached bundle until a navigation
+// happens — which on a locked kiosk never occurs.
 self.addEventListener('activate', (event) => {
   console.log('[SW] Activating service worker...');
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
+    (async () => {
+      const cacheNames = await caches.keys();
+      await Promise.all(
         cacheNames
           .filter((name) => name !== CACHE_NAME && name !== STATIC_CACHE)
           .map((name) => {
             console.log('[SW] Deleting old cache:', name);
             return caches.delete(name);
-          })
+          }),
       );
-    })
+      // Take control immediately.
+      await self.clients.claim();
+      // Force a fresh navigation in any window that this SW now controls.
+      // ``client.navigate(client.url)`` re-requests the page through the
+      // network-first fetch handler, picking up the new index.html + the
+      // new content-hashed JS bundle. Guarded so the very first install on
+      // a never-controlled client doesn't trigger an unwanted reload.
+      const clients = await self.clients.matchAll({ type: 'window' });
+      for (const client of clients) {
+        try {
+          if (client.url && typeof client.navigate === 'function') {
+            await client.navigate(client.url);
+          }
+        } catch (e) {
+          // Some browsers reject navigate on cross-origin or detached
+          // clients — swallow so one bad client doesn't break the rest.
+          console.warn('[SW] Forced reload skipped for client:', client.url, e);
+        }
+      }
+    })(),
   );
-  // Take control immediately
-  self.clients.claim();
 });
 
 // Fetch event - network-first for API, cache-first for static

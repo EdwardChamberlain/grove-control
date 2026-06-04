@@ -144,6 +144,7 @@ class Permission(StrEnum):
 
     # Cloud Auth (admin-level)
     CLOUD_AUTH = "cloud:auth"
+    ORCA_CLOUD_AUTH = "orca_cloud:auth"
 
     # MakerWorld Integration
     MAKERWORLD_VIEW = "makerworld:view"  # Resolve MakerWorld URLs and view model metadata
@@ -297,6 +298,7 @@ PERMISSION_CATEGORIES = {
     ],
     "Cloud": [
         Permission.CLOUD_AUTH,
+        Permission.ORCA_CLOUD_AUTH,
     ],
     "MakerWorld": [
         Permission.MAKERWORLD_VIEW,

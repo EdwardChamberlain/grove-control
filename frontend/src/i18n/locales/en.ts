@@ -2838,9 +2838,62 @@ export default {
     title: 'Profiles',
     subtitle: 'Manage your slicer presets and pressure advance calibrations',
     tabs: {
-      cloud: 'Cloud Profiles',
+      bambuCloud: 'Bambu Cloud',
+      orcaCloud: 'Orca Cloud',
       local: 'Local Profiles',
       kprofiles: 'K-Profiles',
+    },
+    orcaCloud: {
+      connectedAs: 'Connected as',
+      logout: 'Disconnect',
+      noLogoutPermission: 'You do not have permission to disconnect',
+      noConnectPermission: 'You do not have permission to connect to Orca Cloud',
+      retry: 'Retry',
+      back: 'Use a different sign-in method',
+      connect: {
+        title: 'Connect to Orca Cloud',
+        description: 'Sign in to your Orca Cloud account to sync your slicer profiles into Bambuddy.',
+      },
+      providers: {
+        google: 'Sign in with Google',
+        apple: 'Sign in with Apple',
+        github: 'Sign in with GitHub',
+        email: 'Sign in with email and password',
+      },
+      password: {
+        title: 'Sign in with email and password',
+        email: 'Email',
+        emailPlaceholder: 'you@example.com',
+        password: 'Password',
+        submit: 'Sign in',
+      },
+      paste: {
+        title: 'Finish signing in',
+        step1: 'A new tab opened with the Orca Cloud sign-in page. Sign in with your Orca account.',
+        step2: 'Your browser will be redirected to a "localhost" URL that fails to load. That is expected — the URL is what we need.',
+        step3: 'Copy the entire URL from your browser\'s address bar and paste it below.',
+        signInUrl: 'If the sign-in tab did not open, click this URL:',
+        label: 'Paste the callback URL here',
+        placeholder: 'http://localhost:41172/callback?code=...&state=...',
+        submit: 'Finish connecting',
+      },
+      profiles: {
+        title: 'Your Orca Cloud profiles ({{count}})',
+        refresh: 'Refresh',
+        empty: 'No profiles found in your Orca Cloud account yet.',
+      },
+      toast: {
+        connected: 'Connected to Orca Cloud as {{email}}',
+        disconnected: 'Disconnected from Orca Cloud',
+      },
+      errors: {
+        startFailed: 'Could not start the Orca Cloud sign-in flow.',
+        finishFailed: 'Could not finish the Orca Cloud sign-in.',
+        passwordFailed: 'Could not sign in with that email and password.',
+        passwordEmpty: 'Please enter both your email and password.',
+        emptyPaste: 'Please paste the callback URL from your browser.',
+        noCode: 'That URL does not look like an Orca Cloud callback (no code parameter). Copy the full URL from your address bar.',
+      },
     },
     localProfiles: {
       title: 'Local Profiles',
@@ -3486,13 +3539,19 @@ export default {
     failedToast: 'Slicing {{name}} failed: {{detail}}',
     tier: {
       local: 'Imported',
-      cloud: 'Cloud',
+      cloud: 'Bambu Cloud',
+      orcaCloud: 'Orca Cloud',
       standard: 'Standard',
     },
     cloud: {
-      notAuthenticated: 'Sign in to Bambu Cloud (Settings → Profiles → Cloud) to see your cloud presets.',
+      notAuthenticated: 'Sign in to Bambu Cloud (Settings → Profiles → Bambu Cloud) to see your cloud presets.',
       expired: 'Bambu Cloud session expired — sign in again to refresh your cloud presets.',
       unreachable: 'Bambu Cloud is unreachable right now. Local and standard presets still work.',
+    },
+    orcaCloud: {
+      notAuthenticated: 'Sign in to Orca Cloud (Profiles → Orca Cloud) to see your Orca presets.',
+      expired: 'Orca Cloud session expired — sign in again to refresh your Orca presets.',
+      unreachable: 'Orca Cloud is unreachable right now. Other presets still work.',
     },
     bedType: {
       label: 'Build plate',
@@ -4123,7 +4182,7 @@ export default {
     scheduledBackupFailed: 'Backup failed',
     nextBackup: 'Next backup',
     backupSize: 'Size',
-    utc: 'UTC',
+    localTimeHint: 'Local time ({{tz}})',
     defaultPathLabel: 'Default:',
 
     // Category labels
@@ -5524,6 +5583,8 @@ export default {
   diagnostic: {
     modalTitle: 'Connection diagnostic — {{name}}',
     running: 'Running diagnostic...',
+    runningElapsed: 'Running diagnostic... ({{elapsed}}s)',
+    waitingForReportHint: 'Listening for the printer to publish a status report — this can take up to {{max}} seconds.',
     runFailed: 'Diagnostic could not run: {{error}}',
     retry: 'Run again',
     runButton: 'Run diagnostic',
@@ -5573,6 +5634,12 @@ export default {
         title: 'LAN Developer Mode',
         pass: 'Developer Mode is enabled.',
         fail: 'Developer Mode is OFF on the printer. Enable it in the printer\'s LAN settings — and confirm with OK. Without it, prints will not start.',
+        skip: 'Could not be checked — requires a live connection to the printer.',
+      },
+      printer_publishing: {
+        title: 'Printer is publishing status',
+        pass: 'The printer is publishing status updates — AMS, filaments, and K-profiles will mirror correctly to the slicer.',
+        fail: 'The MQTT broker accepted the connection but the printer has not published any status reports. This is almost always a wrong or mis-cased serial number — the device/<serial>/report topic is case-sensitive. Re-check the serial in printer settings against the screen on the printer.',
         skip: 'Could not be checked — requires a live connection to the printer.',
       },
     },

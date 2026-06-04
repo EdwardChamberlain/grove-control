@@ -463,6 +463,10 @@ function NewSpoolTouchForm({ currencySymbol, onCreated, selectedSpool, spoolmanM
   }, []);
 
   useEffect(() => {
+    // ``cancelled`` guards every state setter so an async fetch that
+    // resolves after view-mode change / unmount can't setState on a
+    // torn-down component. Same shape as SpoolFormModal's cleanup.
+    let cancelled = false;
     const fetchData = async () => {
       // Only load full data when in full view mode
       if (viewMode !== 'full') {
@@ -471,22 +475,41 @@ function NewSpoolTouchForm({ currencySymbol, onCreated, selectedSpool, spoolmanM
 
       setLoadingCloudPresets(true);
       try {
-        const status = await api.getCloudStatus();
-        setCloudAuthenticated(status.is_authenticated);
-        if (status.is_authenticated) {
-          const presets = await api.getFilamentPresets();
-          setCloudPresets(presets);
-        }
+        // Fetch Bambu + Orca in parallel; merge their filament lists into
+        // ``cloudPresets`` because ``OrcaProfileMeta`` is structurally
+        // identical to ``SlicerSetting`` (same fields, same semantics).
+        // Same shape as SpoolFormModal — see that for the rationale.
+        const [bambuResult, orcaResult] = await Promise.allSettled([
+          (async () => {
+            const status = await api.getCloudStatus();
+            if (!status.is_authenticated) return { connected: false, presets: [] as SlicerSetting[] };
+            const presets = await api.getFilamentPresets();
+            return { connected: true, presets };
+          })(),
+          (async () => {
+            const status = await api.orcaCloudStatus();
+            if (!status.connected) return { connected: false, presets: [] as SlicerSetting[] };
+            const list = await api.orcaCloudListProfiles();
+            return { connected: true, presets: list.filament as unknown as SlicerSetting[] };
+          })(),
+        ]);
+        if (cancelled) return;
+        const bambuConnected = bambuResult.status === 'fulfilled' && bambuResult.value.connected;
+        const orcaConnected = orcaResult.status === 'fulfilled' && orcaResult.value.connected;
+        const bambuPresets = bambuResult.status === 'fulfilled' ? bambuResult.value.presets : [];
+        const orcaPresets = orcaResult.status === 'fulfilled' ? orcaResult.value.presets : [];
+        setCloudAuthenticated(bambuConnected || orcaConnected);
+        setCloudPresets([...bambuPresets, ...orcaPresets]);
       } catch {
-        setCloudAuthenticated(false);
+        if (!cancelled) setCloudAuthenticated(false);
       } finally {
-        setLoadingCloudPresets(false);
+        if (!cancelled) setLoadingCloudPresets(false);
       }
 
-      api.getSpoolCatalog().then(setSpoolCatalog).catch(() => undefined);
-      api.getColorCatalog().then(setColorCatalog).catch(() => undefined);
-      api.getLocalPresets().then(r => setLocalPresets(r.filament)).catch(() => undefined);
-      api.getBuiltinFilaments().then(setBuiltinFilaments).catch(() => undefined);
+      api.getSpoolCatalog().then((d) => { if (!cancelled) setSpoolCatalog(d); }).catch(() => undefined);
+      api.getColorCatalog().then((d) => { if (!cancelled) setColorCatalog(d); }).catch(() => undefined);
+      api.getLocalPresets().then(r => { if (!cancelled) setLocalPresets(r.filament); }).catch(() => undefined);
+      api.getBuiltinFilaments().then((d) => { if (!cancelled) setBuiltinFilaments(d); }).catch(() => undefined);
 
       try {
         const printers = await api.getPrinters();
@@ -516,13 +539,16 @@ function NewSpoolTouchForm({ currencySymbol, onCreated, selectedSpool, spoolmanM
           }
           results.push({ printer: { ...printer, connected }, calibrations });
         }
-        setPrintersWithCalibrations(results);
+        if (!cancelled) setPrintersWithCalibrations(results);
       } catch {
         // ignore calibration loading errors on kiosk form
       }
     };
 
     fetchData();
+    return () => {
+      cancelled = true;
+    };
   }, [viewMode]);
 
   useEffect(() => {

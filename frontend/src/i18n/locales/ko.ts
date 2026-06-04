@@ -2673,9 +2673,62 @@ export default {
     title: '프로필',
     subtitle: '슬라이서 프리셋 및 압력 전진 보정 관리',
     tabs: {
-      cloud: '클라우드 프로필',
+      bambuCloud: 'Bambu Cloud',
+      orcaCloud: 'Orca Cloud',
       local: '로컬 프로필',
       kprofiles: 'K-프로필'
+    },
+    orcaCloud: {
+      connectedAs: '연결됨',
+      logout: '연결 해제',
+      noLogoutPermission: '연결을 해제할 권한이 없습니다',
+      noConnectPermission: 'Orca Cloud에 연결할 권한이 없습니다',
+      retry: '다시 시도',
+      back: '다른 로그인 방법 사용',
+      connect: {
+        title: 'Orca Cloud에 연결',
+        description: 'Orca Cloud 계정에 로그인하여 슬라이서 프로필을 Bambuddy에 동기화하세요.',
+      },
+      providers: {
+        google: 'Google로 로그인',
+        apple: 'Apple로 로그인',
+        github: 'GitHub로 로그인',
+        email: '이메일과 비밀번호로 로그인',
+      },
+      password: {
+        title: '이메일과 비밀번호로 로그인',
+        email: '이메일',
+        emailPlaceholder: 'you@example.com',
+        password: '비밀번호',
+        submit: '로그인',
+      },
+      paste: {
+        title: '로그인 완료',
+        step1: '새 탭에서 Orca Cloud 로그인 페이지가 열렸습니다. Orca 계정으로 로그인하세요.',
+        step2: '브라우저가 로드되지 않는 "localhost" URL로 리디렉션됩니다. 이것은 정상입니다 — 우리에게 필요한 것은 그 URL입니다.',
+        step3: '브라우저의 주소 표시줄에서 전체 URL을 복사하여 아래에 붙여넣으세요.',
+        signInUrl: '로그인 탭이 열리지 않은 경우 이 URL을 클릭하세요:',
+        label: '여기에 콜백 URL 붙여넣기',
+        placeholder: 'http://localhost:41172/callback?code=...&state=...',
+        submit: '연결 완료',
+      },
+      profiles: {
+        title: 'Orca Cloud 프로필 ({{count}})',
+        refresh: '새로고침',
+        empty: 'Orca Cloud 계정에 아직 프로필이 없습니다.',
+      },
+      toast: {
+        connected: '{{email}}로 Orca Cloud에 연결됨',
+        disconnected: 'Orca Cloud 연결 해제됨',
+      },
+      errors: {
+        startFailed: 'Orca Cloud 로그인 흐름을 시작할 수 없습니다.',
+        finishFailed: 'Orca Cloud 로그인을 완료할 수 없습니다.',
+        passwordFailed: '해당 이메일과 비밀번호로 로그인할 수 없습니다.',
+        passwordEmpty: '이메일과 비밀번호를 모두 입력하세요.',
+        emptyPaste: '브라우저에서 콜백 URL을 붙여넣으세요.',
+        noCode: '해당 URL은 Orca Cloud 콜백이 아닌 것 같습니다 (code 매개변수 없음). 주소 표시줄에서 전체 URL을 복사하세요.',
+      },
     },
     localProfiles: {
       title: '로컬 프로필',
@@ -3287,13 +3340,19 @@ export default {
     failedToast: '{{name}} 슬라이싱 실패: {{detail}}',
     tier: {
       local: '가져온 것',
-      cloud: '클라우드',
+      cloud: 'Bambu Cloud',
+      orcaCloud: 'Orca Cloud',
       standard: '표준'
     },
     cloud: {
-      notAuthenticated: '클라우드 프리셋을 보려면 Bambu 클라우드에 로그인하세요 (설정 → 프로필 → 클라우드).',
-      expired: 'Bambu 클라우드 세션이 만료되었습니다 — 다시 로그인하여 클라우드 프리셋을 새로고침하세요.',
-      unreachable: '현재 Bambu 클라우드에 연결할 수 없습니다. 로컬 및 표준 프리셋은 계속 작동합니다.'
+      notAuthenticated: '클라우드 프리셋을 보려면 Bambu Cloud에 로그인하세요 (설정 → 프로필 → Bambu Cloud).',
+      expired: 'Bambu Cloud 세션이 만료되었습니다 — 다시 로그인하여 클라우드 프리셋을 새로고침하세요.',
+      unreachable: '현재 Bambu Cloud에 연결할 수 없습니다. 로컬 및 표준 프리셋은 계속 작동합니다.'
+    },
+    orcaCloud: {
+      notAuthenticated: 'Orca 프리셋을 보려면 Orca Cloud (프로필 → Orca Cloud)에 로그인하세요.',
+      expired: 'Orca Cloud 세션이 만료되었습니다 — Orca 프리셋을 새로고침하려면 다시 로그인하세요.',
+      unreachable: 'Orca Cloud에 현재 연결할 수 없습니다. 다른 프리셋은 계속 작동합니다.'
     },
     actionAll: '{{count}}개 플레이트 모두 슬라이싱',
     actionAllTitle: '모든 플레이트를 단일 다중 플레이트 출력으로 슬라이싱합니다 (단일 아카이브). 필라멘트 선택은 프로젝트가 정의하는 모든 슬롯을 포함합니다.',
@@ -3878,7 +3937,7 @@ export default {
     scheduledBackupFailed: '백업 실패',
     nextBackup: '다음 백업',
     backupSize: '크기',
-    utc: 'UTC',
+    localTimeHint: '현지 시간 ({{tz}})',
     defaultPathLabel: '기본값:',
     categories: {
       settings: '설정',
@@ -5569,6 +5628,8 @@ export default {
   diagnostic: {
     modalTitle: '연결 진단 — {{name}}',
     running: '진단 실행 중...',
+    runningElapsed: '진단 실행 중... ({{elapsed}}초)',
+    waitingForReportHint: '프린터가 상태 보고를 게시하기를 기다리는 중 — 최대 {{max}}초 걸릴 수 있습니다.',
     runFailed: '진단 실행 실패: {{error}}',
     retry: '다시 실행',
     runButton: '진단 실행',
@@ -5618,6 +5679,12 @@ export default {
         title: 'LAN 개발자 모드',
         pass: '개발자 모드가 활성화되어 있습니다.',
         fail: '프린터에서 개발자 모드가 꺼져 있습니다. 프린터의 LAN 설정에서 활성화하고 확인을 누르세요. 이 없으면 인쇄가 시작되지 않습니다.',
+        skip: '확인할 수 없음 — 프린터에 연결되어 있어야 합니다.'
+      },
+      printer_publishing: {
+        title: '프린터가 상태를 게시 중',
+        pass: '프린터가 상태 업데이트를 게시하고 있습니다 — AMS, 필라멘트, K-프로파일이 슬라이서에 올바르게 반영됩니다.',
+        fail: 'MQTT 브로커는 연결을 수락했지만 프린터가 상태 보고를 게시하지 않았습니다. 거의 항상 시리얼 번호가 잘못되었거나 대소문자가 일치하지 않아서 발생합니다 — device/<serial>/report 토픽은 대소문자를 구분합니다. 프린터 설정의 시리얼 번호를 프린터 화면 표시와 비교해 확인하세요.',
         skip: '확인할 수 없음 — 프린터에 연결되어 있어야 합니다.'
       }
     }
