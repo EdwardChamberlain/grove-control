@@ -2661,7 +2661,8 @@ function PrinterCard({
 
           {/* Badges row - only in expanded mode */}
           {viewMode === 'expanded' && (
-            <div className="flex flex-wrap items-center gap-2 mt-2">
+            <div className="mt-2 rounded-[10px] bg-bambu-dark p-2">
+              <div className="flex flex-wrap items-center gap-2">
               {/* Connection status badge */}
               <span
                 className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-xs ${
@@ -2809,6 +2810,7 @@ function PrinterCard({
                   {status.door_open ? <DoorOpen className="w-3 h-3" /> : <DoorClosed className="w-3 h-3" />}
                 </span>
               )}
+              </div>
             </div>
           )}
         </div>
