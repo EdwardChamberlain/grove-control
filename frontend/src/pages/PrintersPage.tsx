@@ -1819,6 +1819,17 @@ function PrinterCard({
   const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
   const needsPlateClear = requirePlateClear && status?.awaiting_plate_clear === true;
   const showClearPlateButton = status?.connected && needsPlateClear && !isPrintingOrPaused;
+  const activePrintName = status?.current_print && isPrintingOrPaused
+    ? formatPrintName(status.subtask_name || status.current_print || null, status.gcode_file, t, activePlateLabel)
+    : null;
+  const [retainedPrintJob, setRetainedPrintJob] = useState<{ name: string; coverUrl: string | null } | null>(null);
+  useEffect(() => {
+    if (activePrintName) {
+      setRetainedPrintJob({ name: activePrintName, coverUrl: status?.cover_url ?? null });
+    } else if (!needsPlateClear) {
+      setRetainedPrintJob(null);
+    }
+  }, [activePrintName, needsPlateClear, status?.cover_url]);
   const plateStatus = (() => {
     if (!requirePlateClear || !status?.connected) return null;
     if (isPrintingOrPaused) {
@@ -2937,10 +2948,10 @@ function PrinterCard({
                 {/* Current Print or Idle Placeholder */}
                 {(() => {
                   const isActivePrint = !!(status.current_print && (status.state === 'RUNNING' || status.state === 'PAUSE'));
-                  const printName = isActivePrint
-                    ? formatPrintName(status.subtask_name || status.current_print || null, status.gcode_file, t, activePlateLabel)
-                    : null;
-                  const progress = isActivePrint ? (status.progress || 0) : 0;
+                  const showRetainedPrint = !isActivePrint && needsPlateClear && retainedPrintJob;
+                  const printName = isActivePrint ? activePrintName : showRetainedPrint ? retainedPrintJob.name : null;
+                  const coverUrl = isActivePrint ? status.cover_url : showRetainedPrint ? retainedPrintJob.coverUrl : null;
+                  const progress = isActivePrint ? (status.progress || 0) : showRetainedPrint ? 100 : 0;
 
                   return (
                     <div className="p-2 bg-bambu-dark rounded-[10px] relative overflow-hidden">
@@ -2971,7 +2982,7 @@ function PrinterCard({
                       </button>
                       <div className="flex items-stretch gap-2">
                         <CoverImage
-                          url={isActivePrint ? status.cover_url : null}
+                          url={coverUrl}
                           printName={printName || undefined}
                           className="w-24 h-24 max-[520px]:w-20 max-[520px]:h-20"
                         />
@@ -2980,17 +2991,17 @@ function PrinterCard({
                             <p className="min-w-0 truncate text-sm text-bambu-gray">{getStatusDisplay(status.state, status.stg_cur_name)}</p>
                             {plateStatusPill}
                           </div>
-                          <p className={`min-h-[18px] truncate pr-8 text-sm ${isActivePrint ? 'text-white' : 'text-bambu-gray/70'}`}>
+                          <p className={`min-h-[18px] truncate pr-8 text-sm ${printName ? 'text-white' : 'text-bambu-gray/70'}`}>
                             {printName || t('printers.noActiveJob', 'No active job')}
                           </p>
                           <div className="flex h-3 items-center gap-2 text-sm">
                             <div className="h-1.5 min-w-0 flex-1 rounded-full bg-bambu-dark-tertiary">
                               <div
-                                className={`${isActivePrint ? (status.state === 'PAUSE' ? 'bg-status-warning' : 'bg-bambu-green') : 'bg-bambu-dark-tertiary'} h-1.5 rounded-full transition-all`}
+                                className={`${isActivePrint ? (status.state === 'PAUSE' ? 'bg-status-warning' : 'bg-bambu-green') : showRetainedPrint ? 'bg-bambu-green' : 'bg-bambu-dark-tertiary'} h-1.5 rounded-full transition-all`}
                                 style={{ width: `${progress}%` }}
                               />
                             </div>
-                            <span className={`w-9 shrink-0 pr-1 text-right text-[11px] leading-none ${isActivePrint ? 'text-white' : 'text-bambu-gray'}`}>{isActivePrint ? `${Math.round(progress)}%` : '---%'}</span>
+                            <span className={`w-9 shrink-0 pr-1 text-right text-[11px] leading-none ${isActivePrint || showRetainedPrint ? 'text-white' : 'text-bambu-gray'}`}>{isActivePrint || showRetainedPrint ? `${Math.round(progress)}%` : '---%'}</span>
                           </div>
                           <div className="flex min-h-[16px] items-center gap-2 text-xs text-bambu-gray">
                             {isActivePrint ? (
