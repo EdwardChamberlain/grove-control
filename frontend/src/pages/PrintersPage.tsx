@@ -2946,7 +2946,7 @@ function PrinterCard({
                           className="w-24 h-24 max-[520px]:w-20 max-[520px]:h-20"
                           radiusClass="rounded-md"
                         />
-                        <div className="flex h-24 max-[520px]:h-20 min-w-0 flex-1 flex-col justify-between pr-8">
+                        <div className="flex h-24 max-[520px]:h-20 min-w-0 flex-1 flex-col justify-between pt-1 pr-8">
                           <div className="flex min-h-[18px] items-center gap-2">
                             <p className="min-w-0 truncate text-sm text-bambu-gray">{getStatusDisplay(status.state, status.stg_cur_name)}</p>
                             {plateStatusPill}
@@ -2954,14 +2954,14 @@ function PrinterCard({
                           <p className={`min-h-[18px] truncate text-sm ${isActivePrint ? 'text-white' : 'text-bambu-gray/70'}`}>
                             {printName || t('printers.noActiveJob', 'No active job')}
                           </p>
-                          <div className="flex items-center justify-between text-sm">
-                            <div className="mr-2 h-2 flex-1 rounded-full bg-bambu-dark-tertiary">
+                          <div className="flex h-3 items-center gap-2 text-sm">
+                            <div className="h-1.5 min-w-0 flex-1 rounded-full bg-bambu-dark-tertiary">
                               <div
-                                className={`${isActivePrint ? (status.state === 'PAUSE' ? 'bg-status-warning' : 'bg-bambu-green') : 'bg-bambu-dark-tertiary'} h-2 rounded-full transition-all`}
+                                className={`${isActivePrint ? (status.state === 'PAUSE' ? 'bg-status-warning' : 'bg-bambu-green') : 'bg-bambu-dark-tertiary'} h-1.5 rounded-full transition-all`}
                                 style={{ width: `${progress}%` }}
                               />
                             </div>
-                            <span className={isActivePrint ? 'text-white' : 'text-bambu-gray'}>{isActivePrint ? `${Math.round(progress)}%` : '---%'}</span>
+                            <span className={`w-8 shrink-0 text-right text-[11px] leading-none ${isActivePrint ? 'text-white' : 'text-bambu-gray'}`}>{isActivePrint ? `${Math.round(progress)}%` : '---%'}</span>
                           </div>
                           <div className="flex min-h-[16px] items-center gap-2 text-xs text-bambu-gray">
                             {isActivePrint ? (
