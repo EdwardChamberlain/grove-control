@@ -2953,12 +2953,12 @@ function PrinterCard({
                           className="w-24 h-24 max-[520px]:w-20 max-[520px]:h-20"
                           radiusClass="rounded-[2px]"
                         />
-                        <div className="flex h-24 max-[520px]:h-20 min-w-0 flex-1 flex-col justify-between pt-1 pr-8">
-                          <div className="flex min-h-[18px] items-center gap-2">
+                        <div className="flex h-24 max-[520px]:h-20 min-w-0 flex-1 flex-col justify-between pt-1">
+                          <div className="flex min-h-[18px] items-center gap-2 pr-8">
                             <p className="min-w-0 truncate text-sm text-bambu-gray">{getStatusDisplay(status.state, status.stg_cur_name)}</p>
                             {plateStatusPill}
                           </div>
-                          <p className={`min-h-[18px] truncate text-sm ${isActivePrint ? 'text-white' : 'text-bambu-gray/70'}`}>
+                          <p className={`min-h-[18px] truncate pr-8 text-sm ${isActivePrint ? 'text-white' : 'text-bambu-gray/70'}`}>
                             {printName || t('printers.noActiveJob', 'No active job')}
                           </p>
                           <div className="flex h-3 items-center gap-2 text-sm">
@@ -2968,7 +2968,7 @@ function PrinterCard({
                                 style={{ width: `${progress}%` }}
                               />
                             </div>
-                            <span className={`w-8 shrink-0 text-right text-[11px] leading-none ${isActivePrint ? 'text-white' : 'text-bambu-gray'}`}>{isActivePrint ? `${Math.round(progress)}%` : '---%'}</span>
+                            <span className={`w-9 shrink-0 pr-1 text-right text-[11px] leading-none ${isActivePrint ? 'text-white' : 'text-bambu-gray'}`}>{isActivePrint ? `${Math.round(progress)}%` : '---%'}</span>
                           </div>
                           <div className="flex min-h-[16px] items-center gap-2 text-xs text-bambu-gray">
                             {isActivePrint ? (
