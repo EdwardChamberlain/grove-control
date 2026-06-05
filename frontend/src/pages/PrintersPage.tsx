@@ -3181,6 +3181,7 @@ function PrinterCard({
               const isPaused = status.state === 'PAUSE';
               const isPrinting = isRunning || isPaused;
               const isControlBusy = stopPrintMutation.isPending || pausePrintMutation.isPending || resumePrintMutation.isPending;
+              const useFullWidthPrintControls = cardSize === 2;
 
               return (
                 <div className="mt-3">
@@ -3444,13 +3445,13 @@ function PrinterCard({
                     </div>
 
                     {/* Right: Print Control Buttons */}
-                    <div className="flex items-center gap-2 flex-shrink-0 max-[550px]:self-start">
+                    <div className={`flex items-center gap-2 ${useFullWidthPrintControls ? 'basis-full w-full' : 'flex-shrink-0 max-[550px]:self-start'}`}>
                       {/* Stop button */}
                       <button
                         onClick={() => setShowStopConfirm(true)}
                         disabled={!isPrinting || isControlBusy || !hasPermission('printers:control')}
                         className={`
-                          flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium
+                          flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium ${useFullWidthPrintControls ? 'flex-1' : ''}
                           transition-colors
                           ${isPrinting && hasPermission('printers:control')
                             ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
@@ -3468,7 +3469,7 @@ function PrinterCard({
                         onClick={() => isPaused ? setShowResumeConfirm(true) : setShowPauseConfirm(true)}
                         disabled={!isPrinting || isControlBusy || !hasPermission('printers:control')}
                         className={`
-                          flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium
+                          flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium ${useFullWidthPrintControls ? 'flex-1' : ''}
                           transition-colors
                           ${isPrinting && hasPermission('printers:control')
                             ? isPaused
