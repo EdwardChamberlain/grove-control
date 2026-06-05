@@ -2426,13 +2426,17 @@ function PrinterCard({
     }
   };
 
+  const footerActionButtonClass = '!h-8 !min-h-8 !px-2 !py-0';
+  const footerIconButtonClass = '!h-8 !min-h-8 !w-8 !px-0 !py-0';
+
   const printerActionsMenu = (
     <div className="relative flex-shrink-0">
       <Button
-        variant="ghost"
+        variant="secondary"
         size="sm"
         onClick={() => setShowMenu(!showMenu)}
         title={t('common.more', 'More')}
+        className={footerIconButtonClass}
       >
         <MoreVertical className="w-4 h-4" />
       </Button>
@@ -4848,6 +4852,7 @@ function PrinterCard({
                 }}
                 disabled={!status?.connected || !hasPermission('camera:view')}
                 title={!hasPermission('camera:view') ? t('printers.permission.noCamera') : (cameraViewMode === 'embedded' ? t('printers.openCameraOverlay') : t('printers.openCameraWindow'))}
+                className={footerIconButtonClass}
               >
                 <Video className="w-4 h-4" />
               </Button>
@@ -4857,6 +4862,7 @@ function PrinterCard({
                 onClick={() => setShowFileManager(true)}
                 disabled={!isConnected || !hasPermission('printers:files')}
                 title={!hasPermission('printers:files') ? t('printers.permission.noFiles') : t('printers.browseFiles')}
+                className={footerActionButtonClass}
               >
                 <HardDrive className="w-4 h-4" />
                 {t('printers.files')}
@@ -4867,7 +4873,7 @@ function PrinterCard({
                   onClick={() => setShowUploadForPrint(true)}
                   disabled={!hasPermission('printers:control')}
                   title={!hasPermission('printers:control') ? t('printers.permission.noControl') : t('common.print')}
-                  className="!bg-bambu-green hover:!bg-bambu-green/80 !text-white"
+                  className={`${footerActionButtonClass} !bg-bambu-green hover:!bg-bambu-green/80 !text-white`}
                 >
                   <PrinterIcon className="w-4 h-4" />
                   {t('common.print')}
