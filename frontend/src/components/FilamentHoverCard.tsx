@@ -46,13 +46,14 @@ interface FilamentHoverCardProps {
   spoolman?: SpoolmanConfig;
   inventory?: InventoryConfig;
   configureSlot?: ConfigureSlotConfig;
+  actions?: ReactNode;
 }
 
 /**
  * A hover card that displays filament details when hovering over AMS slots.
  * Replaces the basic browser tooltip with a styled popover.
  */
-export function FilamentHoverCard({ data, children, disabled, className = '', spoolman, inventory, configureSlot }: FilamentHoverCardProps) {
+export function FilamentHoverCard({ data, children, disabled, className = '', spoolman, inventory, configureSlot, actions }: FilamentHoverCardProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [isVisible, setIsVisible] = useState(false);
@@ -434,6 +435,11 @@ export function FilamentHoverCard({ data, children, disabled, className = '', sp
                   </button>
                 </div>
               )}
+              {actions && (
+                <div className="pt-2 mt-2 border-t border-bambu-dark-tertiary space-y-1">
+                  {actions}
+                </div>
+              )}
             </div>
           </div>
 
@@ -499,6 +505,7 @@ interface EmptySlotHoverCardProps {
   className?: string;
   configureSlot?: ConfigureSlotConfig;
   onAssignSpool?: () => void;
+  actions?: ReactNode;
   // #1322 follow-up: distinguish firmware-confirmed empty (state 9/10) from
   // a user reset where the firmware still has a spool registered. "reset"
   // surfaces the user-cleared label; undefined / "physical" keeps the
@@ -506,7 +513,7 @@ interface EmptySlotHoverCardProps {
   kind?: 'physical' | 'reset';
 }
 
-export function EmptySlotHoverCard({ children, className = '', configureSlot, onAssignSpool, kind }: EmptySlotHoverCardProps) {
+export function EmptySlotHoverCard({ children, className = '', configureSlot, onAssignSpool, actions, kind }: EmptySlotHoverCardProps) {
   const { t } = useTranslation();
   const [isVisible, setIsVisible] = useState(false);
   // Screen-space coords for the portaled card — same pattern as
@@ -587,7 +594,7 @@ export function EmptySlotHoverCard({ children, className = '', configureSlot, on
               {kind === 'reset' ? t('ams.emptySlotReset') : t('ams.emptySlot')}
             </div>
             {/* Configure slot button */}
-            {(configureSlot?.enabled || onAssignSpool) && (
+            {(configureSlot?.enabled || onAssignSpool || actions) && (
               <div className="px-2 pb-2 space-y-1">
                 {configureSlot?.enabled && (
                   <button
@@ -610,6 +617,11 @@ export function EmptySlotHoverCard({ children, className = '', configureSlot, on
                     <Package className="w-3.5 h-3.5" />
                     {t('inventory.assignSpool')}
                   </button>
+                )}
+                {actions && (
+                  <div className="pt-1 mt-1 border-t border-bambu-dark-tertiary space-y-1">
+                    {actions}
+                  </div>
                 )}
               </div>
             )}
