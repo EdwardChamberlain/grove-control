@@ -5355,19 +5355,20 @@ function PrinterCard({
               onClick={e => e.stopPropagation()}
             >
               {/* Header */}
-              <div className="shrink-0 flex items-center gap-2 px-3 py-2.5 border-b border-bambu-dark-tertiary">
-                <Flame className="w-3.5 h-3.5 text-amber-400" />
-                <span className="text-xs text-white font-medium">{t('printers.drying.start')}</span>
+              <div className="shrink-0 flex items-center justify-center gap-2 px-3 py-2.5">
+                <Flame className="w-3.5 h-3.5 text-bambu-green" />
+                <span className="text-xs text-white font-medium text-center">{t('printers.drying.start')}</span>
               </div>
+              <div className="shrink-0 h-px bg-bambu-dark-tertiary" />
               {/* Body */}
               <div className="px-3 py-2.5 space-y-2.5 overflow-y-auto min-h-0">
                 {/* Filament type select */}
                 <div>
-                  <label className="text-[10px] text-bambu-gray mb-1 block">{t('printers.filaments')}</label>
-                  <select
+                  <label className="text-[10px] text-white/70 font-medium mb-1 block">{t('printers.filaments')}</label>
+                  <ToolbarDropdown
                     value={dryingFilament}
-                    onChange={e => {
-                      const fil = e.target.value;
+                    options={Object.keys(dryingPresets).map(fil => ({ value: fil, label: fil }))}
+                    onChange={fil => {
                       setDryingFilament(fil);
                       const preset = dryingPresets[fil];
                       if (preset) {
@@ -5376,17 +5377,13 @@ function PrinterCard({
                         setDryingDuration(dryingPopoverModuleType === 'n3s' ? preset.n3s_hours : preset.n3f_hours);
                       }
                     }}
-                    className="w-full px-2 py-1.5 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-xs focus:outline-none focus:border-amber-500/50"
-                  >
-                    {Object.keys(dryingPresets).map(fil => (
-                      <option key={fil} value={fil}>{fil}</option>
-                    ))}
-                  </select>
+                    fullWidth
+                  />
                 </div>
                 {/* Temperature */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <label className="text-[10px] text-bambu-gray">{t('printers.drying.temperature')}</label>
+                    <label className="text-[10px] text-white/70 font-medium">{t('printers.drying.temperature')}</label>
                     <div className="flex items-center gap-1">
                       <input
                         type="number"
@@ -5394,7 +5391,7 @@ function PrinterCard({
                         max={maxTemp}
                         value={dryingTemp}
                         onChange={e => setDryingTemp(Math.min(maxTemp, Math.max(45, Number(e.target.value) || 45)))}
-                        className="w-12 px-1 py-0.5 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-[11px] text-center focus:outline-none focus:border-amber-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        className="w-12 px-1 py-0.5 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-[11px] text-center focus:outline-none focus:border-bambu-green [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                       />
                       <span className="text-[10px] text-bambu-gray">°C</span>
                     </div>
@@ -5405,7 +5402,7 @@ function PrinterCard({
                     max={sliderMax}
                     value={dryingTemp}
                     onChange={e => setDryingTemp(Math.min(maxTemp, Math.max(45, Number(e.target.value))))}
-                    className="w-full h-1 accent-amber-500 cursor-pointer"
+                    className="w-full h-1 accent-bambu-green cursor-pointer"
                   />
                   <div className="flex justify-between text-[9px] text-bambu-gray/50 mt-0.5">
                     <span>45°C</span>
@@ -5415,7 +5412,7 @@ function PrinterCard({
                 {/* Duration */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <label className="text-[10px] text-bambu-gray">{t('printers.drying.duration')}</label>
+                    <label className="text-[10px] text-white/70 font-medium">{t('printers.drying.duration')}</label>
                     <div className="flex items-center gap-1">
                       <input
                         type="number"
@@ -5423,7 +5420,7 @@ function PrinterCard({
                         max={24}
                         value={dryingDuration}
                         onChange={e => setDryingDuration(Math.min(24, Math.max(1, Number(e.target.value) || 1)))}
-                        className="w-10 px-1 py-0.5 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-[11px] text-center focus:outline-none focus:border-amber-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        className="w-10 px-1 py-0.5 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-[11px] text-center focus:outline-none focus:border-bambu-green [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                       />
                       <span className="text-[10px] text-bambu-gray">{t('printers.drying.hours')}</span>
                     </div>
@@ -5434,7 +5431,7 @@ function PrinterCard({
                     max={24}
                     value={dryingDuration}
                     onChange={e => setDryingDuration(Number(e.target.value))}
-                    className="w-full h-1 accent-amber-500 cursor-pointer"
+                    className="w-full h-1 accent-bambu-green cursor-pointer"
                   />
                   <div className="flex justify-between text-[9px] text-bambu-gray/50 mt-0.5">
                     <span>1h</span>
@@ -5442,16 +5439,20 @@ function PrinterCard({
                   </div>
                 </div>
                 {/* Rotate tray */}
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={dryingRotateTray}
-                    onChange={e => setDryingRotateTray(e.target.checked)}
-                    className="w-3.5 h-3.5 accent-amber-500 rounded cursor-pointer"
-                  />
-                  <span className="text-[11px] text-bambu-gray">{t('printers.drying.rotateTray')}</span>
-                </label>
+                <button
+                  type="button"
+                  onClick={() => setDryingRotateTray(enabled => !enabled)}
+                  aria-pressed={dryingRotateTray}
+                  className={`h-8 w-full rounded-lg border px-2 text-sm font-medium transition-colors ${
+                    dryingRotateTray
+                      ? 'bg-bambu-green border-bambu-green text-white'
+                      : 'bg-bambu-dark border-bambu-dark-tertiary text-white hover:bg-bambu-dark-tertiary'
+                  }`}
+                >
+                  {t('printers.drying.rotateTray')}
+                </button>
               </div>
+              <div className="shrink-0 h-px bg-bambu-dark-tertiary" />
               {/* Footer */}
               <div className="shrink-0 px-3 pt-2.5 pb-3">
                 <button
@@ -5461,7 +5462,7 @@ function PrinterCard({
                     }
                   }}
                   disabled={startDryingMutation.isPending}
-                  className="w-full py-1.5 bg-amber-500 hover:bg-amber-400 text-white text-xs font-medium rounded-lg transition-colors disabled:opacity-50"
+                  className="w-full py-1.5 bg-bambu-green hover:bg-bambu-green/80 text-white text-xs font-medium rounded-lg transition-colors disabled:opacity-50"
                 >
                   {startDryingMutation.isPending ? t('printers.drying.startingDrying') : t('printers.drying.start')}
                 </button>
