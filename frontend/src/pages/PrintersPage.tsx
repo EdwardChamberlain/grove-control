@@ -2958,7 +2958,6 @@ function PrinterCard({
                           url={isActivePrint ? status.cover_url : null}
                           printName={printName || undefined}
                           className="w-24 h-24 max-[520px]:w-20 max-[520px]:h-20"
-                          radiusClass="rounded-[2px]"
                         />
                         <div className="flex h-24 max-[520px]:h-20 min-w-0 flex-1 flex-col justify-between pt-1">
                           <div className="flex min-h-[18px] items-center gap-2 pr-8">
