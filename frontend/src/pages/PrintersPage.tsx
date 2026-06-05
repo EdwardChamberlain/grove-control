@@ -3620,7 +3620,7 @@ function PrinterCard({
                                 )}
                               </div>
                               {(ams.humidity != null || ams.temp != null) && (
-                                <div className="flex shrink-0 items-center gap-1.5 max-[550px]:flex-col max-[550px]:items-start">
+                                <div className="flex shrink-0 items-center gap-1.5">
                                   {ams.humidity != null && (
                                     <HumidityIndicator
                                       humidity={ams.humidity}
@@ -3635,7 +3635,7 @@ function PrinterCard({
                                     />
                                   )}
                                   {ams.temp != null && (
-                                    <div className="mr-1 max-[550px]:mr-0">
+                                    <div className="mr-1">
                                       <TemperatureIndicator
                                         temp={ams.temp}
                                         goodThreshold={amsThresholds?.tempGood}
@@ -3673,7 +3673,7 @@ function PrinterCard({
                                           setDryingPopoverPos(computePopoverPosition({ triggerRect: rect, popoverWidth: DRYING_POPOVER_WIDTH, estimatedHeight: DRYING_POPOVER_ESTIMATED_HEIGHT, horizontalAlign: 'center' }));
                                         }
                                       }}
-                                      className={`ml-1 flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] transition-colors max-[550px]:ml-0 ${
+                                      className={`ml-1 flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] transition-colors ${
                                         ams.dry_time > 0
                                           ? 'bg-amber-500/20 text-amber-400'
                                           : ams.dry_sf_reason?.length
