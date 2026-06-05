@@ -1071,8 +1071,8 @@ async def restore_spool(
     return result.scalar_one()
 
 
-@router.post("/spools/{spool_id}/reset-usage", response_model=SpoolResponse)
-async def reset_spool_usage(
+@router.post("/spools/{spool_id}/reset-consumed-counter", response_model=SpoolResponse)
+async def reset_spool_consumed_counter(
     spool_id: int,
     db: AsyncSession = Depends(get_db),
     _: User | None = RequirePermissionIfAuthEnabled(Permission.INVENTORY_UPDATE),
@@ -1084,6 +1084,12 @@ async def reset_spool_usage(
     weight_used` (remaining) is unchanged. weight_locked is also left
     alone — the spool keeps receiving AMS auto-sync updates. Matches
     Spoolman's split between used_weight and remaining_weight (#1390).
+
+    The earlier name `/reset-usage` was misleading: callers reasonably
+    expected `weight_used` itself to drop to 0 and were surprised when
+    the response showed it unchanged. The current name describes what
+    the endpoint actually does — reset the "Total Consumed" counter
+    widget, not the lifetime weight_used field.
     """
     result = await db.execute(select(Spool).where(Spool.id == spool_id))
     spool = result.scalar_one_or_none()
@@ -1097,8 +1103,8 @@ async def reset_spool_usage(
     return result.scalar_one()
 
 
-@router.post("/spools/reset-usage-bulk")
-async def bulk_reset_spool_usage(
+@router.post("/spools/reset-consumed-counter-bulk")
+async def bulk_reset_spool_consumed_counter(
     payload: dict,
     db: AsyncSession = Depends(get_db),
     _: User | None = RequirePermissionIfAuthEnabled(Permission.INVENTORY_UPDATE),
