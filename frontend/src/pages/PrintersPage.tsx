@@ -4811,10 +4811,9 @@ function PrinterCard({
                 onClick={() => setShowFileManager(true)}
                 disabled={!isConnected || !hasPermission('printers:files')}
                 title={!hasPermission('printers:files') ? t('printers.permission.noFiles') : t('printers.browseFiles')}
-                className={footerActionButtonClass}
+                className={footerIconButtonClass}
               >
                 <HardDrive className="w-4 h-4" />
-                {t('printers.files')}
               </Button>
               {isConnected && status?.state !== 'RUNNING' && status?.state !== 'PAUSE' && (
                 <Button
