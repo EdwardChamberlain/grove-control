@@ -1538,6 +1538,7 @@ function PrinterCard({
   const [dryingPopoverPos, setDryingPopoverPos] = useState<{ top: number; left: number } | null>(null);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [isDropUploading, setIsDropUploading] = useState(false);
+  const printerActionsMenuRef = useRef<HTMLDivElement>(null);
   const dragCounterRef = useRef(0);
   const [amsHistoryModal, setAmsHistoryModal] = useState<{
     amsId: number;
@@ -2342,6 +2343,20 @@ function PrinterCard({
     };
   }, [status?.ams_status_main, refreshingSlot]);
 
+  useEffect(() => {
+    if (!showMenu) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!printerActionsMenuRef.current?.contains(target)) {
+        setShowMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showMenu]);
+
   if (shouldHide) {
     return null;
   }
@@ -2520,7 +2535,7 @@ function PrinterCard({
   };
 
   const printerActionsMenu = (
-    <div className="relative flex-shrink-0">
+    <div ref={printerActionsMenuRef} className="relative flex-shrink-0">
       <Button
         variant="secondary"
         size="sm"
