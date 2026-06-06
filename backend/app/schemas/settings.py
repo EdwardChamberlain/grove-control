@@ -9,7 +9,13 @@ class AppSettings(BaseModel):
     auto_archive: bool = Field(default=True, description="Automatically archive prints when completed")
     save_thumbnails: bool = Field(default=True, description="Extract and save preview images from 3MF files")
     capture_finish_photo: bool = Field(
-        default=True, description="Capture photo from printer camera when print completes"
+        default=True,
+        description=(
+            "Capture photo from printer camera when print completes. Bambuddy records a "
+            "brief timelapse during the print so the photo can be sourced from the moment "
+            "before the bed drops; the timelapse file is kept if you enabled timelapse for "
+            "this print, otherwise it is deleted automatically after the photo is captured."
+        ),
     )
     default_filament_cost: float = Field(default=25.0, description="Default filament cost per kg")
     currency: str = Field(default="USD", description="Currency for cost tracking")

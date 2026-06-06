@@ -126,7 +126,15 @@ async def apply_spool_to_slot_via_mqtt(
 
     if sf:
         base_sf = sf.split("_")[0] if "_" in sf else sf
-        if base_sf.startswith("GFS") or base_sf.startswith("PFUS"):
+        # Cloud-side preset IDs in three known shapes:
+        #   GFS…   — Bambu official cloud preset
+        #   PFUS…  — cloud user-created preset
+        #   PFCN…  — cloud shared / partner preset (e.g. Polymaker's
+        #            "(Custom)" Bambu Lab H2D variant, #1648)
+        # All three need a cloud-detail lookup to extract the underlying
+        # filament_id; without it the raw cloud id ends up in tray_info_idx
+        # and the printer's calibration table can't resolve it.
+        if base_sf.startswith("GFS") or base_sf.startswith("PFUS") or base_sf.startswith("PFCN"):
             setting_id = base_sf
             try:
                 from backend.app.api.routes.cloud import build_authenticated_cloud
@@ -204,7 +212,7 @@ async def apply_spool_to_slot_via_mqtt(
                     setting_id = filament_id_to_setting_id(fid)
                     break
 
-    # Defend against tray_info_idx values the slicer cannot resolve. Two
+    # Defend against tray_info_idx values the slicer cannot resolve. Three
     # shapes leak through and must be discarded so the generic-material
     # fallback below can rescue the slot:
     #   1. Literal material names ("PLA", "PETG-CF") that pass through
@@ -217,10 +225,16 @@ async def apply_spool_to_slot_via_mqtt(
     #      replay path in main.py.on_ams_change passes current_user=None,
     #      which skips cloud auth and leaves the raw PFUS in tray_info_idx —
     #      overwriting the correctly-configured slot from the original assign.
+    #   3. PFCN-prefix cloud shared / partner presets (e.g. Polymaker's
+    #      "(Custom)" H2D variants, #1648) — same shape problem as PFUS.
     # Valid tray_info_idx values: "GF" + letter + digits (Bambu official) or
-    # "P" followed by hex (user/local presets, NOT "PFUS").
+    # "P" followed by hex (user/local presets, NOT "PFUS" or "PFCN").
     _known_materials = set(MATERIAL_TEMPS.keys()) | set(_GENERIC_FILAMENT_IDS.keys())
-    if tray_info_idx and (tray_info_idx.upper() in _known_materials or tray_info_idx.startswith("PFUS")):
+    if tray_info_idx and (
+        tray_info_idx.upper() in _known_materials
+        or tray_info_idx.startswith("PFUS")
+        or tray_info_idx.startswith("PFCN")
+    ):
         tray_info_idx = ""
         setting_id = ""
 
@@ -229,6 +243,7 @@ async def apply_spool_to_slot_via_mqtt(
             current_tray_info_idx
             and current_tray_info_idx not in _generic_id_values
             and not current_tray_info_idx.startswith("PFUS")
+            and not current_tray_info_idx.startswith("PFCN")
             and current_tray_info_idx.upper() not in _known_materials
             and current_tray_type
             and current_tray_type.upper() == tray_type.upper()
@@ -1071,8 +1086,8 @@ async def restore_spool(
     return result.scalar_one()
 
 
-@router.post("/spools/{spool_id}/reset-usage", response_model=SpoolResponse)
-async def reset_spool_usage(
+@router.post("/spools/{spool_id}/reset-consumed-counter", response_model=SpoolResponse)
+async def reset_spool_consumed_counter(
     spool_id: int,
     db: AsyncSession = Depends(get_db),
     _: User | None = RequirePermissionIfAuthEnabled(Permission.INVENTORY_UPDATE),
@@ -1084,6 +1099,12 @@ async def reset_spool_usage(
     weight_used` (remaining) is unchanged. weight_locked is also left
     alone — the spool keeps receiving AMS auto-sync updates. Matches
     Spoolman's split between used_weight and remaining_weight (#1390).
+
+    The earlier name `/reset-usage` was misleading: callers reasonably
+    expected `weight_used` itself to drop to 0 and were surprised when
+    the response showed it unchanged. The current name describes what
+    the endpoint actually does — reset the "Total Consumed" counter
+    widget, not the lifetime weight_used field.
     """
     result = await db.execute(select(Spool).where(Spool.id == spool_id))
     spool = result.scalar_one_or_none()
@@ -1097,8 +1118,8 @@ async def reset_spool_usage(
     return result.scalar_one()
 
 
-@router.post("/spools/reset-usage-bulk")
-async def bulk_reset_spool_usage(
+@router.post("/spools/reset-consumed-counter-bulk")
+async def bulk_reset_spool_consumed_counter(
     payload: dict,
     db: AsyncSession = Depends(get_db),
     _: User | None = RequirePermissionIfAuthEnabled(Permission.INVENTORY_UPDATE),

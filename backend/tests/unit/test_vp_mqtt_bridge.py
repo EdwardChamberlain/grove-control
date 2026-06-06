@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import socket
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -12,6 +13,7 @@ from backend.app.services.virtual_printer.mqtt_bridge import (
     MQTTBridge,
     _ip_to_uint32_le,
     _resolve_host_interface_for_target,
+    _resolve_target_to_ipv4,
 )
 from backend.app.services.virtual_printer.mqtt_server import SimpleMQTTServer
 
@@ -1088,6 +1090,62 @@ class TestIpEncoding:
             _ip_to_uint32_le("not.an.ip.actually")
 
 
+class TestHostnameResolution:
+    """#1429 follow-up: users who configured the printer by FQDN (common on
+    LANs with router-provided DNS like `p1s.fritz.box`) hit `invalid IPv4`
+    on the encoder and the rewrite never armed — slicer kept FTPing direct
+    to the real printer. The bridge now resolves hostname→IPv4 first."""
+
+    def test_pass_through_for_valid_ipv4(self):
+        assert _resolve_target_to_ipv4("192.168.1.50") == "192.168.1.50"
+
+    def test_empty_returns_none(self):
+        assert _resolve_target_to_ipv4("") is None
+        assert _resolve_target_to_ipv4(None) is None  # type: ignore[arg-type]
+
+    def test_hostname_resolves_via_getaddrinfo(self):
+        with patch(
+            "backend.app.services.virtual_printer.mqtt_bridge.socket.getaddrinfo",
+            return_value=[(2, 1, 6, "", ("192.168.3.153", 0))],
+        ) as mock_gai:
+            assert _resolve_target_to_ipv4("p1s.fritz.box") == "192.168.3.153"
+        # AF_INET filter prevents an IPv6-only result from being picked,
+        # since net.info[*].ip is a uint32 LE that can't carry v6.
+        assert mock_gai.call_args.kwargs.get("family") == socket.AF_INET
+
+    def test_dns_failure_returns_none(self):
+        with patch(
+            "backend.app.services.virtual_printer.mqtt_bridge.socket.getaddrinfo",
+            side_effect=OSError("Name or service not known"),
+        ):
+            assert _resolve_target_to_ipv4("nope.invalid") is None
+
+    def test_fqdn_target_arms_encoding(self, caplog):
+        """End-to-end: a client whose `ip_address` is an FQDN should arm
+        the bridge once DNS resolves, and the cached rewrite uses the
+        resolved IPv4 (not the hostname string) for the `net.info[].ip`
+        encoding."""
+        server = _make_server(bind_address=VP_IP)
+        bridge = _make_bridge(server)
+        client = _make_paho_client(ip="p1s.fritz.box")
+        bridge._target_client = client
+        with (
+            patch(
+                "backend.app.services.virtual_printer.mqtt_bridge.socket.getaddrinfo",
+                return_value=[(2, 1, 6, "", (H2D_IP, 0))],
+            ),
+            caplog.at_level(logging.INFO, logger="backend.app.services.virtual_printer.mqtt_bridge"),
+        ):
+            bridge._refresh_ip_encoding()
+        assert bridge._target_ip_uint32_le == _ip_to_uint32_le(H2D_IP)
+        assert bridge._vp_ip_uint32_le == _ip_to_uint32_le(VP_IP)
+        armed = [r for r in caplog.records if "MQTT bridge IP encoding armed" in r.getMessage()]
+        assert len(armed) == 1
+        # Operator should see configured→resolved in the log line so a
+        # bad-DNS regression is immediately legible.
+        assert "p1s.fritz.box→192.168.255.133" in armed[0].getMessage()
+
+
 # ---------------------------------------------------------------------------
 # Auto-resolve fallback for default-config (bind_address = "0.0.0.0")
 # ---------------------------------------------------------------------------
@@ -1236,17 +1294,26 @@ class TestNotArmedDiagnosticLogging:
         assert H2D_IP in msg
         assert "no host interface" in msg
 
-    def test_invalid_ipv4_logs_value_error(self, caplog):
+    def test_unresolvable_target_logs_reason(self, caplog):
+        """When `ip_address` isn't a valid IPv4 *and* doesn't resolve via DNS,
+        the bridge must report a single concrete not-armed reason naming the
+        configured value — operator can then see exactly what input failed."""
         server = _make_server(bind_address=VP_IP)
         bridge = _make_bridge(server)
         client = _make_paho_client()
         client.ip_address = "not.an.ip"
         bridge._target_client = client
-        with caplog.at_level(logging.INFO, logger="backend.app.services.virtual_printer.mqtt_bridge"):
+        with (
+            patch(
+                "backend.app.services.virtual_printer.mqtt_bridge.socket.getaddrinfo",
+                side_effect=OSError("nodename nor servname provided"),
+            ),
+            caplog.at_level(logging.INFO, logger="backend.app.services.virtual_printer.mqtt_bridge"),
+        ):
             bridge._refresh_ip_encoding()
         not_armed = [r for r in caplog.records if "NOT armed" in r.getMessage()]
         assert len(not_armed) == 1
-        assert "invalid IPv4" in not_armed[0].getMessage()
+        assert "could not resolve printer host 'not.an.ip'" in not_armed[0].getMessage()
 
     def test_successful_arm_clears_dedup_so_future_failure_relogs(self, caplog):
         """After a successful arm, the dedup must reset so a subsequent

@@ -949,6 +949,11 @@ export function FileManagerPage() {
 
   // State
   const [selectedFolderId, setSelectedFolderId] = useState<number | null>(initialFolderId);
+  // Which top-level pseudo-view the sidebar shows when no specific folder is
+  // selected: "internal" = files in Bambuddy's managed storage, "external" =
+  // combined view across every linked external folder (#1621). Per-folder
+  // selection bypasses this (selectedFolderId !== null disables the filter).
+  const [topLevelView, setTopLevelView] = useState<'internal' | 'external'>('internal');
   const [selectedFiles, setSelectedFiles] = useState<number[]>([]);
   const [showNewFolderModal, setShowNewFolderModal] = useState(false);
   const [showExternalFolderModal, setShowExternalFolderModal] = useState(false);
@@ -1071,11 +1076,19 @@ export function FileManagerPage() {
   });
 
   const { data: files, isLoading: filesLoading } = useQuery({
-    queryKey: ['library-files', selectedFolderId],
-    // "All Files" (selectedFolderId === null) lists every file across folders,
-    // so include_root must be false — true would scope the result to files at
-    // the library root only and hide everything nested in subfolders (#1499).
-    queryFn: () => api.getLibraryFiles(selectedFolderId, false),
+    queryKey: ['library-files', selectedFolderId, topLevelView],
+    // When a specific folder is selected we list its contents directly; when
+    // no folder is selected the topLevelView pseudo-node decides whether the
+    // server scopes the result to internal-managed-storage files or to the
+    // union of every external folder (#1621). include_root stays false so the
+    // listing still descends into subfolders (regression guard from #1499).
+    queryFn: () =>
+      api.getLibraryFiles(
+        selectedFolderId,
+        false,
+        undefined,
+        selectedFolderId === null ? topLevelView : undefined,
+      ),
   });
 
   const { data: stats } = useQuery({
@@ -1577,11 +1590,22 @@ export function FileManagerPage() {
         {/* Mobile folder selector */}
         <div className="lg:hidden">
           <select
-            value={selectedFolderId ?? ''}
-            onChange={(e) => setSelectedFolderId(e.target.value ? parseInt(e.target.value, 10) : null)}
+            value={selectedFolderId !== null ? String(selectedFolderId) : `__top:${topLevelView}`}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v.startsWith('__top:')) {
+                setSelectedFolderId(null);
+                setTopLevelView(v.slice('__top:'.length) as 'internal' | 'external');
+              } else {
+                setSelectedFolderId(parseInt(v, 10));
+              }
+            }}
             className="w-full bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-bambu-green"
           >
-            <option value="">📁 {t('fileManager.allFiles')}</option>
+            <option value="__top:internal">📁 {t('fileManager.allFiles')}</option>
+            {folders?.some((f) => f.is_external) && (
+              <option value="__top:external">🔗 {t('fileManager.allExternal')}</option>
+            )}
             {folders && (() => {
               // Flatten folder tree for mobile selector
               const flattenFolders = (items: LibraryFolderTree[], depth = 0): { id: number; name: string; fileCount: number; depth: number }[] => {
@@ -1667,18 +1691,43 @@ export function FileManagerPage() {
             </div>
           </div>
           <div className="flex-1 overflow-y-auto p-2">
-            {/* All Files (root) */}
+            {/* All Files = the user's own uploaded / managed-storage files
+                only. External folders are surfaced separately below to keep
+                a linked NAS from drowning the user's own uploads (#1621). */}
             <div
               className={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer transition-colors ${
-                selectedFolderId === null
+                selectedFolderId === null && topLevelView === 'internal'
                   ? 'bg-bambu-green/20 text-bambu-green'
                   : 'hover:bg-bambu-dark text-white'
               }`}
-              onClick={() => setSelectedFolderId(null)}
+              onClick={() => {
+                setSelectedFolderId(null);
+                setTopLevelView('internal');
+              }}
             >
               <FileBox className="w-4 h-4" />
               <span className="text-sm">{t('fileManager.allFiles')}</span>
             </div>
+
+            {/* External (combined) — only shown when at least one external
+                folder is linked. Single folder users don't need a combined
+                view; clicking the individual folder is just as fast. */}
+            {folders?.some((f) => f.is_external) && (
+              <div
+                className={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer transition-colors ${
+                  selectedFolderId === null && topLevelView === 'external'
+                    ? 'bg-bambu-green/20 text-bambu-green'
+                    : 'hover:bg-bambu-dark text-white'
+                }`}
+                onClick={() => {
+                  setSelectedFolderId(null);
+                  setTopLevelView('external');
+                }}
+              >
+                <FolderSymlink className="w-4 h-4 text-purple-400" />
+                <span className="text-sm">{t('fileManager.allExternal')}</span>
+              </div>
+            )}
 
             {/* Folder tree — re-key on the collapse toggle so flipping it
                 remounts every FolderTreeItem, which re-reads defaultExpanded
@@ -1952,12 +2001,18 @@ export function FileManagerPage() {
                 <FileBox className="w-12 h-12 text-bambu-gray/50" />
               </div>
               <h3 className="text-lg font-medium text-white mb-2">
-                {selectedFolderId !== null ? t('fileManager.folderIsEmpty') : t('fileManager.noFilesYet')}
+                {selectedFolderId !== null
+                  ? t('fileManager.folderIsEmpty')
+                  : topLevelView === 'external'
+                    ? t('fileManager.externalIsEmpty')
+                    : t('fileManager.noFilesYet')}
               </h3>
               <p className="text-bambu-gray text-center max-w-md mb-6">
                 {selectedFolderId !== null
                   ? t('fileManager.folderEmptyDescription')
-                  : t('fileManager.noFilesDescription')}
+                  : topLevelView === 'external'
+                    ? t('fileManager.externalEmptyDescription')
+                    : t('fileManager.noFilesDescription')}
               </p>
               <Button
                 onClick={() => setShowUploadModal(true)}
