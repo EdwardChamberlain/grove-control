@@ -3130,12 +3130,16 @@ function PrinterCard({
                           </div>
                         </div>
                       </div>
+                      <PrinterQueueWidget
+                        printerId={printer.id}
+                        printerModel={printer.model}
+                        loadedFilamentTypes={loadedFilamentTypes}
+                        loadedFilaments={loadedFilaments}
+                        variant="panelExtension"
+                      />
                     </div>
                   );
                 })()}
-
-                {/* Queue Widget - always visible when there are pending items */}
-                <PrinterQueueWidget printerId={printer.id} printerModel={printer.model} loadedFilamentTypes={loadedFilamentTypes} loadedFilaments={loadedFilaments} />
               </>
             )}
 
