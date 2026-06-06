@@ -3738,7 +3738,7 @@ function PrinterCard({
                                       >
                                         <ArrowUp className="w-4 h-4" />
                                       </button>
-                                      <div className="flex h-8 w-8 items-center justify-center rounded bg-bambu-dark text-bambu-gray/80">
+                                      <div className="flex h-8 w-8 items-center justify-center text-bambu-gray/80">
                                         <Layers className="w-4 h-4" />
                                       </div>
                                       <button
