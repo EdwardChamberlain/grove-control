@@ -2451,7 +2451,7 @@ function PrinterCard({
     }
   };
 
-  const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
+  const handleCardClick = (e: React.MouseEvent) => {
     if (viewMode !== 'compact' || selectionMode) return;
     const target = e.target as HTMLElement;
     if (target.closest('button, a, input, select, textarea, [role="button"]')) return;
