@@ -3263,7 +3263,7 @@ function PrinterCard({
                       return (
                         <div
                           key={key}
-                          className="px-2 py-1 bg-bambu-dark rounded-lg flex-1 min-w-0 flex items-center justify-center gap-1"
+                          className="px-2 py-1.5 bg-bambu-dark rounded-lg flex-1 min-w-0 flex items-center justify-center gap-1"
                           title={label}
                         >
                           <Icon className={`w-3 h-3 shrink-0 ${active ? activeClass : 'text-bambu-gray/50'}`} />
