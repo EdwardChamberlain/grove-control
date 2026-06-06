@@ -361,7 +361,7 @@ export default {
       unload: 'Çıkar',
     },
     bedJog: {
-      title: 'Baskı plakasını hareket ettir',
+      title: 'Jog kontrolleri',
       bed: 'Tabla',
       step: 'Adım (mm)',
       up: 'Plakayı yukarı hareket ettir',

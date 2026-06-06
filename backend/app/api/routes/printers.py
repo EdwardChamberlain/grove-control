@@ -3004,6 +3004,34 @@ async def xy_jog(
     return {"success": True, "message": f"XY jog X{x:+.1f} Y{y:+.1f} mm sent"}
 
 
+@router.post("/{printer_id}/extruder-jog")
+async def extruder_jog(
+    printer_id: int,
+    distance: float = Query(
+        ..., description="Signed relative extrusion distance in mm. Positive extrudes, negative retracts."
+    ),
+    _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_CONTROL),
+    db: AsyncSession = Depends(get_db),
+):
+    """Extrude or retract filament by a relative distance."""
+    if distance == 0 or abs(distance) > 100:
+        raise HTTPException(400, "Extruder movement must be non-zero and ≤ 100 mm")
+
+    result = await db.execute(select(Printer).where(Printer.id == printer_id))
+    printer = result.scalar_one_or_none()
+    if not printer:
+        raise HTTPException(404, "Printer not found")
+
+    client = printer_manager.get_client(printer_id)
+    if not client:
+        raise HTTPException(400, "Printer not connected")
+
+    if not client.send_gcode("\n".join(["M83", f"G1 E{distance:.2f} F300", "M82"])):
+        raise HTTPException(500, "Failed to send extruder jog command")
+
+    return {"success": True, "message": f"Extruder jog {distance:+.1f} mm sent"}
+
+
 @router.post("/{printer_id}/home-axes")
 async def home_axes(
     printer_id: int,

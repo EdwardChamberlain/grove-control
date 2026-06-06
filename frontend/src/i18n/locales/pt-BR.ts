@@ -361,7 +361,7 @@ export default {
       unload: 'Descarregar',
     },
     bedJog: {
-      title: 'Mover a mesa de impressão',
+      title: 'Controles de movimento',
       bed: 'Mesa',
       step: 'Passo (mm)',
       up: 'Mover mesa para cima',

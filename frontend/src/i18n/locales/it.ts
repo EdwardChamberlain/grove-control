@@ -361,7 +361,7 @@ export default {
       unload: 'Scarica',
     },
     bedJog: {
-      title: 'Muovi il piano di stampa',
+      title: 'Controlli jog',
       bed: 'Piano',
       step: 'Passo (mm)',
       up: 'Sposta piano su',

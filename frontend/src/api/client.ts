@@ -3499,6 +3499,11 @@ export const api = {
       `/printers/${printerId}/xy-jog?x=${x}&y=${y}`,
       { method: 'POST' }
     ),
+  extruderJog: (printerId: number, distance: number) =>
+    request<{ success: boolean; message: string }>(
+      `/printers/${printerId}/extruder-jog?distance=${distance}`,
+      { method: 'POST' }
+    ),
   homeAxes: (printerId: number, axes: 'z' | 'xy' | 'all' = 'z') =>
     request<{ success: boolean; message: string }>(
       `/printers/${printerId}/home-axes?axes=${axes}`,

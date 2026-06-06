@@ -361,7 +361,7 @@ export default {
       unload: 'Descargar',
     },
     bedJog: {
-      title: 'Mover la cama de impresión',
+      title: 'Controles de movimiento',
       bed: 'Cama',
       step: 'Paso (mm)',
       up: 'Subir la cama',

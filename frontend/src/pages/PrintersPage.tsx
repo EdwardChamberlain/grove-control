@@ -2231,6 +2231,13 @@ function PrinterCard({
       showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
   });
 
+  const extruderJogMutation = useMutation({
+    mutationFn: (distance: number) =>
+      api.extruderJog(printer.id, distance),
+    onError: (error: Error) =>
+      showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
+  });
+
   const homeAxesMutation = useMutation({
     mutationFn: (axes: 'z' | 'xy' | 'all') => api.homeAxes(printer.id, axes),
     onSuccess: () => {
@@ -3656,6 +3663,9 @@ function PrinterCard({
                         const requestXyJog = (x: number, y: number) => {
                           xyJogMutation.mutate({ x, y });
                         };
+                        const requestExtruderJog = (distance: number) => {
+                          extruderJogMutation.mutate(distance);
+                        };
                         return (
                           <div className="relative">
                             <button
@@ -3666,16 +3676,16 @@ function PrinterCard({
                                   ? 'bg-bambu-dark text-bambu-gray/50 cursor-not-allowed'
                                   : 'bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20'
                               }`}
-                              title={!canControl ? t('printers.permission.noControl') : isPrinting ? t('printers.bedJog.disabledWhilePrinting') : `${t('printers.bedJog.title')} (${bedJogStep}mm)`}
+                              title={!canControl ? t('printers.permission.noControl') : isPrinting ? t('printers.bedJog.disabledWhilePrinting') : t('printers.bedJog.title')}
                             >
                               <Move className="w-4 h-4" />
                             </button>
                             {showBedJogMenu === printer.id && (
                               <>
                                 <div className="fixed inset-0 z-40" onClick={() => setShowBedJogMenu(null)} />
-                                <div className="absolute bottom-full left-0 mb-1 z-50 flex w-[230px] flex-col overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary shadow-2xl">
+                                <div className="absolute bottom-full left-0 mb-1 z-50 flex w-[216px] flex-col overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary shadow-2xl">
                                   <div className="shrink-0 px-3 py-2.5 text-center text-sm font-medium text-white">
-                                    Jog controls
+                                    {t('printers.bedJog.title')}
                                   </div>
                                   <div className="h-px bg-bambu-dark-tertiary" />
                                   <div className="flex justify-center px-3 py-2.5">
@@ -3746,6 +3756,27 @@ function PrinterCard({
                                         disabled={bedJogMutation.isPending}
                                         className={jogButtonClass}
                                         aria-label={t('printers.bedJog.down')}
+                                      >
+                                        <ArrowDown className="w-4 h-4" />
+                                      </button>
+                                    </div>
+                                    <div className="flex flex-col items-center gap-1">
+                                      <button
+                                        onClick={() => requestExtruderJog(-bedJogStep)}
+                                        disabled={extruderJogMutation.isPending}
+                                        className={jogButtonClass}
+                                        aria-label="Retract filament"
+                                      >
+                                        <ArrowUp className="w-4 h-4" />
+                                      </button>
+                                      <div className="flex h-8 w-8 items-center justify-center text-bambu-gray/80">
+                                        <span className="text-sm font-semibold leading-none">E</span>
+                                      </div>
+                                      <button
+                                        onClick={() => requestExtruderJog(bedJogStep)}
+                                        disabled={extruderJogMutation.isPending}
+                                        className={jogButtonClass}
+                                        aria-label="Extrude filament"
                                       >
                                         <ArrowDown className="w-4 h-4" />
                                       </button>
