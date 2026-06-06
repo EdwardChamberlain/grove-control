@@ -2754,6 +2754,111 @@ async def set_print_speed(
     return {"success": True, "message": f"Print speed set to {speed_names.get(mode, 'Unknown')}"}
 
 
+@router.post("/{printer_id}/temperature/nozzle")
+async def set_nozzle_temperature(
+    printer_id: int,
+    target: int = Query(..., ge=0, le=320, description="Target nozzle temperature in Celsius; 0 turns heating off"),
+    nozzle: int = Query(0, ge=0, le=1, description="Nozzle/extruder index (0=right/default, 1=left)"),
+    _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_CONTROL),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set a nozzle target temperature."""
+    result = await db.execute(select(Printer).where(Printer.id == printer_id))
+    printer = result.scalar_one_or_none()
+    if not printer:
+        raise HTTPException(404, "Printer not found")
+
+    client = printer_manager.get_client(printer_id)
+    if not client:
+        raise HTTPException(400, "Printer not connected")
+
+    success = client.set_nozzle_temperature(target, nozzle)
+    if not success:
+        raise HTTPException(500, "Failed to set nozzle temperature")
+
+    return {"success": True, "message": f"Nozzle temperature set to {target}°C"}
+
+
+@router.post("/{printer_id}/temperature/bed")
+async def set_bed_temperature(
+    printer_id: int,
+    target: int = Query(..., ge=0, le=140, description="Target bed temperature in Celsius; 0 turns heating off"),
+    _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_CONTROL),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set the bed target temperature."""
+    result = await db.execute(select(Printer).where(Printer.id == printer_id))
+    printer = result.scalar_one_or_none()
+    if not printer:
+        raise HTTPException(404, "Printer not found")
+
+    client = printer_manager.get_client(printer_id)
+    if not client:
+        raise HTTPException(400, "Printer not connected")
+
+    success = client.set_bed_temperature(target)
+    if not success:
+        raise HTTPException(500, "Failed to set bed temperature")
+
+    return {"success": True, "message": f"Bed temperature set to {target}°C"}
+
+
+@router.post("/{printer_id}/fan-speed")
+async def set_fan_speed(
+    printer_id: int,
+    fan: str = Query(..., description="Fan to control: part, aux, or chamber"),
+    speed: int = Query(..., ge=0, le=100, description="Fan speed percentage"),
+    _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_CONTROL),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set a fan speed by percentage."""
+    fan_ids = {"part": 1, "aux": 2, "chamber": 3}
+    fan_id = fan_ids.get(fan)
+    if fan_id is None:
+        raise HTTPException(400, "fan must be 'part', 'aux', or 'chamber'")
+
+    result = await db.execute(select(Printer).where(Printer.id == printer_id))
+    printer = result.scalar_one_or_none()
+    if not printer:
+        raise HTTPException(404, "Printer not found")
+
+    client = printer_manager.get_client(printer_id)
+    if not client:
+        raise HTTPException(400, "Printer not connected")
+
+    pwm_speed = round(speed * 255 / 100)
+    success = client.set_fan_speed(fan_id, pwm_speed)
+    if not success:
+        raise HTTPException(500, "Failed to set fan speed")
+
+    fan_names = {"part": "Part cooling fan", "aux": "Auxiliary fan", "chamber": "Chamber fan"}
+    return {"success": True, "message": f"{fan_names[fan]} set to {speed}%"}
+
+
+@router.post("/{printer_id}/select-extruder")
+async def select_extruder(
+    printer_id: int,
+    extruder: int = Query(..., ge=0, le=1, description="Extruder index (0=right, 1=left)"),
+    _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_CONTROL),
+    db: AsyncSession = Depends(get_db),
+):
+    """Select the active extruder/nozzle on dual-nozzle printers."""
+    result = await db.execute(select(Printer).where(Printer.id == printer_id))
+    printer = result.scalar_one_or_none()
+    if not printer:
+        raise HTTPException(404, "Printer not found")
+
+    client = printer_manager.get_client(printer_id)
+    if not client:
+        raise HTTPException(400, "Printer not connected")
+
+    success = client.select_extruder(extruder)
+    if not success:
+        raise HTTPException(500, "Failed to select nozzle")
+
+    return {"success": True, "message": f"{'Left' if extruder == 1 else 'Right'} nozzle selected"}
+
+
 @router.post("/{printer_id}/airduct-mode")
 async def set_airduct_mode(
     printer_id: int,

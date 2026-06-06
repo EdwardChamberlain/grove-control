@@ -1128,6 +1128,95 @@ function ToolbarMenu({
   );
 }
 
+function IndicatorControlPopover({
+  title,
+  options,
+  unit,
+  customMin,
+  customMax,
+  customStep = 1,
+  isPending,
+  onClose,
+  onSubmit,
+}: {
+  title: string;
+  options: Array<{ label: string; value: number }>;
+  unit?: string;
+  customMin?: number;
+  customMax?: number;
+  customStep?: number;
+  isPending?: boolean;
+  onClose: () => void;
+  onSubmit: (value: number) => void;
+}) {
+  const [customValue, setCustomValue] = useState('');
+  const showCustomInput = unit !== undefined;
+  const submitCustom = () => {
+    const value = Number(customValue);
+    if (!Number.isFinite(value)) return;
+    const bounded = Math.min(customMax ?? value, Math.max(customMin ?? value, value));
+    onSubmit(Math.round(bounded));
+  };
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} />
+      <div
+        className="absolute left-1/2 top-full z-50 mt-1 flex w-[240px] -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary shadow-2xl"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="shrink-0 px-3 py-2.5 text-center text-sm font-medium text-white">{title}</div>
+        <div className="shrink-0 h-px bg-bambu-dark-tertiary" />
+        <div className="px-3 py-2.5">
+          <div className="grid grid-cols-2 gap-1.5">
+            {options.map(option => (
+              <button
+                key={`${option.label}-${option.value}`}
+                type="button"
+                disabled={isPending}
+                onClick={() => onSubmit(option.value)}
+                className="h-8 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark px-2 text-xs font-medium text-white transition-colors hover:bg-bambu-dark-tertiary disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {showCustomInput && (
+          <>
+            <div className="shrink-0 h-px bg-bambu-dark-tertiary" />
+            <form
+              className="flex gap-1.5 px-3 pt-2.5 pb-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                submitCustom();
+              }}
+            >
+              <input
+                type="number"
+                min={customMin}
+                max={customMax}
+                step={customStep}
+                value={customValue}
+                onChange={e => setCustomValue(e.target.value)}
+                placeholder="Custom"
+                className="h-8 min-w-0 flex-1 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark px-2 text-xs text-white placeholder:text-bambu-gray/60 focus:border-bambu-green focus:outline-none"
+              />
+              <button
+                type="submit"
+                disabled={isPending || customValue.trim() === ''}
+                className="h-8 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark px-2 text-xs font-medium text-white transition-colors hover:bg-bambu-dark-tertiary disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Set
+              </button>
+            </form>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
 const STATUS_GROUP_ORDER: string[] = ['error', 'printing', 'paused', 'finished', 'idle', 'offline'];
 
 const STATUS_GROUP_META: Record<string, { labelKey: string; dot: string }> = {
@@ -1519,6 +1608,7 @@ function PrinterCard({
   const [showSpeedMenu, setShowSpeedMenu] = useState<number | null>(null);
   const [showAirductMenu, setShowAirductMenu] = useState<number | null>(null);
   const [showBedJogMenu, setShowBedJogMenu] = useState<number | null>(null);
+  const [statusControlMenu, setStatusControlMenu] = useState<string | null>(null);
   const [bedJogStep, setBedJogStep] = useState<number>(10);
   const [showNotHomedModal, setShowNotHomedModal] = useState<null | { distance: number }>(null);
   const [showResumeConfirm, setShowResumeConfirm] = useState(false);
@@ -1985,6 +2075,79 @@ function PrinterCard({
       queryClient.invalidateQueries({ queryKey: ['queue', printer.id] });
     },
     onError: (error: Error) => showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
+  });
+
+  const nozzleTemperatureMutation = useMutation({
+    mutationFn: ({ target, nozzle }: { target: number; nozzle: number }) =>
+      api.setNozzleTemperature(printer.id, target, nozzle),
+    onSuccess: (result) => {
+      setStatusControlMenu(null);
+      showToast(result.message || 'Nozzle temperature set');
+      queryClient.invalidateQueries({ queryKey: ['printerStatus', printer.id] });
+    },
+    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
+  });
+
+  const bedTemperatureMutation = useMutation({
+    mutationFn: (target: number) => api.setBedTemperature(printer.id, target),
+    onSuccess: (result) => {
+      setStatusControlMenu(null);
+      showToast(result.message || 'Bed temperature set');
+      queryClient.invalidateQueries({ queryKey: ['printerStatus', printer.id] });
+    },
+    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
+  });
+
+  const fanSpeedMutation = useMutation({
+    mutationFn: ({ fan, speed }: { fan: 'part' | 'aux' | 'chamber'; speed: number }) =>
+      api.setFanSpeed(printer.id, fan, speed),
+    onMutate: async ({ fan, speed }) => {
+      await queryClient.cancelQueries({ queryKey: ['printerStatus', printer.id] });
+      const previousStatus = queryClient.getQueryData(['printerStatus', printer.id]);
+      const fanField = {
+        part: 'cooling_fan_speed',
+        aux: 'big_fan1_speed',
+        chamber: 'big_fan2_speed',
+      }[fan];
+      queryClient.setQueryData(['printerStatus', printer.id], (old: PrinterStatus | undefined) =>
+        old ? { ...old, [fanField]: speed } : old
+      );
+      return { previousStatus };
+    },
+    onSuccess: (result) => {
+      setStatusControlMenu(null);
+      showToast(result.message || 'Fan speed set');
+      queryClient.invalidateQueries({ queryKey: ['printerStatus', printer.id] });
+    },
+    onError: (error: Error, _variables, context) => {
+      if (context?.previousStatus) {
+        queryClient.setQueryData(['printerStatus', printer.id], context.previousStatus);
+      }
+      showToast(error.message || t('printers.toast.failedToSendCommand'), 'error');
+    },
+  });
+
+  const selectExtruderMutation = useMutation({
+    mutationFn: (extruder: number) => api.selectExtruder(printer.id, extruder),
+    onMutate: async (extruder) => {
+      await queryClient.cancelQueries({ queryKey: ['printerStatus', printer.id] });
+      const previousStatus = queryClient.getQueryData(['printerStatus', printer.id]);
+      queryClient.setQueryData(['printerStatus', printer.id], (old: PrinterStatus | undefined) =>
+        old ? { ...old, active_extruder: extruder } : old
+      );
+      return { previousStatus };
+    },
+    onSuccess: (result) => {
+      setStatusControlMenu(null);
+      showToast(result.message || 'Nozzle selected');
+      queryClient.invalidateQueries({ queryKey: ['printerStatus', printer.id] });
+    },
+    onError: (error: Error, _extruder, context) => {
+      if (context?.previousStatus) {
+        queryClient.setQueryData(['printerStatus', printer.id], context.previousStatus);
+      }
+      showToast(error.message || t('printers.toast.failedToSendCommand'), 'error');
+    },
   });
 
   // Chamber light mutation with optimistic update
@@ -3158,6 +3321,11 @@ function PrinterCard({
               const rightNozzleSlot = status.nozzle_rack?.find(s => s.id === 0);
               // Single-nozzle models (H2D, H2C): use the primary nozzle (id 0)
               const singleNozzleSlot = rightNozzleSlot || leftNozzleSlot;
+              const canUseStatusControls = status.connected && hasPermission('printers:control');
+              const statusControlTitle = canUseStatusControls ? undefined : t('printers.permission.noControl');
+              const statusControlClass = `relative text-center px-2 py-1.5 bg-bambu-dark rounded-lg flex-1 flex flex-col justify-center items-center transition-colors ${
+                canUseStatusControls ? 'cursor-pointer hover:bg-bambu-dark-tertiary' : 'cursor-default opacity-80'
+              }`;
               const fanItems = [
                 {
                   key: 'part',
@@ -3186,7 +3354,11 @@ function PrinterCard({
                 <>
                   <div className="mt-2 flex items-stretch gap-1.5 flex-wrap">
                     {/* Nozzle temp - combined for dual nozzle */}
-                    <div className="text-center px-2 py-1.5 bg-bambu-dark rounded-lg flex-1 flex flex-col justify-center items-center">
+                    <div
+                      className={statusControlClass}
+                      title={statusControlTitle}
+                      onClick={() => canUseStatusControls && setStatusControlMenu(statusControlMenu === 'nozzle-temp' ? null : 'nozzle-temp')}
+                    >
                       <HeaterThermometer className="w-3.5 h-3.5 mb-0.5" color="text-orange-400" isHeating={nozzleHeating} />
                       {status.temperatures.nozzle_2 !== undefined ? (
                         <>
@@ -3212,13 +3384,51 @@ function PrinterCard({
                           </p>
                         </>
                       )}
+                      {statusControlMenu === 'nozzle-temp' && (
+                        <IndicatorControlPopover
+                          title="Set Nozzle Temperature"
+                          unit="°C"
+                          customMin={0}
+                          customMax={320}
+                          isPending={nozzleTemperatureMutation.isPending}
+                          options={[
+                            { label: 'Off', value: 0 },
+                            { label: '120 C', value: 120 },
+                            { label: '220 C', value: 220 },
+                            { label: '260 C', value: 260 },
+                          ]}
+                          onClose={() => setStatusControlMenu(null)}
+                          onSubmit={(target) => nozzleTemperatureMutation.mutate({ target, nozzle: status.active_extruder ?? 0 })}
+                        />
+                      )}
                     </div>
-                    <div className="text-center px-2 py-1.5 bg-bambu-dark rounded-lg flex-1 flex flex-col justify-center items-center">
+                    <div
+                      className={statusControlClass}
+                      title={statusControlTitle}
+                      onClick={() => canUseStatusControls && setStatusControlMenu(statusControlMenu === 'bed-temp' ? null : 'bed-temp')}
+                    >
                       <HeaterThermometer className="w-3.5 h-3.5 mb-0.5" color="text-blue-400" isHeating={bedHeating} />
                       <p className="text-[9px] text-bambu-gray">{t('printers.temperatures.bed')}</p>
                       <p className="text-[11px] text-white">
                         {Math.round(status.temperatures.bed || 0)}°C
                       </p>
+                      {statusControlMenu === 'bed-temp' && (
+                        <IndicatorControlPopover
+                          title="Set Bed Temperature"
+                          unit="°C"
+                          customMin={0}
+                          customMax={140}
+                          isPending={bedTemperatureMutation.isPending}
+                          options={[
+                            { label: 'Off', value: 0 },
+                            { label: '55 C', value: 55 },
+                            { label: '75 C', value: 75 },
+                            { label: '90 C', value: 90 },
+                          ]}
+                          onClose={() => setStatusControlMenu(null)}
+                          onSubmit={(target) => bedTemperatureMutation.mutate(target)}
+                        />
+                      )}
                     </div>
                     {status.temperatures.chamber !== undefined && (
                       <div className="text-center px-2 py-1.5 bg-bambu-dark rounded-lg flex-1 flex flex-col justify-center items-center">
@@ -3237,7 +3447,13 @@ function PrinterCard({
                         activeNozzle={activeNozzle}
                         filamentInfo={filamentInfo}
                       >
-                        <div className="text-center px-3 py-1.5 bg-bambu-dark rounded-lg h-full flex flex-col justify-center items-center cursor-default" title={t('printers.activeNozzle', { nozzle: activeNozzle === 'L' ? t('common.left') : t('common.right') })}>
+                        <div
+                          className={`relative text-center px-3 py-1.5 bg-bambu-dark rounded-lg h-full flex flex-col justify-center items-center transition-colors ${
+                            canUseStatusControls ? 'cursor-pointer hover:bg-bambu-dark-tertiary' : 'cursor-default opacity-80'
+                          }`}
+                          title={canUseStatusControls ? t('printers.activeNozzle', { nozzle: activeNozzle === 'L' ? t('common.left') : t('common.right') }) : statusControlTitle}
+                          onClick={() => canUseStatusControls && setStatusControlMenu(statusControlMenu === 'nozzle-select' ? null : 'nozzle-select')}
+                        >
                           <NozzleIcon className="w-3.5 h-3.5 mb-0.5 text-amber-400" />
                           <div className="flex items-center gap-2">
                             <span className={`text-[11px] font-bold ${activeNozzle === 'L' ? 'text-amber-400' : 'text-gray-500'}`}>
@@ -3249,6 +3465,18 @@ function PrinterCard({
                             </span>
                           </div>
                           <p className="text-[9px] text-bambu-gray">{t('printers.temperatures.nozzle')}</p>
+                          {statusControlMenu === 'nozzle-select' && (
+                            <IndicatorControlPopover
+                              title="Set Nozzle Selection"
+                              isPending={selectExtruderMutation.isPending}
+                              options={[
+                                { label: 'Left', value: 1 },
+                                { label: 'Right', value: 0 },
+                              ]}
+                              onClose={() => setStatusControlMenu(null)}
+                              onSubmit={(extruder) => selectExtruderMutation.mutate(extruder)}
+                            />
+                          )}
                         </div>
                       </DualNozzleHoverCard>
                     )}
@@ -3263,13 +3491,33 @@ function PrinterCard({
                       return (
                         <div
                           key={key}
-                          className="px-2 py-1.5 bg-bambu-dark rounded-lg flex-1 min-w-0 flex items-center justify-center gap-1"
-                          title={label}
+                          className={`relative px-2 py-1.5 bg-bambu-dark rounded-lg flex-1 min-w-0 flex items-center justify-center gap-1 transition-colors ${
+                            canUseStatusControls ? 'cursor-pointer hover:bg-bambu-dark-tertiary' : 'cursor-default opacity-80'
+                          }`}
+                          title={canUseStatusControls ? label : statusControlTitle}
+                          onClick={() => canUseStatusControls && setStatusControlMenu(statusControlMenu === `fan-${key}` ? null : `fan-${key}`)}
                         >
                           <Icon className={`w-3 h-3 shrink-0 ${active ? activeClass : 'text-bambu-gray/50'}`} />
                           <span className={`text-[10px] leading-none ${active ? 'text-white' : 'text-bambu-gray/50'}`}>
                             {value}%
                           </span>
+                          {statusControlMenu === `fan-${key}` && (
+                            <IndicatorControlPopover
+                              title={`Set ${label} Speed`}
+                              unit="%"
+                              customMin={0}
+                              customMax={100}
+                              isPending={fanSpeedMutation.isPending}
+                              options={[
+                                { label: 'Off', value: 0 },
+                                { label: '50 %', value: 50 },
+                                { label: '75 %', value: 75 },
+                                { label: '100 %', value: 100 },
+                              ]}
+                              onClose={() => setStatusControlMenu(null)}
+                              onSubmit={(speed) => fanSpeedMutation.mutate({ fan: key as 'part' | 'aux' | 'chamber', speed })}
+                            />
+                          )}
                         </div>
                       );
                     })}
