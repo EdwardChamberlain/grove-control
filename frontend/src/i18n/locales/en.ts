@@ -4479,7 +4479,7 @@ export default {
     },
     archiveNameSource: {
       title: 'Archive name source',
-      description: 'Choose how new archives are named when files arrive via the virtual printer. "Metadata" uses the slicer-embedded title from the 3MF (default). "Filename" uses the filename Bambu Studio sent over FTP — handy if you renamed the job in the "send to printer" dialog.',
+      description: 'Choose how new archives are named when files arrive via the virtual printer. "Metadata" uses the slicer-embedded Title from the 3MF (default). "Filename" uses the filename Bambu Studio sent over FTP. Note: Bambu Studio overwrites the name you type in the "send to printer" dialog with the 3MF\'s Title field whenever one is present, so both modes often produce the same string.',
       metadata: 'Metadata',
       filename: 'Filename',
     },

@@ -4430,7 +4430,7 @@ export default {
     },
     archiveNameSource: {
       title: 'Arşiv ad kaynağı',
-      description: 'Dosyalar sanal yazıcı aracılığıyla geldiğinde yeni arşivlerin nasıl adlandırılacağını seçin. "Meta veri" 3MF\'den dilimleyici-gömülü başlığı kullanır (varsayılan). "Dosya adı" Bambu Studio\'nun FTP üzerinden gönderdiği dosya adını kullanır — "yazıcıya gönder" iletişim kutusunda işi yeniden adlandırdıysanız kullanışlıdır.',
+      description: 'Dosyalar sanal yazıcı aracılığıyla geldiğinde yeni arşivlerin nasıl adlandırılacağını seçin. "Meta veri" 3MF\'den dilimleyici-gömülü başlığı kullanır (varsayılan). "Dosya adı" Bambu Studio\'nun FTP üzerinden gönderdiği dosya adını kullanır. Not: Bambu Studio, 3MF\'de bir Başlık alanı varsa "yazıcıya gönder" iletişim kutusunda yazdığınız adı bu alanla geçersiz kılar, bu nedenle her iki mod da genellikle aynı dizeyi üretir.',
       metadata: 'Meta veri',
       filename: 'Dosya adı',
     },

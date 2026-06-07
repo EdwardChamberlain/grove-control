@@ -4466,7 +4466,7 @@ export default {
     },
     archiveNameSource: {
       title: 'Quelle des Archivnamens',
-      description: 'Lege fest, wie neue Archive benannt werden, wenn Dateien über den virtuellen Drucker eintreffen. "Metadaten" verwendet den im 3MF eingebetteten Titel des Slicers (Standard). "Dateiname" nutzt den Dateinamen, den Bambu Studio per FTP gesendet hat — praktisch, wenn der Job im Dialog "Zum Drucker senden" umbenannt wurde.',
+      description: 'Lege fest, wie neue Archive benannt werden, wenn Dateien über den virtuellen Drucker eintreffen. "Metadaten" verwendet den im 3MF eingebetteten Titel des Slicers (Standard). "Dateiname" nutzt den Dateinamen, den Bambu Studio per FTP gesendet hat. Hinweis: Bambu Studio überschreibt den im Dialog "Zum Drucker senden" eingegebenen Namen mit dem Titelfeld der 3MF, sofern eines vorhanden ist — beide Modi liefern daher oft denselben Wert.',
       metadata: 'Metadaten',
       filename: 'Dateiname',
     },

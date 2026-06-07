@@ -4513,7 +4513,7 @@ export default {
     },
     archiveNameSource: {
       title: 'Origem do nome do arquivo',
-      description: 'Escolha como os novos arquivos são nomeados quando chegam pela impressora virtual. "Metadados" usa o título embutido pelo slicer no 3MF (padrão). "Nome do arquivo" usa o nome que o Bambu Studio enviou via FTP — útil se você renomeou o job no diálogo "enviar para impressora".',
+      description: 'Escolha como os novos arquivos são nomeados quando chegam pela impressora virtual. "Metadados" usa o título embutido pelo slicer no 3MF (padrão). "Nome do arquivo" usa o nome que o Bambu Studio enviou via FTP. Nota: o Bambu Studio sobrescreve o nome digitado no diálogo "enviar para impressora" com o campo Título do 3MF quando presente, portanto ambos os modos costumam produzir a mesma string.',
       metadata: 'Metadados',
       filename: 'Nome do arquivo',
     },

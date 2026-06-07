@@ -4455,7 +4455,7 @@ export default {
     },
     archiveNameSource: {
       title: '存档名称来源',
-      description: '选择通过虚拟打印机接收文件时新存档的命名方式。"元数据"使用 3MF 中嵌入的切片标题（默认）。"文件名"使用 Bambu Studio 通过 FTP 发送的文件名 — 当您在"发送到打印机"对话框中重命名作业时非常有用。',
+      description: '选择通过虚拟打印机接收文件时新存档的命名方式。"元数据"使用 3MF 中嵌入的切片标题（默认）。"文件名"使用 Bambu Studio 通过 FTP 发送的文件名。注意：当 3MF 包含标题字段时，Bambu Studio 会用该字段覆盖您在"发送到打印机"对话框中输入的名称，因此两种模式通常会产生相同的字符串。',
       metadata: '元数据',
       filename: '文件名',
     },
