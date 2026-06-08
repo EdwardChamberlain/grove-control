@@ -997,6 +997,7 @@ export function SettingsPage() {
       Number(settings.library_disk_warning_gb ?? 5) !== Number(localSettings.library_disk_warning_gb ?? 5) ||
       (settings.camera_view_mode ?? 'window') !== (localSettings.camera_view_mode ?? 'window') ||
       (settings.preferred_slicer ?? 'bambu_studio') !== (localSettings.preferred_slicer ?? 'bambu_studio') ||
+      (settings.open_in_slicer ?? null) !== (localSettings.open_in_slicer ?? null) ||
       (settings.use_slicer_api ?? false) !== (localSettings.use_slicer_api ?? false) ||
       (settings.orcaslicer_api_url ?? '') !== (localSettings.orcaslicer_api_url ?? '') ||
       (settings.bambu_studio_api_url ?? '') !== (localSettings.bambu_studio_api_url ?? '') ||
@@ -1082,6 +1083,7 @@ export function SettingsPage() {
         library_disk_warning_gb: localSettings.library_disk_warning_gb,
         camera_view_mode: localSettings.camera_view_mode,
         preferred_slicer: localSettings.preferred_slicer,
+        open_in_slicer: localSettings.open_in_slicer,
         use_slicer_api: localSettings.use_slicer_api,
         orcaslicer_api_url: localSettings.orcaslicer_api_url,
         bambu_studio_api_url: localSettings.bambu_studio_api_url,
@@ -4323,6 +4325,37 @@ export function SettingsPage() {
                     )}
                   </div>
                 )}
+              </div>
+              {/* Desktop "Open in Slicer" override (#1329). Independent of the
+                  API slicer so a user can slice via the Bambu Studio sidecar
+                  but open files locally in OrcaSlicer, or vice versa. */}
+              <div>
+                <label className="block text-sm text-bambu-gray mb-1">
+                  {t('settings.openInSlicerLabel', 'Open in Slicer')}
+                </label>
+                <div className="relative">
+                  <select
+                    value={localSettings.open_in_slicer ?? ''}
+                    onChange={(e) =>
+                      updateSetting(
+                        'open_in_slicer',
+                        e.target.value === '' ? null : (e.target.value as 'bambu_studio' | 'orcaslicer'),
+                      )
+                    }
+                    className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
+                  >
+                    <option value="">{t('settings.openInSlicerInherit', 'Same as API slicer')}</option>
+                    <option value="bambu_studio">{t('settings.slicerBambuStudio')}</option>
+                    <option value="orcaslicer">{t('settings.slicerOrcaSlicer')}</option>
+                  </select>
+                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
+                </div>
+                <p className="text-xs text-bambu-gray mt-1">
+                  {t(
+                    'settings.openInSlicerDescription',
+                    "Desktop slicer used by the 'Open in Slicer' button. Leave on 'Same as API slicer' to inherit, or pick a different slicer to use locally.",
+                  )}
+                </p>
               </div>
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">

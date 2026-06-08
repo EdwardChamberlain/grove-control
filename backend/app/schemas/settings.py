@@ -187,10 +187,21 @@ class AppSettings(BaseModel):
         description="Camera view mode: 'window' opens in new browser window, 'embedded' shows overlay on main screen",
     )
 
-    # Preferred slicer application
+    # Preferred slicer application (server-side / API sidecar slicer)
     preferred_slicer: str = Field(
         default="bambu_studio",
-        description="Preferred slicer: 'bambu_studio' or 'orcaslicer'",
+        description="Slicer used for the server-side API / sidecar: 'bambu_studio' or 'orcaslicer'",
+    )
+    # "Open in Slicer" desktop URI handler — independent of the API slicer so
+    # a user can slice via the Bambu Studio sidecar but open files locally in
+    # OrcaSlicer, or vice versa (#1329). None falls back to ``preferred_slicer``
+    # so existing installs behave identically until someone changes it.
+    open_in_slicer: str | None = Field(
+        default=None,
+        description=(
+            "Desktop slicer for the 'Open in Slicer' button: 'bambu_studio' or "
+            "'orcaslicer'. None inherits from preferred_slicer."
+        ),
     )
 
     # Slicer dispatch mode: when True, "Slice" actions open the in-app
@@ -396,6 +407,7 @@ class AppSettingsUpdate(BaseModel):
     library_disk_warning_gb: float | None = None
     camera_view_mode: str | None = None
     preferred_slicer: str | None = None
+    open_in_slicer: str | None = None
     use_slicer_api: bool | None = None
     orcaslicer_api_url: str | None = None
     bambu_studio_api_url: str | None = None

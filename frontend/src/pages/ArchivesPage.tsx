@@ -2688,7 +2688,11 @@ export function ArchivesPage() {
   });
 
   const timeFormat: TimeFormat = settings?.time_format || 'system';
-  const preferredSlicer: SlicerType = settings?.preferred_slicer || 'bambu_studio';
+  // Desktop "Open in Slicer" target — falls back to preferred_slicer when the
+  // user hasn't explicitly chosen a different desktop slicer (#1329). This is
+  // ONLY the URI-handoff target; the in-app SliceModal still uses
+  // preferred_slicer for the sidecar.
+  const preferredSlicer: SlicerType = settings?.open_in_slicer || settings?.preferred_slicer || 'bambu_studio';
   const useSlicerApi = settings?.use_slicer_api ?? false;
   const currency = getCurrencySymbol(settings?.currency || 'USD');
 

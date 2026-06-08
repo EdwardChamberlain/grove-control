@@ -1131,8 +1131,11 @@ export interface AppSettings {
   library_disk_warning_gb: number;
   // Camera view settings
   camera_view_mode: 'window' | 'embedded';
-  // Preferred slicer
+  // Preferred slicer (server-side API / sidecar)
   preferred_slicer: 'bambu_studio' | 'orcaslicer';
+  // Desktop "Open in Slicer" override (#1329). Null inherits from
+  // preferred_slicer so existing installs behave identically.
+  open_in_slicer: 'bambu_studio' | 'orcaslicer' | null;
   // Use the slicer-API sidecar for slicing (in-app modal) vs desktop URI scheme
   use_slicer_api: boolean;
   // Per-install sidecar URLs. Empty string falls back to the env defaults.
