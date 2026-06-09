@@ -5652,6 +5652,12 @@ export default {
         pass: 'Accessible — l\'envoi de fichiers d\'impression fonctionnera.',
         warn: 'Le port 990 est inaccessible. La surveillance peut toujours fonctionner, mais l\'envoi d\'impressions vers l\'imprimante échouera. Assurez-vous que le port 990 n\'est pas bloqué.',
       },
+      external_storage: {
+        title: 'Stocker les fichiers envoyés sur stockage externe (étape 4 de l\'installation)',
+        pass: 'L\'imprimante signale que cette option est activée — les fichiers envoyés seront stockés sur la carte SD et les archives auront des miniatures et des métadonnées slicer.',
+        fail: 'L\'imprimante signale que cette option est désactivée. Activez « Stocker les fichiers envoyés sur stockage externe » — sur les firmwares récents (P2S 01.02 / Bambu Studio 2.6+) l\'interrupteur se trouve dans les Paramètres d\'impression de l\'imprimante ; sur les versions antérieures, il est dans l\'onglet Périphérique de Bambu Studio / OrcaSlicer. Sans cette option, chaque impression archivée est dépourvue de miniature et de métadonnées slicer.',
+        skip: 'Non vérifié — une connexion MQTT active est requise. Sur les slicers plus anciens où ce paramètre n\'existe que dans le slicer, l\'imprimante ne le signale pas, donc cette vérification passe même si l\'option est désactivée — vérifiez l\'étape 4 de l\'installation manuellement.',
+      },
       port_rtsps: {
         title: 'Port caméra (RTSPS 322)',
         pass: 'Accessible — le flux de la caméra fonctionnera.',

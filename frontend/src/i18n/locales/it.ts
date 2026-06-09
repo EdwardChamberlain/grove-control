@@ -5651,6 +5651,12 @@ export default {
         pass: 'Raggiungibile — l\'invio dei file di stampa funzionerà.',
         warn: 'La porta 990 non è raggiungibile. Il monitoraggio potrebbe ancora funzionare, ma l\'invio delle stampe alla stampante fallirà. Assicurati che la porta 990 non sia bloccata.',
       },
+      external_storage: {
+        title: 'Memorizza file inviati su archiviazione esterna (passo 4 dell\'installazione)',
+        pass: 'La stampante segnala che questa opzione è attiva — i file inviati saranno memorizzati sulla scheda SD e gli archivi avranno miniature e metadati dello slicer.',
+        fail: 'La stampante segnala che questa opzione è disattivata. Abilita "Memorizza file inviati su archiviazione esterna" — nei firmware recenti (P2S 01.02 / Bambu Studio 2.6+) l\'interruttore si trova nelle Impostazioni di stampa della stampante; nelle versioni precedenti è nella scheda Dispositivo di Bambu Studio / OrcaSlicer. Senza questa opzione, ogni stampa archiviata è priva di miniatura e di metadati dello slicer.',
+        skip: 'Non verificato — è necessaria una connessione MQTT attiva. Negli slicer più vecchi dove questa impostazione esiste solo nello slicer, la stampante non la segnala, quindi questo controllo passa anche se l\'opzione è disattivata — verifica manualmente il passo 4 dell\'installazione.',
+      },
       port_rtsps: {
         title: 'Porta fotocamera (RTSPS 322)',
         pass: 'Raggiungibile — lo streaming della fotocamera funzionerà.',

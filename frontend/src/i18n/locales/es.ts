@@ -5671,6 +5671,12 @@ export default {
         pass: 'Accesible — el envío de archivos de impresión funcionará.',
         warn: 'El puerto 990 no es accesible. La supervisión puede seguir funcionando, pero el envío de impresiones a la impresora fallará. Asegúrese de que el puerto 990 no esté bloqueado.',
       },
+      external_storage: {
+        title: 'Almacenar archivos enviados en almacenamiento externo (paso 4 de instalación)',
+        pass: 'La impresora informa que esta opción está activada — los archivos enviados se guardarán en la tarjeta SD y los archivos tendrán miniaturas y metadatos del slicer.',
+        fail: 'La impresora informa que esta opción está desactivada. Active "Almacenar archivos enviados en almacenamiento externo" — en firmware reciente (P2S 01.02 / Bambu Studio 2.6+) el conmutador está en los Ajustes de Impresión de la impresora; en versiones anteriores está en la pestaña Dispositivo de Bambu Studio / OrcaSlicer. Sin esta opción, cada impresión archivada queda sin miniatura ni metadatos del slicer.',
+        skip: 'No comprobado — se necesita una conexión MQTT activa. En slicers más antiguos donde este ajuste solo existe en el slicer, la impresora no lo reporta, así que esta comprobación pasa aunque la opción esté desactivada — verifique el paso 4 de la instalación manualmente.',
+      },
       port_rtsps: {
         title: 'Puerto de la cámara (RTSPS 322)',
         pass: 'Accesible — la transmisión de la cámara funcionará.',

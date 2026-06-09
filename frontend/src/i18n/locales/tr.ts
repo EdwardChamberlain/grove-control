@@ -5601,6 +5601,12 @@ export default {
         pass: 'Erişilebilir — baskı dosyaları gönderme çalışacak.',
         warn: 'Port 990 erişilemez. İzleme yine çalışabilir, ancak yazıcıya baskı gönderme başarısız olacak. Port 990\'ın engellenmediğinden emin olun.',
       },
+      external_storage: {
+        title: 'Gönderilen dosyaları harici depolamada sakla (kurulum adımı 4)',
+        pass: 'Yazıcı bu seçeneğin açık olduğunu bildiriyor — gönderilen dosyalar SD kartta saklanacak ve arşivler küçük resim ve dilimleyici meta verileri içerecek.',
+        fail: 'Yazıcı bu seçeneğin kapalı olduğunu bildiriyor. "Gönderilen dosyaları harici depolamada sakla" seçeneğini etkinleştirin — yeni donanım yazılımlarında (P2S 01.02 / Bambu Studio 2.6+) düğme yazıcının Baskı Ayarları\'nda; eski sürümlerde Bambu Studio / OrcaSlicer\'in Cihaz sekmesindedir. Bu seçenek olmadan, arşivlenen her baskıda küçük resim ve dilimleyici meta verisi olmayacak.',
+        skip: 'Kontrol edilmedi — etkin bir MQTT bağlantısı gerekli. Bu ayarın yalnızca dilimleyicide bulunduğu eski dilimleyicilerde yazıcı bunu bildirmez, bu nedenle seçenek kapalı olsa bile bu kontrol geçer — kurulum adımı 4\'ü manuel olarak doğrulayın.',
+      },
       port_rtsps: {
         title: 'Kamera portu (RTSPS 322)',
         pass: 'Erişilebilir — kamera akışı çalışacak.',

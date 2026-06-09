@@ -5651,6 +5651,12 @@ export default {
         pass: 'Acessível — o envio de arquivos de impressão funcionará.',
         warn: 'A porta 990 está inacessível. O monitoramento ainda pode funcionar, mas o envio de impressões para a impressora falhará. Verifique se a porta 990 não está bloqueada.',
       },
+      external_storage: {
+        title: 'Armazenar arquivos enviados no armazenamento externo (passo 4 da instalação)',
+        pass: 'A impressora informa que esta opção está ligada — os arquivos enviados serão armazenados no cartão SD e os arquivos terão miniaturas e metadados do fatiador.',
+        fail: 'A impressora informa que esta opção está desligada. Ative "Armazenar arquivos enviados no armazenamento externo" — em firmwares recentes (P2S 01.02 / Bambu Studio 2.6+) o interruptor fica nas Configurações de Impressão da impressora; em versões mais antigas, está na aba Dispositivo do Bambu Studio / OrcaSlicer. Sem essa opção, cada impressão arquivada fica sem miniatura nem metadados do fatiador.',
+        skip: 'Não verificado — é necessária uma conexão MQTT ativa. Em fatiadores mais antigos onde essa configuração existe apenas no fatiador, a impressora não a reporta, então esta verificação passa mesmo com a opção desligada — verifique o passo 4 da instalação manualmente.',
+      },
       port_rtsps: {
         title: 'Porta da câmera (RTSPS 322)',
         pass: 'Acessível — o streaming da câmera funcionará.',

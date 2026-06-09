@@ -5675,6 +5675,12 @@ export default {
         pass: 'Reachable — sending print files will work.',
         warn: 'Port 990 is unreachable. Monitoring may still work, but sending prints to the printer will fail. Make sure port 990 is not blocked.',
       },
+      external_storage: {
+        title: 'Store sent files on external storage (install step 4)',
+        pass: 'The printer reports this option is on — sent files will be stored on the SD card and archives will have thumbnails and slicer metadata.',
+        fail: 'The printer reports this option is off. Enable "Store sent files on external storage" — on newer firmware (P2S 01.02 / Bambu Studio 2.6+) the toggle lives on the printer\'s Print Settings; on older versions it\'s in Bambu Studio / OrcaSlicer\'s Device tab. Without it, every archived print is missing its thumbnail and slicer metadata.',
+        skip: 'Not checked — needs a live MQTT connection. On older slicers where this setting lives only in the slicer the printer never reports it, so this check will pass even when the option is off — verify install step 4 manually.',
+      },
       port_rtsps: {
         title: 'Camera port (RTSPS 322)',
         pass: 'Reachable — the camera stream will work.',
