@@ -16,6 +16,14 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# Least-privilege per CodeQL actions/missing-workflow-permissions.
+# contents: write is required by softprops/action-gh-release to attach
+# the .exe to a tag release; the manual-dispatch path doesn't trigger
+# that step and could run with read-only, but a single workflow-level
+# block keeps the surface auditable in one place.
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
