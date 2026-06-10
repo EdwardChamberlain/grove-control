@@ -35,10 +35,8 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Install Inno Setup
-        run: |
-          choco install innosetup --version=6.2.2 --no-progress -y
-        shell: pwsh
+      # Inno Setup 6.x is pre-installed on windows-latest runners (under
+      # C:\Program Files (x86)\Inno Setup 6\). No install step needed.
 
       - name: Stage installer artifacts
         working-directory: installers/windows
