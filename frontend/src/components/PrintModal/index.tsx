@@ -1106,6 +1106,10 @@ export function PrintModal({
                 defaultExpanded={!!initialSelectedPrinterIds?.length || (settings?.per_printer_mapping_expanded ?? false)}
                 currencySymbol={currencySymbol}
                 defaultCostPerKg={defaultCostPerKg}
+                forceColorMatch={forceColorMatch}
+                onForceColorMatchChange={(slotId, value) =>
+                  setForceColorMatch((prev) => ({ ...prev, [slotId]: value }))
+                }
               />
             )}
 

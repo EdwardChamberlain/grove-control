@@ -3826,8 +3826,12 @@ class TestStartPrintAmsMapping:
         cmd = self._get_published_command(mqtt_client)
         assert cmd["timelapse"] is True
         assert cmd["flow_cali"] is False
-        # flow_cali off → extrude_cali_flag=2 (skip, reuse stored PA value).
-        assert cmd["extrude_cali_flag"] == 2
+        # flow_cali off → extrude_cali_flag=0 (firmware actually skips the
+        # pre-print calibration stage). #1721 test on H2D 01.x showed `2`
+        # didn't suppress stage 8 ("Calibrating dynamic flow") despite the
+        # earlier "skip and reuse stored PA" reading; `0` does — verified
+        # live against the stg queue.
+        assert cmd["extrude_cali_flag"] == 0
 
     def test_h2s_single_external_spool_uses_main_id(self, mqtt_client):
         """H2S is single-nozzle (#1386): external spool (254) → ams_id=255.
@@ -3888,18 +3892,18 @@ class TestStartPrintAmsMapping:
         assert cmd["extrude_cali_flag"] == 1
 
     def test_nozzle_offset_cali_default_is_skip(self, mqtt_client):
-        """Default `nozzle_offset_cali=False` → wire value `2` (skip).
+        """Default `nozzle_offset_cali=False` → wire value `0` (skip).
 
-        Matches the legacy behavior on every model: BambuStudio sends `2`
-        unless the user enabled the toggle for a dual-nozzle machine. The
-        legacy hardcoded value before #1682 was `2` for everyone — this
-        test pins that default so we don't regress.
+        #1721 H2D 01.x test: `2` ("skip") didn't actually suppress stage 39
+        ("Nozzle offset calibration") — the stage stayed in the `stg` queue
+        and ran at print start. `0` does suppress it (verified live). Matches
+        what a BambuStudio Send-dialog echo on the same firmware shows.
         """
         mqtt_client.model = "P1S"
         mqtt_client.start_print("test.3mf")
 
         cmd = self._get_published_command(mqtt_client)
-        assert cmd["nozzle_offset_cali"] == 2
+        assert cmd["nozzle_offset_cali"] == 0
 
     def test_nozzle_offset_cali_ignored_on_single_nozzle(self, mqtt_client):
         """Single-nozzle printer: `nozzle_offset_cali=True` is silently dropped.
@@ -3909,20 +3913,21 @@ class TestStartPrintAmsMapping:
         behind `nozzle_count==2`. Even if a stale queue item from when the
         printer was misidentified as dual carries the flag, the MQTT layer
         must downgrade it so firmware never tries to calibrate a head it
-        doesn't have (#1682).
+        doesn't have (#1682). `0` is the actually-honoured skip value
+        post-#1721; old `2` left the stage in the queue.
         """
         mqtt_client.model = "P1S"
         mqtt_client.start_print("test.3mf", nozzle_offset_cali=True)
 
         cmd = self._get_published_command(mqtt_client)
-        assert cmd["nozzle_offset_cali"] == 2
+        assert cmd["nozzle_offset_cali"] == 0
 
     def test_nozzle_offset_cali_honored_on_dual_nozzle(self, mqtt_client):
         """Dual-nozzle printer (H2D): `nozzle_offset_cali=True` → wire value `1`.
 
         H2D is in `DUAL_NOZZLE_MODELS`. The toggle controls whether the
         printer runs the nozzle-offset calibration pass before the print
-        starts. `1`=run, `2`=skip — matches BambuStudio's encoding (#1682).
+        starts. `1`=run (#1682).
         """
         mqtt_client.model = "H2D"
         mqtt_client.start_print("test.3mf", nozzle_offset_cali=True)
@@ -3931,16 +3936,17 @@ class TestStartPrintAmsMapping:
         assert cmd["nozzle_offset_cali"] == 1
 
     def test_nozzle_offset_cali_false_on_dual_nozzle(self, mqtt_client):
-        """Dual-nozzle printer (H2D Pro): `nozzle_offset_cali=False` → `2` (skip).
+        """Dual-nozzle printer (H2D Pro): `nozzle_offset_cali=False` → `0` (skip).
 
-        Same wire encoding as legacy. Critical for users like #1682 who run
-        diamond nozzles and need to keep the calibration off.
+        Critical for users like #1682 who run diamond nozzles and need to
+        keep the calibration off. The wire value flipped from `2` to `0` in
+        #1721 after the H2D test showed `2` didn't actually suppress.
         """
         mqtt_client.model = "H2D Pro"
         mqtt_client.start_print("test.3mf", nozzle_offset_cali=False)
 
         cmd = self._get_published_command(mqtt_client)
-        assert cmd["nozzle_offset_cali"] == 2
+        assert cmd["nozzle_offset_cali"] == 0
 
 
 class TestStartPrintUniqueIdentityFields:

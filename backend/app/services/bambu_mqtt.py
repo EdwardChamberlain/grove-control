@@ -3459,17 +3459,24 @@ class BambuMQTTClient:
                     "use_ams": use_ams,
                     "cfg": "0",
                     # extrude_cali_flag gates flow-dynamics calibration:
-                    # 1 = run it, 2 = skip and reuse the stored PA value.
-                    # BambuStudio always pairs this with flow_cali and never
-                    # sends 0; a hardcoded 0 made the printer skip calibration
-                    # regardless of the flow_cali toggle (#1478).
-                    "extrude_cali_flag": 1 if flow_cali else 2,
+                    # 1 = run it, 0 = printer skips entirely (#1478 evidence).
+                    # 2 = "skip and reuse stored PA" was previously believed to
+                    # suppress the stage too, but #1721 testing on H2D 01.x
+                    # showed stage 8 ("Calibrating dynamic flow") still gets
+                    # queued when we send 2. A real BambuStudio Send-dialog
+                    # capture today also showed 0 when the user disables flow
+                    # calibration. Going with 0 to actually suppress the
+                    # pre-print calibration stage.
+                    "extrude_cali_flag": 1 if flow_cali else 0,
                     "extrude_cali_manual_mode": 0,
-                    # 1 = run, 2 = skip. BambuStudio exposes the toggle only for
-                    # dual-nozzle machines (H2D/H2D Pro/H2C/X2D); on single-nozzle
-                    # printers we always send 2 so firmware never wastes cycles
-                    # on a calibration their head doesn't support (#1682).
-                    "nozzle_offset_cali": 1 if (nozzle_offset_cali and is_dual_nozzle) else 2,
+                    # 1 = run, 0 = skip (matches BambuStudio's wire today). The
+                    # earlier 2 = "skip" reading from #1682 didn't actually
+                    # suppress stage 39 ("Nozzle offset calibration") on H2D
+                    # 01.x — captured live in #1721. BambuStudio exposes the
+                    # toggle only for dual-nozzle (H2D/H2D Pro/H2C/X2D); single-
+                    # nozzle prints still resolve to 0 here so firmware never
+                    # runs a calibration the head doesn't support.
+                    "nozzle_offset_cali": 1 if (nozzle_offset_cali and is_dual_nozzle) else 0,
                     "subtask_name": filename.replace(".3mf", "").replace(".gcode", ""),
                     "profile_id": "0",
                     "project_id": submission_id,
