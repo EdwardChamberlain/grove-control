@@ -2701,10 +2701,6 @@ async def _try_preview_slice_filaments(
     plate_id: int,
     file_path: Path,
     request_id: str | None = None,
-    bundle_id: str | None = None,
-    printer_name: str | None = None,
-    process_name: str | None = None,
-    filament_names: list[str] | None = None,
 ) -> list[dict] | None:
     """Run a preview slice via the user's configured sidecar. Same shape as
     the matching helper in archives.py — see that module for rationale.
@@ -2712,13 +2708,6 @@ async def _try_preview_slice_filaments(
     ``request_id``: when supplied, forwarded to the sidecar so the
     SliceModal's inline spinner + toast can poll the matching progress
     endpoint and show "Generating G-code (45%)" for the preview as well.
-
-    ``bundle_id`` / ``printer_name`` / ``process_name`` / ``filament_names``:
-    when all are supplied, the preview uses ``slice_with_bundle`` against
-    the named bundle's preset triplet so the preview's gram numbers reflect
-    the same profiles the real print will use. Partial context falls back
-    to the embedded-settings path so a half-completed Bundle-tier selection
-    in the modal doesn't error out.
     """
     from backend.app.api.routes.settings import get_setting
     from backend.app.services.slice_preview import get_preview_filaments
@@ -2747,10 +2736,6 @@ async def _try_preview_slice_filaments(
         file_name=file_path.name,
         api_url=api_url,
         request_id=request_id,
-        bundle_id=bundle_id,
-        printer_name=printer_name,
-        process_name=process_name,
-        filament_names=filament_names,
     )
 
 
@@ -2759,10 +2744,6 @@ async def get_library_file_filament_requirements(
     file_id: int,
     plate_id: int | None = None,
     request_id: str | None = None,
-    bundle_id: str | None = None,
-    printer_name: str | None = None,
-    process_name: str | None = None,
-    filament_names: str | None = None,
     db: AsyncSession = Depends(get_db),
     _: User | None = Depends(require_permission_if_auth_enabled(Permission.LIBRARY_READ)),
 ):
@@ -2774,12 +2755,6 @@ async def get_library_file_filament_requirements(
     Args:
         file_id: The library file ID
         plate_id: Optional plate index to get filaments for a specific plate
-        bundle_id / printer_name / process_name / filament_names: Optional
-            bundle context. When all four are supplied, the preview slice
-            (run for unsliced project files) uses ``slice_with_bundle``
-            against the named preset triplet instead of the embedded-
-            settings fallback. ``filament_names`` is comma- or semicolon-
-            separated to mirror the slice route's multi-color form.
     """
     import defusedxml.ElementTree as ET
 
@@ -2899,14 +2874,6 @@ async def get_library_file_filament_requirements(
                 project_filaments = extract_project_filaments_from_3mf(zf)
                 used_slot_ids: set[int] = set()
                 if project_filaments and plate_id is not None:
-                    # Bundle context flows through optional query params so
-                    # callers without a Bundle-tier selection (the common
-                    # case) hit the same path as before.
-                    parsed_filament_names: list[str] | None = None
-                    if filament_names:
-                        parsed_filament_names = [
-                            n.strip() for n in filament_names.replace(";", ",").split(",") if n.strip()
-                        ] or None
                     preview = await _try_preview_slice_filaments(
                         db,
                         kind="library_file",
@@ -2914,10 +2881,6 @@ async def get_library_file_filament_requirements(
                         plate_id=plate_id,
                         file_path=file_path,
                         request_id=request_id,
-                        bundle_id=bundle_id,
-                        printer_name=printer_name,
-                        process_name=process_name,
-                        filament_names=parsed_filament_names,
                     )
                     if preview is not None:
                         used_slot_ids = {f["slot_id"] for f in preview}
@@ -3171,48 +3134,38 @@ async def _run_slicer_with_fallback(
         SlicerInputError,
     )
 
-    # Bundle dispatch path: when SliceRequest.bundle is set, the schema
-    # validator short-circuited the presets-required check, so the
-    # PresetRef fields may all be None. Skip resolve_preset_ref entirely
-    # — the sidecar will materialise the per-category JSONs from the
-    # bundle's extracted directory at slice time.
-    use_bundle = request.bundle is not None
-
     user: User | None = None
     presets: dict[str, str] = {}
     filament_jsons: list[str] = []
-    if not use_bundle:
-        # Resolve each slot via the source-aware resolver. The schema
-        # validator has already normalised legacy `*_preset_id: int`
-        # fields into `PresetRef(source='local', id=str(int))`, so all
-        # three are guaranteed non-None here.
-        if current_user_id is not None:
-            user = await db.get(User, current_user_id)
+    # Resolve each slot via the source-aware resolver. The schema
+    # validator has already normalised legacy `*_preset_id: int`
+    # fields into `PresetRef(source='local', id=str(int))`, so all
+    # three are guaranteed non-None here.
+    if current_user_id is not None:
+        user = await db.get(User, current_user_id)
 
-        refs = {
-            "printer": request.printer_preset,
-            "process": request.process_preset,
-        }
-        for slot, ref in refs.items():
-            assert ref is not None, "schema validator guarantees PresetRef is set"
-            presets[slot] = await resolve_preset_ref(db, user, ref, slot)
-        # Multi-color: resolve each filament slot in plate order. The schema
-        # validator backfilled `filament_presets` from the legacy `filament_preset`
-        # field for single-color callers, so this list is always non-empty.
-        for ref in request.filament_presets:
-            assert ref is not None, "schema validator guarantees filament list is non-None"
-            filament_jsons.append(await resolve_preset_ref(db, user, ref, "filament"))
+    refs = {
+        "printer": request.printer_preset,
+        "process": request.process_preset,
+    }
+    for slot, ref in refs.items():
+        assert ref is not None, "schema validator guarantees PresetRef is set"
+        presets[slot] = await resolve_preset_ref(db, user, ref, slot)
+    # Multi-color: resolve each filament slot in plate order. The schema
+    # validator backfilled `filament_presets` from the legacy `filament_preset`
+    # field for single-color callers, so this list is always non-empty.
+    for ref in request.filament_presets:
+        assert ref is not None, "schema validator guarantees filament list is non-None"
+        filament_jsons.append(await resolve_preset_ref(db, user, ref, "filament"))
 
-        # Bed-type override (#1337): patch curr_bed_type onto the resolved
-        # process JSON so the slicer's StaticPrintConfig pass picks up the
-        # user's pick instead of whatever the process preset defaults to.
-        # Without this, slicing an STL of ABS onto a process preset whose
-        # default is "Cool Plate" fails with "Plate 1: Cool Plate does not
-        # support filament 1" — the reporter's exact scenario. Only applies
-        # to the resolved-preset path; bundle mode would need a sidecar-side
-        # mechanism to patch presets it materialises from disk.
-        if request.bed_type:
-            presets["process"] = _patch_process_bed_type(presets["process"], request.bed_type)
+    # Bed-type override (#1337): patch curr_bed_type onto the resolved
+    # process JSON so the slicer's StaticPrintConfig pass picks up the
+    # user's pick instead of whatever the process preset defaults to.
+    # Without this, slicing an STL of ABS onto a process preset whose
+    # default is "Cool Plate" fails with "Plate 1: Cool Plate does not
+    # support filament 1" — the reporter's exact scenario.
+    if request.bed_type:
+        presets["process"] = _patch_process_bed_type(presets["process"], request.bed_type)
 
     # Slicer routing — pick the sidecar URL by preferred_slicer.
     # The per-install URL setting (Settings UI → Slicer card) wins; an
@@ -3286,11 +3239,10 @@ async def _run_slicer_with_fallback(
         target_model = await _resolve_target_printer_model(db, user, request)
         if source_model and target_model and is_dual_nozzle_model(source_model) != is_dual_nozzle_model(target_model):
             logger.info(
-                "Cross-nozzle-class re-slice (%s -> %s, %s): enabling --arrange so BS reconciles "
+                "Cross-nozzle-class re-slice (%s -> %s): enabling --arrange so BS reconciles "
                 "the embedded project layout against the target printer",
                 source_model,
                 target_model,
-                "bundle" if use_bundle else "presets",
             )
             cross_class_arrange = True
     # When this slice is dispatcher-tracked, generate a request_id so
@@ -3319,17 +3271,10 @@ async def _run_slicer_with_fallback(
     # never touches the unused slot. Replace unused-slot entries with the
     # slot-1 selection before the real slice so the loaded-filament set
     # is materially homogeneous.
-    bundle_filament_names: list[str] | None = None
     if is_3mf and request.plate is not None:
         from backend.app.services.slicer_3mf_convert import substitute_unused_plate_filaments
 
-        if use_bundle:
-            assert request.bundle is not None
-            bundle_filament_names = substitute_unused_plate_filaments(
-                primary_bytes, request.plate, list(request.bundle.filament_names)
-            )
-        else:
-            filament_jsons = substitute_unused_plate_filaments(primary_bytes, request.plate, filament_jsons)
+        filament_jsons = substitute_unused_plate_filaments(primary_bytes, request.plate, filament_jsons)
 
     # Cross-class slice-all loop (#1493): when the user asks for
     # ``plate=0`` (all plates) AND the source's nozzle class differs from
@@ -3392,39 +3337,18 @@ async def _run_slicer_with_fallback(
 
                 for plate_num in range(1, plate_count + 1):
                     plate_cb = _wrap_progress_for_plate(plate_num, plate_count)
-                    if use_bundle:
-                        assert request.bundle is not None
-                        per_plate = await service.slice_with_bundle(
-                            model_bytes=primary_bytes,
-                            model_filename=model_filename,
-                            bundle_id=request.bundle.bundle_id,
-                            printer_name=request.bundle.printer_name,
-                            process_name=request.bundle.process_name,
-                            filament_names=(
-                                bundle_filament_names
-                                if bundle_filament_names is not None
-                                else request.bundle.filament_names
-                            ),
-                            plate=plate_num,
-                            export_3mf=True,
-                            arrange=True,
-                            bed_type=request.bed_type,
-                            request_id=progress_request_id,
-                            on_progress=plate_cb,
-                        )
-                    else:
-                        per_plate = await service.slice_with_profiles(
-                            model_bytes=primary_bytes,
-                            model_filename=model_filename,
-                            printer_profile_json=presets["printer"],
-                            process_profile_json=presets["process"],
-                            filament_profile_jsons=filament_jsons,
-                            plate=plate_num,
-                            export_3mf=True,
-                            arrange=True,
-                            request_id=progress_request_id,
-                            on_progress=plate_cb,
-                        )
+                    per_plate = await service.slice_with_profiles(
+                        model_bytes=primary_bytes,
+                        model_filename=model_filename,
+                        printer_profile_json=presets["printer"],
+                        process_profile_json=presets["process"],
+                        filament_profile_jsons=filament_jsons,
+                        plate=plate_num,
+                        export_3mf=True,
+                        arrange=True,
+                        request_id=progress_request_id,
+                        on_progress=plate_cb,
+                    )
                     per_plate_results.append((plate_num, per_plate))
 
                 # Merge the N single-plate 3MFs into one multi-plate 3MF.
@@ -3444,27 +3368,6 @@ async def _run_slicer_with_fallback(
                     print_time_seconds=sum(r.print_time_seconds for _, r in per_plate_results),
                     filament_used_g=sum(r.filament_used_g for _, r in per_plate_results),
                     filament_used_mm=sum(r.filament_used_mm for _, r in per_plate_results),
-                )
-            elif use_bundle:
-                # Bundle dispatch: sidecar materialises the JSON triplet
-                # from the stored .bbscfg by name. ``request.bundle`` is
-                # guaranteed non-None here by the use_bundle branch above.
-                assert request.bundle is not None
-                result = await service.slice_with_bundle(
-                    model_bytes=primary_bytes,
-                    model_filename=model_filename,
-                    bundle_id=request.bundle.bundle_id,
-                    printer_name=request.bundle.printer_name,
-                    process_name=request.bundle.process_name,
-                    filament_names=bundle_filament_names
-                    if bundle_filament_names is not None
-                    else request.bundle.filament_names,
-                    plate=request.plate,
-                    export_3mf=request.export_3mf,
-                    arrange=cross_class_arrange,
-                    bed_type=request.bed_type,
-                    request_id=progress_request_id,
-                    on_progress=progress_callback,
                 )
             else:
                 result = await service.slice_with_profiles(
@@ -3502,11 +3405,8 @@ async def _run_slicer_with_fallback(
             # bytes — the embedded-settings path also reads the same
             # project_settings.config and the same range validator runs
             # there too, so without sanitisation the fallback would die
-            # on the same sentinel error (#1201). Same fallback applies
-            # to the bundle path: if the resolved triplet crashes the CLI,
-            # embedded settings give the user *something* rather than a
-            # hard failure (the SliceModal flags the difference via
-            # used_embedded_settings).
+            # on the same sentinel error (#1201). The SliceModal flags
+            # the difference to the user via used_embedded_settings.
             result = await service.slice_without_profiles(
                 model_bytes=primary_bytes,
                 model_filename=model_filename,
@@ -3555,8 +3455,6 @@ async def _resolve_target_printer_model(db: AsyncSession, user: User | None, req
     """
     from backend.app.services.preset_resolver import resolve_preset_ref
 
-    if request.bundle is not None:
-        return _canonical_printer_model(request.bundle.printer_name)
     if request.printer_preset is None:
         return None
     try:
@@ -3578,11 +3476,10 @@ async def guard_nozzle_class_reslice(
 
     Cross-nozzle-class re-slicing is handled by ``_run_slicer_with_fallback``'s
     two-pass conversion (#1493): a 1mm cube is sliced with the target triplet
-    (via either ``slice_with_profiles`` or ``slice_with_bundle``, whichever
-    dispatch mode the caller is using) to produce a fresh target-shaped
+    via ``slice_with_profiles`` to produce a fresh target-shaped
     ``Metadata/project_settings.config``, which is then spliced into the
     source 3MF before the real slice. So this guard never needs to block
-    anymore — both preset and bundle paths are covered.
+    anymore.
 
     The function and its call sites in ``archives.py`` / the library re-slice
     route are kept so external pinned-version forks and downstream patches
