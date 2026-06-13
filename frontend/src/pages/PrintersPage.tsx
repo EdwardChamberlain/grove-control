@@ -3089,7 +3089,7 @@ function PrinterCard({
       )}
       <CardContent className={`${cardSize >= 3 ? 'p-5' : ''} flex flex-1 flex-col`}>
         {/* Header */}
-        <div className={getSpacing()}>
+        <div className={`${getSpacing()} ${cardSize >= 2 ? 'rounded-lg bg-bambu-dark p-3' : ''}`}>
           {/* Top row: Image, Name, Menu */}
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-3 min-w-0 flex-1">
