@@ -2912,7 +2912,7 @@ function PrinterCard({
         {/* Header */}
         <div className={getSpacing()}>
           {/* Top row: Image, Name, Menu */}
-          <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-3 min-w-0 flex-1">
               {/* Printer Model Image */}
               <img
@@ -2949,13 +2949,6 @@ function PrinterCard({
                       );
                     })()}
                   </div>
-                  <span
-                    className={`inline-flex h-7 w-8 flex-shrink-0 items-center justify-center rounded-lg ${printerHealth.className}`}
-                    title={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
-                    aria-label={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
-                  >
-                    <Activity className="w-4 h-4" />
-                  </span>
                   {viewMode === 'compact' && showClearPlateButton && (
                     <button
                       type="button"
@@ -2990,6 +2983,13 @@ function PrinterCard({
                 </p>
               </div>
             </div>
+            <span
+              className={`inline-flex h-7 w-8 flex-shrink-0 items-center justify-center rounded-lg ${printerHealth.className}`}
+              title={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
+              aria-label={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
+            >
+              <Activity className="w-4 h-4" />
+            </span>
           </div>
 
           {/* Badges row - only in expanded mode */}
