@@ -1945,8 +1945,9 @@ function PrinterCard({
       className: 'bg-status-ok/20 text-status-ok',
     };
   })();
+  const statusPillBase = 'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium';
   const plateStatusPill = plateStatus ? (
-    <span className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs ${plateStatus.className}`}>
+    <span className={`${statusPillBase} ${plateStatus.className}`}>
       <PlateClearedIcon className="w-3 h-3" />
       {plateStatus.label}
     </span>
@@ -2992,13 +2993,13 @@ function PrinterCard({
             </span>
           </div>
 
-          {/* Badges row - only in expanded mode */}
+          {/* Status indicators - only in expanded mode */}
           {viewMode === 'expanded' && (
             <div className="mt-2">
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="space-y-1.5">
               {/* Connection status badge */}
               <span
-                className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-xs ${
+                className={`${statusPillBase} ${
                   status?.connected
                     ? 'bg-status-ok/20 text-status-ok'
                     : 'bg-status-error/20 text-status-error'
@@ -3016,7 +3017,7 @@ function PrinterCard({
               {!status?.connected && (
                 <button
                   onClick={() => setShowDiagnostic(true)}
-                  className="flex items-center gap-1 px-2 py-1 rounded-full text-xs cursor-pointer bg-status-warning/20 text-status-warning hover:opacity-80 transition-opacity"
+                  className={`${statusPillBase} cursor-pointer bg-status-warning/20 text-status-warning hover:opacity-80 transition-opacity`}
                   title={t('diagnostic.runButton')}
                 >
                   <Stethoscope className="w-3 h-3" />
@@ -3026,7 +3027,7 @@ function PrinterCard({
               {/* Network connection indicator */}
               {status?.connected && status?.wired_network && (
                 <span
-                  className="flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-status-ok/20 text-status-ok"
+                  className={`${statusPillBase} bg-status-ok/20 text-status-ok`}
                   title={t('printers.connection.ethernet', 'Ethernet')}
                 >
                   <Cable className="w-3 h-3" />
@@ -3036,7 +3037,7 @@ function PrinterCard({
               {/* WiFi signal indicator */}
               {status?.connected && !status?.wired_network && wifiSignal != null && (
                 <span
-                  className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs ${
+                  className={`${statusPillBase} ${
                     wifiSignal >= -50
                       ? 'bg-status-ok/20 text-status-ok'
                       : wifiSignal >= -60
@@ -3059,7 +3060,7 @@ function PrinterCard({
                 return (
                   <button
                     onClick={() => setShowHMSModal(true)}
-                    className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs cursor-pointer hover:opacity-80 transition-opacity ${
+                    className={`${statusPillBase} cursor-pointer hover:opacity-80 transition-opacity ${
                       knownErrors.length > 0
                         ? knownErrors.some(e => e.severity <= 2)
                           ? 'bg-status-error/20 text-status-error'
@@ -3077,7 +3078,7 @@ function PrinterCard({
               {maintenanceInfo && (
                 <button
                   onClick={() => navigate('/maintenance')}
-                  className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs cursor-pointer hover:opacity-80 transition-opacity ${
+                  className={`${statusPillBase} cursor-pointer hover:opacity-80 transition-opacity ${
                     maintenanceInfo.due_count > 0
                       ? 'bg-status-error/20 text-status-error'
                       : maintenanceInfo.warning_count > 0
@@ -3100,7 +3101,7 @@ function PrinterCard({
               {queueCount > 0 && (
                 <button
                   onClick={() => navigate('/queue')}
-                  className="flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-status-ok/20 text-status-ok hover:opacity-80 transition-opacity"
+                  className={`${statusPillBase} bg-status-ok/20 text-status-ok hover:opacity-80 transition-opacity`}
                   title={t('printers.queue.inQueue', { count: queueCount })}
                 >
                   <Layers className="w-3 h-3" />
@@ -3111,7 +3112,7 @@ function PrinterCard({
               {checkPrinterFirmware && firmwareInfo?.current_version && firmwareInfo?.latest_version ? (
                 <button
                   onClick={() => setShowFirmwareModal(true)}
-                  className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs hover:opacity-80 transition-opacity ${
+                  className={`${statusPillBase} hover:opacity-80 transition-opacity ${
                     firmwareInfo.update_available
                       ? 'bg-status-warning/20 text-status-warning'
                       : 'bg-status-ok/20 text-status-ok'
@@ -3126,7 +3127,7 @@ function PrinterCard({
                   {firmwareInfo.current_version}
                 </button>
               ) : status?.firmware_version ? (
-                <span className="flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-status-ok/20 text-status-ok">
+                <span className={`${statusPillBase} bg-status-ok/20 text-status-ok`}>
                   {status.firmware_version}
                 </span>
               ) : null}
@@ -3134,7 +3135,7 @@ function PrinterCard({
               {/* Enclosure Door Badge (X1/X2D/P1S/P2S/H2*) */}
               {status?.connected && ['X1C', 'X1', 'X1E', 'X2D', 'P1S', 'P1P', 'P2S', 'H2D', 'H2D Pro', 'H2C', 'H2S'].includes(printer.model ?? '') && (
                 <span
-                  className={`flex items-center px-2 py-1 rounded-full text-xs ${
+                  className={`${statusPillBase} ${
                     status.door_open
                       ? 'bg-status-warning/20 text-status-warning'
                       : 'bg-status-ok/20 text-status-ok'
@@ -3142,6 +3143,7 @@ function PrinterCard({
                   title={status.door_open ? t('printers.door.open') : t('printers.door.closed')}
                 >
                   {status.door_open ? <DoorOpen className="w-3 h-3" /> : <DoorClosed className="w-3 h-3" />}
+                  {status.door_open ? t('printers.door.open') : t('printers.door.closed')}
                 </span>
               )}
               </div>
