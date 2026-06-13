@@ -567,7 +567,7 @@ describe('PrintersPage', () => {
       expect(badge?.className).toContain('text-status-ok');
     });
 
-    it('shows orange badge when firmware update is available', async () => {
+    it('shows warning badge when firmware update is available', async () => {
       server.use(
         http.get('/api/v1/firmware/updates/:id', () => {
           return HttpResponse.json(firmwareUpdateAvailable);
@@ -589,7 +589,7 @@ describe('PrintersPage', () => {
 
       const badge = screen.getAllByText('01.08.00.00')[0].closest('button');
       expect(badge).toBeInTheDocument();
-      expect(badge?.className).toContain('text-orange-400');
+      expect(badge?.className).toContain('text-status-warning');
     });
 
     it('hides badge when firmware check is disabled', async () => {

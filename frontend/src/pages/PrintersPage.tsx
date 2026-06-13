@@ -1930,13 +1930,13 @@ function PrinterCard({
     if (isPrintingOrPaused) {
       return {
         label: t('printers.plateStatus.inUse'),
-        className: 'bg-blue-500/20 text-blue-400',
+        className: 'bg-status-ok/20 text-status-ok',
       };
     }
     if (status.awaiting_plate_clear) {
       return {
         label: t('printers.plateStatus.notCleared'),
-        className: 'bg-yellow-500/20 text-yellow-400',
+        className: 'bg-status-warning/20 text-status-warning',
       };
     }
     return {
@@ -2972,7 +2972,7 @@ function PrinterCard({
               {!status?.connected && (
                 <button
                   onClick={() => setShowDiagnostic(true)}
-                  className="flex items-center gap-1 px-2 py-1 rounded-full text-xs cursor-pointer bg-bambu-dark-tertiary text-bambu-gray hover:text-white transition-colors"
+                  className="flex items-center gap-1 px-2 py-1 rounded-full text-xs cursor-pointer bg-status-warning/20 text-status-warning hover:opacity-80 transition-opacity"
                   title={t('diagnostic.runButton')}
                 >
                   <Stethoscope className="w-3 h-3" />
@@ -3000,7 +3000,7 @@ function PrinterCard({
                       : wifiSignal >= -70
                       ? 'bg-status-warning/20 text-status-warning'
                       : wifiSignal >= -80
-                      ? 'bg-orange-500/20 text-orange-600'
+                      ? 'bg-status-warning/20 text-status-warning'
                       : 'bg-status-error/20 text-status-error'
                   }`}
                   title={`WiFi: ${wifiSignal} dBm - ${t(getWifiStrength(wifiSignal).labelKey)}`}
@@ -3056,7 +3056,7 @@ function PrinterCard({
               {queueCount > 0 && (
                 <button
                   onClick={() => navigate('/queue')}
-                  className="flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-indigo-500/20 text-indigo-400 hover:opacity-80 transition-opacity"
+                  className="flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-status-ok/20 text-status-ok hover:opacity-80 transition-opacity"
                   title={t('printers.queue.inQueue', { count: queueCount })}
                 >
                   <Layers className="w-3 h-3" />
@@ -3069,7 +3069,7 @@ function PrinterCard({
                   onClick={() => setShowFirmwareModal(true)}
                   className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs hover:opacity-80 transition-opacity ${
                     firmwareInfo.update_available
-                      ? 'bg-orange-500/20 text-orange-400'
+                      ? 'bg-status-warning/20 text-status-warning'
                       : 'bg-status-ok/20 text-status-ok'
                   }`}
                   title={
@@ -3082,7 +3082,7 @@ function PrinterCard({
                   {firmwareInfo.current_version}
                 </button>
               ) : status?.firmware_version ? (
-                <span className="flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-bambu-dark-tertiary/50 text-bambu-gray">
+                <span className="flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-status-ok/20 text-status-ok">
                   {status.firmware_version}
                 </span>
               ) : null}
@@ -3092,7 +3092,7 @@ function PrinterCard({
                 <span
                   className={`flex items-center px-2 py-1 rounded-full text-xs ${
                     status.door_open
-                      ? 'bg-yellow-500/20 text-yellow-400'
+                      ? 'bg-status-warning/20 text-status-warning'
                       : 'bg-status-ok/20 text-status-ok'
                   }`}
                   title={status.door_open ? t('printers.door.open') : t('printers.door.closed')}
