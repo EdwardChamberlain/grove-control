@@ -1621,6 +1621,7 @@ function PrinterCard({
   const [showUploadForPrint, setShowUploadForPrint] = useState(false);
   const [showPrinterInfo, setShowPrinterInfo] = useState(false);
   const [showDiagnostic, setShowDiagnostic] = useState(false);
+  const [showHealthStatusMenu, setShowHealthStatusMenu] = useState(false);
   const closePrinterInfo = useCallback(() => setShowPrinterInfo(false), []);
   const [printAfterUpload, setPrintAfterUpload] = useState<{ id: number; filename: string } | null>(null);
   // AMS drying popover state: which AMS unit has the popover open
@@ -1999,10 +2000,134 @@ function PrinterCard({
   const showFirmwarePill = !!(checkPrinterFirmware && firmwareInfo?.current_version && firmwareInfo?.latest_version && firmwareInfo.update_available);
   const showFirmwareVersionPill = false;
   const showDoorPill = !!(status?.connected && hasDoorSensor && status.door_open);
+  const connectionStatusPill = (
+    <span
+      className={`${statusPillBase} ${
+        status?.connected
+          ? 'bg-status-ok/20 text-status-ok'
+          : 'bg-status-error/20 text-status-error'
+      }`}
+      title={statusRowLabel(connectionTitle, status?.connected ? t('printers.connection.connected') : t('printers.connection.offline'))}
+    >
+      {status?.connected ? (
+        <Link className="w-3 h-3" />
+      ) : (
+        <Unlink className="w-3 h-3" />
+      )}
+      <StatusRowText title={connectionTitle} state={status?.connected ? t('printers.connection.connected') : t('printers.connection.offline')} />
+    </span>
+  );
   const plateStatusPill = showPlateStatusPill && plateStatus ? (
     <span className={`${statusPillBase} ${plateStatus.className}`} title={statusRowLabel(plateTitle, plateStatus.label)}>
       <PlateClearedIcon className="w-3 h-3" />
       <StatusRowText title={plateTitle} state={plateStatus.label} />
+    </span>
+  ) : null;
+  const healthMenuPlateStatusPill = plateStatus ? (
+    <span className={`${statusPillBase} ${plateStatus.className}`} title={statusRowLabel(plateTitle, plateStatus.label)}>
+      <PlateClearedIcon className="w-3 h-3" />
+      <StatusRowText title={plateTitle} state={plateStatus.label} />
+    </span>
+  ) : null;
+  const networkStatusPill = (
+    <span
+      className={`${statusPillBase} ${networkClassName}`}
+      title={statusRowLabel(networkTitle, networkTitleLabel)}
+    >
+      {status?.wired_network ? <Cable className="w-3 h-3" /> : <Signal className="w-3 h-3" />}
+      <StatusRowText title={networkTitle} state={networkStateLabel} />
+    </span>
+  );
+  const hmsStatusPill = (
+    <button
+      type="button"
+      onClick={() => status?.connected && setShowHMSModal(true)}
+      className={`${statusPillBase} ${status?.connected ? 'cursor-pointer hover:opacity-80 transition-opacity' : 'cursor-default'} ${
+        !status?.connected
+          ? 'bg-status-error/20 text-status-error'
+          : knownHmsErrors.length > 0
+          ? knownHmsErrors.some(e => e.severity <= 2)
+            ? 'bg-status-error/20 text-status-error'
+            : 'bg-status-warning/20 text-status-warning'
+          : 'bg-status-ok/20 text-status-ok'
+      }`}
+      title={statusRowLabel(errorsTitle, status?.connected ? hmsStateLabel : t('common.unknown', 'Unknown'))}
+    >
+      <AlertTriangle className="w-3 h-3" />
+      <StatusRowText title={errorsTitle} state={status?.connected ? hmsStateLabel : t('common.unknown', 'Unknown')} />
+    </button>
+  );
+  const maintenanceStatusPill = (
+    <button
+      type="button"
+      onClick={() => navigate('/maintenance')}
+      className={`${statusPillBase} cursor-pointer hover:opacity-80 transition-opacity ${
+        maintenanceDueCount > 0
+          ? 'bg-status-error/20 text-status-error'
+          : maintenanceWarningCount > 0
+          ? 'bg-status-warning/20 text-status-warning'
+          : 'bg-status-ok/20 text-status-ok'
+      }`}
+      title={statusRowLabel(maintenanceTitle, maintenanceStateLabel)}
+    >
+      <Wrench className="w-3 h-3" />
+      <StatusRowText title={maintenanceTitle} state={maintenanceStateLabel} />
+    </button>
+  );
+  const queueStatusPill = (
+    <button
+      type="button"
+      onClick={() => navigate('/queue')}
+      className={`${statusPillBase} bg-status-ok/20 text-status-ok hover:opacity-80 transition-opacity`}
+      title={statusRowLabel(queueTitle, t('printers.queue.inQueue', { count: queueCount }))}
+    >
+      <Layers className="w-3 h-3" />
+      <StatusRowText title={queueTitle} state={t('printers.queue.inQueue', { count: queueCount })} />
+    </button>
+  );
+  const firmwareStatusPill = checkPrinterFirmware && firmwareInfo?.current_version && firmwareInfo?.latest_version ? (
+    <button
+      type="button"
+      onClick={() => setShowFirmwareModal(true)}
+      className={`${statusPillBase} hover:opacity-80 transition-opacity ${
+        firmwareInfo.update_available
+          ? 'bg-status-warning/20 text-status-warning'
+          : 'bg-status-ok/20 text-status-ok'
+      }`}
+      title={
+        firmwareInfo.update_available
+          ? t('printers.firmwareUpdateAvailable', { current: firmwareInfo.current_version, latest: firmwareInfo.latest_version })
+          : t('printers.firmwareUpToDate', { version: firmwareInfo.current_version })
+      }
+    >
+      {firmwareInfo.update_available ? <Download className="w-3 h-3" /> : <CheckCircle className="w-3 h-3" />}
+      <StatusRowText title={firmwareTitle} state={firmwareInfo.current_version} />
+      <span>
+        {firmwareInfo.update_available
+          ? t('printers.status.updateAvailable', 'Update available')
+          : t('common.ok', 'OK')
+        }
+      </span>
+    </button>
+  ) : status?.firmware_version ? (
+    <span
+      className={`${statusPillBase} bg-status-ok/20 text-status-ok`}
+      title={statusRowLabel(firmwareTitle, status.firmware_version)}
+    >
+      <StatusRowText title={firmwareTitle} state={status.firmware_version} />
+    </span>
+  ) : null;
+  const doorStatusPill = status?.connected && hasDoorSensor ? (
+    <span
+      className={`${statusPillBase} ${
+        status?.door_open
+          ? 'bg-status-warning/20 text-status-warning'
+          : 'bg-status-ok/20 text-status-ok'
+      }`}
+      title={statusRowLabel(doorTitle, status?.door_open ? t('printers.door.open') : t('printers.door.closed'))}
+    >
+      {status?.door_open ? <DoorOpen className="w-3 h-3" /> : <DoorClosed className="w-3 h-3" />}
+      <StatusRowText title={doorTitle} state={status?.door_open ? t('printers.door.open') : t('printers.door.closed')} />
     </span>
   ) : null;
   const printerHealth = (() => {
@@ -3037,13 +3162,38 @@ function PrinterCard({
                 </p>
               </div>
             </div>
-            <span
-              className={`inline-flex h-7 w-8 flex-shrink-0 items-center justify-center rounded-lg ${printerHealth.className}`}
-              title={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
-              aria-label={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
-            >
-              <Activity className="w-4 h-4" />
-            </span>
+            <div className="relative flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowHealthStatusMenu(!showHealthStatusMenu)}
+                className={`inline-flex h-7 w-8 items-center justify-center rounded-lg transition-opacity hover:opacity-80 ${printerHealth.className}`}
+                title={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
+                aria-label={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
+              >
+                <Activity className="w-4 h-4" />
+              </button>
+              {showHealthStatusMenu && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowHealthStatusMenu(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-50 flex w-[240px] flex-col overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary shadow-2xl">
+                    <div className="shrink-0 px-3 py-2.5 text-center text-sm font-medium text-white">
+                      Status details
+                    </div>
+                    <div className="h-px bg-bambu-dark-tertiary" />
+                    <div className="space-y-1.5 p-2.5">
+                      {connectionStatusPill}
+                      {healthMenuPlateStatusPill}
+                      {networkStatusPill}
+                      {hmsStatusPill}
+                      {maintenanceStatusPill}
+                      {queueStatusPill}
+                      {firmwareStatusPill}
+                      {doorStatusPill}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
 
           {/* Status indicators - only in expanded mode */}
@@ -3051,23 +3201,7 @@ function PrinterCard({
             <div className="mt-2">
               <div className="space-y-1.5">
               {/* Connection status badge */}
-              {showConnectionPill && (
-                <span
-                  className={`${statusPillBase} ${
-                    status?.connected
-                      ? 'bg-status-ok/20 text-status-ok'
-                      : 'bg-status-error/20 text-status-error'
-                  }`}
-                  title={statusRowLabel(connectionTitle, status?.connected ? t('printers.connection.connected') : t('printers.connection.offline'))}
-                >
-                  {status?.connected ? (
-                    <Link className="w-3 h-3" />
-                  ) : (
-                    <Unlink className="w-3 h-3" />
-                  )}
-                  <StatusRowText title={connectionTitle} state={status?.connected ? t('printers.connection.connected') : t('printers.connection.offline')} />
-                </span>
-              )}
+              {showConnectionPill && connectionStatusPill}
               {plateStatusPill}
               {/* Run connection diagnostic — offered when the printer is offline */}
               {!status?.connected && (
@@ -3081,108 +3215,17 @@ function PrinterCard({
                 </button>
               )}
               {/* Network connection indicator */}
-              {showNetworkPill && (
-                <span
-                  className={`${statusPillBase} ${networkClassName}`}
-                  title={statusRowLabel(networkTitle, networkTitleLabel)}
-                >
-                  {status?.wired_network ? <Cable className="w-3 h-3" /> : <Signal className="w-3 h-3" />}
-                  <StatusRowText title={networkTitle} state={networkStateLabel} />
-                </span>
-              )}
+              {showNetworkPill && networkStatusPill}
               {/* HMS Status Indicator */}
-              {showHmsPill && (
-                <button
-                  onClick={() => status?.connected && setShowHMSModal(true)}
-                  className={`${statusPillBase} ${status?.connected ? 'cursor-pointer hover:opacity-80 transition-opacity' : 'cursor-default'} ${
-                    !status?.connected
-                      ? 'bg-status-error/20 text-status-error'
-                      : knownHmsErrors.length > 0
-                      ? knownHmsErrors.some(e => e.severity <= 2)
-                        ? 'bg-status-error/20 text-status-error'
-                        : 'bg-status-warning/20 text-status-warning'
-                      : 'bg-status-ok/20 text-status-ok'
-                  }`}
-                  title={statusRowLabel(errorsTitle, status?.connected ? hmsStateLabel : t('common.unknown', 'Unknown'))}
-                >
-                  <AlertTriangle className="w-3 h-3" />
-                  <StatusRowText title={errorsTitle} state={status?.connected ? hmsStateLabel : t('common.unknown', 'Unknown')} />
-                </button>
-              )}
+              {showHmsPill && hmsStatusPill}
               {/* Maintenance Status Indicator */}
-              {showMaintenancePill && (
-                <button
-                  onClick={() => navigate('/maintenance')}
-                  className={`${statusPillBase} cursor-pointer hover:opacity-80 transition-opacity ${
-                    maintenanceDueCount > 0
-                      ? 'bg-status-error/20 text-status-error'
-                      : maintenanceWarningCount > 0
-                      ? 'bg-status-warning/20 text-status-warning'
-                      : 'bg-status-ok/20 text-status-ok'
-                  }`}
-                  title={statusRowLabel(maintenanceTitle, maintenanceStateLabel)}
-                >
-                  <Wrench className="w-3 h-3" />
-                  <StatusRowText title={maintenanceTitle} state={maintenanceStateLabel} />
-                </button>
-              )}
+              {showMaintenancePill && maintenanceStatusPill}
               {/* Queue Count Badge */}
-              {showQueuePill && (
-                <button
-                  onClick={() => navigate('/queue')}
-                  className={`${statusPillBase} bg-status-ok/20 text-status-ok hover:opacity-80 transition-opacity`}
-                  title={statusRowLabel(queueTitle, t('printers.queue.inQueue', { count: queueCount }))}
-                >
-                  <Layers className="w-3 h-3" />
-                  <StatusRowText title={queueTitle} state={t('printers.queue.inQueue', { count: queueCount })} />
-                </button>
-              )}
+              {showQueuePill && queueStatusPill}
               {/* Firmware Version Badge */}
-              {showFirmwarePill && checkPrinterFirmware && firmwareInfo?.current_version && firmwareInfo?.latest_version ? (
-                <button
-                  onClick={() => setShowFirmwareModal(true)}
-                  className={`${statusPillBase} hover:opacity-80 transition-opacity ${
-                    firmwareInfo.update_available
-                      ? 'bg-status-warning/20 text-status-warning'
-                      : 'bg-status-ok/20 text-status-ok'
-                  }`}
-                  title={
-                    firmwareInfo.update_available
-                      ? t('printers.firmwareUpdateAvailable', { current: firmwareInfo.current_version, latest: firmwareInfo.latest_version })
-                      : t('printers.firmwareUpToDate', { version: firmwareInfo.current_version })
-                  }
-                >
-                  {firmwareInfo.update_available ? <Download className="w-3 h-3" /> : <CheckCircle className="w-3 h-3" />}
-                  <StatusRowText title={firmwareTitle} state={firmwareInfo.current_version} />
-                  <span>
-                    {firmwareInfo.update_available
-                      ? t('printers.status.updateAvailable', 'Update available')
-                      : t('common.ok', 'OK')
-                    }
-                  </span>
-                </button>
-              ) : showFirmwareVersionPill && status?.firmware_version ? (
-                <span
-                  className={`${statusPillBase} bg-status-ok/20 text-status-ok`}
-                  title={statusRowLabel(firmwareTitle, status.firmware_version)}
-                >
-                  <StatusRowText title={firmwareTitle} state={status.firmware_version} />
-                </span>
-              ) : null}
+              {showFirmwarePill ? firmwareStatusPill : showFirmwareVersionPill && status?.firmware_version ? firmwareStatusPill : null}
               {/* Enclosure Door Badge */}
-              {showDoorPill && (
-                <span
-                  className={`${statusPillBase} ${
-                    status?.door_open
-                      ? 'bg-status-warning/20 text-status-warning'
-                      : 'bg-status-ok/20 text-status-ok'
-                  }`}
-                  title={statusRowLabel(doorTitle, status?.door_open ? t('printers.door.open') : t('printers.door.closed'))}
-                >
-                  {status?.door_open ? <DoorOpen className="w-3 h-3" /> : <DoorClosed className="w-3 h-3" />}
-                  <StatusRowText title={doorTitle} state={status?.door_open ? t('printers.door.open') : t('printers.door.closed')} />
-                </span>
-              )}
+              {showDoorPill && doorStatusPill}
               </div>
             </div>
           )}

@@ -565,6 +565,12 @@ describe('PrintersPage', () => {
       });
 
       expect(screen.queryByText('01.09.00.00')).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getAllByLabelText(/Machine health:/)[0]);
+
+      await waitFor(() => {
+        expect(screen.getByText('01.09.00.00')).toBeInTheDocument();
+      });
     });
 
     it('shows warning badge when firmware update is available', async () => {
