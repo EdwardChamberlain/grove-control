@@ -3103,30 +3103,6 @@ function PrinterCard({
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2">
                     <h3 className={`font-semibold text-white ${getTitleSize()}`}>{printer.name}</h3>
-                    {/* Connection indicator dot for compact mode */}
-                    {viewMode === 'compact' && (() => {
-                      const hmsErrors = status?.connected && status.hms_errors ? filterKnownHMSErrors(status.hms_errors) : [];
-                      const hasSevere = hmsErrors.some(e => e.severity <= 2);
-                      const hasWarning = hmsErrors.length > 0;
-                      const pipColor = !status?.connected
-                        ? 'bg-status-error'
-                        : hasSevere
-                          ? 'bg-status-error'
-                          : hasWarning
-                            ? 'bg-status-warning'
-                            : 'bg-status-ok';
-                      const pipTitle = !status?.connected
-                        ? t('printers.connection.offline')
-                        : hasWarning
-                          ? `${hmsErrors.length} HMS ${hmsErrors.length === 1 ? 'error' : 'errors'}`
-                          : t('printers.connection.connected');
-                      return (
-                        <div
-                          className={`w-2 h-2 rounded-full flex-shrink-0 ${pipColor}`}
-                          title={pipTitle}
-                        />
-                      );
-                    })()}
                   </div>
                   {viewMode === 'compact' && showClearPlateButton && (
                     <button
