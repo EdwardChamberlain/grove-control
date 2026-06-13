@@ -1945,7 +1945,8 @@ function PrinterCard({
     };
   })();
   const plateStatusPill = plateStatus ? (
-    <span className={`inline-flex flex-shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${plateStatus.className}`}>
+    <span className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs ${plateStatus.className}`}>
+      <PlateClearedIcon className="w-3 h-3" />
       {plateStatus.label}
     </span>
   ) : null;
@@ -2966,6 +2967,7 @@ function PrinterCard({
                 )}
                 {status?.connected ? t('printers.connection.connected') : t('printers.connection.offline')}
               </span>
+              {plateStatusPill}
               {/* Run connection diagnostic — offered when the printer is offline */}
               {!status?.connected && (
                 <button
@@ -3255,7 +3257,6 @@ function PrinterCard({
                         <div className="flex h-24 max-[520px]:h-20 min-w-0 flex-1 flex-col justify-between pt-1">
                           <div className="flex min-h-[18px] items-center gap-2 pr-8">
                             <p className="min-w-0 truncate text-sm text-bambu-gray">{getStatusDisplay(status.state, status.stg_cur_name)}</p>
-                            {plateStatusPill}
                           </div>
                           <p className={`min-h-[18px] truncate pr-8 text-sm ${printName ? 'text-white' : 'text-bambu-gray/70'}`}>
                             {printName || t('printers.noActiveJob', 'No active job')}
