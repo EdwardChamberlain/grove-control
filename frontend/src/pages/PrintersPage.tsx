@@ -71,6 +71,7 @@ import {
   MoreHorizontal,
   SlidersHorizontal,
   Stethoscope,
+  Activity,
 } from 'lucide-react';
 
 import { useNavigate } from 'react-router-dom';
@@ -1950,6 +1951,42 @@ function PrinterCard({
       {plateStatus.label}
     </span>
   ) : null;
+  const printerHealth = (() => {
+    if (!status?.connected) {
+      return {
+        label: t('printers.health.error', 'Error'),
+        className: 'bg-status-error/20 text-status-error',
+      };
+    }
+
+    const knownErrors = status.hms_errors ? filterKnownHMSErrors(status.hms_errors) : [];
+    const hasSevereHms = knownErrors.some(e => e.severity <= 2);
+    if (hasSevereHms || (maintenanceInfo?.due_count ?? 0) > 0 || (wifiSignal != null && wifiSignal < -80)) {
+      return {
+        label: t('printers.health.error', 'Error'),
+        className: 'bg-status-error/20 text-status-error',
+      };
+    }
+
+    if (
+      knownErrors.length > 0 ||
+      needsPlateClear ||
+      (maintenanceInfo?.warning_count ?? 0) > 0 ||
+      firmwareInfo?.update_available ||
+      status.door_open ||
+      (wifiSignal != null && wifiSignal < -60)
+    ) {
+      return {
+        label: t('printers.health.attention', 'Attention'),
+        className: 'bg-status-warning/20 text-status-warning',
+      };
+    }
+
+    return {
+      label: t('printers.health.normal', 'Normal'),
+      className: 'bg-status-ok/20 text-status-ok',
+    };
+  })();
 
   // Determine if this card should be hidden (use cached connected state to prevent flicker)
   const shouldHide = hideIfDisconnected && isConnected === false;
@@ -2912,6 +2949,13 @@ function PrinterCard({
                       );
                     })()}
                   </div>
+                  <span
+                    className={`inline-flex h-7 w-8 flex-shrink-0 items-center justify-center rounded-lg ${printerHealth.className}`}
+                    title={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
+                    aria-label={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
+                  >
+                    <Activity className="w-4 h-4" />
+                  </span>
                   {viewMode === 'compact' && showClearPlateButton && (
                     <button
                       type="button"
