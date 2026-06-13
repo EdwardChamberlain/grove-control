@@ -1989,6 +1989,7 @@ function PrinterCard({
     : wifiSignal >= -80
     ? 'bg-status-warning/20 text-status-warning'
     : 'bg-status-error/20 text-status-error';
+  const hasDoorSensor = ['X1C', 'X1', 'X1E', 'X2D', 'P2S', 'H2D', 'H2D Pro', 'H2C', 'H2S'].includes(printer.model ?? '');
   const plateStatusPill = plateStatus ? (
     <span className={`${statusPillBase} ${plateStatus.className}`} title={statusRowLabel(plateTitle, plateStatus.label)}>
       <PlateClearedIcon className="w-3 h-3" />
@@ -2017,7 +2018,7 @@ function PrinterCard({
       needsPlateClear ||
       (maintenanceInfo?.warning_count ?? 0) > 0 ||
       firmwareInfo?.update_available ||
-      status.door_open ||
+      (hasDoorSensor && status.door_open) ||
       (wifiSignal != null && wifiSignal < -60)
     ) {
       return {
@@ -3149,8 +3150,8 @@ function PrinterCard({
                   <StatusRowText title={firmwareTitle} state={status.firmware_version} />
                 </span>
               ) : null}
-              {/* Enclosure Door Badge (X1/X2D/P1S/P2S/H2*) */}
-              {status?.connected && ['X1C', 'X1', 'X1E', 'X2D', 'P1S', 'P1P', 'P2S', 'H2D', 'H2D Pro', 'H2C', 'H2S'].includes(printer.model ?? '') && (
+              {/* Enclosure Door Badge */}
+              {status?.connected && hasDoorSensor && (
                 <span
                   className={`${statusPillBase} ${
                     status.door_open
