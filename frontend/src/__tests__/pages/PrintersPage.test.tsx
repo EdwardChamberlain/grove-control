@@ -329,6 +329,32 @@ describe('PrintersPage', () => {
       });
     });
 
+    it('dismisses small-card status details without opening the medium-card drilldown', async () => {
+      const { container } = render(<PrintersPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'S' }));
+      fireEvent.click(screen.getAllByLabelText(/Machine health:/)[0]);
+
+      await waitFor(() => {
+        expect(screen.getByText('Status details')).toBeInTheDocument();
+      });
+
+      const backdrop = container.querySelector('.fixed.inset-0.z-40');
+      expect(backdrop).toBeInTheDocument();
+
+      fireEvent.click(backdrop!);
+
+      await waitFor(() => {
+        expect(screen.queryByText('Status details')).not.toBeInTheDocument();
+      });
+
+      expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
+    });
+
     it('hides green plate clear status and action while idle', async () => {
       render(<PrintersPage />);
 

@@ -3141,7 +3141,10 @@ function PrinterCard({
             <div className="relative flex-shrink-0">
               <button
                 type="button"
-                onClick={() => setShowHealthStatusMenu(!showHealthStatusMenu)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowHealthStatusMenu(!showHealthStatusMenu);
+                }}
                 className={`inline-flex h-7 w-8 items-center justify-center rounded-lg transition-opacity hover:opacity-80 ${printerHealth.className}`}
                 title={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
                 aria-label={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
@@ -3150,8 +3153,17 @@ function PrinterCard({
               </button>
               {showHealthStatusMenu && (
                 <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowHealthStatusMenu(false)} />
-                  <div className="absolute right-0 top-full mt-1 z-50 flex w-[240px] flex-col overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary shadow-2xl">
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowHealthStatusMenu(false);
+                    }}
+                  />
+                  <div
+                    className="absolute right-0 top-full mt-1 z-50 flex w-[240px] flex-col overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary shadow-2xl"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <div className="shrink-0 px-3 py-2.5 text-center text-sm font-medium text-white">
                       Status details
                     </div>
