@@ -2000,6 +2000,16 @@ function PrinterCard({
   const showFirmwarePill = !!(checkPrinterFirmware && firmwareInfo?.current_version && firmwareInfo?.latest_version && firmwareInfo.update_available);
   const showFirmwareVersionPill = false;
   const showDoorPill = !!(status?.connected && hasDoorSensor && status.door_open);
+  const hasVisibleStatusPills = showConnectionPill ||
+    showPlateStatusPill ||
+    !status?.connected ||
+    showNetworkPill ||
+    showHmsPill ||
+    showMaintenancePill ||
+    showQueuePill ||
+    showFirmwarePill ||
+    (showFirmwareVersionPill && !!status?.firmware_version) ||
+    showDoorPill;
   const connectionStatusPill = (
     <span
       className={`${statusPillBase} ${
@@ -3091,7 +3101,7 @@ function PrinterCard({
         {/* Header */}
         <div className={`${getSpacing()} ${cardSize >= 2 ? 'rounded-lg bg-bambu-dark p-3' : ''}`}>
           {/* Top row: Image, Name, Menu */}
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex items-stretch justify-between gap-2">
             <div className="flex items-center gap-3 min-w-0 flex-1">
               {/* Printer Model Image */}
               <img
@@ -3138,14 +3148,14 @@ function PrinterCard({
                 </p>
               </div>
             </div>
-            <div className="relative flex-shrink-0">
+            <div className="relative flex flex-shrink-0 self-stretch">
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   setShowHealthStatusMenu(!showHealthStatusMenu);
                 }}
-                className={`inline-flex h-7 w-8 items-center justify-center rounded-lg transition-opacity hover:opacity-80 ${printerHealth.className}`}
+                className={`inline-flex h-full min-h-7 w-8 items-center justify-center rounded-lg transition-opacity hover:opacity-80 ${printerHealth.className}`}
                 title={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
                 aria-label={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
               >
@@ -3185,7 +3195,7 @@ function PrinterCard({
           </div>
 
           {/* Status indicators - only in expanded mode */}
-          {viewMode === 'expanded' && (
+          {viewMode === 'expanded' && hasVisibleStatusPills && (
             <div className="mt-2">
               <div className="space-y-1.5">
               {/* Connection status badge */}
