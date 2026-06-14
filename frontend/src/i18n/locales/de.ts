@@ -361,7 +361,7 @@ export default {
       unload: 'Entladen',
     },
     bedJog: {
-      title: 'Druckbett bewegen',
+      title: 'Jog-Steuerung',
       bed: 'Bett',
       step: 'Schritt (mm)',
       up: 'Platte hoch',

@@ -360,7 +360,7 @@ export default {
       unload: 'アンロード',
     },
     bedJog: {
-      title: 'ビルドプレートを移動',
+      title: 'ジョグ操作',
       bed: 'ベッド',
       step: 'ステップ (mm)',
       up: 'プレートを上へ',

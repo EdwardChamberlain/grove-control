@@ -361,7 +361,7 @@ export default {
       unload: 'Unload',
     },
     bedJog: {
-      title: 'Move build plate',
+      title: 'Jog Controls',
       bed: 'Bed',
       step: 'Step (mm)',
       up: 'Move plate up',

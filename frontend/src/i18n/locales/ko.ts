@@ -331,7 +331,7 @@ export default {
       unload: '언로드'
     },
     bedJog: {
-      title: '빌드 플레이트 이동',
+      title: '조그 컨트롤',
       bed: '베드',
       step: '이동 거리 (mm)',
       up: '플레이트 위로',

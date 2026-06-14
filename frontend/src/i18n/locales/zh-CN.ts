@@ -361,7 +361,7 @@ export default {
       unload: '卸载',
     },
     bedJog: {
-      title: '移动热床',
+      title: '点动控制',
       bed: '热床',
       step: '步长 (mm)',
       up: '热床上移',

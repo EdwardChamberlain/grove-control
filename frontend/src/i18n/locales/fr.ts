@@ -361,7 +361,7 @@ export default {
       unload: 'Décharger',
     },
     bedJog: {
-      title: 'Déplacer le plateau',
+      title: 'Commandes de déplacement',
       bed: 'Plateau',
       step: 'Pas (mm)',
       up: 'Monter le plateau',
