@@ -2,8 +2,8 @@ import type { PrintQueueItem, Printer } from '../../api/client';
 
 /**
  * Mode of operation for the PrintModal.
- * - 'reprint': Immediate print from archive (no schedule options)
- * - 'add-to-queue': Schedule print to queue (includes schedule options)
+ * - 'reprint': Legacy alias for creating a print queue item
+ * - 'add-to-queue': Legacy alias for creating a print queue item
  * - 'edit-queue-item': Edit existing queue item (all options + existing values)
  */
 export type PrintModalMode = 'reprint' | 'add-to-queue' | 'edit-queue-item';
@@ -66,7 +66,7 @@ export const DEFAULT_PRINT_OPTIONS: PrintOptions = {
 /**
  * Schedule type for queue items.
  */
-export type ScheduleType = 'asap' | 'scheduled' | 'manual';
+export type ScheduleType = 'asap' | 'queue' | 'scheduled';
 
 /**
  * Schedule options for queue items.
@@ -74,6 +74,7 @@ export type ScheduleType = 'asap' | 'scheduled' | 'manual';
 export interface ScheduleOptions {
   scheduleType: ScheduleType;
   scheduledTime: string;
+  requireManualStart: boolean;
   requirePreviousSuccess: boolean;
   autoOffAfter: boolean;
   gcodeInjection: boolean;
@@ -88,6 +89,7 @@ export interface ScheduleOptions {
 export const DEFAULT_SCHEDULE_OPTIONS: ScheduleOptions = {
   scheduleType: 'asap',
   scheduledTime: '',
+  requireManualStart: false,
   requirePreviousSuccess: false,
   autoOffAfter: false,
   gcodeInjection: false,

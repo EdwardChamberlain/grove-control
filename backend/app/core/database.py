@@ -935,6 +935,16 @@ async def run_migrations(conn):
     else:
         await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN filament_short BOOLEAN DEFAULT false")
 
+    # Migration: cleanup flag for transient printer-card uploads routed through
+    # the scheduler. The archive copy is durable; the library row/file can be
+    # deleted after dispatch.
+    if is_sqlite():
+        await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN cleanup_library_after_dispatch BOOLEAN DEFAULT 0")
+    else:
+        await _safe_execute(
+            conn, "ALTER TABLE print_queue ADD COLUMN cleanup_library_after_dispatch BOOLEAN DEFAULT false"
+        )
+
     # Migration: skip_filament_check flag on print_queue (#1698-followup).
     # Persists the user's "Print Anyway" acknowledgement so the scheduler
     # doesn't re-flag the item every tick after they've confirmed dispatch
