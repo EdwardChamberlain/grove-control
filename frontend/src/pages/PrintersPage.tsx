@@ -3120,13 +3120,13 @@ function PrinterCard({
                       onClick={() => clearPlateMutation.mutate()}
                       disabled={clearPlateMutation.isPending || !hasPermission('printers:clear_plate')}
                       aria-label={t('printers.plateStatus.markCleared')}
-                      className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md bg-yellow-500/20 border border-yellow-400/40 text-yellow-400 hover:bg-yellow-500/30 transition-colors disabled:opacity-50"
+                      className="inline-flex h-7 min-h-7 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-status-warning/20 text-status-warning transition-opacity hover:opacity-80 disabled:opacity-50 disabled:hover:opacity-50"
                       title={!hasPermission('printers:clear_plate') ? t('printers.permission.noControl') : t('printers.plateStatus.markCleared')}
                     >
                       {clearPlateMutation.isPending ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
+                        <Loader2 className="w-4 h-4 animate-spin" />
                       ) : (
-                        <PlateClearedIcon className="w-3 h-3" />
+                        <PlateClearedIcon className="w-4 h-4" />
                       )}
                     </button>
                   )}
