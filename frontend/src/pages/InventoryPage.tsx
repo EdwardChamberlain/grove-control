@@ -7,6 +7,7 @@ import {
   Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   TrendingDown, Layers, Printer, AlertTriangle, X, Clock, LayoutGrid, TableProperties, Columns,
   ArrowUp, ArrowDown, ArrowUpDown, Group, ChevronDown, Check, RefreshCw, TrendingUp, Lock, Copy, Eraser,
+  Upload, Download,
 } from 'lucide-react';
 import { ForecastPanel } from '../components/ForecastPanel';
 import { api, spoolbuddyApi, ApiError } from '../api/client';
@@ -18,6 +19,7 @@ import {SpoolFormModal, type SpoolFormMode} from '../components/SpoolFormModal';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { ColumnConfigModal, type ColumnConfig } from '../components/ColumnConfigModal';
 import { LabelTemplatePickerModal } from '../components/LabelTemplatePickerModal';
+import { SpoolCsvImportModal } from '../components/SpoolCsvImportModal';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { resolveSpoolColorName } from '../utils/colors';
@@ -467,12 +469,15 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
   const [formModal, setFormModal] = useState<{ spool?: InventorySpool | null; mode: SpoolFormMode } | null>(null);
   const deepLinkHandled = useRef(false);
   const [confirmAction, setConfirmAction] = useState<
-    | { type: 'delete' | 'archive' | 'reset-usage'; spoolId: number }
-    | { type: 'reset-all-usage' }
+    | { type: 'delete' | 'archive' | 'reset-consumed-counter'; spoolId: number }
+    | { type: 'reset-all-consumed-counters' }
     | null
   >(null);
   // Label printing (#809). null = closed; otherwise the IDs to print labels for.
   const [labelPickerSpoolIds, setLabelPickerSpoolIds] = useState<number[] | null>(null);
+  // CSV import/export (#1576). Local inventory only — hidden in Spoolman mode.
+  const [csvImportOpen, setCsvImportOpen] = useState(false);
+  const [exportingCsv, setExportingCsv] = useState(false);
 
   // Filter state
   const [archiveFilter, setArchiveFilter] = useState<ArchiveFilter>('active');
@@ -526,6 +531,26 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
       spoolmanMode ? api.getSpoolmanInventorySpools(true) : api.getSpools(true),
     refetchInterval: 30000,
   });
+
+  // CSV export (#1576) — downloads the active inventory as a CSV file.
+  const handleExportCsv = useCallback(async () => {
+    setExportingCsv(true);
+    try {
+      await api.exportSpoolsCsv();
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : t('inventory.csv.exportError', 'Export failed'),
+        'error',
+      );
+    } finally {
+      setExportingCsv(false);
+    }
+  }, [showToast, t]);
+
+  // Shown as the tooltip on both CSV buttons when they're disabled in Spoolman mode.
+  const spoolmanCsvHint = spoolmanMode
+    ? t('inventory.csv.spoolmanHint', 'In Spoolman mode, use Spoolman\'s built-in CSV import/export.')
+    : undefined;
 
   // Deep-link: open edit modal for ?spool=<id>
   // Prefer the already-loaded spool list (no extra API call); fall back to a
@@ -687,27 +712,31 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
     },
   });
 
-  const resetUsageMutation = useMutation({
+  const resetConsumedCounterMutation = useMutation({
     mutationFn: (id: number) =>
-      spoolmanMode ? api.resetSpoolmanInventorySpoolUsage(id) : api.resetSpoolUsage(id),
+      spoolmanMode
+        ? api.resetSpoolmanInventorySpoolConsumedCounter(id)
+        : api.resetSpoolConsumedCounter(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: spoolsQueryKey });
-      showToast(t('inventory.usageReset'), 'success');
+      showToast(t('inventory.consumedCounterReset'), 'success');
     },
     onError: () => {
-      showToast(t('inventory.resetUsageFailed'), 'error');
+      showToast(t('inventory.resetConsumedCounterFailed'), 'error');
     },
   });
 
-  const bulkResetUsageMutation = useMutation({
+  const bulkResetConsumedCounterMutation = useMutation({
     mutationFn: (ids: number[]) =>
-      spoolmanMode ? api.bulkResetSpoolmanInventorySpoolUsage(ids) : api.bulkResetSpoolUsage(ids),
+      spoolmanMode
+        ? api.bulkResetSpoolmanInventorySpoolConsumedCounter(ids)
+        : api.bulkResetSpoolConsumedCounter(ids),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: spoolsQueryKey });
-      showToast(t('inventory.allUsageReset', { count: data.reset }), 'success');
+      showToast(t('inventory.allConsumedCountersReset', { count: data.reset }), 'success');
     },
     onError: () => {
-      showToast(t('inventory.resetUsageFailed'), 'error');
+      showToast(t('inventory.resetConsumedCounterFailed'), 'error');
     },
   });
 
@@ -1100,6 +1129,28 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
           <p className="text-bambu-gray mt-1">{t('inventory.subtitle')}</p>
         </div>
         <div className="flex items-center gap-2">
+          {/* CSV import/export (#1576). Operates on Bambuddy's local inventory.
+              In Spoolman mode the buttons stay visible (feature parity) but are
+              disabled with a hint pointing at Spoolman's own CSV export, since
+              Spoolman owns the data store in that mode. */}
+          <Button
+            variant="secondary"
+            disabled={spoolmanMode}
+            onClick={() => setCsvImportOpen(true)}
+            title={spoolmanCsvHint}
+          >
+            <Upload className="w-4 h-4" />
+            {t('inventory.csv.importButton', 'Import CSV')}
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={spoolmanMode || exportingCsv}
+            onClick={handleExportCsv}
+            title={spoolmanCsvHint}
+          >
+            {exportingCsv ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            {t('inventory.csv.exportButton', 'Export CSV')}
+          </Button>
           <Button
             variant="secondary"
             disabled={filteredSpools.length === 0}
@@ -1145,10 +1196,10 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
               </div>
               {stats.totalConsumed > 0 && resetableSpoolIds.length > 0 && (
                 <button
-                  onClick={() => setConfirmAction({ type: 'reset-all-usage' })}
+                  onClick={() => setConfirmAction({ type: 'reset-all-consumed-counters' })}
                   className="p-1 text-bambu-gray hover:text-red-400 rounded transition-colors"
-                  title={t('inventory.resetAllUsageTooltip')}
-                  aria-label={t('inventory.resetAllUsage')}
+                  title={t('inventory.resetAllConsumedCountersTooltip')}
+                  aria-label={t('inventory.resetAllConsumedCounters')}
                 >
                   <Eraser className="w-3.5 h-3.5" />
                 </button>
@@ -1747,7 +1798,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
                           onArchive={(id) => setConfirmAction({ type: 'archive', spoolId: id })}
                           onDelete={(id) => setConfirmAction({ type: 'delete', spoolId: id })}
                           onPrintLabel={(id) => setLabelPickerSpoolIds([id])}
-                          onResetUsage={(id) => setConfirmAction({ type: 'reset-usage', spoolId: id })}
+                          onResetConsumedCounter={(id) => setConfirmAction({ type: 'reset-consumed-counter', spoolId: id })}
                           visibleColumns={visibleColumns}
                           assignmentMap={assignmentMap}
                           catalogMap={catalogMap}
@@ -1773,7 +1824,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
                         onArchive={() => setConfirmAction({ type: 'archive', spoolId: spool.id })}
                         onDelete={() => setConfirmAction({ type: 'delete', spoolId: spool.id })}
                         onPrintLabel={() => setLabelPickerSpoolIds([spool.id])}
-                        onResetUsage={() => setConfirmAction({ type: 'reset-usage', spoolId: spool.id })}
+                        onResetConsumedCounter={() => setConfirmAction({ type: 'reset-consumed-counter', spoolId: spool.id })}
                         visibleColumns={visibleColumns}
                         assignmentMap={assignmentMap}
                         catalogMap={catalogMap}
@@ -1874,25 +1925,25 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
         />
       )}
 
-      {/* Confirm Modal (delete / archive / reset-usage / reset-all-usage) */}
+      {/* Confirm Modal (delete / archive / reset-consumed-counter / reset-all-consumed-counters) */}
       {confirmAction && (
         <ConfirmModal
           title={
             confirmAction.type === 'delete' ? t('common.delete') :
             confirmAction.type === 'archive' ? t('inventory.archive') :
-            confirmAction.type === 'reset-usage' ? t('inventory.resetUsage') :
-            t('inventory.resetAllUsage')
+            confirmAction.type === 'reset-consumed-counter' ? t('inventory.resetConsumedCounter') :
+            t('inventory.resetAllConsumedCounters')
           }
           message={
             confirmAction.type === 'delete' ? t('inventory.deleteConfirm') :
             confirmAction.type === 'archive' ? t('inventory.archiveConfirm') :
-            confirmAction.type === 'reset-usage' ? t('inventory.resetUsageConfirm') :
-            t('inventory.resetAllUsageConfirm', { count: resetableSpoolIds.length })
+            confirmAction.type === 'reset-consumed-counter' ? t('inventory.resetConsumedCounterConfirm') :
+            t('inventory.resetAllConsumedCountersConfirm', { count: resetableSpoolIds.length })
           }
           confirmText={
             confirmAction.type === 'delete' ? t('common.delete') :
             confirmAction.type === 'archive' ? t('inventory.archive') :
-            t('inventory.resetUsage')
+            t('inventory.resetConsumedCounter')
           }
           variant={confirmAction.type === 'archive' ? 'warning' : 'danger'}
           onConfirm={() => {
@@ -1900,10 +1951,10 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
               deleteMutation.mutate(confirmAction.spoolId);
             } else if (confirmAction.type === 'archive') {
               archiveMutation.mutate(confirmAction.spoolId);
-            } else if (confirmAction.type === 'reset-usage') {
-              resetUsageMutation.mutate(confirmAction.spoolId);
+            } else if (confirmAction.type === 'reset-consumed-counter') {
+              resetConsumedCounterMutation.mutate(confirmAction.spoolId);
             } else {
-              bulkResetUsageMutation.mutate(resetableSpoolIds);
+              bulkResetConsumedCounterMutation.mutate(resetableSpoolIds);
             }
             setConfirmAction(null);
           }}
@@ -1927,6 +1978,17 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
         initialSelectedIds={labelPickerSpoolIds ?? []}
         spoolmanMode={spoolmanMode}
       />
+
+      {csvImportOpen && (
+        <SpoolCsvImportModal
+          onClose={() => setCsvImportOpen(false)}
+          onImported={(created) => {
+            setCsvImportOpen(false);
+            queryClient.invalidateQueries({ queryKey: spoolsQueryKey });
+            showToast(t('inventory.csv.importSuccess', '{{count}} spools imported', { count: created }), 'success');
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -2115,7 +2177,7 @@ function SpoolCard({
 
 /* Single spool row for table view */
 function SpoolTableRow({
-  spool, remaining, pct, onEdit, onCopy, onRestore, onArchive, onDelete, onPrintLabel, onResetUsage,
+  spool, remaining, pct, onEdit, onCopy, onRestore, onArchive, onDelete, onPrintLabel, onResetConsumedCounter,
   visibleColumns, assignmentMap, catalogMap, currencySymbol, dateFormat, t, onSyncWeight,
 }: {
   spool: InventorySpool;
@@ -2127,7 +2189,7 @@ function SpoolTableRow({
   onArchive: () => void;
   onDelete: () => void;
   onPrintLabel?: () => void;
-  onResetUsage?: () => void;
+  onResetConsumedCounter?: () => void;
   visibleColumns: string[];
   assignmentMap: Record<number, LocationDisplay>;
   catalogMap: Record<number, SpoolCatalogEntry>;
@@ -2163,12 +2225,12 @@ function SpoolTableRow({
               <Printer className="w-4 h-4" />
             </button>
           )}
-          {onResetUsage && spool.weight_used > 0 && (
+          {onResetConsumedCounter && spool.weight_used > 0 && (
             // Eraser also shows on archived spools (#1390 follow-up):
             // archived consumed weight now counts in "Total Consumed", so
             // the user needs a way to zero an archived spool's tracking
             // counter individually without having to un-archive it first.
-            <button onClick={onResetUsage} className="p-1.5 text-bambu-gray hover:text-orange-400 rounded transition-colors" title={t('inventory.resetUsageTooltip')}>
+            <button onClick={onResetConsumedCounter} className="p-1.5 text-bambu-gray hover:text-orange-400 rounded transition-colors" title={t('inventory.resetConsumedCounterTooltip')}>
               <Eraser className="w-4 h-4" />
             </button>
           )}
@@ -2193,7 +2255,7 @@ function SpoolTableRow({
 /* Grouped spool rows for table view */
 function SpoolTableGroup({
   spools, headerSpool, remaining, pct, isExpanded, onToggle,
-  onEdit, onCopy, onArchive, onDelete, onPrintLabel, onResetUsage,
+  onEdit, onCopy, onArchive, onDelete, onPrintLabel, onResetConsumedCounter,
   visibleColumns, assignmentMap, catalogMap, currencySymbol, dateFormat, t, onSyncWeight,
 }: {
   spools: InventorySpool[];
@@ -2209,7 +2271,7 @@ function SpoolTableGroup({
   onArchive: (id: number) => void;
   onDelete: (id: number) => void;
   onPrintLabel?: (spoolId: number) => void;
-  onResetUsage?: (id: number) => void;
+  onResetConsumedCounter?: (id: number) => void;
   visibleColumns: string[];
   assignmentMap: Record<number, LocationDisplay>;
   catalogMap: Record<number, SpoolCatalogEntry>;
@@ -2263,7 +2325,7 @@ function SpoolTableGroup({
             onArchive={() => onArchive(spool.id)}
             onDelete={() => onDelete(spool.id)}
             onPrintLabel={onPrintLabel ? () => onPrintLabel(spool.id) : undefined}
-            onResetUsage={onResetUsage ? () => onResetUsage(spool.id) : undefined}
+            onResetConsumedCounter={onResetConsumedCounter ? () => onResetConsumedCounter(spool.id) : undefined}
             visibleColumns={visibleColumns}
             assignmentMap={assignmentMap}
             catalogMap={catalogMap}

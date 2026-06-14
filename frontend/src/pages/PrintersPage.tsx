@@ -1194,6 +1194,8 @@ function mapModelCode(ssdpModel: string | null): string {
     'BL-P003': 'X1E',
     // X2 Series
     'N6': 'X2D',
+    // A2 Series
+    'N9': 'A2L',
     // P Series
     'C11': 'P1S',
     'C12': 'P1P',
@@ -1211,6 +1213,7 @@ function mapModelCode(ssdpModel: string | null): string {
     'P2S': 'P2S',
     'A1': 'A1',
     'A1 Mini': 'A1 Mini',
+    'A2L': 'A2L',
     'H2D': 'H2D',
     'H2D Pro': 'H2D Pro',
     'H2C': 'H2C',
@@ -3649,7 +3652,7 @@ function PrinterCard({
                                       slotNumber={slotIdx + 1}
                                     />
                                     <div className="text-[9px] text-white font-bold truncate">
-                                      {tray?.tray_type || t('ams.slotEmpty')}
+                                      {tray?.tray_type || t(emptyKind === 'reset' ? 'ams.slotUnconfigured' : 'ams.slotEmpty')}
                                     </div>
                                     {/* Fill bar */}
                                     <div className="mt-1 h-1.5 bg-black/30 rounded-full overflow-hidden">
@@ -3977,7 +3980,7 @@ function PrinterCard({
                               slotNumber={1}
                             />
                             <div className="text-[9px] text-white font-bold truncate">
-                              {tray?.tray_type || t('ams.slotEmpty')}
+                              {tray?.tray_type || t(emptyKind === 'reset' ? 'ams.slotUnconfigured' : 'ams.slotEmpty')}
                             </div>
                             {/* Fill bar */}
                             <div className="mt-1 h-1.5 bg-black/30 rounded-full overflow-hidden">
@@ -5445,8 +5448,10 @@ function PrinterCard({
                 // margin). When the popover is taller than that space — short
                 // viewport, landscape phone, zoomed-in — the body scrolls and
                 // the footer stays pinned, so the Start button is always
-                // reachable (#1458 / #1447 follow-up).
-                maxHeight: `calc(100vh - ${dryingPopoverPos.top}px - 8px)`,
+                // reachable (#1458 / #1447 follow-up). dvh (not vh) so iOS
+                // Safari's bottom toolbar overlay doesn't clip the footer
+                // (#1669, iPhone 17 Safari).
+                maxHeight: `calc(100dvh - ${dryingPopoverPos.top}px - 8px)`,
               }}
               onClick={e => e.stopPropagation()}
             >
@@ -5570,7 +5575,7 @@ function PrinterCard({
   );
 }
 
-function AddPrinterModal({
+export function AddPrinterModal({
   onClose,
   onAdd,
   existingSerials,
@@ -5598,6 +5603,12 @@ function AddPrinterModal({
   const [isDocker, setIsDocker] = useState(false);
   const [detectedSubnets, setDetectedSubnets] = useState<string[]>([]);
   const [subnet, setSubnet] = useState('');
+  // Custom subnet — `__custom__` sentinel in the dropdown reveals a CIDR
+  // text input so users can scan a subnet Bambuddy isn't directly on
+  // (printer behind a router on a different L3 segment — SSDP multicast
+  // won't cross that boundary, only an active unicast scan will). #1564
+  const [customSubnet, setCustomSubnet] = useState('');
+  const [useCustomSubnet, setUseCustomSubnet] = useState(false);
   const [scanProgress, setScanProgress] = useState({ scanned: 0, total: 0 });
   const [showDiagnostic, setShowDiagnostic] = useState(false);
 
@@ -5608,7 +5619,9 @@ function AddPrinterModal({
   const [checkingSave, setCheckingSave] = useState(false);
   const [saveWarning, setSaveWarning] = useState<PrinterDiagnosticResult | null>(null);
 
-  // Fetch discovery info on mount
+  // Fetch discovery info on mount + restore the last custom CIDR the user
+  // typed (kept in localStorage so they don't retype `10.1.1.0/24` every
+  // time they open this modal).
   useEffect(() => {
     discoveryApi.getInfo().then(info => {
       setIsDocker(info.is_docker);
@@ -5619,6 +5632,12 @@ function AddPrinterModal({
     }).catch(() => {
       // Ignore errors, assume not Docker
     });
+    try {
+      const saved = localStorage.getItem('bambuddy.discovery.customSubnet');
+      if (saved) setCustomSubnet(saved);
+    } catch {
+      // localStorage unavailable (private mode, quota); recall is opportunistic
+    }
   }, []);
 
   // Filter out already-added printers
@@ -5652,10 +5671,23 @@ function AddPrinterModal({
     setHasScanned(false);
     setScanProgress({ scanned: 0, total: 0 });
 
+    // Native installs fall back to subnet scanning when the user picks
+    // "Custom" — SSDP can't reach a printer on a different L3 segment
+    // (#1564). Docker mode always uses subnet scan (multicast unavailable).
+    const scanCidr = useCustomSubnet ? customSubnet.trim() : subnet;
+    const wantsSubnetScan = isDocker || useCustomSubnet;
+
+    if (wantsSubnetScan && useCustomSubnet) {
+      try {
+        localStorage.setItem('bambuddy.discovery.customSubnet', scanCidr);
+      } catch {
+        // localStorage write best-effort; user just retypes next time
+      }
+    }
+
     try {
-      if (isDocker) {
-        // Use subnet scanning for Docker
-        await discoveryApi.startSubnetScan(subnet);
+      if (wantsSubnetScan) {
+        await discoveryApi.startSubnetScan(scanCidr);
 
         // Poll for scan status and results
         const pollInterval = setInterval(async () => {
@@ -5761,37 +5793,61 @@ function AddPrinterModal({
 
           {/* Discovery Section */}
           <div className="mb-4 pb-4 border-b border-bambu-dark-tertiary">
-            {isDocker && (
-              <div className="mb-3">
-                <label className="block text-sm text-bambu-gray mb-1">
-                  {t('printers.discovery.subnetToScan')}
-                </label>
-                {detectedSubnets.length > 0 ? (
-                  <select
-                    className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
-                    value={subnet}
-                    onChange={(e) => setSubnet(e.target.value)}
-                    disabled={discovering}
-                  >
-                    {detectedSubnets.map(s => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    type="text"
-                    className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
-                    value={subnet}
-                    onChange={(e) => setSubnet(e.target.value)}
-                    placeholder="192.168.1.0/24"
-                    disabled={discovering}
-                  />
-                )}
-                <p className="mt-1 text-xs text-bambu-gray">
-                  {t('printers.discovery.dockerNote')}
-                </p>
-              </div>
-            )}
+            {/* Subnet picker — always visible. The dropdown lists detected
+                interface subnets and a "Custom..." sentinel that reveals
+                a CIDR text input for printers on a different L3 segment
+                (router, VLAN, etc.). #1564 */}
+            <div className="mb-3">
+              <label className="block text-sm text-bambu-gray mb-1">
+                {t('printers.discovery.subnetToScan')}
+              </label>
+              {detectedSubnets.length > 0 ? (
+                <select
+                  className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
+                  value={useCustomSubnet ? '__custom__' : subnet}
+                  onChange={(e) => {
+                    if (e.target.value === '__custom__') {
+                      setUseCustomSubnet(true);
+                    } else {
+                      setUseCustomSubnet(false);
+                      setSubnet(e.target.value);
+                    }
+                  }}
+                  disabled={discovering}
+                >
+                  {detectedSubnets.map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                  <option value="__custom__">{t('printers.discovery.customSubnetOption')}</option>
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
+                  value={subnet}
+                  onChange={(e) => setSubnet(e.target.value)}
+                  placeholder="192.168.1.0/24"
+                  disabled={discovering}
+                />
+              )}
+              {useCustomSubnet && (
+                <input
+                  type="text"
+                  aria-label={t('printers.discovery.customSubnetLabel')}
+                  className="mt-2 w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
+                  value={customSubnet}
+                  onChange={(e) => setCustomSubnet(e.target.value)}
+                  placeholder="10.1.1.0/24"
+                  disabled={discovering}
+                />
+              )}
+              <p className="mt-1 text-xs text-bambu-gray">
+                {isDocker
+                  ? t('printers.discovery.dockerNote')
+                  : t('printers.discovery.customSubnetNote')}
+              </p>
+            </div>
+
 
             <Button
               type="button"
@@ -5803,14 +5859,14 @@ function AddPrinterModal({
               {discovering ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  {isDocker && scanProgress.total > 0
+                  {(isDocker || useCustomSubnet) && scanProgress.total > 0
                     ? t('printers.discovery.scanProgress', { scanned: scanProgress.scanned, total: scanProgress.total })
                     : t('printers.discovery.scanning')}
                 </>
               ) : (
                 <>
                   <Search className="w-4 h-4" />
-                  {isDocker ? t('printers.discovery.scanSubnet') : t('printers.discovery.discoverNetwork')}
+                  {(isDocker || useCustomSubnet) ? t('printers.discovery.scanSubnet') : t('printers.discovery.discoverNetwork')}
                 </>
               )}
             </Button>
@@ -5846,13 +5902,13 @@ function AddPrinterModal({
 
             {discovering && (
               <p className="mt-2 text-sm text-bambu-gray text-center">
-                {isDocker ? t('printers.discovery.scanningSubnet') : t('printers.discovery.scanningNetwork')}
+                {(isDocker || useCustomSubnet) ? t('printers.discovery.scanningSubnet') : t('printers.discovery.scanningNetwork')}
               </p>
             )}
 
             {hasScanned && !discovering && discovered.length === 0 && (
               <p className="mt-2 text-sm text-bambu-gray text-center">
-                {isDocker ? t('printers.discovery.noPrintersFoundSubnet') : t('printers.discovery.noPrintersFoundNetwork')}
+                {(isDocker || useCustomSubnet) ? t('printers.discovery.noPrintersFoundSubnet') : t('printers.discovery.noPrintersFoundNetwork')}
               </p>
             )}
 
@@ -5916,28 +5972,31 @@ function AddPrinterModal({
                 onChange={(e) => setForm({ ...form, model: e.target.value })}
               >
                 <option value="">{t('printers.modal.selectModel')}</option>
+                <optgroup label="A1 Series">
+                  <option value="A1">A1</option>
+                  <option value="A1 Mini">A1 Mini</option>
+                </optgroup>
+                <optgroup label="A2 Series">
+                  <option value="A2L">A2L</option>
+                </optgroup>
                 <optgroup label="H2 Series">
                   <option value="H2C">H2C</option>
                   <option value="H2D">H2D</option>
                   <option value="H2D Pro">H2D Pro</option>
                   <option value="H2S">H2S</option>
                 </optgroup>
-                <optgroup label="X2 Series">
-                  <option value="X2D">X2D</option>
+                <optgroup label="P Series">
+                  <option value="P1P">P1P</option>
+                  <option value="P1S">P1S</option>
+                  <option value="P2S">P2S</option>
                 </optgroup>
                 <optgroup label="X1 Series">
-                  <option value="X1E">X1E</option>
-                  <option value="X1C">X1 Carbon</option>
                   <option value="X1">X1</option>
+                  <option value="X1C">X1 Carbon</option>
+                  <option value="X1E">X1E</option>
                 </optgroup>
-                <optgroup label="P Series">
-                  <option value="P2S">P2S</option>
-                  <option value="P1S">P1S</option>
-                  <option value="P1P">P1P</option>
-                </optgroup>
-                <optgroup label="A1 Series">
-                  <option value="A1">A1</option>
-                  <option value="A1 Mini">A1 Mini</option>
+                <optgroup label="X2 Series">
+                  <option value="X2D">X2D</option>
                 </optgroup>
               </select>
             </div>
@@ -6442,28 +6501,31 @@ function EditPrinterModal({
                 onChange={(e) => setForm({ ...form, model: e.target.value })}
               >
                 <option value="">{t('printers.modal.selectModel')}</option>
+                <optgroup label="A1 Series">
+                  <option value="A1">A1</option>
+                  <option value="A1 Mini">A1 Mini</option>
+                </optgroup>
+                <optgroup label="A2 Series">
+                  <option value="A2L">A2L</option>
+                </optgroup>
                 <optgroup label="H2 Series">
                   <option value="H2C">H2C</option>
                   <option value="H2D">H2D</option>
                   <option value="H2D Pro">H2D Pro</option>
                   <option value="H2S">H2S</option>
                 </optgroup>
-                <optgroup label="X2 Series">
-                  <option value="X2D">X2D</option>
+                <optgroup label="P Series">
+                  <option value="P1P">P1P</option>
+                  <option value="P1S">P1S</option>
+                  <option value="P2S">P2S</option>
                 </optgroup>
                 <optgroup label="X1 Series">
-                  <option value="X1E">X1E</option>
-                  <option value="X1C">X1 Carbon</option>
                   <option value="X1">X1</option>
+                  <option value="X1C">X1 Carbon</option>
+                  <option value="X1E">X1E</option>
                 </optgroup>
-                <optgroup label="P Series">
-                  <option value="P2S">P2S</option>
-                  <option value="P1S">P1S</option>
-                  <option value="P1P">P1P</option>
-                </optgroup>
-                <optgroup label="A1 Series">
-                  <option value="A1">A1</option>
-                  <option value="A1 Mini">A1 Mini</option>
+                <optgroup label="X2 Series">
+                  <option value="X2D">X2D</option>
                 </optgroup>
               </select>
             </div>

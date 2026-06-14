@@ -43,6 +43,7 @@ from backend.app.models.user import User
 from backend.app.schemas.spool import SpoolKProfileBase
 from backend.app.schemas.spoolman import SpoolmanFilamentPatch, SpoolmanSlotAssignmentEnriched
 from backend.app.services.printer_manager import printer_manager
+from backend.app.services.slicer_filament_resolver import resolve_slicer_filament
 from backend.app.services.spoolman import (
     SpoolmanClient,
     SpoolmanClientError,
@@ -55,6 +56,7 @@ from backend.app.services.spoolman_tracking import get_fallback_spool_tag_for_sl
 from backend.app.utils.filament_ids import (
     GENERIC_FILAMENT_IDS,
     MATERIAL_TEMPS,
+    filament_id_to_setting_id,
     normalize_slicer_filament,
 )
 
@@ -865,13 +867,23 @@ async def restore_spool(
         raise HTTPException(status_code=502, detail="Spoolman returned malformed spool data") from exc
 
 
-@router.post("/spools/{spool_id}/reset-usage")
-async def reset_spool_usage(
+@router.post("/spools/{spool_id}/reset-consumed-counter")
+async def reset_spool_consumed_counter(
     spool_id: int = Path(..., gt=0),
     db: AsyncSession = Depends(get_db),
     _: User | None = RequirePermissionIfAuthEnabled(Permission.INVENTORY_UPDATE),
 ) -> dict:
-    """Zero the spool's used_weight in Spoolman without touching anything else."""
+    """Zero the displayed "Total Consumed" counter for a Spoolman spool.
+
+    Spoolman doesn't have a native "baseline" field, so the implementation
+    reaches for the closest equivalent: PATCH `used_weight=0` upstream.
+    The read mapping in ``_map_spoolman_spool`` then derives Bambuddy's
+    `weight_used = label - remaining_weight` and `baseline = weight_used -
+    real_used_weight`, so the Inventory page's `weight_used - baseline`
+    display lands at 0 while remaining (= label - weight_used) is preserved
+    — parity with the internal-mode endpoint (#1390, see also
+    ``backend/app/api/routes/inventory.py::reset_spool_consumed_counter``).
+    """
     client = await _get_client(db)
     async with _translate_spoolman_errors():
         spool = await client.reset_spool_usage(spool_id)
@@ -882,13 +894,13 @@ async def reset_spool_usage(
         raise HTTPException(status_code=502, detail="Spoolman returned malformed spool data") from exc
 
 
-@router.post("/spools/reset-usage-bulk")
-async def bulk_reset_spool_usage(
+@router.post("/spools/reset-consumed-counter-bulk")
+async def bulk_reset_spool_consumed_counter(
     payload: dict = Body(...),
     db: AsyncSession = Depends(get_db),
     _: User | None = RequirePermissionIfAuthEnabled(Permission.INVENTORY_UPDATE),
 ) -> dict:
-    """Bulk-reset used_weight to 0 across the given Spoolman spool IDs.
+    """Bulk reset the "Total Consumed" counter across the given Spoolman spool IDs.
 
     Caller passes an explicit list of IDs — no "reset all" shortcut, since
     a typo on a wildcard would wipe the entire inventory's tracking.
@@ -909,7 +921,7 @@ async def bulk_reset_spool_usage(
                 await client.reset_spool_usage(spool_id)
             reset_count += 1
         except HTTPException as exc:
-            logger.warning("Spoolman reset-usage failed for spool %s: %s", spool_id, exc.detail)
+            logger.warning("Spoolman reset-consumed-counter failed for spool %s: %s", spool_id, exc.detail)
     return {"reset": reset_count}
 
 
@@ -1211,7 +1223,7 @@ async def sync_spoolman_ams_weights(
 async def assign_spoolman_slot(
     body: SpoolSlotAssignmentRequest,
     db: AsyncSession = Depends(get_db),
-    _: User | None = RequirePermissionIfAuthEnabled(Permission.INVENTORY_UPDATE),
+    current_user: User | None = RequirePermissionIfAuthEnabled(Permission.INVENTORY_UPDATE),
 ) -> dict:
     """Assign a Spoolman spool to a printer AMS slot (stored in local DB only).
 
@@ -1296,13 +1308,43 @@ async def assign_spoolman_slot(
             if len(tray_color) == 6:
                 tray_color = tray_color + "FF"
 
-            material_upper = tray_type.upper().strip()
-            tray_info_idx = (
-                GENERIC_FILAMENT_IDS.get(material_upper)
-                or GENERIC_FILAMENT_IDS.get(material_upper.split("-")[0].split(" ")[0])
-                or ""
+            # #1713: resolve the spool's stored slicer_filament reference
+            # (cloud preset, local preset, GF-prefix builtin, or numeric
+            # LocalPreset id) to the printer-side tray_info_idx + setting_id.
+            # Previously the Spoolman path dropped slicer_filament on the
+            # floor and only the generic-material fallback fired; the user-
+            # configured profile never reached the printer. Shared with the
+            # internal-mode route via the same helper so the two flows can't
+            # drift again.
+            tray_info_idx, setting_id, sub_brand_override = await resolve_slicer_filament(
+                db=db,
+                current_user=current_user,
+                slicer_filament=mapped.get("slicer_filament"),
+                slicer_filament_name=mapped.get("slicer_filament_name"),
+                material=tray_type,
             )
-            setting_id = ""
+            if sub_brand_override:
+                tray_sub_brands = sub_brand_override
+
+            material_upper = tray_type.upper().strip()
+            # Fall back to generic-material id when slicer_filament is empty
+            # or the resolver discarded an unresolvable value. Matches the
+            # internal-mode tail in inventory.py:_apply_spool_to_slot_inner.
+            if not tray_info_idx:
+                tray_info_idx = (
+                    GENERIC_FILAMENT_IDS.get(material_upper)
+                    or GENERIC_FILAMENT_IDS.get(material_upper.split("-")[0].split(" ")[0])
+                    or ""
+                )
+
+            # Ensure setting_id is always derivable from tray_info_idx. The
+            # local-preset path can leave it empty when the LP's setting JSON
+            # has no filament_id and falls through to the generic material id;
+            # without this fallback the slicer gets a half-configured slot
+            # (filament id without setting id) and the slot detail modal
+            # renders empty fields. Same pattern as the internal-mode tail.
+            if tray_info_idx and not setting_id:
+                setting_id = filament_id_to_setting_id(tray_info_idx)
 
             temp_defaults = MATERIAL_TEMPS.get(material_upper, (200, 240))
             temp_min = mapped.get("nozzle_temp_min") or temp_defaults[0]

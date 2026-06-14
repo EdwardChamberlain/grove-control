@@ -16,6 +16,7 @@ from backend.app.core.auth import RequirePermissionIfAuthEnabled, require_owners
 from backend.app.core.config import settings
 from backend.app.core.database import get_db
 from backend.app.core.permissions import Permission
+from backend.app.core.tasks import spawn_background_task
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_batch import PrintBatch
@@ -35,7 +36,7 @@ from backend.app.schemas.print_queue import (
 from backend.app.services.filament_deficit import compute_deficit_for_queue_item
 from backend.app.services.notification_service import notification_service
 from backend.app.utils.printer_models import normalize_printer_model, normalize_printer_model_id
-from backend.app.utils.threemf_tools import extract_filament_usage_from_3mf
+from backend.app.utils.threemf_tools import extract_bed_type_from_3mf, extract_filament_usage_from_3mf
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +199,7 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
         "auto_off_after": item.auto_off_after,
         "manual_start": item.manual_start,
         "filament_short": bool(item.filament_short),
+        "skip_filament_check": bool(item.skip_filament_check),
         "ams_mapping": ams_mapping_parsed,
         "plate_id": item.plate_id,
         "bed_levelling": item.bed_levelling,
@@ -206,6 +208,7 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
         "layer_inspect": item.layer_inspect,
         "timelapse": item.timelapse,
         "use_ams": item.use_ams,
+        "nozzle_offset_cali": item.nozzle_offset_cali,
         "status": item.status,
         "started_at": item.started_at,
         "completed_at": item.completed_at,
@@ -244,6 +247,7 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
             response.layer_height = item.archive.layer_height
             response.nozzle_diameter = item.archive.nozzle_diameter
             response.sliced_for_model = item.archive.sliced_for_model
+            response.bed_type = item.archive.bed_type
             if item.plate_id:
                 archive_path = settings.base_dir / item.archive.file_path
                 if archive_path.exists():
@@ -251,10 +255,13 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
                     plate_weight = sum(
                         f["used_g"] for f in extract_filament_usage_from_3mf(archive_path, item.plate_id)
                     )
+                    plate_bed = extract_bed_type_from_3mf(archive_path, item.plate_id)
                     if plate_time is not None:
                         response.print_time_seconds = plate_time
                     if plate_weight > 0:
                         response.filament_used_grams = plate_weight
+                    if plate_bed:
+                        response.bed_type = plate_bed
     if item.library_file:
         response.library_file_name = (
             item.library_file.file_metadata.get("print_name") if item.library_file.file_metadata else None
@@ -271,6 +278,7 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
             response.layer_height = item.library_file.file_metadata.get("layer_height")
             response.nozzle_diameter = item.library_file.file_metadata.get("nozzle_diameter")
             response.sliced_for_model = item.library_file.file_metadata.get("sliced_for_model")
+            response.bed_type = item.library_file.file_metadata.get("bed_type")
         if item.plate_id:
             lib_path = Path(item.library_file.file_path)
             library_file_path = lib_path if lib_path.is_absolute() else settings.base_dir / item.library_file.file_path
@@ -279,10 +287,13 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
                 plate_weight = sum(
                     f["used_g"] for f in extract_filament_usage_from_3mf(library_file_path, item.plate_id)
                 )
+                plate_bed = extract_bed_type_from_3mf(library_file_path, item.plate_id)
                 if plate_time is not None:
                     response.print_time_seconds = plate_time
                 if plate_weight > 0:
                     response.filament_used_grams = plate_weight
+                if plate_bed:
+                    response.bed_type = plate_bed
     if item.printer:
         response.printer_name = item.printer.name
     return response
@@ -296,9 +307,15 @@ async def list_queue(
         None, description="Filter by target model (also includes model-based items when combined with printer_id)"
     ),
     db: AsyncSession = Depends(get_db),
-    _: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_READ),
+    auth_result: tuple[User | None, bool] = Depends(
+        require_ownership_permission(
+            Permission.QUEUE_READ_ALL,
+            Permission.QUEUE_READ_OWN,
+        )
+    ),
 ):
     """List all queue items, optionally filtered by printer or status."""
+    user, can_read_all = auth_result
     query = (
         select(PrintQueueItem)
         .options(
@@ -310,6 +327,8 @@ async def list_queue(
         )
         .order_by(PrintQueueItem.printer_id.nulls_first(), PrintQueueItem.position)
     )
+    if user is not None and not can_read_all:
+        query = query.where(PrintQueueItem.created_by_id == user.id)
 
     if printer_id is not None:
         if printer_id == -1:
@@ -394,11 +413,18 @@ async def add_to_queue(
         archive = result.scalar_one_or_none()
         if not archive:
             raise HTTPException(400, "Archive not found")
-        if current_user is not None:
-            can_reprint_all = current_user.has_permission(Permission.ARCHIVES_REPRINT_ALL.value)
-            can_reprint_own = current_user.has_permission(Permission.ARCHIVES_REPRINT_OWN.value)
-            if not can_reprint_all and not (can_reprint_own and archive.created_by_id == current_user.id):
-                raise HTTPException(403, "You can only print your own archives")
+        # IDOR fix (maziggy/bambuddy-security #2): without this check, a
+        # caller with QUEUE_CREATE could queue any user's archive even
+        # without ARCHIVES_READ on it — Landon's PoC enumerated this on
+        # admin's archives as operator1. Gate on ARCHIVES_READ_ALL OR
+        # ownership of the archive. 404 (not 403) so we don't leak
+        # "this id exists but you can't queue it" for enumeration.
+        if (
+            current_user is not None
+            and not current_user.has_permission(Permission.ARCHIVES_READ_ALL.value)
+            and archive.created_by_id != current_user.id
+        ):
+            raise HTTPException(404, "Archive not found")
 
     # Validate library file exists (if provided) and get it for filament extraction
     library_file = None
@@ -407,6 +433,13 @@ async def add_to_queue(
         library_file = result.scalar_one_or_none()
         if not library_file:
             raise HTTPException(400, "Library file not found")
+        # Same shape: gate cross-user library-file queueing on LIBRARY_READ_ALL.
+        if (
+            current_user is not None
+            and not current_user.has_permission(Permission.LIBRARY_READ_ALL.value)
+            and library_file.created_by_id != current_user.id
+        ):
+            raise HTTPException(404, "Library file not found")
         # Bambu SD card is FAT32/exFAT — illegal filename chars would 553 at
         # FTP upload time (#1540). Reject at queue time so the user gets the
         # actionable error before waiting in queue.
@@ -546,6 +579,7 @@ async def add_to_queue(
             require_previous_success=data.require_previous_success,
             auto_off_after=data.auto_off_after,
             manual_start=data.manual_start,
+            skip_filament_check=data.skip_filament_check,
             ams_mapping=ams_mapping_json,
             plate_id=data.plate_id,
             bed_levelling=data.bed_levelling,
@@ -554,6 +588,7 @@ async def add_to_queue(
             layer_inspect=data.layer_inspect,
             timelapse=data.timelapse,
             use_ams=data.use_ams,
+            nozzle_offset_cali=data.nozzle_offset_cali,
             gcode_injection=data.gcode_injection,
             cleanup_library_after_dispatch=data.cleanup_library_after_dispatch,
             project_id=data.project_id,
@@ -690,12 +725,20 @@ async def bulk_update_queue_items(
 async def list_batches(
     status: str | None = Query(None, description="Filter by status (active, completed, cancelled)"),
     db: AsyncSession = Depends(get_db),
-    current_user: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_READ),
+    auth_result: tuple[User | None, bool] = Depends(
+        require_ownership_permission(
+            Permission.QUEUE_READ_ALL,
+            Permission.QUEUE_READ_OWN,
+        )
+    ),
 ):
     """List all print batches with progress stats."""
+    current_user, can_read_all = auth_result
     query = select(PrintBatch).order_by(PrintBatch.created_at.desc())
     if status:
         query = query.where(PrintBatch.status == status)
+    if current_user is not None and not can_read_all:
+        query = query.where(PrintBatch.created_by_id == current_user.id)
     result = await db.execute(query)
     batches = result.scalars().all()
 
@@ -709,12 +752,24 @@ async def list_batches(
 async def get_batch(
     batch_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_READ),
+    auth_result: tuple[User | None, bool] = Depends(
+        require_ownership_permission(
+            Permission.QUEUE_READ_ALL,
+            Permission.QUEUE_READ_OWN,
+        )
+    ),
 ):
     """Get a print batch with progress stats."""
+    current_user, can_read_all = auth_result
     result = await db.execute(select(PrintBatch).where(PrintBatch.id == batch_id))
     batch = result.scalar_one_or_none()
     if not batch:
+        raise HTTPException(404, "Batch not found")
+    if (
+        current_user is not None
+        and not can_read_all
+        and (batch.created_by_id is None or batch.created_by_id != current_user.id)
+    ):
         raise HTTPException(404, "Batch not found")
     return await _build_batch_response(db, batch)
 
@@ -787,9 +842,15 @@ async def _build_batch_response(db: AsyncSession, batch: PrintBatch) -> PrintBat
 async def get_queue_item(
     item_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_READ),
+    auth_result: tuple[User | None, bool] = Depends(
+        require_ownership_permission(
+            Permission.QUEUE_READ_ALL,
+            Permission.QUEUE_READ_OWN,
+        )
+    ),
 ):
     """Get a specific queue item."""
+    current_user, can_read_all = auth_result
     result = await db.execute(
         select(PrintQueueItem)
         .options(
@@ -803,6 +864,12 @@ async def get_queue_item(
     )
     item = result.scalar_one_or_none()
     if not item:
+        raise HTTPException(404, "Queue item not found")
+    if (
+        current_user is not None
+        and not can_read_all
+        and (item.created_by_id is None or item.created_by_id != current_user.id)
+    ):
         raise HTTPException(404, "Queue item not found")
     return _enrich_response(item)
 
@@ -979,7 +1046,6 @@ async def stop_queue_item(
     _: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_UPDATE_ALL),
 ):
     """Stop an actively printing queue item."""
-    import asyncio
 
     from backend.app.models.smart_plug import SmartPlug
     from backend.app.services.printer_manager import printer_manager
@@ -1049,7 +1115,7 @@ async def stop_queue_item(
                     logger.info("Auto-off: Powering off printer %s", printer_id)
                     await tasmota_service.turn_off(plug)
 
-        asyncio.create_task(cooldown_and_poweroff())
+        spawn_background_task(cooldown_and_poweroff(), name=f"queue-cooldown-poweroff-{printer_id}")
 
     return {"message": "Print stopped" if stop_sent else "Queue item cancelled (printer was offline)"}
 
@@ -1059,7 +1125,7 @@ async def start_queue_item(
     item_id: int,
     skip_filament_check: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
-    _: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_UPDATE_OWN),
+    user: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_UPDATE_OWN),
 ):
     """Manually start a staged (manual_start) queue item.
 
@@ -1104,6 +1170,20 @@ async def start_queue_item(
     # Print Anyway / no deficit: clear the flags and let the scheduler dispatch.
     item.manual_start = False
     item.filament_short = False
+    # Persist the user's "Print Anyway" decision so the scheduler does not
+    # immediately re-flag this item on the next tick (#1698-followup). The
+    # pre-fix behaviour bounced between "user said anyway" and
+    # "scheduler re-blocked on same deficit" forever.
+    if skip_filament_check:
+        item.skip_filament_check = True
+    # Credit the clicker as the item's owner when no prior owner is set —
+    # VP-uploaded queue items arrive over FTP unattributed, so without this
+    # the print log's User column stays blank even when auth is on
+    # (#1670). An item that already has a creator (UI-added queue items)
+    # keeps that attribution; the dispatcher is not promoted over the
+    # original uploader.
+    if user is not None and item.created_by_id is None:
+        item.created_by_id = user.id
     await db.commit()
     await db.refresh(item, ["archive", "printer", "library_file", "created_by", "batch"])
 

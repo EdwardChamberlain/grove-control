@@ -945,6 +945,17 @@ async def run_migrations(conn):
             conn, "ALTER TABLE print_queue ADD COLUMN cleanup_library_after_dispatch BOOLEAN DEFAULT false"
         )
 
+    # Migration: skip_filament_check flag on print_queue (#1698-followup).
+    # Persists the user's "Print Anyway" acknowledgement so the scheduler
+    # doesn't re-flag the item every tick after they've confirmed dispatch
+    # despite the deficit warning. Set from the start route's skip_filament_check
+    # query param and from PrintModal at queue-creation time. Postgres / SQLite
+    # boolean default branch matches filament_short above.
+    if is_sqlite():
+        await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN skip_filament_check BOOLEAN DEFAULT 0")
+    else:
+        await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN skip_filament_check BOOLEAN DEFAULT false")
+
     # Migration: Add queue_force_color_match column to virtual_printers (#1188).
     # Opt-in flag: when true, VP queue-mode uploads pin the per-slot type+color
     # from the 3MF onto the queue item's filament_overrides so the scheduler
@@ -1119,6 +1130,12 @@ async def run_migrations(conn):
     await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN layer_inspect BOOLEAN DEFAULT 0")
     await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN timelapse BOOLEAN DEFAULT 0")
     await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN use_ams BOOLEAN DEFAULT 1")
+    # Migration: Add nozzle offset calibration option (dual-nozzle printers, #1682).
+    # Postgres rejects `DEFAULT 1` on a BOOLEAN column — use TRUE / 1 per dialect.
+    if is_sqlite():
+        await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN nozzle_offset_cali BOOLEAN DEFAULT 1")
+    else:
+        await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN nozzle_offset_cali BOOLEAN DEFAULT TRUE")
 
     # Migration: Add library_file_id column to print_queue and make archive_id nullable
     # This allows queue items to reference library files directly (archive created at print start)
@@ -1843,6 +1860,110 @@ async def run_migrations(conn):
             {"old": old_val, "new": new_val},
         )
 
+    # Migration: Auto-sync VP access codes from their target printer.
+    # Non-proxy VPs with a target printer (the live-mirror bridge) forward the
+    # slicer's MQTT/RTSPS auth bytes through to the real printer, so the VP's
+    # access code MUST equal the target's — earlier UIs let them diverge,
+    # producing a VP that the slicer could bind but whose bridge silently
+    # failed to authenticate against the real printer. The route layer now
+    # auto-inherits on every create/update; this backfill corrects any rows
+    # that pre-date that change. Idempotent (re-running on synced rows is a
+    # no-op because the WHERE clause excludes them). SQLite and Postgres both
+    # accept correlated subqueries in UPDATE — no driver-specific syntax.
+    mismatch_result = await conn.execute(
+        text(
+            "SELECT vp.id AS vp_id, vp.name AS vp_name, p.name AS target_name "
+            "FROM virtual_printers vp "
+            "JOIN printers p ON vp.target_printer_id = p.id "
+            "WHERE vp.mode != 'proxy' "
+            "  AND (vp.access_code IS NULL OR vp.access_code != p.access_code)"
+        )
+    )
+    for row in mismatch_result.fetchall():
+        logger.info(
+            "VP %r (id=%d) access code synced from target printer %r",
+            row.vp_name,
+            row.vp_id,
+            row.target_name,
+        )
+    await conn.execute(
+        text(
+            "UPDATE virtual_printers "
+            "SET access_code = ("
+            "    SELECT access_code FROM printers WHERE printers.id = virtual_printers.target_printer_id"
+            ") "
+            "WHERE virtual_printers.target_printer_id IS NOT NULL "
+            "  AND virtual_printers.mode != 'proxy' "
+            "  AND (virtual_printers.access_code IS NULL OR virtual_printers.access_code != ("
+            "      SELECT access_code FROM printers WHERE printers.id = virtual_printers.target_printer_id"
+            "  ))"
+        )
+    )
+
+    # Migration: Recover queue items that got stuck in `skipped` because of
+    # the cancellation-cascade bug (#1667). Pre-fix, the scheduler's
+    # `_check_previous_success` lookback excluded `cancelled` but included
+    # `skipped`, so a single user-cancelled print poisoned every downstream
+    # item with `require_previous_success=True` indefinitely. The reporter saw
+    # 18 items blocked over 3 days from one cancellation.
+    #
+    # Conservative reversal: ONLY reset rows whose immediate predecessor on
+    # the same printer (by completed_at desc, excluding the skipped-bug
+    # cascade) was `cancelled`. Skipped items whose true predecessor was a
+    # real `failed` or `aborted` print stay skipped — those were legitimate.
+    # Genuine failure-skips share the same status + error_message + completed_at
+    # fingerprint as bug-skips, so the predecessor check is what distinguishes
+    # them. Idempotent (post-reset rows no longer match the WHERE clause).
+    #
+    # Correlated subquery is portable across SQLite and Postgres. The
+    # `error_message` literal matches the exact string the buggy scheduler
+    # wrote — narrowing further on intent.
+    stuck_skipped_result = await conn.execute(
+        text(
+            "SELECT pq.id, pq.printer_id "
+            "FROM print_queue pq "
+            "WHERE pq.status = 'skipped' "
+            "  AND pq.error_message = 'Previous print failed or was aborted' "
+            "  AND pq.completed_at IS NOT NULL "
+            "  AND ("
+            "    SELECT prev.status FROM print_queue prev "
+            "    WHERE prev.printer_id = pq.printer_id "
+            "      AND prev.id != pq.id "
+            "      AND prev.status IN ('completed', 'failed', 'cancelled', 'aborted') "
+            "      AND prev.completed_at IS NOT NULL "
+            "      AND prev.completed_at < pq.completed_at "
+            "    ORDER BY prev.completed_at DESC LIMIT 1"
+            "  ) = 'cancelled'"
+        )
+    )
+    stuck_ids = [row.id for row in stuck_skipped_result.fetchall()]
+    if stuck_ids:
+        logger.info(
+            "Queue cancellation-cascade migration (#1667): resetting %d skipped item(s) to pending",
+            len(stuck_ids),
+        )
+        await conn.execute(
+            text(
+                "UPDATE print_queue "
+                "SET status = 'pending', error_message = NULL, completed_at = NULL "
+                "WHERE id IN ("
+                "  SELECT pq.id FROM print_queue pq "
+                "  WHERE pq.status = 'skipped' "
+                "    AND pq.error_message = 'Previous print failed or was aborted' "
+                "    AND pq.completed_at IS NOT NULL "
+                "    AND ("
+                "      SELECT prev.status FROM print_queue prev "
+                "      WHERE prev.printer_id = pq.printer_id "
+                "        AND prev.id != pq.id "
+                "        AND prev.status IN ('completed', 'failed', 'cancelled', 'aborted') "
+                "        AND prev.completed_at IS NOT NULL "
+                "        AND prev.completed_at < pq.completed_at "
+                "      ORDER BY prev.completed_at DESC LIMIT 1"
+                "    ) = 'cancelled'"
+                ")"
+            )
+        )
+
     # Migration: Unify `LibraryFile.file_type` across ingest paths (#1600).
     # Pre-#1600, only the external-folder scan path stored `gcode.3mf` for
     # sliced outputs — the upload, ZIP-extract, and in-process paths all
@@ -2048,6 +2169,19 @@ async def run_migrations(conn):
     await _safe_execute(
         conn,
         "CREATE INDEX IF NOT EXISTS ix_print_archives_deleted_at ON print_archives (deleted_at)",
+    )
+
+    # Migration: Add bambuddy_forced_timelapse to print_archives (#1397)
+    # Tracks prints where Bambuddy forced the firmware to record a timelapse
+    # so the finish-photo extractor could pull the post-park-pre-drop frame.
+    # The cleanup path uses this to delete the timelapse both locally and on
+    # the printer's SD after extraction — the user didn't opt in to a
+    # timelapse recording. Postgres rejects `DEFAULT 0` for BOOLEAN; SQLite
+    # accepts both 0/FALSE — branch the literal.
+    _bool_false_literal = "0" if is_sqlite() else "FALSE"
+    await _safe_execute(
+        conn,
+        f"ALTER TABLE print_archives ADD COLUMN bambuddy_forced_timelapse BOOLEAN DEFAULT {_bool_false_literal}",
     )
 
     # Migration: Create smart_plug_energy_snapshots table (#941)
@@ -2790,6 +2924,30 @@ async def run_migrations(conn):
     # file metadata so the FileManager displays the filename, not the title (#1489).
     await _migrate_drop_library_print_name(conn)
 
+    # Backfill NULL print_archives.created_at — older rows (and rows imported
+    # via the SQLite ↔ Postgres cross-DB restore path) can land with NULL
+    # because the column was originally created without a DEFAULT clause and
+    # server_default=func.now() only fires at table creation, not column
+    # population. The list_archives response model requires a datetime, so a
+    # single NULL row 500s the whole endpoint (#1732).
+    async with conn.begin_nested():
+        if is_sqlite():
+            await conn.execute(
+                text(
+                    "UPDATE print_archives "
+                    "SET created_at = COALESCE(completed_at, started_at, datetime('now')) "
+                    "WHERE created_at IS NULL"
+                )
+            )
+        else:
+            await conn.execute(
+                text(
+                    "UPDATE print_archives "
+                    "SET created_at = COALESCE(completed_at, started_at, NOW()) "
+                    "WHERE created_at IS NULL"
+                )
+            )
+
 
 async def seed_notification_templates():
     """Seed default notification templates if they don't exist."""
@@ -2850,7 +3008,20 @@ async def seed_default_groups():
     logger = logging.getLogger(__name__)
 
     # Map old permissions to new ones for migration
-    # Administrators get *_all permissions, Operators get *_own permissions
+    # Administrators get *_all permissions, Operators get *_own permissions.
+    #
+    # NOTE on the read-flag asymmetry: write permissions (`update`, `delete`,
+    # `reprint`) are removed from the legacy flag and remapped to the OWN/ALL
+    # split — the legacy flag is dead on the API side. Read permissions are
+    # different: the frontend still gates UI actions (download buttons in
+    # ArchivesPage, preview button in FileManagerPage) on the LEGACY
+    # `archives:read` / `library:read` / `queue:read` strings. For admin we
+    # therefore keep the legacy flag (the `*_all` companion gets added via the
+    # backfill block below). For non-admin roles the legacy IS renamed to
+    # `_own` — that closes the IDOR (operators with a custom `archives:read`
+    # row can no longer read cross-user data) and the UI gates degrade to
+    # disabled-button state until the frontend is migrated to also accept
+    # `_own` (separate change). See maziggy/bambuddy-security #2.
     PERMISSION_MIGRATION_ALL = {
         "queue:update": "queue:update_all",
         "queue:delete": "queue:delete_all",
@@ -2864,11 +3035,20 @@ async def seed_default_groups():
     PERMISSION_MIGRATION_OWN = {
         "queue:update": "queue:update_own",
         "queue:delete": "queue:delete_own",
+        # Read permissions: any role NOT flagged as Administrator gets
+        # ownership-scoped reads. Pre-existing custom roles with the legacy
+        # `*:read` flag silently saw every user's items; the OWN variant
+        # closes that IDOR. Roles that genuinely need cross-user visibility
+        # must be re-granted `*:read_all` explicitly by an administrator
+        # after upgrade — fail-closed by default (per CWE-636).
+        "queue:read": "queue:read_own",
         "archives:update": "archives:update_own",
         "archives:delete": "archives:delete_own",
         "archives:reprint": "archives:reprint_own",
+        "archives:read": "archives:read_own",
         "library:update": "library:update_own",
         "library:delete": "library:delete_own",
+        "library:read": "library:read_own",
     }
 
     async with async_session() as session:
@@ -2916,11 +3096,14 @@ async def seed_default_groups():
                         for _own_perm, all_perm in [
                             ("queue:update_own", "queue:update_all"),
                             ("queue:delete_own", "queue:delete_all"),
+                            ("queue:read_own", "queue:read_all"),
                             ("archives:update_own", "archives:update_all"),
                             ("archives:delete_own", "archives:delete_all"),
                             ("archives:reprint_own", "archives:reprint_all"),
+                            ("archives:read_own", "archives:read_all"),
                             ("library:update_own", "library:update_all"),
                             ("library:delete_own", "library:delete_all"),
+                            ("library:read_own", "library:read_all"),
                         ]:
                             # Add *_all if not present
                             if all_perm not in new_permissions:
@@ -2987,6 +3170,81 @@ async def seed_default_groups():
                     logger.info("Added %s to Administrators group (backfill)", new_perm)
             if added:
                 admin_group.permissions = perms
+        await session.commit()
+
+        # Backfill the read flag set for the Administrators group on existing
+        # installs (maziggy/bambuddy-security #2). Two layers:
+        #
+        # (a) New OWN/ALL splits — `archives:read_own` etc. Fresh installs get
+        #     these via ALL_PERMISSIONS; upgrades need the explicit backfill
+        #     so admin's permission set matches a fresh install's.
+        #
+        # (b) Legacy `archives:read` / `library:read` / `queue:read`. The
+        #     frontend still gates download / preview UI on these LEGACY
+        #     strings (see ArchivesPage / FileManagerPage), so admin needs
+        #     them retained even though the new API uses the OWN/ALL split.
+        #     The PERMISSION_MIGRATION_ALL map deliberately doesn't rename
+        #     read flags for admin — this backfill ensures they're present
+        #     even if they were stripped by hand or by an older migration.
+        #
+        # Also includes orca_cloud:auth for parity with fresh-install
+        # behaviour (ALL_PERMISSIONS covers it; backfill makes sure an
+        # admin role that's been customised since seed still has it).
+        result = await session.execute(select(Group).where(Group.name == "Administrators"))
+        admin_group = result.scalar_one_or_none()
+        if admin_group and admin_group.permissions is not None:
+            perms = list(admin_group.permissions)
+            added = False
+            for new_perm in (
+                "archives:read",
+                "archives:read_own",
+                "archives:read_all",
+                "library:read",
+                "library:read_own",
+                "library:read_all",
+                "queue:read",
+                "queue:read_own",
+                "queue:read_all",
+                "orca_cloud:auth",
+            ):
+                if new_perm not in perms:
+                    perms.append(new_perm)
+                    added = True
+                    logger.info("Added %s to Administrators group (backfill)", new_perm)
+            if added:
+                admin_group.permissions = perms
+        await session.commit()
+
+        # Same OWN-tier backfill for non-admin system groups. Operators and
+        # Viewers are seeded with _own on fresh installs (see DEFAULT_GROUPS),
+        # but the legacy-rename migration above won't run on a role that
+        # didn't carry the legacy `archives:read` flag. Without this block,
+        # an existing Operators row whose permissions list lacks the legacy
+        # flag would never get archives:read_own and operators would lose
+        # read access after upgrade. Re-check by group name so customised
+        # rows still get the correct OWN tier on next startup.
+        #
+        # Operators also get orca_cloud:auth backfilled — fresh installs now
+        # include it in the DEFAULT_GROUPS bootstrap, so this keeps upgrades
+        # consistent. Viewers do NOT get orca_cloud:auth (read-only role,
+        # not expected to author slicer presets / sync to Orca Cloud).
+        for non_admin_group_name in ("Operators", "Viewers"):
+            grp = (await session.execute(select(Group).where(Group.name == non_admin_group_name))).scalar_one_or_none()
+            if grp is None or grp.permissions is None:
+                continue
+            perms = list(grp.permissions)
+            changed = False
+            for own_perm in ("archives:read_own", "library:read_own", "queue:read_own"):
+                if own_perm not in perms:
+                    perms.append(own_perm)
+                    changed = True
+                    logger.info("Added %s to %s group (backfill)", own_perm, non_admin_group_name)
+            if non_admin_group_name == "Operators" and "orca_cloud:auth" not in perms:
+                perms.append("orca_cloud:auth")
+                changed = True
+                logger.info("Added orca_cloud:auth to Operators group (backfill)")
+            if changed:
+                grp.permissions = perms
         await session.commit()
 
         # Backfill inventory forecast permissions for existing groups.

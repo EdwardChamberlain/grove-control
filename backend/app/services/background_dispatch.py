@@ -20,6 +20,7 @@ from sqlalchemy import select
 
 from backend.app.core.config import settings
 from backend.app.core.database import async_session
+from backend.app.core.tasks import spawn_background_task
 from backend.app.core.websocket import ws_manager
 from backend.app.models.library import LibraryFile
 from backend.app.models.printer import Printer
@@ -618,7 +619,10 @@ class BackgroundDispatchService:
                         progress_state["last_emit"] = now
                         progress_state["last_bytes"] = uploaded
                         loop.call_soon_threadsafe(
-                            lambda u=uploaded, t=total: asyncio.create_task(self._set_active_upload_progress(job, u, t))
+                            lambda u=uploaded, t=total: spawn_background_task(
+                                self._set_active_upload_progress(job, u, t),
+                                name=f"upload-progress-{job.id}",
+                            )
                         )
 
                 if ftp_retry_enabled:
@@ -655,16 +659,22 @@ class BackgroundDispatchService:
                         "Failed to upload file to printer. Check if SD card is inserted and properly formatted (FAT32/exFAT)."
                     )
 
+                # Resolve plate_id before register so usage tracking can scope the
+                # 3MF parse to the dispatched plate at print-start (#1697). Pure
+                # transform of file_path + options, safe to reorder.
+                plate_id = self._resolve_plate_id(file_path, job.options.get("plate_id"))
+
                 register_expected_print(
                     job.printer_id,
                     remote_filename,
                     job.source_id,
                     ams_mapping=job.options.get("ams_mapping"),
+                    plate_id=plate_id,
                 )
 
-                plate_id = self._resolve_plate_id(file_path, job.options.get("plate_id"))
-
                 self._raise_if_cancel_requested(job)
+
+                effective_timelapse = bool(job.options.get("timelapse", False))
 
                 await self._set_active_message(job, f"Starting print on {printer_name}...")
                 started = printer_manager.start_print(
@@ -672,12 +682,13 @@ class BackgroundDispatchService:
                     remote_filename,
                     plate_id,
                     ams_mapping=job.options.get("ams_mapping"),
-                    timelapse=job.options.get("timelapse", False),
+                    timelapse=effective_timelapse,
                     bed_levelling=job.options.get("bed_levelling", True),
                     flow_cali=job.options.get("flow_cali", False),
                     vibration_cali=job.options.get("vibration_cali", True),
                     layer_inspect=job.options.get("layer_inspect", False),
                     use_ams=job.options.get("use_ams", True),
+                    nozzle_offset_cali=job.options.get("nozzle_offset_cali", False),
                 )
 
                 if not started:
@@ -815,7 +826,10 @@ class BackgroundDispatchService:
                         progress_state["last_emit"] = now
                         progress_state["last_bytes"] = uploaded
                         loop.call_soon_threadsafe(
-                            lambda u=uploaded, t=total: asyncio.create_task(self._set_active_upload_progress(job, u, t))
+                            lambda u=uploaded, t=total: spawn_background_task(
+                                self._set_active_upload_progress(job, u, t),
+                                name=f"upload-progress-{job.id}",
+                            )
                         )
 
                 if ftp_retry_enabled:
@@ -853,16 +867,21 @@ class BackgroundDispatchService:
                         "Failed to upload file to printer. Check if SD card is inserted and properly formatted (FAT32/exFAT)."
                     )
 
+                # Resolve plate_id before register so usage tracking can scope the
+                # 3MF parse to the dispatched plate at print-start (#1697).
+                plate_id = self._resolve_plate_id(file_path, job.options.get("plate_id"))
+
                 register_expected_print(
                     job.printer_id,
                     remote_filename,
                     archive.id,
                     ams_mapping=job.options.get("ams_mapping"),
+                    plate_id=plate_id,
                 )
 
-                plate_id = self._resolve_plate_id(file_path, job.options.get("plate_id"))
-
                 self._raise_if_cancel_requested(job)
+
+                effective_timelapse = bool(job.options.get("timelapse", False))
 
                 await self._set_active_message(job, f"Starting print on {printer_name}...")
                 started = printer_manager.start_print(
@@ -870,12 +889,13 @@ class BackgroundDispatchService:
                     remote_filename,
                     plate_id,
                     ams_mapping=job.options.get("ams_mapping"),
-                    timelapse=job.options.get("timelapse", False),
+                    timelapse=effective_timelapse,
                     bed_levelling=job.options.get("bed_levelling", True),
                     flow_cali=job.options.get("flow_cali", False),
                     vibration_cali=job.options.get("vibration_cali", True),
                     layer_inspect=job.options.get("layer_inspect", False),
                     use_ams=job.options.get("use_ams", True),
+                    nozzle_offset_cali=job.options.get("nozzle_offset_cali", False),
                 )
 
                 if not started:

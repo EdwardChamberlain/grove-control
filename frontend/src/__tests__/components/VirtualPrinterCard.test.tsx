@@ -35,7 +35,7 @@ vi.mock('../../api/client', () => ({
   },
 }));
 
-import { multiVirtualPrinterApi } from '../../api/client';
+import { multiVirtualPrinterApi, api } from '../../api/client';
 
 const models: Record<string, string> = {
   'BL-P001': 'X1C',
@@ -405,5 +405,84 @@ describe('VirtualPrinterCard - Tailscale FQDN copy', () => {
     await waitFor(() => {
       expect(document.querySelectorAll('textarea').length).toBe(0);
     });
+  });
+});
+
+// Non-proxy VPs with a target printer derive their access code from the
+// target — the live-mirror bridge forwards slicer auth to the real printer,
+// so the codes must match. The card surfaces the target's code read-only
+// (with an Eye-toggle reveal) so the user knows what to type into the slicer
+// but can't diverge it from the printer's. When no target is set, the field
+// stays editable.
+describe('VirtualPrinterCard - access code inherits from target', () => {
+  const printers = [
+    {
+      id: 7,
+      name: 'Workshop X1C',
+      ip_address: '192.168.1.50',
+      access_code: 'TGTCODE1',
+      serial_number: '01P00A391800001',
+      model: 'X1C',
+      is_active: true,
+    },
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(multiVirtualPrinterApi.update).mockResolvedValue(createMockPrinter());
+    // Re-mock the printers query for this block so the card has a target
+    // printer it can read access_code from.
+    vi.mocked(api.getPrinters).mockResolvedValue(printers as unknown as Awaited<ReturnType<typeof api.getPrinters>>);
+  });
+
+  it('shows target printer access code read-only when target is set on a non-proxy VP', async () => {
+    const printer = createMockPrinter({ mode: 'queue', target_printer_id: 7 });
+    render(<VirtualPrinterCard printer={printer} models={models} />);
+
+    // Wait for the inheritance badge AND the actual code value to appear —
+    // the badge renders synchronously from local state, but the value
+    // depends on the printers query (api.getPrinters) resolving first.
+    const codeInput = await waitFor(() => {
+      const input = screen.getByLabelText('Access Code') as HTMLInputElement;
+      if (input.value !== 'TGTCODE1') throw new Error('inherited value not populated yet');
+      return input;
+    });
+
+    expect(screen.getByText('Inherited from target')).toBeInTheDocument();
+    // Save button must NOT exist in the readonly path — the field is
+    // managed via the target printer's settings, not this card.
+    expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+    expect(codeInput.readOnly).toBe(true);
+    expect(codeInput.type).toBe('password');
+  });
+
+  it('toggles the access code to plaintext via the Eye button', async () => {
+    const user = userEvent.setup();
+    const printer = createMockPrinter({ mode: 'queue', target_printer_id: 7 });
+    render(<VirtualPrinterCard printer={printer} models={models} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Inherited from target')).toBeInTheDocument();
+    });
+
+    const revealBtn = screen.getByRole('button', { name: /show access code/i });
+    await user.click(revealBtn);
+
+    const codeInput = screen.getByLabelText('Access Code') as HTMLInputElement;
+    expect(codeInput.type).toBe('text');
+  });
+
+  it('keeps the editable input + Save button when no target is set', async () => {
+    const printer = createMockPrinter({ mode: 'archive', target_printer_id: null });
+    render(<VirtualPrinterCard printer={printer} models={models} />);
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Enter 8-char code')).toBeInTheDocument();
+    });
+
+    // Inheritance badge must NOT appear when there's no target.
+    expect(screen.queryByText('Inherited from target')).not.toBeInTheDocument();
+    // Save button IS present in the editable path (disabled until 8 chars typed).
+    expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument();
   });
 });

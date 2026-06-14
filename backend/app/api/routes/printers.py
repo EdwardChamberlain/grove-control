@@ -12,6 +12,7 @@ from backend.app.core.auth import RequireCameraStreamTokenIfAuthEnabled, Require
 from backend.app.core.config import settings
 from backend.app.core.database import get_db
 from backend.app.core.permissions import Permission
+from backend.app.core.tasks import spawn_background_task
 from backend.app.models.ams_label import AmsLabel
 from backend.app.models.printer import Printer
 from backend.app.models.slot_preset import SlotPresetMapping
@@ -1534,8 +1535,12 @@ async def delete_printer_file(
     if not printer:
         raise HTTPException(404, "Printer not found")
 
-    success = await delete_file_async(printer.ip_address, printer.access_code, path, printer_model=printer.model)
-    if not success:
+    from backend.app.services.bambu_ftp import DeleteResult
+
+    result = await delete_file_async(printer.ip_address, printer.access_code, path, printer_model=printer.model)
+    if result == DeleteResult.NOT_FOUND:
+        raise HTTPException(404, f"File not found on printer: {path}")
+    if result == DeleteResult.FAILED:
         raise HTTPException(500, f"Failed to delete file: {path}")
 
     return {"status": "deleted", "path": path}
@@ -3120,7 +3125,10 @@ async def refresh_ams_slot(
         raise HTTPException(400, message)
 
     # Apply PA profile after delay (RFID re-read takes a few seconds)
-    asyncio.create_task(_apply_pa_after_refresh(printer_id, ams_id, slot_id))
+    spawn_background_task(
+        _apply_pa_after_refresh(printer_id, ams_id, slot_id),
+        name=f"apply-pa-after-refresh-{printer_id}-{ams_id}-{slot_id}",
+    )
 
     return {"success": True, "message": message}
 

@@ -14,12 +14,13 @@ from typing import TYPE_CHECKING
 from backend.app.core.config import settings as app_settings
 from backend.app.models.virtual_printer import (
     VP_MODE_ARCHIVE,
+    VP_MODE_PROXY,
     VP_MODE_QUEUE,
     normalize_vp_mode,
 )
 from backend.app.services.virtual_printer.bind_server import BindServer
 from backend.app.services.virtual_printer.certificate import CertificateService
-from backend.app.services.virtual_printer.ftp_server import VirtualPrinterFTPServer
+from backend.app.services.virtual_printer.ftp_server import VirtualPrinterFTPServer, compute_passive_port_slice
 from backend.app.services.virtual_printer.mqtt_bridge import MQTTBridge
 from backend.app.services.virtual_printer.mqtt_server import SimpleMQTTServer
 from backend.app.services.virtual_printer.ssdp_server import SSDPProxy, VirtualPrinterSSDPServer
@@ -43,6 +44,8 @@ VIRTUAL_PRINTER_MODELS = {
     "C13": "X1E",  # X1E
     # X2 Series
     "N6": "X2D",  # X2D
+    # A2 Series (single-FDM + integrated cutter/plotter)
+    "N9": "A2L",  # A2L
     # P Series
     "C11": "P1P",  # P1P
     "C12": "P1S",  # P1S
@@ -75,6 +78,8 @@ MODEL_SERIAL_PREFIXES = {
     "C13": "03W00A",  # X1E
     # X2 Series
     "N6": "20P90A",  # X2D (first 4 chars "20P9" match real serials)
+    # A2 Series
+    "N9": "26A19A",  # A2L (first 5 chars "26A19" match real serials)
     # P Series
     "C11": "01S00A",  # P1P
     "C12": "01P00A",  # P1S
@@ -204,6 +209,10 @@ class VirtualPrinterInstance:
         self._ssdp_proxy: SSDPProxy | None = None
         self._tasks: list[asyncio.Task] = []
 
+        # Pending timer that re-fires gcode_state=FINISH after a project_file
+        # ack. See ``_schedule_finish_release`` for the #1658 rationale.
+        self._finish_release_task: asyncio.Task | None = None
+
     @property
     def serial(self) -> str:
         """Full serial number for this virtual printer."""
@@ -285,9 +294,17 @@ class VirtualPrinterInstance:
         modes ignore the print command, so we skip the stash there to keep
         the dict from accumulating one entry per print over the VP's
         uptime.
+
+        Also schedules the #1658 follow-up that re-fires gcode_state=FINISH a
+        moment after the synthetic project_file ack — for every non-proxy
+        mode — so the slicer's "Downloading" UI releases on the slicer's
+        FTP-first-then-MQTT send order.
         """
         logger.info("[VP %s] Print command for: %s", self.name, filename)
-        if normalize_vp_mode(self.mode) != VP_MODE_QUEUE:
+        mode = normalize_vp_mode(self.mode)
+        if mode != VP_MODE_PROXY and filename and self._mqtt is not None:
+            self._schedule_finish_release(filename)
+        if mode != VP_MODE_QUEUE:
             return
         # Drop the oldest stash if the cache is growing — happens when the
         # slicer sends project_file for a filename whose FTP upload was
@@ -306,6 +323,48 @@ class VirtualPrinterInstance:
         event = self._slicer_print_options_events.get(filename)
         if event:
             event.set()
+
+    def _schedule_finish_release(self, filename: str, delay: float = 1.5) -> None:
+        """Re-set gcode_state=FINISH on the VP after the project_file ack.
+
+        #1280 set FINISH after the FTP upload completes — that was correct
+        for the slicer flow at the time (MQTT project_file → FTP → done).
+        Bambu Studio 2.7.x flipped the order to FTP → FTP → MQTT project_file,
+        which means ``_send_print_response`` runs *after* the FINISH set in
+        ``on_file_received`` and overwrites the state back to PREPARE. The
+        slicer's 1 Hz status stream then carries PREPARE forever and the
+        send modal sits at "Downloading" until the VP is restarted (#1658).
+
+        Re-firing FINISH after a short delay closes the gap: the slicer sees
+        the synthetic PREPARE in the project_file ack (and likely one PREPARE
+        push on the 1 Hz cycle), then the next push carries FINISH and the
+        modal releases. Proxy mode is exempt — there the real printer drives
+        the state through the bridge and a synthetic FINISH would clobber a
+        real PREPARE/RUNNING transition coming back from the printer.
+
+        Cancels any in-flight timer before scheduling a new one so a slicer
+        that fires project_file twice in quick succession only ends in one
+        FINISH.
+        """
+        if self._mqtt is None:
+            return
+        if self._finish_release_task is not None and not self._finish_release_task.done():
+            self._finish_release_task.cancel()
+        self._finish_release_task = asyncio.create_task(
+            self._delayed_finish_release(filename, delay),
+            name=f"vp-{self.id}-finish-release",
+        )
+
+    async def _delayed_finish_release(self, filename: str, delay: float) -> None:
+        """Sleep, then set gcode_state=FINISH. Used by ``_schedule_finish_release``."""
+        try:
+            await asyncio.sleep(delay)
+        except asyncio.CancelledError:
+            return
+        if self._mqtt is None:
+            return
+        self._mqtt.set_gcode_state("FINISH", filename=filename, prepare_percent="100")
+        logger.debug("[VP %s] Re-set gcode_state=FINISH after project_file ack (%s)", self.name, filename)
 
     async def _archive_file(self, file_path: Path, source_ip: str) -> None:
         """Archive file immediately."""
@@ -529,44 +588,21 @@ class VirtualPrinterInstance:
                     target_model = None
                     if not self.target_printer_id and self.model:
                         target_model = VIRTUAL_PRINTER_MODELS.get(self.model)
-                    plate_id = self._extract_plate_id(file_path)
+                    # #1733: multi-plate "Send All" uploads ship every plate in
+                    # one 3MF — `slice_info.config` lists each `<plate>` with
+                    # its own index. Enqueue one PrintQueueItem per plate so
+                    # the scheduler runs each separately. Single-plate "Send"
+                    # comes through as `[N]` (one plate index) so the loop
+                    # below runs once and the existing behaviour is preserved.
+                    plate_ids = self._extract_plate_ids(file_path)
 
-                    # Parse the 3MF for per-slot filament requirements (#1188).
-                    # The manual /print-queue/ POST flow does this at queue-add
-                    # time; the VP path used to skip it, so the scheduler fell
-                    # through to model-only matching and dispatched onto whatever
-                    # printer happened to be free regardless of loaded colour.
-                    # required_filament_types is populated unconditionally — it's
-                    # cheap, lets the scheduler reject obvious mis-matches even
-                    # without force_color_match. filament_overrides only carries
-                    # force_color_match=True when the per-VP setting is on, so
-                    # upgraders keep the old behaviour by default.
-                    required_filament_types_json: str | None = None
-                    filament_overrides_json: str | None = None
-                    requirements = extract_filament_requirements(file_path, plate_id)
-                    if requirements:
-                        types = sorted({r["type"] for r in requirements if r.get("type")})
-                        if types:
-                            required_filament_types_json = json.dumps(types)
-                        if self.queue_force_color_match:
-                            overrides = [
-                                {
-                                    "slot_id": r["slot_id"],
-                                    "type": r.get("type", ""),
-                                    "color": r.get("color", ""),
-                                    "force_color_match": True,
-                                }
-                                for r in requirements
-                                if r.get("type") and r.get("color")
-                            ]
-                            if overrides:
-                                filament_overrides_json = json.dumps(overrides)
-
-                    # Pick the next free position the same way the manual
-                    # /print-queue/ POST does — previously hardcoded to 1,
-                    # which created duplicate position=1 rows on every
-                    # VP upload and made queue execution order
-                    # non-deterministic for any non-empty queue.
+                    # Pick a base position the same way the manual /print-queue/
+                    # POST does, then hand consecutive positions to each plate
+                    # so a Send All keeps plate-order execution inside the
+                    # queue (#1733). Previously hardcoded to 1, which created
+                    # duplicate position=1 rows on every VP upload and made
+                    # queue execution order non-deterministic for any non-
+                    # empty queue.
                     from sqlalchemy import func, select as _sql_select
 
                     queue_scope = _sql_select(func.max(PrintQueueItem.position)).where(
@@ -581,27 +617,72 @@ class VirtualPrinterInstance:
                         max_pos = int(max_pos_raw) if max_pos_raw is not None else 0
                     except (TypeError, ValueError):
                         max_pos = 0
-                    next_position = max_pos + 1
 
-                    queue_item = PrintQueueItem(
-                        printer_id=self.target_printer_id,
-                        target_model=target_model,
-                        archive_id=archive.id,
-                        plate_id=plate_id,
-                        position=next_position,
-                        status="pending",
-                        manual_start=not self.auto_dispatch,
-                        required_filament_types=required_filament_types_json,
-                        filament_overrides=filament_overrides_json,
-                        bed_levelling=bed_levelling,
-                        flow_cali=flow_cali,
-                        vibration_cali=vibration_cali,
-                        layer_inspect=layer_inspect,
-                        timelapse=timelapse,
-                    )
-                    db.add(queue_item)
+                    # Parse per-plate filament requirements (#1188). Each plate
+                    # has its own filament set in `slice_info.config`, so the
+                    # `required_filament_types` / `filament_overrides` columns
+                    # on each queue item reflect THAT plate, not the file's
+                    # first plate. Scoping was already plate-aware via #1697 —
+                    # the `extract_filament_requirements(path, plate_id)` filter
+                    # returns just the plate's filaments. required_filament_types
+                    # is populated unconditionally — it's cheap, lets the
+                    # scheduler reject obvious mis-matches even without
+                    # force_color_match. filament_overrides only carries
+                    # force_color_match=True when the per-VP setting is on, so
+                    # upgraders keep the old behaviour by default.
+                    queue_item_ids: list[int] = []
+                    for offset, plate_id in enumerate(plate_ids, start=1):
+                        required_filament_types_json: str | None = None
+                        filament_overrides_json: str | None = None
+                        requirements = extract_filament_requirements(file_path, plate_id)
+                        if requirements:
+                            types = sorted({r["type"] for r in requirements if r.get("type")})
+                            if types:
+                                required_filament_types_json = json.dumps(types)
+                            if self.queue_force_color_match:
+                                overrides = [
+                                    {
+                                        "slot_id": r["slot_id"],
+                                        "type": r.get("type", ""),
+                                        "color": r.get("color", ""),
+                                        "force_color_match": True,
+                                    }
+                                    for r in requirements
+                                    if r.get("type") and r.get("color")
+                                ]
+                                if overrides:
+                                    filament_overrides_json = json.dumps(overrides)
+
+                        queue_item = PrintQueueItem(
+                            printer_id=self.target_printer_id,
+                            target_model=target_model,
+                            archive_id=archive.id,
+                            plate_id=plate_id,
+                            position=max_pos + offset,
+                            status="pending",
+                            manual_start=not self.auto_dispatch,
+                            required_filament_types=required_filament_types_json,
+                            filament_overrides=filament_overrides_json,
+                            bed_levelling=bed_levelling,
+                            flow_cali=flow_cali,
+                            vibration_cali=vibration_cali,
+                            layer_inspect=layer_inspect,
+                            timelapse=timelapse,
+                        )
+                        db.add(queue_item)
+                        await db.flush()  # populate queue_item.id before logging
+                        queue_item_ids.append(queue_item.id)
                     await db.commit()
-                    logger.info("[VP %s] Added to queue: %s", self.name, queue_item.id)
+                    if len(queue_item_ids) == 1:
+                        logger.info("[VP %s] Added to queue: %s", self.name, queue_item_ids[0])
+                    else:
+                        logger.info(
+                            "[VP %s] Added %d queue items for multi-plate upload (plates %s): %s",
+                            self.name,
+                            len(queue_item_ids),
+                            plate_ids,
+                            queue_item_ids,
+                        )
                     await self._broadcast_archive_created(archive)
                 else:
                     logger.error("Failed to archive file: %s", file_path.name)
@@ -641,8 +722,27 @@ class VirtualPrinterInstance:
             logger.debug("[VP %s] archive_created broadcast failed: %s", self.name, e)
 
     @staticmethod
-    def _extract_plate_id(file_path: Path) -> int | None:
-        """Extract plate index from 3MF slice_info.config."""
+    def _extract_plate_ids(file_path: Path) -> list[int]:
+        """Extract every plate index from a 3MF's slice_info.config.
+
+        A multi-plate "Send All" from BambuStudio / OrcaSlicer uploads a
+        single 3MF containing every plate the user selected. Each plate
+        has its own ``<plate>`` block with a ``<metadata key="index"
+        value="N"/>`` child and its own ``Metadata/plate_N.gcode`` payload
+        inside the same zip. Returning the full ordered list lets the VP
+        queue path create one queue item per plate (`_add_to_print_queue`
+        loops over the result), so "Send All" of a 3-plate file produces
+        3 queue items sharing the same archive — one per plate to print.
+
+        Single-plate "Send" hits the same code path and returns ``[N]``
+        for whichever plate the user selected; the loop runs once and the
+        existing single-plate behaviour is preserved.
+
+        Returns ``[1]`` when the 3MF is missing ``slice_info.config``,
+        unparseable, or contains no plate-index metadata — the original
+        single-plate fallback. Production logs at debug so a non-3MF
+        upload doesn't spam, but the trail survives for support bundles.
+        """
         try:
             import xml.etree.ElementTree as ET
             import zipfile
@@ -651,19 +751,20 @@ class VirtualPrinterInstance:
                 if "Metadata/slice_info.config" in zf.namelist():
                     content = zf.read("Metadata/slice_info.config").decode()
                     root = ET.fromstring(content)  # noqa: S314  # nosec B314
-                    plate = root.find(".//plate")
-                    if plate is not None:
+                    plate_ids: list[int] = []
+                    for plate in root.findall(".//plate"):
                         for meta in plate.findall("metadata"):
                             if meta.get("key") == "index" and meta.get("value"):
-                                return int(meta.get("value"))
+                                try:
+                                    plate_ids.append(int(meta.get("value")))
+                                except ValueError:
+                                    continue
+                                break
+                    if plate_ids:
+                        return plate_ids
         except Exception as e:
-            # Malformed / missing slice_info.config — fall through to None.
-            # Logged at debug so a non-3MF or unconventional 3MF doesn't
-            # spam production logs; a debug trail exists for support
-            # bundles when wrong-plate dispatches are reported.
-            logger.debug("[VP] _extract_plate_id failed for %s: %s", file_path.name, e)
-            return None
-        return None
+            logger.debug("[VP] _extract_plate_ids failed for %s: %s", file_path.name, e)
+        return [1]
 
     # -- Service lifecycle --
 
@@ -694,7 +795,12 @@ class VirtualPrinterInstance:
 
         self._tasks = []
 
-        # FTP server
+        # FTP server. Each VP gets a non-overlapping passive-mode port slice
+        # derived from its DB id so bridge-mode Docker users only have to
+        # expose a narrow range (#1646). Default slice is 10 ports per VP;
+        # see ftp_server.compute_passive_port_slice for the wrap-around
+        # behaviour on installs with very high VP ids.
+        passive_port_min, passive_port_max = compute_passive_port_slice(self.id)
         self._ftp = VirtualPrinterFTPServer(
             upload_dir=self.upload_dir,
             access_code=self.access_code,
@@ -703,6 +809,8 @@ class VirtualPrinterInstance:
             on_file_received=self.on_file_received,
             bind_address=bind_addr,
             vp_name=self.name,
+            passive_port_min=passive_port_min,
+            passive_port_max=passive_port_max,
         )
         self._tasks.append(
             asyncio.create_task(
@@ -832,6 +940,9 @@ class VirtualPrinterInstance:
 
     async def stop_server(self) -> None:
         """Stop server-mode services."""
+        if self._finish_release_task is not None and not self._finish_release_task.done():
+            self._finish_release_task.cancel()
+            self._finish_release_task = None
         if self._mqtt_bridge:
             try:
                 await self._mqtt_bridge.stop()

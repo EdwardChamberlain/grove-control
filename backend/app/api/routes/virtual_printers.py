@@ -74,13 +74,26 @@ def _resolve_printer_model(printer_model: str | None) -> str | None:
     return DISPLAY_NAME_TO_MODEL_CODE.get(printer_model)
 
 
-def _vp_to_dict(vp, status: dict | None = None) -> dict:
-    """Convert VirtualPrinter model to response dict."""
+async def _vp_to_dict(vp, db: AsyncSession, status: dict | None = None) -> dict:
+    """Convert VirtualPrinter model to response dict.
+
+    In proxy mode the surfaced serial is the target printer's actual serial
+    (what the bridge advertises over SSDP / what slicers see), not the
+    self-generated suffix. Archive / queue / review keep the self-generated
+    serial since those modes never speak the target's identity.
+    """
+    from backend.app.models.printer import Printer
+    from backend.app.models.virtual_printer import VP_MODE_PROXY
     from backend.app.services.virtual_printer import VIRTUAL_PRINTER_MODELS
     from backend.app.services.virtual_printer.manager import DEFAULT_VIRTUAL_PRINTER_MODEL, _get_serial_for_model
 
     model_code = vp.model or DEFAULT_VIRTUAL_PRINTER_MODEL
     serial = _get_serial_for_model(model_code, vp.serial_suffix)
+    if vp.mode == VP_MODE_PROXY and vp.target_printer_id:
+        result = await db.execute(select(Printer.serial_number).where(Printer.id == vp.target_printer_id))
+        target_serial = result.scalar_one_or_none()
+        if target_serial:
+            serial = target_serial
 
     return {
         "id": vp.id,
@@ -118,7 +131,7 @@ async def list_virtual_printers(
     for vp in vps:
         instance = virtual_printer_manager.get_instance(vp.id)
         status = instance.get_status() if instance else {"running": False, "pending_files": 0}
-        printers.append(_vp_to_dict(vp, status))
+        printers.append(await _vp_to_dict(vp, db, status))
 
     return {
         "printers": printers,
@@ -154,7 +167,10 @@ async def create_virtual_printer(
     if body.access_code and len(body.access_code) != 8:
         return JSONResponse(status_code=400, content={"detail": "Access code must be exactly 8 characters"})
 
-    # Validation when enabling
+    # Validation when enabling. Non-proxy VPs with a target printer derive
+    # their access code from the target (the bridge forwards the slicer's
+    # auth bytes through to the real printer, so the codes MUST match),
+    # so a separately-supplied access_code isn't required in that case.
     if body.enabled:
         if not body.bind_ip:
             return JSONResponse(status_code=400, content={"detail": "Bind IP is required when enabling"})
@@ -162,7 +178,7 @@ async def create_virtual_printer(
             if not body.target_printer_id:
                 return JSONResponse(status_code=400, content={"detail": "Target printer is required for proxy mode"})
         else:
-            if not body.access_code:
+            if not body.access_code and not body.target_printer_id:
                 return JSONResponse(status_code=400, content={"detail": "Access code is required when enabling"})
 
     # Validate proxy target printer exists
@@ -188,6 +204,16 @@ async def create_virtual_printer(
         if result.scalar_one_or_none():
             return JSONResponse(status_code=400, content={"detail": f"Bind IP {body.bind_ip} is already in use"})
 
+    # Force-inherit the access code from the target printer for non-proxy VPs.
+    # The non-proxy bridge (Immediate / Review / Queue with a target set) forwards
+    # the slicer's MQTT / RTSPS auth bytes through to the real printer, so any
+    # value the user supplied here would silently break the bridge if it didn't
+    # match the printer's code. The UI now renders the field read-only when a
+    # target is set; this is the belt-and-braces backstop for any non-UI client.
+    effective_access_code = body.access_code
+    if body.mode != "proxy" and target_printer is not None:
+        effective_access_code = target_printer.access_code
+
     # Generate next serial suffix
     result = await db.execute(select(VirtualPrinter.serial_suffix).order_by(VirtualPrinter.id.desc()))
     last_suffix = result.scalar()
@@ -212,7 +238,7 @@ async def create_virtual_printer(
         model=body.model
         or _resolve_printer_model(target_printer.model if target_printer and body.mode == "proxy" else None)
         or DEFAULT_VIRTUAL_PRINTER_MODEL,
-        access_code=body.access_code,
+        access_code=effective_access_code,
         target_printer_id=body.target_printer_id,
         auto_dispatch=body.auto_dispatch,
         queue_force_color_match=body.queue_force_color_match,
@@ -234,7 +260,7 @@ async def create_virtual_printer(
         except Exception as e:
             logger.error("Failed to start virtual printer after create: %s", e)
 
-    return _vp_to_dict(vp)
+    return await _vp_to_dict(vp, db)
 
 
 @router.get("/tailscale-status", response_model=TailscaleStatusResponse)
@@ -318,7 +344,7 @@ async def get_virtual_printer(
     instance = virtual_printer_manager.get_instance(vp.id)
     status = instance.get_status() if instance else {"running": False, "pending_files": 0}
 
-    return _vp_to_dict(vp, status)
+    return await _vp_to_dict(vp, db, status)
 
 
 @router.put("/{vp_id}")
@@ -409,6 +435,20 @@ async def update_virtual_printer(
         if existing_target and existing_target.model:
             vp.model = _resolve_printer_model(existing_target.model) or existing_target.model
 
+    # Force-inherit the access code from the target printer for non-proxy VPs.
+    # See create_virtual_printer for the rationale: the bridge forwards slicer
+    # auth bytes through, so the VP's code MUST equal the target's. This block
+    # runs after every patch (whether or not access_code or target were in the
+    # body), so changing the target also resyncs the code, and an explicit
+    # access_code submitted alongside a target is silently overridden.
+    if vp.mode != "proxy" and vp.target_printer_id is not None:
+        from backend.app.models.printer import Printer as PrinterModelAC
+
+        result = await db.execute(select(PrinterModelAC).where(PrinterModelAC.id == vp.target_printer_id))
+        target_for_ac = result.scalar_one_or_none()
+        if target_for_ac is not None and vp.access_code != target_for_ac.access_code:
+            vp.access_code = target_for_ac.access_code
+
     # Determine final enabled state
     explicitly_enabling = body.enabled is True
     new_enabled = body.enabled if body.enabled is not None else vp.enabled
@@ -479,7 +519,7 @@ async def update_virtual_printer(
     instance = virtual_printer_manager.get_instance(vp.id)
     status = instance.get_status() if instance else {"running": False, "pending_files": 0}
 
-    return _vp_to_dict(vp, status)
+    return await _vp_to_dict(vp, db, status)
 
 
 @router.delete("/{vp_id}")

@@ -30,6 +30,10 @@ class PrintQueueItemCreate(BaseModel):
     manual_start: bool = False  # Requires manual trigger to start (staged)
     insert_at_top: bool = False  # Insert ahead of other pending items in the same queue scope
     insert_position: int | None = None  # 1-indexed insertion position for priority queueing
+    # Persistent "Print Anyway" acknowledgement (#1698-followup). When set,
+    # PrintModal already showed the deficit warning and the user confirmed,
+    # so the scheduler does not re-flag this item on the next tick.
+    skip_filament_check: bool = False
     # AMS mapping: list of global tray IDs for each filament slot
     # Format: [5, -1, 2, -1] where position = slot_id-1, value = global tray ID (-1 = unused)
     ams_mapping: list[int] | None = None
@@ -42,6 +46,10 @@ class PrintQueueItemCreate(BaseModel):
     layer_inspect: bool = False
     timelapse: bool = False
     use_ams: bool = True
+    # Nozzle offset calibration — dual-nozzle printers only (#1682). Default True
+    # matches BambuStudio's default; the MQTT layer ignores the flag on
+    # single-nozzle printers so the wire value stays "skip" there.
+    nozzle_offset_cali: bool = True
     # Auto-print G-code injection
     gcode_injection: bool = False
     # Batch: create multiple copies (creates a batch if > 1)
@@ -72,6 +80,7 @@ class PrintQueueItemUpdate(BaseModel):
     layer_inspect: bool | None = None
     timelapse: bool | None = None
     use_ams: bool | None = None
+    nozzle_offset_cali: bool | None = None
     # Auto-print G-code injection
     gcode_injection: bool | None = None
 
@@ -96,6 +105,9 @@ class PrintQueueItemResponse(BaseModel):
     # (#1496). Display-only — the ▶ click recomputes deficit against live
     # spool state.
     filament_short: bool = False
+    # User has acknowledged "Print Anyway" — scheduler skips the deficit check
+    # for this item (#1698-followup).
+    skip_filament_check: bool = False
     ams_mapping: list[int] | None = None
     plate_id: int | None = None  # Plate ID for multi-plate 3MF files
     # Print options
@@ -105,6 +117,7 @@ class PrintQueueItemResponse(BaseModel):
     layer_inspect: bool = False
     timelapse: bool = False
     use_ams: bool = True
+    nozzle_offset_cali: bool = True
     status: Literal["pending", "printing", "completed", "failed", "skipped", "cancelled"]
     started_at: UTCDatetime
     completed_at: UTCDatetime
@@ -131,6 +144,11 @@ class PrintQueueItemResponse(BaseModel):
     layer_height: float | None = None  # e.g. 0.2 (from archive/library file)
     nozzle_diameter: float | None = None  # e.g. 0.4 (from archive/library file)
     sliced_for_model: str | None = None  # e.g. "P1S" (from archive/library file)
+    # Build plate type (e.g. "Textured PEI Plate") so the user knows which
+    # plate to mount on the printer (#1281). Per-plate accurate on multi-plate
+    # 3MFs: when `plate_id` is set, the value is the matching plate's
+    # `curr_bed_type` rather than the archive-level first-plate default.
+    bed_type: str | None = None
 
     # User tracking (Issue #206)
     created_by_id: int | None = None
@@ -177,6 +195,7 @@ class PrintQueueBulkUpdate(BaseModel):
     layer_inspect: bool | None = None
     timelapse: bool | None = None
     use_ams: bool | None = None
+    nozzle_offset_cali: bool | None = None
     # Auto-print G-code injection
     gcode_injection: bool | None = None
 
