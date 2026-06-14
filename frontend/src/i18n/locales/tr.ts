@@ -2838,9 +2838,62 @@ export default {
     title: 'Profiller',
     subtitle: 'Dilimleyici ön ayarlarını ve basınç ilerleme kalibrasyonlarını yönetin',
     tabs: {
-      cloud: 'Bulut Profilleri',
+      bambuCloud: 'Bambu Cloud',
+      orcaCloud: 'Orca Cloud',
       local: 'Yerel Profiller',
       kprofiles: 'K-Profilleri',
+    },
+    orcaCloud: {
+      connectedAs: 'Bağlı kullanıcı',
+      logout: 'Bağlantıyı kes',
+      noLogoutPermission: 'Bağlantıyı kesme izniniz yok',
+      noConnectPermission: 'Orca Cloud\'a bağlanma izniniz yok',
+      retry: 'Yeniden dene',
+      back: 'Farklı bir giriş yöntemi kullan',
+      connect: {
+        title: 'Orca Cloud\'a bağlan',
+        description: 'Dilimleyici profillerinizi Bambuddy ile senkronize etmek için Orca Cloud hesabınıza giriş yapın.',
+      },
+      providers: {
+        google: 'Google ile giriş yap',
+        apple: 'Apple ile giriş yap',
+        github: 'GitHub ile giriş yap',
+        email: 'E-posta ve şifre ile giriş yap',
+      },
+      password: {
+        title: 'E-posta ve şifre ile giriş yap',
+        email: 'E-posta',
+        emailPlaceholder: 'sen@ornek.com',
+        password: 'Şifre',
+        submit: 'Giriş yap',
+      },
+      paste: {
+        title: 'Girişi tamamla',
+        step1: 'Yeni bir sekme Orca Cloud giriş sayfasıyla açıldı. Orca hesabınızla giriş yapın.',
+        step2: 'Tarayıcınız yüklenemeyen bir "localhost" URL\'sine yönlendirilecektir. Bu beklenen bir durumdur — bize gereken URL budur.',
+        step3: 'Tarayıcınızın adres çubuğundaki URL\'nin tamamını kopyalayın ve aşağıya yapıştırın.',
+        signInUrl: 'Giriş sekmesi açılmadıysa bu URL\'ye tıklayın:',
+        label: 'Geri çağrı URL\'sini buraya yapıştırın',
+        placeholder: 'http://localhost:41172/callback?code=...&state=...',
+        submit: 'Bağlantıyı tamamla',
+      },
+      profiles: {
+        title: 'Orca Cloud profilleriniz ({{count}})',
+        refresh: 'Yenile',
+        empty: 'Orca Cloud hesabınızda henüz profil bulunamadı.',
+      },
+      toast: {
+        connected: '{{email}} olarak Orca Cloud\'a bağlanıldı',
+        disconnected: 'Orca Cloud bağlantısı kesildi',
+      },
+      errors: {
+        startFailed: 'Orca Cloud giriş akışı başlatılamadı.',
+        finishFailed: 'Orca Cloud girişi tamamlanamadı.',
+        passwordFailed: 'Bu e-posta ve şifreyle giriş yapılamadı.',
+        passwordEmpty: 'Lütfen hem e-postanızı hem de şifrenizi girin.',
+        emptyPaste: 'Lütfen tarayıcınızdan geri çağrı URL\'sini yapıştırın.',
+        noCode: 'Bu URL bir Orca Cloud geri çağrısına benzemiyor (code parametresi yok). Tam URL\'yi adres çubuğundan kopyalayın.',
+      },
     },
     localProfiles: {
       title: 'Yerel Profiller',
@@ -3472,13 +3525,19 @@ export default {
     failedToast: '{{name}} dilimleme başarısız: {{detail}}',
     tier: {
       local: 'İçe aktarılmış',
-      cloud: 'Bulut',
+      cloud: 'Bambu Cloud',
+      orcaCloud: 'Orca Cloud',
       standard: 'Standart',
     },
     cloud: {
-      notAuthenticated: 'Bulut ön ayarlarınızı görmek için Bambu Cloud\'a giriş yapın (Ayarlar → Profiller → Bulut).',
+      notAuthenticated: 'Bulut ön ayarlarınızı görmek için Bambu Cloud\'a giriş yapın (Ayarlar → Profiller → Bambu Cloud).',
       expired: 'Bambu Cloud oturumu süresi doldu — bulut ön ayarlarınızı yenilemek için tekrar giriş yapın.',
       unreachable: 'Bambu Cloud şu anda erişilemez. Yerel ve standart ön ayarlar hâlâ çalışıyor.',
+    },
+    orcaCloud: {
+      notAuthenticated: 'Orca ön ayarlarınızı görmek için Orca Cloud\'a giriş yapın (Profiller → Orca Cloud).',
+      expired: 'Orca Cloud oturumu sona erdi — Orca ön ayarlarınızı yenilemek için tekrar giriş yapın.',
+      unreachable: 'Orca Cloud şu anda erişilemez. Diğer ön ayarlar çalışmaya devam ediyor.',
     },
     bedType: {
       label: 'Baskı plakası',
@@ -4086,7 +4145,7 @@ export default {
     scheduledBackupFailed: 'Yedekleme başarısız',
     nextBackup: 'Sonraki yedek',
     backupSize: 'Boyut',
-    utc: 'UTC',
+    localTimeHint: 'Yerel saat ({{tz}})',
     defaultPathLabel: 'Varsayılan:',
 
     categories: {
@@ -5450,6 +5509,8 @@ export default {
   diagnostic: {
     modalTitle: 'Bağlantı tanılaması — {{name}}',
     running: 'Tanılama çalışıyor...',
+    runningElapsed: 'Tanılama çalışıyor... ({{elapsed}}s)',
+    waitingForReportHint: 'Yazıcının durum raporu yayınlamasını bekliyor — bu işlem en fazla {{max}} saniye sürebilir.',
     runFailed: 'Tanılama çalıştırılamadı: {{error}}',
     retry: 'Tekrar çalıştır',
     runButton: 'Tanılamayı çalıştır',
@@ -5499,6 +5560,12 @@ export default {
         title: 'LAN Geliştirici Modu',
         pass: 'Geliştirici Modu etkin.',
         fail: 'Yazıcıda Geliştirici Modu KAPALI. Yazıcının LAN ayarlarında etkinleştirin — ve OK ile onaylayın. Bu olmadan baskılar başlamayacak.',
+        skip: 'Kontrol edilemedi — yazıcıya canlı bir bağlantı gerektirir.',
+      },
+      printer_publishing: {
+        title: 'Yazıcı durum yayını yapıyor',
+        pass: 'Yazıcı durum güncellemelerini yayınlıyor — AMS, filamentler ve K profilleri dilimleyiciye doğru şekilde yansıtılacak.',
+        fail: 'MQTT aracısı bağlantıyı kabul etti, ancak yazıcı hiç durum raporu yayınlamadı. Bu neredeyse her zaman yanlış ya da büyük/küçük harf hatalı bir seri numarasından kaynaklanır — device/<serial>/report konusu büyük/küçük harfe duyarlıdır. Yazıcı ayarlarındaki seri numarasını cihazın ekranındaki ile karşılaştırarak doğrulayın.',
         skip: 'Kontrol edilemedi — yazıcıya canlı bir bağlantı gerektirir.',
       },
     },

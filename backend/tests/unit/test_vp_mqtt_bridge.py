@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1184,3 +1185,83 @@ class TestBindAddressAutoResolve:
             return_value=None,
         ):
             assert _resolve_host_interface_for_target("203.0.113.1") is None
+
+
+class TestNotArmedDiagnosticLogging:
+    """#1429 follow-up: every silent early-return in `_refresh_ip_encoding`
+    now emits one INFO line explaining WHY the rewrite couldn't arm. Throttled
+    to one line per state change so an idle unarmed bridge doesn't spam the
+    log every 30s tick. Cleared on arm so a future failure re-emits.
+    """
+
+    def test_no_client_logs_once(self, caplog):
+        bridge = _make_bridge(_make_server())
+        # Force the "no client" path: bridge starts with _target_client=None.
+        assert bridge._target_client is None
+        with caplog.at_level(logging.INFO, logger="backend.app.services.virtual_printer.mqtt_bridge"):
+            bridge._refresh_ip_encoding()
+            bridge._refresh_ip_encoding()  # 2nd tick — same reason, must NOT re-log.
+            bridge._refresh_ip_encoding()
+        not_armed = [r for r in caplog.records if "NOT armed" in r.getMessage()]
+        assert len(not_armed) == 1
+        assert "target_client is None" in not_armed[0].getMessage()
+
+    def test_missing_target_ip_logs_specific_reason(self, caplog):
+        bridge = _make_bridge(_make_server())
+        # Manually attach a client with no ip_address (simulates pre-DHCP).
+        client = _make_paho_client()
+        client.ip_address = ""
+        bridge._target_client = client
+        with caplog.at_level(logging.INFO, logger="backend.app.services.virtual_printer.mqtt_bridge"):
+            bridge._refresh_ip_encoding()
+        not_armed = [r for r in caplog.records if "NOT armed" in r.getMessage()]
+        assert len(not_armed) == 1
+        assert "no ip_address" in not_armed[0].getMessage()
+
+    def test_no_matching_host_interface_logs_specific_reason(self, caplog):
+        server = _make_server(bind_address="0.0.0.0")
+        bridge = _make_bridge(server)
+        with (
+            patch(
+                "backend.app.services.virtual_printer.mqtt_bridge._resolve_host_interface_for_target",
+                return_value=None,
+            ),
+            caplog.at_level(logging.INFO, logger="backend.app.services.virtual_printer.mqtt_bridge"),
+        ):
+            bridge._target_client = _make_paho_client()
+            bridge._refresh_ip_encoding()
+        not_armed = [r for r in caplog.records if "NOT armed" in r.getMessage()]
+        assert len(not_armed) == 1
+        msg = not_armed[0].getMessage()
+        assert H2D_IP in msg
+        assert "no host interface" in msg
+
+    def test_invalid_ipv4_logs_value_error(self, caplog):
+        server = _make_server(bind_address=VP_IP)
+        bridge = _make_bridge(server)
+        client = _make_paho_client()
+        client.ip_address = "not.an.ip"
+        bridge._target_client = client
+        with caplog.at_level(logging.INFO, logger="backend.app.services.virtual_printer.mqtt_bridge"):
+            bridge._refresh_ip_encoding()
+        not_armed = [r for r in caplog.records if "NOT armed" in r.getMessage()]
+        assert len(not_armed) == 1
+        assert "invalid IPv4" in not_armed[0].getMessage()
+
+    def test_successful_arm_clears_dedup_so_future_failure_relogs(self, caplog):
+        """After a successful arm, the dedup must reset so a subsequent
+        regression (e.g. printer client unbinds) re-emits the diagnostic
+        line instead of being silenced by the previous failure reason."""
+        bridge = _make_bridge(_make_server(bind_address=VP_IP))
+        bridge._target_client = _make_paho_client()
+        with caplog.at_level(logging.INFO, logger="backend.app.services.virtual_printer.mqtt_bridge"):
+            bridge._refresh_ip_encoding()  # arms
+            assert bridge._not_armed_reason is None
+            # Simulate a regression — target_client drops away.
+            bridge._target_client = None
+            bridge._refresh_ip_encoding()
+            bridge._refresh_ip_encoding()  # 2nd same-reason tick must not re-log
+        not_armed = [r for r in caplog.records if "NOT armed" in r.getMessage()]
+        assert len(not_armed) == 1  # the post-arm failure
+        armed = [r for r in caplog.records if "MQTT bridge IP encoding armed" in r.getMessage()]
+        assert len(armed) == 1

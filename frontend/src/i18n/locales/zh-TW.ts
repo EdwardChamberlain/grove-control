@@ -2823,9 +2823,62 @@ export default {
     title: '設定檔案',
     subtitle: '管理您的切片預設和壓力推進校準',
     tabs: {
-      cloud: '雲端設定檔案',
+      bambuCloud: 'Bambu Cloud',
+      orcaCloud: 'Orca Cloud',
       local: '本機設定檔案',
       kprofiles: 'K 值設定',
+    },
+    orcaCloud: {
+      connectedAs: '已連接',
+      logout: '中斷連線',
+      noLogoutPermission: '您沒有中斷連線的權限',
+      noConnectPermission: '您沒有連接到 Orca Cloud 的權限',
+      retry: '重試',
+      back: '使用其他登入方式',
+      connect: {
+        title: '連接到 Orca Cloud',
+        description: '登入您的 Orca Cloud 帳號,將切片機設定檔同步到 Bambuddy。',
+      },
+      providers: {
+        google: '使用 Google 登入',
+        apple: '使用 Apple 登入',
+        github: '使用 GitHub 登入',
+        email: '使用電子郵件和密碼登入',
+      },
+      password: {
+        title: '使用電子郵件和密碼登入',
+        email: '電子郵件',
+        emailPlaceholder: 'you@example.com',
+        password: '密碼',
+        submit: '登入',
+      },
+      paste: {
+        title: '完成登入',
+        step1: '已在新分頁中開啟 Orca Cloud 登入頁面。請使用您的 Orca 帳號登入。',
+        step2: '您的瀏覽器將被重新導向到一個 "localhost" URL,該 URL 無法載入。這是正常的 — 我們需要的就是這個 URL。',
+        step3: '從瀏覽器的網址列複製整個 URL,貼到下方。',
+        signInUrl: '若登入分頁未開啟,請點擊此 URL:',
+        label: '在此貼上回呼 URL',
+        placeholder: 'http://localhost:41172/callback?code=...&state=...',
+        submit: '完成連接',
+      },
+      profiles: {
+        title: '您的 Orca Cloud 設定檔 ({{count}})',
+        refresh: '重新整理',
+        empty: '您的 Orca Cloud 帳號中尚無設定檔。',
+      },
+      toast: {
+        connected: '已以 {{email}} 身分連接到 Orca Cloud',
+        disconnected: '已從 Orca Cloud 中斷連線',
+      },
+      errors: {
+        startFailed: '無法啟動 Orca Cloud 登入流程。',
+        finishFailed: '無法完成 Orca Cloud 登入。',
+        passwordFailed: '無法使用該電子郵件和密碼登入。',
+        passwordEmpty: '請輸入電子郵件和密碼。',
+        emptyPaste: '請從瀏覽器貼上回呼 URL。',
+        noCode: '該 URL 不像 Orca Cloud 回呼 (缺少 code 參數)。請從網址列複製完整 URL。',
+      },
     },
     localProfiles: {
       title: '本機設定檔案',
@@ -3471,13 +3524,19 @@ export default {
     failedToast: '切片 {{name}} 失敗：{{detail}}',
     tier: {
       local: '已匯入',
-      cloud: '雲端',
+      cloud: 'Bambu Cloud',
+      orcaCloud: 'Orca Cloud',
       standard: '標準',
     },
     cloud: {
-      notAuthenticated: '登入 Bambu Cloud（設定 → 設定檔 → 雲端）以查看雲端預設。',
+      notAuthenticated: '登入 Bambu Cloud（設定 → 設定檔 → Bambu Cloud）以查看雲端預設。',
       expired: 'Bambu Cloud 工作階段已過期 — 請重新登入以重新整理雲端預設。',
       unreachable: '目前無法存取 Bambu Cloud。本機和標準預設仍可使用。',
+    },
+    orcaCloud: {
+      notAuthenticated: '登入 Orca Cloud（設定檔 → Orca Cloud）以查看您的 Orca 預設。',
+      expired: 'Orca Cloud 工作階段已過期 — 請重新登入以重新整理您的 Orca 預設。',
+      unreachable: 'Orca Cloud 目前無法存取。其他預設仍可正常使用。',
     },
     bedType: {
       label: '列印板',
@@ -4099,7 +4158,7 @@ export default {
     scheduledBackupFailed: '備份失敗',
     nextBackup: '下次備份',
     backupSize: '大小',
-    utc: 'UTC',
+    localTimeHint: '本地時間 ({{tz}})',
     defaultPathLabel: '預設：',
 
     // Category labels
@@ -5499,6 +5558,8 @@ export default {
   diagnostic: {
     modalTitle: '連線診斷 — {{name}}',
     running: '正在執行診斷...',
+    runningElapsed: '正在執行診斷... ({{elapsed}}秒)',
+    waitingForReportHint: '正在等待印表機發佈狀態報告 — 最長可能需要 {{max}} 秒。',
     runFailed: '無法執行診斷：{{error}}',
     retry: '重新執行',
     runButton: '執行診斷',
@@ -5548,6 +5609,12 @@ export default {
         title: 'LAN 開發者模式',
         pass: '開發者模式已啟用。',
         fail: '印表機上的開發者模式已關閉。請在印表機的 LAN 設定中啟用它 — 並按 OK 確認。否則列印將無法開始。',
+        skip: '無法檢查 — 需要與印表機的即時連線。',
+      },
+      printer_publishing: {
+        title: '印表機正在發佈狀態',
+        pass: '印表機正在發佈狀態更新 — AMS、耗材和 K 配置將正確鏡像到切片軟體。',
+        fail: 'MQTT 代理已接受連線，但印表機未發佈任何狀態報告。這幾乎總是因為序號錯誤或大小寫不一致 — device/<serial>/report 主題區分大小寫。請將印表機設定中的序號與印表機螢幕上的顯示進行核對。',
         skip: '無法檢查 — 需要與印表機的即時連線。',
       },
     },

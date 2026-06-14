@@ -2823,9 +2823,62 @@ export default {
     title: '配置文件',
     subtitle: '管理您的切片预设和压力推进校准',
     tabs: {
-      cloud: '云端配置文件',
+      bambuCloud: 'Bambu Cloud',
+      orcaCloud: 'Orca Cloud',
       local: '本地配置文件',
       kprofiles: 'K 值配置',
+    },
+    orcaCloud: {
+      connectedAs: '已连接',
+      logout: '断开连接',
+      noLogoutPermission: '您没有断开连接的权限',
+      noConnectPermission: '您没有连接到 Orca Cloud 的权限',
+      retry: '重试',
+      back: '使用其他登录方式',
+      connect: {
+        title: '连接到 Orca Cloud',
+        description: '登录您的 Orca Cloud 账户,将切片机配置同步到 Bambuddy。',
+      },
+      providers: {
+        google: '使用 Google 登录',
+        apple: '使用 Apple 登录',
+        github: '使用 GitHub 登录',
+        email: '使用邮箱和密码登录',
+      },
+      password: {
+        title: '使用邮箱和密码登录',
+        email: '邮箱',
+        emailPlaceholder: 'you@example.com',
+        password: '密码',
+        submit: '登录',
+      },
+      paste: {
+        title: '完成登录',
+        step1: '已在新标签页中打开 Orca Cloud 登录页面。请使用您的 Orca 账户登录。',
+        step2: '您的浏览器将被重定向到一个 "localhost" URL,该 URL 无法加载。这是正常的 — 我们需要的就是这个 URL。',
+        step3: '从浏览器的地址栏复制整个 URL,粘贴到下方。',
+        signInUrl: '如果登录标签页未打开,请点击此 URL:',
+        label: '在此处粘贴回调 URL',
+        placeholder: 'http://localhost:41172/callback?code=...&state=...',
+        submit: '完成连接',
+      },
+      profiles: {
+        title: '您的 Orca Cloud 配置文件 ({{count}})',
+        refresh: '刷新',
+        empty: '您的 Orca Cloud 账户中尚无配置文件。',
+      },
+      toast: {
+        connected: '已以 {{email}} 身份连接到 Orca Cloud',
+        disconnected: '已从 Orca Cloud 断开连接',
+      },
+      errors: {
+        startFailed: '无法启动 Orca Cloud 登录流程。',
+        finishFailed: '无法完成 Orca Cloud 登录。',
+        passwordFailed: '无法使用该邮箱和密码登录。',
+        passwordEmpty: '请输入邮箱和密码。',
+        emptyPaste: '请从浏览器粘贴回调 URL。',
+        noCode: '该 URL 不像 Orca Cloud 回调 (缺少 code 参数)。请从地址栏复制完整 URL。',
+      },
     },
     localProfiles: {
       title: '本地配置文件',
@@ -3471,13 +3524,19 @@ export default {
     failedToast: '切片 {{name}} 失败：{{detail}}',
     tier: {
       local: '已导入',
-      cloud: '云端',
+      cloud: 'Bambu Cloud',
+      orcaCloud: 'Orca Cloud',
       standard: '标准',
     },
     cloud: {
-      notAuthenticated: '登录 Bambu Cloud（设置 → 配置文件 → 云端）以查看云端预设。',
+      notAuthenticated: '登录 Bambu Cloud（设置 → 配置文件 → Bambu Cloud）以查看云端预设。',
       expired: 'Bambu Cloud 会话已过期 — 请重新登录以刷新云端预设。',
       unreachable: '目前无法访问 Bambu Cloud。本地和标准预设仍可使用。',
+    },
+    orcaCloud: {
+      notAuthenticated: '登录 Orca Cloud（配置文件 → Orca Cloud）以查看您的 Orca 预设。',
+      expired: 'Orca Cloud 会话已过期 — 请重新登录以刷新您的 Orca 预设。',
+      unreachable: 'Orca Cloud 当前无法访问。其他预设仍可正常使用。',
     },
     bedType: {
       label: '打印板',
@@ -4099,7 +4158,7 @@ export default {
     scheduledBackupFailed: '备份失败',
     nextBackup: '下次备份',
     backupSize: '大小',
-    utc: 'UTC',
+    localTimeHint: '本地时间 ({{tz}})',
     defaultPathLabel: '默认：',
 
     // Category labels
@@ -5499,6 +5558,8 @@ export default {
   diagnostic: {
     modalTitle: '连接诊断 — {{name}}',
     running: '正在运行诊断...',
+    runningElapsed: '正在运行诊断... ({{elapsed}}秒)',
+    waitingForReportHint: '正在等待打印机发布状态报告 — 最长可能需要 {{max}} 秒。',
     runFailed: '无法运行诊断：{{error}}',
     retry: '重新运行',
     runButton: '运行诊断',
@@ -5548,6 +5609,12 @@ export default {
         title: 'LAN 开发者模式',
         pass: '开发者模式已启用。',
         fail: '打印机上的开发者模式已关闭。请在打印机的 LAN 设置中启用它 — 并按 OK 确认。否则打印将无法开始。',
+        skip: '无法检查 — 需要与打印机的实时连接。',
+      },
+      printer_publishing: {
+        title: '打印机正在发布状态',
+        pass: '打印机正在发布状态更新 — AMS、耗材和 K 配置将正确镜像到切片软件。',
+        fail: 'MQTT 代理已接受连接，但打印机未发布任何状态报告。这几乎总是因为序列号错误或大小写不一致 — device/<serial>/report 主题区分大小写。请将打印机设置中的序列号与打印机屏幕上的显示进行核对。',
         skip: '无法检查 — 需要与打印机的实时连接。',
       },
     },

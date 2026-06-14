@@ -2835,9 +2835,62 @@ export default {
     title: 'フィラメントプロファイル',
     subtitle: 'スライサープリセットと圧力キャリブレーションの管理',
     tabs: {
-      cloud: 'クラウドプロファイル',
+      bambuCloud: 'Bambu Cloud',
+      orcaCloud: 'Orca Cloud',
       local: 'ローカルプロファイル',
       kprofiles: 'Kプロファイル',
+    },
+    orcaCloud: {
+      connectedAs: '接続中',
+      logout: '切断',
+      noLogoutPermission: '切断する権限がありません',
+      noConnectPermission: 'Orca Cloudに接続する権限がありません',
+      retry: '再試行',
+      back: '別のサインイン方法を使用',
+      connect: {
+        title: 'Orca Cloudに接続',
+        description: 'Orca Cloudアカウントにサインインして、スライサープロファイルをBambuddyに同期します。',
+      },
+      providers: {
+        google: 'Googleでサインイン',
+        apple: 'Appleでサインイン',
+        github: 'GitHubでサインイン',
+        email: 'メールとパスワードでサインイン',
+      },
+      password: {
+        title: 'メールとパスワードでサインイン',
+        email: 'メールアドレス',
+        emailPlaceholder: 'you@example.com',
+        password: 'パスワード',
+        submit: 'サインイン',
+      },
+      paste: {
+        title: 'サインインを完了',
+        step1: 'Orca Cloudのサインインページが新しいタブで開きました。Orcaアカウントでサインインしてください。',
+        step2: 'ブラウザは「localhost」のURLにリダイレクトされ、読み込みに失敗します。それは想定通りです — そのURLが必要です。',
+        step3: 'ブラウザのアドレスバーからURL全体をコピーして、下に貼り付けてください。',
+        signInUrl: 'サインインタブが開かなかった場合は、このURLをクリックしてください:',
+        label: 'コールバックURLをここに貼り付け',
+        placeholder: 'http://localhost:41172/callback?code=...&state=...',
+        submit: '接続を完了',
+      },
+      profiles: {
+        title: 'Orca Cloudプロファイル ({{count}})',
+        refresh: '更新',
+        empty: 'Orca Cloudアカウントにまだプロファイルがありません。',
+      },
+      toast: {
+        connected: '{{email}}としてOrca Cloudに接続しました',
+        disconnected: 'Orca Cloudから切断しました',
+      },
+      errors: {
+        startFailed: 'Orca Cloudのサインインを開始できませんでした。',
+        finishFailed: 'Orca Cloudのサインインを完了できませんでした。',
+        passwordFailed: 'そのメールとパスワードでサインインできませんでした。',
+        passwordEmpty: 'メールアドレスとパスワードの両方を入力してください。',
+        emptyPaste: 'ブラウザからコールバックURLを貼り付けてください。',
+        noCode: 'このURLはOrca Cloudのコールバックではないようです (codeパラメータがありません)。アドレスバーから完全なURLをコピーしてください。',
+      },
     },
     localProfiles: {
       title: 'ローカルプロファイル',
@@ -3483,13 +3536,19 @@ export default {
     failedToast: '{{name}}のスライスに失敗: {{detail}}',
     tier: {
       local: 'インポート済み',
-      cloud: 'クラウド',
+      cloud: 'Bambu Cloud',
+      orcaCloud: 'Orca Cloud',
       standard: '標準',
     },
     cloud: {
-      notAuthenticated: 'Bambu Cloudにサインイン（設定 → プロファイル → クラウド）してクラウドプリセットを表示。',
+      notAuthenticated: 'Bambu Cloudにサインイン（設定 → プロファイル → Bambu Cloud）してクラウドプリセットを表示。',
       expired: 'Bambu Cloudセッションの有効期限切れ – クラウドプリセットを更新するには再ログインしてください。',
       unreachable: 'Bambu Cloudに接続できません。ローカルと標準のプリセットは引き続き使用できます。',
+    },
+    orcaCloud: {
+      notAuthenticated: 'Orcaプリセットを表示するには、Orca Cloudにサインインしてください（プロファイル → Orca Cloud）。',
+      expired: 'Orca Cloudセッションが期限切れです — Orcaプリセットを更新するには再度サインインしてください。',
+      unreachable: 'Orca Cloudは現在到達できません。他のプリセットは引き続き動作します。',
     },
     bedType: {
       label: 'ビルドプレート',
@@ -4111,7 +4170,7 @@ export default {
     scheduledBackupFailed: 'バックアップに失敗',
     nextBackup: '次回バックアップ',
     backupSize: 'サイズ',
-    utc: 'UTC',
+    localTimeHint: '現地時刻 ({{tz}})',
     defaultPathLabel: 'デフォルト:',
 
     // Category labels
@@ -5512,6 +5571,8 @@ export default {
   diagnostic: {
     modalTitle: '接続診断 — {{name}}',
     running: '診断を実行中...',
+    runningElapsed: '診断を実行中... ({{elapsed}}秒)',
+    waitingForReportHint: 'プリンターがステータスレポートを送信するのを待っています — 最大 {{max}} 秒かかる場合があります。',
     runFailed: '診断を実行できませんでした: {{error}}',
     retry: '再実行',
     runButton: '診断を実行',
@@ -5561,6 +5622,12 @@ export default {
         title: 'LAN開発者モード',
         pass: '開発者モードは有効です。',
         fail: 'プリンターの開発者モードがオフです。プリンターのLAN設定で有効にし、OKで確定してください。これがないと印刷は開始されません。',
+        skip: '確認できませんでした — プリンターへのアクティブな接続が必要です。',
+      },
+      printer_publishing: {
+        title: 'プリンターがステータスを送信中',
+        pass: 'プリンターはステータス更新を送信しています — AMS、フィラメント、Kプロファイルがスライサーに正しくミラーされます。',
+        fail: 'MQTTブローカーは接続を受け付けましたが、プリンターはステータスレポートを一切送信していません。ほぼ常にシリアル番号の誤りまたは大文字小文字の不一致が原因です — device/<serial>/report トピックは大文字小文字を区別します。プリンター設定のシリアル番号をプリンター本体の画面表示と照合してください。',
         skip: '確認できませんでした — プリンターへのアクティブな接続が必要です。',
       },
     },

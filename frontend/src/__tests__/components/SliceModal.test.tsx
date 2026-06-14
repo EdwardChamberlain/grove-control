@@ -46,10 +46,12 @@ const mockApi = api as unknown as {
 
 function makeUnified(overrides: Partial<UnifiedPresetsResponse> = {}): UnifiedPresetsResponse {
   return {
+    orca_cloud: { printer: [], process: [], filament: [] },
     cloud: { printer: [], process: [], filament: [] },
     local: { printer: [], process: [], filament: [] },
     standard: { printer: [], process: [], filament: [] },
     cloud_status: 'ok',
+    orca_cloud_status: 'ok',
     ...overrides,
   };
 }
@@ -166,7 +168,7 @@ describe('SliceModal', () => {
     const groups = printerSelect.querySelectorAll('optgroup');
     expect(Array.from(groups).map((g) => g.label)).toEqual([
       'Imported',
-      'Cloud',
+      'Bambu Cloud',
       'Standard',
     ]);
 
@@ -703,6 +705,7 @@ describe('SliceModal', () => {
     // should match each plate slot to the same-colour preset so the user
     // doesn't have to manually align them.
     return {
+      orca_cloud: { printer: [], process: [], filament: [] },
       cloud: {
         printer: [{ id: 'P1', name: 'X1C', source: 'cloud' }],
         process: [{ id: 'PR1', name: '0.20mm', source: 'cloud' }],
@@ -714,6 +717,7 @@ describe('SliceModal', () => {
       local: { printer: [], process: [], filament: [] },
       standard: { printer: [], process: [], filament: [] },
       cloud_status: 'ok',
+      orca_cloud_status: 'ok',
     };
   }
 
@@ -921,6 +925,8 @@ describe('SliceModal', () => {
       local: { printer: [], process: [], filament: [] },
       standard: { printer: [], process: [], filament: [] },
       cloud_status: 'ok',
+      orca_cloud: { printer: [], process: [], filament: [] },
+      orca_cloud_status: 'ok',
     });
 
     renderWithTracker({
@@ -985,6 +991,8 @@ describe('SliceModal', () => {
       local: { printer: [], process: [], filament: [] },
       standard: { printer: [], process: [], filament: [] },
       cloud_status: 'ok',
+      orca_cloud: { printer: [], process: [], filament: [] },
+      orca_cloud_status: 'ok',
     });
     mockApi.sliceLibraryFile.mockResolvedValue({
       job_id: 50,

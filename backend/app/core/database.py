@@ -2765,6 +2765,27 @@ async def run_migrations(conn):
             "ALTER TABLE smart_plugs ADD COLUMN IF NOT EXISTS off_delay_after_drying_minutes INTEGER DEFAULT 10",
         )
 
+    # Migration: Add per-user Orca Cloud credential columns. Mirrors the Bambu
+    # Cloud columns but adds refresh_token + expires_at (Supabase PKCE issues
+    # short-lived access tokens with rotating refresh tokens), plus three
+    # transient PKCE state columns held during the auth handshake. DATETIME
+    # is SQLite-only — Postgres uses TIMESTAMP, so the datetime columns are
+    # dialect-branched per project convention.
+    await _safe_execute(conn, "ALTER TABLE users ADD COLUMN orca_cloud_token VARCHAR(2000)")
+    await _safe_execute(conn, "ALTER TABLE users ADD COLUMN orca_cloud_refresh_token VARCHAR(128)")
+    if is_sqlite():
+        await _safe_execute(conn, "ALTER TABLE users ADD COLUMN orca_cloud_expires_at DATETIME")
+    else:
+        await _safe_execute(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS orca_cloud_expires_at TIMESTAMP")
+    await _safe_execute(conn, "ALTER TABLE users ADD COLUMN orca_cloud_email VARCHAR(255)")
+    await _safe_execute(conn, "ALTER TABLE users ADD COLUMN orca_cloud_user_id VARCHAR(64)")
+    await _safe_execute(conn, "ALTER TABLE users ADD COLUMN orca_cloud_pending_verifier VARCHAR(64)")
+    await _safe_execute(conn, "ALTER TABLE users ADD COLUMN orca_cloud_pending_state VARCHAR(32)")
+    if is_sqlite():
+        await _safe_execute(conn, "ALTER TABLE users ADD COLUMN orca_cloud_pending_at DATETIME")
+    else:
+        await _safe_execute(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS orca_cloud_pending_at TIMESTAMP")
+
     # Data migration: drop the embedded 3MF Title (`print_name`) from library
     # file metadata so the FileManager displays the filename, not the title (#1489).
     await _migrate_drop_library_print_name(conn)

@@ -2823,9 +2823,62 @@ export default {
     title: 'Profili',
     subtitle: 'Gestisci preset slicer e calibrazioni pressure advance',
     tabs: {
-      cloud: 'Profili cloud',
+      bambuCloud: 'Bambu Cloud',
+      orcaCloud: 'Orca Cloud',
       local: 'Profili locali',
       kprofiles: 'Profili K',
+    },
+    orcaCloud: {
+      connectedAs: 'Connesso come',
+      logout: 'Disconnetti',
+      noLogoutPermission: 'Non hai il permesso di disconnetterti',
+      noConnectPermission: 'Non hai il permesso di connetterti a Orca Cloud',
+      retry: 'Riprova',
+      back: 'Usa un altro metodo di accesso',
+      connect: {
+        title: 'Connetti a Orca Cloud',
+        description: 'Accedi al tuo account Orca Cloud per sincronizzare i profili dello slicer in Bambuddy.',
+      },
+      providers: {
+        google: 'Accedi con Google',
+        apple: 'Accedi con Apple',
+        github: 'Accedi con GitHub',
+        email: 'Accedi con email e password',
+      },
+      password: {
+        title: 'Accedi con email e password',
+        email: 'Email',
+        emailPlaceholder: 'tu@esempio.it',
+        password: 'Password',
+        submit: 'Accedi',
+      },
+      paste: {
+        title: 'Completa l\'accesso',
+        step1: 'Si è aperta una nuova scheda con la pagina di accesso di Orca Cloud. Accedi con il tuo account Orca.',
+        step2: 'Il browser verrà reindirizzato a un URL "localhost" che non riuscirà a caricarsi. È normale — è proprio quell\'URL che ci serve.',
+        step3: 'Copia l\'intero URL dalla barra degli indirizzi del browser e incollalo qui sotto.',
+        signInUrl: 'Se la scheda di accesso non si è aperta, clicca su questo URL:',
+        label: 'Incolla qui l\'URL di callback',
+        placeholder: 'http://localhost:41172/callback?code=...&state=...',
+        submit: 'Completa la connessione',
+      },
+      profiles: {
+        title: 'I tuoi profili Orca Cloud ({{count}})',
+        refresh: 'Aggiorna',
+        empty: 'Nessun profilo trovato nel tuo account Orca Cloud.',
+      },
+      toast: {
+        connected: 'Connesso a Orca Cloud come {{email}}',
+        disconnected: 'Disconnesso da Orca Cloud',
+      },
+      errors: {
+        startFailed: 'Impossibile avviare l\'accesso a Orca Cloud.',
+        finishFailed: 'Impossibile completare l\'accesso a Orca Cloud.',
+        passwordFailed: 'Impossibile accedere con quell\'email e password.',
+        passwordEmpty: 'Inserisci sia l\'email che la password.',
+        emptyPaste: 'Incolla l\'URL di callback dal tuo browser.',
+        noCode: 'Questo URL non sembra un callback di Orca Cloud (manca il parametro code). Copia l\'URL completo dalla barra degli indirizzi.',
+      },
     },
     localProfiles: {
       title: 'Profili locali',
@@ -3471,13 +3524,19 @@ export default {
     failedToast: 'Slicing di {{name}} fallito: {{detail}}',
     tier: {
       local: 'Importato',
-      cloud: 'Cloud',
+      cloud: 'Bambu Cloud',
+      orcaCloud: 'Orca Cloud',
       standard: 'Standard',
     },
     cloud: {
-      notAuthenticated: 'Accedi a Bambu Cloud (Impostazioni → Profili → Cloud) per vedere i preset cloud.',
+      notAuthenticated: 'Accedi a Bambu Cloud (Impostazioni → Profili → Bambu Cloud) per vedere i preset cloud.',
       expired: 'Sessione Bambu Cloud scaduta – accedi di nuovo per aggiornare i preset cloud.',
       unreachable: 'Bambu Cloud non è raggiungibile. I preset locali e standard funzionano ancora.',
+    },
+    orcaCloud: {
+      notAuthenticated: 'Accedi a Orca Cloud (Profili → Orca Cloud) per vedere i tuoi preset Orca.',
+      expired: 'Sessione Orca Cloud scaduta — accedi di nuovo per aggiornare i tuoi preset Orca.',
+      unreachable: 'Orca Cloud non è raggiungibile in questo momento. Gli altri preset continuano a funzionare.',
     },
     bedType: {
       label: 'Piano di stampa',
@@ -4099,7 +4158,7 @@ export default {
     scheduledBackupFailed: 'Backup fallito',
     nextBackup: 'Prossimo backup',
     backupSize: 'Dimensione',
-    utc: 'UTC',
+    localTimeHint: 'Ora locale ({{tz}})',
     defaultPathLabel: 'Predefinito:',
 
     // Category labels
@@ -5500,6 +5559,8 @@ export default {
   diagnostic: {
     modalTitle: 'Diagnostica connessione — {{name}}',
     running: 'Diagnostica in corso...',
+    runningElapsed: 'Diagnostica in corso... ({{elapsed}}s)',
+    waitingForReportHint: 'In attesa che la stampante pubblichi un report di stato — può richiedere fino a {{max}} secondi.',
     runFailed: 'Impossibile eseguire la diagnostica: {{error}}',
     retry: 'Esegui di nuovo',
     runButton: 'Esegui diagnostica',
@@ -5549,6 +5610,12 @@ export default {
         title: 'Modalità sviluppatore LAN',
         pass: 'La modalità sviluppatore è attivata.',
         fail: 'La modalità sviluppatore è DISATTIVATA sulla stampante. Attivala nelle impostazioni LAN della stampante — e conferma con OK. Senza di essa le stampe non verranno avviate.',
+        skip: 'Impossibile verificare — richiede una connessione attiva alla stampante.',
+      },
+      printer_publishing: {
+        title: 'La stampante pubblica lo stato',
+        pass: 'La stampante sta pubblicando aggiornamenti di stato — AMS, filamenti e profili K saranno correttamente replicati nello slicer.',
+        fail: 'Il broker MQTT ha accettato la connessione ma la stampante non ha pubblicato alcun report di stato. È quasi sempre un numero di serie errato o con maiuscole/minuscole sbagliate — il topic device/<serial>/report distingue tra maiuscole e minuscole. Confronta il numero di serie nelle impostazioni della stampante con quello mostrato sullo schermo del dispositivo.',
         skip: 'Impossibile verificare — richiede una connessione attiva alla stampante.',
       },
     },

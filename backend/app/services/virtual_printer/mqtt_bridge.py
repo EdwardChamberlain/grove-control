@@ -244,6 +244,14 @@ class MQTTBridge:
         self._target_serial: str | None = None
         self._target_ip_uint32_le: int | None = None
         self._vp_ip_uint32_le: int | None = None
+        # Last reason `_refresh_ip_encoding` early-returned without arming.
+        # Used to throttle the "NOT armed" diagnostic log to one line per
+        # state change — refresh runs every 30s, so without throttling an
+        # idle-but-unarmed bridge would emit one line per tick forever. Set
+        # to None once arming succeeds so the next failure re-logs. #1429
+        # follow-up: makes silent early-returns visible without grepping the
+        # source.
+        self._not_armed_reason: str | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._refresh_task: asyncio.Task | None = None
         self._stopping = False
@@ -389,12 +397,23 @@ class MQTTBridge:
         arms on a default-config flat-LAN install and `net.info[].ip` leaks
         the real printer IP — slicer follows it on Send (#1429 residual).
         """
+
+        def _log_not_armed(reason: str) -> None:
+            # Throttle: only log when the reason changes, otherwise an idle
+            # unarmed bridge would emit one INFO line every refresh tick
+            # (~30s) forever. Cleared on arm so a regression re-logs.
+            if reason != self._not_armed_reason:
+                logger.info("[%s] MQTT bridge IP encoding NOT armed: %s", self.vp_name, reason)
+                self._not_armed_reason = reason
+
         client = self._target_client
         if client is None:
+            _log_not_armed("target_client is None (bridge not bound to a printer)")
             return
 
         target_ip = getattr(client, "ip_address", None)
         if not target_ip:
+            _log_not_armed("printer client has no ip_address yet")
             return
 
         vp_ip = getattr(self._mqtt_server, "bind_address", None)
@@ -402,6 +421,10 @@ class MQTTBridge:
         if not vp_ip or vp_ip in ("0.0.0.0", ""):  # nosec B104
             resolved = _resolve_host_interface_for_target(target_ip)
             if not resolved:
+                _log_not_armed(
+                    f"no host interface shares a subnet with printer IP {target_ip} "
+                    "(and VP bind_address is 0.0.0.0/empty)"
+                )
                 return
             vp_ip = resolved
             vp_ip_source = "auto-resolved"
@@ -409,7 +432,8 @@ class MQTTBridge:
         try:
             new_target_le = _ip_to_uint32_le(target_ip)
             new_vp_le = _ip_to_uint32_le(vp_ip)
-        except ValueError:
+        except ValueError as e:
+            _log_not_armed(f"invalid IPv4 (target={target_ip!r}, vp={vp_ip!r}): {e}")
             return
 
         if new_target_le == self._target_ip_uint32_le and new_vp_le == self._vp_ip_uint32_le:
@@ -420,6 +444,8 @@ class MQTTBridge:
         was_armed = self._target_ip_uint32_le is not None and self._vp_ip_uint32_le is not None
         self._target_ip_uint32_le = new_target_le
         self._vp_ip_uint32_le = new_vp_le
+        # Clear the dedup so a future failure re-emits the diagnostic line.
+        self._not_armed_reason = None
         logger.info(
             "[%s] MQTT bridge IP encoding %s: target=%s vp=%s (%s)",
             self.vp_name,

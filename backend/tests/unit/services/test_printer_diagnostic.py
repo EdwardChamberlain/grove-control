@@ -46,6 +46,7 @@ class _Env:
         host_ip="192.168.1.5",
         state=None,
         test_connection_success=True,
+        report_messages_since_connect: int | None = 5,
     ):
         self.ports = ports or _port_probe()
         self.in_docker = in_docker
@@ -53,12 +54,21 @@ class _Env:
         self.host_ip = host_ip
         self.state = state
         self.test_connection_success = test_connection_success
+        # ``None`` means get_client returns None (e.g. pre-add flow); an int
+        # means there's a client with that counter value.
+        self.report_messages_since_connect = report_messages_since_connect
         self._stack = ExitStack()
 
     def __enter__(self):
         manager = MagicMock()
         manager.get_status.return_value = self.state
         manager.test_connection = AsyncMock(return_value={"success": self.test_connection_success})
+        if self.report_messages_since_connect is None:
+            manager.get_client.return_value = None
+        else:
+            client = MagicMock()
+            client.report_messages_since_connect = self.report_messages_since_connect
+            manager.get_client.return_value = client
         self._stack.enter_context(patch(f"{MOD}._check_port", new_callable=AsyncMock, side_effect=self.ports))
         self._stack.enter_context(patch(f"{MOD}.is_running_in_docker", return_value=self.in_docker))
         self._stack.enter_context(patch(f"{MOD}._detect_docker_network_mode", return_value=self.network_mode))
@@ -91,7 +101,7 @@ class TestSameSubnet:
 
 class TestExistingPrinter:
     async def test_all_healthy(self):
-        with _Env(state=_state(connected=True, developer_mode=True)):
+        with _Env(state=_state(connected=True, developer_mode=True), report_messages_since_connect=42):
             result = await run_connection_diagnostic("192.168.1.50", printer=_printer())
         s = _statuses(result)
         assert result.overall == "ok"
@@ -103,6 +113,7 @@ class TestExistingPrinter:
             "subnet": "pass",
             "mqtt_auth": "pass",
             "developer_mode": "pass",
+            "printer_publishing": "pass",
         }
 
     async def test_mqtt_port_unreachable_is_a_problem(self):
@@ -138,6 +149,8 @@ class TestExistingPrinter:
         assert s["developer_mode"] == "skip"
         # Reachable port but no connection -> credential failure class.
         assert s["mqtt_auth"] == "fail"
+        # Can't observe report messages without a connection.
+        assert s["printer_publishing"] == "skip"
 
     async def test_bridge_mode_warns_and_skips_subnet(self):
         with _Env(network_mode="bridge", state=_state()):
@@ -156,6 +169,53 @@ class TestExistingPrinter:
         with _Env(host_ip="10.0.0.5", state=_state()):
             result = await run_connection_diagnostic("192.168.1.50", printer=_printer())
         assert _statuses(result)["subnet"] == "warn"
+
+    async def test_printer_publishing_passes_when_reports_seen(self):
+        # Counter > 0 means the printer is publishing on the report topic.
+        with _Env(state=_state(), report_messages_since_connect=1):
+            result = await run_connection_diagnostic("192.168.1.50", printer=_printer())
+        assert _statuses(result)["printer_publishing"] == "pass"
+
+    async def test_printer_publishing_fails_when_zero_reports_after_wait(self):
+        # Counter stays at 0 across the wait window — printer never published.
+        # Tiny wait_for_publish_seconds keeps the test sub-second.
+        with _Env(state=_state(), report_messages_since_connect=0):
+            result = await run_connection_diagnostic(
+                "192.168.1.50",
+                printer=_printer(),
+                wait_for_publish_seconds=0.05,
+            )
+        s = _statuses(result)
+        assert s["printer_publishing"] == "fail"
+        # Overall escalates because fail is present.
+        assert result.overall == "problems"
+        # The check exposes the wait budget so the UI can render a countdown.
+        params = next(c.params for c in result.checks if c.id == "printer_publishing")
+        assert params == {"max_wait_seconds": 0.05}
+
+    async def test_printer_publishing_skips_when_disconnected(self):
+        # No live MQTT connection -> can't observe report messages.
+        with _Env(state=_state(connected=False), report_messages_since_connect=0):
+            result = await run_connection_diagnostic("192.168.1.50", printer=_printer())
+        assert _statuses(result)["printer_publishing"] == "skip"
+
+    async def test_printer_publishing_skips_when_no_client(self):
+        # State says connected but printer_manager has no client object
+        # (race between client teardown and a fresh diagnostic request).
+        with _Env(state=_state(), report_messages_since_connect=None):
+            result = await run_connection_diagnostic("192.168.1.50", printer=_printer())
+        assert _statuses(result)["printer_publishing"] == "skip"
+
+    async def test_printer_publishing_no_wait_returns_instantly_on_zero(self):
+        # Default wait is 0 — instant pass/fail without polling. Used by the
+        # support-package code path so bundling stays fast.
+        with _Env(state=_state(), report_messages_since_connect=0):
+            result = await run_connection_diagnostic("192.168.1.50", printer=_printer())
+        s = _statuses(result)
+        assert s["printer_publishing"] == "fail"
+        params = next(c.params for c in result.checks if c.id == "printer_publishing")
+        # No wait -> no max_wait_seconds param surfaced to the UI.
+        assert params == {}
 
 
 class TestPreAddFlow:

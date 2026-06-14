@@ -2823,9 +2823,62 @@ export default {
     title: 'Perfis',
     subtitle: 'Gerencie seus presets de fatiador e calibrações de avanço de pressão',
     tabs: {
-      cloud: 'Perfis na Nuvem',
+      bambuCloud: 'Bambu Cloud',
+      orcaCloud: 'Orca Cloud',
       local: 'Perfis Locais',
       kprofiles: 'K-Perfis',
+    },
+    orcaCloud: {
+      connectedAs: 'Conectado como',
+      logout: 'Desconectar',
+      noLogoutPermission: 'Você não tem permissão para desconectar',
+      noConnectPermission: 'Você não tem permissão para conectar ao Orca Cloud',
+      retry: 'Tentar novamente',
+      back: 'Usar outro método de login',
+      connect: {
+        title: 'Conectar ao Orca Cloud',
+        description: 'Entre na sua conta Orca Cloud para sincronizar seus perfis de slicer no Bambuddy.',
+      },
+      providers: {
+        google: 'Entrar com Google',
+        apple: 'Entrar com Apple',
+        github: 'Entrar com GitHub',
+        email: 'Entrar com e-mail e senha',
+      },
+      password: {
+        title: 'Entrar com e-mail e senha',
+        email: 'E-mail',
+        emailPlaceholder: 'voce@exemplo.com.br',
+        password: 'Senha',
+        submit: 'Entrar',
+      },
+      paste: {
+        title: 'Concluir login',
+        step1: 'Uma nova aba abriu com a página de login do Orca Cloud. Entre com sua conta Orca.',
+        step2: 'Seu navegador será redirecionado para uma URL "localhost" que não carregará. Isso é esperado — é dessa URL que precisamos.',
+        step3: 'Copie a URL completa da barra de endereços do navegador e cole abaixo.',
+        signInUrl: 'Se a aba de login não abriu, clique nesta URL:',
+        label: 'Cole a URL de callback aqui',
+        placeholder: 'http://localhost:41172/callback?code=...&state=...',
+        submit: 'Concluir conexão',
+      },
+      profiles: {
+        title: 'Seus perfis do Orca Cloud ({{count}})',
+        refresh: 'Atualizar',
+        empty: 'Nenhum perfil encontrado na sua conta Orca Cloud ainda.',
+      },
+      toast: {
+        connected: 'Conectado ao Orca Cloud como {{email}}',
+        disconnected: 'Desconectado do Orca Cloud',
+      },
+      errors: {
+        startFailed: 'Não foi possível iniciar o login do Orca Cloud.',
+        finishFailed: 'Não foi possível concluir o login do Orca Cloud.',
+        passwordFailed: 'Não foi possível entrar com esse e-mail e senha.',
+        passwordEmpty: 'Insira o e-mail e a senha.',
+        emptyPaste: 'Cole a URL de callback do seu navegador.',
+        noCode: 'Essa URL não parece ser um callback do Orca Cloud (sem parâmetro code). Copie a URL completa da barra de endereços.',
+      },
     },
     localProfiles: {
       title: 'Perfis Locais',
@@ -3471,13 +3524,19 @@ export default {
     failedToast: 'Falha ao fatiar {{name}}: {{detail}}',
     tier: {
       local: 'Importado',
-      cloud: 'Nuvem',
+      cloud: 'Bambu Cloud',
+      orcaCloud: 'Orca Cloud',
       standard: 'Padrão',
     },
     cloud: {
-      notAuthenticated: 'Faça login no Bambu Cloud (Configurações → Perfis → Nuvem) para ver as predefinições.',
+      notAuthenticated: 'Faça login no Bambu Cloud (Configurações → Perfis → Bambu Cloud) para ver as predefinições.',
       expired: 'Sessão do Bambu Cloud expirou – faça login novamente para atualizar as predefinições.',
       unreachable: 'Bambu Cloud está inacessível agora. Predefinições locais e padrão ainda funcionam.',
+    },
+    orcaCloud: {
+      notAuthenticated: 'Entre no Orca Cloud (Perfis → Orca Cloud) para ver seus presets Orca.',
+      expired: 'Sessão do Orca Cloud expirada — entre novamente para atualizar seus presets Orca.',
+      unreachable: 'Orca Cloud está indisponível no momento. Outros presets continuam funcionando.',
     },
     bedType: {
       label: 'Mesa de impressão',
@@ -4099,7 +4158,7 @@ export default {
     scheduledBackupFailed: 'Falha no backup',
     nextBackup: 'Próximo backup',
     backupSize: 'Tamanho',
-    utc: 'UTC',
+    localTimeHint: 'Horário local ({{tz}})',
     defaultPathLabel: 'Padrão:',
 
     // Category labels
@@ -5500,6 +5559,8 @@ export default {
   diagnostic: {
     modalTitle: 'Diagnóstico de conexão — {{name}}',
     running: 'Executando diagnóstico...',
+    runningElapsed: 'Executando diagnóstico... ({{elapsed}}s)',
+    waitingForReportHint: 'Aguardando a impressora publicar um relatório de status — pode levar até {{max}} segundos.',
     runFailed: 'Não foi possível executar o diagnóstico: {{error}}',
     retry: 'Executar novamente',
     runButton: 'Executar diagnóstico',
@@ -5549,6 +5610,12 @@ export default {
         title: 'Modo Desenvolvedor LAN',
         pass: 'O Modo Desenvolvedor está ativado.',
         fail: 'O Modo Desenvolvedor está DESLIGADO na impressora. Ative-o nas configurações de LAN da impressora — e confirme com OK. Sem ele, as impressões não iniciarão.',
+        skip: 'Não foi possível verificar — requer uma conexão ativa com a impressora.',
+      },
+      printer_publishing: {
+        title: 'Impressora publicando status',
+        pass: 'A impressora está publicando atualizações de status — AMS, filamentos e perfis K serão espelhados corretamente para o slicer.',
+        fail: 'O broker MQTT aceitou a conexão, mas a impressora não publicou nenhum relatório de status. Quase sempre é um número de série errado ou com maiúsculas/minúsculas incorretas — o tópico device/<serial>/report diferencia maiúsculas de minúsculas. Verifique o número de série nas configurações da impressora comparando com a tela do equipamento.',
         skip: 'Não foi possível verificar — requer uma conexão ativa com a impressora.',
       },
     },

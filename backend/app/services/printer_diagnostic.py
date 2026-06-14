@@ -28,6 +28,16 @@ PORT_RTSPS = 322  # RTSPS — camera stream; optional.
 
 _PORT_PROBE_TIMEOUT = 3.0
 
+# Default seconds the `printer_publishing` check will wait for the first
+# report-topic message before declaring fail. Bambu printers in idle publish
+# push_status every few seconds; 10s catches healthy bridges with margin while
+# staying short enough that the spinner-with-countdown UX stays acceptable.
+# The check exits the moment a message arrives, so the typical wall-clock is
+# 1–2s, not the full 10. Passed as ``wait_for_publish_seconds`` per call so
+# the support-package code path can skip the wait entirely (defaults to 0).
+PUBLISH_WAIT_DEFAULT = 10.0
+_PUBLISH_POLL_INTERVAL = 0.5
+
 
 async def _check_port(ip: str, port: int, timeout: float = _PORT_PROBE_TIMEOUT) -> bool:
     """Test TCP connectivity to ip:port. Returns True if reachable."""
@@ -93,6 +103,7 @@ async def run_connection_diagnostic(
     printer: Printer | None = None,
     serial_number: str | None = None,
     access_code: str | None = None,
+    wait_for_publish_seconds: float = 0.0,
 ) -> PrinterDiagnosticResult:
     """Run connection checks for a printer.
 
@@ -184,6 +195,51 @@ async def run_connection_diagnostic(
         checks.append(DiagnosticCheck(id="developer_mode", status=dev_status))
     else:
         checks.append(DiagnosticCheck(id="developer_mode", status="skip"))
+
+    # --- Printer is actually publishing on its report topic ---
+    # The mqtt_auth check above only proves TCP + TLS + auth + SUBSCRIBE
+    # succeed. A printer with a wrong-cased serial — or one that simply isn't
+    # publishing for some other reason — still passes mqtt_auth because the
+    # broker accepts the subscription regardless. The user-visible symptom in
+    # that case is "AMS / K-profiles / custom filaments missing on the slicer
+    # side": the VP bridge has nothing cached to mirror because no reports
+    # arrived. #1622 surfaced this: bridge keep-alive timeouts paired with
+    # the `Connected and subscribed, but the printer has sent zero status
+    # reports` warning. The check below turns that warning into a structured
+    # diagnostic result the user can act on without grepping container logs.
+    #
+    # If ``_report_messages_since_connect`` is already > 0, we exit
+    # immediately — the bridge has seen reports. If it's 0 and a wait is
+    # requested, we poll every PUBLISH_POLL_INTERVAL up to
+    # ``wait_for_publish_seconds`` so a fresh reconnect (counter reset to 0)
+    # isn't reported as fail before the printer's first idle push lands.
+    publishing_params: dict[str, int | float] | None = None
+    publishing_status = "skip"
+    if printer is not None and state is not None and state.connected:
+        client = printer_manager.get_client(printer.id)
+        if client is not None:
+            wait_budget = max(wait_for_publish_seconds, 0.0)
+            if wait_budget > 0:
+                # Expose the budget so the UI can render a countdown next to
+                # the spinner — the user knows how long this check might take.
+                publishing_params = {"max_wait_seconds": wait_budget}
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + wait_budget
+            while True:
+                if client.report_messages_since_connect > 0:
+                    publishing_status = "pass"
+                    break
+                if loop.time() >= deadline:
+                    publishing_status = "fail"
+                    break
+                await asyncio.sleep(_PUBLISH_POLL_INTERVAL)
+    checks.append(
+        DiagnosticCheck(
+            id="printer_publishing",
+            status=publishing_status,
+            params=publishing_params or {},
+        )
+    )
 
     statuses = {c.status for c in checks}
     if "fail" in statuses:
