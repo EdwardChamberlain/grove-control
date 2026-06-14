@@ -289,7 +289,7 @@ describe('PrintersPage', () => {
         expect(screen.queryByText('Plate not Clear')).not.toBeInTheDocument();
       });
 
-      expect(screen.getAllByText('Plate Clear').length).toBeGreaterThan(0);
+      expect(screen.queryByText('Plate Clear')).not.toBeInTheDocument();
     });
 
     it('shows an icon-only plate clear action in small card view', async () => {
@@ -329,17 +329,44 @@ describe('PrintersPage', () => {
       });
     });
 
-    it('shows plate clear status but no action while idle', async () => {
+    it('dismisses small-card status details without opening the medium-card drilldown', async () => {
+      const { container } = render(<PrintersPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'S' }));
+      fireEvent.click(screen.getAllByLabelText(/Machine health:/)[0]);
+
+      await waitFor(() => {
+        expect(screen.getByText('Status details')).toBeInTheDocument();
+      });
+
+      const backdrop = container.querySelector('.fixed.inset-0.z-40');
+      expect(backdrop).toBeInTheDocument();
+
+      fireEvent.click(backdrop!);
+
+      await waitFor(() => {
+        expect(screen.queryByText('Status details')).not.toBeInTheDocument();
+      });
+
+      expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
+    });
+
+    it('hides green plate clear status and action while idle', async () => {
       render(<PrintersPage />);
 
       await waitFor(() => {
-        expect(screen.getAllByText('Plate Clear').length).toBeGreaterThan(0);
+        expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
       });
 
+      expect(screen.queryByText('Plate Clear')).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Mark plate as cleared' })).not.toBeInTheDocument();
     });
 
-    it('shows plate in use status while printing and hides the clear action', async () => {
+    it('hides green plate in use status while printing and hides the clear action', async () => {
       server.use(
         http.get('/api/v1/printers/:id/status', () => {
           return HttpResponse.json({ ...mockPrinterStatus, state: 'RUNNING', awaiting_plate_clear: false });
@@ -349,9 +376,10 @@ describe('PrintersPage', () => {
       render(<PrintersPage />);
 
       await waitFor(() => {
-        expect(screen.getAllByText('Plate in Use').length).toBeGreaterThan(0);
+        expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
       });
 
+      expect(screen.queryByText('Plate in Use')).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Mark plate as cleared' })).not.toBeInTheDocument();
     });
 
@@ -542,7 +570,7 @@ describe('PrintersPage', () => {
       release_notes: 'New features added.',
     };
 
-    it('shows green badge when firmware is up to date', async () => {
+    it('hides green badge when firmware is up to date', async () => {
       server.use(
         http.get('/api/v1/firmware/updates/:id', () => {
           return HttpResponse.json(firmwareUpToDate);
@@ -559,15 +587,19 @@ describe('PrintersPage', () => {
       render(<PrintersPage />);
 
       await waitFor(() => {
-        expect(screen.getAllByText('01.09.00.00').length).toBeGreaterThan(0);
+        expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
       });
 
-      const badge = screen.getAllByText('01.09.00.00')[0].closest('button');
-      expect(badge).toBeInTheDocument();
-      expect(badge?.className).toContain('text-status-ok');
+      expect(screen.queryByText('01.09.00.00')).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getAllByLabelText(/Machine health:/)[0]);
+
+      await waitFor(() => {
+        expect(screen.getByText('01.09.00.00')).toBeInTheDocument();
+      });
     });
 
-    it('shows orange badge when firmware update is available', async () => {
+    it('shows warning badge when firmware update is available', async () => {
       server.use(
         http.get('/api/v1/firmware/updates/:id', () => {
           return HttpResponse.json(firmwareUpdateAvailable);
@@ -589,7 +621,7 @@ describe('PrintersPage', () => {
 
       const badge = screen.getAllByText('01.08.00.00')[0].closest('button');
       expect(badge).toBeInTheDocument();
-      expect(badge?.className).toContain('text-orange-400');
+      expect(badge?.className).toContain('text-status-warning');
     });
 
     it('hides badge when firmware check is disabled', async () => {
