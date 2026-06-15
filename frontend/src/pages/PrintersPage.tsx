@@ -3114,22 +3114,6 @@ function PrinterCard({
                   <div className="flex min-w-0 items-center gap-2">
                     <h3 className={`font-semibold text-white ${getTitleSize()}`}>{printer.name}</h3>
                   </div>
-                  {viewMode === 'compact' && showClearPlateButton && (
-                    <button
-                      type="button"
-                      onClick={() => clearPlateMutation.mutate()}
-                      disabled={clearPlateMutation.isPending || !hasPermission('printers:clear_plate')}
-                      aria-label={t('printers.plateStatus.markCleared')}
-                      className="inline-flex h-7 min-h-7 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-status-warning/20 text-status-warning transition-opacity hover:opacity-80 disabled:opacity-50 disabled:hover:opacity-50"
-                      title={!hasPermission('printers:clear_plate') ? t('printers.permission.noControl') : t('printers.plateStatus.markCleared')}
-                    >
-                      {clearPlateMutation.isPending ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <PlateClearedIcon className="w-4 h-4" />
-                      )}
-                    </button>
-                  )}
                 </div>
                 <p className="text-sm text-bambu-gray">
                   {printer.model || 'Unknown Model'}
@@ -3148,7 +3132,23 @@ function PrinterCard({
                 </p>
               </div>
             </div>
-            <div className="relative flex flex-shrink-0 self-stretch">
+            <div className="relative flex flex-shrink-0 self-stretch gap-2">
+              {viewMode === 'compact' && showClearPlateButton && (
+                <button
+                  type="button"
+                  onClick={() => clearPlateMutation.mutate()}
+                  disabled={clearPlateMutation.isPending || !hasPermission('printers:clear_plate')}
+                  aria-label={t('printers.plateStatus.markCleared')}
+                  className="inline-flex h-full min-h-7 w-8 items-center justify-center rounded-lg bg-yellow-500/20 border border-yellow-400/40 text-yellow-400 transition-opacity hover:opacity-80 disabled:opacity-50 disabled:hover:opacity-50"
+                  title={!hasPermission('printers:clear_plate') ? t('printers.permission.noControl') : t('printers.plateStatus.markCleared')}
+                >
+                  {clearPlateMutation.isPending ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <PlateClearedIcon className="w-4 h-4" />
+                  )}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={(e) => {
