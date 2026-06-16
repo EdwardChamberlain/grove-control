@@ -12,6 +12,7 @@ import { SIDEBAR_HIDDEN_SYSTEM_ITEMS_KEY, SIDEBAR_ORDER_KEY } from '../../utils/
 
 describe('Layout', () => {
   beforeEach(() => {
+    window.history.pushState({}, '', '/');
     vi.mocked(localStorage.getItem).mockReset();
     vi.mocked(localStorage.setItem).mockReset();
     vi.mocked(localStorage.removeItem).mockReset();
@@ -107,6 +108,22 @@ describe('Layout', () => {
         const settingsLink = document.querySelector('a[href="/settings"]');
         expect(settingsLink).toBeInTheDocument();
       });
+    });
+
+    it('positions one sliding active indicator at the active sidebar item', async () => {
+      window.history.pushState({}, '', '/queue');
+
+      render(<Layout />);
+
+      await waitFor(() => {
+        const indicator = document.querySelector('[data-testid="sidebar-active-indicator"]') as HTMLElement | null;
+        expect(indicator).toBeInTheDocument();
+        expect(indicator?.style.transform).toBe('translateY(10.5rem)');
+      });
+
+      const queueLink = document.querySelector('aside a[href="/queue"]');
+      expect(queueLink).toHaveClass('text-white');
+      expect(queueLink).not.toHaveClass('bg-bambu-green');
     });
 
     it('hides system nav items stored in sidebar layout preferences', async () => {

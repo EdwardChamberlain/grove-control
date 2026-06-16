@@ -309,6 +309,20 @@ export function Layout() {
 
     return result;
   })();
+  const activeSidebarIndex = orderedSidebarIds.findIndex(id => {
+    if (isExternalSidebarItemId(id)) {
+      const link = extLinksMap.get(id);
+      return !!link && !link.open_in_new_tab && location.pathname.startsWith(`/external/${link.id}`);
+    }
+
+    const navItem = navItemsMap.get(id);
+    if (!navItem) return false;
+    return navItem.to === '/'
+      ? location.pathname === '/'
+      : location.pathname === navItem.to || location.pathname.startsWith(`${navItem.to}/`);
+  });
+  const sidebarItemAlignmentClass = isSidebarCompact || sidebarExpanded ? 'gap-3 px-4' : 'justify-center px-2';
+  const sidebarItemBaseClass = `relative z-10 flex h-12 items-center ${sidebarItemAlignmentClass} rounded-lg transition-colors group`;
 
   // Show update banner if update available and not dismissed for this version.
   // Suppressed when running as a Home Assistant addon — HA Supervisor surfaces
@@ -478,7 +492,15 @@ export function Layout() {
 
         {/* Navigation */}
         <nav className="flex-1 p-2 overflow-y-auto">
-          <ul className="space-y-2">
+          <ul className="relative flex flex-col gap-2">
+            {activeSidebarIndex >= 0 && (
+              <li
+                aria-hidden="true"
+                data-testid="sidebar-active-indicator"
+                className="pointer-events-none absolute left-0 right-0 top-0 z-0 h-12 rounded-lg bg-bambu-green transition-transform duration-300 ease-out"
+                style={{ transform: `translateY(${activeSidebarIndex * 3.5}rem)` }}
+              />
+            )}
             {orderedSidebarIds.map((id) => {
               const isExternal = isExternalSidebarItemId(id);
 
@@ -495,7 +517,7 @@ export function Layout() {
                         href={link.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className={`flex items-center ${isSidebarCompact || sidebarExpanded ? 'gap-3 px-4' : 'justify-center px-2'} py-3 rounded-lg transition-colors group text-bambu-gray-light hover:bg-bambu-dark-tertiary hover:text-white`}
+                        className={`${sidebarItemBaseClass} text-bambu-gray-light hover:bg-bambu-dark-tertiary hover:text-white`}
                         title={!isSidebarCompact && !sidebarExpanded ? link.name : undefined}
                       >
                         {link.custom_icon ? (
@@ -513,9 +535,9 @@ export function Layout() {
                       <NavLink
                         to={`/external/${link.id}`}
                         className={({ isActive }) =>
-                          `flex items-center ${isSidebarCompact || sidebarExpanded ? 'gap-3 px-4' : 'justify-center px-2'} py-3 rounded-lg transition-colors group ${
+                          `${sidebarItemBaseClass} ${
                             isActive
-                              ? 'bg-bambu-green text-white'
+                              ? 'text-white'
                               : 'text-bambu-gray-light hover:bg-bambu-dark-tertiary hover:text-white'
                           }`
                         }
@@ -552,9 +574,9 @@ export function Layout() {
                     <NavLink
                       to={to}
                       className={({ isActive }) =>
-                        `flex items-center ${isSidebarCompact || sidebarExpanded ? 'gap-3 px-4' : 'justify-center px-2'} py-3 rounded-lg transition-colors group ${
+                        `${sidebarItemBaseClass} ${
                           isActive
-                            ? 'bg-bambu-green text-white'
+                            ? 'text-white'
                             : 'text-bambu-gray-light hover:bg-bambu-dark-tertiary hover:text-white'
                         }`
                       }
