@@ -312,7 +312,7 @@ export function Layout() {
   const activeSidebarIndex = orderedSidebarIds.findIndex(id => {
     if (isExternalSidebarItemId(id)) {
       const link = extLinksMap.get(id);
-      return !!link && !link.open_in_new_tab && location.pathname.startsWith(`/external/${link.id}`);
+      return !!link && !link.open_in_new_tab && location.pathname === `/external/${link.id}`;
     }
 
     const navItem = navItemsMap.get(id);

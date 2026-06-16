@@ -126,6 +126,53 @@ describe('Layout', () => {
       expect(queueLink).not.toHaveClass('bg-bambu-green');
     });
 
+    it('matches external sidebar links by exact id instead of prefix', async () => {
+      window.history.pushState({}, '', '/external/10');
+      vi.mocked(localStorage.getItem).mockImplementation((key) => {
+        if (key === SIDEBAR_ORDER_KEY) return JSON.stringify(['ext-1', 'ext-10', 'printers']);
+        return null;
+      });
+      server.use(
+        http.get('/api/v1/external-links/', () =>
+          HttpResponse.json([
+            {
+              id: 1,
+              name: 'Docs One',
+              url: 'https://one.example.test',
+              icon: 'Link',
+              open_in_new_tab: false,
+              custom_icon: null,
+              sort_order: 0,
+              created_at: '2026-01-01T00:00:00Z',
+              updated_at: '2026-01-01T00:00:00Z',
+            },
+            {
+              id: 10,
+              name: 'Docs Ten',
+              url: 'https://ten.example.test',
+              icon: 'Link',
+              open_in_new_tab: false,
+              custom_icon: null,
+              sort_order: 1,
+              created_at: '2026-01-01T00:00:00Z',
+              updated_at: '2026-01-01T00:00:00Z',
+            },
+          ]),
+        ),
+      );
+
+      render(<Layout />);
+
+      await waitFor(() => {
+        const indicator = document.querySelector('[data-testid="sidebar-active-indicator"]') as HTMLElement | null;
+        expect(indicator).toBeInTheDocument();
+        expect(indicator?.style.transform).toBe('translateY(3.5rem)');
+      });
+
+      expect(document.querySelector('aside a[href="/external/1"]')).not.toHaveClass('text-white');
+      expect(document.querySelector('aside a[href="/external/10"]')).toHaveClass('text-white');
+    });
+
     it('hides system nav items stored in sidebar layout preferences', async () => {
       vi.mocked(localStorage.getItem).mockImplementation((key) => {
         if (key === SIDEBAR_HIDDEN_SYSTEM_ITEMS_KEY) return JSON.stringify(['printers']);
