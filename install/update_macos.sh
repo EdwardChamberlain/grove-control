@@ -153,14 +153,14 @@ log "Current commit: ${old_commit:-unknown}"
 log "Remote commit: ${remote_commit:-unknown}"
 
 if git diff --quiet HEAD "origin/$BRANCH"; then
-  log "You are already running the latest version of Bambuddy."
+  log "You are already running the latest version of Grove Control."
   read -r -p "Do you want to run the update process anyway? [y/N]: " run_anyway
   case "${run_anyway:-}" in
     y|Y|yes|YES) ;;
     *) exit 0 ;;
   esac
 else
-  read -r -p "An update for Bambuddy is available. Install now? [y/N]: " install_now
+  read -r -p "An update for Grove Control is available. Install now? [y/N]: " install_now
   case "${install_now:-}" in
     y|Y|yes|YES) ;;
     *) exit 0 ;;

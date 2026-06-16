@@ -150,8 +150,8 @@ def generate_splash(output_path):
     print("  Loading SpoolBuddy logo...")
     script_dir = os.path.dirname(os.path.abspath(__file__))
     logo_paths = [
-        os.path.join(script_dir, "..", "..", "frontend", "public", "spoolbuddy_logo_dark.png"),
-        os.path.join(script_dir, "..", "..", "frontend", "public", "img", "spoolbuddy_logo_dark.png"),
+        os.path.join(script_dir, "..", "..", "frontend", "public", "grove_control_spoolbuddy_logo_dark.png"),
+        os.path.join(script_dir, "..", "..", "frontend", "public", "img", "grove_control_spoolbuddy_logo_dark.png"),
     ]
 
     logo = None
@@ -163,7 +163,7 @@ def generate_splash(output_path):
             break
 
     if logo is None:
-        print("  ERROR: Could not find spoolbuddy_logo_dark.png")
+        print("  ERROR: Could not find grove_control_spoolbuddy_logo_dark.png")
         sys.exit(1)
 
     # Scale logo to target width
@@ -220,5 +220,9 @@ def generate_splash(output_path):
 
 
 if __name__ == "__main__":
-    out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "splash.png")
+    out = (
+        sys.argv[1]
+        if len(sys.argv) > 1
+        else os.path.join(os.path.dirname(os.path.abspath(__file__)), "grove_control_spoolbuddy_splash.png")
+    )
     generate_splash(out)

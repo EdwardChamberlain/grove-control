@@ -2,7 +2,7 @@
  * Discovery — custom-subnet picker (#1564).
  *
  * Reporters with a printer behind a router on a different L3 segment
- * (e.g. Bambuddy on 192.168.1.0/24, printer on 10.1.1.0/24) couldn't
+ * (e.g. Grove Control on 192.168.1.0/24, printer on 10.1.1.0/24) couldn't
  * scan that subnet because:
  *   - SSDP multicast doesn't cross routers
  *   - The Docker-mode subnet input was the only path that accepted a

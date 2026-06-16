@@ -6,7 +6,7 @@
 # advisory's framing as a namespace-abuse / supply-chain vector is
 # valid: anyone controlling the `fastar` PyPI namespace gains code
 # execution at install time across every fastapi[standard] install.
-# Bambuddy doesn't request [standard], so we don't pull `fastar` in
+# Grove Control doesn't request [standard], so we don't pull `fastar` in
 # practice, but pip-audit flags the package itself and breaks CI.
 # Hold to 0.135.x (which has all features we use, including SSE)
 # until upstream removes the dep or explains the rationale.
@@ -92,7 +92,7 @@ httpx>=0.26.0
 # Bambu's Cloudflare WAF gates the page behind a JA3/TLS-fingerprint
 # challenge that plain httpx/requests can't pass (#1666). curl_cffi
 # replays Chrome's ClientHello bytes so the TLS handshake clears CF;
-# the HTTP-layer User-Agent stays honest Bambuddy/1.0 per our compliance
+# the HTTP-layer User-Agent stays honest Grove Control/1.0 per our compliance
 # commitment. Soft dependency — if it fails to import (rare platforms,
 # constrained installs), firmware_check degrades gracefully to wiki-only
 # version detection and logs a warning at startup.

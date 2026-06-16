@@ -155,7 +155,7 @@ class GitHubBackupService:
                         else "could not confirm the target repository is private"
                     )
                     abort_message = (
-                        f"Backup aborted: {visibility_note}. Bambuddy backups carry credentials "
+                        f"Backup aborted: {visibility_note}. Grove Control backups carry credentials "
                         "and are refused for any non-private target. Make the repository private "
                         "to resume scheduled backups."
                     )

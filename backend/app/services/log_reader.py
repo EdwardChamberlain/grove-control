@@ -1,4 +1,4 @@
-"""Shared primitives for reading, parsing, and sanitizing the Bambuddy app log.
+"""Shared primitives for reading, parsing, and sanitizing the Grove Control app log.
 
 Extracted from ``routes/support.py`` so service-layer code (e.g. the log-health
 scanner in ``log_health.py``) can reuse log reading and redaction without

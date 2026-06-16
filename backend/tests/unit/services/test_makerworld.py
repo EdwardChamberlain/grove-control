@@ -105,11 +105,11 @@ class TestGetDesign:
 
     @pytest.mark.asyncio
     async def test_sends_honest_bambuddy_user_agent(self, service):
-        """The client identifies honestly as Bambuddy, not as Firefox.
+        """The client identifies honestly as Grove Control, not as Firefox.
 
         Earlier iterations of this code stripped ``x-bbl-*`` Bambu-app
         identification headers but kept a Firefox User-Agent. Verified
-        2026-05-12 that MakerWorld treats ``Bambuddy/X.Y.Z`` identically to
+        2026-05-12 that MakerWorld treats ``Grove Control/X.Y.Z`` identically to
         a Firefox UA at the Cloudflare edge — same response shape on
         ``/api/v1/design-service/*`` paths. Honest identification keeps us
         clearly outside Bambu Lab's "no falsified client identity" line
@@ -126,7 +126,7 @@ class TestGetDesign:
 
         await service.get_design(1)
         headers = service._client.get.call_args.kwargs["headers"]
-        assert headers["User-Agent"].startswith("Bambuddy/")
+        assert headers["User-Agent"].startswith("Grove Control/")
         # Browser-impersonation strings must not creep back in
         assert "Mozilla" not in headers["User-Agent"]
         assert "Firefox" not in headers["User-Agent"]

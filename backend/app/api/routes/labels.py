@@ -7,7 +7,7 @@ Two endpoints, one per inventory backend:
 
 Both accept ``{spool_ids: [int], template: str}`` and return a PDF stream.
 The QR code on each label deep-links to ``/inventory?spool=<id>`` so a phone
-scan jumps straight back into Bambuddy at that spool's row.
+scan jumps straight back into Grove Control at that spool's row.
 """
 
 from __future__ import annotations
@@ -72,7 +72,7 @@ def _split_extra_colors(raw: str | None) -> list[str] | None:
 
 async def _resolve_deeplink_base(request: Request, db: AsyncSession) -> str:
     """Where the QR codes should point. Prefers `external_url` when set so a
-    phone scan reaches the user's public Bambuddy URL rather than an internal
+    phone scan reaches the user's public Grove Control URL rather than an internal
     address; falls back to the request's own scheme+host when no setting is
     configured.
     """

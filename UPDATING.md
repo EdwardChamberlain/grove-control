@@ -1,10 +1,10 @@
-# Updating Bambuddy
+# Updating Grove Control
 
 > **0.2.3 note:** the in-app **Update** button is unreliable when upgrading from
 > older releases. Use the commands below instead — they cover every supported
 > install path and are safe to run repeatedly.
 
-Pick the section that matches how Bambuddy was installed.
+Pick the section that matches how Grove Control was installed.
 
 ---
 

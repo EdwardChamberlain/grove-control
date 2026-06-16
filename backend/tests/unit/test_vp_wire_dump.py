@@ -26,8 +26,8 @@ def test_disabled_by_default_writes_nothing(_isolated_log_dir, monkeypatch):
 def test_enabled_writes_dict_as_pretty_json(_isolated_log_dir, monkeypatch):
     monkeypatch.setenv("BAMBUDDY_VP_DUMP_WIRE", "1")
     payload = {"print": {"ams": {"ams": [{"id": 0, "tray": [{"id": 0, "tray_type": "PLA"}]}]}}}
-    _debug.dump_wire("Bambuddy P1S", "out", payload)
-    out = _isolated_log_dir / "vp_wire" / "Bambuddy_P1S_out.json"
+    _debug.dump_wire("Grove Control P1S", "out", payload)
+    out = _isolated_log_dir / "vp_wire" / "Grove Control_P1S_out.json"
     assert out.is_file()
     assert json.loads(out.read_text()) == payload
 

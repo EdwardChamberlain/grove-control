@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Comprehensive end-to-end test for Bambuddy application."""
+"""Comprehensive end-to-end test for Grove Control application."""
 
 import os
 import time

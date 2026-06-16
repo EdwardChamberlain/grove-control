@@ -209,7 +209,7 @@ class TestDeviceEndpoints:
     @pytest.mark.integration
     async def test_heartbeat_returns_ssh_public_key(self, async_client: AsyncClient, device_factory):
         """Heartbeat response carries the current SSH public key so the daemon
-        can re-deploy it whenever Bambuddy's keypair rotates without waiting
+        can re-deploy it whenever Grove Control's keypair rotates without waiting
         for a service restart."""
         await device_factory(device_id="sb-ssh-hb")
 

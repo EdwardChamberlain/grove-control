@@ -1,10 +1,10 @@
 # Slicer-API sidecar (optional)
 
 Self-contained Docker Compose stack that runs HTTP wrappers around the
-OrcaSlicer and/or Bambu Studio CLI. Bambuddy's **Slice** action calls
+OrcaSlicer and/or Bambu Studio CLI. Grove Control's **Slice** action calls
 these to slice models server-side, no desktop slicer required.
 
-This folder is **optional**. Bambuddy works without it — Slice falls back
+This folder is **optional**. Grove Control works without it — Slice falls back
 to opening the model in the user's local desktop slicer via URI scheme.
 Enable the API path by:
 
@@ -35,21 +35,21 @@ works on QNAP / Synology / Container Station out of the box.
 Both images are `linux/amd64` only. OrcaSlicer's ARM64 build is on hold
 pending an upstream extraction fix; BambuStudio doesn't publish ARM64
 at all. For ARM64 hosts (Raspberry Pi 4/5, Apple Silicon Linux), run
-the sidecar on a separate x86_64 box and point Bambuddy at it via the
-**Sidecar URL** field — the sidecar doesn't need to live next to Bambuddy.
+the sidecar on a separate x86_64 box and point Grove Control at it via the
+**Sidecar URL** field — the sidecar doesn't need to live next to Grove Control.
 
 ## Ports
 
 | Service | Default host port | Why this port |
 |---|---|---|
-| `orca-slicer-api` | **3003** | Bambuddy's virtual-printer feature reserves 3000 and 3002 |
+| `orca-slicer-api` | **3003** | Grove Control's virtual-printer feature reserves 3000 and 3002 |
 | `bambu-studio-api` | **3001** | First free port in that range |
 
 Override via `ORCA_API_PORT` / `BAMBU_API_PORT` in `.env`.
 
-## Bambuddy wiring
+## Grove Control wiring
 
-In the Bambuddy UI: **Settings → Slicer**:
+In the Grove Control UI: **Settings → Slicer**:
 
 - **Preferred Slicer**: pick OrcaSlicer or Bambu Studio.
 - **Use Slicer API**: turn on.
@@ -59,18 +59,18 @@ In the Bambuddy UI: **Settings → Slicer**:
   - Bambu Studio: `http://localhost:3001`
 
 Leaving the URL field blank uses the `SLICER_API_URL` /
-`BAMBU_STUDIO_API_URL` environment defaults from Bambuddy's config.
+`BAMBU_STUDIO_API_URL` environment defaults from Grove Control's config.
 
 ## Where the images live
 
-Pre-built images are published to two registries on every Bambuddy
+Pre-built images are published to two registries on every Grove Control
 stable release:
 
 - `ghcr.io/maziggy/orca-slicer-api:latest` / `docker.io/maziggy/orca-slicer-api:latest`
 - `ghcr.io/maziggy/bambu-studio-api:latest` / `docker.io/maziggy/bambu-studio-api:latest`
 
 Each release also publishes a versioned tag (`:bambuddy-X.Y.Z`) so you
-can pin to the sidecar that shipped alongside a specific Bambuddy
+can pin to the sidecar that shipped alongside a specific Grove Control
 release — set `SIDECAR_TAG=bambuddy-0.2.5` in `.env`.
 
 Both images are built from the
@@ -92,13 +92,13 @@ docker compose --profile bambu up -d
 That's it — Compose pulls the current `:latest` (or whatever
 `SIDECAR_TAG` you've pinned to) and recreates the containers.
 
-To roll back to the sidecar that shipped with a previous Bambuddy
+To roll back to the sidecar that shipped with a previous Grove Control
 release, set `SIDECAR_TAG=bambuddy-X.Y.Z` in `.env` and re-run the two
 commands above.
 
 ## Troubleshooting
 
-- **`address already in use` on port 3000 or 3002** — Bambuddy's
+- **`address already in use` on port 3000 or 3002** — Grove Control's
   virtual-printer feature owns those. Don't change `ORCA_API_PORT` to
   3000 or 3002.
 - **`/health` reports `version: "unknown"`** — cosmetic. The bundled

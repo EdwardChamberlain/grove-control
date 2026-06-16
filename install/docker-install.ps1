@@ -51,7 +51,7 @@ $ErrorActionPreference = 'Stop'
 function Write-Banner {
     Write-Host ''
     Write-Host '==========================================================' -ForegroundColor Cyan
-    Write-Host '   Bambuddy - Docker Installation (Windows)' -ForegroundColor Cyan
+    Write-Host '   Grove Control - Docker Installation (Windows)' -ForegroundColor Cyan
     Write-Host '==========================================================' -ForegroundColor Cyan
     Write-Host ''
 }
@@ -244,8 +244,8 @@ function Update-ComposeForDockerDesktop {
     Warn 'If you plan to use a Virtual Printer, edit docker-compose.yml and uncomment the relevant `- "PORT:PORT"` lines under `ports:`.'
 }
 
-function Start-Bambuddy {
-    Info 'Starting Bambuddy container...'
+function Start-Grove Control {
+    Info 'Starting Grove Control container...'
     if ($Build) {
         & cmd /c "$DockerCompose up -d --build"
     } else {
@@ -263,7 +263,7 @@ function Start-Bambuddy {
     while ($attempts -lt 15) {
         Start-Sleep -Seconds 2
         $ps = & cmd /c "$DockerCompose ps" 2>&1
-        if ($ps -match 'Up') { Ok 'Bambuddy container is running'; return }
+        if ($ps -match 'Up') { Ok 'Grove Control container is running'; return }
         if ($ps -match 'Exited') {
             Fail 'Container exited unexpectedly.'
             Write-Host "    $DockerCompose logs bambuddy" -ForegroundColor Yellow
@@ -312,7 +312,7 @@ Initialize-InstallDir
 Get-ComposeFile
 Write-EnvFile
 Update-ComposeForDockerDesktop
-Start-Bambuddy
+Start-Grove Control
 
 $lanIp = Get-LanIp
 
@@ -321,7 +321,7 @@ Write-Host '==========================================================' -Foregro
 Write-Host '   Installation Complete!' -ForegroundColor Green
 Write-Host '==========================================================' -ForegroundColor Green
 Write-Host ''
-Write-Host "  Access Bambuddy:  http://localhost:$Port" -ForegroundColor Cyan
+Write-Host "  Access Grove Control:  http://localhost:$Port" -ForegroundColor Cyan
 Write-Host "                    http://${lanIp}:$Port  (from other devices)" -ForegroundColor Cyan
 Write-Host ''
 Write-Host '  Manage container:'
@@ -331,7 +331,7 @@ Write-Host "    Stop:     cd `"$InstallPath`"; $DockerCompose down"
 Write-Host "    Start:    cd `"$InstallPath`"; $DockerCompose up -d"
 Write-Host "    Restart:  cd `"$InstallPath`"; $DockerCompose restart"
 Write-Host ''
-Write-Host '  Update Bambuddy:'
+Write-Host '  Update Grove Control:'
 if ($Build) {
     Write-Host "    cd `"$InstallPath`"; git pull; $DockerCompose up -d --build"
 } else {

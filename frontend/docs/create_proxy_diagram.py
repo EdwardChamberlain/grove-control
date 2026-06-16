@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Create a professional network architecture diagram for Bambuddy Virtual Printer Proxy Mode.
+Create a professional network architecture diagram for Grove Control Virtual Printer Proxy Mode.
 Following the Signal Flow design philosophy.
 """
 
@@ -249,7 +249,7 @@ def create_diagram():
     draw.text((WIDTH // 2, 35), title, font=fonts['title'], fill=BAMBU_GREEN, anchor="mm")
 
     # Subtitle
-    subtitle = "Secure remote printing through Bambuddy"
+    subtitle = "Secure remote printing through Grove Control"
     draw.text((WIDTH // 2, 62), subtitle, font=fonts['small'], fill=TEXT_SECONDARY, anchor="mm")
 
     # === LAYOUT ===
@@ -264,7 +264,7 @@ def create_diagram():
     # Internet section (center)
     internet_x = 510
 
-    # Bambuddy section (center-right)
+    # Grove Control section (center-right)
     bambuddy_x = 700
     bambuddy_box = [560, 140, 840, 500]
 
@@ -283,7 +283,7 @@ def create_diagram():
     draw.text((remote_x, section_y + 52), "or OrcaSlicer", font=fonts['small'], fill=TEXT_SECONDARY, anchor="mm")
 
     # Ports on remote side
-    draw.text((remote_x, section_y + 100), "Connects to Bambuddy", font=fonts['small'], fill=TEXT_LABEL, anchor="mm")
+    draw.text((remote_x, section_y + 100), "Connects to Grove Control", font=fonts['small'], fill=TEXT_LABEL, anchor="mm")
     draw.text((remote_x, section_y + 120), "FTP :990  MQTT :8883", font=fonts['port_small'], fill=TEXT_SECONDARY, anchor="mm")
 
     # === INTERNET CLOUD ===
@@ -298,7 +298,7 @@ def create_diagram():
     draw_server_icon(draw, bambuddy_x, section_y - 50, 70, BAMBU_GREEN)
     draw.text((bambuddy_x, section_y + 20), "TLS Proxy", font=fonts['heading'], fill=TEXT_PRIMARY, anchor="mm")
 
-    # Incoming ports (left side of Bambuddy)
+    # Incoming ports (left side of Grove Control)
     draw.text((bambuddy_x, section_y + 70), "LISTEN PORTS", font=fonts['small'], fill=TEXT_LABEL, anchor="mm")
     draw_rounded_rect(draw, [bambuddy_x - 55, section_y + 85, bambuddy_x + 55, section_y + 130],
                       6, fill=(35, 35, 45), outline=CONTAINER_BORDER, width=1)
@@ -340,13 +340,13 @@ def create_diagram():
     # TLS badge between remote and internet
     draw_tls_badge(draw, 392, section_y - 20, fonts)
 
-    # Internet to Bambuddy
+    # Internet to Grove Control
     draw_bidirectional_arrow(draw, 555, section_y, 620, section_y, BAMBU_GREEN_DIM, 2)
 
-    # Bambuddy to Local
+    # Grove Control to Local
     draw_bidirectional_arrow(draw, 780, section_y, 920, section_y, BAMBU_GREEN_DIM, 2)
 
-    # TLS badge between Bambuddy and printer
+    # TLS badge between Grove Control and printer
     draw_tls_badge(draw, 850, section_y - 20, fonts)
 
     # Local network arrow to printer
@@ -356,7 +356,7 @@ def create_diagram():
     info_y = 560
 
     # Flow description
-    draw.text((WIDTH // 2, info_y), "← Slicer traffic encrypted and relayed through Bambuddy to your printer →",
+    draw.text((WIDTH // 2, info_y), "← Slicer traffic encrypted and relayed through Grove Control to your printer →",
               font=fonts['small'], fill=TEXT_SECONDARY, anchor="mm")
 
     # Key features
@@ -376,7 +376,7 @@ def create_diagram():
         draw.ellipse([fx - 80, features_y - 3, fx - 74, features_y + 3], fill=BAMBU_GREEN)
         draw.text((fx - 68, features_y), feature, font=fonts['small'], fill=TEXT_SECONDARY, anchor="lm")
 
-    # Bambuddy branding
+    # Grove Control branding
     draw.text((WIDTH // 2, HEIGHT - 30), "bambuddy.cool", font=fonts['small'], fill=TEXT_LABEL, anchor="mm")
 
     return img

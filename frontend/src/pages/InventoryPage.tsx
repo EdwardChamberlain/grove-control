@@ -1129,7 +1129,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
           <p className="text-bambu-gray mt-1">{t('inventory.subtitle')}</p>
         </div>
         <div className="flex items-center gap-2">
-          {/* CSV import/export (#1576). Operates on Bambuddy's local inventory.
+          {/* CSV import/export (#1576). Operates on Grove Control's local inventory.
               In Spoolman mode the buttons stay visible (feature parity) but are
               disabled with a hint pointing at Spoolman's own CSV export, since
               Spoolman owns the data store in that mode. */}

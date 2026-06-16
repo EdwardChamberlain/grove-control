@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="static/img/bambuddy_logo_dark.png" alt="Bambuddy Logo" width="300">
+  <img src="static/img/grove_control_logo_dark.png" alt="Grove Control Logo" width="300">
 </p>
 
-<h1 align="center">Bambuddy</h1>
+<h1 align="center">Grove Control</h1>
 
 <p align="center">
   <strong>Your printers. No cloud. Your rules.</strong><br>
@@ -38,14 +38,14 @@
     <img src="https://img.shields.io/badge/🎮_Live_Demo-demo.bambuddy.cool-00ae42?style=for-the-badge&labelColor=0a0d14" alt="Live Demo">
   </a>
   <br>
-  <em>Spin up your own private Bambuddy in ~10 seconds — no install, no signup, 30-minute session.</em>
+  <em>Spin up your own private Grove Control in ~10 seconds — no install, no signup, 30-minute session.</em>
 </p>
 
 ---
 
 ## 📰 As Featured In
 
-> **"Bambuddy is the companion app that Bambu Lab should have built from day one."**
+> **"Grove Control is the companion app that Bambu Lab should have built from day one."**
 > — Adam Conway, [XDA-Developers](https://www.xda-developers.com/finally-have-full-control-bambu-lab-printer-ditched-bambu-cloud/)
 
 <p align="center">
@@ -59,7 +59,7 @@
   <a href="https://www.fastblinker.com/bambuddy-the-open-source-solution-thats-revolutionizing-bambu-lab-3d-printer-management/"><img src="https://img.shields.io/badge/FastBlinker-Read-00B0FF?style=flat-square" alt="FastBlinker"></a>
 </p>
 
-Two leading 3D-printing publications independently concluded that Bambuddy's feature set **already exceeds Bambu's own cloud**:
+Two leading 3D-printing publications independently concluded that Grove Control's feature set **already exceeds Bambu's own cloud**:
 
 > *"The features seem to exceed those provided by Bambu Lab's own cloud."* — [Fabbaloo](https://www.fabbaloo.com/news/bambuddy-launches-as-open-source-alternative-to-bambu-labs-cloud)
 >
@@ -75,11 +75,11 @@ Two leading 3D-printing publications independently concluded that Bambuddy's fea
   <img src="docs/images/proxy-mode-diagram.png" alt="Proxy Mode Architecture" width="800">
 </p>
 
-**Print from anywhere in the world** — Bambuddy's new Proxy Mode acts as a secure relay between your slicer and printer:
+**Print from anywhere in the world** — Grove Control's new Proxy Mode acts as a secure relay between your slicer and printer:
 
 - 🔒 **End-to-end TLS encryption** — FTP, file transfer, and camera are transparently proxied with the printer's real TLS certificate
-- 🛡️ **Optional Tailscale integration** — per-VP toggle + Docker socket mount surface the host's Tailscale IP on the VP card, so you know which `100.x.x.x` to paste into the slicer when you want a virtual printer reachable over your tailnet ([setup](https://wiki.bambuddy.cool/features/virtual-printer/)). Bambuddy's self-signed CA import is still required on the slicer side: Bambu Studio / OrcaSlicer validate printer TLS against a bundled BBL CA (not the system trust store), **and** their Add Printer dialog is IP-only (no hostname to match an LE cert against), so a publicly-trusted cert can't help on either dimension. Tailscale's role is the private tunnel (reachability from anywhere, no port forwarding), not cert-import elimination.
-- 🌍 **No cloud dependency** — Direct connection through your own Bambuddy server
+- 🛡️ **Optional Tailscale integration** — per-VP toggle + Docker socket mount surface the host's Tailscale IP on the VP card, so you know which `100.x.x.x` to paste into the slicer when you want a virtual printer reachable over your tailnet ([setup](https://wiki.bambuddy.cool/features/virtual-printer/)). Grove Control's self-signed CA import is still required on the slicer side: Bambu Studio / OrcaSlicer validate printer TLS against a bundled BBL CA (not the system trust store), **and** their Add Printer dialog is IP-only (no hostname to match an LE cert against), so a publicly-trusted cert can't help on either dimension. Tailscale's role is the private tunnel (reachability from anywhere, no port forwarding), not cert-import elimination.
+- 🌍 **No cloud dependency** — Direct connection through your own Grove Control server
 - 🔑 **Uses printer's access code** — No additional credentials needed
 - ⚡ **Full-speed printing** — Transparent TCP proxy, only MQTT is decrypted for IP rewriting
 
@@ -91,22 +91,22 @@ Perfect for remote print farms, traveling makers, or accessing your home printer
 
 ## 🍰 NEW: Integrated Slicing — Slice & Print, All In One Place
 
-**No desktop slicer required.** Drop an STL or 3MF into Bambuddy's File Manager, hit **Slice**, and the result lands as a ready-to-print `.gcode.3mf` in the same folder — without ever opening Bambu Studio or Orca Slicer.
+**No desktop slicer required.** Drop an STL or 3MF into Grove Control's File Manager, hit **Slice**, and the result lands as a ready-to-print `.gcode.3mf` in the same folder — without ever opening Bambu Studio or Orca Slicer.
 
 - 🍰 **One-click slicing** — Slice from any browser. The job runs server-side in a [tiny sidecar container](slicer-api/README.md), progress streams back as a toast, and the sliced file appears in your library when it's done.
-- 📱 **Slice from your phone or tablet** — Bambuddy's PWA + the new server-side slicer means you can drop an STL in from mobile and queue a print without ever touching a desktop.
+- 📱 **Slice from your phone or tablet** — Grove Control's PWA + the new server-side slicer means you can drop an STL in from mobile and queue a print without ever touching a desktop.
 - 🎒 **Bring your own profiles** — Import a `Printer Preset Bundle` (`.bbscfg`) exported from Bambu Studio: pick a curated **printer + process + filament** triplet from a dropdown in the Slice dialog, no more juggling JSON files.
-- 🔄 **Re-slice for a different printer in one click** — Open any sliced archive in Bambuddy and re-slice it for any printer, including across the single-nozzle ↔ dual-nozzle (H2D / H2D Pro) boundary that BambuStudio's CLI would normally reject. Bambuddy detects the class change and auto-arranges objects laid out for the source bed (e.g. X1C 256×256) so they land safely on the target (e.g. H2D 350×320 with its per-nozzle dead zones).
+- 🔄 **Re-slice for a different printer in one click** — Open any sliced archive in Grove Control and re-slice it for any printer, including across the single-nozzle ↔ dual-nozzle (H2D / H2D Pro) boundary that BambuStudio's CLI would normally reject. Grove Control detects the class change and auto-arranges objects laid out for the source bed (e.g. X1C 256×256) so they land safely on the target (e.g. H2D 350×320 with its per-nozzle dead zones).
 - 🍱 **Slice all plates at once** — Multi-plate projects (parted statues, multi-part kits) get a "Slice all N plates" toggle in the Slice dialog. One click produces a single `.gcode.3mf` containing every plate's gcode, ready for the printer. The toast shows "Plate 2 of 5 — Generating G-code (47%)" as the loop runs.
-- 🔁 **Same dispatch as the rest of Bambuddy** — The sliced output flows into the existing queue / plate-picker / AMS-mapping path, so all the regular conveniences (multi-printer dispatch, AMS routing, scheduled prints) just work.
+- 🔁 **Same dispatch as the rest of Grove Control** — The sliced output flows into the existing queue / plate-picker / AMS-mapping path, so all the regular conveniences (multi-printer dispatch, AMS routing, scheduled prints) just work.
 
-Optional but recommended — drop the [`slicer-api/` Compose stack](slicer-api/README.md) next to your Bambuddy install and the **Slice** button lights up everywhere.
+Optional but recommended — drop the [`slicer-api/` Compose stack](slicer-api/README.md) next to your Grove Control install and the **Slice** button lights up everywhere.
 
 👉 **[Slicer Integration Guide →](https://wiki.bambuddy.cool/features/slicer-api/)**
 
 ---
 
-## Why Bambuddy?
+## Why Grove Control?
 
 - **Own your data** — All print history stored locally, no cloud dependency
 - **Works offline** — Uses Developer Mode for direct printer control via local network
@@ -136,7 +136,7 @@ Optional but recommended — drop the [`slicer-api/` Compose stack](slicer-api/R
 
 ### 📊 Monitoring & Control
 - Real-time printer status via WebSocket
-- Live camera streaming (MJPEG) & snapshots with multi-viewer support — most Bambu printers only allow one upstream connection, so Bambuddy fans out a single shared stream to all browser tabs / cards / overlays
+- Live camera streaming (MJPEG) & snapshots with multi-viewer support — most Bambu printers only allow one upstream connection, so Grove Control fans out a single shared stream to all browser tabs / cards / overlays
 - **Long-lived camera tokens** for Home Assistant / Frigate / kiosks — mint a token from Settings → API Keys, paste it once, capped at 365 days, revocable at any time (no infinite tokens — leaked permanent tokens are unsafe by design)
 - **Streaming overlay for OBS** - Embeddable page with camera + status for live streaming (`/overlay/:printerId`), configurable FPS (`?fps=30`), status-only mode (`?camera=false`)
 - External camera support (MJPEG, RTSP, HTTP snapshot, USB/V4L2) with layer-based timelapse
@@ -208,7 +208,7 @@ Optional but recommended — drop the [`slicer-api/` Compose stack](slicer-api/R
 - **Server-side Slice button** (optional) — slice STL/3MF without a desktop slicer when the [`slicer-api/` Compose stack](slicer-api/README.md) is running; the result lands as a new `.gcode.3mf` in the same folder, with progress shown via a toast tracker that follows the job to completion. Supports importing **Bambu Studio Printer Preset Bundles** (`.bbscfg`) so a curated printer + process + filament triplet can be picked in the Slice dialog without re-uploading JSON profiles ([details](https://wiki.bambuddy.cool/features/slicer-api/#slicer-bundles-bbscfg))
 
 ### 🌍 MakerWorld Integration
-- Paste any `makerworld.com/models/…` URL → preview, plate picker, and import without leaving Bambuddy
+- Paste any `makerworld.com/models/…` URL → preview, plate picker, and import without leaving Grove Control
 - Per-plate **Save** or **Save & Slice in Bambu Studio / OrcaSlicer** (your preferred slicer from Settings)
 - **Import all plates** button for multi-plate models
 - Auto-creates a "MakerWorld" folder in File Manager; override with any existing folder via the picker
@@ -255,14 +255,14 @@ Optional but recommended — drop the [`slicer-api/` Compose stack](slicer-api/R
 - **Bulk spool addition** — Add multiple identical spools at once (quantity 1–100) with a single form submission. Quick Add mode for stock spools that only need material, color, and weight.
 - Spool catalog, color catalog, PA profile matching, and low-stock alerts
 - **Multi-colour gradients, transparency, and visual effects** — Paste a comma-separated hex list (e.g. from 3dfilamentprofiles.com) to render a spool as a gradient or conic colour wheel; transparency shows through a checkerboard so the alpha you set is the alpha you see; pick a visual effect (sparkle, wood, marble, glow, matte) for the swatch overlay. Same fields are editable on the colour catalog so combos can be reused across spools.
-- **Printable spool labels** — Generate PDF labels for any selection of spools in four pre-built sizes: AMS holder (30×15 mm), box label (62×29 mm), Avery L7160 sheet (A4, 21 per page), and Avery 5160 sheet (US Letter, 30 per page). Each label shows the colour swatch, brand, material, name, the **spool ID** (for at-a-glance identification across many similar spools), and a QR code that deep-links straight back to the spool's row in Bambuddy when scanned with a phone. Pick from the inventory page — search, filter by material, multi-select spools, then print or save to PDF.
+- **Printable spool labels** — Generate PDF labels for any selection of spools in four pre-built sizes: AMS holder (30×15 mm), box label (62×29 mm), Avery L7160 sheet (A4, 21 per page), and Avery 5160 sheet (US Letter, 30 per page). Each label shows the colour swatch, brand, material, name, the **spool ID** (for at-a-glance identification across many similar spools), and a QR code that deep-links straight back to the spool's row in Grove Control when scanned with a phone. Pick from the inventory page — search, filter by material, multi-select spools, then print or save to PDF.
 
 ### 🔧 Integrations
 - [Spoolman](https://github.com/Donkie/Spoolman) filament sync with per-filament usage tracking and fill level display
 - MQTT publishing for Home Assistant, Node-RED, etc.
 - **Prometheus metrics** - Export printer telemetry for Grafana dashboards
 - Bambu Cloud profile management
-- **Orca Cloud profile sync** — read your OrcaSlicer 2.4.0+ cloud-synced profiles directly in Bambuddy, usable for slicing alongside Bambu Cloud / local / standard presets. Four sign-in providers (Google / Apple / GitHub / email+password)
+- **Orca Cloud profile sync** — read your OrcaSlicer 2.4.0+ cloud-synced profiles directly in Grove Control, usable for slicing alongside Bambu Cloud / local / standard presets. Four sign-in providers (Google / Apple / GitHub / email+password)
 - **Local Profiles** - Import OrcaSlicer presets (`.orca_filament`, `.bbscfg`, `.bbsflmt`, `.zip`, `.json`) without Bambu Cloud
 - K-profiles (pressure advance)
 - **GitHub backup** - Schedule automatic backups of cloud profiles, k profiles and settings to GitHub
@@ -275,7 +275,7 @@ Optional but recommended — drop the [`slicer-api/` Compose stack](slicer-api/R
 
 ### 🖨️ Virtual Printer & Remote Printing
 - **🌐 Proxy Mode** — Print remotely from anywhere via secure TLS relay
-- **🪞 Live target-printer mirror in non-proxy modes (NEW!)** — Immediate / Review / Queue VPs now mirror their target printer's live state to the slicer: AMS slot contents, FTS / dual-extruder routing, k-profiles, AMS load / dry / calibration commands, and the camera stream all flow through the VP. Use the slicer as a full remote for the printer behind the VP without giving up Bambuddy's queue / archive / dispatch features.
+- **🪞 Live target-printer mirror in non-proxy modes (NEW!)** — Immediate / Review / Queue VPs now mirror their target printer's live state to the slicer: AMS slot contents, FTS / dual-extruder routing, k-profiles, AMS load / dry / calibration commands, and the camera stream all flow through the VP. Use the slicer as a full remote for the printer behind the VP without giving up Grove Control's queue / archive / dispatch features.
 - Emulates a Bambu Lab printer on your network
 - Send prints directly from Bambu Studio/Orca Slicer
 - Configurable printer model (X1C, P1S, A1, H2D, etc.)
@@ -328,7 +328,7 @@ Optional but recommended — drop the [`slicer-api/` Compose stack](slicer-api/R
     <img src="https://img.shields.io/badge/🎮_Try_It_Live-demo.bambuddy.cool-00ae42?style=for-the-badge&labelColor=0a0d14" alt="Live Demo">
   </a>
   <br>
-  <em>Spin up your own private Bambuddy with simulated printers and pre-loaded print history. Click around freely — it's your sandbox. ~10 seconds to spawn, 30-minute session, no signup.</em>
+  <em>Spin up your own private Grove Control with simulated printers and pre-loaded print history. Click around freely — it's your sandbox. ~10 seconds to spawn, 30-minute session, no signup.</em>
 </p>
 
 <p align="center">
@@ -337,7 +337,7 @@ Optional but recommended — drop the [`slicer-api/` Compose stack](slicer-api/R
 
 <p align="center">
   <a href="https://youtu.be/bmq2Z0lEXeo">
-    <img src="https://img.youtube.com/vi/bmq2Z0lEXeo/maxresdefault.jpg" alt="Bambuddy Demo Video" width="800">
+    <img src="https://img.youtube.com/vi/bmq2Z0lEXeo/maxresdefault.jpg" alt="Grove Control Demo Video" width="800">
   </a>
   <br><em>Click to watch the demo on YouTube</em>
 </p>
@@ -485,13 +485,13 @@ Optional but recommended — drop the [`slicer-api/` Compose stack](slicer-api/R
 
 #### Windows (Native Installer)
 
-Self-contained `.exe` — no Python, Node, Docker, or Git required on the target machine. The installer bundles Python 3.13, the React frontend, ffmpeg, and registers Bambuddy as a Windows service.
+Self-contained `.exe` — no Python, Node, Docker, or Git required on the target machine. The installer bundles Python 3.13, the React frontend, ffmpeg, and registers Grove Control as a Windows service.
 
 Download the latest installer:
 
 > https://github.com/maziggy/bambuddy/releases/latest/download/bambuddy-windows-x64-setup.exe
 
-Run it (one-time UAC prompt — admin install) → Bambuddy starts as a Windows service and the dashboard opens at **http://localhost:8000** automatically. Data lives at `C:\ProgramData\Bambuddy\`, install at `C:\Program Files\Bambuddy\`. To update, just run a newer installer over the existing install — your database and archives are preserved.
+Run it (one-time UAC prompt — admin install) → Grove Control starts as a Windows service and the dashboard opens at **http://localhost:8000** automatically. Data lives at `C:\ProgramData\Grove Control\`, install at `C:\Program Files\Grove Control\`. To update, just run a newer installer over the existing install — your database and archives are preserved.
 
 > **SmartScreen warning:** until our SignPath OSS code-signing approval lands, you'll see "Windows protected your PC" on first run. Click **More info → Run anyway**.
 
@@ -622,7 +622,7 @@ services:
     network_mode: host
 ```
 
-> **Note:** Docker's default bridge networking cannot receive SSDP multicast packets for automatic printer discovery. When using `network_mode: host`, Bambuddy auto-detects your network subnet and can discover printers via subnet scanning in the Add Printer dialog.
+> **Note:** Docker's default bridge networking cannot receive SSDP multicast packets for automatic printer discovery. When using `network_mode: host`, Grove Control auto-detects your network subnet and can discover printers via subnet scanning in the Add Printer dialog.
 
 </details>
 
@@ -652,11 +652,11 @@ Windows PowerShell (run as Administrator — the installer self-elevates via UAC
 powershell -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/maziggy/bambuddy/main/install/windows-installer.ps1 -OutFile windows-installer.ps1; .\windows-installer.ps1"
 ```
 
-> Installs Bambuddy natively on Windows using Git, Python, a virtual environment, separate data/log directories, and optional NSSM Windows Service registration. See the [Windows Installer Guide](http://wiki.bambuddy.cool/getting-started/windows-installer/) for parameters and unattended-install options.
+> Installs Grove Control natively on Windows using Git, Python, a virtual environment, separate data/log directories, and optional NSSM Windows Service registration. See the [Windows Installer Guide](http://wiki.bambuddy.cool/getting-started/windows-installer/) for parameters and unattended-install options.
 
 ### Enabling Developer Mode
 
-Developer Mode allows third-party software like Bambuddy to control your printer over the local network.
+Developer Mode allows third-party software like Grove Control to control your printer over the local network.
 
 1. On printer: **Settings** → **Network** → **LAN Only Mode** → Enable
 2. Enable **Developer Mode** (appears after LAN Only Mode is enabled)
@@ -668,7 +668,7 @@ Developer Mode allows third-party software like Bambuddy to control your printer
 
 ### Slicer Settings
 
-In Bambu Studio or OrcaSlicer, enable **"Store sent files on external storage"** so that print files (3MF) are saved to the printer's SD card. Bambuddy needs these files to extract thumbnails and 3D model previews.
+In Bambu Studio or OrcaSlicer, enable **"Store sent files on external storage"** so that print files (3MF) are saved to the printer's SD card. Grove Control needs these files to extract thumbnails and 3D model previews.
 
 1. Open **Bambu Studio** or **OrcaSlicer**
 2. Go to the **Device** tab for your printer
@@ -728,7 +728,7 @@ Not sure where to start? Reach out on [Discord](https://discord.gg/aFS3ZfScHM) o
 
 ### 🔒 Looking for a security-focused contributor
 
-I'm bringing on a contributor whose specific focus is keeping an eye on Bambuddy's security.
+I'm bringing on a contributor whose specific focus is keeping an eye on Grove Control's security.
 
 Concretely:
 
@@ -757,9 +757,9 @@ AGPL-3.0 License — see [LICENSE](LICENSE) for details.
 
 ---
 
-## 💖 Support Bambuddy
+## 💖 Support Grove Control
 
-Bambuddy stays independent because real people support it directly. If Bambuddy makes your printers more useful, please consider:
+Grove Control stays independent because real people support it directly. If Grove Control makes your printers more useful, please consider:
 
 - **[GitHub Sponsors](https://github.com/sponsors/maziggy)** — five recurring tiers from $5/mo (Backer) to $300/mo (Corporate). Supporter+ ($15/mo) get access to a private sponsors space with a monthly newsletter and early release notes. Patron+ ($35/mo) vote on the quarterly roadmap. Sustaining Sponsor+ ($150/mo) get a direct async email line for technical questions (~2-3 business days). Corporate ($300/mo) get priority email response (next business day), README header logo, sitewide footer logo on [bambuddy.cool](https://bambuddy.cool), and [Press page](https://bambuddy.cool/press.html) placement.
 - **[Ko-fi](https://ko-fi.com/maziggy)** — one-time tip or recurring.

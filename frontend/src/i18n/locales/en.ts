@@ -28,7 +28,7 @@ export default {
     smartSwitches: 'Smart Switches',
     logout: 'Logout',
     installApp: 'Install app',
-    installAppSuccess: 'Bambuddy was installed',
+    installAppSuccess: 'Grove Control was installed',
   },
 
   // Common
@@ -637,7 +637,7 @@ export default {
     title: 'Print Archives',
     no3mfBanner: {
       title: 'Some recent prints couldn\'t be archived with thumbnails',
-      body: 'The slicer didn\'t leave the .gcode.3mf on the printer\'s SD card, so Bambuddy couldn\'t pull the thumbnail or slicer metadata. This is usually because "Store sent files on external storage" is off in the slicer (Bambu Studio / OrcaSlicer Device tab).',
+      body: 'The slicer didn\'t leave the .gcode.3mf on the printer\'s SD card, so Grove Control couldn\'t pull the thumbnail or slicer metadata. This is usually because "Store sent files on external storage" is off in the slicer (Bambu Studio / OrcaSlicer Device tab).',
       docsLink: 'See install step 4',
       dismissLabel: 'Dismiss this notice',
     },
@@ -1897,7 +1897,7 @@ export default {
     authentication: 'Authentication',
     authEnabledDescription: 'Your instance is secured with user authentication',
     authDisabledDescription: 'Enable to require login and manage user access',
-    authDisabledMessage: 'Enable authentication to create user accounts, manage permissions, and secure your Bambuddy instance.',
+    authDisabledMessage: 'Enable authentication to create user accounts, manage permissions, and secure your Grove Control instance.',
     enableAuthentication: 'Enable Authentication',
     currentUser: 'Current User',
     changePassword: 'Change Password',
@@ -1936,10 +1936,10 @@ export default {
     deleteGroup: 'Delete Group',
     // Modal: Disable auth
     disableAuthenticationTitle: 'Disable Authentication',
-    disableAuthenticationMessage: 'Are you sure you want to disable authentication? This will make your Bambuddy instance accessible without login. All users will remain in the database but authentication will be disabled.',
+    disableAuthenticationMessage: 'Are you sure you want to disable authentication? This will make your Grove Control instance accessible without login. All users will remain in the database but authentication will be disabled.',
     disableAuthentication: 'Disable Authentication',
     // Additional settings
-    configureBambuddy: 'Configure Bambuddy',
+    configureGroveControl: 'Configure Grove Control',
     systemDefault: 'System Default',
     archiveSettings: 'Archive Settings',
     newWindow: 'New Window',
@@ -2166,7 +2166,7 @@ export default {
     autoArchivePrints: 'Auto-archive prints',
     autoArchiveDescription: 'Automatically save 3MF files when prints complete',
     saveThumbnailsDescription: 'Extract and save preview images from 3MF files',
-    captureFinishPhotoDescription: 'Take a photo from printer camera when print completes. Bambuddy records a brief timelapse during the print so the photo can be sourced from the moment before the bed drops; the timelapse file is kept if you enabled timelapse for this print, otherwise it is deleted automatically after the photo is captured.',
+    captureFinishPhotoDescription: 'Take a photo from printer camera when print completes. Grove Control records a brief timelapse during the print so the photo can be sourced from the moment before the bed drops; the timelapse file is kept if you enabled timelapse for this print, otherwise it is deleted automatically after the photo is captured.',
     ffmpegNotInstalled: 'ffmpeg not installed',
     ffmpegRequired: 'Camera capture requires ffmpeg. Install it via <brew>brew install ffmpeg</brew> (macOS) or <apt>apt install ffmpeg</apt> (Linux).',
     // Camera
@@ -2204,13 +2204,13 @@ export default {
     // Updates
     printerFirmware: 'Printer Firmware',
     checkFirmwareDescription: 'Check for printer firmware updates from Bambu Lab',
-    bambuddySoftware: 'Bambuddy Software',
+    bambuddySoftware: 'Grove Control Software',
     autoCheckDescription: 'Automatically check for new versions on startup',
     checkNow: 'Check now',
     updateAvailableVersion: 'Update available: v{{version}}',
     releaseNotes: 'Release Notes',
     updateViaDocker: 'Update via Docker Compose:',
-    updateViaHomeAssistant: 'Updates are managed by the Home Assistant Supervisor. Open Settings → Add-ons → Bambuddy in Home Assistant to install the new version.',
+    updateViaHomeAssistant: 'Updates are managed by the Home Assistant Supervisor. Open Settings → Add-ons → Grove Control in Home Assistant to install the new version.',
     installUpdate: 'Install Update',
     latestVersionRunning: "You're running the latest version",
     failedToCheckUpdates: 'Failed to check for updates: {{error}}',
@@ -2220,8 +2220,8 @@ export default {
     goToBackup: 'Go to Backup',
     // Network tab
     externalUrl: 'External URL',
-    externalUrlDescription: 'The external URL where Bambuddy is accessible. Used for notification images and external integrations.',
-    bambuddyUrl: 'Bambuddy URL',
+    externalUrlDescription: 'The external URL where Grove Control is accessible. Used for notification images and external integrations.',
+    bambuddyUrl: 'Grove Control URL',
     externalUrlHint: 'Include protocol and port (e.g., http://192.168.1.100:8000)',
     ftpRetry: 'FTP Retry',
     ftpRetryDescription: 'Retry FTP operations when printer WiFi is unreliable. Applies to 3MF downloads, print uploads, timelapse downloads, and firmware updates.',
@@ -2379,7 +2379,7 @@ export default {
       enabledFromFile: 'At-rest encryption enabled (key loaded from data directory)',
       enabledGenerated: 'At-rest encryption enabled with auto-generated key',
       notConfigured: 'At-rest encryption not configured',
-      notConfiguredDesc: 'TOTP secrets and OIDC client_secrets are stored in plaintext. Set MFA_ENCRYPTION_KEY or restart Bambuddy with a writable data directory to auto-generate one.',
+      notConfiguredDesc: 'TOTP secrets and OIDC client_secrets are stored in plaintext. Set MFA_ENCRYPTION_KEY or restart Grove Control with a writable data directory to auto-generate one.',
       allEncrypted: 'All MFA secrets are encrypted at rest.',
       legacyRowsLabel: 'Legacy plaintext rows',
       encryptedRowsLabel: 'Encrypted rows',
@@ -2387,7 +2387,7 @@ export default {
       backupHint: 'The auto-generated key is stored at DATA_DIR/.mfa_encryption_key and is included in local backup ZIPs. Keep your backups secure or set MFA_ENCRYPTION_KEY explicitly.',
       decryptionBrokenTitle: 'Encryption key missing',
       decryptionBrokenError: '{{count}} encrypted record(s) cannot be decrypted because the encryption key is no longer available. Restore the previous MFA_ENCRYPTION_KEY or DATA_DIR/.mfa_encryption_key to recover.',
-      migrationErrorWarning: '{{count}} legacy row(s) failed to re-encrypt at startup. Check server logs and restart Bambuddy to retry.',
+      migrationErrorWarning: '{{count}} legacy row(s) failed to re-encrypt at startup. Check server logs and restart Grove Control to retry.',
     },
 
   },
@@ -2506,7 +2506,7 @@ export default {
 
   // Login page
   login: {
-    title: 'Bambuddy Login',
+    title: 'Grove Control Login',
     subtitle: 'Sign in to your account',
     username: 'Username',
     usernamePlaceholder: 'Enter your username',
@@ -2552,7 +2552,7 @@ export default {
     sending: 'Sending...',
     sendResetEmail: 'Send Reset Email',
     howToReset: 'How to reset your password:',
-    resetStep1: 'Contact your Bambuddy administrator',
+    resetStep1: 'Contact your Grove Control administrator',
     resetStep2: 'Ask them to reset your password in User Management',
     resetStep3: 'They can set a new temporary password for you',
     resetStep4: 'Log in with the new password and change it in Settings',
@@ -2577,7 +2577,7 @@ export default {
       methodAuthenticator: 'Authenticator App',
       methodEmail: 'Email Code',
       methodBackup: 'Backup Code',
-      instructionsTotp: 'Open your authenticator app and enter the 6-digit code for Bambuddy.',
+      instructionsTotp: 'Open your authenticator app and enter the 6-digit code for Grove Control.',
       instructionsEmail: 'A 6-digit code has been sent to your email address. It expires in 10 minutes.',
       instructionsEmailNotSent: 'Click the button below to receive a verification code via email.',
       instructionsBackup: 'Enter one of your 8-character backup recovery codes. Each code can only be used once.',
@@ -2602,8 +2602,8 @@ export default {
 
   // Setup page
   setup: {
-    title: 'Bambuddy Setup',
-    subtitle: 'Configure authentication for your Bambuddy instance',
+    title: 'Grove Control Setup',
+    subtitle: 'Configure authentication for your Grove Control instance',
     enableAuth: 'Enable Authentication',
     adminAccount: 'Admin Account',
     adminAccountDesc: 'If admin users already exist, authentication will be enabled using the existing admin accounts. Leave the fields below empty to use existing admins, or enter new credentials to create a new admin user.',
@@ -2759,7 +2759,7 @@ export default {
   // Users management
   users: {
     title: 'User Management',
-    subtitle: 'Manage users and their access to your Bambuddy instance',
+    subtitle: 'Manage users and their access to your Grove Control instance',
     backToSettings: 'Back to Settings',
     createUser: 'Create User',
     noPermission: 'You do not have permission to access this page.',
@@ -2875,7 +2875,7 @@ export default {
       back: 'Use a different sign-in method',
       connect: {
         title: 'Connect to Orca Cloud',
-        description: 'Sign in to your Orca Cloud account to sync your slicer profiles into Bambuddy.',
+        description: 'Sign in to your Orca Cloud account to sync your slicer profiles into Grove Control.',
       },
       providers: {
         google: 'Sign in with Google',
@@ -3626,8 +3626,8 @@ export default {
     title: 'Spool Inventory',
     subtitle: 'Manage your spools',
     spoolmanMixedContentTitle: 'Spoolman can\'t load over HTTPS — mixed-content blocked by your browser',
-    spoolmanMixedContentBody: 'Bambuddy is served over HTTPS (via your reverse proxy), but your Spoolman URL is still plain HTTP. Browsers block mixed content for security, so the embedded Spoolman UI can\'t render. Spoolman needs to be reachable over HTTPS for this to work.',
-    spoolmanMixedContentFixReverseProxy: 'Put Spoolman behind the same reverse proxy as Bambuddy (Traefik / Nginx / Caddy) with HTTPS, then update the Spoolman URL in Settings to the new HTTPS address.',
+    spoolmanMixedContentBody: 'Grove Control is served over HTTPS (via your reverse proxy), but your Spoolman URL is still plain HTTP. Browsers block mixed content for security, so the embedded Spoolman UI can\'t render. Spoolman needs to be reachable over HTTPS for this to work.',
+    spoolmanMixedContentFixReverseProxy: 'Put Spoolman behind the same reverse proxy as Grove Control (Traefik / Nginx / Caddy) with HTTPS, then update the Spoolman URL in Settings to the new HTTPS address.',
     spoolmanMixedContentFixOpenNewTab: 'As a workaround, open Spoolman in a new browser tab over HTTP — mixed-content rules only apply to embedded frames, so a standalone tab still works.',
     spoolmanOpenInNewTab: 'Open Spoolman in a new tab',
     labels: {
@@ -4079,8 +4079,8 @@ export default {
     cloudLoginRequiredShort: 'Cloud login required',
     githubDescription: 'Automatically sync your profiles to a private GitHub repository for backup and version history.',
     repoIsPrivate: 'Repository is private — safe to back up to.',
-    repoIsPublicWarning: 'Repository is PUBLIC. Bambuddy backups include MQTT credentials, Home Assistant tokens, Prometheus tokens, your Bambu Cloud email, and printer access codes via K-profiles. Saving is blocked until you make the repository private in your provider\'s settings.',
-    repoVisibilityUnknown: 'Could not determine repository visibility. Bambuddy refuses to back up to anything not confirmed private; saving will be blocked.',
+    repoIsPublicWarning: 'Repository is PUBLIC. Grove Control backups include MQTT credentials, Home Assistant tokens, Prometheus tokens, your Bambu Cloud email, and printer access codes via K-profiles. Saving is blocked until you make the repository private in your provider\'s settings.',
+    repoVisibilityUnknown: 'Could not determine repository visibility. Grove Control refuses to back up to anything not confirmed private; saving will be blocked.',
     repositoryUrl: 'Repository URL',
     repoUrlPlaceholderGitHub: 'https://github.com/username/repo-name',
 	repoUrlPlaceholderGitea: 'https://gitea.example.com/username/repo-name',
@@ -4110,7 +4110,7 @@ export default {
     cloudProfiles: 'Cloud Profiles',
     cloudProfilesDescription: 'Filament, printer, and process presets from Bambu Cloud',
     appSettings: 'App Settings',
-    appSettingsDescription: 'Bambuddy configuration (complete database)',
+    appSettingsDescription: 'Grove Control configuration (complete database)',
     spoolInventory: 'Spool Inventory',
     spoolInventoryDescription: 'Filament spools, usage history, and cost tracking',
     printArchives: 'Print Archives',
@@ -4145,7 +4145,7 @@ export default {
 
     // Local Backup
     localBackup: 'Local Backup',
-    localBackupDescription: 'Create a complete backup of your Bambuddy data including the database, archives, uploads, and all files.',
+    localBackupDescription: 'Create a complete backup of your Grove Control data including the database, archives, uploads, and all files.',
     downloadBackupLabel: 'Download Backup',
     completeBackupZip: 'Complete backup: database + all files (ZIP)',
     download: 'Download',
@@ -4161,7 +4161,7 @@ export default {
     restoreConfirmMessage: 'Are you sure you want to restore from "{{filename}}"? This will completely replace your current database and all files. The application will need to be restarted after restore.',
     restoreConfirmButton: 'Restore Backup',
     uploadingFile: 'Uploading backup file...',
-    backupRestoredRestart: 'Backup restored. Please restart Bambuddy.',
+    backupRestoredRestart: 'Backup restored. Please restart Grove Control.',
     failedToRestore: 'Failed to restore backup. Please check the file format.',
     reloadNow: 'Reload Now',
     creatingBackup: 'Creating Backup',
@@ -4393,7 +4393,7 @@ export default {
       right: 'Right',
       notes: 'Notes (stored locally)',
       notesPlaceholder: 'Add notes about this profile...',
-      notesHelp: 'Notes are saved in Bambuddy, not on the printer',
+      notesHelp: 'Notes are saved in Grove Control, not on the printer',
       syncing: 'Syncing with printer...',
       savingExtruder: 'Saving to extruder {{current}}/{{total}}...',
       pleaseWait: 'Please wait',
@@ -4448,7 +4448,7 @@ export default {
     },
     enable: {
       title: 'Enable Virtual Printer',
-      visibleInSlicer: 'Visible as "Bambuddy" in slicer discovery',
+      visibleInSlicer: 'Visible as "Grove Control" in slicer discovery',
       proxyingTo: 'Proxying to {{name}}',
       notActive: 'Not active',
     },
@@ -4483,7 +4483,7 @@ export default {
       configured: 'Interface override active',
       optional: 'Optional - use if auto-detected IP is wrong (e.g. multiple NICs, Docker, VPN)',
       placeholder: 'Auto-detect (default)...',
-      hint: 'Override the IP address advertised via SSDP and used in the TLS certificate. Useful when Bambuddy has multiple network interfaces.',
+      hint: 'Override the IP address advertised via SSDP and used in the TLS certificate. Useful when Grove Control has multiple network interfaces.',
     },
     mode: {
       title: 'Mode',
@@ -4521,7 +4521,7 @@ export default {
     },
     caCert: {
       title: 'Slicer certificate',
-      description: 'Virtual printers use a TLS certificate signed by the Bambuddy CA. Import this CA certificate into your slicer\'s trust store once so it accepts the connection — no need to copy it from the command line.',
+      description: 'Virtual printers use a TLS certificate signed by the Grove Control CA. Import this CA certificate into your slicer\'s trust store once so it accepts the connection — no need to copy it from the command line.',
       copy: 'Copy',
       copied: 'Copied',
       download: 'Download',
@@ -4530,7 +4530,7 @@ export default {
     howItWorks: {
       title: 'How it works',
       step1: 'On the same LAN, virtual printers appear in your slicer (Bambu Studio / OrcaSlicer) automatically via discovery. From other networks, add them manually by IP address and access code.',
-      step2: 'In Archive, Review, and Queue modes, use the "Send" button in your slicer to upload 3MF files to Bambuddy. The slicer will show "Print success" — the file is stored, not printed.',
+      step2: 'In Archive, Review, and Queue modes, use the "Send" button in your slicer to upload 3MF files to Grove Control. The slicer will show "Print success" — the file is stored, not printed.',
       step3: 'In Proxy mode, the virtual printer relays all traffic to a real printer — prints start immediately as if connected directly.',
     },
     status: {
@@ -5071,7 +5071,7 @@ export default {
     title: 'Sidebar Links',
     sidebarLayout: 'Sidebar',
     sidebarLayoutDescription: 'Show or hide built-in pages, add external links, and drag items to reorder the sidebar navigation.',
-    systemPages: 'Bambuddy pages',
+    systemPages: 'Grove Control pages',
     externalLinks: 'External links',
     visibleInSidebar: 'Visible in sidebar',
     hiddenFromSidebar: 'Hidden from sidebar',
@@ -5541,7 +5541,7 @@ export default {
       hostname: 'Host',
       uptime: 'Uptime',
       systemConfig: 'Backend & Auth',
-      backendUrl: 'Bambuddy Backend URL',
+      backendUrl: 'Grove Control Backend URL',
       apiToken: 'API Token',
       apiTokenPlaceholder: 'Enter API token',
       saveConfig: 'Save Config',
@@ -5689,13 +5689,13 @@ export default {
       network_mode: {
         title: 'Docker network mode',
         pass: 'Running in host network mode.',
-        warn: 'Bambuddy is running in Docker bridge networking. Printer discovery and the Virtual Printer need host network mode — recreate the container with "network_mode: host".',
+        warn: 'Grove Control is running in Docker bridge networking. Printer discovery and the Virtual Printer need host network mode — recreate the container with "network_mode: host".',
         skip: 'Not running in Docker — not applicable.',
       },
       subnet: {
         title: 'Network subnet',
-        pass: 'The printer and Bambuddy are on the same subnet.',
-        warn: 'The printer ({{printer_ip}}) and Bambuddy ({{host_ip}}) are on different subnets. They may not reach each other unless routing between the subnets is configured.',
+        pass: 'The printer and Grove Control are on the same subnet.',
+        warn: 'The printer ({{printer_ip}}) and Grove Control ({{host_ip}}) are on different subnets. They may not reach each other unless routing between the subnets is configured.',
         skip: 'Subnet could not be determined — skipped.',
       },
       mqtt_auth: {
@@ -5737,12 +5737,12 @@ export default {
       'ftp-auth-rejected': {
         name: 'Printer rejected the access code',
         cause: 'The printer refused the file-transfer login. The access code is wrong, or it changed after Developer Mode was toggled.',
-        fix: 'Re-copy the access code from the printer screen (LAN settings) and update it in the printer\'s settings in Bambuddy.',
+        fix: 'Re-copy the access code from the printer screen (LAN settings) and update it in the printer\'s settings in Grove Control.',
       },
       'ftp-connection-timeout': {
         name: 'File-transfer connection timed out',
-        cause: 'Bambuddy could not reach the printer\'s file-transfer port (FTPS 990). The port is blocked, or the printer is off or on another subnet.',
-        fix: 'Make sure nothing blocks port 990 between Bambuddy and the printer, and that both are on the same network.',
+        cause: 'Grove Control could not reach the printer\'s file-transfer port (FTPS 990). The port is blocked, or the printer is off or on another subnet.',
+        fix: 'Make sure nothing blocks port 990 between Grove Control and the printer, and that both are on the same network.',
       },
       'ftp-ssl-error': {
         name: 'Secure file-transfer handshake failed',
@@ -5762,7 +5762,7 @@ export default {
       'database-locked': {
         name: 'Database write contention',
         cause: 'The SQLite database is hitting "database is locked" errors under load — common when running several printers at once.',
-        fix: 'Switch Bambuddy to an external PostgreSQL database. See the PostgreSQL guide in the documentation.',
+        fix: 'Switch Grove Control to an external PostgreSQL database. See the PostgreSQL guide in the documentation.',
       },
     },
   },
@@ -5785,7 +5785,7 @@ export default {
       },
       running: {
         title: 'Services running',
-        fail: 'The virtual printer is enabled but its services are not running. Check the Bambuddy log — a bind IP conflict or a permission error usually stops them.',
+        fail: 'The virtual printer is enabled but its services are not running. Check the Grove Control log — a bind IP conflict or a permission error usually stops them.',
       },
       bind_interface: {
         title: 'Bind network interface',
@@ -5814,8 +5814,8 @@ export default {
       },
       certificate: {
         title: 'TLS certificate',
-        pass: 'Certificate ready. Make sure the Bambuddy CA certificate (above) is imported into your slicer\'s trust store.',
-        fail: 'The TLS certificate for this virtual printer is missing. Check that the Bambuddy data directory is writable.',
+        pass: 'Certificate ready. Make sure the Grove Control CA certificate (above) is imported into your slicer\'s trust store.',
+        fail: 'The TLS certificate for this virtual printer is missing. Check that the Grove Control data directory is writable.',
       },
     },
   },
@@ -5880,7 +5880,7 @@ export default {
     pollInterval: 'Poll interval (seconds)',
     pollIntervalHint: 'How often to check each printer while it is printing. Minimum 5s, maximum 120s.',
     externalUrlMissing: 'External URL is not set.',
-    externalUrlHint: 'The ML API fetches the camera snapshot by URL. Set the External URL in General settings so the ML API container can reach Bambuddy.',
+    externalUrlHint: 'The ML API fetches the camera snapshot by URL. Set the External URL in General settings so the ML API container can reach Grove Control.',
     perPrinterTitle: 'Monitored Printers',
     perPrinterHint: 'Choose which printers the detection service watches.',
     monitorAll: 'Monitor all connected printers',
@@ -5895,7 +5895,7 @@ export default {
 
   makerworld: {
     title: 'MakerWorld',
-    description: 'Paste a MakerWorld model URL to import and print it directly from Bambuddy — without leaving for the Bambu Handy app.',
+    description: 'Paste a MakerWorld model URL to import and print it directly from Grove Control — without leaving for the Bambu Handy app.',
     pasteUrlHeader: 'Import from MakerWorld',
     pasteUrlPlaceholder: 'https://makerworld.com/en/models/… or paste any MakerWorld link',
     resolveButton: 'Resolve',
@@ -5918,7 +5918,7 @@ export default {
     alsoCompatible: 'Also marked compatible: {{printers}}',
     importToLibrary: 'Save',
     sliceIn: 'Save & Slice in {{slicer}}',
-    disclaimer: 'MakerWorld integration uses community-documented API endpoints. Bambuddy is not affiliated with or endorsed by MakerWorld or Bambu Lab.',
+    disclaimer: 'MakerWorld integration uses community-documented API endpoints. Grove Control is not affiliated with or endorsed by MakerWorld or Bambu Lab.',
     lastImportSuccess: 'Imported to your library',
     lastImportAlreadyInLibrary: 'Already in your library',
     viewInLibrary: 'View in File Manager',
@@ -6014,7 +6014,7 @@ export default {
     effect1: 'Matching files are moved to Trash — they are not deleted from disk yet.',
     effect2: 'You can restore them from Trash at any time until the retention window expires.',
     effect3: 'After retention, the trash sweeper permanently removes them from disk.',
-    effect4: 'Files in external (linked) folders are skipped — Bambuddy never deletes bytes it does not own.',
+    effect4: 'Files in external (linked) folders are skipped — Grove Control never deletes bytes it does not own.',
     previewLoading: 'Checking how many files match…',
     previewFailed: 'Could not preview the purge.',
     previewSummary: '{{count}} files · {{size}} would move to trash',

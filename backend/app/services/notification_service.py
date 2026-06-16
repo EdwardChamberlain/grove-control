@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 # inventory). Previously this client leaked python-httpx/<version>, which
 # was both inconsistent with the rest of the project and a more obvious
 # bot signature for upstream WAFs.
-_USER_AGENT = "Bambuddy/1.0 (+https://github.com/maziggy/bambuddy)"
+_USER_AGENT = "Grove Control/1.0 (+https://github.com/maziggy/bambuddy)"
 
 
 def _looks_like_cloudflare_challenge(response: httpx.Response) -> bool:
@@ -183,7 +183,7 @@ class NotificationService:
         """Build notification title and body from template."""
         # Add common variables
         variables["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-        variables["app_name"] = "Bambuddy"
+        variables["app_name"] = "Grove Control"
 
         template = await self._get_template(db, event_type)
         if not template:
@@ -203,7 +203,7 @@ class NotificationService:
         if db:
             title, message = await self._build_message_from_template(db, "test", {})
         else:
-            title = "Bambuddy Test"
+            title = "Grove Control Test"
             message = "This is a test notification. If you see this, notifications are working!"
 
         try:
@@ -311,7 +311,7 @@ class NotificationService:
         if _looks_like_cloudflare_challenge(response):
             return False, (
                 f"HTTP {response.status_code} — ntfy server is behind a Cloudflare "
-                "challenge. Bambuddy was served the JS challenge page instead of "
+                "challenge. Grove Control was served the JS challenge page instead of "
                 "reaching ntfy. Cloudflare cannot be solved from a backend; add a "
                 "Cloudflare security-skip rule for this hostname, disable Bot "
                 "Fight Mode, or front the server with Cloudflare Access using a "
@@ -433,7 +433,7 @@ class NotificationService:
             msg = MIMEMultipart()
             msg["From"] = from_email
             msg["To"] = to_email
-            msg["Subject"] = f"[Bambuddy] {subject}"
+            msg["Subject"] = f"[Grove Control] {subject}"
             msg.attach(MIMEText(body, "plain"))
 
             if security == "ssl":
@@ -536,7 +536,7 @@ class NotificationService:
                 custom_field_title: title,
                 custom_field_message: message,
                 "timestamp": datetime.now().isoformat(),
-                "source": "Bambuddy",
+                "source": "Grove Control",
             }
 
         # For generic format, include structured event data for automation tools

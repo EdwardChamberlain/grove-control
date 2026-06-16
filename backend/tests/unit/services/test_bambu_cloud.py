@@ -223,12 +223,12 @@ class TestBambuCloudTOTPVerification:
 
     @pytest.mark.asyncio
     async def test_verify_totp_uses_honest_bambuddy_user_agent(self, cloud_service):
-        """TOTP verification identifies as Bambuddy, not as a browser.
+        """TOTP verification identifies as Grove Control, not as a browser.
 
         The TOTP endpoint previously sent a Chrome User-Agent + Origin/Referer
         headers under the assumption Cloudflare would block non-browser
         identification. Verified 2026-05-12 that ``https://bambulab.com/api/sign-in/tfa``
-        accepts ``Bambuddy/X.Y.Z`` cleanly — the expected application-level
+        accepts ``Grove Control/X.Y.Z`` cleanly — the expected application-level
         response comes back, no Cloudflare interstitial. Browser impersonation
         was removed to stay clearly on the right side of Bambu Lab's
         "no falsified client identity" line from the 2026-05-12 cloud-access
@@ -247,7 +247,7 @@ class TestBambuCloudTOTPVerification:
 
             call_args = mock_post.call_args
             headers = call_args[1]["headers"]
-            assert headers["User-Agent"].startswith("Bambuddy/")
+            assert headers["User-Agent"].startswith("Grove Control/")
             # Browser-impersonation strings must not creep back in
             assert "Mozilla" not in headers["User-Agent"]
             assert "Chrome" not in headers["User-Agent"]
@@ -384,7 +384,7 @@ class TestCloudflareChallengeDetection:
 
     def test_message_mentions_bambu_lab_and_cloudflare(self):
         """The message must clearly attribute the block to Bambu Lab's
-        Cloudflare protection — not to Bambuddy — so users know what to do."""
+        Cloudflare protection — not to Grove Control — so users know what to do."""
         from backend.app.services.bambu_cloud import _detect_cloudflare_challenge
 
         response = MagicMock()

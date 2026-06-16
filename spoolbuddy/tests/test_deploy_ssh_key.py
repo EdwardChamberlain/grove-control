@@ -1,15 +1,15 @@
-"""Tests for daemon.main._deploy_ssh_key — Bambuddy key sync.
+"""Tests for daemon.main._deploy_ssh_key — Grove Control key sync.
 
-Background: Bambuddy generates an ed25519 keypair under its data dir and ships
+Background: Grove Control generates an ed25519 keypair under its data dir and ships
 the public half to the SpoolBuddy daemon over the registration/heartbeat
-response. The daemon writes that key into ~/.ssh/authorized_keys so Bambuddy
-can SSH in to drive remote updates. Whenever Bambuddy's keypair rotates (data
+response. The daemon writes that key into ~/.ssh/authorized_keys so Grove Control
+can SSH in to drive remote updates. Whenever Grove Control's keypair rotates (data
 volume wiped, container recreated, fresh deploy) the device's authorized_keys
 must drop the old entries and pick up the new one — otherwise:
 
   1. SSH updates start failing silently with permission-denied
-  2. Stale Bambuddy-tagged keys pile up over time, eroding the security
-     boundary (any prior keypair Bambuddy held is permanently authorized).
+  2. Stale Grove Control-tagged keys pile up over time, eroding the security
+     boundary (any prior keypair Grove Control held is permanently authorized).
 
 These tests pin the replace-not-append semantics of the deploy helper.
 """
@@ -49,7 +49,7 @@ class TestDeploySshKey:
         assert lines == [CURRENT_KEY]
 
     def test_preserves_unrelated_user_keys(self, tmp_path):
-        """Only Bambuddy-tagged keys get replaced — user's own keys stay."""
+        """Only Grove Control-tagged keys get replaced — user's own keys stay."""
         ssh_dir = tmp_path / ".ssh"
         ssh_dir.mkdir()
         auth_keys = ssh_dir / "authorized_keys"

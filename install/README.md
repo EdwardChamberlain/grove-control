@@ -35,7 +35,7 @@ powershell -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercon
 
 **Unattended:**
 ```powershell
-.\windows-installer.ps1 -InstallDir C:\Bambuddy -Port 8000 -Yes
+.\windows-installer.ps1 -InstallDir C:\Grove Control -Port 8000 -Yes
 ```
 ---
 
@@ -99,16 +99,16 @@ Windows PowerShell (run as Administrator — the installer self-elevates via UAC
 powershell -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/maziggy/bambuddy/main/install/windows-installer.ps1 -OutFile windows-installer.ps1; .\windows-installer.ps1"
 ```
 
-> Installs Bambuddy natively on Windows using Git, Python, a virtual environment, and optional NSSM Windows Service registration. See the [Windows Installer Guide](https://wiki.bambuddy.cool/getting-started/windows-installer/) for full parameter reference.
+> Installs Grove Control natively on Windows using Git, Python, a virtual environment, and optional NSSM Windows Service registration. See the [Windows Installer Guide](https://wiki.bambuddy.cool/getting-started/windows-installer/) for full parameter reference.
 
 **Parameters:**
 ```powershell
--InstallDir PATH  Installation directory (default: C:\Bambuddy)
+-InstallDir PATH  Installation directory (default: C:\Grove Control)
 -Port PORT        Port to listen on (default: 8000)
 -Yes              Non-interactive mode, accept defaults
 -Silent           Non-interactive mode with reduced console output
 -NoService        Skip Windows Service setup
--NoStart          Do not start Bambuddy at the end
+-NoStart          Do not start Grove Control at the end
 -LocalOnly        Bind to 127.0.0.1 instead of all LAN interfaces
 ```
 
@@ -116,7 +116,7 @@ The installer stores the Git checkout in `INSTALL_DIR\bambuddy`, user data in
 `INSTALL_DIR\data`, and application logs in `INSTALL_DIR\logs` so updates and
 re-clones do not delete runtime data. If an earlier Windows installer run left
 runtime data in the Git checkout, the installer moves known data and log paths
-to the new locations before starting Bambuddy.
+to the new locations before starting Grove Control.
 
 ---
 
@@ -235,11 +235,11 @@ launchctl unload ~/Library/LaunchAgents/com.bambuddy.app.plist  # Stop
 
 **Windows (NSSM service):**
 ```powershell
-Get-Service Bambuddy        # Check status
-Start-Service Bambuddy      # Start
-Stop-Service Bambuddy       # Stop
-Restart-Service Bambuddy    # Restart
-Get-Content "C:\Bambuddy\bambuddy-runtime.log" -Tail 100 -Wait  # View logs
+Get-Service Grove Control        # Check status
+Start-Service Grove Control      # Start
+Stop-Service Grove Control       # Stop
+Restart-Service Grove Control    # Restart
+Get-Content "C:\Grove Control\bambuddy-runtime.log" -Tail 100 -Wait  # View logs
 ```
 
 **Docker:**
@@ -299,9 +299,9 @@ docker compose up -d --build
 
 **Windows (native):** rerun the installer; it detects the existing checkout and offers `git pull`, leaving `INSTALL_DIR\data` and `INSTALL_DIR\logs` untouched. Stop the service first if it is registered:
 ```powershell
-Stop-Service Bambuddy
+Stop-Service Grove Control
 .\windows-installer.ps1 -Yes
-Start-Service Bambuddy
+Start-Service Grove Control
 ```
 
 ---
@@ -342,12 +342,12 @@ Get-NetTCPConnection -LocalPort 8000 -State Listen
 ### Windows: Service Won't Start
 Test the start script manually first:
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File "C:\Bambuddy\Start-Bambuddy.ps1"
+powershell.exe -ExecutionPolicy Bypass -File "C:\Grove Control\Start-Grove Control.ps1"
 ```
 
 Then check the NSSM runtime logs:
 ```powershell
-Get-Content "C:\Bambuddy\bambuddy-runtime-error.log" -Tail 100
+Get-Content "C:\Grove Control\bambuddy-runtime-error.log" -Tail 100
 ```
 
 ---

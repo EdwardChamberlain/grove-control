@@ -75,7 +75,7 @@ class TestReadOnlyVerbsDropped:
 class TestNoFalseMatchInUrl:
     """The matcher anchors on ``" `` + verb + space so an unrelated literal
     substring inside a URL can't false-match. Important because URLs in
-    Bambuddy include things like ``/print/stop``, ``/print/pause`` — words
+    Grove Control include things like ``/print/stop``, ``/print/pause`` — words
     that happen to contain the verb names as substrings."""
 
     def test_url_containing_verb_substring_does_not_match(self, filter_under_test):
@@ -100,7 +100,7 @@ class TestEdgeCases:
         """If the filter ever ends up attached to the wrong logger by
         mistake, it must not leak unrelated records — silent fallthrough
         on application logs would defeat the whole point."""
-        record = _record("Bambuddy starting - debug=False, log_level=INFO")
+        record = _record("Grove Control starting - debug=False, log_level=INFO")
         assert filter_under_test.filter(record) is False
 
     def test_filter_is_idempotent_across_records(self, filter_under_test):

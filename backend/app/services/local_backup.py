@@ -1,6 +1,6 @@
 """Scheduled local backup service.
 
-Creates ZIP snapshots of the full Bambuddy data (database + data directories)
+Creates ZIP snapshots of the full Grove Control data (database + data directories)
 on a configurable schedule with retention management.
 """
 

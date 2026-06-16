@@ -65,7 +65,7 @@ async def main():
 
     if not token:
         print("Could not find token in database.")
-        print("Make sure you're logged into Bambu Cloud in Bambuddy.")
+        print("Make sure you're logged into Bambu Cloud in Grove Control.")
         sys.exit(1)
 
     print(f"Found token in database (length: {len(token)})")

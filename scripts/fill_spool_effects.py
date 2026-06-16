@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Seed Bambuddy with a quick visual set of filament effect spools.
+"""Seed Grove Control with a quick visual set of filament effect spools.
 
 Usage:
     python scripts/fill_spool_effects.py --bambuddy-url http://localhost:8000
@@ -170,8 +170,8 @@ def create_bulk_spools(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create development stock spools for every effect type")
-    parser.add_argument("--bambuddy-url", required=True, help="Bambuddy URL (e.g. http://localhost:8000)")
-    parser.add_argument("--api-key", help="Bambuddy API key (required if auth is enabled)")
+    parser.add_argument("--bambuddy-url", required=True, help="Grove Control URL (e.g. http://localhost:8000)")
+    parser.add_argument("--api-key", help="Grove Control API key (required if auth is enabled)")
     parser.add_argument("--timeout", type=int, default=30, help="HTTP timeout in seconds (default: 30)")
     args = parser.parse_args()
 

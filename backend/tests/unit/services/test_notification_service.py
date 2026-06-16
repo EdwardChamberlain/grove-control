@@ -2069,11 +2069,11 @@ class TestNtfyOutbound:
     @pytest.mark.asyncio
     async def test_notification_client_sets_honest_user_agent(self, service):
         """Default httpx UA leaks `python-httpx/<version>` — every other
-        outbound client in the codebase identifies as Bambuddy. The
+        outbound client in the codebase identifies as Grove Control. The
         notification client must too."""
         client = await service._get_client()
         try:
-            assert client.headers.get("user-agent") == "Bambuddy/1.0 (+https://github.com/maziggy/bambuddy)"
+            assert client.headers.get("user-agent") == "Grove Control/1.0 (+https://github.com/maziggy/bambuddy)"
         finally:
             await service.close()
 

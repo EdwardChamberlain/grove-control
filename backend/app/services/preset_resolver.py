@@ -58,7 +58,7 @@ _SLOT_TO_BUNDLED_CATEGORY = {
 # parsed.", return_code: -5` to result.json, and exits 0 — which the
 # Node sidecar's child_process treats as silent success producing no
 # output, then bubbles up as a generic "Failed to slice the model" 5xx.
-# Bambuddy then falls back to the embedded-settings path for every 3MF
+# Grove Control then falls back to the embedded-settings path for every 3MF
 # slice, silently using whatever printer the source file was originally
 # bound to. Setting `type` correctly per slot fixes the silent fallback.
 _SLOT_TO_PROFILE_TYPE = {
@@ -255,7 +255,7 @@ def _resolve_standard(ref: PresetRef, slot: str) -> str:
     """Build a minimal `{name, inherits, from, type}` stub. The sidecar's
     resolver walks `BUNDLED_PROFILES_PATH/<category>/<name>.json` and merges,
     yielding the full bundled preset without us round-tripping the content
-    through Bambuddy."""
+    through Grove Control."""
     if slot not in _SLOT_TO_BUNDLED_CATEGORY:
         raise HTTPException(status_code=400, detail=f"Unknown slot for standard preset: {slot!r}")
     return json.dumps(

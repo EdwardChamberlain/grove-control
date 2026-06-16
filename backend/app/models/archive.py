@@ -20,7 +20,7 @@ class PrintArchive(Base):
     content_hash: Mapped[str | None] = mapped_column(String(64))  # SHA256 hash for duplicate detection
     thumbnail_path: Mapped[str | None] = mapped_column(String(500))
     timelapse_path: Mapped[str | None] = mapped_column(String(500))
-    # True when Bambuddy forced timelapse recording on for this print so the
+    # True when Grove Control forced timelapse recording on for this print so the
     # finish-photo extractor (#1397) could pull the post-park-pre-drop frame.
     # The cleanup path uses this to know the timelapse should be deleted
     # both locally and on the printer's SD after extraction — the user

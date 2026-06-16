@@ -5906,7 +5906,7 @@ export const api = {
     }>(`/library/files/${fileId}/filament-requirements${qs.toString() ? `?${qs}` : ''}`);
   },
 
-  /** Poll the sidecar's per-request progress snapshot via the Bambuddy
+  /** Poll the sidecar's per-request progress snapshot via the Grove Control
    * proxy. Used by the SliceModal's filament-discovery path so the inline
    * spinner + persistent toast can show "Generating G-code (45%)" while
    * the preview slice runs. Returns null on 404 (sidecar doesn't yet

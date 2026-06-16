@@ -28,7 +28,7 @@ export default {
     smartSwitches: 'Akıllı Anahtarlar',
     logout: 'Çıkış',
     installApp: 'Uygulamayı yükle',
-    installAppSuccess: 'Bambuddy yüklendi',
+    installAppSuccess: 'Grove Control yüklendi',
   },
 
   // Ortak
@@ -637,7 +637,7 @@ export default {
     title: 'Baskı Arşivleri',
     no3mfBanner: {
       title: 'Bazı son baskılar küçük resimlerle birlikte arşivlenemedi',
-      body: 'Dilimleyici yazıcının SD kartına .gcode.3mf dosyasını bırakmadı, bu nedenle Bambuddy küçük resmi veya dilimleyici meta verilerini alamadı. Bu genellikle dilimleyicide (Bambu Studio / OrcaSlicer\'in Cihaz sekmesi) "Gönderilen dosyaları harici depolamada sakla" seçeneğinin kapalı olmasından kaynaklanır.',
+      body: 'Dilimleyici yazıcının SD kartına .gcode.3mf dosyasını bırakmadı, bu nedenle Grove Control küçük resmi veya dilimleyici meta verilerini alamadı. Bu genellikle dilimleyicide (Bambu Studio / OrcaSlicer\'in Cihaz sekmesi) "Gönderilen dosyaları harici depolamada sakla" seçeneğinin kapalı olmasından kaynaklanır.',
       docsLink: 'Kurulum adımı 4\'ü görüntüle',
       dismissLabel: 'Bu bildirimi kapat',
     },
@@ -1897,7 +1897,7 @@ export default {
     authentication: 'Kimlik Doğrulama',
     authEnabledDescription: 'Örneğiniz kullanıcı kimlik doğrulamayla güvende',
     authDisabledDescription: 'Girişi gerektirmek ve kullanıcı erişimini yönetmek için etkinleştir',
-    authDisabledMessage: 'Kullanıcı hesapları oluşturmak, izinleri yönetmek ve Bambuddy örneğinizi güvende tutmak için kimlik doğrulamayı etkinleştirin.',
+    authDisabledMessage: 'Kullanıcı hesapları oluşturmak, izinleri yönetmek ve Grove Control örneğinizi güvende tutmak için kimlik doğrulamayı etkinleştirin.',
     enableAuthentication: 'Kimlik Doğrulamayı Etkinleştir',
     currentUser: 'Mevcut Kullanıcı',
     changePassword: 'Parolayı Değiştir',
@@ -1936,10 +1936,10 @@ export default {
     deleteGroup: 'Grubu Sil',
     // Modal: Kimlik doğrulamayı devre dışı bırak
     disableAuthenticationTitle: 'Kimlik Doğrulamayı Devre Dışı Bırak',
-    disableAuthenticationMessage: 'Kimlik doğrulamayı devre dışı bırakmak istediğinizden emin misiniz? Bu, Bambuddy örneğinizi giriş yapmadan erişilebilir hale getirecek. Tüm kullanıcılar veritabanında kalacak ancak kimlik doğrulama devre dışı bırakılacak.',
+    disableAuthenticationMessage: 'Kimlik doğrulamayı devre dışı bırakmak istediğinizden emin misiniz? Bu, Grove Control örneğinizi giriş yapmadan erişilebilir hale getirecek. Tüm kullanıcılar veritabanında kalacak ancak kimlik doğrulama devre dışı bırakılacak.',
     disableAuthentication: 'Kimlik Doğrulamayı Devre Dışı Bırak',
     // Ek ayarlar
-    configureBambuddy: 'Bambuddy\'yi Yapılandır',
+    configureGroveControl: 'Grove Control\'yi Yapılandır',
     systemDefault: 'Sistem Varsayılanı',
     archiveSettings: 'Arşiv Ayarları',
     newWindow: 'Yeni Pencere',
@@ -2166,7 +2166,7 @@ export default {
     autoArchivePrints: 'Baskıları otomatik arşivle',
     autoArchiveDescription: 'Baskılar tamamlandığında 3MF dosyalarını otomatik olarak kaydet',
     saveThumbnailsDescription: '3MF dosyalarından önizleme görüntülerini çıkar ve kaydet',
-    captureFinishPhotoDescription: 'Baskı tamamlandığında yazıcı kamerasından bir fotoğraf çek. Bambuddy, baskı sırasında kısa bir zaman atlamalı kayıt yapar, böylece fotoğraf tabla inmeden önceki andan alınabilir. Bu baskı için zaman atlamalı kaydı etkinleştirdiyseniz dosya saklanır, aksi takdirde fotoğraf çekildikten sonra otomatik olarak silinir.',
+    captureFinishPhotoDescription: 'Baskı tamamlandığında yazıcı kamerasından bir fotoğraf çek. Grove Control, baskı sırasında kısa bir zaman atlamalı kayıt yapar, böylece fotoğraf tabla inmeden önceki andan alınabilir. Bu baskı için zaman atlamalı kaydı etkinleştirdiyseniz dosya saklanır, aksi takdirde fotoğraf çekildikten sonra otomatik olarak silinir.',
     ffmpegNotInstalled: 'ffmpeg yüklü değil',
     ffmpegRequired: 'Kamera yakalama ffmpeg gerektirir. <brew>brew install ffmpeg</brew> (macOS) veya <apt>apt install ffmpeg</apt> (Linux) ile yükleyin.',
     // Kamera
@@ -2204,13 +2204,13 @@ export default {
     // Güncellemeler
     printerFirmware: 'Yazıcı Firmware',
     checkFirmwareDescription: "Bambu Lab'dan yazıcı firmware güncellemelerini kontrol et",
-    bambuddySoftware: 'Bambuddy Yazılımı',
+    bambuddySoftware: 'Grove Control Yazılımı',
     autoCheckDescription: 'Başlangıçta otomatik olarak yeni sürümleri kontrol et',
     checkNow: 'Şimdi kontrol et',
     updateAvailableVersion: 'Güncelleme mevcut: v{{version}}',
     releaseNotes: 'Sürüm Notları',
     updateViaDocker: 'Docker Compose ile güncelle:',
-    updateViaHomeAssistant: "Güncellemeler Home Assistant Supervisor tarafından yönetilir. Yeni sürümü yüklemek için Home Assistant'ta Ayarlar → Eklentiler → Bambuddy'ye gidin.",
+    updateViaHomeAssistant: "Güncellemeler Home Assistant Supervisor tarafından yönetilir. Yeni sürümü yüklemek için Home Assistant'ta Ayarlar → Eklentiler → Grove Control'ye gidin.",
     installUpdate: 'Güncellemeyi Yükle',
     latestVersionRunning: 'En son sürümü çalıştırıyorsunuz',
     failedToCheckUpdates: 'Güncellemeler kontrol edilemedi: {{error}}',
@@ -2220,8 +2220,8 @@ export default {
     goToBackup: 'Yedeklemeye Git',
     // Ağ sekmesi
     externalUrl: 'Harici URL',
-    externalUrlDescription: 'Bambuddy\'nin erişilebildiği harici URL. Bildirim görüntüleri ve harici entegrasyonlar için kullanılır.',
-    bambuddyUrl: 'Bambuddy URL',
+    externalUrlDescription: 'Grove Control\'nin erişilebildiği harici URL. Bildirim görüntüleri ve harici entegrasyonlar için kullanılır.',
+    bambuddyUrl: 'Grove Control URL',
     externalUrlHint: 'Protokol ve port dahil edin (örn., http://192.168.1.100:8000)',
     ftpRetry: 'FTP Yeniden Dene',
     ftpRetryDescription: 'Yazıcı WiFi güvenilmez olduğunda FTP işlemlerini yeniden dene. 3MF indirmelerine, baskı yüklemelerine, zaman atlamalı video indirmelerine ve firmware güncellemelerine uygulanır.',
@@ -2379,7 +2379,7 @@ export default {
       enabledFromFile: 'Sabit şifreleme etkin (anahtar veri dizininden yüklendi)',
       enabledGenerated: 'Sabit şifreleme otomatik oluşturulan anahtarla etkin',
       notConfigured: 'Sabit şifreleme yapılandırılmamış',
-      notConfiguredDesc: 'TOTP gizli anahtarları ve OIDC client_secrets düz metin olarak saklanır. MFA_ENCRYPTION_KEY ayarlayın veya Bambuddy\'yi otomatik olarak oluşturmak için yazılabilir bir veri dizini ile yeniden başlatın.',
+      notConfiguredDesc: 'TOTP gizli anahtarları ve OIDC client_secrets düz metin olarak saklanır. MFA_ENCRYPTION_KEY ayarlayın veya Grove Control\'yi otomatik olarak oluşturmak için yazılabilir bir veri dizini ile yeniden başlatın.',
       allEncrypted: 'Tüm MFA gizli anahtarları sabit olarak şifrelenmiş durumda.',
       legacyRowsLabel: 'Eski düz metin satırlar',
       encryptedRowsLabel: 'Şifrelenmiş satırlar',
@@ -2387,7 +2387,7 @@ export default {
       backupHint: 'Otomatik oluşturulan anahtar DATA_DIR/.mfa_encryption_key konumunda saklanır ve yerel yedek ZIP\'lere dahil edilir. Yedeklerinizi güvende tutun veya MFA_ENCRYPTION_KEY\'i açıkça ayarlayın.',
       decryptionBrokenTitle: 'Şifreleme anahtarı eksik',
       decryptionBrokenError: 'Şifreleme anahtarı artık mevcut olmadığından {{count}} şifrelenmiş kayıt şifresi çözülemiyor. Kurtarmak için önceki MFA_ENCRYPTION_KEY veya DATA_DIR/.mfa_encryption_key\'i geri yükleyin.',
-      migrationErrorWarning: 'Başlangıçta {{count}} eski satır yeniden şifrelenemedi. Sunucu günlüklerini kontrol edin ve yeniden denemek için Bambuddy\'yi yeniden başlatın.',
+      migrationErrorWarning: 'Başlangıçta {{count}} eski satır yeniden şifrelenemedi. Sunucu günlüklerini kontrol edin ve yeniden denemek için Grove Control\'yi yeniden başlatın.',
     },
 
   },
@@ -2506,7 +2506,7 @@ export default {
 
   // Giriş sayfası
   login: {
-    title: 'Bambuddy Giriş',
+    title: 'Grove Control Giriş',
     subtitle: 'Hesabınıza giriş yapın',
     username: 'Kullanıcı Adı',
     usernamePlaceholder: 'Kullanıcı adınızı girin',
@@ -2552,7 +2552,7 @@ export default {
     sending: 'Gönderiliyor...',
     sendResetEmail: 'Sıfırlama E-postası Gönder',
     howToReset: 'Parolanızı nasıl sıfırlarsınız:',
-    resetStep1: 'Bambuddy yöneticinizle iletişime geçin',
+    resetStep1: 'Grove Control yöneticinizle iletişime geçin',
     resetStep2: 'Kullanıcı Yönetiminde parolanızı sıfırlamasını isteyin',
     resetStep3: 'Sizin için yeni bir geçici parola belirleyebilirler',
     resetStep4: 'Yeni parolayla giriş yapın ve Ayarlarda değiştirin',
@@ -2577,7 +2577,7 @@ export default {
       methodAuthenticator: 'Doğrulayıcı Uygulama',
       methodEmail: 'E-posta Kodu',
       methodBackup: 'Yedek Kod',
-      instructionsTotp: 'Doğrulayıcı uygulamanızı açın ve Bambuddy için 6 haneli kodu girin.',
+      instructionsTotp: 'Doğrulayıcı uygulamanızı açın ve Grove Control için 6 haneli kodu girin.',
       instructionsEmail: 'E-posta adresinize 6 haneli bir kod gönderildi. 10 dakika içinde sona erer.',
       instructionsEmailNotSent: 'E-posta yoluyla bir doğrulama kodu almak için aşağıdaki düğmeye tıklayın.',
       instructionsBackup: '8 karakterlik yedek kurtarma kodlarınızdan birini girin. Her kod yalnızca bir kez kullanılabilir.',
@@ -2602,8 +2602,8 @@ export default {
 
   // Kurulum sayfası
   setup: {
-    title: 'Bambuddy Kurulumu',
-    subtitle: 'Bambuddy örneğiniz için kimlik doğrulamayı yapılandırın',
+    title: 'Grove Control Kurulumu',
+    subtitle: 'Grove Control örneğiniz için kimlik doğrulamayı yapılandırın',
     enableAuth: 'Kimlik Doğrulamayı Etkinleştir',
     adminAccount: 'Yönetici Hesabı',
     adminAccountDesc: 'Yönetici kullanıcılar zaten varsa, kimlik doğrulama mevcut yönetici hesapları kullanılarak etkinleştirilecek. Mevcut yöneticileri kullanmak için aşağıdaki alanları boş bırakın veya yeni bir yönetici kullanıcı oluşturmak için yeni kimlik bilgileri girin.',
@@ -2759,7 +2759,7 @@ export default {
   // Kullanıcı yönetimi
   users: {
     title: 'Kullanıcı Yönetimi',
-    subtitle: 'Kullanıcıları ve Bambuddy örneğinize erişimlerini yönetin',
+    subtitle: 'Kullanıcıları ve Grove Control örneğinize erişimlerini yönetin',
     backToSettings: 'Ayarlara Dön',
     createUser: 'Kullanıcı Oluştur',
     noPermission: 'Bu sayfaya erişim izniniz yok.',
@@ -2875,7 +2875,7 @@ export default {
       back: 'Farklı bir giriş yöntemi kullan',
       connect: {
         title: 'Orca Cloud\'a bağlan',
-        description: 'Dilimleyici profillerinizi Bambuddy ile senkronize etmek için Orca Cloud hesabınıza giriş yapın.',
+        description: 'Dilimleyici profillerinizi Grove Control ile senkronize etmek için Orca Cloud hesabınıza giriş yapın.',
       },
       providers: {
         google: 'Google ile giriş yap',
@@ -3612,8 +3612,8 @@ export default {
     title: 'Makara Envanteri',
     subtitle: 'Makaralarınızı yönetin',
     spoolmanMixedContentTitle: 'Spoolman HTTPS üzerinden yüklenemiyor — tarayıcınız tarafından karışık içerik engellendi',
-    spoolmanMixedContentBody: 'Bambuddy HTTPS üzerinden sunuluyor (ters proxy\'niz aracılığıyla), ancak Spoolman URL\'niz hâlâ düz HTTP. Tarayıcılar güvenlik için karışık içeriği engeller, bu nedenle gömülü Spoolman arayüzü oluşturulamaz. Bunun çalışması için Spoolman\'in HTTPS üzerinden erişilebilir olması gerekiyor.',
-    spoolmanMixedContentFixReverseProxy: "Spoolman'i Bambuddy ile aynı ters proxy'nin (Traefik / Nginx / Caddy) arkasına HTTPS ile koyun, ardından Ayarlardaki Spoolman URL'sini yeni HTTPS adresine güncelleyin.",
+    spoolmanMixedContentBody: 'Grove Control HTTPS üzerinden sunuluyor (ters proxy\'niz aracılığıyla), ancak Spoolman URL\'niz hâlâ düz HTTP. Tarayıcılar güvenlik için karışık içeriği engeller, bu nedenle gömülü Spoolman arayüzü oluşturulamaz. Bunun çalışması için Spoolman\'in HTTPS üzerinden erişilebilir olması gerekiyor.',
+    spoolmanMixedContentFixReverseProxy: "Spoolman'i Grove Control ile aynı ters proxy'nin (Traefik / Nginx / Caddy) arkasına HTTPS ile koyun, ardından Ayarlardaki Spoolman URL'sini yeni HTTPS adresine güncelleyin.",
     spoolmanMixedContentFixOpenNewTab: 'Geçici bir çözüm olarak, Spoolman\'i HTTP üzerinden yeni bir tarayıcı sekmesinde açın — karışık içerik kuralları yalnızca gömülü çerçevelere uygulanır, bu nedenle bağımsız bir sekme yine çalışır.',
     spoolmanOpenInNewTab: 'Spoolman\'i yeni sekmede aç',
     labels: {
@@ -4044,8 +4044,8 @@ export default {
     cloudLoginRequiredShort: 'Bulut girişi gerekli',
     githubDescription: 'Yedekleme ve sürüm geçmişi için profillerinizi otomatik olarak özel bir GitHub deposuna senkronize et.',
     repoIsPrivate: 'Depo özel — yedeklemek için güvenli.',
-    repoIsPublicWarning: "Depo HERKESE AÇIK. Bambuddy yedekleri MQTT kimlik bilgilerini, Home Assistant belirteçlerini, Prometheus belirteçlerini, Bambu Cloud e-postanızı ve K-profilleri aracılığıyla yazıcı erişim kodlarını içerir. Sağlayıcınızın ayarlarında depoyu özel hale getirene kadar kaydetme engellenir.",
-    repoVisibilityUnknown: 'Depo görünürlüğü belirlenemedi. Bambuddy, özel olarak onaylanmamış hiçbir şeye yedekleme yapmayı reddeder; kaydetme engellenecek.',
+    repoIsPublicWarning: "Depo HERKESE AÇIK. Grove Control yedekleri MQTT kimlik bilgilerini, Home Assistant belirteçlerini, Prometheus belirteçlerini, Bambu Cloud e-postanızı ve K-profilleri aracılığıyla yazıcı erişim kodlarını içerir. Sağlayıcınızın ayarlarında depoyu özel hale getirene kadar kaydetme engellenir.",
+    repoVisibilityUnknown: 'Depo görünürlüğü belirlenemedi. Grove Control, özel olarak onaylanmamış hiçbir şeye yedekleme yapmayı reddeder; kaydetme engellenecek.',
     repositoryUrl: 'Depo URL\'si',
     repoUrlPlaceholderGitHub: 'https://github.com/username/repo-name',
     repoUrlPlaceholderGitea: 'https://gitea.example.com/username/repo-name',
@@ -4075,7 +4075,7 @@ export default {
     cloudProfiles: 'Bulut Profilleri',
     cloudProfilesDescription: 'Bambu Cloud\'dan filament, yazıcı ve işlem ön ayarları',
     appSettings: 'Uygulama Ayarları',
-    appSettingsDescription: 'Bambuddy yapılandırması (tam veritabanı)',
+    appSettingsDescription: 'Grove Control yapılandırması (tam veritabanı)',
     spoolInventory: 'Makara Envanteri',
     spoolInventoryDescription: 'Filament makaraları, kullanım geçmişi ve maliyet takibi',
     printArchives: 'Baskı Arşivleri',
@@ -4109,7 +4109,7 @@ export default {
 
     // Yerel Yedekleme
     localBackup: 'Yerel Yedekleme',
-    localBackupDescription: 'Veritabanı, arşivler, yüklemeler ve tüm dosyalar dahil Bambuddy verilerinizin tam bir yedeğini oluşturun.',
+    localBackupDescription: 'Veritabanı, arşivler, yüklemeler ve tüm dosyalar dahil Grove Control verilerinizin tam bir yedeğini oluşturun.',
     downloadBackupLabel: 'Yedeği İndir',
     completeBackupZip: 'Tam yedek: veritabanı + tüm dosyalar (ZIP)',
     download: 'İndir',
@@ -4125,7 +4125,7 @@ export default {
     restoreConfirmMessage: '"{{filename}}" dosyasından geri yüklemek istediğinizden emin misiniz? Bu, mevcut veritabanınızı ve tüm dosyaları tamamen değiştirecek. Geri yüklemeden sonra uygulamanın yeniden başlatılması gerekecek.',
     restoreConfirmButton: 'Yedeği Geri Yükle',
     uploadingFile: 'Yedek dosyası yükleniyor...',
-    backupRestoredRestart: 'Yedek geri yüklendi. Lütfen Bambuddy\'yi yeniden başlatın.',
+    backupRestoredRestart: 'Yedek geri yüklendi. Lütfen Grove Control\'yi yeniden başlatın.',
     failedToRestore: 'Yedek geri yüklenemedi. Lütfen dosya formatını kontrol edin.',
     reloadNow: 'Şimdi Yeniden Yükle',
     creatingBackup: 'Yedek Oluşturuluyor',
@@ -4348,7 +4348,7 @@ export default {
       right: 'Sağ',
       notes: 'Notlar (yerel olarak saklanır)',
       notesPlaceholder: 'Bu profil hakkında notlar ekleyin...',
-      notesHelp: 'Notlar yazıcıda değil, Bambuddy\'de kaydedilir',
+      notesHelp: 'Notlar yazıcıda değil, Grove Control\'de kaydedilir',
       syncing: 'Yazıcıyla senkronize ediliyor...',
       savingExtruder: 'Ekstrüdere kaydediliyor {{current}}/{{total}}...',
       pleaseWait: 'Lütfen bekleyin',
@@ -4399,7 +4399,7 @@ export default {
     },
     enable: {
       title: 'Sanal Yazıcıyı Etkinleştir',
-      visibleInSlicer: 'Dilimleyici keşfinde "Bambuddy" olarak görünür',
+      visibleInSlicer: 'Dilimleyici keşfinde "Grove Control" olarak görünür',
       proxyingTo: '{{name}} cihazına proxy yapılıyor',
       notActive: 'Aktif değil',
     },
@@ -4434,7 +4434,7 @@ export default {
       configured: 'Arayüz geçersiz kılma aktif',
       optional: 'İsteğe bağlı - otomatik algılanan IP yanlışsa kullanın (örn. birden fazla NIC, Docker, VPN)',
       placeholder: 'Otomatik algıla (varsayılan)...',
-      hint: 'SSDP üzerinden tanıtılan ve TLS sertifikasında kullanılan IP adresini geçersiz kıl. Bambuddy birden fazla ağ arayüzüne sahip olduğunda kullanışlıdır.',
+      hint: 'SSDP üzerinden tanıtılan ve TLS sertifikasında kullanılan IP adresini geçersiz kıl. Grove Control birden fazla ağ arayüzüne sahip olduğunda kullanışlıdır.',
     },
     mode: {
       title: 'Mod',
@@ -4472,7 +4472,7 @@ export default {
     },
     caCert: {
       title: 'Dilimleyici sertifikası',
-      description: "Sanal yazıcılar Bambuddy CA tarafından imzalanmış bir TLS sertifikası kullanır. Bağlantıyı kabul etmesi için bu CA sertifikasını dilimleyicinizin güven deposuna bir kez içe aktarın — komut satırından kopyalamaya gerek yok.",
+      description: "Sanal yazıcılar Grove Control CA tarafından imzalanmış bir TLS sertifikası kullanır. Bağlantıyı kabul etmesi için bu CA sertifikasını dilimleyicinizin güven deposuna bir kez içe aktarın — komut satırından kopyalamaya gerek yok.",
       copy: 'Kopyala',
       copied: 'Kopyalandı',
       download: 'İndir',
@@ -4481,7 +4481,7 @@ export default {
     howItWorks: {
       title: 'Nasıl çalışır',
       step1: "Aynı LAN'da, sanal yazıcılar dilimleyicinizde (Bambu Studio / OrcaSlicer) keşif yoluyla otomatik olarak görünür. Diğer ağlardan, IP adresi ve erişim koduyla manuel olarak ekleyin.",
-      step2: '3MF dosyalarını Bambuddy\'ye yüklemek için Arşiv, İnceleme ve Kuyruk modlarında dilimleyicinizdeki "Gönder" düğmesini kullanın. Dilimleyici "Baskı başarılı" gösterecek — dosya saklanır, yazdırılmaz.',
+      step2: '3MF dosyalarını Grove Control\'ye yüklemek için Arşiv, İnceleme ve Kuyruk modlarında dilimleyicinizdeki "Gönder" düğmesini kullanın. Dilimleyici "Baskı başarılı" gösterecek — dosya saklanır, yazdırılmaz.',
       step3: 'Proxy modunda, sanal yazıcı tüm trafiği gerçek bir yazıcıya iletir — baskılar doğrudan bağlıymış gibi hemen başlar.',
     },
     status: {
@@ -5002,7 +5002,7 @@ export default {
     title: 'Kenar çubuğu bağlantıları',
     sidebarLayout: 'Kenar çubuğu',
     sidebarLayoutDescription: 'Yerleşik sayfaları gösterin veya gizleyin, harici bağlantılar ekleyin ve kenar çubuğu gezinmesini yeniden sıralamak için öğeleri sürükleyin.',
-    systemPages: 'Bambuddy sayfaları',
+    systemPages: 'Grove Control sayfaları',
     externalLinks: 'Harici bağlantılar',
     visibleInSidebar: 'Kenar çubuğunda görünür',
     hiddenFromSidebar: 'Kenar çubuğunda gizli',
@@ -5470,7 +5470,7 @@ export default {
       hostname: 'Ana Bilgisayar',
       uptime: 'Çalışma Süresi',
       systemConfig: 'Arka Uç ve Kimlik Doğrulama',
-      backendUrl: 'Bambuddy Arka Uç URL\'si',
+      backendUrl: 'Grove Control Arka Uç URL\'si',
       apiToken: 'API Belirteci',
       apiTokenPlaceholder: 'API belirtecini girin',
       saveConfig: 'Yapılandırmayı Kaydet',
@@ -5615,13 +5615,13 @@ export default {
       network_mode: {
         title: 'Docker ağ modu',
         pass: 'Ana bilgisayar ağ modunda çalışıyor.',
-        warn: 'Bambuddy, Docker köprü ağı kullanılarak çalışıyor. Yazıcı keşfi ve Sanal Yazıcı, ana bilgisayar ağ modu gerektirir — konteyneri "network_mode: host" ile yeniden oluşturun.',
+        warn: 'Grove Control, Docker köprü ağı kullanılarak çalışıyor. Yazıcı keşfi ve Sanal Yazıcı, ana bilgisayar ağ modu gerektirir — konteyneri "network_mode: host" ile yeniden oluşturun.',
         skip: 'Docker\'da çalışmıyor — uygulanamaz.',
       },
       subnet: {
         title: 'Ağ alt ağı',
-        pass: 'Yazıcı ve Bambuddy aynı alt ağda.',
-        warn: 'Yazıcı ({{printer_ip}}) ve Bambuddy ({{host_ip}}) farklı alt ağlarda. Alt ağlar arasında yönlendirme yapılandırılmazsa birbirlerine erişemeyebilirler.',
+        pass: 'Yazıcı ve Grove Control aynı alt ağda.',
+        warn: 'Yazıcı ({{printer_ip}}) ve Grove Control ({{host_ip}}) farklı alt ağlarda. Alt ağlar arasında yönlendirme yapılandırılmazsa birbirlerine erişemeyebilirler.',
         skip: 'Alt ağ belirlenemedi — atlandı.',
       },
       mqtt_auth: {
@@ -5663,12 +5663,12 @@ export default {
       'ftp-auth-rejected': {
         name: 'Yazıcı erişim kodunu reddetti',
         cause: 'Yazıcı dosya aktarım girişini reddetti. Erişim kodu yanlış veya Geliştirici Modu açılıp kapatıldıktan sonra değişti.',
-        fix: 'Erişim kodunu yazıcı ekranından (LAN ayarları) yeniden kopyalayın ve Bambuddy\'deki yazıcının ayarlarında güncelleyin.',
+        fix: 'Erişim kodunu yazıcı ekranından (LAN ayarları) yeniden kopyalayın ve Grove Control\'deki yazıcının ayarlarında güncelleyin.',
       },
       'ftp-connection-timeout': {
         name: 'Dosya aktarım bağlantısı zaman aşımına uğradı',
-        cause: 'Bambuddy yazıcının dosya aktarım portuna (FTPS 990) erişemedi. Port engellendi veya yazıcı kapalı ya da başka bir alt ağda.',
-        fix: 'Bambuddy ile yazıcı arasında hiçbir şeyin port 990\'ı engellemediğinden ve her ikisinin de aynı ağda olduğundan emin olun.',
+        cause: 'Grove Control yazıcının dosya aktarım portuna (FTPS 990) erişemedi. Port engellendi veya yazıcı kapalı ya da başka bir alt ağda.',
+        fix: 'Grove Control ile yazıcı arasında hiçbir şeyin port 990\'ı engellemediğinden ve her ikisinin de aynı ağda olduğundan emin olun.',
       },
       'ftp-ssl-error': {
         name: 'Güvenli dosya aktarım el sıkışması başarısız',
@@ -5688,7 +5688,7 @@ export default {
       'database-locked': {
         name: 'Veritabanı yazma çekişmesi',
         cause: 'SQLite veritabanı yük altında "veritabanı kilitli" hatalarıyla karşılaşıyor — aynı anda birkaç yazıcı çalıştırırken yaygındır.',
-        fix: 'Bambuddy\'yi harici bir PostgreSQL veritabanına geçirin. Dokümantasyondaki PostgreSQL kılavuzuna bakın.',
+        fix: 'Grove Control\'yi harici bir PostgreSQL veritabanına geçirin. Dokümantasyondaki PostgreSQL kılavuzuna bakın.',
       },
     },
   },
@@ -5711,7 +5711,7 @@ export default {
       },
       running: {
         title: 'Servisler çalışıyor',
-        fail: 'Sanal yazıcı etkin ancak servisleri çalışmıyor. Bambuddy günlüğünü kontrol edin — bir bind IP çakışması veya bir izin hatası genellikle onları durdurur.',
+        fail: 'Sanal yazıcı etkin ancak servisleri çalışmıyor. Grove Control günlüğünü kontrol edin — bir bind IP çakışması veya bir izin hatası genellikle onları durdurur.',
       },
       bind_interface: {
         title: 'Bind ağ arayüzü',
@@ -5740,8 +5740,8 @@ export default {
       },
       certificate: {
         title: 'TLS sertifikası',
-        pass: 'Sertifika hazır. Bambuddy CA sertifikasının (yukarıda) dilimleyicinizin güven deposuna içe aktarıldığından emin olun.',
-        fail: 'Bu sanal yazıcı için TLS sertifikası eksik. Bambuddy veri dizininin yazılabilir olduğunu kontrol edin.',
+        pass: 'Sertifika hazır. Grove Control CA sertifikasının (yukarıda) dilimleyicinizin güven deposuna içe aktarıldığından emin olun.',
+        fail: 'Bu sanal yazıcı için TLS sertifikası eksik. Grove Control veri dizininin yazılabilir olduğunu kontrol edin.',
       },
     },
   },
@@ -5806,7 +5806,7 @@ export default {
     pollInterval: 'Sorgulama aralığı (saniye)',
     pollIntervalHint: 'Baskı yaparken her yazıcının ne sıklıkta kontrol edileceği. Minimum 5sn, maksimum 120sn.',
     externalUrlMissing: 'Harici URL ayarlanmamış.',
-    externalUrlHint: 'ML API, kamera anlık görüntüsünü URL üzerinden alır. ML API konteyneri Bambuddy\'ye erişebilsin diye Genel ayarlarda Harici URL\'yi ayarlayın.',
+    externalUrlHint: 'ML API, kamera anlık görüntüsünü URL üzerinden alır. ML API konteyneri Grove Control\'ye erişebilsin diye Genel ayarlarda Harici URL\'yi ayarlayın.',
     perPrinterTitle: 'İzlenen Yazıcılar',
     perPrinterHint: 'Algılama servisinin hangi yazıcıları izleyeceğini seçin.',
     monitorAll: 'Tüm bağlı yazıcıları izle',
@@ -5821,7 +5821,7 @@ export default {
 
   makerworld: {
     title: 'MakerWorld',
-    description: 'Bambu Handy uygulamasına gitmeden — doğrudan Bambuddy\'den içe aktarmak ve yazdırmak için bir MakerWorld model URL\'si yapıştırın.',
+    description: 'Bambu Handy uygulamasına gitmeden — doğrudan Grove Control\'den içe aktarmak ve yazdırmak için bir MakerWorld model URL\'si yapıştırın.',
     pasteUrlHeader: "MakerWorld'den İçe Aktar",
     pasteUrlPlaceholder: 'https://makerworld.com/en/models/… veya herhangi bir MakerWorld bağlantısını yapıştırın',
     resolveButton: 'Çöz',
@@ -5844,7 +5844,7 @@ export default {
     alsoCompatible: 'Ayrıca uyumlu olarak işaretlendi: {{printers}}',
     importToLibrary: 'Kaydet',
     sliceIn: 'Kaydet ve {{slicer}}\'de Dilimle',
-    disclaimer: 'MakerWorld entegrasyonu topluluk tarafından belgelenen API uç noktalarını kullanır. Bambuddy, MakerWorld veya Bambu Lab ile ilişkili veya onaylı değildir.',
+    disclaimer: 'MakerWorld entegrasyonu topluluk tarafından belgelenen API uç noktalarını kullanır. Grove Control, MakerWorld veya Bambu Lab ile ilişkili veya onaylı değildir.',
     lastImportSuccess: 'Kütüphanenize içe aktarıldı',
     lastImportAlreadyInLibrary: 'Zaten kütüphanenizde',
     viewInLibrary: 'Dosya Yöneticisinde Görüntüle',
@@ -5940,7 +5940,7 @@ export default {
     effect1: 'Eşleşen dosyalar Çöp\'e taşınır — henüz diskten silinmezler.',
     effect2: 'Saklama penceresi sona erene kadar Çöp\'ten herhangi bir zamanda geri yükleyebilirsiniz.',
     effect3: 'Saklama sonrası, çöp süpürücü onları kalıcı olarak diskten kaldırır.',
-    effect4: 'Harici (bağlı) klasörlerdeki dosyalar atlanır — Bambuddy asla sahibi olmadığı bayt\'ları silmez.',
+    effect4: 'Harici (bağlı) klasörlerdeki dosyalar atlanır — Grove Control asla sahibi olmadığı bayt\'ları silmez.',
     previewLoading: 'Kaç dosyanın eşleştiği kontrol ediliyor…',
     previewFailed: 'Temizleme önizlenemedi.',
     previewSummary: '{{count}} dosya · {{size}} çöpe taşınacak',

@@ -1224,7 +1224,7 @@ class TestGiteaBackendEmptyRepoInitialCommit:
         body = client.post.call_args.kwargs["json"]
         assert body["branch"] == "main"
         assert body["new_branch"] == "main"
-        assert body["message"].startswith("Initial Bambuddy backup")
+        assert body["message"].startswith("Initial Grove Control backup")
         assert len(body["files"]) == 2
         paths = {f["path"] for f in body["files"]}
         assert paths == {"a.json", "nested/b.json"}

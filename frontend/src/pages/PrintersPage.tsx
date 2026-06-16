@@ -6028,7 +6028,7 @@ export function AddPrinterModal({
   const [detectedSubnets, setDetectedSubnets] = useState<string[]>([]);
   const [subnet, setSubnet] = useState('');
   // Custom subnet — `__custom__` sentinel in the dropdown reveals a CIDR
-  // text input so users can scan a subnet Bambuddy isn't directly on
+  // text input so users can scan a subnet Grove Control isn't directly on
   // (printer behind a router on a different L3 segment — SSDP multicast
   // won't cross that boundary, only an active unicast scan will). #1564
   const [customSubnet, setCustomSubnet] = useState('');

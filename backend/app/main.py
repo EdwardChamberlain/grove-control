@@ -130,7 +130,7 @@ def _start_error_server(missing_packages: list):
     html = f"""<!DOCTYPE html>
 <html>
 <head>
-    <title>Bambuddy - Setup Required</title>
+    <title>Grove Control - Setup Required</title>
     <style>
         body {{
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -167,7 +167,7 @@ def _start_error_server(missing_packages: list):
         <div class="command">pip install -r requirements.txt</div>
         <p>Or if using a virtual environment:</p>
         <div class="command">./venv/bin/pip install -r requirements.txt</div>
-        <p class="note">After installing, restart Bambuddy:<br>
+        <p class="note">After installing, restart Grove Control:<br>
         <code>sudo systemctl restart bambuddy</code></p>
     </div>
 </body>
@@ -327,7 +327,7 @@ if not app_settings.debug:
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("paho.mqtt").setLevel(logging.WARNING)
 
-logging.info("Bambuddy starting - debug=%s, log_level=%s", app_settings.debug, log_level_str)
+logging.info("Grove Control starting - debug=%s, log_level=%s", app_settings.debug, log_level_str)
 
 
 # Track active prints: {(printer_id, filename): archive_id}
@@ -846,7 +846,7 @@ _nozzle_count_updated: set[int] = set()
 async def on_printer_status_change(printer_id: int, state: PrinterState):
     """Handle printer status changes - broadcast via WebSocket."""
     # Connected-edge reconciliation (#1542 follow-up). When the printer
-    # transitions disconnected → connected — which covers both Bambuddy
+    # transitions disconnected → connected — which covers both Grove Control
     # startup (no prior connection) and a mid-session MQTT reconnect — fire
     # `reconcile_stale_active_prints` exactly once for this connection so
     # any archive still in `status="printing"` that can't actually be
@@ -2260,10 +2260,10 @@ async def on_print_start(printer_id: int, data: dict):
                 # Persist a restart-stable id so a later restart resumes this
                 # archive by subtask_id instead of name-matching + duplicating
                 # it (#1485). The printer often hasn't echoed subtask_id back
-                # this soon after dispatch, so fall back to the id Bambuddy
+                # this soon after dispatch, so fall back to the id Grove Control
                 # minted when it sent the print command. Scoped to this
                 # expected-print branch on purpose: an expected match means
-                # Bambuddy dispatched this exact print in this process, so the
+                # Grove Control dispatched this exact print in this process, so the
                 # client's last-dispatch id genuinely belongs to it — using it
                 # for an externally-started print could mis-tag the archive.
                 effective_subtask_id = subtask_id
@@ -2382,7 +2382,7 @@ async def on_print_start(printer_id: int, data: dict):
         # across a backend restart for the same print, so this is the most
         # reliable way to reattach. We also accept a previously stale-cancelled
         # archive here so users upgrading mid-print get revived when the row
-        # their earlier Bambuddy version wrongly cancelled reappears (#972).
+        # their earlier Grove Control version wrongly cancelled reappears (#972).
         if subtask_id:
             by_id = await db.execute(
                 select(PrintArchive)
@@ -3337,10 +3337,10 @@ async def _capture_finish_photo_from_timelapse(
 
 async def on_print_running_observed(printer_id: int, data: dict):
     """Restart-recovery: capture a fresh timelapse baseline for a print that
-    started before Bambuddy came up.
+    started before Grove Control came up.
 
     bambu_mqtt.py suppresses ``on_print_start`` on the first RUNNING push
-    after Bambuddy startup (#1304 guard, prevents duplicate archive
+    after Grove Control startup (#1304 guard, prevents duplicate archive
     creation). Without that path, ``_capture_timelapse_baseline_at_start``
     never runs and ``_scan_for_timelapse_with_retries`` falls into its
     "take baseline now" fallback at completion time — but by then the
@@ -3355,7 +3355,7 @@ async def on_print_running_observed(printer_id: int, data: dict):
     logger = logging.getLogger(__name__)
 
     # Avoid double-capture: on_print_start may have run earlier in this
-    # Bambuddy process if the print started AFTER startup and we crashed
+    # Grove Control process if the print started AFTER startup and we crashed
     # later in the same session. (Realistically this can't happen — the
     # MQTT client object would have been recreated — but the cheap guard
     # is correct regardless.)
@@ -3443,11 +3443,11 @@ async def reconcile_stale_active_prints(printer_id: int) -> int:
     running on the printer anymore.
 
     Called once per MQTT (re)connection (from on_printer_status_change when
-    the connected edge flips False → True) and at Bambuddy startup (from
+    the connected edge flips False → True) and at Grove Control startup (from
     the FastAPI lifespan). Without this, a print that completes during a
     disconnect window — followed by a smart-plug-driven power cycle — leaves
     the ``.3mf`` on the SD card, the firmware auto-replays it on next boot,
-    and Bambuddy fires a fresh PRINT START for the ghost rather than the
+    and Grove Control fires a fresh PRINT START for the ghost rather than the
     SD cleanup that PRINT COMPLETE was supposed to run. Repeats every
     power cycle until the operator notices (#1542 follow-up). Reconciliation
     closes the loop by faking the missed PRINT COMPLETE — the existing
@@ -3693,10 +3693,10 @@ async def on_print_complete(printer_id: int, data: dict):
     # twelve-hour print, a printer can self-abort mid-job after a clog, and a
     # touchscreen-stop reports `aborted` rather than `cancelled` because
     # `_user_stopped_printers` is only populated when the user stops via the
-    # Bambuddy queue UI. Earlier code raised the flag only for completed/failed,
+    # Grove Control queue UI. Earlier code raised the flag only for completed/failed,
     # which auto-dispatched the next queued print onto a fouled bed two seconds
     # after a touchscreen-abort (#1171). Persisted to DB so the gate survives
-    # Auto Off power cycles and Bambuddy restarts.
+    # Auto Off power cycles and Grove Control restarts.
     _final_status = data.get("status", "completed")
     if _final_status in ("completed", "failed", "aborted", "cancelled"):
         printer_manager.set_awaiting_plate_clear(printer_id, True)
@@ -4484,7 +4484,7 @@ async def on_print_complete(printer_id: int, data: dict):
                             # would miss (#1397). Skipped for external cameras (those have
                             # their own framing and don't see a Bambu timelapse). Only
                             # runs when the USER explicitly enabled timelapse for this
-                            # print — #1721 removed Bambuddy's force-on at dispatch
+                            # print — #1721 removed Grove Control's force-on at dispatch
                             # because it caused per-layer nozzle parking on Smooth-mode
                             # slicer profiles.
                             prefer_timelapse_source = bool(data.get("timelapse_was_active")) and not (
@@ -5868,7 +5868,7 @@ def _parse_trusted_frame_origins() -> tuple[str, ...]:
 
     Used by ``security_headers_middleware`` to relax ``frame-ancestors`` for
     trusted same-LAN deployments (e.g. Home Assistant Webpage panel embedding
-    Bambuddy from a different port). Defaults to empty — strict ``'none'``.
+    Grove Control from a different port). Defaults to empty — strict ``'none'``.
 
     Invalid entries are dropped with a warning rather than failing startup, so
     a typo in one origin doesn't take the whole deployment down.
@@ -5930,7 +5930,7 @@ def _frame_ancestors(default_value: str) -> str:
 async def security_headers_middleware(request, call_next):
     """Add standard HTTP security headers to every response."""
     # Per-request nonce stamped into `script-src` (#1460). On its own this
-    # changes nothing for Bambuddy's own pages — index.html has no inline
+    # changes nothing for Grove Control's own pages — index.html has no inline
     # scripts since the SW registration moved to /sw-register.js. The reason
     # it's here is Cloudflare: a CF-fronted deployment has the bot-detection
     # script injected into the HTML on the edge, with a fresh hash on every
@@ -6275,7 +6275,7 @@ async def serve_frontend():
     if index_file.exists():
         return FileResponse(index_file, headers=_HTML_CACHE_HEADERS)
     return {
-        "message": "Bambuddy API",
+        "message": "Grove Control API",
         "docs": "/docs",
         "frontend": "Build and place React app in /static directory",
     }

@@ -31,7 +31,7 @@ def _get_network_interfaces_psutil() -> list[dict]:
 
     fcntl + ioctl is Linux-only, and the ``ip`` command isn't available
     on Windows either, so both Linux code paths return empty here. psutil
-    is already a Bambuddy dep (``psutil>=6.0.0``) and gives us cross-
+    is already a Grove Control dep (``psutil>=6.0.0``) and gives us cross-
     platform name + IPv4 + netmask in one call.
 
     Filters: IPv4 only (matches the Linux path), skip loopback and

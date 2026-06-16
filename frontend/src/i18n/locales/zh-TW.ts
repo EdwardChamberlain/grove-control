@@ -28,7 +28,7 @@ export default {
     smartSwitches: '智慧開關',
     logout: '登出',
     installApp: '安裝應用程式',
-    installAppSuccess: 'Bambuddy 已安裝',
+    installAppSuccess: 'Grove Control 已安裝',
   },
 
   // Common
@@ -637,7 +637,7 @@ export default {
     title: '列印歸檔',
     no3mfBanner: {
       title: '最近的一些列印未能附帶縮圖封存',
-      body: '切片機沒有在印表機的 SD 卡上留下 .gcode.3mf 檔案，因此 Bambuddy 無法取得縮圖或切片機中繼資料。這通常是因為切片機 (Bambu Studio / OrcaSlicer 的裝置分頁) 中「將傳送的檔案儲存在外部儲存中」已關閉。',
+      body: '切片機沒有在印表機的 SD 卡上留下 .gcode.3mf 檔案，因此 Grove Control 無法取得縮圖或切片機中繼資料。這通常是因為切片機 (Bambu Studio / OrcaSlicer 的裝置分頁) 中「將傳送的檔案儲存在外部儲存中」已關閉。',
       docsLink: '檢視安裝步驟 4',
       dismissLabel: '關閉此通知',
     },
@@ -1895,7 +1895,7 @@ export default {
     authentication: '身份驗證',
     authEnabledDescription: '您的實例已透過使用者身份驗證保護',
     authDisabledDescription: '啟用以要求登入並管理使用者存取',
-    authDisabledMessage: '啟用身份驗證以建立使用者帳戶、管理權限並保護您的 Bambuddy 實例。',
+    authDisabledMessage: '啟用身份驗證以建立使用者帳戶、管理權限並保護您的 Grove Control 實例。',
     enableAuthentication: '啟用身份驗證',
     currentUser: '目前使用者',
     changePassword: '修改密碼',
@@ -1934,10 +1934,10 @@ export default {
     deleteGroup: '刪除群組',
     // Modal: Disable auth
     disableAuthenticationTitle: '停用身份驗證',
-    disableAuthenticationMessage: '確定要停用身份驗證嗎？這將使您的 Bambuddy 實例無需登入即可存取。所有使用者將保留在資料庫中但身份驗證將被停用。',
+    disableAuthenticationMessage: '確定要停用身份驗證嗎？這將使您的 Grove Control 實例無需登入即可存取。所有使用者將保留在資料庫中但身份驗證將被停用。',
     disableAuthentication: '停用身份驗證',
     // Additional settings
-    configureBambuddy: '設定 Bambuddy',
+    configureGroveControl: '設定 Grove Control',
     systemDefault: '系統預設',
     archiveSettings: '歸檔設定',
     newWindow: '新視窗',
@@ -2161,7 +2161,7 @@ export default {
     autoArchivePrints: '自動歸檔列印',
     autoArchiveDescription: '列印完成時自動儲存3MF檔案',
     saveThumbnailsDescription: '從3MF檔案中提取並儲存預覽影像',
-    captureFinishPhotoDescription: '列印完成時從印表機攝影機拍照。Bambuddy 會在列印期間錄製一段短縮時攝影，以便從熱床下降前的瞬間取得照片；如果您為本次列印啟用了縮時攝影，檔案將保留，否則會在拍照完成後自動刪除。',
+    captureFinishPhotoDescription: '列印完成時從印表機攝影機拍照。Grove Control 會在列印期間錄製一段短縮時攝影，以便從熱床下降前的瞬間取得照片；如果您為本次列印啟用了縮時攝影，檔案將保留，否則會在拍照完成後自動刪除。',
     ffmpegNotInstalled: '未安裝ffmpeg',
     ffmpegRequired: '攝影機捕獲需要ffmpeg。透過 <brew>brew install ffmpeg</brew>（macOS）或 <apt>apt install ffmpeg</apt>（Linux）安裝。',
     camera: '攝影機',
@@ -2195,13 +2195,13 @@ export default {
     lowDiskSpaceDescription: '當可用磁碟空間低於此閾值時顯示警告',
     printerFirmware: '印表機韌體',
     checkFirmwareDescription: '檢查Bambu Lab的印表機韌體更新',
-    bambuddySoftware: 'Bambuddy 軟體',
+    bambuddySoftware: 'Grove Control 軟體',
     autoCheckDescription: '啟動時自動檢查新版本',
     checkNow: '立即檢查',
     updateAvailableVersion: '可用更新：v{{version}}',
     releaseNotes: '發布說明',
     updateViaDocker: '透過 Docker Compose 更新：',
-    updateViaHomeAssistant: '更新由 Home Assistant Supervisor 管理。請在 Home Assistant 中開啟 設定 → 附加元件 → Bambuddy 以安裝新版本。',
+    updateViaHomeAssistant: '更新由 Home Assistant Supervisor 管理。請在 Home Assistant 中開啟 設定 → 附加元件 → Grove Control 以安裝新版本。',
     installUpdate: '安裝更新',
     latestVersionRunning: '您正在執行最新版本',
     failedToCheckUpdates: '檢查更新失敗：{{error}}',
@@ -2209,8 +2209,8 @@ export default {
     backupRestoreDescription: '匯出/匯入設定並設定GitHub 備份',
     goToBackup: '前往備份',
     externalUrl: '外部URL',
-    externalUrlDescription: 'Bambuddy可存取的外部URL。用於通知影像和外部整合。',
-    bambuddyUrl: 'Bambuddy URL',
+    externalUrlDescription: 'Grove Control可存取的外部URL。用於通知影像和外部整合。',
+    bambuddyUrl: 'Grove Control URL',
     externalUrlHint: '包含協定和連接埠（例如：http://192.168.1.100:8000）',
     ftpRetry: 'FTP重試',
     ftpRetryDescription: '當印表機Wi-Fi 不穩定時重試FTP操作。適用於3MF下載、列印上傳、縮時攝影下載和韌體更新。',
@@ -2364,7 +2364,7 @@ export default {
       enabledFromFile: '已啟用靜態加密（金鑰從資料目錄載入）',
       enabledGenerated: '使用自動產生的金鑰啟用靜態加密',
       notConfigured: '未設定靜態加密',
-      notConfiguredDesc: 'TOTP 機密和 OIDC client_secrets 以明文儲存。請設定 MFA_ENCRYPTION_KEY 或使用可寫資料目錄重新啟動 Bambuddy 以自動產生。',
+      notConfiguredDesc: 'TOTP 機密和 OIDC client_secrets 以明文儲存。請設定 MFA_ENCRYPTION_KEY 或使用可寫資料目錄重新啟動 Grove Control 以自動產生。',
       allEncrypted: '所有 MFA 機密皆已靜態加密。',
       legacyRowsLabel: '舊版明文列',
       encryptedRowsLabel: '已加密列',
@@ -2372,7 +2372,7 @@ export default {
       backupHint: '自動產生的金鑰儲存在 DATA_DIR/.mfa_encryption_key 中，並包含在本機備份 ZIP 中。請保護備份安全或顯式設定 MFA_ENCRYPTION_KEY。',
       decryptionBrokenTitle: '加密金鑰遺失',
       decryptionBrokenError: '無法解密 {{count}} 條加密記錄，因為加密金鑰不再可用。請還原先前的 MFA_ENCRYPTION_KEY 或 DATA_DIR/.mfa_encryption_key 以恢復存取。',
-      migrationErrorWarning: '{{count}} 行舊資料在啟動時未能重新加密。請檢查伺服器日誌並重新啟動 Bambuddy 以重試。',
+      migrationErrorWarning: '{{count}} 行舊資料在啟動時未能重新加密。請檢查伺服器日誌並重新啟動 Grove Control 以重試。',
     },
 
   },
@@ -2491,7 +2491,7 @@ export default {
 
   // Login page
   login: {
-    title: 'Bambuddy 登入',
+    title: 'Grove Control 登入',
     subtitle: '登入您的帳戶',
     username: '使用者名稱',
     usernamePlaceholder: '輸入您的使用者名稱',
@@ -2537,7 +2537,7 @@ export default {
     sending: '傳送中...',
     sendResetEmail: '傳送重設郵件',
     howToReset: '如何重設密碼：',
-    resetStep1: '聯絡您的 Bambuddy 管理員',
+    resetStep1: '聯絡您的 Grove Control 管理員',
     resetStep2: '請他們在使用者管理中重設您的密碼',
     resetStep3: '他們可以為您設定一個臨時密碼',
     resetStep4: '使用新密碼登入並在設定中修改密碼',
@@ -2562,7 +2562,7 @@ export default {
       methodAuthenticator: '身份驗證器 App',
       methodEmail: '信箱驗證碼',
       methodBackup: '備用恢復碼',
-      instructionsTotp: '請開啟您的身份驗證器 App，輸入 Bambuddy 的 6 位驗證碼。',
+      instructionsTotp: '請開啟您的身份驗證器 App，輸入 Grove Control 的 6 位驗證碼。',
       instructionsEmail: '6 位驗證碼已傳送至您的信箱，有效期為 10 分鐘。',
       instructionsEmailNotSent: '點選下方按鈕，透過郵件獲取驗證碼。',
       instructionsBackup: '請輸入您的一個 8 位備用恢復碼。每個恢復碼只能使用一次。',
@@ -2587,8 +2587,8 @@ export default {
 
   // Setup page
   setup: {
-    title: 'Bambuddy 設定',
-    subtitle: '為您的 Bambuddy 實例設定身份驗證',
+    title: 'Grove Control 設定',
+    subtitle: '為您的 Grove Control 實例設定身份驗證',
     enableAuth: '啟用身份驗證',
     adminAccount: '管理員帳戶',
     adminAccountDesc: '如果管理員使用者已存在，將使用現有管理員帳戶啟用身份驗證。如需使用現有管理員，請將下方欄位留空，或輸入新憑據建立新管理員使用者。',
@@ -2744,7 +2744,7 @@ export default {
   // Users management
   users: {
     title: '使用者管理',
-    subtitle: '管理使用者及其對 Bambuddy 實例的存取',
+    subtitle: '管理使用者及其對 Grove Control 實例的存取',
     backToSettings: '返回設定',
     createUser: '建立使用者',
     noPermission: '您沒有存取此頁面的權限。',
@@ -2860,7 +2860,7 @@ export default {
       back: '使用其他登入方式',
       connect: {
         title: '連接到 Orca Cloud',
-        description: '登入您的 Orca Cloud 帳號,將切片機設定檔同步到 Bambuddy。',
+        description: '登入您的 Orca Cloud 帳號,將切片機設定檔同步到 Grove Control。',
       },
       providers: {
         google: '使用 Google 登入',
@@ -3611,8 +3611,8 @@ export default {
     title: '耗材庫存',
     subtitle: '管理您的料盤',
     spoolmanMixedContentTitle: 'Spoolman 無法透過 HTTPS 載入 — 瀏覽器已封鎖混合內容',
-    spoolmanMixedContentBody: 'Bambuddy 透過您的反向代理以 HTTPS 提供服務，但您的 Spoolman 位址仍為 HTTP。基於安全考量，瀏覽器會封鎖混合內容，因此內嵌的 Spoolman 介面無法載入。Spoolman 也必須可透過 HTTPS 存取。',
-    spoolmanMixedContentFixReverseProxy: '請將 Spoolman 置於與 Bambuddy 相同的反向代理（Traefik / Nginx / Caddy）之後並啟用 HTTPS，然後在設定中將 Spoolman URL 更新為新的 HTTPS 位址。',
+    spoolmanMixedContentBody: 'Grove Control 透過您的反向代理以 HTTPS 提供服務，但您的 Spoolman 位址仍為 HTTP。基於安全考量，瀏覽器會封鎖混合內容，因此內嵌的 Spoolman 介面無法載入。Spoolman 也必須可透過 HTTPS 存取。',
+    spoolmanMixedContentFixReverseProxy: '請將 Spoolman 置於與 Grove Control 相同的反向代理（Traefik / Nginx / Caddy）之後並啟用 HTTPS，然後在設定中將 Spoolman URL 更新為新的 HTTPS 位址。',
     spoolmanMixedContentFixOpenNewTab: '作為替代方案，可在新分頁以 HTTP 開啟 Spoolman — 混合內容規則僅適用於內嵌框架，獨立分頁仍可正常運作。',
     spoolmanOpenInNewTab: '在新分頁開啟 Spoolman',
     labels: {
@@ -4055,8 +4055,8 @@ export default {
     cloudLoginRequiredShort: '需要雲端登入',
     githubDescription: '自動將您的設定檔案同步到私有 GitHub 倉庫以進行備份和版本歷史紀錄。',
     repoIsPrivate: '儲存庫為私有 — 可安全備份。',
-    repoIsPublicWarning: '儲存庫為公開（PUBLIC）。Bambuddy 備份包含 MQTT 認證、Home Assistant 權杖、Prometheus 權杖、您的 Bambu Cloud 電子郵件，以及透過 K-profile 暴露的印表機存取碼。在您於服務商設定中將儲存庫改為私有之前，儲存將被阻擋。',
-    repoVisibilityUnknown: '無法確認儲存庫的可見性。Bambuddy 拒絕向任何未確認為私有的目標進行備份；儲存將被阻擋。',
+    repoIsPublicWarning: '儲存庫為公開（PUBLIC）。Grove Control 備份包含 MQTT 認證、Home Assistant 權杖、Prometheus 權杖、您的 Bambu Cloud 電子郵件，以及透過 K-profile 暴露的印表機存取碼。在您於服務商設定中將儲存庫改為私有之前，儲存將被阻擋。',
+    repoVisibilityUnknown: '無法確認儲存庫的可見性。Grove Control 拒絕向任何未確認為私有的目標進行備份；儲存將被阻擋。',
     repositoryUrl: '倉庫 URL',
     repoUrlPlaceholderGitHub: 'https://github.com/username/repo-name',
 	repoUrlPlaceholderGitea: 'https://gitea.example.com/username/repo-name',
@@ -4086,7 +4086,7 @@ export default {
     cloudProfiles: '雲設定檔案',
     cloudProfilesDescription: '來自 Bambu Cloud 的耗材、印表機和工藝預設',
     appSettings: '應用程式設定',
-    appSettingsDescription: 'Bambuddy 設定（完整資料庫）',
+    appSettingsDescription: 'Grove Control 設定（完整資料庫）',
     spoolInventory: '耗材庫存',
     spoolInventoryDescription: '耗材卷軸、使用紀錄和成本追蹤',
     printArchives: '列印檔案',
@@ -4121,7 +4121,7 @@ export default {
 
     // Local Backup
     localBackup: '本機備份',
-    localBackupDescription: '建立 Bambuddy 資料的完整備份，包括資料庫、檔案、上傳和所有檔案。',
+    localBackupDescription: '建立 Grove Control 資料的完整備份，包括資料庫、檔案、上傳和所有檔案。',
     downloadBackupLabel: '下載備份',
     completeBackupZip: '完整備份：資料庫 + 所有檔案（ZIP）',
     download: '下載',
@@ -4137,7 +4137,7 @@ export default {
     restoreConfirmMessage: '您確定要從"{{filename}}"恢復嗎？這將完全替換您目前的資料庫和所有檔案。恢復後需要重新啟動應用程式。',
     restoreConfirmButton: '恢復備份',
     uploadingFile: '正在上傳備份檔案...',
-    backupRestoredRestart: '備份已恢復。請重新啟動 Bambuddy。',
+    backupRestoredRestart: '備份已恢復。請重新啟動 Grove Control。',
     failedToRestore: '恢復備份失敗。請檢查檔案格式。',
     reloadNow: '立即重新載入',
     creatingBackup: '正在建立備份',
@@ -4369,7 +4369,7 @@ export default {
       right: '右',
       notes: '備註（本機儲存）',
       notesPlaceholder: '新增關於此設定的備註...',
-      notesHelp: '備註儲存在 Bambuddy 中，不在印表機上',
+      notesHelp: '備註儲存在 Grove Control 中，不在印表機上',
       syncing: '與印表機同步中...',
       savingExtruder: '儲存到擠出機 {{current}}/{{total}}...',
       pleaseWait: '請稍候',
@@ -4424,7 +4424,7 @@ export default {
     },
     enable: {
       title: '啟用虛擬印表機',
-      visibleInSlicer: '在切片軟體發現中顯示為"Bambuddy"',
+      visibleInSlicer: '在切片軟體發現中顯示為"Grove Control"',
       proxyingTo: '代理到 {{name}}',
       notActive: '未啟用',
     },
@@ -4459,7 +4459,7 @@ export default {
       configured: '介面覆蓋已啟用',
       optional: '可選 - 當自動檢測的 IP 不正確時使用（例如多網路卡、Docker、VPN）',
       placeholder: '自動檢測（預設）...',
-      hint: '覆蓋透過 SSDP 廣播並在 TLS 憑證中使用的 IP 位址。在 Bambuddy 有多個網路介面時很有用。',
+      hint: '覆蓋透過 SSDP 廣播並在 TLS 憑證中使用的 IP 位址。在 Grove Control 有多個網路介面時很有用。',
     },
     mode: {
       title: '模式',
@@ -4497,7 +4497,7 @@ export default {
     },
     caCert: {
       title: '切片軟體憑證',
-      description: '虛擬印表機使用由 Bambuddy CA 簽發的 TLS 憑證。將此 CA 憑證匯入切片軟體的信任庫一次，切片軟體即可接受連線 — 無需再透過命令列取得。',
+      description: '虛擬印表機使用由 Grove Control CA 簽發的 TLS 憑證。將此 CA 憑證匯入切片軟體的信任庫一次，切片軟體即可接受連線 — 無需再透過命令列取得。',
       copy: '複製',
       copied: '已複製',
       download: '下載',
@@ -4506,7 +4506,7 @@ export default {
     howItWorks: {
       title: '工作原理',
       step1: '在同一區域網路中，虛擬印表機會透過發現機制自動出現在您的切片軟體（Bambu Studio / OrcaSlicer）中。從其他網路，透過 IP 位址和存取碼手動新增。',
-      step2: '在歸檔、審核和佇列模式下，使用切片軟體中的"傳送"按鈕將 3MF 檔案上傳到 Bambuddy。切片軟體會顯示"列印成功"— 檔案已儲存，未列印。',
+      step2: '在歸檔、審核和佇列模式下，使用切片軟體中的"傳送"按鈕將 3MF 檔案上傳到 Grove Control。切片軟體會顯示"列印成功"— 檔案已儲存，未列印。',
       step3: '在代理模式下，虛擬印表機將所有流量中繼到真實印表機 — 列印會立即開始，就像直接連線一樣。',
     },
     status: {
@@ -5046,7 +5046,7 @@ export default {
     title: '側邊欄連結',
     sidebarLayout: '側邊欄',
     sidebarLayoutDescription: '顯示或隱藏內建頁面、加入外部連結，並拖曳項目以重新排序側邊欄導覽。',
-    systemPages: 'Bambuddy 頁面',
+    systemPages: 'Grove Control 頁面',
     externalLinks: '外部連結',
     visibleInSidebar: '顯示於側邊欄',
     hiddenFromSidebar: '隱藏於側邊欄',
@@ -5261,7 +5261,7 @@ export default {
   // Email Settings
   emailSettings: {
     placeholders: {
-      fromName: 'Bambuddy',
+      fromName: 'Grove Control',
     },
   },
 
@@ -5516,7 +5516,7 @@ export default {
       hostname: '主機',
       uptime: '執行時間',
       systemConfig: '後端與認證',
-      backendUrl: 'Bambuddy 後端 URL',
+      backendUrl: 'Grove Control 後端 URL',
       apiToken: 'API 權杖',
       apiTokenPlaceholder: '輸入 API 權杖',
       saveConfig: '儲存設定',
@@ -5664,13 +5664,13 @@ export default {
       network_mode: {
         title: 'Docker 網路模式',
         pass: '正在以 host 網路模式執行。',
-        warn: 'Bambuddy 正在以 Docker bridge 網路執行。印表機探索與虛擬印表機需要 host 網路模式 — 請使用 "network_mode: host" 重新建立容器。',
+        warn: 'Grove Control 正在以 Docker bridge 網路執行。印表機探索與虛擬印表機需要 host 網路模式 — 請使用 "network_mode: host" 重新建立容器。',
         skip: '未在 Docker 中執行 — 不適用。',
       },
       subnet: {
         title: '網路子網路',
-        pass: '印表機與 Bambuddy 位於同一子網路。',
-        warn: '印表機（{{printer_ip}}）與 Bambuddy（{{host_ip}}）位於不同的子網路。除非設定了子網路之間的路由，否則它們可能無法互相連線。',
+        pass: '印表機與 Grove Control 位於同一子網路。',
+        warn: '印表機（{{printer_ip}}）與 Grove Control（{{host_ip}}）位於不同的子網路。除非設定了子網路之間的路由，否則它們可能無法互相連線。',
         skip: '無法判定子網路 — 已略過。',
       },
       mqtt_auth: {
@@ -5712,12 +5712,12 @@ export default {
       'ftp-auth-rejected': {
         name: '印表機拒絕了存取碼',
         cause: '印表機拒絕了檔案傳輸登入。存取碼錯誤，或在切換開發者模式後已變更。',
-        fix: '從印表機螢幕（區域網路設定）重新複製存取碼，並在 Bambuddy 的印表機設定中更新。',
+        fix: '從印表機螢幕（區域網路設定）重新複製存取碼，並在 Grove Control 的印表機設定中更新。',
       },
       'ftp-connection-timeout': {
         name: '檔案傳輸連線逾時',
-        cause: 'Bambuddy 無法連線印表機的檔案傳輸連接埠（FTPS 990）。該連接埠被封鎖，或印表機已關機或位於其他子網路。',
-        fix: '請確認 Bambuddy 與印表機之間的 990 連接埠未被封鎖，且兩者位於同一網路。',
+        cause: 'Grove Control 無法連線印表機的檔案傳輸連接埠（FTPS 990）。該連接埠被封鎖，或印表機已關機或位於其他子網路。',
+        fix: '請確認 Grove Control 與印表機之間的 990 連接埠未被封鎖，且兩者位於同一網路。',
       },
       'ftp-ssl-error': {
         name: '安全檔案傳輸交握失敗',
@@ -5737,7 +5737,7 @@ export default {
       'database-locked': {
         name: '資料庫寫入衝突',
         cause: '在負載下 SQLite 資料庫出現 "database is locked" 錯誤——同時使用多台印表機時較為常見。',
-        fix: '請將 Bambuddy 切換到外部 PostgreSQL 資料庫。參見文件中的 PostgreSQL 指南。',
+        fix: '請將 Grove Control 切換到外部 PostgreSQL 資料庫。參見文件中的 PostgreSQL 指南。',
       },
     },
   },
@@ -5760,7 +5760,7 @@ export default {
       },
       running: {
         title: '服務正在執行',
-        fail: '虛擬印表機已啟用，但其服務未執行。請檢查 Bambuddy 記錄 — 通常是繫結 IP 衝突或權限錯誤使其停止。',
+        fail: '虛擬印表機已啟用，但其服務未執行。請檢查 Grove Control 記錄 — 通常是繫結 IP 衝突或權限錯誤使其停止。',
       },
       bind_interface: {
         title: '繫結網路介面',
@@ -5789,8 +5789,8 @@ export default {
       },
       certificate: {
         title: 'TLS 憑證',
-        pass: '憑證已就緒。請確保已將 Bambuddy CA 憑證（上方）匯入切片軟體的信任庫。',
-        fail: '此虛擬印表機的 TLS 憑證遺失。請檢查 Bambuddy 資料目錄是否可寫入。',
+        pass: '憑證已就緒。請確保已將 Grove Control CA 憑證（上方）匯入切片軟體的信任庫。',
+        fail: '此虛擬印表機的 TLS 憑證遺失。請檢查 Grove Control 資料目錄是否可寫入。',
       },
     },
   },
@@ -5855,7 +5855,7 @@ export default {
     pollInterval: '檢查間隔(秒)',
     pollIntervalHint: '列印過程中每臺印表機的檢查頻率。最小 5 秒,最大 120 秒。',
     externalUrlMissing: '尚未設定外部 URL。',
-    externalUrlHint: 'ML API 透過 URL 擷取攝影機快照。請在一般設定中設定外部 URL，讓 ML API 容器可以連線到 Bambuddy。',
+    externalUrlHint: 'ML API 透過 URL 擷取攝影機快照。請在一般設定中設定外部 URL，讓 ML API 容器可以連線到 Grove Control。',
     perPrinterTitle: '監控的印表機',
     perPrinterHint: '選擇檢測服務要監視哪些印表機。',
     monitorAll: '監控所有已連線的印表機',
@@ -5869,7 +5869,7 @@ export default {
   },
   makerworld: {
     title: 'MakerWorld',
-    description: '貼上 MakerWorld 模型連結，即可直接在 Bambuddy 中匯入並列印 —— 無需切換至 Bambu Handy 應用程式。',
+    description: '貼上 MakerWorld 模型連結，即可直接在 Grove Control 中匯入並列印 —— 無需切換至 Bambu Handy 應用程式。',
     pasteUrlHeader: '從 MakerWorld 匯入',
     pasteUrlPlaceholder: 'https://makerworld.com/en/models/… 或貼上任意 MakerWorld 連結',
     resolveButton: '解析',
@@ -5892,7 +5892,7 @@ export default {
     alsoCompatible: '還標記為相容：{{printers}}',
     importToLibrary: '儲存',
     sliceIn: '儲存並在 {{slicer}} 中切片',
-    disclaimer: 'MakerWorld 整合使用由社群記錄的 API 介面。Bambuddy 與 MakerWorld 或 Bambu Lab 無從屬或認可關係。',
+    disclaimer: 'MakerWorld 整合使用由社群記錄的 API 介面。Grove Control 與 MakerWorld 或 Bambu Lab 無從屬或認可關係。',
     lastImportSuccess: '已匯入您的資料庫',
     lastImportAlreadyInLibrary: '已存在於您的資料庫中',
     viewInLibrary: '在檔案管理員中查看',
@@ -5988,7 +5988,7 @@ export default {
     effect1: '符合的檔案移至回收筒 — 尚未從磁碟刪除。',
     effect2: '在保留期到期之前，您可以隨時從回收筒復原。',
     effect3: '保留期滿後，回收筒清理器將它們從磁碟永久刪除。',
-    effect4: '外部（連結）資料夾中的檔案將被略過 — Bambuddy 從不刪除不屬於自己的位元組。',    previewLoading: '正在檢查符合的檔案數量…',
+    effect4: '外部（連結）資料夾中的檔案將被略過 — Grove Control 從不刪除不屬於自己的位元組。',    previewLoading: '正在檢查符合的檔案數量…',
     previewFailed: '無法預覽清理結果。',
     previewSummary: '{{count}} 個檔案 · {{size}} 將被移至資源回收筒',
     andMore: '…還有 {{count}} 個',

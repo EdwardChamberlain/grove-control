@@ -1232,7 +1232,7 @@ export function SettingsPage() {
             <SettingsIcon className="w-7 h-7 text-bambu-green" />
             {t('settings.title')}
           </h1>
-          <p className="text-bambu-gray mt-1">{t('settings.configureBambuddy')}</p>
+          <p className="text-bambu-gray mt-1">{t('settings.configureGroveControl')}</p>
         </div>
         {/* Cross-tab search */}
         <div className="relative sm:w-72">

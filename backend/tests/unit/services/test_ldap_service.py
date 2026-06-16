@@ -398,7 +398,7 @@ class TestAuthenticateLdapUserGroups:
     def test_case_insensitive_dedupe(self, mock_ldap):
         """DNs differing only in case should collapse to a single entry (LDAP DNs are case-insensitive)."""
         user_entry = _MockEntry("cn=mz,dc=test,dc=com", uid="mz", gidNumber=10002)
-        upper_dn = _MockEntry("CN=Bambuddy-Operators,OU=Groups,DC=Test,DC=Com")
+        upper_dn = _MockEntry("CN=Grove Control-Operators,OU=Groups,DC=Test,DC=Com")
         lower_dn = _MockEntry("cn=bambuddy-operators,ou=groups,dc=test,dc=com")
 
         mock_ldap._search_fixture = {
@@ -411,7 +411,7 @@ class TestAuthenticateLdapUserGroups:
 
         assert len(info.groups) == 1
         # The first-seen casing (memberUid result) is kept.
-        assert info.groups[0] == "CN=Bambuddy-Operators,OU=Groups,DC=Test,DC=Com"
+        assert info.groups[0] == "CN=Grove Control-Operators,OU=Groups,DC=Test,DC=Com"
 
     def test_no_gidnumber_skips_primary_search(self, mock_ldap):
         """User entries without a gidNumber attribute should not crash and should not issue the primary-gid query."""

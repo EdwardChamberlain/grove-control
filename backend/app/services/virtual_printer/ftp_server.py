@@ -89,7 +89,7 @@ class FTPSession:
         """Handle the FTP session."""
         try:
             # Send welcome banner
-            await self.send(220, "Bambuddy Virtual Printer FTP ready")
+            await self.send(220, "Grove Control Virtual Printer FTP ready")
 
             while True:
                 try:
@@ -544,7 +544,7 @@ class FTPSession:
         """Handle LIST command - list directory contents.
 
         Intentionally answers 150 + 226 without opening the passive data
-        channel. Bambuddy is an upload-only VP — no slicer in capture logs
+        channel. Grove Control is an upload-only VP — no slicer in capture logs
         actually issues LIST during the project_file flow, so the
         no-data-conn ack is what every observed slicer accepts. A previous
         audit recommended opening + closing the data conn for protocol

@@ -606,7 +606,7 @@ async def send_user_print_notification(
     all_variables = {
         "username": username,
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-        "app_name": "Bambuddy",
+        "app_name": "Grove Control",
         **variables,
     }
 

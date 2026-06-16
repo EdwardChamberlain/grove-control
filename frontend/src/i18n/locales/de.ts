@@ -28,7 +28,7 @@ export default {
     smartSwitches: 'Smart Switches',
     logout: 'Abmelden',
     installApp: 'App installieren',
-    installAppSuccess: 'Bambuddy wurde installiert',
+    installAppSuccess: 'Grove Control wurde installiert',
   },
 
   // Common
@@ -637,7 +637,7 @@ export default {
     title: 'Druckarchiv',
     no3mfBanner: {
       title: 'Einige kürzliche Drucke konnten nicht mit Vorschaubild archiviert werden',
-      body: 'Der Slicer hat die .gcode.3mf-Datei nicht auf der SD-Karte des Druckers hinterlegt, daher konnte Bambuddy weder Vorschaubild noch Slicer-Metadaten abrufen. Üblicherweise liegt das daran, dass "Gesendete Dateien auf externem Speicher speichern" im Slicer (Geräte-Tab in Bambu Studio / OrcaSlicer) deaktiviert ist.',
+      body: 'Der Slicer hat die .gcode.3mf-Datei nicht auf der SD-Karte des Druckers hinterlegt, daher konnte Grove Control weder Vorschaubild noch Slicer-Metadaten abrufen. Üblicherweise liegt das daran, dass "Gesendete Dateien auf externem Speicher speichern" im Slicer (Geräte-Tab in Bambu Studio / OrcaSlicer) deaktiviert ist.',
       docsLink: 'Installationsschritt 4 anzeigen',
       dismissLabel: 'Hinweis schließen',
     },
@@ -1894,7 +1894,7 @@ export default {
     authentication: 'Authentifizierung',
     authEnabledDescription: 'Ihre Instanz ist mit Benutzerauthentifizierung gesichert',
     authDisabledDescription: 'Aktivieren Sie die Anmeldepflicht und verwalten Sie den Benutzerzugriff',
-    authDisabledMessage: 'Aktivieren Sie die Authentifizierung, um Benutzerkonten zu erstellen, Berechtigungen zu verwalten und Ihre Bambuddy-Instanz zu sichern.',
+    authDisabledMessage: 'Aktivieren Sie die Authentifizierung, um Benutzerkonten zu erstellen, Berechtigungen zu verwalten und Ihre Grove Control-Instanz zu sichern.',
     enableAuthentication: 'Authentifizierung aktivieren',
     currentUser: 'Aktueller Benutzer',
     changePassword: 'Passwort ändern',
@@ -1933,10 +1933,10 @@ export default {
     deleteGroup: 'Gruppe löschen',
     // Modal: Disable auth
     disableAuthenticationTitle: 'Authentifizierung deaktivieren',
-    disableAuthenticationMessage: 'Möchten Sie die Authentifizierung wirklich deaktivieren? Dadurch wird Ihre Bambuddy-Instanz ohne Anmeldung zugänglich. Alle Benutzer bleiben in der Datenbank, aber die Authentifizierung wird deaktiviert.',
+    disableAuthenticationMessage: 'Möchten Sie die Authentifizierung wirklich deaktivieren? Dadurch wird Ihre Grove Control-Instanz ohne Anmeldung zugänglich. Alle Benutzer bleiben in der Datenbank, aber die Authentifizierung wird deaktiviert.',
     disableAuthentication: 'Authentifizierung deaktivieren',
     // Additional settings
-    configureBambuddy: 'Bambuddy konfigurieren',
+    configureGroveControl: 'Grove Control konfigurieren',
     systemDefault: 'Systemstandard',
     archiveSettings: 'Archiv-Einstellungen',
     newWindow: 'Neues Fenster',
@@ -2163,7 +2163,7 @@ export default {
     autoArchivePrints: 'Drucke automatisch archivieren',
     autoArchiveDescription: '3MF-Dateien automatisch speichern, wenn Drucke abgeschlossen sind',
     saveThumbnailsDescription: 'Vorschaubilder aus 3MF-Dateien extrahieren und speichern',
-    captureFinishPhotoDescription: 'Foto von der Druckerkamera aufnehmen, wenn der Druck abgeschlossen ist. Bambuddy zeichnet während des Drucks einen kurzen Zeitraffer auf, damit das Foto aus dem Moment vor dem Absenken der Druckplatte stammen kann. Die Zeitraffer-Datei bleibt erhalten, wenn du den Zeitraffer für diesen Druck aktiviert hast, andernfalls wird sie nach Aufnahme des Fotos automatisch gelöscht.',
+    captureFinishPhotoDescription: 'Foto von der Druckerkamera aufnehmen, wenn der Druck abgeschlossen ist. Grove Control zeichnet während des Drucks einen kurzen Zeitraffer auf, damit das Foto aus dem Moment vor dem Absenken der Druckplatte stammen kann. Die Zeitraffer-Datei bleibt erhalten, wenn du den Zeitraffer für diesen Druck aktiviert hast, andernfalls wird sie nach Aufnahme des Fotos automatisch gelöscht.',
     ffmpegNotInstalled: 'ffmpeg nicht installiert',
     ffmpegRequired: 'Kameraaufnahme benötigt ffmpeg. Installieren über <brew>brew install ffmpeg</brew> (macOS) oder <apt>apt install ffmpeg</apt> (Linux).',
     // Camera
@@ -2201,13 +2201,13 @@ export default {
     // Updates
     printerFirmware: 'Drucker-Firmware',
     checkFirmwareDescription: 'Nach Firmware-Updates von Bambu Lab suchen',
-    bambuddySoftware: 'Bambuddy-Software',
+    bambuddySoftware: 'Grove Control-Software',
     autoCheckDescription: 'Automatisch beim Start nach neuen Versionen suchen',
     checkNow: 'Jetzt prüfen',
     updateAvailableVersion: 'Update verfügbar: v{{version}}',
     releaseNotes: 'Versionshinweise',
     updateViaDocker: 'Update über Docker Compose:',
-    updateViaHomeAssistant: 'Updates werden vom Home Assistant Supervisor verwaltet. Öffne Einstellungen → Add-ons → Bambuddy in Home Assistant, um die neue Version zu installieren.',
+    updateViaHomeAssistant: 'Updates werden vom Home Assistant Supervisor verwaltet. Öffne Einstellungen → Add-ons → Grove Control in Home Assistant, um die neue Version zu installieren.',
     installUpdate: 'Update installieren',
     latestVersionRunning: 'Sie verwenden die neueste Version',
     failedToCheckUpdates: 'Update-Prüfung fehlgeschlagen: {{error}}',
@@ -2217,8 +2217,8 @@ export default {
     goToBackup: 'Zur Sicherung',
     // Network tab
     externalUrl: 'Externe URL',
-    externalUrlDescription: 'Die externe URL, unter der Bambuddy erreichbar ist. Wird für Benachrichtigungsbilder und externe Integrationen verwendet.',
-    bambuddyUrl: 'Bambuddy-URL',
+    externalUrlDescription: 'Die externe URL, unter der Grove Control erreichbar ist. Wird für Benachrichtigungsbilder und externe Integrationen verwendet.',
+    bambuddyUrl: 'Grove Control-URL',
     externalUrlHint: 'Protokoll und Port angeben (z.B. http://192.168.1.100:8000)',
     ftpRetry: 'FTP-Wiederholung',
     ftpRetryDescription: 'FTP-Operationen bei unzuverlässigem Drucker-WLAN wiederholen. Gilt für 3MF-Downloads, Druck-Uploads, Zeitraffer-Downloads und Firmware-Updates.',
@@ -2376,7 +2376,7 @@ export default {
       enabledFromFile: 'At-Rest-Verschlüsselung aktiv (Schlüssel aus dem Datenverzeichnis geladen)',
       enabledGenerated: 'At-Rest-Verschlüsselung aktiv mit automatisch generiertem Schlüssel',
       notConfigured: 'At-Rest-Verschlüsselung nicht konfiguriert',
-      notConfiguredDesc: 'TOTP-Geheimnisse und OIDC-Client-Secrets werden im Klartext gespeichert. Setze MFA_ENCRYPTION_KEY oder starte Bambuddy mit beschreibbarem Datenverzeichnis neu, damit ein Schlüssel automatisch erzeugt wird.',
+      notConfiguredDesc: 'TOTP-Geheimnisse und OIDC-Client-Secrets werden im Klartext gespeichert. Setze MFA_ENCRYPTION_KEY oder starte Grove Control mit beschreibbarem Datenverzeichnis neu, damit ein Schlüssel automatisch erzeugt wird.',
       allEncrypted: 'Alle MFA-Geheimnisse sind verschlüsselt gespeichert.',
       legacyRowsLabel: 'Klartext-Zeilen (Altbestand)',
       encryptedRowsLabel: 'Verschlüsselte Zeilen',
@@ -2384,7 +2384,7 @@ export default {
       backupHint: 'Der automatisch erzeugte Schlüssel liegt unter DATA_DIR/.mfa_encryption_key und wird in lokalen Backup-ZIPs mitgesichert. Backups sicher aufbewahren oder MFA_ENCRYPTION_KEY explizit setzen.',
       decryptionBrokenTitle: 'Verschlüsselungsschlüssel fehlt',
       decryptionBrokenError: '{{count}} verschlüsselte Datensätze können nicht entschlüsselt werden, weil der Schlüssel nicht mehr verfügbar ist. Den vorherigen MFA_ENCRYPTION_KEY oder DATA_DIR/.mfa_encryption_key wiederherstellen.',
-      migrationErrorWarning: '{{count}} Legacy-Eintrag/Einträge konnten beim Start nicht verschlüsselt werden. Prüfen Sie die Server-Logs und starten Sie Bambuddy neu.',
+      migrationErrorWarning: '{{count}} Legacy-Eintrag/Einträge konnten beim Start nicht verschlüsselt werden. Prüfen Sie die Server-Logs und starten Sie Grove Control neu.',
     },
 
   },
@@ -2503,7 +2503,7 @@ export default {
 
   // Login page
   login: {
-    title: 'Bambuddy Anmeldung',
+    title: 'Grove Control Anmeldung',
     subtitle: 'Melden Sie sich bei Ihrem Konto an',
     username: 'Benutzername',
     usernamePlaceholder: 'Benutzername eingeben',
@@ -2549,7 +2549,7 @@ export default {
     sending: 'Wird gesendet...',
     sendResetEmail: 'Zurücksetzungs-E-Mail senden',
     howToReset: 'So setzen Sie Ihr Passwort zurück:',
-    resetStep1: 'Kontaktieren Sie Ihren Bambuddy-Administrator',
+    resetStep1: 'Kontaktieren Sie Ihren Grove Control-Administrator',
     resetStep2: 'Bitten Sie ihn, Ihr Passwort in der Benutzerverwaltung zurückzusetzen',
     resetStep3: 'Er kann ein neues temporäres Passwort für Sie festlegen',
     resetStep4: 'Melden Sie sich mit dem neuen Passwort an und ändern Sie es in den Einstellungen',
@@ -2574,7 +2574,7 @@ export default {
       methodAuthenticator: 'Authenticator-App',
       methodEmail: 'E-Mail-Code',
       methodBackup: 'Wiederherstellungscode',
-      instructionsTotp: 'Öffnen Sie Ihre Authenticator-App und geben Sie den 6-stelligen Code für Bambuddy ein.',
+      instructionsTotp: 'Öffnen Sie Ihre Authenticator-App und geben Sie den 6-stelligen Code für Grove Control ein.',
       instructionsEmail: 'Ein 6-stelliger Code wurde an Ihre E-Mail-Adresse gesendet. Er ist 10 Minuten gültig.',
       instructionsEmailNotSent: 'Klicken Sie unten, um einen Bestätigungscode per E-Mail zu erhalten.',
       instructionsBackup: 'Geben Sie einen Ihrer 8-stelligen Wiederherstellungscodes ein. Jeder Code kann nur einmal verwendet werden.',
@@ -2599,8 +2599,8 @@ export default {
 
   // Setup page
   setup: {
-    title: 'Bambuddy Einrichtung',
-    subtitle: 'Konfigurieren Sie die Authentifizierung für Ihre Bambuddy-Instanz',
+    title: 'Grove Control Einrichtung',
+    subtitle: 'Konfigurieren Sie die Authentifizierung für Ihre Grove Control-Instanz',
     enableAuth: 'Authentifizierung aktivieren',
     adminAccount: 'Admin-Konto',
     adminAccountDesc: 'Wenn bereits Admin-Benutzer existieren, wird die Authentifizierung mit den vorhandenen Admin-Konten aktiviert. Lassen Sie die Felder unten leer, um vorhandene Admins zu verwenden, oder geben Sie neue Anmeldedaten ein, um einen neuen Admin-Benutzer zu erstellen.',
@@ -2756,7 +2756,7 @@ export default {
   // Users management
   users: {
     title: 'Benutzerverwaltung',
-    subtitle: 'Benutzer und deren Zugriff auf Ihre Bambuddy-Instanz verwalten',
+    subtitle: 'Benutzer und deren Zugriff auf Ihre Grove Control-Instanz verwalten',
     backToSettings: 'Zurück zu Einstellungen',
     createUser: 'Benutzer erstellen',
     noPermission: 'Sie haben keine Berechtigung, auf diese Seite zuzugreifen.',
@@ -2872,7 +2872,7 @@ export default {
       back: 'Andere Anmeldemethode verwenden',
       connect: {
         title: 'Mit Orca Cloud verbinden',
-        description: 'Melden Sie sich bei Ihrem Orca Cloud-Konto an, um Ihre Slicer-Profile in Bambuddy zu synchronisieren.',
+        description: 'Melden Sie sich bei Ihrem Orca Cloud-Konto an, um Ihre Slicer-Profile in Grove Control zu synchronisieren.',
       },
       providers: {
         google: 'Mit Google anmelden',
@@ -3623,8 +3623,8 @@ export default {
     title: 'Spulen-Inventar',
     subtitle: 'Verwalten Sie Ihre Spulen',
     spoolmanMixedContentTitle: 'Spoolman lässt sich nicht über HTTPS laden — Browser blockiert gemischte Inhalte',
-    spoolmanMixedContentBody: 'Bambuddy wird über HTTPS ausgeliefert (über deinen Reverse-Proxy), aber deine Spoolman-URL ist nach wie vor HTTP. Browser blockieren gemischte Inhalte aus Sicherheitsgründen, daher kann die eingebettete Spoolman-Oberfläche nicht geladen werden. Spoolman muss ebenfalls über HTTPS erreichbar sein.',
-    spoolmanMixedContentFixReverseProxy: 'Stelle Spoolman hinter denselben Reverse-Proxy wie Bambuddy (Traefik / Nginx / Caddy) mit HTTPS und aktualisiere die Spoolman-URL in den Einstellungen auf die neue HTTPS-Adresse.',
+    spoolmanMixedContentBody: 'Grove Control wird über HTTPS ausgeliefert (über deinen Reverse-Proxy), aber deine Spoolman-URL ist nach wie vor HTTP. Browser blockieren gemischte Inhalte aus Sicherheitsgründen, daher kann die eingebettete Spoolman-Oberfläche nicht geladen werden. Spoolman muss ebenfalls über HTTPS erreichbar sein.',
+    spoolmanMixedContentFixReverseProxy: 'Stelle Spoolman hinter denselben Reverse-Proxy wie Grove Control (Traefik / Nginx / Caddy) mit HTTPS und aktualisiere die Spoolman-URL in den Einstellungen auf die neue HTTPS-Adresse.',
     spoolmanMixedContentFixOpenNewTab: 'Als Workaround kannst du Spoolman in einem neuen Tab über HTTP öffnen — gemischte Inhalte werden nur innerhalb eingebetteter Frames blockiert, ein eigener Tab funktioniert weiterhin.',
     spoolmanOpenInNewTab: 'Spoolman in neuem Tab öffnen',
     labels: {
@@ -4067,8 +4067,8 @@ export default {
     cloudLoginRequiredShort: 'Cloud-Login erforderlich',
     githubDescription: 'Synchronisieren Sie Ihre Profile automatisch mit einem privaten GitHub-Repository für Backup und Versionsverlauf.',
     repoIsPrivate: 'Repository ist privat — Sicherung möglich.',
-    repoIsPublicWarning: 'Das Repository ist ÖFFENTLICH. Bambuddy-Backups enthalten MQTT-Zugangsdaten, Home-Assistant-Tokens, Prometheus-Tokens, Ihre Bambu-Cloud-E-Mail-Adresse und über K-Profile auch Drucker-Zugangscodes. Speichern ist blockiert, bis Sie das Repository in den Einstellungen Ihres Anbieters auf privat stellen.',
-    repoVisibilityUnknown: 'Die Sichtbarkeit des Repositories konnte nicht bestimmt werden. Bambuddy sichert nur in Repositories, die nachweislich privat sind; Speichern wird blockiert.',
+    repoIsPublicWarning: 'Das Repository ist ÖFFENTLICH. Grove Control-Backups enthalten MQTT-Zugangsdaten, Home-Assistant-Tokens, Prometheus-Tokens, Ihre Bambu-Cloud-E-Mail-Adresse und über K-Profile auch Drucker-Zugangscodes. Speichern ist blockiert, bis Sie das Repository in den Einstellungen Ihres Anbieters auf privat stellen.',
+    repoVisibilityUnknown: 'Die Sichtbarkeit des Repositories konnte nicht bestimmt werden. Grove Control sichert nur in Repositories, die nachweislich privat sind; Speichern wird blockiert.',
     repositoryUrl: 'Repository-URL',
     repoUrlPlaceholderGitHub: 'https://github.com/username/repo-name',
 	repoUrlPlaceholderGitea: 'https://gitea.example.com/username/repo-name',
@@ -4098,7 +4098,7 @@ export default {
     cloudProfiles: 'Cloud-Profile',
     cloudProfilesDescription: 'Filament-, Drucker- und Prozessprofile aus der Bambu Cloud',
     appSettings: 'App-Einstellungen',
-    appSettingsDescription: 'Bambuddy-Konfiguration (komplette Datenbank)',
+    appSettingsDescription: 'Grove Control-Konfiguration (komplette Datenbank)',
     spoolInventory: 'Spulenbestand',
     spoolInventoryDescription: 'Filamentspulen, Nutzungsverlauf und Kostenverfolgung',
     printArchives: 'Druckarchive',
@@ -4133,7 +4133,7 @@ export default {
 
     // Local Backup
     localBackup: 'Lokale Sicherung',
-    localBackupDescription: 'Erstellen Sie eine vollständige Sicherung Ihrer Bambuddy-Daten einschließlich Datenbank, Archive, Uploads und aller Dateien.',
+    localBackupDescription: 'Erstellen Sie eine vollständige Sicherung Ihrer Grove Control-Daten einschließlich Datenbank, Archive, Uploads und aller Dateien.',
     downloadBackupLabel: 'Sicherung herunterladen',
     completeBackupZip: 'Vollständige Sicherung: Datenbank + alle Dateien (ZIP)',
     download: 'Herunterladen',
@@ -4149,7 +4149,7 @@ export default {
     restoreConfirmMessage: 'Sind Sie sicher, dass Sie von "{{filename}}" wiederherstellen möchten? Dies ersetzt Ihre aktuelle Datenbank und alle Dateien vollständig. Die Anwendung muss nach der Wiederherstellung neu gestartet werden.',
     restoreConfirmButton: 'Sicherung wiederherstellen',
     uploadingFile: 'Sicherungsdatei wird hochgeladen...',
-    backupRestoredRestart: 'Sicherung wiederhergestellt. Bitte starten Sie Bambuddy neu.',
+    backupRestoredRestart: 'Sicherung wiederhergestellt. Bitte starten Sie Grove Control neu.',
     failedToRestore: 'Sicherung wiederherstellen fehlgeschlagen. Bitte überprüfen Sie das Dateiformat.',
     reloadNow: 'Jetzt neu laden',
     creatingBackup: 'Sicherung erstellen',
@@ -4380,7 +4380,7 @@ export default {
       right: 'Rechts',
       notes: 'Notizen (lokal gespeichert)',
       notesPlaceholder: 'Notizen zu diesem Profil hinzufügen...',
-      notesHelp: 'Notizen werden in Bambuddy gespeichert, nicht auf dem Drucker',
+      notesHelp: 'Notizen werden in Grove Control gespeichert, nicht auf dem Drucker',
       syncing: 'Synchronisiert mit Drucker...',
       savingExtruder: 'Speichern auf Extruder {{current}}/{{total}}...',
       pleaseWait: 'Bitte warten',
@@ -4435,7 +4435,7 @@ export default {
     },
     enable: {
       title: 'Virtuellen Drucker aktivieren',
-      visibleInSlicer: 'Sichtbar als "Bambuddy" in der Slicer-Erkennung',
+      visibleInSlicer: 'Sichtbar als "Grove Control" in der Slicer-Erkennung',
       proxyingTo: 'Proxy zu {{name}}',
       notActive: 'Nicht aktiv',
     },
@@ -4470,7 +4470,7 @@ export default {
       configured: 'Schnittstellenüberschreibung aktiv',
       optional: 'Optional - verwenden wenn die automatisch erkannte IP falsch ist (z.B. mehrere NICs, Docker, VPN)',
       placeholder: 'Automatisch erkennen (Standard)...',
-      hint: 'Überschreibt die per SSDP beworbene und im TLS-Zertifikat verwendete IP-Adresse. Nützlich wenn Bambuddy mehrere Netzwerkschnittstellen hat.',
+      hint: 'Überschreibt die per SSDP beworbene und im TLS-Zertifikat verwendete IP-Adresse. Nützlich wenn Grove Control mehrere Netzwerkschnittstellen hat.',
     },
     mode: {
       title: 'Modus',
@@ -4508,7 +4508,7 @@ export default {
     },
     caCert: {
       title: 'Slicer-Zertifikat',
-      description: 'Virtuelle Drucker verwenden ein TLS-Zertifikat, das von der Bambuddy-CA signiert ist. Importieren Sie dieses CA-Zertifikat einmalig in den Vertrauensspeicher Ihres Slicers, damit er die Verbindung akzeptiert — kein Abrufen über die Kommandozeile mehr nötig.',
+      description: 'Virtuelle Drucker verwenden ein TLS-Zertifikat, das von der Grove Control-CA signiert ist. Importieren Sie dieses CA-Zertifikat einmalig in den Vertrauensspeicher Ihres Slicers, damit er die Verbindung akzeptiert — kein Abrufen über die Kommandozeile mehr nötig.',
       copy: 'Kopieren',
       copied: 'Kopiert',
       download: 'Herunterladen',
@@ -4517,7 +4517,7 @@ export default {
     howItWorks: {
       title: 'So funktioniert es',
       step1: 'Im selben LAN erscheinen virtuelle Drucker automatisch in deinem Slicer (Bambu Studio / OrcaSlicer). Aus anderen Netzwerken füge sie manuell per IP-Adresse und Zugangscode hinzu.',
-      step2: 'Im Archiv-, Überprüfungs- und Warteschlangen-Modus verwende die "Senden"-Funktion im Slicer, um 3MF-Dateien an Bambuddy zu senden. Der Slicer zeigt "Druck erfolgreich" — die Datei wird gespeichert, nicht gedruckt.',
+      step2: 'Im Archiv-, Überprüfungs- und Warteschlangen-Modus verwende die "Senden"-Funktion im Slicer, um 3MF-Dateien an Grove Control zu senden. Der Slicer zeigt "Druck erfolgreich" — die Datei wird gespeichert, nicht gedruckt.',
       step3: 'Im Proxy-Modus leitet der virtuelle Drucker den gesamten Datenverkehr an einen echten Drucker weiter — Drucke starten sofort wie bei einer direkten Verbindung.',
     },
     status: {
@@ -5058,7 +5058,7 @@ export default {
     title: 'Seitenleisten-Links',
     sidebarLayout: 'Seitenleiste',
     sidebarLayoutDescription: 'Integrierte Seiten ein- oder ausblenden, externe Links hinzufügen und Elemente ziehen, um die Seitenleisten-Navigation neu zu ordnen.',
-    systemPages: 'Bambuddy-Seiten',
+    systemPages: 'Grove Control-Seiten',
     externalLinks: 'Externe Links',
     visibleInSidebar: 'In Seitenleiste sichtbar',
     hiddenFromSidebar: 'In Seitenleiste ausgeblendet',
@@ -5273,7 +5273,7 @@ export default {
   // Email Settings
   emailSettings: {
     placeholders: {
-      fromName: 'Bambuddy',
+      fromName: 'Grove Control',
     },
   },
 
@@ -5528,7 +5528,7 @@ export default {
       hostname: 'Host',
       uptime: 'Betriebszeit',
       systemConfig: 'Backend & Auth',
-      backendUrl: 'Bambuddy Backend URL',
+      backendUrl: 'Grove Control Backend URL',
       apiToken: 'API-Token',
       apiTokenPlaceholder: 'API-Token eingeben',
       saveConfig: 'Konfiguration speichern',
@@ -5676,13 +5676,13 @@ export default {
       network_mode: {
         title: 'Docker-Netzwerkmodus',
         pass: 'Läuft im Host-Netzwerkmodus.',
-        warn: 'Bambuddy läuft im Docker-Bridge-Netzwerkmodus. Die Druckererkennung und der virtuelle Drucker benötigen den Host-Netzwerkmodus — erstellen Sie den Container mit "network_mode: host" neu.',
+        warn: 'Grove Control läuft im Docker-Bridge-Netzwerkmodus. Die Druckererkennung und der virtuelle Drucker benötigen den Host-Netzwerkmodus — erstellen Sie den Container mit "network_mode: host" neu.',
         skip: 'Läuft nicht in Docker — nicht zutreffend.',
       },
       subnet: {
         title: 'Netzwerk-Subnetz',
-        pass: 'Drucker und Bambuddy befinden sich im selben Subnetz.',
-        warn: 'Der Drucker ({{printer_ip}}) und Bambuddy ({{host_ip}}) befinden sich in unterschiedlichen Subnetzen. Sie können sich möglicherweise nicht erreichen, sofern kein Routing zwischen den Subnetzen konfiguriert ist.',
+        pass: 'Drucker und Grove Control befinden sich im selben Subnetz.',
+        warn: 'Der Drucker ({{printer_ip}}) und Grove Control ({{host_ip}}) befinden sich in unterschiedlichen Subnetzen. Sie können sich möglicherweise nicht erreichen, sofern kein Routing zwischen den Subnetzen konfiguriert ist.',
         skip: 'Subnetz konnte nicht ermittelt werden — übersprungen.',
       },
       mqtt_auth: {
@@ -5724,12 +5724,12 @@ export default {
       'ftp-auth-rejected': {
         name: 'Drucker hat den Zugriffscode abgelehnt',
         cause: 'Der Drucker hat die Anmeldung für die Dateiübertragung abgelehnt. Der Zugriffscode ist falsch oder hat sich nach dem Umschalten des Entwicklermodus geändert.',
-        fix: 'Kopiere den Zugriffscode erneut vom Druckerbildschirm (LAN-Einstellungen) und aktualisiere ihn in den Druckereinstellungen in Bambuddy.',
+        fix: 'Kopiere den Zugriffscode erneut vom Druckerbildschirm (LAN-Einstellungen) und aktualisiere ihn in den Druckereinstellungen in Grove Control.',
       },
       'ftp-connection-timeout': {
         name: 'Zeitüberschreitung bei der Dateiübertragung',
-        cause: 'Bambuddy konnte den Dateiübertragungs-Port des Druckers (FTPS 990) nicht erreichen. Der Port ist blockiert, oder der Drucker ist aus oder in einem anderen Subnetz.',
-        fix: 'Stelle sicher, dass Port 990 zwischen Bambuddy und dem Drucker nicht blockiert wird und beide im selben Netzwerk sind.',
+        cause: 'Grove Control konnte den Dateiübertragungs-Port des Druckers (FTPS 990) nicht erreichen. Der Port ist blockiert, oder der Drucker ist aus oder in einem anderen Subnetz.',
+        fix: 'Stelle sicher, dass Port 990 zwischen Grove Control und dem Drucker nicht blockiert wird und beide im selben Netzwerk sind.',
       },
       'ftp-ssl-error': {
         name: 'Sicherer Dateiübertragungs-Handshake fehlgeschlagen',
@@ -5749,7 +5749,7 @@ export default {
       'database-locked': {
         name: 'Datenbank-Schreibkonflikte',
         cause: 'Die SQLite-Datenbank meldet unter Last "database is locked"-Fehler — häufig beim Betrieb mehrerer Drucker gleichzeitig.',
-        fix: 'Stelle Bambuddy auf eine externe PostgreSQL-Datenbank um. Siehe die PostgreSQL-Anleitung in der Dokumentation.',
+        fix: 'Stelle Grove Control auf eine externe PostgreSQL-Datenbank um. Siehe die PostgreSQL-Anleitung in der Dokumentation.',
       },
     },
   },
@@ -5772,7 +5772,7 @@ export default {
       },
       running: {
         title: 'Dienste laufen',
-        fail: 'Der virtuelle Drucker ist aktiviert, aber seine Dienste laufen nicht. Prüfen Sie das Bambuddy-Protokoll — meist stoppt sie ein Bind-IP-Konflikt oder ein Berechtigungsfehler.',
+        fail: 'Der virtuelle Drucker ist aktiviert, aber seine Dienste laufen nicht. Prüfen Sie das Grove Control-Protokoll — meist stoppt sie ein Bind-IP-Konflikt oder ein Berechtigungsfehler.',
       },
       bind_interface: {
         title: 'Bind-Netzwerkschnittstelle',
@@ -5801,8 +5801,8 @@ export default {
       },
       certificate: {
         title: 'TLS-Zertifikat',
-        pass: 'Zertifikat bereit. Stellen Sie sicher, dass das Bambuddy-CA-Zertifikat (oben) in den Vertrauensspeicher Ihres Slicers importiert ist.',
-        fail: 'Das TLS-Zertifikat für diesen virtuellen Drucker fehlt. Prüfen Sie, ob das Bambuddy-Datenverzeichnis beschreibbar ist.',
+        pass: 'Zertifikat bereit. Stellen Sie sicher, dass das Grove Control-CA-Zertifikat (oben) in den Vertrauensspeicher Ihres Slicers importiert ist.',
+        fail: 'Das TLS-Zertifikat für diesen virtuellen Drucker fehlt. Prüfen Sie, ob das Grove Control-Datenverzeichnis beschreibbar ist.',
       },
     },
   },
@@ -5867,7 +5867,7 @@ export default {
     pollInterval: 'Prüfintervall (Sekunden)',
     pollIntervalHint: 'Wie oft jeder Drucker während eines laufenden Drucks geprüft wird. Minimum 5 s, Maximum 120 s.',
     externalUrlMissing: 'Externe URL ist nicht gesetzt.',
-    externalUrlHint: 'Die ML-API ruft das Kamera-Snapshot per URL ab. Setze die externe URL in den allgemeinen Einstellungen, damit der ML-API-Container Bambuddy erreichen kann.',
+    externalUrlHint: 'Die ML-API ruft das Kamera-Snapshot per URL ab. Setze die externe URL in den allgemeinen Einstellungen, damit der ML-API-Container Grove Control erreichen kann.',
     perPrinterTitle: 'Überwachte Drucker',
     perPrinterHint: 'Wähle, welche Drucker vom Erkennungsdienst überwacht werden.',
     monitorAll: 'Alle verbundenen Drucker überwachen',
@@ -5882,7 +5882,7 @@ export default {
 
   makerworld: {
     title: 'MakerWorld',
-    description: 'Füge eine MakerWorld-Modell-URL ein, um es direkt aus Bambuddy zu importieren und zu drucken — ohne die Bambu Handy App zu öffnen.',
+    description: 'Füge eine MakerWorld-Modell-URL ein, um es direkt aus Grove Control zu importieren und zu drucken — ohne die Bambu Handy App zu öffnen.',
     pasteUrlHeader: 'Von MakerWorld importieren',
     pasteUrlPlaceholder: 'https://makerworld.com/de/models/… oder beliebigen MakerWorld-Link einfügen',
     resolveButton: 'Laden',
@@ -5905,7 +5905,7 @@ export default {
     alsoCompatible: 'Auch kompatibel: {{printers}}',
     importToLibrary: 'Speichern',
     sliceIn: 'Speichern & in {{slicer}} öffnen',
-    disclaimer: 'Die MakerWorld-Integration verwendet von der Community dokumentierte API-Endpunkte. Bambuddy ist nicht mit MakerWorld oder Bambu Lab verbunden oder von diesen unterstützt.',
+    disclaimer: 'Die MakerWorld-Integration verwendet von der Community dokumentierte API-Endpunkte. Grove Control ist nicht mit MakerWorld oder Bambu Lab verbunden oder von diesen unterstützt.',
     lastImportSuccess: 'In deine Bibliothek importiert',
     lastImportAlreadyInLibrary: 'Bereits in deiner Bibliothek',
     viewInLibrary: 'Im Dateimanager anzeigen',
@@ -6001,7 +6001,7 @@ export default {
     effect1: 'Passende Dateien werden in den Papierkorb verschoben — noch nicht von der Festplatte gelöscht.',
     effect2: 'Du kannst sie bis zum Ablauf der Aufbewahrungsfrist jederzeit wiederherstellen.',
     effect3: 'Nach Ablauf der Frist löscht der Papierkorb-Sweeper sie endgültig von der Festplatte.',
-    effect4: 'Dateien in externen (verknüpften) Ordnern werden übersprungen — Bambuddy löscht keine Bytes, die ihm nicht gehören.',
+    effect4: 'Dateien in externen (verknüpften) Ordnern werden übersprungen — Grove Control löscht keine Bytes, die ihm nicht gehören.',
     previewLoading: 'Prüfe, wie viele Dateien passen…',
     previewFailed: 'Vorschau konnte nicht geladen werden.',
     previewSummary: '{{count}} Dateien · {{size}} würden in den Papierkorb verschoben',

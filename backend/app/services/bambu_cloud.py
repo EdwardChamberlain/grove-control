@@ -15,12 +15,12 @@ BAMBU_API_BASE = "https://api.bambulab.com"
 BAMBU_API_BASE_CN = "https://api.bambulab.cn"
 
 # Client identity sent to Bambu Lab's cloud services. We identify honestly as
-# Bambuddy — the URL in parens makes the source unambiguous so Bambu can
+# Grove Control — the URL in parens makes the source unambiguous so Bambu can
 # distinguish our traffic from impersonators. This is the opposite of what the
 # OrcaSlicer fork was called out for in the May 2026 Bambu Lab blog post
 # ("Setting the record straight on cloud access and community"): we do not
 # introduce ourselves as official Bambu Studio.
-_USER_AGENT = "Bambuddy/1.0 (+https://github.com/maziggy/bambuddy)"
+_USER_AGENT = "Grove Control/1.0 (+https://github.com/maziggy/bambuddy)"
 
 # Cloudflare protection on Bambu Lab's edge intermittently returns interstitials /
 # challenges instead of the JSON the API normally produces (issue #1575). The
@@ -28,7 +28,7 @@ _USER_AGENT = "Bambuddy/1.0 (+https://github.com/maziggy/bambuddy)"
 # we can surface an actionable message instead of "Invalid response from Bambu Cloud".
 _CF_INTERSTITIAL_USER_MESSAGE = (
     "Bambu Cloud is temporarily blocking automated requests from your network. "
-    "This is a Cloudflare protection on Bambu Lab's side, not a Bambuddy issue. "
+    "This is a Cloudflare protection on Bambu Lab's side, not a Grove Control issue. "
     "Please wait a few minutes and try again. If it persists, signing in to "
     "bambulab.com once from a browser on the same network usually clears the "
     "challenge."
@@ -254,7 +254,7 @@ class BambuCloudService:
             # We previously sent a Chrome User-Agent plus Origin/Referer headers
             # under the assumption Cloudflare would block bot-identified
             # requests. Verified 2026-05-12 via curl that the endpoint accepts
-            # honest "Bambuddy/X.Y.Z" identification cleanly (HTTP 400 with the
+            # honest "Grove Control/X.Y.Z" identification cleanly (HTTP 400 with the
             # expected application-level "Login failed" JSON, no Cloudflare
             # interstitial). Browser-impersonation removed to stay clearly on
             # the right side of Bambu Lab's "no falsified client identity" line.

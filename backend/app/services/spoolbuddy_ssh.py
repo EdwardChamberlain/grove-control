@@ -1,7 +1,7 @@
 """SSH-based update service for SpoolBuddy devices.
 
 Instead of the daemon updating itself (fragile: permission issues, self-modifying
-code, hardcoded branch), Bambuddy SSHes into the SpoolBuddy Pi and drives the
+code, hardcoded branch), Grove Control SSHes into the SpoolBuddy Pi and drives the
 update remotely: git fetch/checkout, pip install, systemctl restart.
 
 Uses `asyncssh` (pure-Python async SSH client) rather than shelling out to the
@@ -99,7 +99,7 @@ async def get_public_key() -> str:
 
 
 def detect_current_branch() -> str:
-    """Detect the git branch Bambuddy is running on.
+    """Detect the git branch Grove Control is running on.
 
     Reads `.git/HEAD` directly from the application root (``_APP_DIR``) rather
     than shelling out to `git`. The application root is deliberately distinct
@@ -189,7 +189,7 @@ async def _run_ssh_command(
 
 
 async def perform_ssh_update(device_id: str, ip_address: str, install_path: str | None = None) -> None:
-    """SSH into a SpoolBuddy device and update it to match Bambuddy's branch.
+    """SSH into a SpoolBuddy device and update it to match Grove Control's branch.
 
     Updates device.update_status/update_message in the DB and broadcasts
     progress via WebSocket at each step.  Host key verification uses TOFU:

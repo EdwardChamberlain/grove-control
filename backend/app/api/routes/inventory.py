@@ -773,12 +773,12 @@ async def sync_from_filamentcolors(
         total_available = 0
 
         try:
-            # Identify honestly as Bambuddy rather than leaking httpx's
+            # Identify honestly as Grove Control rather than leaking httpx's
             # default "python-httpx/x.y" UA — consistent with every other
             # outbound client (bambu_cloud, makerworld, firmware_check).
             async with httpx.AsyncClient(
                 timeout=120.0,
-                headers={"User-Agent": "Bambuddy/1.0 (+https://github.com/maziggy/bambuddy)"},
+                headers={"User-Agent": "Grove Control/1.0 (+https://github.com/maziggy/bambuddy)"},
             ) as client:
                 page = 1
                 while True:

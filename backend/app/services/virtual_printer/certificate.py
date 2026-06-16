@@ -90,7 +90,7 @@ class CertificateService:
         is broken even though both files exist on disk. ``ensure_certificates``
         uses this to decide whether to regenerate.
 
-        Uses real signature verification — Bambuddy's auto-generated CAs all
+        Uses real signature verification — Grove Control's auto-generated CAs all
         share the same Subject DN ("Virtual Printer CA"), so a DN-only compare
         would incorrectly return True even after rotation.
         """

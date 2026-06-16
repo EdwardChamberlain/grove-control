@@ -556,7 +556,7 @@ class VirtualPrinterInstance:
                         return bool(slicer_opts[field_mqtt])
                     return settings_default
 
-                # Note the MQTT field names differ from Bambuddy's column
+                # Note the MQTT field names differ from Grove Control's column
                 # names: MQTT uses `bed_leveling` (single L) while the
                 # column / settings key use `bed_levelling` (double L).
                 bed_levelling = _slicer_or(
@@ -1350,7 +1350,7 @@ class VirtualPrinterManager:
             "enabled": False,
             "running": False,
             "mode": VP_MODE_ARCHIVE,
-            "name": "Bambuddy",
+            "name": "Grove Control",
             "serial": "",
             "model": DEFAULT_VIRTUAL_PRINTER_MODEL,
             "model_name": VIRTUAL_PRINTER_MODELS[DEFAULT_VIRTUAL_PRINTER_MODEL],

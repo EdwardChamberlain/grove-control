@@ -1,6 +1,6 @@
-# Contributing to Bambuddy
+# Contributing to Grove Control
 
-Thank you for your interest in contributing to Bambuddy! This document provides guidelines and instructions for contributing.
+Thank you for your interest in contributing to Grove Control! This document provides guidelines and instructions for contributing.
 
 ## Table of Contents
 
@@ -259,7 +259,7 @@ function MyComponent() {
 
 ## Authentication & Permissions
 
-Bambuddy has an optional authentication system. When auth is enabled, API endpoints are protected by granular permissions.
+Grove Control has an optional authentication system. When auth is enabled, API endpoints are protected by granular permissions.
 
 ### How It Works
 
@@ -412,4 +412,4 @@ Use the [Feature Request template](https://github.com/maziggy/bambuddy/issues/ne
 
 ---
 
-Thank you for contributing to Bambuddy!
+Thank you for contributing to Grove Control!

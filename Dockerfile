@@ -32,7 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install the Tailscale CLI only (no tailscaled — the daemon runs on the host).
-# Bambuddy calls `tailscale status` / `tailscale cert` via the host's socket,
+# Grove Control calls `tailscale status` / `tailscale cert` via the host's socket,
 # which the user mounts in via docker-compose when they want to enable the
 # Tailscale integration for virtual printers. Without the socket mount, the
 # binary is harmless — the code logs a hint and falls back to self-signed.
@@ -66,13 +66,13 @@ COPY backend/ ./backend/
 # flow reads at runtime via detect_current_branch() in spoolbuddy_ssh.py.
 # Without this, the production image has no git metadata at all and would
 # always pull `main` on the remote device regardless of which branch
-# Bambuddy itself was built from.
+# Grove Control itself was built from.
 COPY .git/HEAD ./.git/HEAD
 
 # Copy built frontend from builder stage
 COPY --from=frontend-builder /app/static ./static
 
-# Copy embedded GCode viewer static assets (PrettyGCode + Bambuddy adapter).
+# Copy embedded GCode viewer static assets (PrettyGCode + Grove Control adapter).
 # Served by the explicit @app.get("/gcode-viewer/{...}") routes in main.py,
 # which resolve files under (static_dir.parent / "gcode_viewer") = /app/gcode_viewer/.
 # Without this COPY the routes return a bare 404 at request time and the 3D

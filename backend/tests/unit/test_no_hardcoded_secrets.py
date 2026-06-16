@@ -4,7 +4,7 @@ The first half of GHSA-gc24-px2r-5qmf (CVSS 9.8) was a literal
 ``bambuddy-secret-key-change-in-production`` string used as the JWT
 signing key when ``JWT_SECRET_KEY`` was unset. Production Docker images
 shipped with that exact string — meaning anyone who pulled the image
-could forge admin tokens for any Bambuddy instance running unmodified.
+could forge admin tokens for any Grove Control instance running unmodified.
 
 This test walks every source file in ``backend/app/`` at parse time and
 flags string literals that look like credential fallbacks. It is

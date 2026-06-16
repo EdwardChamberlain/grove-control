@@ -871,7 +871,7 @@ async def get_printer_cover(
         raise HTTPException(404, f"No subtask_name in printer state (state={state.state})")
 
     # Resolve the active plate. Precedence (#1166):
-    #   1. The plate Bambuddy dispatched (authoritative when we sent the print)
+    #   1. The plate Grove Control dispatched (authoritative when we sent the print)
     #   2. plate_(\d+)\.gcode regex on state.gcode_file (works on firmware that
     #      reflects the full path, e.g. some X1C builds)
     #   3. Scan the downloaded 3MF for a unique Metadata/plate_*.gcode (covers

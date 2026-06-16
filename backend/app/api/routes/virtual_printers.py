@@ -31,7 +31,7 @@ class TailscaleStatusResponse(BaseModel):
 
 
 class VirtualPrinterCreate(BaseModel):
-    name: str = "Bambuddy"
+    name: str = "Grove Control"
     enabled: bool = False
     mode: str = "archive"
     model: str | None = None

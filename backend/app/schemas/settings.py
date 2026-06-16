@@ -11,7 +11,7 @@ class AppSettings(BaseModel):
     capture_finish_photo: bool = Field(
         default=True,
         description=(
-            "Capture photo from printer camera when print completes. Bambuddy records a "
+            "Capture photo from printer camera when print completes. Grove Control records a "
             "brief timelapse during the print so the photo can be sourced from the moment "
             "before the bed drops; the timelapse file is kept if you enabled timelapse for "
             "this print, otherwise it is deleted automatically after the photo is captured."
@@ -156,7 +156,7 @@ class AppSettings(BaseModel):
 
     # External URL for notifications
     external_url: str = Field(
-        default="", description="External URL where Bambuddy is accessible (for notification images)"
+        default="", description="External URL where Grove Control is accessible (for notification images)"
     )
 
     # Home Assistant integration for smart plug control
@@ -207,7 +207,7 @@ class AppSettings(BaseModel):
     # Slicer dispatch mode: when True, "Slice" actions open the in-app
     # SliceModal and call the slicer-API sidecar. When False (default), they
     # hand off to the user's local desktop slicer via URI scheme — preserving
-    # the original Bambuddy behavior for users who don't run a sidecar.
+    # the original Grove Control behavior for users who don't run a sidecar.
     use_slicer_api: bool = Field(
         default=False,
         description="Use the slicer-API sidecar for slicing instead of the desktop slicer URI scheme",

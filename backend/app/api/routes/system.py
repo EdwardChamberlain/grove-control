@@ -586,7 +586,7 @@ async def get_storage_usage(
     max_age_seconds: int = STORAGE_USAGE_CACHE_SECONDS,
     _: User | None = RequirePermissionIfAuthEnabled(Permission.SYSTEM_READ),
 ):
-    """Get storage usage breakdown for Bambuddy data directories."""
+    """Get storage usage breakdown for Grove Control data directories."""
     max_age_seconds = max(0, min(max_age_seconds, 3600))
     return await _get_storage_usage_cached(refresh=refresh, max_age_seconds=max_age_seconds)
 

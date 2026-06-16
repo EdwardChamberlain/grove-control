@@ -1,6 +1,6 @@
 """Log-health scanner.
 
-Matches the recent Bambuddy app log against a curated catalog of known failure
+Matches the recent Grove Control app log against a curated catalog of known failure
 signatures, so users can self-diagnose setup ("layer 8") issues before filing a
 bug report.
 

@@ -1,8 +1,8 @@
-"""Build script for the Bambuddy Windows installer.
+"""Build script for the Grove Control Windows installer.
 
 Stages all artifacts under ``installers/windows/build/staging/`` for the
 Inno Setup compiler to package. Run this on Windows (or in a Windows CI
-runner) — it pip-installs Bambuddy's deps against the embedded Python it
+runner) — it pip-installs Grove Control's deps against the embedded Python it
 downloads, which requires the matching platform.
 
 Steps:
@@ -123,7 +123,7 @@ def stage_embedded_python() -> Path:
     # Install setuptools + wheel. The embedded distribution ships without
     # them, and get-pip.py installs only pip — but pip needs
     # ``setuptools.build_meta`` (PEP 517 backend) to build any source-only
-    # package. Bambuddy's requirements.txt hits this with pyftpdlib 2.2.0
+    # package. Grove Control's requirements.txt hits this with pyftpdlib 2.2.0
     # which is sdist-only on PyPI; other source-only packages would fail
     # the same way without this step.
     log("installing setuptools + wheel for PEP 517 builds")
@@ -144,7 +144,7 @@ def stage_embedded_python() -> Path:
 
 
 def install_requirements(python_dir: Path) -> None:
-    """Install Bambuddy's requirements.txt into the embedded Python."""
+    """Install Grove Control's requirements.txt into the embedded Python."""
     py = python_dir / "python.exe"
     requirements = REPO_ROOT / "requirements.txt"
     log(f"installing requirements.txt into {python_dir}")
@@ -187,7 +187,7 @@ def build_frontend() -> Path:
 def stage_backend(frontend_dist: Path) -> None:
     """Copy backend source + frontend bundle into the staging tree.
 
-    The runtime layout under STAGING/app/ mirrors a Bambuddy checkout:
+    The runtime layout under STAGING/app/ mirrors a Grove Control checkout:
     ``backend/`` (source), ``static/`` (frontend bundle served by FastAPI).
     """
     app = STAGING / "app"
@@ -270,7 +270,7 @@ def stage_service_scripts() -> None:
 
 def _read_app_version() -> str:
     """Read APP_VERSION from backend/app/core/config.py (the canonical
-    source used by every other Bambuddy surface — FastAPI OpenAPI title,
+    source used by every other Grove Control surface — FastAPI OpenAPI title,
     /system info, support bundles, spoolbuddy update check).
     """
     config_py = REPO_ROOT / "backend" / "app" / "core" / "config.py"
@@ -350,7 +350,7 @@ def main() -> int:
         log("ERROR: this build script must run on Windows.")
         log("")
         log("It downloads a Windows embeddable Python distribution and")
-        log("pip-installs Bambuddy's requirements.txt against it — both")
+        log("pip-installs Grove Control's requirements.txt against it — both")
         log("require executing python.exe, which only runs on Windows.")
         log("")
         log("Supported build paths:")

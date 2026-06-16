@@ -184,7 +184,7 @@ describe('SettingsPage', () => {
       });
     });
 
-    it('hides a Bambuddy sidebar page from Sidebar', async () => {
+    it('hides a Grove Control sidebar page from Sidebar', async () => {
       const user = userEvent.setup();
       render(<SettingsPage />);
 
@@ -198,7 +198,7 @@ describe('SettingsPage', () => {
       expect(screen.getByText('Hidden from sidebar')).toBeInTheDocument();
     });
 
-    it('shows a previously hidden Bambuddy sidebar page from Sidebar', async () => {
+    it('shows a previously hidden Grove Control sidebar page from Sidebar', async () => {
       vi.mocked(localStorage.getItem).mockImplementation((key) => {
         if (key === SIDEBAR_HIDDEN_SYSTEM_ITEMS_KEY) return JSON.stringify(['printers']);
         return null;
@@ -228,7 +228,7 @@ describe('SettingsPage', () => {
       expect(screen.getByText('Required in sidebar')).toBeInTheDocument();
     });
 
-    it('presents external links and Bambuddy pages in saved sidebar order', async () => {
+    it('presents external links and Grove Control pages in saved sidebar order', async () => {
       vi.mocked(localStorage.getItem).mockImplementation((key) => {
         if (key === SIDEBAR_ORDER_KEY) return JSON.stringify(['ext-7', 'printers', 'settings']);
         return null;

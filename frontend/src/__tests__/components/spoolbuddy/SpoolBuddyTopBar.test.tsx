@@ -52,7 +52,7 @@ describe('SpoolBuddyTopBar', () => {
     renderTopBar();
     const img = screen.getByAltText('SpoolBuddy');
     expect(img).toBeDefined();
-    expect(img.getAttribute('src')).toBe('/img/spoolbuddy_logo_dark_small.png');
+    expect(img.getAttribute('src')).toBe('/img/grove_control_spoolbuddy_logo_dark_small.png');
   });
 
   it('renders the printer selector', () => {

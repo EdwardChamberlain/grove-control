@@ -52,9 +52,9 @@ services:
     # → ~60 processes → ~210 MB instead.
     #
     # Bridge mode is the normal setup for any Linux host that runs
-    # Bambuddy alongside other services (NAS, multi-tenant Docker VM,
+    # Grove Control alongside other services (NAS, multi-tenant Docker VM,
     # Synology DSM, Unraid) — `network_mode: host` would conflict with
-    # ports those other services already bind. Bambuddy uses host mode by
+    # ports those other services already bind. Grove Control uses host mode by
     # default because SSDP printer discovery needs L2 multicast, but it's
     # a deliberate trade-off, not a security-blind default; setups that
     # forgo discovery (add printers by IP) can stay on bridge with the
@@ -63,7 +63,7 @@ services:
       - bambuddy_data:/app/data
       - bambuddy_logs:/app/logs
       #
-      # OPTIONAL — only needed if you ALSO run a native install of Bambuddy
+      # OPTIONAL — only needed if you ALSO run a native install of Grove Control
       # on the same host and want both installs to share the same Virtual
       # Printer CA certificate (so the slicer only has to trust one CA).
       # Most Docker-only users should leave this commented out — the
@@ -78,20 +78,20 @@ services:
       #- /path/to/nas/bambuddy-backups:/app/data/backups
       #
       # Tailscale integration (optional): mount the host's tailscaled socket
-      # so Bambuddy can request Let's Encrypt certs for virtual printers via
+      # so Grove Control can request Let's Encrypt certs for virtual printers via
       # your tailnet's MagicDNS name. Requires:
       #   1. Tailscale installed + `tailscale up` completed on the host
       #   2. `sudo tailscale set --operator=<container-user>` on the host so
       #      the user running the container can call `tailscale cert`
       # Without this mount, the Tailscale toggle in the UI is harmless —
-      # Bambuddy falls back to self-signed certs.
+      # Grove Control falls back to self-signed certs.
       #- /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock
       #
       # Using a self signed certificate for Home Assistant
       # Add your certificate to certs directory and mount it to the container.
       # The certificate will be added to the system trust store on container startup.
       # Enable the system trust store with the USE_SYSTEM_TRUST_STORE env var to
-      # have Bambuddy trust the certificate.
+      # have Grove Control trust the certificate.
       # - /path/to/certs:/usr/local/share/ca-certificates
       #
       # External library folders. Mount the host paths the operator wants
@@ -149,7 +149,7 @@ services:
     restart: unless-stopped
 
   # Optional: External PostgreSQL database
-  # Uncomment to run Postgres alongside Bambuddy (or use an external Postgres host)
+  # Uncomment to run Postgres alongside Grove Control (or use an external Postgres host)
   #postgres:
   #  image: postgres:16-alpine
   #  container_name: bambuddy-db

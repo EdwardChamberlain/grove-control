@@ -1,19 +1,19 @@
 /**
  * bambuddy_adapter.js
- * Bridges OctoPrint-PrettyGCode to Bambuddy's API.
+ * Bridges OctoPrint-PrettyGCode to Grove Control's API.
  *
  * Load this BEFORE prettygcode.js. It provides:
  *   - OCTOPRINT_VIEWMODELS shim
  *   - Minimal KnockoutJS observable shim (ko.observable)
  *   - fetch() + XHR interceptors for path rewriting
- *   - Bambuddy WebSocket → fromCurrentData bridge
- *   - File picker backed by Bambuddy's library API
+ *   - Grove Control WebSocket → fromCurrentData bridge
+ *   - File picker backed by Grove Control's library API
  *   - Settings load/save via plugin settings endpoint
  *
  * What works:
  *   - Full 3D GCode visualisation
  *   - Dark mode and all dat.GUI settings
- *   - File selection from Bambuddy's file library
+ *   - File selection from Grove Control's file library
  *   - Print progress highlight (% based)
  *   - Auto-load currently printing file
  *
@@ -146,7 +146,7 @@
     var fakeControl = {};
 
     // -------------------------------------------------------------------------
-    // 4. fetch() interceptor — rewrite OctoPrint paths to Bambuddy
+    // 4. fetch() interceptor — rewrite OctoPrint paths to Grove Control
     // -------------------------------------------------------------------------
     var _originalFetch = window.fetch.bind(window);
     window.fetch = function (resource, init) {
@@ -165,22 +165,22 @@
 
             var newPath = path;
 
-            // OctoPrint file download  →  Bambuddy library download
+            // OctoPrint file download  →  Grove Control library download
             newPath = newPath.replace(
                 /^\/?downloads\/files\/local\/__bambuddy_file_(\d+)$/,
                 API_BASE + '/library/files/$1/download'
             );
-            // OctoPrint file download  →  Bambuddy archive gcode (specific plate)
+            // OctoPrint file download  →  Grove Control archive gcode (specific plate)
             newPath = newPath.replace(
                 /^\/?downloads\/files\/local\/__bambuddy_archive_(\d+)_plate(\d+)$/,
                 API_BASE + '/archives/$1/gcode?plate=$2'
             );
-            // OctoPrint file download  →  Bambuddy archive gcode (first plate)
+            // OctoPrint file download  →  Grove Control archive gcode (first plate)
             newPath = newPath.replace(
                 /^\/?downloads\/files\/local\/__bambuddy_archive_(\d+)$/,
                 API_BASE + '/archives/$1/gcode'
             );
-            // OctoPrint file download  →  Bambuddy library file gcode
+            // OctoPrint file download  →  Grove Control library file gcode
             // (sliced LibraryFile — extracts embedded gcode from .gcode.3mf
             // or returns plain .gcode). Plate is ignored upstream for now.
             newPath = newPath.replace(
@@ -198,7 +198,7 @@
                 resource = url; // always pass as string after rewriting
             }
 
-            // Inject auth header for all Bambuddy API calls
+            // Inject auth header for all Grove Control API calls
             if (url.startsWith(API_BASE)) {
                 var hdrs = authHeaders();
                 init = init || {};
@@ -510,7 +510,7 @@
             }
         }
 
-        console.log('[PrettyGCode] Bambuddy adapter initialised');
+        console.log('[PrettyGCode] Grove Control adapter initialised');
 
         // Wire up playback controls
         var playBtn = document.getElementById('bb-play-btn');
@@ -637,7 +637,7 @@
     // -------------------------------------------------------------------------
     // Public API
     // -------------------------------------------------------------------------
-    window.BambuddyPrettyGCode = {
+    window.GroveControlPrettyGCode = {
         loadArchive: loadArchiveById,
         loadLibraryFile: loadLibraryFileById,
         getViewModel: function () { return viewModel; },

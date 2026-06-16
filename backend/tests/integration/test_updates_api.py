@@ -186,7 +186,7 @@ class TestUpdatesAPI:
         """#1420: once GitHub returns 403 with X-RateLimit-Remaining=0, the
         next call must short-circuit on the backoff window instead of hitting
         api.github.com again. Otherwise the user's logs flood with rate-limit
-        errors and Bambuddy keeps adding to whatever throttle GitHub applies."""
+        errors and Grove Control keeps adding to whatever throttle GitHub applies."""
         import time
 
         import httpx as _httpx

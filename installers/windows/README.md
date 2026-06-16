@@ -1,14 +1,14 @@
-# Bambuddy Windows Installer
+# Grove Control Windows Installer
 
-Builds a self-contained Windows installer (`.exe`) for Bambuddy: embedded
+Builds a self-contained Windows installer (`.exe`) for Grove Control: embedded
 Python 3.13 distribution + pre-built frontend + NSSM-supervised Windows
 service. No Python or Node installation required on the target machine.
 
 ## Architecture
 
-- **Install target:** `C:\Program Files\Bambuddy\`
-- **Data target:** `C:\ProgramData\Bambuddy\data\` (preserved on uninstall by default)
-- **Logs target:** `C:\ProgramData\Bambuddy\logs\`
+- **Install target:** `C:\Program Files\Grove Control\`
+- **Data target:** `C:\ProgramData\Grove Control\data\` (preserved on uninstall by default)
+- **Logs target:** `C:\ProgramData\Grove Control\logs\`
 - **Service:** registered via NSSM, runs as `LocalSystem`, autostart on boot
 - **Service command:** `python.exe -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000`
 - **Bundled binaries:** Python 3.13 embeddable, NSSM, ffmpeg static build
@@ -22,7 +22,7 @@ version: PowerShell install scripts can't survive environmental drift
 across the Windows host fleet, so we ship a self-contained bundle that
 depends on nothing on the host. Inno Setup + embedded Python is the
 lowest-maintenance path that delivers native-app UX. No Tauri/Electron
-launcher in v1 — browser-as-UI matches every other Bambuddy platform.
+launcher in v1 — browser-as-UI matches every other Grove Control platform.
 
 ## Build prerequisites
 
@@ -74,7 +74,7 @@ as a release asset.
   ports, but the user's Windows Firewall will prompt on first VP enable.
   Documenting this is TBD.
 - **Spoolman:** explicitly NOT bundled in v1. Users who want Spoolman
-  install it separately. Bambuddy internal-inventory mode is the default
+  install it separately. Grove Control internal-inventory mode is the default
   on Windows.
 - **Bundle size:** estimated 250–350MB installed (mostly opencv +
   ffmpeg + matplotlib). Acceptable for a v1; can investigate slimming

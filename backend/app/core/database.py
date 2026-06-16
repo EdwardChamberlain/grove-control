@@ -1725,7 +1725,7 @@ async def run_migrations(conn):
                                  NULL, :remote_iface, '391800001', 0)
                         """),
                         {
-                            "name": "Bambuddy",
+                            "name": "Grove Control",
                             "enabled": old_enabled,
                             "mode": old_mode or "archive",
                             "model": old_model,
@@ -2172,7 +2172,7 @@ async def run_migrations(conn):
     )
 
     # Migration: Add bambuddy_forced_timelapse to print_archives (#1397)
-    # Tracks prints where Bambuddy forced the firmware to record a timelapse
+    # Tracks prints where Grove Control forced the firmware to record a timelapse
     # so the finish-photo extractor could pull the post-park-pre-drop frame.
     # The cleanup path uses this to delete the timelapse both locally and on
     # the printer's SD after extraction — the user didn't opt in to a

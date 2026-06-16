@@ -812,9 +812,9 @@ async def apply_update(
             "is_ha_addon": True,
             "is_docker": True,
             "message": (
-                "Bambuddy is running as a Home Assistant addon. "
+                "Grove Control is running as a Home Assistant addon. "
                 "Updates are managed by the Home Assistant Supervisor "
-                "(Settings → Add-ons → Bambuddy → Update)."
+                "(Settings → Add-ons → Grove Control → Update)."
             ),
         }
     if _is_docker_environment():

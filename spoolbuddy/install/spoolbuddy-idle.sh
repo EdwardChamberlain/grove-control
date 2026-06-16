@@ -3,7 +3,7 @@
 #
 # Powers the HDMI output off via wlopm after the configured inactivity
 # timeout, driven by swayidle inside the labwc Wayland session. The timeout
-# value is fetched once from the Bambuddy backend on startup so it matches
+# value is fetched once from the Grove Control backend on startup so it matches
 # whatever the user picked in SpoolBuddy Settings → Display.
 #
 # Changes made in the UI are applied live: the daemon writes a

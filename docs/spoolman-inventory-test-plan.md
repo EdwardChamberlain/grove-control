@@ -14,7 +14,7 @@
 3. **Section F — Final state diff.** Run only once, after Pass 2 completes.
 
 A few ground rules for both passes:
-- **The "Verify (slicer)" steps are MANDATORY** — see [How to verify in the slicer](#how-to-verify-in-the-slicer) below for the exact protocol. Most testers skip these. Don't. The slicer is the only place that proves AMS slot config actually applied — Bambuddy's UI can show a green checkmark while the printer's calibration table is unchanged.
+- **The "Verify (slicer)" steps are MANDATORY** — see [How to verify in the slicer](#how-to-verify-in-the-slicer) below for the exact protocol. Most testers skip these. Don't. The slicer is the only place that proves AMS slot config actually applied — Grove Control's UI can show a green checkmark while the printer's calibration table is unchanged.
 - **Mark each row P (pass) / F (fail) / B (blocked)**. For F/B, paste a one-line note + screenshot link.
 - **Stop and file a bug** the moment you hit an F. Don't keep going on a broken path — downstream results become noise.
 - **Do not flip Spoolman on/off mid-pass.** If you accidentally do, restart the current pass.
@@ -23,11 +23,11 @@ A few ground rules for both passes:
 
 ## How to verify in the slicer
 
-Whenever a row says **Verify (slicer)**, do this — it is the only way to catch silent failures where Bambuddy's UI says "applied" but the printer's calibration table never changed.
+Whenever a row says **Verify (slicer)**, do this — it is the only way to catch silent failures where Grove Control's UI says "applied" but the printer's calibration table never changed.
 
 ### Pick OrcaSlicer over BambuStudio
 
-> **BambuStudio has a known bug**: the printer's AMS panel will not show custom (user / cloud) flow-dynamics profiles **unless** you have first visited *Calibration → Flow Dynamics → Manage Results* at least once in this BambuStudio session. Without that step, the AMS panel silently falls back to "Default" even when the printer actually has the right cali_idx applied — making it impossible to tell whether Bambuddy did its job or not.
+> **BambuStudio has a known bug**: the printer's AMS panel will not show custom (user / cloud) flow-dynamics profiles **unless** you have first visited *Calibration → Flow Dynamics → Manage Results* at least once in this BambuStudio session. Without that step, the AMS panel silently falls back to "Default" even when the printer actually has the right cali_idx applied — making it impossible to tell whether Grove Control did its job or not.
 >
 > **Use OrcaSlicer for these checks whenever possible.** OrcaSlicer's AMS panel reads the printer's calibration table directly and does not have this caveat.
 >
@@ -44,7 +44,7 @@ For each "Verify (slicer)" step:
    - **a) Filament preset name** — must match the spool's `slicer_filament_name` (or for cloud presets, the cloud preset name). Must **not** be "Default" or a fallback like "Generic PLA". Take a screenshot if it looks wrong before troubleshooting — race conditions are real.
    - **b) K-profile (Flow Dynamics) selection** — must match the K-profile you assigned (by name or slot index). For "no stored K-profile" tests, the live cali_idx the slot already had should be preserved.
    - **c) Re-open the modal** — close it and click the slot again. The values from (a) and (b) must persist. Flicker-to-Default or flicker-to-blank counts as a fail.
-5. If ANY of (a)/(b)/(c) is wrong, the row is a fail — even if Bambuddy's own UI looks correct.
+5. If ANY of (a)/(b)/(c) is wrong, the row is a fail — even if Grove Control's own UI looks correct.
 
 ### Test both Bambu Lab and non-Bambu Lab spools
 
@@ -62,7 +62,7 @@ Within each section (B and C in particular), do the row once with the Bambu spoo
 ## Pre-flight setup
 
 ### Required environment
-- [ ] Bambuddy running, either built from branch `feature/spoolman-inventory-ui` **or** pulled from docker image `bambuddy:spoolman-test_20260505`
+- [ ] Grove Control running, either built from branch `feature/spoolman-inventory-ui` **or** pulled from docker image `bambuddy:spoolman-test_20260505`
 - [ ] At least **two** Bambu Lab printers connected (single-printer setups miss multi-printer assignment bugs)
 - [ ] At least **one printer with a multi-AMS configuration** (dual AMS / AMS HT) — single-AMS users miss "wrong-AMS" routing
 - [ ] **OrcaSlicer** (preferred) installed on a machine that can reach the printers. BambuStudio acceptable but see the bug warning under [How to verify in the slicer](#how-to-verify-in-the-slicer).
@@ -81,7 +81,7 @@ You need physical spools of **both** kinds available for AMS-config tests in Sec
 Take a snapshot so you can tell whether something changed unexpectedly:
 
 ```bash
-# from your Bambuddy admin shell, or via the API:
+# from your Grove Control admin shell, or via the API:
 curl -s ${BAMBUDDY_URL}/api/v1/inventory/spools | jq 'length'
 curl -s ${BAMBUDDY_URL}/api/v1/inventory/assignments | jq 'length'
 curl -s ${BAMBUDDY_URL}/api/v1/spoolman/inventory/spools | jq 'length'   # spoolman mode
@@ -216,7 +216,7 @@ These tests exercise the AMS slot UI, the AssignSpoolModal, and the ConfigureAms
 
 ### B3. Assign spool to an **empty** AMS slot (deferral / SpoolBuddy primary workflow)
 
-> Empty slot = printer reports `tray_type=""`. Bambu firmware silently drops MQTT for these, so Bambuddy persists the assignment and replays MQTT when the spool is physically inserted.
+> Empty slot = printer reports `tray_type=""`. Bambu firmware silently drops MQTT for these, so Grove Control persists the assignment and replays MQTT when the spool is physically inserted.
 
 | # | Step | Verify (UI) | **Verify (slicer)** | Verify (DB) | Pass 1 (Local) | Pass 2 (Spoolman) |
 |---|---|---|---|---|---|---|
@@ -362,11 +362,11 @@ Run this **once** after Pass 2 completes (i.e. after both passes are done). Re-r
 For each F row, please post a comment on issue **TBD** with:
 - The row number (e.g. **B2.4**)
 - One-line description of what you observed vs expected
-- Bambuddy version (`/api/v1/version`)
+- Grove Control version (`/api/v1/version`)
 - Printer model + firmware
 - Slicer + version
 - A screenshot of the slicer's slot detail modal (for any B/C section failure)
-- Bambuddy logs from the relevant 60s window (`docker logs bambuddy --since 1m`)
+- Grove Control logs from the relevant 60s window (`docker logs bambuddy --since 1m`)
 
 ---
 
