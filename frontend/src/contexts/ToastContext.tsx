@@ -490,10 +490,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={{ showToast, showPersistentToast, dismissToast, setViewportSuppressed }}>
       {children}
 
-      {/* Toast Container — to the left of the bug-report bubble (bottom-4 right-4 w-12).
-          The kiosk layout suppresses this entire viewport so SpoolBuddy displays stay
+      {/* The kiosk layout suppresses this entire viewport so SpoolBuddy displays stay
           free of main-app notifications. */}
-      <div className={`fixed bottom-4 right-20 z-[60] flex flex-col items-end gap-2 ${viewportSuppressed ? 'hidden' : ''}`}>
+      <div className={`fixed bottom-4 right-4 z-[60] flex flex-col items-end gap-2 ${viewportSuppressed ? 'hidden' : ''}`}>
         {toasts.map((toast) => (
           <div
             key={toast.id}

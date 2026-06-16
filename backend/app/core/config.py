@@ -8,7 +8,6 @@ from pydantic_settings import BaseSettings
 # Application version - single source of truth
 APP_VERSION = "0.2.4.7"
 GITHUB_REPO = "maziggy/bambuddy"
-BUG_REPORT_RELAY_URL = os.environ.get("BUG_REPORT_RELAY_URL", "https://bambuddy.cool/api/bug-report")
 
 # App directory - where the application is installed (for static files)
 _app_dir = Path(__file__).resolve().parent.parent.parent.parent
@@ -110,7 +109,6 @@ _INTENTIONAL_UNSETTINGS = {
     "DATABASE_URL",  # config.py (above)
     "LOG_DIR",  # config.py (above)
     "LOG_LEVEL",  # main.py logging setup
-    "BUG_REPORT_RELAY_URL",  # config.py (above)
 }
 
 _known_settings_fields = {f.upper() for f in settings.model_fields}

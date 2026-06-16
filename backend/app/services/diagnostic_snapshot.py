@@ -1,10 +1,9 @@
 """Aggregate connection, virtual-printer, and log-health diagnostics into a
-single snapshot for the support bundle and bug-report submission paths.
+single snapshot for support bundles.
 
-Each user-triggered support artifact (the System-page support ZIP and the
-bug-report bubble) already exposed these three checks inline in the UI but
-omitted them from what landed in the maintainer's hands. This module is the
-single entry point both flows call to capture all three at once.
+The System-page support ZIP exposes these checks inline in the UI and persists
+the same snapshot into the generated bundle. This module is the single entry
+point for capturing all three diagnostics at once.
 
 Designed around three constraints:
 

@@ -973,7 +973,7 @@ class TestAMSDataMerging:
         # tray_exist_bits goes from 0x13 -> 0x11, but firmware still reports
         # power_on_flag=False because the printer is between prints. The real
         # push_status payloads on the affected X1C still carry the full `ams`
-        # list (matches the bug-report log) — the slot inventory shrinks via
+        # list (matches the captured support log) — the slot inventory shrinks via
         # the bitfield rather than via per-tray content updates.
         removal_ams = {
             "ams": [

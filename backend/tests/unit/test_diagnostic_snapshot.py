@@ -1,6 +1,5 @@
 """Tests for the diagnostic snapshot helper that aggregates connection,
-virtual-printer, and log-health diagnostics for the support bundle and
-bug-report submission paths (#1506 follow-up).
+virtual-printer, and log-health diagnostics for the support bundle.
 
 The helper has three hard requirements:
 
