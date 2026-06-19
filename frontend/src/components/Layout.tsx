@@ -451,7 +451,7 @@ export function Layout() {
         <header className="fixed top-0 left-0 right-0 z-40 h-14 bg-bambu-dark-secondary border-b border-bambu-dark-tertiary flex items-center px-4">
           <button
             onClick={() => setMobileDrawerOpen(true)}
-            className="p-2 -ml-2 rounded-lg hover:bg-bambu-dark-tertiary transition-colors"
+            className="relative z-10 p-2 -ml-2 rounded-lg hover:bg-bambu-dark-tertiary transition-colors"
             aria-label="Open menu"
           >
             <Menu className="w-6 h-6 text-white" />
@@ -459,7 +459,7 @@ export function Layout() {
           <img
             src={resolvedMode === 'dark' ? '/img/grove_control_logo_dark_transparent.png' : '/img/grove_control_logo_light.png'}
             alt="Grove Control"
-            className="h-8 ml-3"
+            className="absolute left-1/2 h-8 -translate-x-1/2"
           />
         </header>
       )}
