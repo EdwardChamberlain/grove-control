@@ -451,7 +451,7 @@ export function Layout() {
         <header className="fixed top-0 left-0 right-0 z-40 h-14 bg-bambu-dark-secondary border-b border-bambu-dark-tertiary flex items-center px-4">
           <button
             onClick={() => setMobileDrawerOpen(true)}
-            className="relative z-10 p-2 -ml-2 rounded-lg hover:bg-bambu-dark-tertiary transition-colors"
+            className="relative z-10 p-2 -ml-2 rounded-lg hover:bg-bambu-dark-tertiary active:scale-95 transition-[background-color,transform] duration-150"
             aria-label="Open menu"
           >
             <Menu className="w-6 h-6 text-white" />
@@ -465,20 +465,28 @@ export function Layout() {
       )}
 
       {/* Compact Drawer Backdrop */}
-      {isSidebarCompact && mobileDrawerOpen && (
+      {isSidebarCompact && (
         <div
-          className="fixed inset-0 bg-black/60 z-40 transition-opacity"
+          className={`fixed inset-0 z-40 bg-black/60 transition-opacity duration-300 ease-out ${
+            mobileDrawerOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
+          }`}
           onClick={() => setMobileDrawerOpen(false)}
+          aria-hidden="true"
         />
       )}
 
       {/* Sidebar / Mobile Drawer */}
       <aside
-        className={`bg-bambu-dark-secondary border-r border-bambu-dark-tertiary flex flex-col transition-all duration-300 ${
+        className={`bg-bambu-dark-secondary border-r border-bambu-dark-tertiary flex flex-col ${
           isSidebarCompact
-            ? `fixed inset-y-0 left-0 z-50 w-72 transform ${mobileDrawerOpen ? 'translate-x-0' : '-translate-x-full'}`
-            : `fixed inset-y-0 left-0 z-30 ${sidebarExpanded ? 'w-64' : 'w-16'}`
+            ? 'fixed inset-y-0 left-0 z-50 w-72 transform-gpu shadow-2xl'
+            : `fixed inset-y-0 left-0 z-30 transition-all duration-300 ${sidebarExpanded ? 'w-64' : 'w-16'}`
         }`}
+        style={isSidebarCompact ? {
+          transform: mobileDrawerOpen ? 'translate3d(0, 0, 0)' : 'translate3d(-100%, 0, 0)',
+          transition: 'transform 300ms cubic-bezier(0, 0, 0.2, 1)',
+          willChange: 'transform',
+        } : undefined}
       >
         {/* Logo */}
         <div className={`border-b border-bambu-dark-tertiary flex items-center justify-center ${isSidebarCompact || sidebarExpanded ? 'p-4' : 'p-2'}`}>
