@@ -183,15 +183,15 @@ For detailed feature documentation, see the project documentation.
 
 **Option A: Pre-built image (fastest)**
 ```bash
-mkdir bambuddy && cd bambuddy
-curl -O https://raw.githubusercontent.com/maziggy/bambuddy/main/docker-compose.yml
+mkdir grove-control && cd grove-control
+curl -O https://raw.githubusercontent.com/EdwardChamberlain/grove-control/main/docker-compose.yml
 docker compose up -d
 ```
 
 **Option B: Build the Docker image locally**
 ```bash
-git clone https://github.com/maziggy/bambuddy.git
-cd bambuddy
+git clone https://github.com/EdwardChamberlain/grove-control.git
+cd grove-control
 docker compose up -d --build
 ```
 
@@ -211,7 +211,7 @@ Open **http://localhost:8000** in your browser.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TZ` | `UTC` | Your timezone (e.g., `America/New_York`, `Europe/Berlin`) |
-| `PORT` | `8000` | Port BamBuddy runs on (with host networking mode) |
+| `PORT` | `8000` | Port Grove Control runs on (with host networking mode) |
 | `DEBUG` | `false` | Enable debug logging |
 | `LOG_LEVEL` | `INFO` | Log level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 
@@ -230,18 +230,18 @@ Open **http://localhost:8000** in your browser.
 docker compose pull && docker compose up -d
 
 # Locally built image: rebuild after pulling changes
-cd bambuddy && git pull && docker compose up -d --build
+cd grove-control && git pull && docker compose up -d --build
 ```
 
-**Daily Beta Builds:**
+**Daily Builds:**
 
 Beta builds with the latest fixes are pushed regularly to the same beta version tag:
 
 ```bash
 # Pull the current beta
-docker pull ghcr.io/maziggy/bambuddy:0.2.2b1
+docker pull ghcr.io/EdwardChamberlain/grove-control:daily
 # or from Docker Hub
-docker pull maziggy/bambuddy:0.2.2b1
+docker pull edchamberlain/grove-control:daily
 ```
 
 Use [Watchtower](https://containrrr.dev/watchtower/) to automatically update when new daily builds are pushed.
@@ -274,7 +274,7 @@ ports:
 ```nginx
 server {
     listen 443 ssl http2;
-    server_name bambuddy.yourdomain.com;
+    server_name grove-control.yourdomain.com;
 
     ssl_certificate /path/to/cert.pem;
     ssl_certificate_key /path/to/key.pem;

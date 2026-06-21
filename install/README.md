@@ -11,7 +11,7 @@ timezone settings, and start Grove Control with Docker Compose.
 ### Linux
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/maziggy/bambuddy/main/install/docker-install.sh -o docker-install.sh
+curl -fsSL https://raw.githubusercontent.com/EdwardChamberlain/grove-control/main/install/docker-install.sh -o docker-install.sh
 chmod +x docker-install.sh
 ./docker-install.sh
 ```
@@ -19,7 +19,7 @@ chmod +x docker-install.sh
 ### macOS
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/maziggy/bambuddy/main/install/docker-install.sh -o docker-install.sh
+curl -fsSL https://raw.githubusercontent.com/EdwardChamberlain/grove-control/main/install/docker-install.sh -o docker-install.sh
 chmod +x docker-install.sh
 ./docker-install.sh
 ```
@@ -31,7 +31,7 @@ in Docker Desktop, so add printers manually by IP.
 ### Windows
 
 ```powershell
-powershell -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/maziggy/bambuddy/main/install/docker-install.ps1 -OutFile docker-install.ps1; .\docker-install.ps1"
+powershell -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/EdwardChamberlain/grove-control/main/install/docker-install.ps1 -OutFile docker-install.ps1; .\docker-install.ps1"
 ```
 
 Docker Desktop must be installed and running. Printer auto-discovery is
@@ -121,5 +121,4 @@ docker compose up -d
 ## Support
 
 - Documentation: https://wiki.bambuddy.cool
-- Discord: https://discord.gg/aFS3ZfScHM
-- Issues: https://github.com/maziggy/bambuddy/issues
+- Issues: https://github.com/EdwardChamberlain/grove-control/issues

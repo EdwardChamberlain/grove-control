@@ -6,11 +6,11 @@ The Grove Control team takes security seriously. We appreciate your efforts to r
 
 ### How to Report
 
-**Please DO NOT report security vulnerabilities through public GitHub.**
+**Please DO NOT report security vulnerabilities through public GitHub issues.**
 
-Instead, please report them via email to:
+Instead, use GitHub private vulnerability reporting:
 
-**security@bambuddy.cool**
+https://github.com/EdwardChamberlain/grove-control/security/advisories/new
 
 ### What to Include
 

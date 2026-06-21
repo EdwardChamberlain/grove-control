@@ -23,7 +23,7 @@ The Grove Control community is dedicated to providing a welcoming and supportive
 
 If you experience or witness unacceptable behavior:
 
-1. **Contact the maintainers** via email or GitHub
+1. **Contact the maintainers** via GitHub
 2. **Provide details** about what happened and when
 3. **All reports will be handled confidentially**
 
