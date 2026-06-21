@@ -57,7 +57,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --root-user-action=ignore --upgrade 'pip>=26.1' \
  && pip install --root-user-action=ignore -r requirements.txt
 
-# Copy backend
+# Copy version metadata and backend
+COPY VERSION ./VERSION
 COPY backend/ ./backend/
 
 # Capture the current git branch at build time. `.git/HEAD` is the only

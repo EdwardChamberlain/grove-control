@@ -116,7 +116,7 @@ Example:
 
 ## Release Process
 
-1. Update version in `pyproject.toml`
+1. Update `VERSION` and run `python scripts/check_version.py`
 2. Update `CHANGELOG.md`
 3. Create a PR with these changes
 4. After merge, tag the release:

@@ -26,6 +26,25 @@ permissions:
 
 jobs:
   # ============================================================================
+  # Metadata Checks
+  # ============================================================================
+
+  version-check:
+    name: Version Consistency
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.pull_request.user.login != github.repository_owner
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Check version metadata
+        run: python scripts/check_version.py
+
+  # ============================================================================
   # Backend Checks
   # ============================================================================
 
