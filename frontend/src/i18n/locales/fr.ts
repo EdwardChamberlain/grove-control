@@ -1063,6 +1063,7 @@ export default {
       ungroup: 'Dégrouper',
       ungroupConfirmTitle: 'Dégrouper le lot ?',
       ungroupConfirmMessage: 'Les éléments resteront dans la file mais ne seront plus groupés.',
+      dragGroup: 'Faire glisser le groupe',
     },
     tabs: {
       queue: 'File',
@@ -1080,6 +1081,8 @@ export default {
     },
     dragGhost: {
       multiCount: '{{count}} éléments',
+      batch: '{{name}} ({{count}} copie)',
+      batch_plural: '{{name}} ({{count}} copies)',
     },
     // Sections
     sections: {

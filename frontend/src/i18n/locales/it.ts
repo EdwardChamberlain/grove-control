@@ -1063,6 +1063,7 @@ export default {
       ungroup: 'Separa',
       ungroupConfirmTitle: 'Separare il lotto?',
       ungroupConfirmMessage: 'Gli elementi resteranno in coda ma non saranno più raggruppati.',
+      dragGroup: 'Trascina gruppo',
     },
     tabs: {
       queue: 'Coda',
@@ -1080,6 +1081,8 @@ export default {
     },
     dragGhost: {
       multiCount: '{{count}} elementi',
+      batch: '{{name}} ({{count}} copia)',
+      batch_plural: '{{name}} ({{count}} copie)',
     },
     // Sections
     sections: {

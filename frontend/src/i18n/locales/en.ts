@@ -1067,6 +1067,7 @@ export default {
       ungroup: 'Ungroup',
       ungroupConfirmTitle: 'Ungroup batch?',
       ungroupConfirmMessage: 'The items will stay in the queue but no longer be grouped together.',
+      dragGroup: 'Drag group',
     },
     // Tabs
     tabs: {
@@ -1090,6 +1091,8 @@ export default {
     // Drag ghost label when multi-dragging
     dragGhost: {
       multiCount: '{{count}} items',
+      batch: '{{name}} ({{count}} copy)',
+      batch_plural: '{{name}} ({{count}} copies)',
     },
     // Sections
     sections: {

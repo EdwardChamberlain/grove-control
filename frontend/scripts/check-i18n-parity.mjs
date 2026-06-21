@@ -194,6 +194,7 @@ const FR_COGNATES = [
   '{{count}} filament', '{{count}} filaments', '{{count}} permissions',
   '{{count}} downloads', '{{count}} item', '{{count}} selected',
   '({{count}} item)', 'Provisioning...', 'Pressure Advance',
+  '{{name}} ({{count}} copies)',  // FR plural of "copie" is also "copies"
   'Box label (62 × 29 mm)',
   'Avery L7160 — A4 sheet (38.1 × 63.5 mm × 21)',
   'Avery 5160 — US Letter sheet (25.4 × 66.7 mm × 30)',

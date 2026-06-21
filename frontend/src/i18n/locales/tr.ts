@@ -1063,6 +1063,7 @@ export default {
       ungroup: 'Gruptan çıkar',
       ungroupConfirmTitle: 'Yığını gruptan çıkar?',
       ungroupConfirmMessage: 'Öğeler kuyrukta kalacak ancak artık birlikte gruplanmayacak.',
+      dragGroup: 'Grubu sürükle',
     },
     tabs: {
       queue: 'Kuyruk',
@@ -1080,6 +1081,8 @@ export default {
     },
     dragGhost: {
       multiCount: '{{count}} öğe',
+      batch: '{{name}} ({{count}} kopya)',
+      batch_plural: '{{name}} ({{count}} kopya)',
     },
     // Bölümler
     sections: {

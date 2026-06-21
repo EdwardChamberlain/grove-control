@@ -1063,6 +1063,7 @@ export default {
       ungroup: 'Gruppierung aufheben',
       ungroupConfirmTitle: 'Stapel auflösen?',
       ungroupConfirmMessage: 'Die Einträge bleiben in der Warteschlange, sind aber nicht mehr gruppiert.',
+      dragGroup: 'Gruppe ziehen',
     },
     tabs: {
       queue: 'Warteschlange',
@@ -1080,6 +1081,8 @@ export default {
     },
     dragGhost: {
       multiCount: '{{count}} Einträge',
+      batch: '{{name}} ({{count}} Kopie)',
+      batch_plural: '{{name}} ({{count}} Kopien)',
     },
     // Sections
     sections: {

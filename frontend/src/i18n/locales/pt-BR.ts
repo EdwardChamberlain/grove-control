@@ -1063,6 +1063,7 @@ export default {
       ungroup: 'Desagrupar',
       ungroupConfirmTitle: 'Desagrupar lote?',
       ungroupConfirmMessage: 'Os itens permanecerão na fila mas não estarão mais agrupados.',
+      dragGroup: 'Arrastar grupo',
     },
     tabs: {
       queue: 'Fila',
@@ -1080,6 +1081,8 @@ export default {
     },
     dragGhost: {
       multiCount: '{{count}} itens',
+      batch: '{{name}} ({{count}} cópia)',
+      batch_plural: '{{name}} ({{count}} cópias)',
     },
     // Sections
     sections: {

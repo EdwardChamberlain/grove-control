@@ -1063,6 +1063,7 @@ export default {
       ungroup: '取消分组',
       ungroupConfirmTitle: '取消批次分组？',
       ungroupConfirmMessage: '项目将保留在队列中，但不再分组在一起。',
+      dragGroup: '拖动批次',
     },
     tabs: {
       queue: '队列',
@@ -1080,6 +1081,8 @@ export default {
     },
     dragGhost: {
       multiCount: '{{count}} 项',
+      batch: '{{name}}（{{count}} 份）',
+      batch_plural: '{{name}}（{{count}} 份）',
     },
     // Sections
     sections: {

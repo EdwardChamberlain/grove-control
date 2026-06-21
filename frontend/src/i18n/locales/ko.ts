@@ -1007,6 +1007,7 @@ export default {
       ungroup: '그룹 해제',
       ungroupConfirmTitle: '배치 그룹을 해제하시겠습니까?',
       ungroupConfirmMessage: '항목은 큐에 남아 있지만 더 이상 함께 그룹화되지 않습니다.',
+      dragGroup: '그룹 드래그',
     },
     tabs: {
       queue: '큐',
@@ -1024,6 +1025,8 @@ export default {
     },
     dragGhost: {
       multiCount: '{{count}}개 항목',
+      batch: '{{name}} ({{count}}부)',
+      batch_plural: '{{name}} ({{count}}부)',
     },
     sections: {
       currentlyPrinting: '현재 인쇄 중',

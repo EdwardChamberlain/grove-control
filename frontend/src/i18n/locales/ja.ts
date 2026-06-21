@@ -1062,6 +1062,7 @@ export default {
       ungroup: 'グループ解除',
       ungroupConfirmTitle: 'バッチのグループを解除しますか？',
       ungroupConfirmMessage: 'アイテムはキューに残りますが、グループ化されなくなります。',
+      dragGroup: 'グループをドラッグ',
     },
     tabs: {
       queue: 'キュー',
@@ -1079,6 +1080,8 @@ export default {
     },
     dragGhost: {
       multiCount: '{{count}}件',
+      batch: '{{name}}（{{count}}部）',
+      batch_plural: '{{name}}（{{count}}部）',
     },
     // Sections
     sections: {
