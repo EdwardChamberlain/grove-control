@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings
 
 # Application version - single source of truth
 APP_VERSION = "0.2.4.7"
-GITHUB_REPO = "maziggy/bambuddy"
+GITHUB_REPO = "EdwardChamberlain/grove-control"
 
 # App directory - where the application is installed (for static files)
 _app_dir = Path(__file__).resolve().parent.parent.parent.parent

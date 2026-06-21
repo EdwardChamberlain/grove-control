@@ -233,20 +233,20 @@ docker compose pull && docker compose up -d
 cd grove-control && git pull && docker compose up -d --build
 ```
 
-**Daily Builds:**
+**Development Builds:**
 
-Beta builds with the latest fixes are pushed regularly to the same beta version tag:
+Development builds are published from the `dev` branch:
 
 ```bash
-# Pull the current beta
-docker pull ghcr.io/EdwardChamberlain/grove-control:daily
+# Pull the current development build
+docker pull ghcr.io/EdwardChamberlain/grove-control:dev
 # or from Docker Hub
-docker pull edchamberlain/grove-control:daily
+docker pull edchamberlain/grove-control:dev
 ```
 
-Use [Watchtower](https://containrrr.dev/watchtower/) to automatically update when new daily builds are pushed.
+Use [Watchtower](https://containrrr.dev/watchtower/) to automatically update when new development builds are pushed.
 
-> **Note:** Beta builds use version tags like `0.2.2b1` — they are never tagged as `latest`. Your stable installation won't auto-update to a beta unless you explicitly pull a beta tag.
+> **Note:** Beta builds use version tags like `v0.2.2b1` — they are never tagged as `latest`. Your stable installation won't auto-update to a beta unless you explicitly pull a beta tag.
 
 **Useful Commands:**
 

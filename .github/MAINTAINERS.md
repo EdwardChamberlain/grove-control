@@ -124,7 +124,7 @@ Example:
    git tag v0.1.x
    git push origin v0.1.x
    ```
-5. Run `docker-publish.sh` to publish Docker image
+5. Push the tag and let the Docker publish workflow build and publish the release image
 
 ## Dependabot (Optional)
 
