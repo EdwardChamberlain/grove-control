@@ -19,7 +19,7 @@
     Get-TimeZone or UTC.
 
 .PARAMETER Build
-    Build the image from source instead of pulling the pre-built image.
+    Build the Docker image locally instead of pulling the pre-built image.
 
 .PARAMETER Yes
     Non-interactive mode; accept defaults.
@@ -291,7 +291,7 @@ if (-not $TimeZone)    {
     $TimeZone = Read-Default 'Timezone (IANA)' $detected
 }
 if (-not $Build -and -not $Yes) {
-    if (Read-YesNo 'Build from source? (No = use pre-built image)' 'n') { $Build = $true }
+    if (Read-YesNo 'Build Docker image locally? (No = use pre-built image)' 'n') { $Build = $true }
 }
 
 Write-Host ''

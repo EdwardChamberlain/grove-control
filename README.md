@@ -476,28 +476,16 @@ Optional but recommended — drop the [`slicer-api/` Compose stack](slicer-api/R
 ## 🚀 Quick Start
 
 ### Requirements
-- Python 3.10+ (3.11/3.12 recommended)
+- Docker Engine 20+ with Docker Compose, or Docker Desktop on macOS/Windows
 - Bambu Lab printer with **Developer Mode** enabled (see below)
 - **"Store sent files on external storage"** enabled in Bambu Studio/OrcaSlicer
 - Same local network as printer
 
 ### Installation
 
-#### Windows (Native Installer)
+> **Supported install path:** Docker Compose is the supported production install path.
 
-Self-contained `.exe` — no Python, Node, Docker, or Git required on the target machine. The installer bundles Python 3.13, the React frontend, ffmpeg, and registers Grove Control as a Windows service.
-
-Download the latest installer:
-
-> https://github.com/maziggy/bambuddy/releases/latest/download/bambuddy-windows-x64-setup.exe
-
-Run it (one-time UAC prompt — admin install) → Grove Control starts as a Windows service and the dashboard opens at **http://localhost:8000** automatically. Data lives at `C:\ProgramData\Grove Control\`, install at `C:\Program Files\Grove Control\`. To update, just run a newer installer over the existing install — your database and archives are preserved.
-
-> **SmartScreen warning:** until our SignPath OSS code-signing approval lands, you'll see "Windows protected your PC" on first run. Click **More info → Run anyway**.
-
-See the [Windows Installer Guide](https://wiki.bambuddy.cool/getting-started/windows-installer/) for service management, logs, and troubleshooting.
-
-#### Docker (Linux / macOS / Windows via Docker Desktop)
+#### Docker Compose
 
 **Option A: Pre-built image (fastest)**
 ```bash
@@ -506,7 +494,7 @@ curl -O https://raw.githubusercontent.com/maziggy/bambuddy/main/docker-compose.y
 docker compose up -d
 ```
 
-**Option B: Build from source**
+**Option B: Build the Docker image locally**
 ```bash
 git clone https://github.com/maziggy/bambuddy.git
 cd bambuddy
@@ -547,7 +535,7 @@ Open **http://localhost:8000** in your browser.
 # Pre-built image: just pull the latest
 docker compose pull && docker compose up -d
 
-# From source: rebuild after pulling changes
+# Locally built image: rebuild after pulling changes
 cd bambuddy && git pull && docker compose up -d --build
 ```
 
@@ -626,34 +614,6 @@ services:
 
 </details>
 
-#### Manual Installation (Linux/macOS)
-
-```bash
-# Clone and setup
-git clone https://github.com/maziggy/bambuddy.git
-cd bambuddy
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-# Run
-uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
-```
-
-Open **http://localhost:8000** and add your printer!
-
-> **Need detailed instructions?** See the [Installation Guide](http://wiki.bambuddy.cool/getting-started/installation/)
-
-### Windows Native Installation
-
-Windows PowerShell (run as Administrator — the installer self-elevates via UAC if not):
-
-```powershell
-powershell -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/maziggy/bambuddy/main/install/windows-installer.ps1 -OutFile windows-installer.ps1; .\windows-installer.ps1"
-```
-
-> Installs Grove Control natively on Windows using Git, Python, a virtual environment, separate data/log directories, and optional NSSM Windows Service registration. See the [Windows Installer Guide](http://wiki.bambuddy.cool/getting-started/windows-installer/) for parameters and unattended-install options.
-
 ### Enabling Developer Mode
 
 Developer Mode allows third-party software like Grove Control to control your printer over the local network.
@@ -680,7 +640,7 @@ In Bambu Studio or OrcaSlicer, enable **"Store sent files on external storage"**
 
 Full documentation available at **[wiki.bambuddy.cool](http://wiki.bambuddy.cool)**:
 
-- [Installation](http://wiki.bambuddy.cool/getting-started/installation/) — All installation methods
+- [Installation](http://wiki.bambuddy.cool/getting-started/installation/) — Docker Compose setup
 - [Getting Started](http://wiki.bambuddy.cool/getting-started/) — First printer setup
 - [Features](http://wiki.bambuddy.cool/features/) — Detailed feature guides
 - [Troubleshooting](http://wiki.bambuddy.cool/reference/troubleshooting/) — Common issues & solutions

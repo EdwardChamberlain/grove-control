@@ -4,7 +4,7 @@ services:
     build: .
     # Usage:
     #   docker compose up -d          → pulls pre-built image from ghcr.io
-    #   docker compose up -d --build  → builds locally from source
+    #   docker compose up -d --build  → builds the Docker image locally
     container_name: bambuddy
     # File ownership inside the data and logs volumes is normalised by the
     # entrypoint at startup (chowns to PUID:PGID and drops privileges via

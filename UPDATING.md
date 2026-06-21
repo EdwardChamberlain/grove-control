@@ -26,5 +26,5 @@ docker compose up -d
 ## Before you upgrade
 
 Take a backup. Settings → Backup → **Create Backup** downloads a ZIP containing
-the database and all stateful directories. Any bare-metal update via
-`update.sh` does this automatically; Docker and manual upgrades do not.
+the database and all stateful directories. Docker Compose upgrades do not create
+an automatic application backup.
