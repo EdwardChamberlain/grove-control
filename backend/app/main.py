@@ -346,6 +346,15 @@ _active_prints: dict[tuple[int, str], int] = {}
 # nozzle parking on slicer profiles with Timelapse Type = Smooth).
 _stage22_finish_frames: dict[int, bytes] = {}
 
+# #1790: per-printer producer-done event. Set by `on_finish_photo_moment` in its
+# `finally` block (whether it captured a frame or not). The consumer in
+# `_background_finish_photo` waits on it before reading `_stage22_finish_frames`
+# so the FINISH-state fallback path — where moment and completion are dispatched
+# back-to-back — doesn't race past the producer with an empty pop, and the
+# consumer's RTSP fallback can't collide with the producer's still-in-flight RTSP
+# grab (Bambu printers allow only one RTSP client at a time).
+_stage22_finish_in_flight: dict[int, asyncio.Event] = {}
+
 # Per-printer "connected" edge tracker. Used by `on_printer_status_change`
 # to fire `reconcile_stale_active_prints` exactly once per (re)connection
 # (#1542 follow-up — power-cycle ghost prints). The value is True after
@@ -3735,6 +3744,14 @@ async def on_finish_photo_moment(printer_id: int, data: dict):
         )
         return
 
+    # #1790: register the producer-done event BEFORE the first await so the
+    # consumer in `_background_finish_photo` — which is dispatched back-to-back
+    # with us on the FINISH-state fallback path — sees it as soon as it polls.
+    # The `finally` below guarantees `set()` runs on every exit, including
+    # early returns and exceptions, so the consumer's bounded wait can't hang.
+    producer_done = asyncio.Event()
+    _stage22_finish_in_flight[printer_id] = producer_done
+
     try:
         async with async_session() as db:
             from backend.app.api.routes.settings import get_setting
@@ -3807,6 +3824,11 @@ async def on_finish_photo_moment(printer_id: int, data: dict):
             printer_id,
             e,
         )
+    finally:
+        # #1790: always unblock the consumer's bounded wait — whether we stored
+        # a frame, gave up, or hit an exception. Local ref means cleanup of the
+        # dict entry by the consumer doesn't affect signalling.
+        producer_done.set()
 
 
 async def on_print_complete(printer_id: int, data: dict):
@@ -4678,6 +4700,22 @@ async def on_print_complete(printer_id: int, data: dict):
                             # has the better framing instead of the post-bed-drop angle
                             # the live-camera fallback below would give.
                             if not photo_filename:
+                                # #1790: on the FINISH-state fallback path the producer
+                                # task is dispatched back-to-back with this consumer, so
+                                # a bare pop would race past with an empty result and
+                                # the RTSP fallback below would collide with the
+                                # producer's still-in-flight grab (single-client RTSP
+                                # on Bambu printers). Wait for the producer to finish
+                                # or give up before touching the cache.
+                                in_flight = _stage22_finish_in_flight.pop(printer_id, None)
+                                if in_flight is not None:
+                                    try:
+                                        await asyncio.wait_for(in_flight.wait(), timeout=20.0)
+                                    except asyncio.TimeoutError:
+                                        logger.warning(
+                                            "[PHOTO-BG] timed out waiting for stage-22 producer for printer %s — proceeding to fallback",
+                                            printer_id,
+                                        )
                                 cached_frame = _stage22_finish_frames.pop(printer_id, None)
                                 if cached_frame:
                                     photos_dir = archive_dir / "photos"
