@@ -473,8 +473,8 @@ describe('FileManagerPage', () => {
     });
   });
 
-  describe('schedule print', () => {
-    it('shows schedule print button when one sliced file is selected', async () => {
+  describe('selection print actions', () => {
+    it('shows print button when one sliced file is selected', async () => {
       const user = userEvent.setup();
       render(<FileManagerPage />);
 
@@ -489,11 +489,11 @@ describe('FileManagerPage', () => {
       }
 
       await waitFor(() => {
-        expect(screen.getByText(/Schedule/)).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /Print/i })).toBeInTheDocument();
       });
     });
 
-    it('hides schedule print button when multiple files are selected', async () => {
+    it('does not show the single-file print action when multiple files are selected', async () => {
       const user = userEvent.setup();
       render(<FileManagerPage />);
 
@@ -505,8 +505,8 @@ describe('FileManagerPage', () => {
       await user.click(screen.getByText('Select All'));
 
       await waitFor(() => {
-        // Schedule button should not be present when multiple files are selected
-        expect(screen.queryByText(/Schedule/)).not.toBeInTheDocument();
+        // The single-file print action should not be present when multiple files are selected.
+        expect(screen.queryByRole('button', { name: /Print/i })).not.toBeInTheDocument();
       });
     });
   });

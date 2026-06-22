@@ -401,7 +401,7 @@ describe('QueuePage', () => {
       render(<QueuePage />);
 
       await waitFor(() => {
-        expect(screen.getByTitle('Start Print')).toBeInTheDocument();
+        expect(screen.getByTitle('Print')).toBeInTheDocument();
       });
     });
   });
@@ -504,7 +504,11 @@ describe('QueuePage', () => {
 
       render(<QueuePage />);
 
-      const playButton = await screen.findByTitle(/Start Print|do not have permission to start prints/i);
+      const playButton = await waitFor(() => {
+        const button = document.querySelector<HTMLButtonElement>('button[title="Print"], button[title="You do not have permission to start prints"]');
+        expect(button).not.toBeNull();
+        return button!;
+      });
       await userEvent.click(playButton);
 
       // Wait for the start endpoint to be hit (the 409 path returns to onError).
