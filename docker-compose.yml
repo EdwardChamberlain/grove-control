@@ -1,5 +1,5 @@
 services:
-  bambuddy:
+  grove-control:
     image: ghcr.io/edwardchamberlain/grove-control:latest
     build: .
     # Usage:

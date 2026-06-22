@@ -299,7 +299,7 @@ server {
 
 ```yaml
 services:
-  bambuddy:
+  grove-control:
     build: .
     network_mode: host
 ```

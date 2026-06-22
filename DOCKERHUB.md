@@ -58,7 +58,7 @@ Open **http://localhost:8000** and add your printer.
 
 ```yaml
 services:
-  bambuddy:
+  grove-control:
     image: edchamberlain/grove-control:latest
     container_name: grove-control
     network_mode: host
