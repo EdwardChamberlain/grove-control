@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.core.auth import RequirePermissionIfAuthEnabled
 from backend.app.core.config import APP_VERSION, settings
 from backend.app.core.database import get_db
+from backend.app.core.local_config import read_local_toml
 from backend.app.core.permissions import Permission
 from backend.app.models.archive import PrintArchive
 from backend.app.models.filament import Filament
@@ -603,3 +604,20 @@ async def get_system_health(
     """
     sensitive_strings = await collect_sensitive_strings(db)
     return await asyncio.to_thread(scan_logs, sensitive_strings=sensitive_strings)
+
+
+@router.get("/appliance")
+async def get_appliance_defaults():
+    """Expose the hostname/timezone/locale the appliance setup wizard collected.
+
+    Read from /etc/bambuddy/local.toml; absent on non-appliance installs, in
+    which case all fields are null. No auth required — the frontend i18n
+    bootstrap reads this BEFORE auth might be set up, and the contents are
+    purely user-set defaults (no secrets).
+    """
+    config = read_local_toml()
+    return {
+        "hostname": config.get("hostname"),
+        "timezone": config.get("timezone"),
+        "locale": config.get("locale"),
+    }

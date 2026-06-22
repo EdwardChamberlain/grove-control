@@ -473,3 +473,78 @@ class TestSystemHealthAPI:
         ids = [f["signature_id"] for f in result["findings"]]
         assert "ftp-auth-rejected" in ids
         assert result["summary"]["layer8"] >= 1
+
+
+class TestSystemApplianceAPI:
+    """Integration tests for GET /api/v1/system/appliance (appliance locale defaults)."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_appliance_endpoint_returns_nulls_when_no_local_toml(
+        self, async_client: AsyncClient, tmp_path, monkeypatch
+    ):
+        """Non-appliance install: file is absent, every field is null."""
+        from backend.app.api.routes import system as system_routes
+
+        absent = tmp_path / "nope.toml"
+        monkeypatch.setattr(
+            system_routes,
+            "read_local_toml",
+            lambda: __import__("backend.app.core.local_config", fromlist=["read_local_toml"]).read_local_toml(absent),
+        )
+
+        response = await async_client.get("/api/v1/system/appliance")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body == {"hostname": None, "timezone": None, "locale": None}
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_appliance_endpoint_returns_wizard_values(self, async_client: AsyncClient, tmp_path, monkeypatch):
+        """Appliance install: wizard's local.toml values surface verbatim."""
+        from backend.app.api.routes import system as system_routes
+        from backend.app.core import local_config
+
+        toml = tmp_path / "local.toml"
+        toml.write_text('hostname = "workshop-pi"\ntimezone = "Europe/Berlin"\nlocale = "de"\n')
+        monkeypatch.setattr(system_routes, "read_local_toml", lambda: local_config.read_local_toml(toml))
+
+        response = await async_client.get("/api/v1/system/appliance")
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "hostname": "workshop-pi",
+            "timezone": "Europe/Berlin",
+            "locale": "de",
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_appliance_endpoint_partial(self, async_client: AsyncClient, tmp_path, monkeypatch):
+        """Only locale set: hostname + timezone surface as null."""
+        from backend.app.api.routes import system as system_routes
+        from backend.app.core import local_config
+
+        toml = tmp_path / "local.toml"
+        toml.write_text('locale = "ja"\n')
+        monkeypatch.setattr(system_routes, "read_local_toml", lambda: local_config.read_local_toml(toml))
+
+        response = await async_client.get("/api/v1/system/appliance")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["locale"] == "ja"
+        assert body["hostname"] is None
+        assert body["timezone"] is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_appliance_endpoint_requires_no_auth(self, async_client: AsyncClient):
+        """The frontend i18n bootstrap reads this before auth might be set up.
+
+        The endpoint must respond 200 even when auth is enabled and the caller
+        is unauthenticated — its contents are non-secret (user-set defaults).
+        """
+        response = await async_client.get("/api/v1/system/appliance")
+        assert response.status_code == 200
