@@ -239,7 +239,7 @@ Development builds are published from the `dev` branch:
 
 ```bash
 # Pull the current development build
-docker pull ghcr.io/EdwardChamberlain/grove-control:dev
+docker pull ghcr.io/edwardchamberlain/grove-control:dev
 # or from Docker Hub
 docker pull edchamberlain/grove-control:dev
 ```

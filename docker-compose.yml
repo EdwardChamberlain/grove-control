@@ -1,6 +1,6 @@
 services:
   bambuddy:
-    image: ghcr.io/EdwardChamberlain/grove-control:latest
+    image: ghcr.io/edwardchamberlain/grove-control:latest
     build: .
     # Usage:
     #   docker compose up -d          → pulls pre-built image from ghcr.io

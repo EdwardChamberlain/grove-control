@@ -3,8 +3,8 @@
 ```bash
 # 1. Make sure your compose file isn't pinned to an old version.
 #    The image line should read one of:
-#      image: ghcr.io/EdwardChamberlain/grove-control:latest
-#      image: ghcr.io/EdwardChamberlain/grove-control:0.2.3
+#      image: ghcr.io/edwardchamberlain/grove-control:latest
+#      image: ghcr.io/edwardchamberlain/grove-control:0.2.3
 #    If it pins an older tag (e.g. :0.2.2.2), edit it first.
 
 # 2. Pull and restart
