@@ -11,7 +11,7 @@
 #   --path PATH        Installation directory (default: /opt/bambuddy)
 #   --port PORT        Port to expose (default: 8000)
 #   --tz TIMEZONE      Timezone (default: system timezone or UTC)
-#   --build            Build from source instead of using pre-built image
+#   --build            Build the Docker image locally instead of using pre-built image
 #   --yes, -y          Non-interactive mode, accept defaults
 #   --redirect-990     (Deprecated, no longer needed — FTP binds to port 990 directly)
 #   --help, -h         Show this help message
@@ -136,7 +136,7 @@ show_help() {
     echo "  --path PATH        Installation directory (default: /opt/bambuddy)"
     echo "  --port PORT        Port to expose (default: 8000)"
     echo "  --tz TIMEZONE      Timezone (default: system timezone or UTC)"
-    echo "  --build            Build from source instead of using pre-built image"
+    echo "  --build            Build the Docker image locally instead of using pre-built image"
     echo "  --yes, -y          Non-interactive mode, accept defaults"
     echo "  --redirect-990     (Deprecated, no longer needed)"
     echo "  --help, -h         Show this help message"
@@ -148,7 +148,7 @@ show_help() {
     echo "  Unattended installation with custom settings:"
     echo "    ./docker-install.sh --path /srv/bambuddy --port 3000 --tz America/New_York --yes"
     echo ""
-    echo "  Build from source:"
+    echo "  Build the Docker image locally:"
     echo "    ./docker-install.sh --build --yes"
     exit 0
 }
@@ -428,9 +428,9 @@ gather_config() {
     detect_timezone
     prompt "Timezone" "$TIMEZONE" TIMEZONE
 
-    # Build from source?
+    # Build the Docker image locally?
     if [[ "$BUILD_FROM_SOURCE" != "true" ]] && [[ "$NON_INTERACTIVE" != "true" ]]; then
-        if prompt_yes_no "Build from source? (No = use pre-built image)" "n"; then
+        if prompt_yes_no "Build Docker image locally? (No = use pre-built image)" "n"; then
             BUILD_FROM_SOURCE="true"
         fi
     fi

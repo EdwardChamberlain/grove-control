@@ -1,0 +1,95 @@
+{
+  "id": "/",
+  "name": "Grove Control",
+  "short_name": "Grove Control",
+  "description": "Monitor and manage your Bambu Lab 3D printers",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1a1a",
+  "theme_color": "#00ae42",
+  "orientation": "any",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/img/grove_control_favicon_16.png",
+      "sizes": "16x16",
+      "type": "image/png"
+    },
+    {
+      "src": "/img/grove_control_favicon_32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    },
+    {
+      "src": "/img/grove_control_pwa_icon_192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/img/grove_control_pwa_icon_512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/img/grove_control_pwa_icon_192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/img/grove_control_pwa_icon_512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/img/screenshot-mobile.png",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Grove Control on mobile"
+    },
+    {
+      "src": "/img/screenshot-desktop.png",
+      "sizes": "1920x1080",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Grove Control on desktop"
+    }
+  ],
+  "categories": ["utilities", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Printers",
+      "short_name": "Printers",
+      "description": "View your printers",
+      "url": "/",
+      "icons": [{ "src": "/img/grove_control_pwa_icon_192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Archives",
+      "short_name": "Archives",
+      "description": "View print archives",
+      "url": "/archives",
+      "icons": [{ "src": "/img/grove_control_pwa_icon_192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Queue",
+      "short_name": "Queue",
+      "description": "View print queue",
+      "url": "/queue",
+      "icons": [{ "src": "/img/grove_control_pwa_icon_192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Projects",
+      "short_name": "Projects",
+      "description": "View print projects",
+      "url": "/projects",
+      "icons": [{ "src": "/img/grove_control_pwa_icon_192.png", "sizes": "192x192" }]
+    }
+  ]
+}
