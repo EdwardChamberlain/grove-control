@@ -240,8 +240,6 @@ Development builds are published from the `dev` branch:
 ```bash
 # Pull the current development build
 docker pull ghcr.io/edwardchamberlain/grove-control:dev
-# or from Docker Hub
-docker pull edchamberlain/grove-control:dev
 ```
 
 Use [Watchtower](https://containrrr.dev/watchtower/) to automatically update when new development builds are pushed.
