@@ -1,7 +1,7 @@
 /**
  * Tests for the print speed control feature on the PrintersPage.
  *
- * Verifies that the speed badge renders, the dropdown menu opens on click,
+ * Verifies that the speed control renders, the dropdown menu opens on click,
  * speed options are displayed, and selecting an option calls the API.
  */
 
@@ -79,8 +79,14 @@ describe('PrintersPage - Print Speed Control', () => {
     );
   });
 
-  describe('speed badge rendering', () => {
-    it('shows speed badge with current speed percentage when printing', async () => {
+  async function openSpeedMenu(user = userEvent.setup()) {
+    const speedButton = await screen.findByLabelText('Print Speed');
+    await user.click(speedButton);
+    return speedButton;
+  }
+
+  describe('speed control rendering', () => {
+    it('shows enabled speed control when printing', async () => {
       server.use(
         http.get('/api/v1/printers/:id/status', () => {
           return HttpResponse.json(mockPrintingStatus);
@@ -89,13 +95,12 @@ describe('PrintersPage - Print Speed Control', () => {
 
       render(<PrintersPage />);
 
-      await waitFor(() => {
-        // speed_level 2 = Standard = 100%
-        expect(screen.getByText('100%')).toBeInTheDocument();
-      });
+      const speedButton = await screen.findByLabelText('Print Speed');
+      expect(speedButton).toBeEnabled();
     });
 
-    it('shows speed badge with 50% for silent mode', async () => {
+    it('marks silent mode as selected in the menu', async () => {
+      const user = userEvent.setup();
       server.use(
         http.get('/api/v1/printers/:id/status', () => {
           return HttpResponse.json({ ...mockPrintingStatus, speed_level: 1 });
@@ -104,12 +109,12 @@ describe('PrintersPage - Print Speed Control', () => {
 
       render(<PrintersPage />);
 
-      await waitFor(() => {
-        expect(screen.getByText('50%')).toBeInTheDocument();
-      });
+      await openSpeedMenu(user);
+      expect(screen.getByText('Silent (50%)').closest('button')).toHaveClass('text-bambu-green');
     });
 
-    it('shows speed badge with 124% for sport mode', async () => {
+    it('marks sport mode as selected in the menu', async () => {
+      const user = userEvent.setup();
       server.use(
         http.get('/api/v1/printers/:id/status', () => {
           return HttpResponse.json({ ...mockPrintingStatus, speed_level: 3 });
@@ -118,12 +123,12 @@ describe('PrintersPage - Print Speed Control', () => {
 
       render(<PrintersPage />);
 
-      await waitFor(() => {
-        expect(screen.getByText('124%')).toBeInTheDocument();
-      });
+      await openSpeedMenu(user);
+      expect(screen.getByText('Sport (124%)').closest('button')).toHaveClass('text-bambu-green');
     });
 
-    it('shows speed badge with 166% for ludicrous mode', async () => {
+    it('marks ludicrous mode as selected in the menu', async () => {
+      const user = userEvent.setup();
       server.use(
         http.get('/api/v1/printers/:id/status', () => {
           return HttpResponse.json({ ...mockPrintingStatus, speed_level: 4 });
@@ -132,12 +137,11 @@ describe('PrintersPage - Print Speed Control', () => {
 
       render(<PrintersPage />);
 
-      await waitFor(() => {
-        expect(screen.getByText('166%')).toBeInTheDocument();
-      });
+      await openSpeedMenu(user);
+      expect(screen.getByText('Ludicrous (166%)').closest('button')).toHaveClass('text-bambu-green');
     });
 
-    it('disables speed badge button when printer is idle', async () => {
+    it('disables speed control when printer is idle', async () => {
       server.use(
         http.get('/api/v1/printers/:id/status', () => {
           return HttpResponse.json(mockIdleStatus);
@@ -146,13 +150,8 @@ describe('PrintersPage - Print Speed Control', () => {
 
       render(<PrintersPage />);
 
-      await waitFor(() => {
-        expect(screen.getByText('100%')).toBeInTheDocument();
-      });
-
-      // The button containing the speed percentage should be disabled
-      const speedBadge = screen.getByText('100%').closest('button');
-      expect(speedBadge).toBeDisabled();
+      const speedButton = await screen.findByLabelText('Print Speed');
+      expect(speedButton).toBeDisabled();
     });
   });
 
@@ -168,12 +167,7 @@ describe('PrintersPage - Print Speed Control', () => {
 
       render(<PrintersPage />);
 
-      await waitFor(() => {
-        expect(screen.getByText('100%')).toBeInTheDocument();
-      });
-
-      const speedBadge = screen.getByText('100%').closest('button')!;
-      await user.click(speedBadge);
+      await openSpeedMenu(user);
 
       await waitFor(() => {
         expect(screen.getByText('Silent (50%)')).toBeInTheDocument();
@@ -194,12 +188,7 @@ describe('PrintersPage - Print Speed Control', () => {
 
       render(<PrintersPage />);
 
-      await waitFor(() => {
-        expect(screen.getByText('100%')).toBeInTheDocument();
-      });
-
-      const speedBadge = screen.getByText('100%').closest('button')!;
-      await user.click(speedBadge);
+      await openSpeedMenu(user);
 
       await waitFor(() => {
         const options = [
@@ -230,13 +219,8 @@ describe('PrintersPage - Print Speed Control', () => {
 
       render(<PrintersPage />);
 
-      await waitFor(() => {
-        expect(screen.getByText('100%')).toBeInTheDocument();
-      });
-
       // Open the speed menu
-      const speedBadge = screen.getByText('100%').closest('button')!;
-      await user.click(speedBadge);
+      await openSpeedMenu(user);
 
       await waitFor(() => {
         expect(screen.getByText('Sport (124%)')).toBeInTheDocument();
@@ -264,12 +248,7 @@ describe('PrintersPage - Print Speed Control', () => {
 
       render(<PrintersPage />);
 
-      await waitFor(() => {
-        expect(screen.getByText('100%')).toBeInTheDocument();
-      });
-
-      const speedBadge = screen.getByText('100%').closest('button')!;
-      await user.click(speedBadge);
+      await openSpeedMenu(user);
 
       await waitFor(() => {
         expect(screen.getByText('Silent (50%)')).toBeInTheDocument();
@@ -298,13 +277,8 @@ describe('PrintersPage - Print Speed Control', () => {
 
       render(<PrintersPage />);
 
-      await waitFor(() => {
-        expect(screen.getByText('100%')).toBeInTheDocument();
-      });
-
       // Open the speed menu and select Ludicrous
-      const speedBadge = screen.getByText('100%').closest('button')!;
-      await user.click(speedBadge);
+      await openSpeedMenu(user);
 
       await waitFor(() => {
         expect(screen.getByText('Ludicrous (166%)')).toBeInTheDocument();
@@ -312,9 +286,10 @@ describe('PrintersPage - Print Speed Control', () => {
 
       await user.click(screen.getByText('Ludicrous (166%)'));
 
-      // The badge should optimistically update to show 166%
+      // The menu selection should optimistically update to Ludicrous.
+      await openSpeedMenu(user);
       await waitFor(() => {
-        expect(screen.getByText('166%')).toBeInTheDocument();
+        expect(screen.getByText('Ludicrous (166%)').closest('button')).toHaveClass('text-bambu-green');
       });
     });
   });

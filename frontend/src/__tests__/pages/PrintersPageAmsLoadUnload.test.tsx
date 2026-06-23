@@ -1,7 +1,7 @@
 /**
  * Tests for the AMS slot load / unload buttons on PrintersPage (#891).
  *
- * Verifies that the menu in each AMS slot popover exposes Load and Unload,
+ * Verifies that the menu in each AMS slot hover card exposes Load and Unload,
  * that clicking them POSTs to the right endpoint with the right tray_id, and
  * that the buttons are hidden while the printer is RUNNING.
  */
@@ -96,6 +96,12 @@ describe('PrintersPage - AMS load/unload (#891)', () => {
     );
   });
 
+  async function hoverSlot(text: string, index = 0, user = userEvent.setup()) {
+    const slotLabels = await screen.findAllByText(text);
+    await user.hover(slotLabels[index]);
+    return user;
+  }
+
   it('Load posts to /ams/load with tray_id derived from amsId*4 + slot', async () => {
     const user = userEvent.setup();
     let captured: { tray_id: string | null } | null = null;
@@ -111,14 +117,8 @@ describe('PrintersPage - AMS load/unload (#891)', () => {
 
     render(<PrintersPage />);
 
-    await waitFor(() => {
-      // The slot menu button is hidden until we hover. Pull it directly out of the DOM.
-      expect(document.querySelectorAll('[title="Slot options"]').length).toBeGreaterThan(0);
-    });
-
     // Slot 2 (third one, slotIdx=2) → expected tray_id = 0*4 + 2 = 2
-    const menuButtons = document.querySelectorAll<HTMLButtonElement>('[title="Slot options"]');
-    await user.click(menuButtons[2]);
+    await hoverSlot('ABS', 0, user);
 
     await waitFor(() => {
       expect(screen.getByText('Load')).toBeInTheDocument();
@@ -146,12 +146,7 @@ describe('PrintersPage - AMS load/unload (#891)', () => {
 
     render(<PrintersPage />);
 
-    await waitFor(() => {
-      expect(document.querySelectorAll('[title="Slot options"]').length).toBeGreaterThan(0);
-    });
-
-    const menuButtons = document.querySelectorAll<HTMLButtonElement>('[title="Slot options"]');
-    await user.click(menuButtons[0]);
+    await hoverSlot('PLA', 0, user);
 
     await waitFor(() => {
       expect(screen.getByText('Unload')).toBeInTheDocument();
@@ -176,8 +171,9 @@ describe('PrintersPage - AMS load/unload (#891)', () => {
       expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
     });
 
-    // No "Slot options" menu trigger should be present at all while running.
-    expect(document.querySelectorAll('[title="Slot options"]').length).toBe(0);
+    // No Load / Unload actions should be exposed while running.
+    expect(screen.queryByText('Load')).not.toBeInTheDocument();
+    expect(screen.queryByText('Unload')).not.toBeInTheDocument();
   });
 
   it('external spool slot exposes Load and posts tray_id=254', async () => {
@@ -200,12 +196,7 @@ describe('PrintersPage - AMS load/unload (#891)', () => {
 
     render(<PrintersPage />);
 
-    await waitFor(() => {
-      expect(document.querySelectorAll('[title="Slot options"]').length).toBeGreaterThan(0);
-    });
-
-    const menuButtons = document.querySelectorAll<HTMLButtonElement>('[title="Slot options"]');
-    await user.click(menuButtons[0]);
+    await hoverSlot('PLA', 0, user);
 
     await waitFor(() => {
       expect(screen.getByText('Load')).toBeInTheDocument();

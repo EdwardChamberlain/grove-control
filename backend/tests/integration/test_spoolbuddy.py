@@ -1261,13 +1261,13 @@ class TestUpdateEndpoints:
     @pytest.mark.integration
     async def test_update_check_returns_version_info(self, async_client: AsyncClient, device_factory):
         """GET /devices/{id}/update-check compares device version against APP_VERSION."""
-        await device_factory(device_id="sb-uc", firmware_version="0.1.0")
+        await device_factory(device_id="sb-uc", firmware_version="0.0.9")
 
         resp = await async_client.get(f"{API}/devices/sb-uc/update-check")
 
         assert resp.status_code == 200
         data = resp.json()
-        assert data["current_version"] == "0.1.0"
+        assert data["current_version"] == "0.0.9"
         assert data["latest_version"] is not None
         assert data["update_available"] is True
 

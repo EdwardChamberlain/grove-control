@@ -3985,6 +3985,7 @@ function PrinterCard({
                                 ? 'bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'
                                 : 'bg-bambu-dark text-bambu-gray/50 cursor-not-allowed'
                             }`}
+                            aria-label={t('printers.speed.title')}
                             title={isPrinting ? t('printers.speed.title') : undefined}
                           >
                             <Gauge className="w-4 h-4" />
