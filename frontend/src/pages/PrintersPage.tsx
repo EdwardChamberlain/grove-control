@@ -951,6 +951,76 @@ interface PrinterMaintenanceInfo {
   total_print_hours: number;
 }
 
+type PrinterHealthMeta = {
+  level: 'healthy' | 'attention' | 'error';
+  label: string;
+  className: string;
+};
+
+function getPrinterHealthMeta({
+  connected,
+  knownErrors,
+  maintenanceInfo,
+  needsPlateClear,
+  wifiSignal,
+  firmwareUpdateAvailable,
+  hasDoorSensor,
+  doorOpen,
+  labels,
+}: {
+  connected: boolean | undefined;
+  knownErrors: HMSError[];
+  maintenanceInfo?: PrinterMaintenanceInfo;
+  needsPlateClear: boolean;
+  wifiSignal: number | null | undefined;
+  firmwareUpdateAvailable: boolean;
+  hasDoorSensor: boolean;
+  doorOpen: boolean | undefined;
+  labels: {
+    healthy: string;
+    attentionRequired: string;
+    error: string;
+  };
+}): PrinterHealthMeta {
+  if (!connected) {
+    return {
+      level: 'error',
+      label: labels.error,
+      className: 'bg-status-error/20 text-status-error',
+    };
+  }
+
+  const hasSevereHms = knownErrors.some(e => e.severity <= 2);
+  if (hasSevereHms || (maintenanceInfo?.due_count ?? 0) > 0 || (wifiSignal != null && wifiSignal < -80)) {
+    return {
+      level: 'error',
+      label: labels.error,
+      className: 'bg-status-error/20 text-status-error',
+    };
+  }
+
+  if (
+    knownErrors.length > 0 ||
+    needsPlateClear ||
+    (maintenanceInfo?.warning_count ?? 0) > 0 ||
+    firmwareUpdateAvailable ||
+    (hasDoorSensor && doorOpen) ||
+    (wifiSignal != null && wifiSignal < -60)
+  ) {
+    return {
+      level: 'attention',
+      label: labels.attentionRequired,
+      className: 'bg-status-warning/20 text-status-warning',
+    };
+  }
+
+  return {
+    level: 'healthy',
+    label: labels.healthy,
+    className: 'bg-status-ok/20 text-status-ok',
+  };
+}
+
 // Status summary bar component - uses queryClient to read cached statuses
 function StatusSummaryBar({ printers }: { printers: Printer[] | undefined }) {
   const { t } = useTranslation();
@@ -1547,6 +1617,7 @@ function PrinterListRow({
   onToggleSelect,
   onOpenSinglePrinter,
   timeFormat = 'system',
+  checkPrinterFirmware = true,
 }: {
   printer: Printer;
   hideIfDisconnected?: boolean;
@@ -1557,42 +1628,64 @@ function PrinterListRow({
   onToggleSelect?: (id: number) => void;
   onOpenSinglePrinter: (id: number) => void;
   timeFormat?: 'system' | '12h' | '24h';
+  checkPrinterFirmware?: boolean;
 }) {
   const { t } = useTranslation();
+  const { hasPermission } = useAuth();
   const { data: status } = useQuery({
     queryKey: ['printerStatus', printer.id],
     queryFn: () => api.getPrinterStatus(printer.id),
     refetchInterval: 30000,
   });
+  const { data: firmwareInfo } = useQuery({
+    queryKey: ['firmwareUpdate', printer.id],
+    queryFn: () => firmwareApi.checkPrinterUpdate(printer.id),
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+    enabled: checkPrinterFirmware && hasPermission('firmware:read'),
+  });
 
   const knownHmsErrors = status?.hms_errors ? filterKnownHMSErrors(status.hms_errors) : [];
   const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
   const progress = Math.max(0, Math.min(100, status?.progress ?? 0));
-  const needsPlateClear = requirePlateClear && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
-  const stateLabel = !status
+  const needsPlateClear = !!requirePlateClear && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
+  const hasDoorSensor = ['X1C', 'X1', 'X1E', 'X2D', 'P2S', 'H2D', 'H2D Pro', 'H2C', 'H2S'].includes(printer.model ?? '');
+  const printerHealth = getPrinterHealthMeta({
+    connected: status?.connected,
+    knownErrors: knownHmsErrors,
+    maintenanceInfo,
+    needsPlateClear,
+    wifiSignal: status?.wifi_signal,
+    firmwareUpdateAvailable: !!firmwareInfo?.update_available,
+    hasDoorSensor,
+    doorOpen: status?.door_open,
+    labels: {
+      healthy: t('printers.health.healthy', 'Healthy'),
+      attentionRequired: t('printers.health.attentionRequired', 'Requires attention'),
+      error: t('printers.health.error', 'Error'),
+    },
+  });
+  const jobStatusLabel = !status
     ? t('common.loading', 'Loading')
     : !status.connected
     ? t('printers.connection.offline')
     : getStatusDisplay(status.state, status.stg_cur_name);
-  const stateClass = !status
-    ? 'bg-bambu-dark-tertiary text-bambu-gray'
-    : !status.connected
-    ? 'bg-status-error/20 text-status-error'
-    : knownHmsErrors.length > 0 || (maintenanceInfo?.due_count ?? 0) > 0
-    ? 'bg-status-error/20 text-status-error'
-    : needsPlateClear || (maintenanceInfo?.warning_count ?? 0) > 0
-    ? 'bg-status-warning/20 text-status-warning'
-    : isPrintingOrPaused
-    ? 'bg-bambu-green/20 text-bambu-green'
-    : 'bg-status-ok/20 text-status-ok';
   const activePrintName = status?.current_print && isPrintingOrPaused
     ? formatPrintName(status.subtask_name || status.current_print || null, status.gcode_file, t)
     : null;
   const etaLabel = status?.remaining_time != null && status.remaining_time > 0
     ? `${formatDuration(status.remaining_time * 60)} - ${formatETA(status.remaining_time, timeFormat, t)}`
-    : '---';
-  const issueCount = knownHmsErrors.length + (maintenanceInfo?.due_count ?? 0) + (needsPlateClear ? 1 : 0);
+    : '--:--';
   const location = printer.location || t('printers.location.unassigned', 'Ungrouped');
+  const printStatusClass = !status?.connected || knownHmsErrors.length > 0 || status?.state === 'FAILED'
+    ? 'bg-status-error'
+    : status?.state === 'RUNNING'
+    ? 'bg-bambu-green animate-pulse'
+    : 'bg-gray-500';
+  const mobilePrintStatusLabel = activePrintName
+    ? t('printers.list.printingJob', 'Printing: {{job}}', { job: activePrintName })
+    : jobStatusLabel;
+  const printStatusTitle = t('printers.list.printStatus', 'Print status: {{status}}', { status: jobStatusLabel });
 
   if (hideIfDisconnected && status?.connected === false) {
     return null;
@@ -1616,9 +1709,9 @@ function PrinterListRow({
           else onOpenSinglePrinter(printer.id);
         }
       }}
-      className={`grid min-w-[820px] grid-cols-[minmax(15rem,1.5fr)_minmax(8rem,0.8fr)_minmax(9rem,0.9fr)_minmax(13rem,1.25fr)_minmax(10rem,0.85fr)] items-center gap-3 border-b border-bambu-dark-tertiary px-3 py-2.5 text-sm transition-colors last:border-b-0 hover:bg-bambu-dark ${isSelected ? 'bg-bambu-green/10' : ''}`}
+      className={`border-b border-bambu-dark-tertiary text-sm transition-colors last:border-b-0 hover:bg-bambu-dark ${isSelected ? 'bg-bambu-green/10' : ''}`}
     >
-      <div className="flex min-w-0 items-center gap-3">
+      <div className="flex min-w-0 items-center gap-3 px-3 py-2.5 md:hidden">
         {selectionMode && (
           <button
             type="button"
@@ -1632,35 +1725,79 @@ function PrinterListRow({
             {isSelected ? <CheckSquare className="h-4 w-4 text-bambu-green" /> : <Square className="h-4 w-4" />}
           </button>
         )}
-        <img
-          src={getPrinterImage(printer.model)}
-          alt={printer.model || t('common.printer')}
-          className="h-10 w-10 shrink-0 rounded-lg object-contain"
-        />
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="truncate font-medium text-white">{printer.name}</div>
-          <div className="truncate text-xs text-bambu-gray">{printer.model || t('common.unknown', 'Unknown')}</div>
+          <div className="truncate text-xs text-bambu-gray">{printer.model || jobStatusLabel}</div>
+        </div>
+        <div className="flex min-w-0 max-w-[58%] shrink-0 items-center gap-2">
+          <span className="min-w-0 max-w-28 truncate text-right text-xs font-medium text-white" title={mobilePrintStatusLabel}>
+            {mobilePrintStatusLabel}
+          </span>
+          <span
+            className={`h-2.5 w-2.5 shrink-0 rounded-full ${printStatusClass}`}
+            title={printStatusTitle}
+            aria-label={printStatusTitle}
+          />
+          <span className="min-w-12 shrink-0 text-right text-xs font-medium tabular-nums text-white">{etaLabel}</span>
+          <span
+            className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${printerHealth.className}`}
+            title={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
+            aria-label={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
+          >
+            <Activity className="h-4 w-4" />
+          </span>
         </div>
       </div>
-      <div className="min-w-0">
-        <span className={`inline-flex max-w-full items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium ${stateClass}`}>
-          <span className="truncate">{stateLabel}</span>
-        </span>
-      </div>
-      <div className="truncate text-bambu-gray">{location}</div>
-      <div className="min-w-0">
-        <div className="truncate text-white">{activePrintName || t('printers.noActivePrint', 'No active print')}</div>
-        <div className="mt-1 flex items-center gap-2">
-          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-bambu-dark-tertiary">
-            <div className="h-full rounded-full bg-bambu-green transition-all" style={{ width: `${isPrintingOrPaused ? progress : 0}%` }} />
+
+      <div className="hidden min-w-[820px] grid-cols-[minmax(15rem,1.5fr)_minmax(8rem,0.8fr)_minmax(9rem,0.9fr)_minmax(13rem,1.25fr)_minmax(10rem,0.85fr)] items-center gap-3 px-3 py-2.5 md:grid">
+        <div className="flex min-w-0 items-center gap-3">
+          {selectionMode && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleSelect?.(printer.id);
+              }}
+              className="shrink-0 text-bambu-gray hover:text-bambu-green"
+              aria-label={isSelected ? t('printers.bulk.deselectPrinter', 'Deselect printer') : t('printers.bulk.selectPrinter', 'Select printer')}
+            >
+              {isSelected ? <CheckSquare className="h-4 w-4 text-bambu-green" /> : <Square className="h-4 w-4" />}
+            </button>
+          )}
+          <img
+            src={getPrinterImage(printer.model)}
+            alt={printer.model || t('common.printer')}
+            className="h-10 w-10 shrink-0 rounded-lg object-contain"
+          />
+          <div className="min-w-0">
+            <div className="truncate font-medium text-white">{printer.name}</div>
+            <div className="truncate text-xs text-bambu-gray">{printer.model || t('common.unknown', 'Unknown')}</div>
           </div>
-          <span className="w-9 shrink-0 text-right text-xs tabular-nums text-bambu-gray">{isPrintingOrPaused ? `${Math.round(progress)}%` : '---'}</span>
         </div>
-      </div>
-      <div className="min-w-0 text-right">
-        <div className="truncate text-white">{etaLabel}</div>
-        <div className={`text-xs ${issueCount > 0 ? 'text-status-warning' : 'text-bambu-gray'}`}>
-          {issueCount > 0 ? t('printers.status.issueCount', '{{count}} issue', { count: issueCount }) : t('common.ok', 'OK')}
+        <div className="min-w-0">
+          <span className="inline-flex max-w-full items-center gap-2">
+            <span
+              className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${printerHealth.className}`}
+              title={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
+              aria-label={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
+            >
+              <Activity className="h-4 w-4" />
+            </span>
+            <span className={`truncate text-sm font-medium ${status ? 'text-white' : 'text-bambu-gray'}`}>{printerHealth.label}</span>
+          </span>
+        </div>
+        <div className="truncate text-bambu-gray">{location}</div>
+        <div className="min-w-0">
+          <div className="truncate text-white">{activePrintName || jobStatusLabel}</div>
+          <div className="mt-1 flex items-center gap-2">
+            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-bambu-dark-tertiary">
+              <div className="h-full rounded-full bg-bambu-green transition-all" style={{ width: `${isPrintingOrPaused ? progress : 0}%` }} />
+            </div>
+            <span className="w-9 shrink-0 text-right text-xs tabular-nums text-bambu-gray">{isPrintingOrPaused ? `${Math.round(progress)}%` : '---'}</span>
+          </div>
+        </div>
+        <div className="min-w-0 text-right">
+          <div className="truncate text-white">{etaLabel}</div>
         </div>
       </div>
     </div>
@@ -1778,7 +1915,7 @@ function SinglePrinterStatusPanel({
         <div className="rounded-xl border border-bambu-dark-tertiary bg-bambu-dark p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="truncate text-sm font-medium text-white">{activePrintName || t('printers.noActivePrint', 'No active print')}</div>
+              <div className="truncate text-sm font-medium text-white">{activePrintName || stateLabel}</div>
               <div className="mt-1 text-xs text-bambu-gray">{stateLabel}</div>
             </div>
             <div className="text-sm font-medium tabular-nums text-white">{isPrintingOrPaused ? `${Math.round(progress)}%` : '---'}</div>
@@ -2658,42 +2795,21 @@ function PrinterCard({
       <StatusRowText title={doorTitle} state={status?.door_open ? t('printers.door.open') : t('printers.door.closed')} />
     </span>
   ) : null;
-  const printerHealth = (() => {
-    if (!status?.connected) {
-      return {
-        label: t('printers.health.error', 'Error'),
-        className: 'bg-status-error/20 text-status-error',
-      };
-    }
-
-    const knownErrors = status.hms_errors ? filterKnownHMSErrors(status.hms_errors) : [];
-    const hasSevereHms = knownErrors.some(e => e.severity <= 2);
-    if (hasSevereHms || (maintenanceInfo?.due_count ?? 0) > 0 || (wifiSignal != null && wifiSignal < -80)) {
-      return {
-        label: t('printers.health.error', 'Error'),
-        className: 'bg-status-error/20 text-status-error',
-      };
-    }
-
-    if (
-      knownErrors.length > 0 ||
-      needsPlateClear ||
-      (maintenanceInfo?.warning_count ?? 0) > 0 ||
-      firmwareInfo?.update_available ||
-      (hasDoorSensor && status.door_open) ||
-      (wifiSignal != null && wifiSignal < -60)
-    ) {
-      return {
-        label: t('printers.health.attention', 'Attention'),
-        className: 'bg-status-warning/20 text-status-warning',
-      };
-    }
-
-    return {
-      label: t('printers.health.normal', 'Normal'),
-      className: 'bg-status-ok/20 text-status-ok',
-    };
-  })();
+  const printerHealth = getPrinterHealthMeta({
+    connected: status?.connected,
+    knownErrors: knownHmsErrors,
+    maintenanceInfo,
+    needsPlateClear,
+    wifiSignal,
+    firmwareUpdateAvailable: !!firmwareInfo?.update_available,
+    hasDoorSensor,
+    doorOpen: status?.door_open,
+    labels: {
+      healthy: t('printers.health.healthy', 'Healthy'),
+      attentionRequired: t('printers.health.attentionRequired', 'Requires attention'),
+      error: t('printers.health.error', 'Error'),
+    },
+  });
 
   // Determine if this card should be hidden (use cached connected state to prevent flicker)
   const shouldHide = hideIfDisconnected && isConnected === false;
@@ -8057,6 +8173,7 @@ export function PrintersPage() {
     const parsed = saved ? Number(saved) : NaN;
     return Number.isFinite(parsed) ? parsed : null;
   });
+  const [singlePrinterReturnView, setSinglePrinterReturnView] = useState<PrinterPageViewMode | null>(null);
   const cardSize = printerPageViewMode === 'cards' ? 1 : printerPageViewMode === 'single' ? 4 : 2;
   const viewMode: ViewMode = printerPageViewMode === 'cards' ? 'compact' : 'expanded';
   const [compactDrilldownPrinterId, setCompactDrilldownPrinterId] = useState<number | null>(null);
@@ -8112,9 +8229,16 @@ export function PrintersPage() {
   const openSinglePrinter = useCallback((printerId: number) => {
     setSelectedSinglePrinterId(printerId);
     localStorage.setItem('singlePrinterViewId', String(printerId));
+    setSinglePrinterReturnView(printerPageViewMode === 'single' ? null : printerPageViewMode);
     setPrinterPageViewMode('single');
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, [setPrinterPageViewMode]);
+  }, [printerPageViewMode, setPrinterPageViewMode]);
+  const returnFromSinglePrinter = useCallback(() => {
+    if (!singlePrinterReturnView) return;
+    const returnView = singlePrinterReturnView;
+    setSinglePrinterReturnView(null);
+    setPrinterPageViewMode(returnView);
+  }, [setPrinterPageViewMode, singlePrinterReturnView]);
   const returnToCompactCards = useCallback(() => {
     const printerId = compactDrilldownPrinterId;
     setCompactDrilldownPrinterId(null);
@@ -8866,10 +8990,10 @@ export function PrintersPage() {
       {/* View selector */}
       <div className={`flex h-8 items-center bg-bambu-dark rounded-lg border border-bambu-dark-tertiary ${inMenu ? 'w-full' : ''}`}>
         {([
+          { mode: 'list' as const, label: t('printers.view.list', 'List'), icon: <List className="h-4 w-4" /> },
           { mode: 'cards' as const, label: t('printers.view.cards', 'Cards'), icon: <LayoutGrid className="h-4 w-4" /> },
           { mode: 'detail' as const, label: t('printers.view.detailCards', 'Detail cards'), icon: <Layers className="h-4 w-4" /> },
           { mode: 'single' as const, label: t('printers.view.singlePrinter', 'Single printer'), icon: <PrinterIcon className="h-4 w-4" /> },
-          { mode: 'list' as const, label: t('printers.view.list', 'List'), icon: <List className="h-4 w-4" /> },
         ]).map((option, index, options) => {
           const isSelected = printerPageViewMode === option.mode;
           return (
@@ -8883,6 +9007,7 @@ export function PrintersPage() {
                   setSelectedSinglePrinterId(sortedPrinters[0].id);
                   localStorage.setItem('singlePrinterViewId', String(sortedPrinters[0].id));
                 }
+                setSinglePrinterReturnView(null);
                 setPrinterPageViewMode(option.mode);
               }}
               className={`flex h-full items-center justify-center px-2 transition-colors ${inMenu ? 'flex-1' : ''} ${
@@ -9119,9 +9244,11 @@ export function PrintersPage() {
       ) : printerPageViewMode === 'single' && selectedSinglePrinter ? (
         <div className="min-h-[calc(100vh-14rem)] space-y-4">
           <div className="flex flex-col gap-3 rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary p-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0">
-              <h2 className="truncate text-lg font-semibold text-white">{t('printers.view.singlePrinter', 'Single printer')}</h2>
-              <p className="truncate text-sm text-bambu-gray">{selectedSinglePrinter.name}</p>
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="min-w-0">
+                <h2 className="truncate text-lg font-semibold text-white">{t('printers.view.singlePrinter', 'Single printer')}</h2>
+                <p className="truncate text-sm text-bambu-gray">{selectedSinglePrinter.name}</p>
+              </div>
             </div>
             <select
               value={selectedSinglePrinter.id}
@@ -9180,11 +9307,22 @@ export function PrintersPage() {
             isSelected={selectedPrinterIds.has(selectedSinglePrinter.id)}
             onToggleSelect={toggleSelect}
           />
+          {singlePrinterReturnView && (
+            <button
+              type="button"
+              onClick={returnFromSinglePrinter}
+              className={`fixed bottom-5 left-1/2 z-40 inline-flex -translate-x-1/2 items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium shadow-xl transition-colors ${accentButtonClass}`}
+              title={t('common.back', 'Back')}
+            >
+              <ArrowLeft className="w-4 h-4" />
+              {t('common.back', 'Back')}
+            </button>
+          )}
         </div>
       ) : printerPageViewMode === 'list' ? (
         <div className="overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary">
-          <div className="overflow-x-auto">
-            <div className="grid min-w-[820px] grid-cols-[minmax(15rem,1.5fr)_minmax(8rem,0.8fr)_minmax(9rem,0.9fr)_minmax(13rem,1.25fr)_minmax(10rem,0.85fr)] gap-3 border-b border-bambu-dark-tertiary bg-bambu-dark px-3 py-2 text-xs font-medium uppercase tracking-wide text-bambu-gray">
+          <div className="md:overflow-x-auto">
+            <div className="hidden min-w-[820px] grid-cols-[minmax(15rem,1.5fr)_minmax(8rem,0.8fr)_minmax(9rem,0.9fr)_minmax(13rem,1.25fr)_minmax(10rem,0.85fr)] gap-3 border-b border-bambu-dark-tertiary bg-bambu-dark px-3 py-2 text-xs font-medium uppercase tracking-wide text-bambu-gray md:grid">
               <div>{t('common.printer')}</div>
               <div>{t('printers.sort.status')}</div>
               <div>{t('printers.sort.location')}</div>
@@ -9203,6 +9341,7 @@ export function PrintersPage() {
                 onToggleSelect={toggleSelect}
                 onOpenSinglePrinter={openSinglePrinter}
                 timeFormat={settings?.time_format || 'system'}
+                checkPrinterFirmware={settings?.check_printer_firmware !== false}
               />
             ))}
           </div>
