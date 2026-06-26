@@ -2201,7 +2201,7 @@ function SinglePrinterCockpit({
   const statusControlClass = `relative min-h-[3.75rem] flex-1 rounded-lg bg-bambu-dark px-2 py-2 text-center flex flex-col justify-center items-center transition-colors ${
     canUseMachineTools ? 'cursor-pointer hover:bg-bambu-dark-tertiary' : 'cursor-default opacity-80'
   }`;
-  const iconControlClass = 'flex h-10 w-10 items-center justify-center rounded-lg text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50';
+  const iconControlClass = 'relative inline-flex h-10 min-w-0 items-center justify-center gap-2 rounded-lg px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50';
   const jogButtonClass = 'flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-500/15 text-indigo-300 transition-colors hover:bg-indigo-500/30 disabled:cursor-not-allowed disabled:opacity-50';
   const currentPrintLabel = activePrintName || t('printers.noActiveJob', 'No active job');
   const plateDetectionEnabled = plateDetectionMutation.isPending && plateDetectionMutation.variables != null
@@ -2341,7 +2341,7 @@ function SinglePrinterCockpit({
             )}
           </section>
 
-          <section className="min-h-0 overflow-hidden rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
+          <section className="relative z-20 min-h-0 overflow-visible rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
             <div className="mb-2 flex items-center gap-2">
               <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">
                 {t('printers.status.title', 'Status')}
@@ -2476,10 +2476,10 @@ function SinglePrinterCockpit({
             </div>
 
             <div className="mt-2 grid min-h-0 gap-2 overflow-hidden">
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="grid grid-cols-2 items-center gap-2">
                 <button
                   type="button"
-                  className={`${iconControlClass} ${
+                  className={`${iconControlClass} w-full ${
                     status?.chamber_light
                       ? 'bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20'
                       : 'bg-bambu-dark-tertiary/70 text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white'
@@ -2489,13 +2489,14 @@ function SinglePrinterCockpit({
                   title={status?.chamber_light ? t('printers.chamberLightOff') : t('printers.chamberLightOn')}
                 >
                   <ChamberLight on={!!status?.chamber_light} className="h-5 w-5" />
+                  <span className="min-w-0 truncate">{t('printers.chamberLight', 'Chamber Light')}</span>
                 </button>
-                <div className={`inline-flex rounded-lg ${plateDetectionEnabled ? 'ring-1 ring-green-500' : ''}`}>
+                <div className={`grid min-w-0 grid-cols-2 rounded-lg ${plateDetectionEnabled ? 'ring-1 ring-green-500' : ''}`}>
                   <button
                     type="button"
                     onClick={() => plateDetectionMutation.mutate(!plateDetectionEnabled)}
                     disabled={!status?.connected || plateDetectionMutation.isPending || !hasPermission('printers:update')}
-                    className={`${iconControlClass} rounded-r-none ${
+                    className={`${iconControlClass} w-full rounded-r-none ${
                       plateDetectionEnabled
                         ? 'bg-green-500/10 text-green-400 hover:bg-green-500/20'
                         : 'bg-bambu-dark-tertiary/70 text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white'
@@ -2507,12 +2508,13 @@ function SinglePrinterCockpit({
                     ) : (
                       <ScanSearch className="h-5 w-5" />
                     )}
+                    <span className="min-w-0 truncate">{t('printers.plateStatus.title', 'Plate')}</span>
                   </button>
                   <button
                     type="button"
                     onClick={handleOpenPlateCheck}
                     disabled={!status?.connected || isCheckingPlate || !hasPermission('printers:update')}
-                    className={`${iconControlClass} rounded-l-none border-l border-bambu-dark-tertiary ${
+                    className={`${iconControlClass} w-full rounded-l-none border-l border-bambu-dark-tertiary ${
                       plateDetectionEnabled
                         ? 'bg-green-500/10 text-green-400 hover:bg-green-500/20'
                         : 'bg-bambu-dark-tertiary/70 text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white'
@@ -2524,13 +2526,14 @@ function SinglePrinterCockpit({
                     ) : (
                       <ChevronDown className="h-5 w-5" />
                     )}
+                    <span className="min-w-0 truncate">{t('printers.plateDetection.check', 'Check')}</span>
                   </button>
                 </div>
                 <button
                   type="button"
                   onClick={() => canControl && isPrintingOrPaused && setStatusControlMenu(statusControlMenu === 'speed' ? null : 'speed')}
                   disabled={!isPrintingOrPaused || !canControl || printSpeedMutation.isPending}
-                  className={`${iconControlClass} ${
+                  className={`${iconControlClass} w-full ${
                     isPrintingOrPaused && canControl
                       ? 'bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'
                       : 'bg-bambu-dark-tertiary/70 text-bambu-gray disabled:opacity-60'
@@ -2538,6 +2541,7 @@ function SinglePrinterCockpit({
                   title={t('printers.speed.title')}
                 >
                   <Gauge className="h-5 w-5" />
+                  <span className="min-w-0 truncate">{t('printers.speed.title')}</span>
                   {statusControlMenu === 'speed' && (
                     <IndicatorControlPopover
                       title={t('printers.speed.title')}
@@ -2553,10 +2557,13 @@ function SinglePrinterCockpit({
                     type="button"
                     onClick={() => airductMutation.mutate(status?.airduct_mode === 1 ? 'cooling' : 'heating')}
                     disabled={!canUseMachineTools || airductMutation.isPending}
-                    className={`${iconControlClass} ${status?.airduct_mode === 1 ? 'bg-orange-500/10 text-orange-400 hover:bg-orange-500/20' : 'bg-sky-500/10 text-sky-400 hover:bg-sky-500/20'}`}
+                    className={`${iconControlClass} w-full ${status?.airduct_mode === 1 ? 'bg-orange-500/10 text-orange-400 hover:bg-orange-500/20' : 'bg-sky-500/10 text-sky-400 hover:bg-sky-500/20'}`}
                     title={t('printers.airduct.title')}
                   >
                     {status?.airduct_mode === 1 ? <Flame className="h-5 w-5" /> : <Snowflake className="h-5 w-5" />}
+                    <span className="min-w-0 truncate">
+                      {status?.airduct_mode === 1 ? t('printers.airduct.heating') : t('printers.airduct.cooling')}
+                    </span>
                   </button>
                 )}
               </div>
