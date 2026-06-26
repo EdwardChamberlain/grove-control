@@ -1861,7 +1861,7 @@ function SinglePrinterSwitcherItem({
     <button
       type="button"
       onClick={() => onSelect(printer.id)}
-      className={`group flex w-full min-w-0 items-center gap-3 rounded-lg border p-2.5 text-left transition-colors ${
+      className={`group flex w-full min-w-0 items-center gap-2 rounded-lg border p-2 text-left transition-colors ${
         isSelected
           ? 'border-bambu-green/60 bg-bambu-green/10'
           : 'border-bambu-dark-tertiary bg-bambu-dark hover:border-bambu-green/40 hover:bg-bambu-dark-tertiary/60'
@@ -1872,18 +1872,18 @@ function SinglePrinterSwitcherItem({
       <img
         src={getPrinterImage(printer.model)}
         alt={printer.model || t('common.printer')}
-        className="h-12 w-12 shrink-0 rounded-lg bg-bambu-dark-secondary object-contain"
+        className="h-10 w-10 shrink-0 rounded-lg bg-bambu-dark-secondary object-contain"
       />
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-semibold text-white">{printer.name}</div>
-        <div className="mt-0.5 truncate text-xs text-bambu-gray">{printer.model || t('common.unknown', 'Unknown')}</div>
+        <div className="truncate text-[13px] font-semibold text-white">{printer.name}</div>
+        <div className="mt-0.5 truncate text-[11px] text-bambu-gray">{printer.model || t('common.unknown', 'Unknown')}</div>
       </div>
       <span
-        className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${printerHealth.className}`}
+        className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${printerHealth.className}`}
         title={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
         aria-label={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
       >
-        <Activity className="h-4 w-4" />
+        <Activity className="h-3.5 w-3.5" />
       </span>
     </button>
   );
@@ -1943,6 +1943,7 @@ function SinglePrinterCockpit({
   const [showUploadForPrint, setShowUploadForPrint] = useState(false);
   const [printAfterUpload, setPrintAfterUpload] = useState<{ id: number; filename: string } | null>(null);
   const [reprintEntry, setReprintEntry] = useState<PrintLogEntry | null>(null);
+  const [isCheckingPlate, setIsCheckingPlate] = useState(false);
 
   const { data: status } = useQuery({
     queryKey: ['printerStatus', printer.id],
@@ -2001,11 +2002,23 @@ function SinglePrinterCockpit({
   });
   const chamberLightMutation = useMutation({
     mutationFn: (on: boolean) => api.setChamberLight(printer.id, on),
+    onMutate: async (on) => {
+      await queryClient.cancelQueries({ queryKey: ['printerStatus', printer.id] });
+      const previousStatus = queryClient.getQueryData(['printerStatus', printer.id]);
+      queryClient.setQueryData(['printerStatus', printer.id], (old: PrinterStatus | undefined) =>
+        old ? { ...old, chamber_light: on } : old
+      );
+      return { previousStatus };
+    },
     onSuccess: (_result, on) => {
       showToast(`Chamber light ${on ? 'on' : 'off'}`);
-      invalidateStatus();
     },
-    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToControlChamberLight'), 'error'),
+    onError: (error: Error, _on, context) => {
+      if (context?.previousStatus) {
+        queryClient.setQueryData(['printerStatus', printer.id], context.previousStatus);
+      }
+      showToast(error.message || t('printers.toast.failedToControlChamberLight'), 'error');
+    },
   });
   const nozzleTemperatureMutation = useMutation({
     mutationFn: ({ target, nozzle }: { target: number; nozzle: number }) => api.setNozzleTemperature(printer.id, target, nozzle),
@@ -2041,8 +2054,28 @@ function SinglePrinterCockpit({
   });
   const airductMutation = useMutation({
     mutationFn: (mode: 'cooling' | 'heating') => api.setAirductMode(printer.id, mode),
-    onSuccess: invalidateStatus,
-    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
+    onMutate: async (mode) => {
+      await queryClient.cancelQueries({ queryKey: ['printerStatus', printer.id] });
+      const previousStatus = queryClient.getQueryData(['printerStatus', printer.id]);
+      queryClient.setQueryData(['printerStatus', printer.id], (old: PrinterStatus | undefined) =>
+        old ? { ...old, airduct_mode: mode === 'cooling' ? 0 : 1 } : old
+      );
+      return { previousStatus };
+    },
+    onError: (error: Error, _mode, context) => {
+      if (context?.previousStatus) {
+        queryClient.setQueryData(['printerStatus', printer.id], context.previousStatus);
+      }
+      showToast(error.message || t('printers.toast.failedToSendCommand'), 'error');
+    },
+  });
+  const plateDetectionMutation = useMutation({
+    mutationFn: (enabled: boolean) => api.updatePrinter(printer.id, { plate_detection_enabled: enabled }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['printers'] });
+      showToast(plateDetectionMutation.variables ? t('printers.toast.plateCheckEnabled') : t('printers.toast.plateCheckDisabled'));
+    },
+    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToUpdateSetting'), 'error'),
   });
   const xyJogMutation = useMutation({
     mutationFn: ({ x, y }: { x: number; y: number }) => api.xyJog(printer.id, x, y),
@@ -2171,6 +2204,20 @@ function SinglePrinterCockpit({
   const iconControlClass = 'flex h-10 w-10 items-center justify-center rounded-lg text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50';
   const jogButtonClass = 'flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-500/15 text-indigo-300 transition-colors hover:bg-indigo-500/30 disabled:cursor-not-allowed disabled:opacity-50';
   const currentPrintLabel = activePrintName || t('printers.noActiveJob', 'No active job');
+  const plateDetectionEnabled = plateDetectionMutation.isPending && plateDetectionMutation.variables != null
+    ? plateDetectionMutation.variables
+    : printer.plate_detection_enabled;
+  const handleOpenPlateCheck = async () => {
+    setIsCheckingPlate(true);
+    try {
+      const result = await api.checkPlateEmpty(printer.id, { includeDebugImage: false });
+      showToast(result.is_empty ? t('printers.plateDetection.plateEmpty') : t('printers.plateDetection.objectsDetected'), result.is_empty ? 'success' : 'warning');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : t('printers.toast.failedToCheckPlate'), 'error');
+    } finally {
+      setIsCheckingPlate(false);
+    }
+  };
 
   return (
     <>
@@ -2443,6 +2490,42 @@ function SinglePrinterCockpit({
                 >
                   <ChamberLight on={!!status?.chamber_light} className="h-5 w-5" />
                 </button>
+                <div className={`inline-flex rounded-lg ${plateDetectionEnabled ? 'ring-1 ring-green-500' : ''}`}>
+                  <button
+                    type="button"
+                    onClick={() => plateDetectionMutation.mutate(!plateDetectionEnabled)}
+                    disabled={!status?.connected || plateDetectionMutation.isPending || !hasPermission('printers:update')}
+                    className={`${iconControlClass} rounded-r-none ${
+                      plateDetectionEnabled
+                        ? 'bg-green-500/10 text-green-400 hover:bg-green-500/20'
+                        : 'bg-bambu-dark-tertiary/70 text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white'
+                    }`}
+                    title={!hasPermission('printers:update') ? t('printers.plateDetection.noPermission') : (plateDetectionEnabled ? t('printers.plateDetection.enabledClick') : t('printers.plateDetection.disabledClick'))}
+                  >
+                    {plateDetectionMutation.isPending ? (
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                    ) : (
+                      <ScanSearch className="h-5 w-5" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleOpenPlateCheck}
+                    disabled={!status?.connected || isCheckingPlate || !hasPermission('printers:update')}
+                    className={`${iconControlClass} rounded-l-none border-l border-bambu-dark-tertiary ${
+                      plateDetectionEnabled
+                        ? 'bg-green-500/10 text-green-400 hover:bg-green-500/20'
+                        : 'bg-bambu-dark-tertiary/70 text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white'
+                    }`}
+                    title={!hasPermission('printers:update') ? t('printers.plateDetection.noPermission') : t('printers.plateDetection.manageCalibration')}
+                  >
+                    {isCheckingPlate ? (
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                    ) : (
+                      <ChevronDown className="h-5 w-5" />
+                    )}
+                  </button>
+                </div>
                 <button
                   type="button"
                   onClick={() => canControl && isPrintingOrPaused && setStatusControlMenu(statusControlMenu === 'speed' ? null : 'speed')}
@@ -2478,11 +2561,14 @@ function SinglePrinterCockpit({
                 )}
               </div>
 
-              <div className="rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary/70">
-                <div className="border-b border-bambu-dark-tertiary px-3 py-2 text-center text-xs font-medium text-white">
-                  {t('printers.bedJog.title')}
-                </div>
-                <div className="flex items-center justify-center gap-3 px-3 py-2.5">
+              <div className="mt-1 flex items-center gap-2">
+                <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">
+                  Jog
+                </span>
+                <div className="h-[2px] flex-1 bg-bambu-dark-tertiary" />
+              </div>
+              <div className="flex items-start justify-center gap-3 rounded-lg bg-bambu-dark/70 px-3 py-2.5">
+                <div className="flex items-center justify-center gap-3">
                   <div className="grid grid-cols-3 gap-1.5">
                     <div />
                     <button type="button" className={jogButtonClass} disabled={!canJog || xyJogMutation.isPending} onClick={() => xyJogMutation.mutate({ x: 0, y: jogStep })} aria-label="Move Y forward"><ArrowUp className="h-4 w-4" /></button>
@@ -2505,17 +2591,18 @@ function SinglePrinterCockpit({
                     <button type="button" className={jogButtonClass} disabled={!canJog || extruderJogMutation.isPending} onClick={() => extruderJogMutation.mutate(jogStep)} aria-label="Extrude filament"><ArrowDown className="h-4 w-4" /></button>
                   </div>
                 </div>
-                <div className="border-t border-bambu-dark-tertiary px-3 pb-3 pt-2">
-                  <div className="mb-1 text-[9px] font-medium uppercase tracking-wider text-bambu-gray/70">
+                <div className="self-stretch border-l border-bambu-dark-tertiary" />
+                <div className="flex min-w-20 flex-col gap-1">
+                  <div className="text-center text-[10px] font-semibold uppercase leading-tight tracking-wider text-white">
                     {t('printers.bedJog.step')}
                   </div>
-                  <div className="flex gap-1">
-                    {[1, 10, 50].map(step => (
+                  <div className="grid gap-1">
+                    {[1, 10, 50, 100].map(step => (
                       <button
                         key={step}
                         type="button"
                         onClick={() => setJogStep(step)}
-                        className={`flex-1 rounded px-1 py-1 text-[10px] transition-colors ${jogStep === step ? 'bg-bambu-green/20 text-bambu-green' : 'bg-bambu-dark text-bambu-gray hover:bg-bambu-dark-tertiary'}`}
+                        className={`rounded px-2 py-1 text-[10px] transition-colors ${jogStep === step ? 'bg-indigo-500/20 text-indigo-300' : 'bg-bambu-dark text-bambu-gray hover:bg-bambu-dark-tertiary'}`}
                       >
                         {step}
                       </button>
@@ -9866,12 +9953,12 @@ export function PrintersPage() {
         />
 
       ) : printerPageViewMode === 'single' && selectedSinglePrinter ? (
-        <div className="grid h-[calc(100vh-14rem)] min-h-0 gap-4 overflow-hidden lg:grid-cols-[20rem_minmax(0,1fr)]">
+        <div className="grid h-[calc(100vh-14rem)] min-h-0 gap-4 overflow-hidden lg:grid-cols-[17.5rem_minmax(0,1fr)]">
           <aside className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary p-3">
             <div className="mb-3 text-center">
               <div className="min-w-0">
-                <h2 className="truncate text-base font-semibold text-white">{t('printers.single.machineList', 'Machines')}</h2>
-                <p className="truncate text-xs text-bambu-gray">
+                <h2 className="truncate text-sm font-semibold text-white">{t('printers.single.machineList', 'Machines')}</h2>
+                <p className="truncate text-[11px] text-bambu-gray">
                   {sortedPrinters.length === 1
                     ? t('printers.single.machineCountOne', '1 printer')
                     : t('printers.single.machineCount', '{{count}} printers', { count: sortedPrinters.length })}
