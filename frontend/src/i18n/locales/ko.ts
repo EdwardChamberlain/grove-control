@@ -704,7 +704,6 @@ export default {
     printTime: '인쇄 시간',
     filamentUsed: '사용된 필라멘트',
     cost: '비용',
-    reprint: '재인쇄',
     preview: '미리보기',
     deleteArchive: '아카이브 삭제',
     deleteConfirm: '이 아카이브를 삭제하시겠습니까?',
@@ -751,7 +750,6 @@ export default {
     },
     menu: {
       print: '인쇄',
-      schedule: '예약',
       openInBambuStudio: '슬라이서에서 열기',
       slice: '슬라이스',
       externalLink: '외부 링크',
@@ -844,9 +842,6 @@ export default {
       noFileForReprint: '3MF 파일 없음 — 인쇄 기록 시 프린터에서 파일을 다운로드할 수 없었습니다',
       noPermissionEdit: '아카이브를 편집할 권한이 없습니다',
       noPermissionDelete: '아카이브를 삭제할 권한이 없습니다',
-      reprint: '재인쇄',
-      schedulePrint: '인쇄 예약',
-      schedule: '예약',
       openInBambuStudio: '슬라이서에서 열기',
       openInBambuStudioToSlice: '슬라이스하려면 슬라이서에서 열기',
       slice: '슬라이스',
@@ -978,17 +973,11 @@ export default {
   queue: {
     title: '인쇄 대기열',
     subtitle: '인쇄 작업을 예약하고 관리하세요',
-    addToQueue: '대기열에 추가',
-    print: '인쇄',
-    reprint: '재인쇄',
-    schedulePrint: '인쇄 예약',
     editQueueItem: '대기열 항목 편집',
-    printToPrinters: '{{count}}개 프린터에 인쇄',
-    queueToPrinters: '{{count}}개 프린터에 대기',
-    queueSelectedPlates: '{{count}}개 플레이트 대기',
     selectAllPlates: '{{count}}개 플레이트 전체 선택',
     deselectAll: '전체 해제',
     printQueued: '인쇄가 대기열에 추가됨',
+    printQueuedWillStartWhenIdle: '프린터가 유휴 상태가 되면 시작됩니다',
     itemsQueued: '{{count}}개 항목이 대기열에 추가됨',
     sending: '전송 중...',
     sendingProgress: '{{current}}/{{total}} 전송 중...',
@@ -1120,8 +1109,8 @@ export default {
       inHours: '{{count}}시간 후'
     },
     actions: {
-      stopPrint: '인쇄 정지',
       startPrint: '인쇄 시작',
+      stopPrint: '인쇄 정지',
       requeue: '재대기'
     },
     bulkEdit: {
@@ -1240,34 +1229,6 @@ export default {
       lineItem: '슬롯 {{slot}}: {{required}}g 필요, {{remaining}}g 남음',
       unknown: '알 수 없음',
       printAnyway: '그냥 인쇄'
-    }
-  },
-  backgroundDispatch: {
-    unknownFile: '알 수 없는 파일',
-    unknownPrinter: '알 수 없는 프린터',
-    startingPrints: '인쇄 시작 중',
-    progressSummary: '{{complete}}/{{total}} 완료 • 전송됨: {{dispatched}} • 처리 중: {{processing}}',
-    expandDetails: '전송 상세 펼치기',
-    collapseDetails: '전송 상세 접기',
-    dismissToast: '전송 알림 닫기',
-    cancelDispatchJob: '전송 작업 취소',
-    cancel: '취소',
-    cancelling: '취소 중…',
-    awaitingPrinter: '프린터 대기 중…',
-    status: {
-      dispatched: '전송됨',
-      processing: '처리 중',
-      completed: '완료',
-      failed: '실패',
-      cancelled: '취소됨'
-    },
-    toast: {
-      cancellingUpload: '업로드 취소 중...',
-      cancelled: '전송이 취소되었습니다',
-      cancelFailed: '전송 취소 실패',
-      completeWithFailures: '백그라운드 전송 완료: {{completed}}개 성공, {{failed}}개 실패',
-      completeSuccess: '백그라운드 전송 완료: {{completed}}개 성공',
-      printStartedRemaining: '{{completed}}개 인쇄 시작, {{remaining}}개 더 전송 중...'
     }
   },
   stats: {
@@ -3167,8 +3128,6 @@ export default {
     changeLink: '링크 변경...',
     linkTo: '연결 대상...',
     linkToProjectOrArchive: '프로젝트 또는 아카이브에 연결',
-    addToQueue: '대기열에 추가',
-    schedulePrint: '예약',
     generateThumbnail: '썸네일 생성',
     generateThumbnails: '썸네일 생성',
     generateThumbnailsForMissing: '썸네일이 없는 STL 파일의 썸네일 생성',
@@ -3459,9 +3418,7 @@ export default {
       forQuickAccess: '빠른 접근을 위해 이 프로젝트에 연결합니다.',
       fileCount: '{{count}}개 파일',
       empty: '연결된 폴더가 없습니다. 파일 관리자로 이동하여 폴더를 이 프로젝트에 연결하세요.',
-      noFiles: '이 폴더에 파일이 없습니다.',
-      print: '지금 인쇄',
-      addToQueue: '대기열에 추가'
+      noFiles: '이 폴더에 파일이 없습니다.'
     },
     bom: {
       title: '부품 목록',
@@ -4071,7 +4028,6 @@ export default {
     emptySlotReset: '필라멘트가 할당되지 않음'
   },
   printModal: {
-    title: '인쇄 시작',
     selectPrinter: '프린터 선택',
     selectPlate: '플레이트 선택',
     filamentMapping: '필라멘트 매핑',
@@ -4083,15 +4039,25 @@ export default {
     vibrationCalibration: '진동 보정',
     layerInspection: '첫 번째 레이어 검사',
     timelapse: '타임랩스',
-    startPrint: '인쇄 시작',
-    addToQueue: '대기열에 추가',
     cancel: '취소',
     noPrintersAvailable: '사용 가능한 프린터 없음',
     printerBusy: '프린터가 사용 중입니다',
     printerOffline: '프린터가 오프라인입니다',
     sameTypeDifferentColor: '같은 유형, 다른 색상',
     filamentTypeNotLoaded: '필라멘트 유형이 장착되지 않음',
+    whenToPrint: '인쇄 시점',
+    asap: '최대한 빨리',
+    queue: '대기열',
+    schedule: '예약',
+    dateTime: '날짜 및 시간',
+    invalidDateTime: '유효한 날짜와 시간을 입력하세요',
     openCalendar: '달력 열기',
+    requireManualStart: '수동 시작 필요',
+    requirePreviousSuccess: '이전 인쇄가 성공한 경우에만 시작',
+    autoOffAfter: '완료 후 프린터 전원 끄기',
+    helpAsap: '인쇄가 대기열 맨 앞에 추가되고 적합한 프린터가 유휴 상태가 되는 즉시 시작됩니다.',
+    helpSchedule: '프린터가 유휴 상태이면 예약된 시간에 인쇄가 시작됩니다. 사용 중이면 프린터가 사용 가능해질 때까지 대기합니다.',
+    helpQueue: '인쇄가 대기열 맨 뒤에 추가됩니다.',
     leftNozzle: 'L',
     rightNozzle: 'R',
     leftNozzleTooltip: '왼쪽 노즐',

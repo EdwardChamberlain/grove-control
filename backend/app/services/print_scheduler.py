@@ -2117,6 +2117,7 @@ class PrintScheduler:
         library_file = None
         file_path = None
         filename = None
+        cleanup_disk_paths: list[Path] = []
 
         if item.archive_id:
             # Print from archive
@@ -2152,6 +2153,7 @@ class PrintScheduler:
             filename = library_file.filename
 
             # Create archive from library file so usage tracking has access to the 3MF
+            queue_item_id = item.id
             try:
                 from backend.app.services.archive import ArchiveService
 
@@ -2165,6 +2167,17 @@ class PrintScheduler:
                 )
                 if archive:
                     item.archive_id = archive.id
+                    if item.cleanup_library_after_dispatch and not library_file.is_external:
+                        item.library_file_id = None
+                        cleanup_disk_paths.append(file_path)
+                        if library_file.thumbnail_path:
+                            thumb_path = Path(library_file.thumbnail_path)
+                            if not thumb_path.is_absolute():
+                                thumb_path = settings.base_dir / library_file.thumbnail_path
+                            cleanup_disk_paths.append(thumb_path)
+                        await db.delete(library_file)
+                        file_path = settings.base_dir / archive.file_path
+                        filename = archive.filename
                     await db.flush()
                     logger.info(
                         "Queue item %s: Created archive %s from library file %s",
@@ -2173,7 +2186,30 @@ class PrintScheduler:
                         item.library_file_id,
                     )
             except Exception as e:
-                logger.warning("Queue item %s: Failed to create archive from library file: %s", item.id, e)
+                logger.warning(
+                    "Queue item %s: Failed to create archive from library file: %s",
+                    queue_item_id,
+                    e,
+                    exc_info=True,
+                )
+                await db.rollback()
+                item = await db.get(PrintQueueItem, queue_item_id)
+                if item:
+                    item.status = "failed"
+                    item.error_message = "Failed to create archive from library file"
+                    item.completed_at = datetime.now(timezone.utc)
+                    await db.commit()
+                    await self._power_off_if_needed(db, item)
+                return
+
+            if not archive:
+                item.status = "failed"
+                item.error_message = "Failed to create archive from library file"
+                item.completed_at = datetime.now(timezone.utc)
+                await db.commit()
+                logger.error("Queue item %s: Archive creation from library file returned no archive", item.id)
+                await self._power_off_if_needed(db, item)
+                return
 
         else:
             # Neither archive nor library file specified
@@ -2329,12 +2365,8 @@ class PrintScheduler:
 
         # Propagate the queue item's owner into printer_manager so the
         # print-complete callback can credit the user in the PrintLogEntry
-        # (#1670). The dispatch path in `background_dispatch.py` does the
-        # equivalent for archive/library "Print" flows; the queue path was
-        # missing this hop, which left the print log's User column blank
-        # for any print started from the queue. `created_by_id` is set
-        # either at queue-add time (UI-added items) or when the user
-        # clicks the manual-start button (#1670 fix in print_queue.py).
+        # (#1670). `created_by_id` is set either at queue-add time (UI-added
+        # items) or when the user clicks the manual-start button.
         await self._propagate_owner_to_printer_manager(db, item)
 
         # IMPORTANT: Set status to "printing" BEFORE sending the print command.
@@ -2346,6 +2378,23 @@ class PrintScheduler:
         item.status = "printing"
         item.started_at = datetime.now(timezone.utc)
         await db.commit()
+
+        for cleanup_path in cleanup_disk_paths:
+            try:
+                if cleanup_path.exists():
+                    cleanup_path.unlink()
+            except OSError as cleanup_err:
+                logger.warning(
+                    "TRANSIENT_LIBRARY_FILE_ORPHAN %s",
+                    json.dumps(
+                        {
+                            "queue_item_id": item.id,
+                            "path": str(cleanup_path),
+                            "error": str(cleanup_err),
+                        },
+                        sort_keys=True,
+                    ),
+                )
 
         # Clear the awaiting-plate-clear flag now that we're starting a new print
         printer_manager.set_awaiting_plate_clear(item.printer_id, False)
@@ -2643,13 +2692,11 @@ class PrintScheduler:
         if landed_on_subtask:
             return
 
-        # Phase A timeout path — same #1150 / #887/#936 discriminator as
-        # background_dispatch: if the printer's gcode_file changed since
+        # Phase A timeout path: if the printer's gcode_file changed since
         # pre-dispatch, the project_file command landed and the printer is
-        # parsing — a forced reconnect mid-parse triggers 0500_4003. If
-        # gcode_file is unchanged, the publish was silently swallowed
-        # (#887/#936) and the original force_reconnect recovery is what we
-        # want.
+        # parsing — a forced reconnect mid-parse triggers 0500_4003 (#1150).
+        # If gcode_file is unchanged, the publish was silently swallowed
+        # (#887/#936) and force_reconnect recovery is what we want.
         client = printer_manager.get_client(printer_id)
         current_gcode_file = getattr(last_status, "gcode_file", None) if last_status else None
         publish_landed = current_gcode_file is not None and current_gcode_file != pre_gcode_file

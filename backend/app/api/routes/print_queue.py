@@ -8,7 +8,7 @@ from pathlib import Path
 
 import defusedxml.ElementTree as ET
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -153,6 +153,13 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
         except json.JSONDecodeError:
             nozzle_mapping_parsed = None
 
+    nozzles_info_parsed = None
+    if item.nozzles_info:
+        try:
+            nozzles_info_parsed = json.loads(item.nozzles_info)
+        except json.JSONDecodeError:
+            nozzles_info_parsed = None
+
     # Create response with parsed ams_mapping
     item_dict = {
         "id": item.id,
@@ -197,6 +204,8 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
         "gcode_injection": item.gcode_injection,
         # H2C rack-swap nozzle pick (#1780)
         "nozzle_mapping": nozzle_mapping_parsed,
+        "nozzles_info": nozzles_info_parsed,
+        "cleanup_library_after_dispatch": item.cleanup_library_after_dispatch,
     }
     response = PrintQueueItemResponse(**item_dict)
     if item.archive:
@@ -397,6 +406,23 @@ async def add_to_queue(
             and archive.created_by_id != current_user.id
         ):
             raise HTTPException(404, "Archive not found")
+        # Reprint perm gate (#1625): the legacy /archives/{id}/reprint endpoint
+        # required ARCHIVES_REPRINT_OWN/ALL; the unified queue route must keep
+        # that gate or an operator with QUEUE_CREATE could reprint via direct
+        # API call even if explicitly denied reprint perm. Mirrors the
+        # frontend `canModify('archives', 'reprint', ...)` helper:
+        # REPRINT_ALL allows any archive, REPRINT_OWN allows own only,
+        # ownerless archives require REPRINT_ALL (fail-closed).
+        if current_user is not None:
+            owns_archive = archive.created_by_id is not None and archive.created_by_id == current_user.id
+            has_reprint = current_user.has_permission(Permission.ARCHIVES_REPRINT_ALL.value) or (
+                owns_archive and current_user.has_permission(Permission.ARCHIVES_REPRINT_OWN.value)
+            )
+            if not has_reprint:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Permission archives:reprint_own or archives:reprint_all required",
+                )
 
     # Validate library file exists (if provided) and get it for filament extraction
     library_file = None
@@ -502,21 +528,35 @@ async def add_to_queue(
         await db.flush()  # Get batch.id before creating items
         batch_id = batch.id
 
-    # Get next position for this printer (or for unassigned/model-based items)
+    # Get queue scope for this printer (or for unassigned/model-based items).
     if data.printer_id is not None:
-        result = await db.execute(
-            select(func.max(PrintQueueItem.position))
-            .where(PrintQueueItem.printer_id == data.printer_id)
-            .where(PrintQueueItem.status == "pending")
+        queue_scope = (
+            PrintQueueItem.printer_id == data.printer_id,
+            PrintQueueItem.status == "pending",
         )
     else:
-        # For unassigned/model-based items, get max position across all unassigned
-        result = await db.execute(
-            select(func.max(PrintQueueItem.position))
-            .where(PrintQueueItem.printer_id.is_(None))
-            .where(PrintQueueItem.status == "pending")
+        # For unassigned/model-based items, scope across all unassigned.
+        queue_scope = (
+            PrintQueueItem.printer_id.is_(None),
+            PrintQueueItem.status == "pending",
         )
-    max_pos = result.scalar() or 0
+
+    insert_position = max(1, data.insert_position or 1)
+    if data.insert_at_top or data.insert_position is not None:
+        result = await db.execute(select(func.max(PrintQueueItem.position)).where(*queue_scope))
+        max_pos = result.scalar() or 0
+        insert_position = min(insert_position, max_pos + 1)
+        await db.execute(
+            update(PrintQueueItem)
+            .where(*queue_scope)
+            .where(PrintQueueItem.position >= insert_position)
+            .values(position=PrintQueueItem.position + quantity)
+        )
+        start_position = insert_position
+    else:
+        result = await db.execute(select(func.max(PrintQueueItem.position)).where(*queue_scope))
+        max_pos = result.scalar() or 0
+        start_position = max_pos + 1
 
     # Resolve print_time_seconds for SJF scheduling (cache on item at creation)
     cached_print_time = None
@@ -571,8 +611,9 @@ async def add_to_queue(
             use_ams=data.use_ams,
             nozzle_offset_cali=data.nozzle_offset_cali,
             gcode_injection=data.gcode_injection,
+            cleanup_library_after_dispatch=data.cleanup_library_after_dispatch,
             project_id=data.project_id,
-            position=max_pos + 1 + i,
+            position=start_position + i,
             status="pending",
             created_by_id=current_user.id if current_user else None,
             batch_id=batch_id,

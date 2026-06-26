@@ -28,6 +28,8 @@ class PrintQueueItemCreate(BaseModel):
     require_previous_success: bool = False
     auto_off_after: bool = False  # Power off printer after print completes
     manual_start: bool = False  # Requires manual trigger to start (staged)
+    insert_at_top: bool = False  # Insert ahead of other pending items in the same queue scope
+    insert_position: int | None = None  # 1-indexed insertion position for priority queueing
     # Persistent "Print Anyway" acknowledgement (#1698-followup). When set,
     # PrintModal already showed the deficit warning and the user confirmed,
     # so the scheduler does not re-flag this item on the next tick.
@@ -58,6 +60,9 @@ class PrintQueueItemCreate(BaseModel):
     batch_id: int | None = None
     # Project to associate the resulting archive with
     project_id: int | None = None
+    # Direct printer-card uploads are temporary library files. The scheduler
+    # deletes them after creating the durable archive copy.
+    cleanup_library_after_dispatch: bool = False
 
 
 class PrintQueueItemUpdate(BaseModel):
@@ -166,6 +171,7 @@ class PrintQueueItemResponse(BaseModel):
 
     # Auto-print G-code injection
     gcode_injection: bool = False
+    cleanup_library_after_dispatch: bool = False
 
     # H2C dual-nozzle-rack slicer pick (#1780). Surface for any future
     # "edit print → choose nozzle" UI; null on every model except O1C2
