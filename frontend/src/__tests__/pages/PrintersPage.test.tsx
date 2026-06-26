@@ -73,6 +73,8 @@ const selectToolbarDropdownOption = async (triggerName: RegExp, optionName: RegE
 describe('PrintersPage', () => {
   beforeEach(() => {
     localStorage.removeItem('printerCardSize');
+    localStorage.removeItem('printerViewMode');
+    localStorage.removeItem('singlePrinterViewId');
 
     server.use(
       http.get('/api/v1/printers/', () => {
@@ -442,7 +444,7 @@ describe('PrintersPage', () => {
         expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
       });
 
-      fireEvent.click(screen.getByRole('button', { name: 'S' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Cards' }));
 
       await waitFor(() => {
         expect(screen.queryByText('Mark plate as cleared')).not.toBeInTheDocument();
@@ -464,7 +466,7 @@ describe('PrintersPage', () => {
         expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
       });
 
-      fireEvent.click(screen.getByRole('button', { name: 'S' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Cards' }));
       fireEvent.click(screen.getAllByLabelText(/Machine health:/)[0]);
 
       await waitFor(() => {
@@ -1246,6 +1248,8 @@ describe('PrintersPage Phase 13 — EmptySlotHoverCard onAssignSpool wiring', ()
   beforeEach(() => {
     phase13EmptySlotProps.length = 0;
     localStorage.removeItem('printerCardSize');
+    localStorage.removeItem('printerViewMode');
+    localStorage.removeItem('singlePrinterViewId');
 
     server.use(
       http.get('/api/v1/printers/', () => HttpResponse.json(mockPrinters)),
@@ -1357,6 +1361,8 @@ describe('PrintersPage Phase 14 — Local-Branch BL-detection symmetry', () => {
   beforeEach(() => {
     phase14HoverCardProps.length = 0;
     localStorage.removeItem('printerCardSize');
+    localStorage.removeItem('printerViewMode');
+    localStorage.removeItem('singlePrinterViewId');
 
     server.use(
       http.get('/api/v1/printers/', () => HttpResponse.json(mockPrinters)),
