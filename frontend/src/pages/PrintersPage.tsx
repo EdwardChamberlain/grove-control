@@ -1804,6 +1804,88 @@ function PrinterListRow({
   );
 }
 
+function SinglePrinterSwitcherItem({
+  printer,
+  isSelected,
+  maintenanceInfo,
+  requirePlateClear,
+  checkPrinterFirmware = true,
+  onSelect,
+}: {
+  printer: Printer;
+  isSelected: boolean;
+  maintenanceInfo?: PrinterMaintenanceInfo;
+  requirePlateClear?: boolean;
+  checkPrinterFirmware?: boolean;
+  onSelect: (id: number) => void;
+}) {
+  const { t } = useTranslation();
+  const { hasPermission } = useAuth();
+  const { data: status } = useQuery({
+    queryKey: ['printerStatus', printer.id],
+    queryFn: () => api.getPrinterStatus(printer.id),
+    refetchInterval: 30000,
+  });
+  const { data: firmwareInfo } = useQuery({
+    queryKey: ['firmwareUpdate', printer.id],
+    queryFn: () => firmwareApi.checkPrinterUpdate(printer.id),
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+    enabled: checkPrinterFirmware && hasPermission('firmware:read'),
+  });
+
+  const knownHmsErrors = status?.hms_errors ? filterKnownHMSErrors(status.hms_errors) : [];
+  const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
+  const needsPlateClear = !!requirePlateClear && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
+  const hasDoorSensor = ['X1C', 'X1', 'X1E', 'X2D', 'P2S', 'H2D', 'H2D Pro', 'H2C', 'H2S'].includes(printer.model ?? '');
+  const printerHealth = getPrinterHealthMeta({
+    connected: status?.connected,
+    knownErrors: knownHmsErrors,
+    maintenanceInfo,
+    needsPlateClear,
+    wifiSignal: status?.wifi_signal,
+    firmwareUpdateAvailable: !!firmwareInfo?.update_available,
+    hasDoorSensor,
+    doorOpen: status?.door_open,
+    labels: {
+      healthy: t('printers.health.healthy', 'Healthy'),
+      attentionRequired: t('printers.health.attentionRequired', 'Requires attention'),
+      error: t('printers.health.error', 'Error'),
+    },
+  });
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(printer.id)}
+      className={`group flex w-full min-w-0 items-center gap-3 rounded-lg border p-2.5 text-left transition-colors ${
+        isSelected
+          ? 'border-bambu-green/60 bg-bambu-green/10'
+          : 'border-bambu-dark-tertiary bg-bambu-dark hover:border-bambu-green/40 hover:bg-bambu-dark-tertiary/60'
+      }`}
+      title={printer.name}
+      aria-pressed={isSelected}
+    >
+      <img
+        src={getPrinterImage(printer.model)}
+        alt={printer.model || t('common.printer')}
+        className="h-12 w-12 shrink-0 rounded-lg bg-bambu-dark-secondary object-contain"
+      />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-semibold text-white">{printer.name}</div>
+        <div className="mt-0.5 truncate text-xs text-bambu-gray">{printer.model || t('common.unknown', 'Unknown')}</div>
+      </div>
+      <span
+        className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${printerHealth.className}`}
+        title={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
+        aria-label={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
+      >
+        <Activity className="h-4 w-4" />
+      </span>
+    </button>
+  );
+}
+
 function SinglePrinterStatusPanel({
   printer,
   maintenanceInfo,
@@ -9242,71 +9324,85 @@ export function PrintersPage() {
         />
 
       ) : printerPageViewMode === 'single' && selectedSinglePrinter ? (
-        <div className="min-h-[calc(100vh-14rem)] space-y-4">
-          <div className="flex flex-col gap-3 rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary p-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex min-w-0 items-center gap-3">
+        <div className="grid min-h-[calc(100vh-14rem)] gap-4 lg:grid-cols-[20rem_minmax(0,1fr)]">
+          <aside className="rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary p-3 lg:sticky lg:top-24 lg:max-h-[calc(100vh-8rem)]">
+            <div className="mb-3 text-center">
               <div className="min-w-0">
-                <h2 className="truncate text-lg font-semibold text-white">{t('printers.view.singlePrinter', 'Single printer')}</h2>
-                <p className="truncate text-sm text-bambu-gray">{selectedSinglePrinter.name}</p>
+                <h2 className="truncate text-base font-semibold text-white">{t('printers.single.machineList', 'Machines')}</h2>
+                <p className="truncate text-xs text-bambu-gray">
+                  {sortedPrinters.length === 1
+                    ? t('printers.single.machineCountOne', '1 printer')
+                    : t('printers.single.machineCount', '{{count}} printers', { count: sortedPrinters.length })}
+                </p>
               </div>
             </div>
-            <select
-              value={selectedSinglePrinter.id}
-              onChange={(e) => {
-                const nextId = Number(e.target.value);
-                setSelectedSinglePrinterId(nextId);
-                localStorage.setItem('singlePrinterViewId', String(nextId));
-              }}
-              className="h-9 min-w-0 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark px-3 text-sm text-white focus:border-bambu-green focus:outline-none sm:min-w-64"
-              aria-label={t('printers.view.selectSinglePrinter', 'Select printer')}
-            >
+            <div className="flex max-h-72 flex-col gap-2 overflow-y-auto pr-1 lg:max-h-[calc(100vh-13rem)]">
               {sortedPrinters.map(printer => (
-                <option key={printer.id} value={printer.id}>{printer.name}</option>
+                <SinglePrinterSwitcherItem
+                  key={printer.id}
+                  printer={printer}
+                  isSelected={printer.id === selectedSinglePrinter.id}
+                  maintenanceInfo={maintenanceByPrinter[printer.id]}
+                  requirePlateClear={settings?.require_plate_clear === true}
+                  checkPrinterFirmware={settings?.check_printer_firmware !== false}
+                  onSelect={(nextId) => {
+                    setSelectedSinglePrinterId(nextId);
+                    localStorage.setItem('singlePrinterViewId', String(nextId));
+                  }}
+                />
               ))}
-            </select>
+            </div>
+          </aside>
+
+          <div className="min-w-0 space-y-4">
+            <div className="rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-bambu-gray">{t('printers.view.singlePrinter', 'Single printer')}</p>
+              <h2 className="mt-1 truncate text-2xl font-semibold text-white">{selectedSinglePrinter.name}</h2>
+              <p className="mt-1 truncate text-sm text-bambu-gray">{selectedSinglePrinter.model || t('common.unknown', 'Unknown')}</p>
+            </div>
+
+            <SinglePrinterStatusPanel
+              printer={selectedSinglePrinter}
+              maintenanceInfo={maintenanceByPrinter[selectedSinglePrinter.id]}
+              requirePlateClear={settings?.require_plate_clear === true}
+              timeFormat={settings?.time_format || 'system'}
+            />
+
+            <PrinterCard
+              key={selectedSinglePrinter.id}
+              printer={selectedSinglePrinter}
+              hideIfDisconnected={hideDisconnected}
+              maintenanceInfo={maintenanceByPrinter[selectedSinglePrinter.id]}
+              viewMode="expanded"
+              cardSize={4}
+              spoolmanEnabled={spoolmanEnabled}
+              hasUnlinkedSpools={hasUnlinkedSpools}
+              linkedSpools={linkedSpools}
+              spoolmanUrl={spoolmanStatus?.url}
+              spoolmanSyncMode={spoolmanSyncMode}
+              onGetAssignment={getAssignment}
+              onUnassignSpool={(pid, aid, tid) => unassignMutation.mutate({ printerId: pid, amsId: aid, trayId: tid })}
+              spoolmanSpools={spoolmanSpools}
+              spoolmanSlotAssignments={spoolmanSlotAssignments}
+              spoolmanLoading={spoolmanSpoolsLoading || spoolmanAssignmentsLoading}
+              onUnassignSpoolmanSpool={(id) => unassignSpoolmanMutation.mutate(id)}
+              amsThresholds={settings ? {
+                humidityGood: Number(settings.ams_humidity_good) || 40,
+                humidityFair: Number(settings.ams_humidity_fair) || 60,
+                tempGood: Number(settings.ams_temp_good) || 28,
+                tempFair: Number(settings.ams_temp_fair) || 35,
+              } : undefined}
+              timeFormat={settings?.time_format || 'system'}
+              cameraViewMode={settings?.camera_view_mode || 'window'}
+              onOpenEmbeddedCamera={(id, name) => setEmbeddedCameraPrinters(prev => new Map(prev).set(id, { id, name }))}
+              checkPrinterFirmware={settings?.check_printer_firmware !== false}
+              dryingPresets={effectiveDryingPresets}
+              requirePlateClear={settings?.require_plate_clear === true}
+              selectionMode={selectionMode}
+              isSelected={selectedPrinterIds.has(selectedSinglePrinter.id)}
+              onToggleSelect={toggleSelect}
+            />
           </div>
-
-          <SinglePrinterStatusPanel
-            printer={selectedSinglePrinter}
-            maintenanceInfo={maintenanceByPrinter[selectedSinglePrinter.id]}
-            requirePlateClear={settings?.require_plate_clear === true}
-            timeFormat={settings?.time_format || 'system'}
-          />
-
-          <PrinterCard
-            key={selectedSinglePrinter.id}
-            printer={selectedSinglePrinter}
-            hideIfDisconnected={hideDisconnected}
-            maintenanceInfo={maintenanceByPrinter[selectedSinglePrinter.id]}
-            viewMode="expanded"
-            cardSize={4}
-            spoolmanEnabled={spoolmanEnabled}
-            hasUnlinkedSpools={hasUnlinkedSpools}
-            linkedSpools={linkedSpools}
-            spoolmanUrl={spoolmanStatus?.url}
-            spoolmanSyncMode={spoolmanSyncMode}
-            onGetAssignment={getAssignment}
-            onUnassignSpool={(pid, aid, tid) => unassignMutation.mutate({ printerId: pid, amsId: aid, trayId: tid })}
-            spoolmanSpools={spoolmanSpools}
-            spoolmanSlotAssignments={spoolmanSlotAssignments}
-            spoolmanLoading={spoolmanSpoolsLoading || spoolmanAssignmentsLoading}
-            onUnassignSpoolmanSpool={(id) => unassignSpoolmanMutation.mutate(id)}
-            amsThresholds={settings ? {
-              humidityGood: Number(settings.ams_humidity_good) || 40,
-              humidityFair: Number(settings.ams_humidity_fair) || 60,
-              tempGood: Number(settings.ams_temp_good) || 28,
-              tempFair: Number(settings.ams_temp_fair) || 35,
-            } : undefined}
-            timeFormat={settings?.time_format || 'system'}
-            cameraViewMode={settings?.camera_view_mode || 'window'}
-            onOpenEmbeddedCamera={(id, name) => setEmbeddedCameraPrinters(prev => new Map(prev).set(id, { id, name }))}
-            checkPrinterFirmware={settings?.check_printer_firmware !== false}
-            dryingPresets={effectiveDryingPresets}
-            requirePlateClear={settings?.require_plate_clear === true}
-            selectionMode={selectionMode}
-            isSelected={selectedPrinterIds.has(selectedSinglePrinter.id)}
-            onToggleSelect={toggleSelect}
-          />
         </div>
       ) : printerPageViewMode === 'list' ? (
         <div className="overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary">
