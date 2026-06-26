@@ -9307,17 +9307,6 @@ export function PrintersPage() {
             isSelected={selectedPrinterIds.has(selectedSinglePrinter.id)}
             onToggleSelect={toggleSelect}
           />
-          {singlePrinterReturnView && (
-            <button
-              type="button"
-              onClick={returnFromSinglePrinter}
-              className={`fixed bottom-5 left-1/2 z-40 inline-flex -translate-x-1/2 items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium shadow-xl transition-colors ${accentButtonClass}`}
-              title={t('common.back', 'Back')}
-            >
-              <ArrowLeft className="w-4 h-4" />
-              {t('common.back', 'Back')}
-            </button>
-          )}
         </div>
       ) : printerPageViewMode === 'list' ? (
         <div className="overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary">
@@ -9496,6 +9485,18 @@ export function PrintersPage() {
         <button
           type="button"
           onClick={returnToCompactCards}
+          className={`fixed bottom-5 left-1/2 z-40 inline-flex -translate-x-1/2 items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium shadow-xl transition-colors ${accentButtonClass}`}
+          title={t('common.back', 'Back')}
+        >
+          <ArrowLeft className="w-4 h-4" />
+          {t('common.back', 'Back')}
+        </button>
+      )}
+
+      {printerPageViewMode === 'single' && singlePrinterReturnView && (
+        <button
+          type="button"
+          onClick={returnFromSinglePrinter}
           className={`fixed bottom-5 left-1/2 z-40 inline-flex -translate-x-1/2 items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium shadow-xl transition-colors ${accentButtonClass}`}
           title={t('common.back', 'Back')}
         >
