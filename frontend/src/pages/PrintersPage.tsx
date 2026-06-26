@@ -2233,47 +2233,45 @@ function SinglePrinterCockpit({
               />
             )}
             <div className="absolute inset-0 bg-gradient-to-br from-bambu-dark/95 via-bambu-dark/75 to-bambu-green/20" />
-            <div className="relative grid h-full min-h-0 grid-cols-[minmax(0,1fr)_minmax(10rem,0.36fr)] gap-4 p-4">
-              <div className="flex min-w-0 flex-col justify-between">
-                <div className="min-w-0">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <h2 className="min-w-0 flex-1 truncate text-3xl font-semibold text-white">{printer.name}</h2>
-                    <span
-                      className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${printerHealth.className}`}
-                      title={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
-                      aria-label={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
-                    >
-                      <Activity className="h-4 w-4" />
-                    </span>
-                  </div>
-                  <p className="mt-1 truncate text-base text-bambu-gray">
-                    {printer.model || t('common.unknown', 'Unknown')}
-                    {printer.location ? ` - ${printer.location}` : ''}
-                  </p>
+            <div className="relative flex h-full min-h-0 flex-col gap-3 p-4">
+              <div className="min-w-0">
+                <div className="flex min-w-0 items-center gap-3">
+                  <h2 className="min-w-0 flex-1 truncate text-3xl font-semibold text-white">{printer.name}</h2>
+                  <span
+                    className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${printerHealth.className}`}
+                    title={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
+                    aria-label={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
+                  >
+                    <Activity className="h-4 w-4" />
+                  </span>
                 </div>
-
-                <div className="min-w-0">
-                  <div className="mb-2 flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-white">{currentPrintLabel}</p>
-                      <p className="mt-1 truncate text-xs text-bambu-gray">{t('printers.currentPrint', 'Current print')}</p>
-                    </div>
-                    <span className="shrink-0 text-3xl font-semibold tabular-nums text-white">
-                      {isPrintingOrPaused ? `${Math.round(progress)}%` : '---'}
-                    </span>
-                  </div>
-                  <div className="h-3 overflow-hidden rounded-full bg-bambu-dark-tertiary">
-                    <div className="h-full rounded-full bg-gradient-to-r from-bambu-green to-emerald-300 transition-all" style={{ width: `${isPrintingOrPaused ? progress : 0}%` }} />
-                  </div>
-                </div>
+                <p className="mt-1 truncate text-base text-bambu-gray">
+                  {printer.model || t('common.unknown', 'Unknown')}
+                  {printer.location ? ` - ${printer.location}` : ''}
+                </p>
               </div>
 
-              <div className="relative flex min-h-0 items-center justify-center">
+              <div className="relative flex min-h-0 flex-1 items-center justify-center">
                 <img
                   src={getPrinterImage(printer.model)}
                   alt={printer.model || t('common.printer')}
-                  className="relative max-h-full max-w-full object-contain drop-shadow-2xl"
+                  className="relative max-h-full max-w-[70%] object-contain drop-shadow-2xl"
                 />
+              </div>
+
+              <div className="min-w-0">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-white">{currentPrintLabel}</p>
+                    <p className="mt-1 truncate text-xs text-bambu-gray">{t('printers.currentPrint', 'Current print')}</p>
+                  </div>
+                  <span className="shrink-0 text-3xl font-semibold tabular-nums text-white">
+                    {isPrintingOrPaused ? `${Math.round(progress)}%` : '---'}
+                  </span>
+                </div>
+                <div className="h-3 overflow-hidden rounded-full bg-bambu-dark-tertiary">
+                  <div className="h-full rounded-full bg-gradient-to-r from-bambu-green to-emerald-300 transition-all" style={{ width: `${isPrintingOrPaused ? progress : 0}%` }} />
+                </div>
               </div>
             </div>
           </section>
