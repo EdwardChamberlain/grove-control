@@ -86,12 +86,15 @@ import {
   LineChart as LineChartIcon,
   MonitorPlay,
   List,
+  BarChart3,
+  Package,
 } from 'lucide-react';
 
 import { useNavigate } from 'react-router-dom';
 import { api, discoveryApi, firmwareApi, withStreamToken, ApiError } from '../api/client';
 import { formatDateOnly, formatETA, formatDuration, parseUTCDate } from '../utils/date';
-import type { Printer, PrinterCreate, PrinterStatus, AMSUnit, DiscoveredPrinter, FirmwareUpdateInfo, FirmwareUploadStatus, LinkedSpoolInfo, SpoolAssignment, HMSError, InventorySpool, SmartPlug, PrinterDiagnosticResult } from '../api/client';
+import { getCurrencySymbol } from '../utils/currency';
+import type { Printer, PrinterCreate, PrinterStatus, AMSUnit, DiscoveredPrinter, FirmwareUpdateInfo, FirmwareUploadStatus, LinkedSpoolInfo, SpoolAssignment, HMSError, InventorySpool, SmartPlug, PrinterDiagnosticResult, PrintLogEntry } from '../api/client';
 import { Card, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -1615,7 +1618,7 @@ function PrinterListRow({
   selectionMode,
   isSelected,
   onToggleSelect,
-  onOpenSinglePrinter,
+  onOpenExpandedCard,
   timeFormat = 'system',
   checkPrinterFirmware = true,
 }: {
@@ -1626,7 +1629,7 @@ function PrinterListRow({
   selectionMode?: boolean;
   isSelected?: boolean;
   onToggleSelect?: (id: number) => void;
-  onOpenSinglePrinter: (id: number) => void;
+  onOpenExpandedCard: (id: number) => void;
   timeFormat?: 'system' | '12h' | '24h';
   checkPrinterFirmware?: boolean;
 }) {
@@ -1700,13 +1703,13 @@ function PrinterListRow({
           onToggleSelect?.(printer.id);
           return;
         }
-        onOpenSinglePrinter(printer.id);
+        onOpenExpandedCard(printer.id);
       }}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           if (selectionMode) onToggleSelect?.(printer.id);
-          else onOpenSinglePrinter(printer.id);
+          else onOpenExpandedCard(printer.id);
         }
       }}
       className={`border-b border-bambu-dark-tertiary text-sm transition-colors last:border-b-0 hover:bg-bambu-dark ${isSelected ? 'bg-bambu-green/10' : ''}`}
@@ -1886,28 +1889,165 @@ function SinglePrinterSwitcherItem({
   );
 }
 
-function SinglePrinterStatusPanel({
+function formatCockpitWeight(grams: number): string {
+  if (grams >= 1000) return `${(grams / 1000).toFixed(2)}kg`;
+  return `${Math.round(grams)}g`;
+}
+
+function getPrintLogStatusClass(status: string): string {
+  switch (status.toLowerCase()) {
+    case 'completed':
+      return 'bg-status-ok/20 text-status-ok';
+    case 'failed':
+      return 'bg-status-error/20 text-status-error';
+    case 'cancelled':
+    case 'stopped':
+    case 'skipped':
+      return 'bg-bambu-dark-tertiary text-bambu-gray';
+    default:
+      return 'bg-status-warning/20 text-status-warning';
+  }
+}
+
+function CockpitMetricCard({
+  icon: Icon,
+  label,
+  value,
+  detail,
+  className = '',
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+  detail?: string;
+  className?: string;
+}) {
+  return (
+    <div className={`rounded-xl border border-white/5 bg-bambu-dark/70 p-3 shadow-sm ${className}`}>
+      <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-bambu-gray">
+        <Icon className="h-4 w-4 text-bambu-green" />
+        <span className="truncate">{label}</span>
+      </div>
+      <div className="mt-2 truncate text-2xl font-semibold tabular-nums text-white">{value}</div>
+      {detail && <div className="mt-1 truncate text-xs text-bambu-gray">{detail}</div>}
+    </div>
+  );
+}
+
+function SinglePrinterCockpit({
   printer,
   maintenanceInfo,
   requirePlateClear,
   timeFormat = 'system',
+  checkPrinterFirmware = true,
+  currencySymbol,
 }: {
   printer: Printer;
   maintenanceInfo?: PrinterMaintenanceInfo;
   requirePlateClear?: boolean;
   timeFormat?: 'system' | '12h' | '24h';
+  checkPrinterFirmware?: boolean;
+  currencySymbol: string;
 }) {
   const { t } = useTranslation();
+  const { hasPermission } = useAuth();
+  const { showToast } = useToast();
+  const queryClient = useQueryClient();
+
   const { data: status } = useQuery({
     queryKey: ['printerStatus', printer.id],
     queryFn: () => api.getPrinterStatus(printer.id),
     refetchInterval: 30000,
   });
+  const { data: firmwareInfo } = useQuery({
+    queryKey: ['firmwareUpdate', printer.id],
+    queryFn: () => firmwareApi.checkPrinterUpdate(printer.id),
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+    enabled: checkPrinterFirmware && hasPermission('firmware:read'),
+  });
+  const { data: printLog } = useQuery({
+    queryKey: ['single-printer-print-log', printer.id],
+    queryFn: () => api.getPrintLog({ printerId: printer.id, limit: 250 }),
+    staleTime: 60 * 1000,
+  });
+
+  const invalidateStatus = () => queryClient.invalidateQueries({ queryKey: ['printerStatus', printer.id] });
+  const stopPrintMutation = useMutation({
+    mutationFn: () => api.stopPrint(printer.id),
+    onSuccess: () => {
+      showToast(t('printers.toast.printStopped'));
+      invalidateStatus();
+    },
+    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToStopPrint'), 'error'),
+  });
+  const pausePrintMutation = useMutation({
+    mutationFn: () => api.pausePrint(printer.id),
+    onSuccess: () => {
+      showToast(t('printers.toast.printPaused'));
+      invalidateStatus();
+    },
+    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToPausePrint'), 'error'),
+  });
+  const resumePrintMutation = useMutation({
+    mutationFn: () => api.resumePrint(printer.id),
+    onSuccess: () => {
+      showToast(t('printers.toast.printResumed'));
+      invalidateStatus();
+    },
+    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToResumePrint'), 'error'),
+  });
+  const clearPlateMutation = useMutation({
+    mutationFn: () => api.clearPlate(printer.id),
+    onSuccess: () => {
+      showToast(t('queue.clearPlateSuccess'));
+      queryClient.setQueryData(['printerStatus', printer.id], (old: PrinterStatus | undefined) =>
+        old ? { ...old, awaiting_plate_clear: false } : old
+      );
+      invalidateStatus();
+      queryClient.invalidateQueries({ queryKey: ['queue', printer.id] });
+    },
+    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
+  });
+  const chamberLightMutation = useMutation({
+    mutationFn: (on: boolean) => api.setChamberLight(printer.id, on),
+    onSuccess: (_result, on) => {
+      showToast(`Chamber light ${on ? 'on' : 'off'}`);
+      invalidateStatus();
+    },
+    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToControlChamberLight'), 'error'),
+  });
+  const refreshMutation = useMutation({
+    mutationFn: () => api.refreshPrinterStatus(printer.id),
+    onSuccess: () => {
+      showToast(t('printers.forceRefreshSuccess'));
+      invalidateStatus();
+    },
+    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
+  });
 
   const knownHmsErrors = status?.hms_errors ? filterKnownHMSErrors(status.hms_errors) : [];
   const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
+  const isPaused = status?.state === 'PAUSE';
   const progress = Math.max(0, Math.min(100, status?.progress ?? 0));
-  const needsPlateClear = requirePlateClear && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
+  const needsPlateClear = !!requirePlateClear && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
+  const hasDoorSensor = ['X1C', 'X1', 'X1E', 'X2D', 'P2S', 'H2D', 'H2D Pro', 'H2C', 'H2S'].includes(printer.model ?? '');
+  const printerHealth = getPrinterHealthMeta({
+    connected: status?.connected,
+    knownErrors: knownHmsErrors,
+    maintenanceInfo,
+    needsPlateClear,
+    wifiSignal: status?.wifi_signal,
+    firmwareUpdateAvailable: !!firmwareInfo?.update_available,
+    hasDoorSensor,
+    doorOpen: status?.door_open,
+    labels: {
+      healthy: t('printers.health.healthy', 'Healthy'),
+      attentionRequired: t('printers.health.attentionRequired', 'Requires attention'),
+      error: t('printers.health.error', 'Error'),
+    },
+  });
+
   const activePrintName = status?.current_print && isPrintingOrPaused
     ? formatPrintName(status.subtask_name || status.current_print || null, status.gcode_file, t)
     : null;
@@ -1916,20 +2056,9 @@ function SinglePrinterStatusPanel({
     : !status.connected
     ? t('printers.connection.offline')
     : getStatusDisplay(status.state, status.stg_cur_name);
-  const stateClass = !status
-    ? 'bg-bambu-dark-tertiary text-bambu-gray'
-    : !status.connected
-    ? 'bg-status-error/20 text-status-error'
-    : knownHmsErrors.length > 0 || (maintenanceInfo?.due_count ?? 0) > 0
-    ? 'bg-status-error/20 text-status-error'
-    : needsPlateClear || (maintenanceInfo?.warning_count ?? 0) > 0
-    ? 'bg-status-warning/20 text-status-warning'
-    : isPrintingOrPaused
-    ? 'bg-bambu-green/20 text-bambu-green'
-    : 'bg-status-ok/20 text-status-ok';
   const etaLabel = status?.remaining_time != null && status.remaining_time > 0
     ? formatETA(status.remaining_time, timeFormat, t)
-    : '---';
+    : '--:--';
   const remainingLabel = status?.remaining_time != null && status.remaining_time > 0
     ? formatDuration(status.remaining_time * 60)
     : '---';
@@ -1937,105 +2066,273 @@ function SinglePrinterStatusPanel({
     ? `${status.layer_num}/${status.total_layers}`
     : '---';
   const temp = status?.temperatures;
-  const temperatureItems = [
-    { label: t('printers.temperature.nozzle', 'Nozzle'), value: temp?.nozzle != null ? `${Math.round(temp.nozzle)}°C` : '---', target: temp?.nozzle_target },
-    { label: t('printers.temperature.bed', 'Bed'), value: temp?.bed != null ? `${Math.round(temp.bed)}°C` : '---', target: temp?.bed_target },
-    { label: t('printers.temperature.chamber', 'Chamber'), value: temp?.chamber != null ? `${Math.round(temp.chamber)}°C` : '---', target: temp?.chamber_target },
-  ];
+  const printEntries = useMemo(() => printLog?.items ?? [], [printLog?.items]);
+  const printerStats = useMemo(() => {
+    const completed = printEntries.filter(entry => entry.status === 'completed').length;
+    const failed = printEntries.filter(entry => entry.status === 'failed').length;
+    const cancelled = printEntries.filter(entry => ['cancelled', 'stopped', 'skipped'].includes(entry.status)).length;
+    const outcomeTotal = completed + failed;
+    const filamentByType = new Map<string, number>();
+    let durationSeconds = 0;
+    let filamentGrams = 0;
+    let totalCost = 0;
+    let energyKwh = 0;
+
+    printEntries.forEach(entry => {
+      durationSeconds += entry.duration_seconds ?? 0;
+      filamentGrams += entry.filament_used_grams ?? 0;
+      totalCost += entry.cost ?? 0;
+      energyKwh += entry.energy_kwh ?? 0;
+      if (entry.filament_type) {
+        filamentByType.set(entry.filament_type, (filamentByType.get(entry.filament_type) ?? 0) + 1);
+      }
+    });
+
+    const topFilament = Array.from(filamentByType.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '---';
+
+    return {
+      completed,
+      failed,
+      cancelled,
+      successRate: outcomeTotal ? Math.round((completed / outcomeTotal) * 100) : 0,
+      durationHours: durationSeconds / 3600,
+      filamentGrams,
+      totalCost,
+      energyKwh,
+      topFilament,
+    };
+  }, [printEntries]);
+
   const issueItems = [
     knownHmsErrors.length > 0 ? t('printers.status.errorCount', '{{count}} active', { count: knownHmsErrors.length }) : null,
     needsPlateClear ? t('printers.plateStatus.notCleared') : null,
     (maintenanceInfo?.due_count ?? 0) > 0 ? t('maintenance.dueCount', { count: maintenanceInfo?.due_count ?? 0 }) : null,
     (maintenanceInfo?.warning_count ?? 0) > 0 ? t('maintenance.warningCount', { count: maintenanceInfo?.warning_count ?? 0 }) : null,
+    firmwareInfo?.update_available ? t('firmware.updateAvailable', 'Firmware update available') : null,
   ].filter((item): item is string => Boolean(item));
 
+  const recentPrints = printEntries.slice(0, 4);
+  const controlBusy = stopPrintMutation.isPending || pausePrintMutation.isPending || resumePrintMutation.isPending;
+  const canControl = !!status?.connected && hasPermission('printers:control');
+  const jobDotClass = !status?.connected
+    ? 'bg-status-error'
+    : status.state === 'RUNNING'
+    ? 'bg-bambu-green'
+    : status.state === 'PAUSE'
+    ? 'bg-status-warning'
+    : status.state === 'FAILED'
+    ? 'bg-status-error'
+    : 'bg-bambu-gray';
+  const heroPrintImage = status?.cover_url && isPrintingOrPaused ? withStreamToken(status.cover_url) : null;
+
   return (
-    <div className="rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary p-4 shadow-lg sm:p-5">
-      <div className="flex flex-col gap-5 xl:flex-row xl:items-stretch">
-        <div className="flex min-w-0 items-center gap-4 xl:w-[30%]">
-          <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded-xl border border-bambu-dark-tertiary bg-bambu-dark">
-            <img
-              src={getPrinterImage(printer.model)}
-              alt={printer.model || t('common.printer')}
-              className="h-20 w-20 object-contain"
-            />
-          </div>
-          <div className="min-w-0">
-            <h2 className="truncate text-2xl font-semibold text-white">{printer.name}</h2>
-            <p className="mt-1 truncate text-sm text-bambu-gray">
-              {printer.model || t('common.unknown', 'Unknown')}
-              {printer.location ? ` - ${printer.location}` : ''}
-            </p>
-            <span className={`mt-3 inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium ${stateClass}`}>
-              <Activity className="h-4 w-4" />
-              {stateLabel}
-            </span>
-          </div>
-        </div>
-
-        <div className="grid flex-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-xl border border-bambu-dark-tertiary bg-bambu-dark p-3">
-            <div className="flex items-center gap-2 text-xs text-bambu-gray"><Gauge className="h-4 w-4" />{t('printers.progress', 'Progress')}</div>
-            <div className="mt-2 text-2xl font-semibold text-white">{isPrintingOrPaused ? `${Math.round(progress)}%` : '---'}</div>
-          </div>
-          <div className="rounded-xl border border-bambu-dark-tertiary bg-bambu-dark p-3">
-            <div className="flex items-center gap-2 text-xs text-bambu-gray"><Clock className="h-4 w-4" />{t('printers.remaining', 'Remaining')}</div>
-            <div className="mt-2 text-2xl font-semibold text-white">{remainingLabel}</div>
-          </div>
-          <div className="rounded-xl border border-bambu-dark-tertiary bg-bambu-dark p-3">
-            <div className="flex items-center gap-2 text-xs text-bambu-gray"><Clock className="h-4 w-4" />{t('printers.eta', 'ETA')}</div>
-            <div className="mt-2 text-2xl font-semibold text-white">{etaLabel}</div>
-          </div>
-          <div className="rounded-xl border border-bambu-dark-tertiary bg-bambu-dark p-3">
-            <div className="flex items-center gap-2 text-xs text-bambu-gray"><Layers className="h-4 w-4" />{t('printers.layers', 'Layers')}</div>
-            <div className="mt-2 text-2xl font-semibold text-white">{layerLabel}</div>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(18rem,0.8fr)]">
-        <div className="rounded-xl border border-bambu-dark-tertiary bg-bambu-dark p-4">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="truncate text-sm font-medium text-white">{activePrintName || stateLabel}</div>
-              <div className="mt-1 text-xs text-bambu-gray">{stateLabel}</div>
-            </div>
-            <div className="text-sm font-medium tabular-nums text-white">{isPrintingOrPaused ? `${Math.round(progress)}%` : '---'}</div>
-          </div>
-          <div className="h-2 overflow-hidden rounded-full bg-bambu-dark-tertiary">
-            <div className="h-full rounded-full bg-bambu-green transition-all" style={{ width: `${isPrintingOrPaused ? progress : 0}%` }} />
-          </div>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
-          <div className="rounded-xl border border-bambu-dark-tertiary bg-bambu-dark p-4">
-            <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white">
-              <Flame className="h-4 w-4 text-bambu-green" />
-              {t('printers.temperature.title', 'Temperature')}
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              {temperatureItems.map(item => (
-                <div key={item.label} className="rounded-lg bg-bambu-dark-secondary px-2 py-2 text-center">
-                  <div className="text-xs text-bambu-gray">{item.label}</div>
-                  <div className="mt-1 text-sm font-medium text-white">{item.value}</div>
-                  {item.target != null && <div className="text-[11px] text-bambu-gray">/{Math.round(item.target)}°C</div>}
+    <div className="relative h-full min-h-0 overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-gradient-to-br from-bambu-dark-secondary via-bambu-dark to-bambu-dark-secondary shadow-xl">
+      <div className="relative grid h-full min-h-0 gap-3 p-3 xl:grid-cols-[minmax(0,1.45fr)_minmax(21rem,0.8fr)]">
+        <div className="grid min-h-0 gap-3 xl:grid-rows-[minmax(15rem,1fr)_minmax(14rem,0.85fr)]">
+          <section className="relative min-h-0 overflow-hidden rounded-xl border border-white/10 bg-bambu-dark">
+            {heroPrintImage && (
+              <img
+                src={heroPrintImage}
+                alt=""
+                className="absolute inset-0 h-full w-full object-cover opacity-20"
+              />
+            )}
+            <div className="absolute inset-0 bg-gradient-to-br from-bambu-dark/95 via-bambu-dark/75 to-bambu-green/20" />
+            <div className="relative grid h-full min-h-0 grid-cols-[minmax(0,1fr)_minmax(13rem,0.45fr)] gap-4 p-5">
+              <div className="flex min-w-0 flex-col justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium ${printerHealth.className}`}
+                      title={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
+                    >
+                      <Activity className="h-4 w-4" />
+                      {printerHealth.label}
+                    </span>
+                    <span className="inline-flex items-center gap-2 rounded-full bg-bambu-dark-tertiary/80 px-3 py-1 text-sm font-medium text-white">
+                      <span className={`h-2.5 w-2.5 rounded-full ${jobDotClass}`} />
+                      {stateLabel}
+                    </span>
+                  </div>
+                  <h2 className="mt-4 truncate text-4xl font-semibold text-white">{printer.name}</h2>
+                  <p className="mt-1 truncate text-base text-bambu-gray">
+                    {printer.model || t('common.unknown', 'Unknown')}
+                    {printer.location ? ` - ${printer.location}` : ''}
+                  </p>
                 </div>
-              ))}
+
+                <div className="min-w-0">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-white">{activePrintName || stateLabel}</p>
+                      <p className="mt-1 truncate text-xs text-bambu-gray">{t('printers.currentPrint', 'Current print')}</p>
+                    </div>
+                    <span className="shrink-0 text-3xl font-semibold tabular-nums text-white">
+                      {isPrintingOrPaused ? `${Math.round(progress)}%` : '---'}
+                    </span>
+                  </div>
+                  <div className="h-3 overflow-hidden rounded-full bg-bambu-dark-tertiary">
+                    <div className="h-full rounded-full bg-gradient-to-r from-bambu-green to-emerald-300 transition-all" style={{ width: `${isPrintingOrPaused ? progress : 0}%` }} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="relative flex min-h-0 items-center justify-center">
+                <img
+                  src={getPrinterImage(printer.model)}
+                  alt={printer.model || t('common.printer')}
+                  className="relative max-h-full max-w-full object-contain drop-shadow-2xl"
+                />
+              </div>
             </div>
-          </div>
-          <div className="rounded-xl border border-bambu-dark-tertiary bg-bambu-dark p-4">
-            <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white">
-              <AlertTriangle className="h-4 w-4 text-status-warning" />
-              {t('printers.status.attention', 'Attention')}
+          </section>
+
+          <section className="grid min-h-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <CockpitMetricCard icon={Gauge} label={t('printers.progress', 'Progress')} value={isPrintingOrPaused ? `${Math.round(progress)}%` : '---'} detail={activePrintName || stateLabel} />
+            <CockpitMetricCard icon={Clock} label={t('printers.remaining', 'Remaining')} value={remainingLabel} detail={`${t('printers.eta', 'ETA')} ${etaLabel}`} />
+            <CockpitMetricCard icon={Layers} label={t('printers.layers', 'Layers')} value={layerLabel} detail={t('printers.layerProgress', 'Layer progress')} />
+            <CockpitMetricCard icon={BarChart3} label={t('stats.successRate', 'Success rate')} value={`${printerStats.successRate}%`} detail={`${printerStats.completed} / ${printerStats.failed} / ${printerStats.cancelled}`} />
+            <CockpitMetricCard icon={Package} label={t('stats.totalPrints', 'Total prints')} value={`${printLog?.total ?? printEntries.length}`} detail={t('stats.topFilament', 'Top filament: {{filament}}', { filament: printerStats.topFilament })} />
+            <CockpitMetricCard icon={Clock} label={t('stats.printTime', 'Print time')} value={`${printerStats.durationHours.toFixed(1)}h`} detail={`${maintenanceInfo?.total_print_hours?.toFixed(1) ?? '0.0'}h ${t('maintenance.title', 'Maintenance')}`} />
+            <CockpitMetricCard icon={Package} label={t('stats.filamentUsed', 'Filament used')} value={formatCockpitWeight(printerStats.filamentGrams)} detail={`${currencySymbol}${printerStats.totalCost.toFixed(2)} ${t('stats.filamentCost', 'filament cost')}`} />
+            <CockpitMetricCard icon={Zap} label={t('stats.energyUsed', 'Energy used')} value={`${printerStats.energyKwh.toFixed(2)} kWh`} detail={t('stats.fromPrintHistory', 'From print history')} />
+          </section>
+        </div>
+
+        <div className="grid min-h-0 gap-3 xl:grid-rows-[auto_minmax(0,1fr)_auto]">
+          <section className="rounded-xl border border-white/10 bg-bambu-dark/80 p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-white">{t('printers.controls.title', 'Controls')}</h3>
+                <p className="text-xs text-bambu-gray">{t('printers.controls.subtitle', 'Live printer actions')}</p>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => refreshMutation.mutate()}
+                disabled={refreshMutation.isPending}
+                title={t('printers.forceRefresh')}
+                className="h-9 w-9 p-0"
+              >
+                <RefreshCw className={`h-4 w-4 ${refreshMutation.isPending ? 'animate-spin' : ''}`} />
+              </Button>
             </div>
-            <div className="space-y-2 text-sm">
-              {issueItems.length > 0 ? (
-                issueItems.map(item => <div key={item} className="truncate text-status-warning">{item}</div>)
+            <div className="grid grid-cols-2 gap-2">
+              {isPaused ? (
+                <Button
+                  size="sm"
+                  onClick={() => resumePrintMutation.mutate()}
+                  disabled={!canControl || controlBusy}
+                  title={!hasPermission('printers:control') ? t('printers.permission.noControl') : undefined}
+                >
+                  <Play className="h-4 w-4" />
+                  {t('printers.controls.resume', 'Resume')}
+                </Button>
               ) : (
-                <div className="text-bambu-gray">{t('common.ok', 'OK')}</div>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => pausePrintMutation.mutate()}
+                  disabled={!canControl || !isPrintingOrPaused || controlBusy}
+                  title={!hasPermission('printers:control') ? t('printers.permission.noControl') : undefined}
+                >
+                  <Pause className="h-4 w-4" />
+                  {t('printers.controls.pause', 'Pause')}
+                </Button>
+              )}
+              <Button
+                size="sm"
+                variant="danger"
+                onClick={() => stopPrintMutation.mutate()}
+                disabled={!canControl || !isPrintingOrPaused || controlBusy}
+                title={!hasPermission('printers:control') ? t('printers.permission.noControl') : undefined}
+              >
+                <Square className="h-4 w-4" />
+                {t('printers.controls.stop', 'Stop')}
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => clearPlateMutation.mutate()}
+                disabled={!needsPlateClear || clearPlateMutation.isPending || !hasPermission('printers:clear_plate')}
+                title={!hasPermission('printers:clear_plate') ? t('printers.permission.noControl') : undefined}
+              >
+                <PlateClearedIcon className="h-4 w-4" />
+                {t('printers.clearPlate', 'Clear plate')}
+              </Button>
+              <Button
+                size="sm"
+                variant={status?.chamber_light ? 'primary' : 'secondary'}
+                onClick={() => chamberLightMutation.mutate(!status?.chamber_light)}
+                disabled={!canControl || chamberLightMutation.isPending}
+                title={!hasPermission('printers:control') ? t('printers.permission.noControl') : undefined}
+              >
+                <ChamberLight on={!!status?.chamber_light} className="h-4 w-4" />
+                {status?.chamber_light ? t('printers.chamberLightOff') : t('printers.chamberLightOn')}
+              </Button>
+            </div>
+          </section>
+
+          <section className="min-h-0 overflow-hidden rounded-xl border border-white/10 bg-bambu-dark/80 p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-white">{t('printers.single.recentPrints', 'Recent prints')}</h3>
+                <p className="text-xs text-bambu-gray">{t('printers.single.printerHistory', 'Printer-specific history')}</p>
+              </div>
+              <span className="rounded-full bg-bambu-dark-tertiary px-2.5 py-1 text-xs text-bambu-gray">{printLog?.total ?? 0}</span>
+            </div>
+            <div className="grid min-h-0 gap-2 overflow-hidden">
+              {recentPrints.length > 0 ? recentPrints.map((entry: PrintLogEntry) => (
+                <div key={entry.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary/80 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-white">{entry.print_name || t('archives.untitledPrint', 'Untitled print')}</p>
+                    <p className="mt-0.5 truncate text-xs text-bambu-gray">
+                      {formatDateOnly(entry.completed_at || entry.started_at || entry.created_at) || '---'}
+                      {entry.duration_seconds ? ` - ${formatDuration(entry.duration_seconds)}` : ''}
+                    </p>
+                  </div>
+                  <span className={`self-start rounded-full px-2 py-1 text-xs font-medium ${getPrintLogStatusClass(entry.status)}`}>{entry.status}</span>
+                </div>
+              )) : (
+                <div className="rounded-lg border border-dashed border-bambu-dark-tertiary p-4 text-sm text-bambu-gray">
+                  {t('printers.single.noPrintHistory', 'No print history for this printer yet.')}
+                </div>
               )}
             </div>
-          </div>
+          </section>
+
+          <section className="grid gap-3 rounded-xl border border-white/10 bg-bambu-dark/80 p-4">
+            <div className="grid grid-cols-3 gap-2">
+              <div className="rounded-lg bg-bambu-dark-secondary/80 p-3">
+                <div className="flex items-center gap-2 text-xs text-bambu-gray"><Flame className="h-4 w-4 text-bambu-green" />{t('printers.temperature.nozzle', 'Nozzle')}</div>
+                <div className="mt-1 text-lg font-semibold text-white">{temp?.nozzle != null ? `${Math.round(temp.nozzle)}°C` : '---'}</div>
+                <div className="text-xs text-bambu-gray">{temp?.nozzle_target != null ? `/${Math.round(temp.nozzle_target)}°C` : ''}</div>
+              </div>
+              <div className="rounded-lg bg-bambu-dark-secondary/80 p-3">
+                <div className="flex items-center gap-2 text-xs text-bambu-gray"><Flame className="h-4 w-4 text-bambu-green" />{t('printers.temperature.bed', 'Bed')}</div>
+                <div className="mt-1 text-lg font-semibold text-white">{temp?.bed != null ? `${Math.round(temp.bed)}°C` : '---'}</div>
+                <div className="text-xs text-bambu-gray">{temp?.bed_target != null ? `/${Math.round(temp.bed_target)}°C` : ''}</div>
+              </div>
+              <div className="rounded-lg bg-bambu-dark-secondary/80 p-3">
+                <div className="flex items-center gap-2 text-xs text-bambu-gray"><Snowflake className="h-4 w-4 text-bambu-green" />{t('printers.temperature.chamber', 'Chamber')}</div>
+                <div className="mt-1 text-lg font-semibold text-white">{temp?.chamber != null ? `${Math.round(temp.chamber)}°C` : '---'}</div>
+                <div className="text-xs text-bambu-gray">{temp?.chamber_target != null ? `/${Math.round(temp.chamber_target)}°C` : ''}</div>
+              </div>
+            </div>
+            <div className="min-h-[3.75rem] rounded-lg bg-bambu-dark-secondary/80 p-3">
+              <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-bambu-gray">
+                <AlertTriangle className="h-4 w-4 text-status-warning" />
+                {t('printers.status.attention', 'Attention')}
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs">
+                {issueItems.length > 0 ? issueItems.map(item => (
+                  <span key={item} className="rounded-full bg-status-warning/20 px-2 py-1 font-medium text-status-warning">{item}</span>
+                )) : (
+                  <span className="rounded-full bg-status-ok/20 px-2 py-1 font-medium text-status-ok">{t('common.ok', 'OK')}</span>
+                )}
+              </div>
+            </div>
+          </section>
         </div>
       </div>
     </div>
@@ -8380,6 +8677,12 @@ export function PrintersPage() {
     queryKey: ['ui-preferences'],
     queryFn: api.getUiPreferences,
   });
+  const { data: appSettings } = useQuery({
+    queryKey: ['settings'],
+    queryFn: api.getSettings,
+    enabled: hasPermission('settings:read'),
+    staleTime: 5 * 60 * 1000,
+  });
 
   // Parse user-configured temperature/fan presets once, with defensive fallback
   // to built-in defaults on parse failure (validators on the backend already
@@ -9324,8 +9627,8 @@ export function PrintersPage() {
         />
 
       ) : printerPageViewMode === 'single' && selectedSinglePrinter ? (
-        <div className="grid min-h-[calc(100vh-14rem)] gap-4 lg:grid-cols-[20rem_minmax(0,1fr)]">
-          <aside className="rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary p-3 lg:sticky lg:top-24 lg:max-h-[calc(100vh-8rem)]">
+        <div className="grid h-[calc(100vh-14rem)] min-h-0 gap-4 overflow-hidden lg:grid-cols-[20rem_minmax(0,1fr)]">
+          <aside className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary p-3">
             <div className="mb-3 text-center">
               <div className="min-w-0">
                 <h2 className="truncate text-base font-semibold text-white">{t('printers.single.machineList', 'Machines')}</h2>
@@ -9336,7 +9639,7 @@ export function PrintersPage() {
                 </p>
               </div>
             </div>
-            <div className="flex max-h-72 flex-col gap-2 overflow-y-auto pr-1 lg:max-h-[calc(100vh-13rem)]">
+            <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
               {sortedPrinters.map(printer => (
                 <SinglePrinterSwitcherItem
                   key={printer.id}
@@ -9354,53 +9657,14 @@ export function PrintersPage() {
             </div>
           </aside>
 
-          <div className="min-w-0 space-y-4">
-            <div className="rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary p-4">
-              <p className="text-xs font-medium uppercase tracking-wide text-bambu-gray">{t('printers.view.singlePrinter', 'Single printer')}</p>
-              <h2 className="mt-1 truncate text-2xl font-semibold text-white">{selectedSinglePrinter.name}</h2>
-              <p className="mt-1 truncate text-sm text-bambu-gray">{selectedSinglePrinter.model || t('common.unknown', 'Unknown')}</p>
-            </div>
-
-            <SinglePrinterStatusPanel
+          <div className="min-h-0 min-w-0">
+            <SinglePrinterCockpit
               printer={selectedSinglePrinter}
               maintenanceInfo={maintenanceByPrinter[selectedSinglePrinter.id]}
               requirePlateClear={settings?.require_plate_clear === true}
               timeFormat={settings?.time_format || 'system'}
-            />
-
-            <PrinterCard
-              key={selectedSinglePrinter.id}
-              printer={selectedSinglePrinter}
-              hideIfDisconnected={hideDisconnected}
-              maintenanceInfo={maintenanceByPrinter[selectedSinglePrinter.id]}
-              viewMode="expanded"
-              cardSize={4}
-              spoolmanEnabled={spoolmanEnabled}
-              hasUnlinkedSpools={hasUnlinkedSpools}
-              linkedSpools={linkedSpools}
-              spoolmanUrl={spoolmanStatus?.url}
-              spoolmanSyncMode={spoolmanSyncMode}
-              onGetAssignment={getAssignment}
-              onUnassignSpool={(pid, aid, tid) => unassignMutation.mutate({ printerId: pid, amsId: aid, trayId: tid })}
-              spoolmanSpools={spoolmanSpools}
-              spoolmanSlotAssignments={spoolmanSlotAssignments}
-              spoolmanLoading={spoolmanSpoolsLoading || spoolmanAssignmentsLoading}
-              onUnassignSpoolmanSpool={(id) => unassignSpoolmanMutation.mutate(id)}
-              amsThresholds={settings ? {
-                humidityGood: Number(settings.ams_humidity_good) || 40,
-                humidityFair: Number(settings.ams_humidity_fair) || 60,
-                tempGood: Number(settings.ams_temp_good) || 28,
-                tempFair: Number(settings.ams_temp_fair) || 35,
-              } : undefined}
-              timeFormat={settings?.time_format || 'system'}
-              cameraViewMode={settings?.camera_view_mode || 'window'}
-              onOpenEmbeddedCamera={(id, name) => setEmbeddedCameraPrinters(prev => new Map(prev).set(id, { id, name }))}
               checkPrinterFirmware={settings?.check_printer_firmware !== false}
-              dryingPresets={effectiveDryingPresets}
-              requirePlateClear={settings?.require_plate_clear === true}
-              selectionMode={selectionMode}
-              isSelected={selectedPrinterIds.has(selectedSinglePrinter.id)}
-              onToggleSelect={toggleSelect}
+              currencySymbol={getCurrencySymbol(appSettings?.currency || 'USD')}
             />
           </div>
         </div>
@@ -9424,7 +9688,7 @@ export function PrintersPage() {
                 selectionMode={selectionMode}
                 isSelected={selectedPrinterIds.has(printer.id)}
                 onToggleSelect={toggleSelect}
-                onOpenSinglePrinter={openSinglePrinter}
+                onOpenExpandedCard={openCompactCard}
                 timeFormat={settings?.time_format || 'system'}
                 checkPrinterFirmware={settings?.check_printer_firmware !== false}
               />
