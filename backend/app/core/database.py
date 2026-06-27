@@ -198,6 +198,7 @@ async def init_db():
         project_bom,
         settings,
         shopping_list,
+        slicer_pipeline,
         slot_preset,
         smart_plug,
         smart_plug_energy_snapshot,
@@ -3590,6 +3591,38 @@ async def seed_default_groups():
                 perms.append("inventory:forecast_write")
                 changed = True
                 logger.info("Added inventory:forecast_write to group '%s' (backfill)", group.name)
+            if changed:
+                group.permissions = perms
+        await session.commit()
+
+        # Backfill pipeline permissions (#1425). Pipelines were added after
+        # initial seeding, so existing groups need them appended:
+        #   - Administrators: all three (matches fresh-install ALL_PERMISSIONS)
+        #   - Operators: all three (matches fresh-install DEFAULT_GROUPS)
+        #   - Viewers + any group with library:read_own or settings:read:
+        #     pipelines:read only
+        result = await session.execute(select(Group))
+        for group in result.scalars().all():
+            if not group.permissions:
+                continue
+            perms = list(group.permissions)
+            changed = False
+            if group.name == "Administrators":
+                for new_perm in ("pipelines:read", "pipelines:write", "pipelines:run"):
+                    if new_perm not in perms:
+                        perms.append(new_perm)
+                        changed = True
+                        logger.info("Added %s to Administrators group (backfill)", new_perm)
+            elif group.name == "Operators":
+                for new_perm in ("pipelines:read", "pipelines:write", "pipelines:run"):
+                    if new_perm not in perms:
+                        perms.append(new_perm)
+                        changed = True
+                        logger.info("Added %s to Operators group (backfill)", new_perm)
+            elif "pipelines:read" not in perms and ("library:read_own" in perms or "settings:read" in perms):
+                perms.append("pipelines:read")
+                changed = True
+                logger.info("Added pipelines:read to group '%s' (backfill)", group.name)
             if changed:
                 group.permissions = perms
         await session.commit()

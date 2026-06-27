@@ -1572,6 +1572,8 @@ export default {
       smartPlugs: 'Smart Plugs',
       notifications: 'Notifications',
       queue: 'Workflow',
+      queueDispatch: 'Queue & Dispatch',
+      queuePipelines: 'Pipelines',
       filament: 'Filament',
       network: 'Network',
       apiKeys: 'API Keys',
@@ -2568,6 +2570,43 @@ export default {
       migrationErrorWarning: '{{count}} legacy row(s) failed to re-encrypt at startup. Check server logs and restart Bambuddy to retry.',
     },
 
+    // Slicer Pipelines (#1425): list/edit/delete preset bundles users saved
+    // from the Slice dialog. Lives in Settings → Workflow → Pipelines sub-tab.
+    pipelines: {
+      title: 'Slicer Pipelines',
+      subtitle: 'Reusable preset bundles (printer + process + filaments + bed type). Save one from the Slice dialog and apply it with a single click on the next file.',
+      loading: 'Loading pipelines…',
+      loadError: 'Could not load pipelines.',
+      confirmDelete: 'Delete this pipeline? This cannot be undone.',
+      staleWarning: 'One or more referenced presets no longer exist. Re-save this pipeline from the Slice dialog to fix.',
+      empty: {
+        title: 'No pipelines yet.',
+        howto: 'Open the Slice dialog for any file, pick your printer / process / filaments / bed type, then click "Save as pipeline". Your saved pipelines will appear here.',
+      },
+      field: {
+        name: 'Pipeline name',
+        description: 'Description',
+      },
+      action: {
+        save: 'Save',
+        cancel: 'Cancel',
+        rename: 'Rename',
+        delete: 'Delete',
+      },
+      slot: {
+        printer: 'Printer',
+        process: 'Process',
+        filament: 'Filament',
+        filamentN: 'Filament {{n}}',
+        bed: 'Bed',
+      },
+      toast: {
+        saved: 'Pipeline saved',
+        saveFailed: 'Save failed',
+        deleted: 'Pipeline deleted',
+        deleteFailed: 'Delete failed',
+      },
+    },
   },
 
   // Notifications (for push notifications)
@@ -3860,6 +3899,22 @@ export default {
       highTemp: 'High Temp Plate',
       texturedPEI: 'Textured PEI Plate',
       smoothPEI: 'Smooth PEI Plate',
+    },
+    // Slicer Pipelines (#1425) — apply a saved bundle or save the current pick.
+    pipelines: {
+      label: 'Pipeline',
+      applyAria: 'Apply pipeline',
+      applyPrompt: 'Apply pipeline…',
+      empty: 'No saved pipelines',
+      saveButton: 'Save as pipeline',
+      saveTitle: 'Save the current four-slot selection as a reusable pipeline',
+      namePlaceholder: 'Pipeline name',
+      nameAria: 'New pipeline name',
+      toast: {
+        applied: 'Applied "{{name}}"',
+        saved: 'Pipeline saved',
+        saveFailed: 'Save failed',
+      },
     },
   },
 

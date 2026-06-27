@@ -1502,6 +1502,39 @@ export interface UnifiedPresetsResponse {
   orca_cloud_status: SlicerCloudStatus;
 }
 
+// Slicer Pipelines (#1425) — named bundles of preset slots the SliceModal
+// can apply in one click. PR A surfaces only the bundle; target_* and
+// fanout_strategy round-trip from the backend but the UI doesn't yet expose
+// them (they come alive in PR B / PR C).
+export interface SlicerPipeline {
+  id: number;
+  name: string;
+  description: string | null;
+  printer_preset: PresetRef;
+  process_preset: PresetRef;
+  filament_presets: PresetRef[];
+  bed_type: string | null;
+  target_kind: 'specific_printer' | 'printer_class';
+  target_printer_id: number | null;
+  target_model_class: string | null;
+  fanout_strategy: 'max_parallel' | 'fill_one_first' | 'round_robin';
+  created_by: number | null;
+  created_at: string;
+  updated_at: string;
+}
+export interface SlicerPipelineCreateRequest {
+  name: string;
+  description?: string | null;
+  printer_preset: PresetRef;
+  process_preset: PresetRef;
+  filament_presets: PresetRef[];
+  bed_type?: string | null;
+}
+export type SlicerPipelineUpdateRequest = Partial<SlicerPipelineCreateRequest>;
+export interface SlicerPipelinesListResponse {
+  pipelines: SlicerPipeline[];
+}
+
 export interface SliceResponse {
   library_file_id: number;
   name: string;
@@ -6198,6 +6231,25 @@ export const api = {
     request<UnifiedPresetsResponse>(
       options?.refresh ? '/slicer/presets?refresh=true' : '/slicer/presets',
     ),
+
+  // Slicer Pipelines (#1425) — preset bundles the SliceModal can apply in
+  // one click. CRUD is gated on PIPELINES_READ / PIPELINES_WRITE.
+  listSlicerPipelines: () =>
+    request<SlicerPipelinesListResponse>('/slicer-pipelines/'),
+  getSlicerPipeline: (id: number) =>
+    request<SlicerPipeline>(`/slicer-pipelines/${id}`),
+  createSlicerPipeline: (data: SlicerPipelineCreateRequest) =>
+    request<SlicerPipeline>('/slicer-pipelines/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateSlicerPipeline: (id: number, data: SlicerPipelineUpdateRequest) =>
+    request<SlicerPipeline>(`/slicer-pipelines/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  deleteSlicerPipeline: (id: number) =>
+    request<void>(`/slicer-pipelines/${id}`, { method: 'DELETE' }),
 
   // Canonical Bambu printer-model registry — "Bambu Lab <model>" → short code.
   // Single source of truth shared with backend (PRINTER_MODEL_MAP); the

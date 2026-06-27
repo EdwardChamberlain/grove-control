@@ -222,6 +222,13 @@ _APIKEY_DENIED_PERMISSIONS: frozenset[Permission] = frozenset(
         Permission.SMART_PLUGS_DELETE,
         # Network scanning — operator only (no API-key scope for this).
         Permission.DISCOVERY_SCAN,
+        # Slicer Pipelines (#1425) — admin authoring + the print-spending Run
+        # action. PR A only ships CRUD; PR B / PR C may move PIPELINES_RUN onto
+        # `can_queue` (it queues prints) once the run dispatch lands. PR A keeps
+        # all three denied so they fail closed for any API-key surface.
+        Permission.PIPELINES_READ,
+        Permission.PIPELINES_WRITE,
+        Permission.PIPELINES_RUN,
     }
 )
 

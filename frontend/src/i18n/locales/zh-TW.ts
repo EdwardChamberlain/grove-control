@@ -1558,6 +1558,8 @@ export default {
       smartPlugs: '智慧插座',
       notifications: '通知',
       queue: '工作流程',
+      queueDispatch: '佇列與分派',
+      queuePipelines: '管線',
       filament: '耗材',
       network: '網路',
       apiKeys: 'API 金鑰',
@@ -2539,6 +2541,44 @@ export default {
       migrationErrorWarning: '{{count}} 行舊資料在啟動時未能重新加密。請檢查伺服器日誌並重新啟動 Bambuddy 以重試。',
     },
 
+
+    // Slicer Pipelines (#1425): list/edit/delete preset bundles users saved
+    // from the Slice dialog. Lives in Settings → Workflow → Pipelines sub-tab.
+    pipelines: {
+      title: '切片機管線',
+      subtitle: '可重複使用的預設組合（印表機 + 製程 + 耗材 + 熱床類型）。在切片對話框中儲存一個，下次切片檔案時一鍵套用。',
+      loading: '正在載入管線…',
+      loadError: '無法載入管線。',
+      confirmDelete: '刪除此管線？此操作無法復原。',
+      staleWarning: '參考的一個或多個預設已不存在。請在切片對話框中重新儲存此管線以修正。',
+      empty: {
+        title: '尚無管線。',
+        howto: '為任意檔案開啟切片對話框，選擇印表機 / 製程 / 耗材 / 熱床,然後點擊「另存為管線」。儲存的管線將顯示於此處。',
+      },
+      field: {
+        name: '管線名稱',
+        description: '描述',
+      },
+      action: {
+        save: '儲存',
+        cancel: '取消',
+        rename: '重新命名',
+        delete: '刪除',
+      },
+      slot: {
+        printer: '印表機',
+        process: '製程',
+        filament: '耗材',
+        filamentN: '耗材 {{n}}',
+        bed: '熱床',
+      },
+      toast: {
+        saved: '管線已儲存',
+        saveFailed: '儲存失敗',
+        deleted: '管線已刪除',
+        deleteFailed: '刪除失敗',
+      },
+    },
   },
 
   // Notifications (for push notifications)
@@ -3831,6 +3871,22 @@ export default {
       highTemp: 'High Temp Plate',
       texturedPEI: 'Textured PEI Plate',
       smoothPEI: 'Smooth PEI Plate',
+    },
+    // Slicer Pipelines (#1425) — apply a saved bundle or save the current pick.
+    pipelines: {
+      label: '管線',
+      applyAria: '套用管線',
+      applyPrompt: '套用管線…',
+      empty: '無已儲存管線',
+      saveButton: '另存為管線',
+      saveTitle: '將目前四個槽位的選擇儲存為可重複使用的管線',
+      namePlaceholder: '管線名稱',
+      nameAria: '新管線名稱',
+      toast: {
+        applied: '已套用「{{name}}」',
+        saved: '管線已儲存',
+        saveFailed: '儲存失敗',
+      },
     },
   },
 

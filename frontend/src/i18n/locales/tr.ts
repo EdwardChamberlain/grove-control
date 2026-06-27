@@ -1560,6 +1560,8 @@ export default {
       smartPlugs: 'Akıllı Prizler',
       notifications: 'Bildirimler',
       queue: 'İş Akışı',
+      queueDispatch: 'Kuyruk ve Sevkıyat',
+      queuePipelines: 'Pipeline\'lar',
       filament: 'Filament',
       network: 'Ağ',
       apiKeys: 'API Anahtarları',
@@ -2555,6 +2557,44 @@ export default {
       migrationErrorWarning: 'Başlangıçta {{count}} eski satır yeniden şifrelenemedi. Sunucu günlüklerini kontrol edin ve yeniden denemek için Bambuddy\'yi yeniden başlatın.',
     },
 
+
+    // Slicer Pipelines (#1425): list/edit/delete preset bundles users saved
+    // from the Slice dialog. Lives in Settings → Workflow → Pipelines sub-tab.
+    pipelines: {
+      title: 'Dilimleyici Pipeline\'ları',
+      subtitle: 'Yeniden kullanılabilir ön ayar paketleri (yazıcı + işlem + filamentler + tabla türü). Dilimleme diyalogundan bir tane kaydedin ve bir sonraki dosyaya tek tıkla uygulayın.',
+      loading: 'Pipeline\'lar yükleniyor…',
+      loadError: 'Pipeline\'lar yüklenemedi.',
+      confirmDelete: 'Bu pipeline silinsin mi? Bu işlem geri alınamaz.',
+      staleWarning: 'Atıfta bulunulan bir veya daha fazla ön ayar artık mevcut değil. Dilimleme diyalogundan bu pipeline\'ı yeniden kaydederek düzeltin.',
+      empty: {
+        title: 'Henüz pipeline yok.',
+        howto: 'Herhangi bir dosya için Dilimleme diyalogunu açın, yazıcı / işlem / filamentler / tablayı seçin, sonra "Pipeline olarak kaydet"e tıklayın. Kaydedilen pipeline\'larınız burada görünecek.',
+      },
+      field: {
+        name: 'Pipeline adı',
+        description: 'Açıklama',
+      },
+      action: {
+        save: 'Kaydet',
+        cancel: 'İptal',
+        rename: 'Yeniden adlandır',
+        delete: 'Sil',
+      },
+      slot: {
+        printer: 'Yazıcı',
+        process: 'İşlem',
+        filament: 'Filament',
+        filamentN: 'Filament {{n}}',
+        bed: 'Tabla',
+      },
+      toast: {
+        saved: 'Pipeline kaydedildi',
+        saveFailed: 'Kaydetme başarısız',
+        deleted: 'Pipeline silindi',
+        deleteFailed: 'Silme başarısız',
+      },
+    },
   },
 
   // Bildirimler (push bildirimleri için)
@@ -3833,6 +3873,22 @@ export default {
       highTemp: 'Yüksek Sıcaklık Plakası',
       texturedPEI: 'Dokulu PEI Plakası',
       smoothPEI: 'Düz PEI Plakası',
+    },
+    // Slicer Pipelines (#1425) — apply a saved bundle or save the current pick.
+    pipelines: {
+      label: 'Pipeline',
+      applyAria: 'Pipeline uygula',
+      applyPrompt: 'Pipeline uygula…',
+      empty: 'Kayıtlı pipeline yok',
+      saveButton: 'Pipeline olarak kaydet',
+      saveTitle: 'Dört slotluk mevcut seçimi yeniden kullanılabilir pipeline olarak kaydet',
+      namePlaceholder: 'Pipeline adı',
+      nameAria: 'Yeni pipeline adı',
+      toast: {
+        applied: '"{{name}}" uygulandı',
+        saved: 'Pipeline kaydedildi',
+        saveFailed: 'Kaydetme başarısız',
+      },
     },
   },
 

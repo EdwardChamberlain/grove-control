@@ -1558,6 +1558,8 @@ export default {
       smartPlugs: 'Tomadas Inteligentes',
       notifications: 'Notificações',
       queue: 'Fluxo',
+      queueDispatch: 'Fila e Dispatch',
+      queuePipelines: 'Pipelines',
       filament: 'Filamento',
       network: 'Rede',
       apiKeys: 'Chaves API',
@@ -2538,6 +2540,44 @@ export default {
       commandConfirm: 'Confirmar',
       commandQueued: 'Comando enfileirado',
       commandError: 'Falha ao enviar comando',
+    },
+
+    // Slicer Pipelines (#1425): list/edit/delete preset bundles users saved
+    // from the Slice dialog. Lives in Settings → Workflow → Pipelines sub-tab.
+    pipelines: {
+      title: 'Pipelines do Slicer',
+      subtitle: 'Pacotes de predefinições reutilizáveis (impressora + processo + filamentos + tipo de mesa). Salve um a partir do diálogo Cortar e aplique com um clique no próximo arquivo.',
+      loading: 'Carregando pipelines…',
+      loadError: 'Não foi possível carregar as pipelines.',
+      confirmDelete: 'Excluir esta pipeline? Isso não pode ser desfeito.',
+      staleWarning: 'Uma ou mais predefinições referenciadas não existem mais. Salve novamente esta pipeline a partir do diálogo Cortar para corrigir.',
+      empty: {
+        title: 'Ainda não há pipelines.',
+        howto: 'Abra o diálogo Cortar em qualquer arquivo, escolha impressora / processo / filamentos / mesa e clique em "Salvar como pipeline". Suas pipelines salvas aparecerão aqui.',
+      },
+      field: {
+        name: 'Nome da pipeline',
+        description: 'Descrição',
+      },
+      action: {
+        save: 'Salvar',
+        cancel: 'Cancelar',
+        rename: 'Renomear',
+        delete: 'Excluir',
+      },
+      slot: {
+        printer: 'Impressora',
+        process: 'Processo',
+        filament: 'Filamento',
+        filamentN: 'Filamento {{n}}',
+        bed: 'Mesa',
+      },
+      toast: {
+        saved: 'Pipeline salva',
+        saveFailed: 'Falha ao salvar',
+        deleted: 'Pipeline excluída',
+        deleteFailed: 'Falha ao excluir',
+      },
     },
   },
 
@@ -3831,6 +3871,22 @@ export default {
       highTemp: 'High Temp Plate',
       texturedPEI: 'Textured PEI Plate',
       smoothPEI: 'Smooth PEI Plate',
+    },
+    // Slicer Pipelines (#1425) — apply a saved bundle or save the current pick.
+    pipelines: {
+      label: 'Pipeline',
+      applyAria: 'Aplicar pipeline',
+      applyPrompt: 'Aplicar pipeline…',
+      empty: 'Nenhuma pipeline salva',
+      saveButton: 'Salvar como pipeline',
+      saveTitle: 'Salvar a seleção atual dos quatro slots como uma pipeline reutilizável',
+      namePlaceholder: 'Nome da pipeline',
+      nameAria: 'Novo nome de pipeline',
+      toast: {
+        applied: '"{{name}}" aplicada',
+        saved: 'Pipeline salva',
+        saveFailed: 'Falha ao salvar',
+      },
     },
   },
 

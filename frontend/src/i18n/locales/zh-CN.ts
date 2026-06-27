@@ -1558,6 +1558,8 @@ export default {
       smartPlugs: '智能插座',
       notifications: '通知',
       queue: '工作流',
+      queueDispatch: '队列与调度',
+      queuePipelines: '流水线',
       filament: '耗材',
       network: '网络',
       apiKeys: 'API 密钥',
@@ -2539,6 +2541,44 @@ export default {
       migrationErrorWarning: '{{count}} 行旧数据在启动时未能重新加密。请检查服务器日志并重启 Bambuddy 以重试。',
     },
 
+
+    // Slicer Pipelines (#1425): list/edit/delete preset bundles users saved
+    // from the Slice dialog. Lives in Settings → Workflow → Pipelines sub-tab.
+    pipelines: {
+      title: '切片机流水线',
+      subtitle: '可复用的预设捆绑包（打印机 + 工艺 + 耗材 + 热床类型）。在切片对话框中保存一个，下次切片文件时一键应用。',
+      loading: '正在加载流水线…',
+      loadError: '无法加载流水线。',
+      confirmDelete: '删除此流水线？此操作无法撤销。',
+      staleWarning: '引用的一个或多个预设已不存在。请在切片对话框中重新保存此流水线以修复。',
+      empty: {
+        title: '暂无流水线。',
+        howto: '为任意文件打开切片对话框，选择打印机 / 工艺 / 耗材 / 热床，然后点击"另存为流水线"。保存的流水线将显示在此处。',
+      },
+      field: {
+        name: '流水线名称',
+        description: '描述',
+      },
+      action: {
+        save: '保存',
+        cancel: '取消',
+        rename: '重命名',
+        delete: '删除',
+      },
+      slot: {
+        printer: '打印机',
+        process: '工艺',
+        filament: '耗材',
+        filamentN: '耗材 {{n}}',
+        bed: '热床',
+      },
+      toast: {
+        saved: '流水线已保存',
+        saveFailed: '保存失败',
+        deleted: '流水线已删除',
+        deleteFailed: '删除失败',
+      },
+    },
   },
 
   // Notifications (for push notifications)
@@ -3831,6 +3871,22 @@ export default {
       highTemp: 'High Temp Plate',
       texturedPEI: 'Textured PEI Plate',
       smoothPEI: 'Smooth PEI Plate',
+    },
+    // Slicer Pipelines (#1425) — apply a saved bundle or save the current pick.
+    pipelines: {
+      label: '流水线',
+      applyAria: '应用流水线',
+      applyPrompt: '应用流水线…',
+      empty: '无已保存流水线',
+      saveButton: '另存为流水线',
+      saveTitle: '将当前四个槽位的选择保存为可复用流水线',
+      namePlaceholder: '流水线名称',
+      nameAria: '新流水线名称',
+      toast: {
+        applied: '已应用 "{{name}}"',
+        saved: '流水线已保存',
+        saveFailed: '保存失败',
+      },
     },
   },
 

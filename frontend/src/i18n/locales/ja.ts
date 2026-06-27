@@ -1557,6 +1557,8 @@ export default {
       smartPlugs: 'スマートプラグ',
       notifications: '通知',
       queue: 'ワークフロー',
+      queueDispatch: 'キューとディスパッチ',
+      queuePipelines: 'パイプライン',
       filament: 'フィラメント',
       network: 'ネットワーク',
       apiKeys: 'APIキー',
@@ -2551,6 +2553,44 @@ export default {
       migrationErrorWarning: '{{count}} 件のレガシー行を起動時に再暗号化できませんでした。サーバーログを確認し、Bambuddy を再起動して再試行してください。',
     },
 
+
+    // Slicer Pipelines (#1425): list/edit/delete preset bundles users saved
+    // from the Slice dialog. Lives in Settings → Workflow → Pipelines sub-tab.
+    pipelines: {
+      title: 'スライサーパイプライン',
+      subtitle: '再利用可能なプリセットバンドル（プリンター + プロセス + フィラメント + ベッドタイプ）。スライスダイアログから保存し、次のファイルにワンクリックで適用できます。',
+      loading: 'パイプラインを読み込み中…',
+      loadError: 'パイプラインを読み込めませんでした。',
+      confirmDelete: 'このパイプラインを削除しますか？元に戻せません。',
+      staleWarning: '参照されているプリセットが見つかりません。スライスダイアログから再保存して修正してください。',
+      empty: {
+        title: 'パイプラインはまだありません。',
+        howto: '任意のファイルでスライスダイアログを開き、プリンター / プロセス / フィラメント / ベッドタイプを選んで「パイプラインとして保存」をクリックしてください。保存したパイプラインはここに表示されます。',
+      },
+      field: {
+        name: 'パイプライン名',
+        description: '説明',
+      },
+      action: {
+        save: '保存',
+        cancel: 'キャンセル',
+        rename: '名前変更',
+        delete: '削除',
+      },
+      slot: {
+        printer: 'プリンター',
+        process: 'プロセス',
+        filament: 'フィラメント',
+        filamentN: 'フィラメント {{n}}',
+        bed: 'ベッド',
+      },
+      toast: {
+        saved: 'パイプラインを保存しました',
+        saveFailed: '保存に失敗しました',
+        deleted: 'パイプラインを削除しました',
+        deleteFailed: '削除に失敗しました',
+      },
+    },
   },
 
   // Notifications (for push notifications)
@@ -3843,6 +3883,22 @@ export default {
       highTemp: 'High Temp Plate',
       texturedPEI: 'Textured PEI Plate',
       smoothPEI: 'Smooth PEI Plate',
+    },
+    // Slicer Pipelines (#1425) — apply a saved bundle or save the current pick.
+    pipelines: {
+      label: 'パイプライン',
+      applyAria: 'パイプラインを適用',
+      applyPrompt: 'パイプラインを適用…',
+      empty: '保存されたパイプラインがありません',
+      saveButton: 'パイプラインとして保存',
+      saveTitle: '現在の4つのスロットの選択を再利用可能なパイプラインとして保存',
+      namePlaceholder: 'パイプライン名',
+      nameAria: '新しいパイプライン名',
+      toast: {
+        applied: '「{{name}}」を適用しました',
+        saved: 'パイプラインを保存しました',
+        saveFailed: '保存に失敗しました',
+      },
     },
   },
 

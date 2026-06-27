@@ -1559,6 +1559,8 @@ export default {
       smartPlugs: 'Enchufes inteligentes',
       notifications: 'Notificaciones',
       queue: 'Flujo de trabajo',
+      queueDispatch: 'Cola y Despacho',
+      queuePipelines: 'Pipelines',
       filament: 'Filamento',
       network: 'Red',
       apiKeys: 'Claves API',
@@ -2554,6 +2556,44 @@ export default {
       migrationErrorWarning: '{{count}} fila(s) heredada(s) no se pudieron volver a cifrar al iniciar. Revise los registros del servidor y reinicie Bambuddy para reintentarlo.',
     },
 
+
+    // Slicer Pipelines (#1425): list/edit/delete preset bundles users saved
+    // from the Slice dialog. Lives in Settings → Workflow → Pipelines sub-tab.
+    pipelines: {
+      title: 'Pipelines del Cortador',
+      subtitle: 'Paquetes reutilizables de preajustes (impresora + proceso + filamentos + tipo de placa). Guarda uno desde el diálogo Cortar y aplícalo con un clic al siguiente archivo.',
+      loading: 'Cargando pipelines…',
+      loadError: 'No se pudieron cargar las pipelines.',
+      confirmDelete: '¿Eliminar esta pipeline? Esto no se puede deshacer.',
+      staleWarning: 'Uno o más preajustes referenciados ya no existen. Vuelve a guardar esta pipeline desde el diálogo Cortar para corregirla.',
+      empty: {
+        title: 'Aún no hay pipelines.',
+        howto: 'Abre el diálogo Cortar para cualquier archivo, elige impresora / proceso / filamentos / placa, y haz clic en "Guardar como pipeline". Tus pipelines guardadas aparecerán aquí.',
+      },
+      field: {
+        name: 'Nombre de la pipeline',
+        description: 'Descripción',
+      },
+      action: {
+        save: 'Guardar',
+        cancel: 'Cancelar',
+        rename: 'Renombrar',
+        delete: 'Eliminar',
+      },
+      slot: {
+        printer: 'Impresora',
+        process: 'Proceso',
+        filament: 'Filamento',
+        filamentN: 'Filamento {{n}}',
+        bed: 'Placa',
+      },
+      toast: {
+        saved: 'Pipeline guardada',
+        saveFailed: 'Error al guardar',
+        deleted: 'Pipeline eliminada',
+        deleteFailed: 'Error al eliminar',
+      },
+    },
   },
 
   // Notifications (for push notifications)
@@ -3846,6 +3886,22 @@ export default {
       highTemp: 'High Temp Plate',
       texturedPEI: 'Textured PEI Plate',
       smoothPEI: 'Smooth PEI Plate',
+    },
+    // Slicer Pipelines (#1425) — apply a saved bundle or save the current pick.
+    pipelines: {
+      label: 'Pipeline',
+      applyAria: 'Aplicar pipeline',
+      applyPrompt: 'Aplicar pipeline…',
+      empty: 'Sin pipelines guardadas',
+      saveButton: 'Guardar como pipeline',
+      saveTitle: 'Guardar la selección actual de los cuatro ajustes como pipeline reutilizable',
+      namePlaceholder: 'Nombre de la pipeline',
+      nameAria: 'Nuevo nombre de pipeline',
+      toast: {
+        applied: '"{{name}}" aplicada',
+        saved: 'Pipeline guardada',
+        saveFailed: 'Error al guardar',
+      },
     },
   },
 

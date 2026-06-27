@@ -1558,6 +1558,8 @@ export default {
       smartPlugs: 'Prises connectées',
       notifications: 'Notifications',
       queue: 'Flux de travail',
+      queueDispatch: 'File & Distribution',
+      queuePipelines: 'Pipelines',
       filament: 'Filament',
       network: 'Réseau',
       apiKeys: 'Clés API',
@@ -2539,6 +2541,44 @@ export default {
       commandConfirm: 'Confirmer',
       commandQueued: 'Commande en file d\'attente',
       commandError: 'Échec de l\'envoi de la commande',
+    },
+
+    // Slicer Pipelines (#1425): list/edit/delete preset bundles users saved
+    // from the Slice dialog. Lives in Settings → Workflow → Pipelines sub-tab.
+    pipelines: {
+      title: 'Pipelines du Trancheur',
+      subtitle: 'Lots de préréglages réutilisables (imprimante + processus + filaments + type de plateau). Enregistrez-en un depuis le dialogue Trancher et appliquez-le en un clic au fichier suivant.',
+      loading: 'Chargement des pipelines…',
+      loadError: 'Impossible de charger les pipelines.',
+      confirmDelete: 'Supprimer ce pipeline ? Cela ne peut pas être annulé.',
+      staleWarning: 'Un ou plusieurs préréglages référencés n\'existent plus. Réenregistrez ce pipeline depuis le dialogue Trancher pour le corriger.',
+      empty: {
+        title: 'Aucun pipeline pour le moment.',
+        howto: 'Ouvrez le dialogue Trancher pour n\'importe quel fichier, choisissez imprimante / processus / filaments / plateau, puis cliquez sur « Enregistrer comme pipeline ». Vos pipelines enregistrés apparaîtront ici.',
+      },
+      field: {
+        name: 'Nom du pipeline',
+        description: 'Description',
+      },
+      action: {
+        save: 'Enregistrer',
+        cancel: 'Annuler',
+        rename: 'Renommer',
+        delete: 'Supprimer',
+      },
+      slot: {
+        printer: 'Imprimante',
+        process: 'Processus',
+        filament: 'Filament',
+        filamentN: 'Filament {{n}}',
+        bed: 'Plateau',
+      },
+      toast: {
+        saved: 'Pipeline enregistré',
+        saveFailed: 'Échec de l\'enregistrement',
+        deleted: 'Pipeline supprimé',
+        deleteFailed: 'Échec de la suppression',
+      },
     },
   },
 
@@ -3832,6 +3872,22 @@ export default {
       highTemp: 'High Temp Plate',
       texturedPEI: 'Textured PEI Plate',
       smoothPEI: 'Smooth PEI Plate',
+    },
+    // Slicer Pipelines (#1425) — apply a saved bundle or save the current pick.
+    pipelines: {
+      label: 'Pipeline',
+      applyAria: 'Appliquer le pipeline',
+      applyPrompt: 'Appliquer un pipeline…',
+      empty: 'Aucun pipeline enregistré',
+      saveButton: 'Enregistrer comme pipeline',
+      saveTitle: 'Enregistrer la sélection actuelle des quatre emplacements comme pipeline réutilisable',
+      namePlaceholder: 'Nom du pipeline',
+      nameAria: 'Nouveau nom de pipeline',
+      toast: {
+        applied: '« {{name}} » appliqué',
+        saved: 'Pipeline enregistré',
+        saveFailed: 'Échec de l\'enregistrement',
+      },
     },
   },
 

@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Plus, Plug, AlertTriangle, RotateCcw, Bell, Download, RefreshCw, ExternalLink, Globe, Droplets, Thermometer, FileText, Edit2, Send, CheckCircle, XCircle, History, Trash2, Zap, TrendingUp, Calendar, DollarSign, Power, PowerOff, Key, Copy, Database, X, Shield, Printer, Cylinder, Wifi, Home, Video, Users, Lock, Unlock, ChevronDown, Save, Mail, Flame, Layers, ListOrdered, Code, Search, Scale, Settings as SettingsIcon, ScanEye, Cog, QrCode, Heart } from 'lucide-react';
+import { Loader2, Plus, Plug, AlertTriangle, RotateCcw, Bell, Download, RefreshCw, ExternalLink, Globe, Droplets, Thermometer, FileText, Edit2, Send, CheckCircle, XCircle, History, Trash2, Zap, TrendingUp, Calendar, DollarSign, Power, PowerOff, Key, Copy, Database, X, Shield, Printer, Cylinder, Wifi, Home, Video, Users, Lock, Unlock, ChevronDown, Save, Mail, Flame, Layers, ListOrdered, Code, Search, Scale, Settings as SettingsIcon, ScanEye, Cog, QrCode, Heart, Workflow } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
@@ -11,6 +11,7 @@ import { PRESET_CATEGORIES, parsePresetTriple } from '../utils/temperatureFanPre
 import type { APIKey, AppSettings, AppSettingsUpdate, SmartPlug, SmartPlugStatus, NotificationProvider, NotificationTemplate, UpdateStatus, GitHubBackupStatus, CloudAuthStatus, UserCreate, UserUpdate, UserResponse, StorageUsageResponse } from '../api/client';
 import { Card, CardContent, CardDensityProvider, CardHeader } from '../components/Card';
 import { SlicerBundlesPanel } from '../components/SlicerBundlesPanel';
+import { SlicerPipelinesPanel } from '../components/SlicerPipelinesPanel';
 import { CameraTokensSection } from './CameraTokensPage';
 import { Collapsible } from '../components/Collapsible';
 import { Button } from '../components/Button';
@@ -190,6 +191,11 @@ export function SettingsPage() {
   const initialTab = isLegacyEmailTab ? 'users' : (tabParam && validTabs.includes(tabParam as TabType) ? tabParam as TabType : 'general');
   const [activeTab, setActiveTab] = useState<TabType>(initialTab);
   const [usersSubTab, setUsersSubTab] = useState<UsersSubTab>(isLegacyEmailTab ? 'email' : 'users');
+  // Workflow tab sub-tabs (#1425): 'dispatch' = current Workflow content,
+  // 'pipelines' = Slicer Pipelines management. URL: ?tab=queue&sub=pipelines.
+  const initialQueueSub: 'dispatch' | 'pipelines' =
+    tabParam === 'queue' && searchParams.get('sub') === 'pipelines' ? 'pipelines' : 'dispatch';
+  const [queueSubTab, setQueueSubTab] = useState<'dispatch' | 'pipelines'>(initialQueueSub);
 
   // Update URL when tab changes
   const handleTabChange = (tab: TabType) => {
@@ -197,10 +203,25 @@ export function SettingsPage() {
     if (tab === 'users') {
       setUsersSubTab('users');
     }
+    if (tab === 'queue') {
+      setQueueSubTab('dispatch');
+      searchParams.delete('sub');
+    }
     if (tab === 'general') {
       searchParams.delete('tab');
     } else {
       searchParams.set('tab', tab);
+    }
+    setSearchParams(searchParams, { replace: true });
+  };
+
+  // Switch the Workflow tab's sub-tab and reflect it in the URL so deep-links work.
+  const handleQueueSubTabChange = (sub: 'dispatch' | 'pipelines') => {
+    setQueueSubTab(sub);
+    if (sub === 'pipelines') {
+      searchParams.set('sub', 'pipelines');
+    } else {
+      searchParams.delete('sub');
     }
     setSearchParams(searchParams, { replace: true });
   };
@@ -4070,8 +4091,37 @@ export function SettingsPage() {
       )}
 
       {/* Filament Tab */}
-      {/* Queue Tab */}
-      {activeTab === 'queue' && localSettings && (
+      {/* Queue Tab — sub-tabs: Queue & Dispatch (current content) / Pipelines (#1425) */}
+      {activeTab === 'queue' && (
+        <div className="space-y-3">
+          {/* Sub-tab nav, mirroring the Authentication tab pattern */}
+          <div className="flex gap-1 border-b border-bambu-dark-tertiary">
+            <button
+              onClick={() => handleQueueSubTabChange('dispatch')}
+              className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px flex items-center gap-2 ${
+                queueSubTab === 'dispatch'
+                  ? 'text-bambu-green border-bambu-green'
+                  : 'text-bambu-gray hover:text-gray-900 dark:hover:text-white border-transparent'
+              }`}
+            >
+              <ListOrdered className="w-4 h-4" />
+              {t('settings.tabs.queueDispatch', 'Queue & Dispatch')}
+            </button>
+            <button
+              onClick={() => handleQueueSubTabChange('pipelines')}
+              className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px flex items-center gap-2 ${
+                queueSubTab === 'pipelines'
+                  ? 'text-bambu-green border-bambu-green'
+                  : 'text-bambu-gray hover:text-gray-900 dark:hover:text-white border-transparent'
+              }`}
+            >
+              <Workflow className="w-4 h-4" />
+              {t('settings.tabs.queuePipelines', 'Pipelines')}
+            </button>
+          </div>
+
+          {queueSubTab === 'pipelines' && <SlicerPipelinesPanel />}
+          {queueSubTab === 'dispatch' && localSettings && (
         <div className="flex flex-col lg:flex-row gap-4 lg:gap-6">
           {/* Left Column */}
           <div className="lg:w-1/2 space-y-3">
@@ -4797,6 +4847,8 @@ export function SettingsPage() {
             </CardContent>
           </Card>
           </div>
+        </div>
+          )}
         </div>
       )}
 

@@ -1558,6 +1558,8 @@ export default {
       smartPlugs: 'Smart Plugs',
       notifications: 'Benachrichtigungen',
       queue: 'Workflow',
+      queueDispatch: 'Warteschlange & Dispatch',
+      queuePipelines: 'Pipelines',
       filament: 'Filament',
       network: 'Netzwerk',
       apiKeys: 'API-Schlüssel',
@@ -2551,6 +2553,44 @@ export default {
       migrationErrorWarning: '{{count}} Legacy-Eintrag/Einträge konnten beim Start nicht verschlüsselt werden. Prüfen Sie die Server-Logs und starten Sie Bambuddy neu.',
     },
 
+
+    // Slicer Pipelines (#1425): list/edit/delete preset bundles users saved
+    // from the Slice dialog. Lives in Settings → Workflow → Pipelines sub-tab.
+    pipelines: {
+      title: 'Slicer-Pipelines',
+      subtitle: 'Wiederverwendbare Preset-Bundles (Drucker + Prozess + Filamente + Druckplatte). Speichere eines aus dem Slice-Dialog und wende es beim nächsten Datei-Slice mit einem Klick an.',
+      loading: 'Pipelines werden geladen…',
+      loadError: 'Pipelines konnten nicht geladen werden.',
+      confirmDelete: 'Diese Pipeline löschen? Das kann nicht rückgängig gemacht werden.',
+      staleWarning: 'Eines oder mehrere referenzierte Presets existieren nicht mehr. Speichere diese Pipeline erneut aus dem Slice-Dialog, um sie zu reparieren.',
+      empty: {
+        title: 'Noch keine Pipelines.',
+        howto: 'Öffne den Slice-Dialog für eine beliebige Datei, wähle Drucker / Prozess / Filamente / Druckplatte und klicke „Als Pipeline speichern“. Deine gespeicherten Pipelines erscheinen hier.',
+      },
+      field: {
+        name: 'Pipeline-Name',
+        description: 'Beschreibung',
+      },
+      action: {
+        save: 'Speichern',
+        cancel: 'Abbrechen',
+        rename: 'Umbenennen',
+        delete: 'Löschen',
+      },
+      slot: {
+        printer: 'Drucker',
+        process: 'Prozess',
+        filament: 'Filament',
+        filamentN: 'Filament {{n}}',
+        bed: 'Druckplatte',
+      },
+      toast: {
+        saved: 'Pipeline gespeichert',
+        saveFailed: 'Speichern fehlgeschlagen',
+        deleted: 'Pipeline gelöscht',
+        deleteFailed: 'Löschen fehlgeschlagen',
+      },
+    },
   },
 
   // Notifications (for push notifications)
@@ -3843,6 +3883,22 @@ export default {
       highTemp: 'High Temp Plate',
       texturedPEI: 'Textured PEI Plate',
       smoothPEI: 'Smooth PEI Plate',
+    },
+    // Slicer Pipelines (#1425) — apply a saved bundle or save the current pick.
+    pipelines: {
+      label: 'Pipeline',
+      applyAria: 'Pipeline anwenden',
+      applyPrompt: 'Pipeline anwenden…',
+      empty: 'Keine gespeicherten Pipelines',
+      saveButton: 'Als Pipeline speichern',
+      saveTitle: 'Aktuelle Auswahl aller vier Slots als wiederverwendbare Pipeline speichern',
+      namePlaceholder: 'Pipeline-Name',
+      nameAria: 'Neuer Pipeline-Name',
+      toast: {
+        applied: '„{{name}}“ angewendet',
+        saved: 'Pipeline gespeichert',
+        saveFailed: 'Speichern fehlgeschlagen',
+      },
     },
   },
 

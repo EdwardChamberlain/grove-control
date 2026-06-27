@@ -1472,6 +1472,8 @@ export default {
       smartPlugs: '스마트 플러그',
       notifications: '알림',
       queue: '워크플로우',
+      queueDispatch: '큐 및 디스패치',
+      queuePipelines: '파이프라인',
       filament: '필라멘트',
       network: '네트워크',
       apiKeys: 'API 키',
@@ -2406,7 +2408,45 @@ export default {
     updateEnergyCost: '전기 요금 업데이트',
     updateEnergyCostDescription: '이 키가 /settings/electricity-price에 새 kWh당 전기 요금을 POST할 수 있도록 허용합니다. Home Assistant 동적 요금 자동화(Tibber, Octopus 등)에 유용합니다. API 키로 쓸 수 있는 유일한 설정 필드입니다.',
     energyCostBadge: '에너지',
-    passwordRequirements: '최소 8자, 대문자, 소문자, 숫자, 특수문자 각 1개 이상 포함'
+    passwordRequirements: '최소 8자, 대문자, 소문자, 숫자, 특수문자 각 1개 이상 포함',
+
+    // Slicer Pipelines (#1425): list/edit/delete preset bundles users saved
+    // from the Slice dialog. Lives in Settings → Workflow → Pipelines sub-tab.
+    pipelines: {
+      title: '슬라이서 파이프라인',
+      subtitle: '재사용 가능한 프리셋 묶음(프린터 + 프로세스 + 필라멘트 + 베드 유형). 슬라이스 대화상자에서 저장한 후 다음 파일에 한 번의 클릭으로 적용하세요.',
+      loading: '파이프라인 불러오는 중…',
+      loadError: '파이프라인을 불러오지 못했습니다.',
+      confirmDelete: '이 파이프라인을 삭제하시겠습니까? 되돌릴 수 없습니다.',
+      staleWarning: '참조된 프리셋이 더 이상 존재하지 않습니다. 슬라이스 대화상자에서 이 파이프라인을 다시 저장하여 수정하세요.',
+      empty: {
+        title: '아직 파이프라인이 없습니다.',
+        howto: '임의의 파일에서 슬라이스 대화상자를 열고 프린터 / 프로세스 / 필라멘트 / 베드를 선택한 다음 "파이프라인으로 저장"을 클릭하세요. 저장된 파이프라인이 여기에 표시됩니다.',
+      },
+      field: {
+        name: '파이프라인 이름',
+        description: '설명',
+      },
+      action: {
+        save: '저장',
+        cancel: '취소',
+        rename: '이름 변경',
+        delete: '삭제',
+      },
+      slot: {
+        printer: '프린터',
+        process: '프로세스',
+        filament: '필라멘트',
+        filamentN: '필라멘트 {{n}}',
+        bed: '베드',
+      },
+      toast: {
+        saved: '파이프라인이 저장되었습니다',
+        saveFailed: '저장 실패',
+        deleted: '파이프라인이 삭제되었습니다',
+        deleteFailed: '삭제 실패',
+      },
+    },
   },
   notification: {
     printStarted: {
@@ -3636,7 +3676,23 @@ export default {
       highTemp: '고온 플레이트',
       texturedPEI: '텍스처 PEI 플레이트',
       smoothPEI: '매끄러운 PEI 플레이트'
-    }
+    },
+    // Slicer Pipelines (#1425) — apply a saved bundle or save the current pick.
+    pipelines: {
+      label: '파이프라인',
+      applyAria: '파이프라인 적용',
+      applyPrompt: '파이프라인 적용…',
+      empty: '저장된 파이프라인이 없습니다',
+      saveButton: '파이프라인으로 저장',
+      saveTitle: '현재 네 개 슬롯의 선택을 재사용 가능한 파이프라인으로 저장합니다',
+      namePlaceholder: '파이프라인 이름',
+      nameAria: '새 파이프라인 이름',
+      toast: {
+        applied: '"{{name}}" 적용됨',
+        saved: '파이프라인이 저장되었습니다',
+        saveFailed: '저장 실패',
+      },
+    },
   },
   spoolman: {
     title: 'Spoolman 통합',
