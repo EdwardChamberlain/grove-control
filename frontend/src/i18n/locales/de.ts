@@ -4,6 +4,7 @@ export default {
     printers: 'Drucker',
     archives: 'Archiv',
     queue: 'Druckwarteschlange',
+    pipelineRuns: 'Pipeline-Läufe',
     stats: 'Statistiken',
     profiles: 'Profile',
     maintenance: 'Wartung',
@@ -101,6 +102,8 @@ export default {
     now: 'Jetzt',
     collapse: 'Einklappen',
     expand: 'Ausklappen',
+    previous: 'Zurück',
+    next: 'Weiter',
     viewArchive: 'Archiv anzeigen',
     viewInFileManager: 'Im Dateimanager anzeigen',
     addedBy: 'Hinzugefügt von {{username}}',
@@ -1042,6 +1045,39 @@ export default {
       start_command_failed: 'Drucker hat Startbefehl abgelehnt',
     },
     dismiss: 'Schließen',
+  },
+
+  // Pipeline Runs dashboard (#1425 PR C).
+  pipelineRuns: {
+    title: 'Pipeline-Läufe',
+    loading: 'Wird geladen…',
+    empty: 'Noch keine Pipeline-Läufe.',
+    filter: {
+      pipeline: 'Pipeline',
+      status: 'Status',
+      all: 'Alle',
+    },
+    copies: '{{n}} Kopien',
+    failedCount: '{{n}} fehlgeschlagen',
+    copyN: 'Kopie {{n}}',
+    retryFailed: 'Fehlgeschlagene wiederholen',
+    retryOf: 'Wiederholung von #{{n}}',
+    pagination: '{{start}}–{{end}} von {{total}}',
+    toast: {
+      cancelled: 'Lauf abgebrochen',
+      cancelFailed: 'Abbruch fehlgeschlagen',
+      retryStarted: 'Wiederholung gestartet',
+      retryFailed: 'Wiederholung fehlgeschlagen',
+    },
+    jobStatus: {
+      pending: 'ausstehend',
+      awaiting_printer: 'wartet auf Drucker',
+      queued: 'in Warteschlange',
+      printing: 'druckt',
+      completed: 'abgeschlossen',
+      failed: 'fehlgeschlagen',
+      cancelled: 'abgebrochen',
+    },
   },
 
   // Queue page
@@ -2554,6 +2590,12 @@ export default {
     },
 
 
+    pipelineLimits: {
+      title: 'Slicer-Pipeline-Limits',
+      maxCopiesLabel: 'Max. Kopien pro Lauf',
+      maxCopiesDesc: 'Obergrenze für die Anzahl an Kopien, die Operatoren beim Ausführen einer Pipeline anfordern können. Serverseitige Obergrenze ist 1000.',
+    },
+
     // Slicer Pipelines (#1425): list/edit/delete preset bundles users saved
     // from the Slice dialog. Lives in Settings → Workflow → Pipelines sub-tab.
     pipelines: {
@@ -2572,6 +2614,16 @@ export default {
         description: 'Beschreibung',
         targetPrinter: 'Zieldrucker',
         noTarget: '— Kein Ziel —',
+        targetKind: 'Zielart',
+        targetKindSpecific: 'Spezifischer Drucker',
+        targetKindClass: 'Druckerklasse',
+        targetModelClass: 'Druckermodell',
+        fanoutStrategy: 'Verteilungsstrategie',
+        fanout: {
+          max_parallel: 'Max parallel — auf alle verfügbaren passenden Drucker verteilen',
+          round_robin: 'Reihum — durch geeignete Drucker rotieren',
+          fill_one_first: 'Erst einen füllen — alle Kopien an einen Drucker binden',
+        },
       },
       action: {
         save: 'Speichern',
@@ -2603,6 +2655,7 @@ export default {
           in_progress: 'druckt',
           completed: 'abgeschlossen',
           failed: 'fehlgeschlagen',
+          partial_failure: 'teilweise fehlgeschlagen',
           cancelled: 'abgebrochen',
         },
       },
@@ -3851,6 +3904,9 @@ export default {
       empty: 'Noch keine Pipelines gespeichert. Öffne den Slice-Dialog und klicke „Als Pipeline speichern“, um eine zu erstellen.',
       noTarget: 'Kein Zieldrucker festgelegt',
       noTargetMessage: 'Diese Pipeline hat keinen Zieldrucker. Öffne sie in den Einstellungen, um einen festzulegen.',
+      copies: 'Kopien',
+      copiesHint: 'max. {{n}}',
+      classTarget: 'Beliebiger {{model}}',
       toast: {
         started: 'Pipeline-Lauf gestartet',
         failed: 'Lauf konnte nicht gestartet werden',
@@ -3864,6 +3920,8 @@ export default {
         filamentColor: 'Filament-Slot {{slot}}: Farbe weicht ab (erwartet {{expected}}, AMS hat {{actual}})',
         amsSlotMissing: 'AMS-Slot {{slot}} ist auf diesem Drucker nicht verfügbar',
         filamentUnverified: 'Filament-Slot {{slot}} stammt aus einem Cloud-/Standard-Preset und konnte nicht statisch verifiziert werden.',
+        noClassMatches: 'Keine Drucker in dieser Installation entsprechen der Zielmodellklasse der Pipeline ({{expected}}).',
+        classNotSet: 'Pipeline-Ziel ist auf eine Druckerklasse gesetzt, aber kein Modell wurde gewählt.',
       },
     },
   },

@@ -41,6 +41,12 @@ class PipelineRun(Base):
     # endpoint instead of growing a second route.
     source_archive_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("print_archives.id", ondelete="SET NULL"))
 
+    # Set when this run was created by ``POST /pipeline-runs/{parent}/retry-failed``.
+    # Chains the new run back to the run whose failed copies it re-attempts so
+    # the dashboard can show "Retry of run #N" inline. ``SET NULL`` so cleaning
+    # up old runs doesn't dangle retries.
+    parent_run_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("pipeline_runs.id", ondelete="SET NULL"))
+
     copies: Mapped[int] = mapped_column(Integer, default=1)
 
     # Snapshot status — terminal transitions are persisted here, in-flight

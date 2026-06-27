@@ -46,6 +46,8 @@ IssueKind = Literal[
     "filament_color_mismatch",
     "ams_slot_missing",
     "filament_unverified",
+    "no_class_matches",
+    "class_not_set",
 ]
 
 
@@ -58,11 +60,24 @@ class EligibilityIssue:
 
 
 @dataclass(frozen=True)
+class PerPrinterReport:
+    """One row of the class-targeting eligibility breakdown."""
+
+    printer_id: int
+    printer_name: str
+    ok: bool
+    issues: tuple[EligibilityIssue, ...]
+
+
+@dataclass(frozen=True)
 class EligibilityReport:
     ok: bool
+    target_kind: Literal["specific_printer", "printer_class"]
     target_printer_id: int | None
     target_printer_name: str | None
+    target_model_class: str | None
     issues: tuple[EligibilityIssue, ...]
+    printer_reports: tuple[PerPrinterReport, ...] = ()
 
 
 # Same equivalence map as print_scheduler._canonical_filament_type but kept
@@ -143,57 +158,25 @@ async def _expected_filament(
     return (_canonical(row.filament_type or ""), _normalise_colour(row.default_filament_colour))
 
 
-async def check_pipeline_eligibility(
+async def _check_one_printer(
     db: AsyncSession,
     pipeline: SlicerPipeline,
+    printer: Printer,
     printer_raw_status: dict | None,
-) -> EligibilityReport:
-    """Build the report. ``printer_raw_status`` is the live ``PrinterState``
-    serialised to a dict (``connected``, ``raw_data``), or ``None`` when the
-    target printer has no MQTT client. The route handler does the
-    ``printer_manager.get_status`` lookup so this stays unit-testable.
-    """
+) -> tuple[bool, tuple[EligibilityIssue, ...]]:
+    """Run the per-printer eligibility checks. Returns ``(ok, issues)`` so the
+    caller can flatten them into either a single-printer or class-targeting
+    report. Pulled out of the original entry function so PR C's class branch
+    can reuse it for each candidate printer."""
     issues: list[EligibilityIssue] = []
 
-    # 1. Target printer set?
-    if pipeline.target_printer_id is None:
-        issues.append(EligibilityIssue(kind="printer_not_set"))
-        return EligibilityReport(
-            ok=False,
-            target_printer_id=None,
-            target_printer_name=None,
-            issues=tuple(issues),
-        )
-
-    printer = (await db.execute(select(Printer).where(Printer.id == pipeline.target_printer_id))).scalar_one_or_none()
-    if printer is None:
-        issues.append(EligibilityIssue(kind="printer_not_found"))
-        return EligibilityReport(
-            ok=False,
-            target_printer_id=pipeline.target_printer_id,
-            target_printer_name=None,
-            issues=tuple(issues),
-        )
-
-    target_name = printer.name
-
-    # 2. Disabled?
     if not printer.is_active:
         issues.append(EligibilityIssue(kind="printer_disabled"))
 
-    # 3. Offline?
     if not printer_raw_status or not printer_raw_status.get("connected"):
         issues.append(EligibilityIssue(kind="printer_offline"))
-        # Without live AMS state, skip slot checks — would surface as a
-        # cascade of misleading mismatches.
-        return EligibilityReport(
-            ok=not issues,
-            target_printer_id=printer.id,
-            target_printer_name=target_name,
-            issues=tuple(issues),
-        )
+        return (not issues, tuple(issues))
 
-    # 4. Per-slot filament match.
     try:
         filament_refs = json.loads(pipeline.filament_presets_json or "[]")
     except (json.JSONDecodeError, TypeError):
@@ -249,15 +232,129 @@ async def check_pipeline_eligibility(
                 )
             )
 
-    # Unverified filament refs are surfaced as INFO — they don't flip ok=False.
-    # The user is told what we couldn't verify so they can sanity-check
-    # before pulling the trigger, but the lenient policy doesn't refuse to
-    # let them run.
+    # ``filament_unverified`` is informational — doesn't flip ok=False.
     blocking_issues = [i for i in issues if i.kind != "filament_unverified"]
+    return (not blocking_issues, tuple(issues))
 
+
+async def check_pipeline_eligibility(
+    db: AsyncSession,
+    pipeline: SlicerPipeline,
+    printer_raw_status: dict | None = None,
+    *,
+    status_lookup: object = None,
+) -> EligibilityReport:
+    """Build the eligibility report.
+
+    Two calling shapes, chosen by ``pipeline.target_kind``:
+      - ``specific_printer``: ``printer_raw_status`` carries the live
+        ``PrinterState`` dict (``connected`` + ``raw_data``) for the pinned
+        target_printer_id. PR B signature, preserved.
+      - ``printer_class``: ``status_lookup`` is a callable
+        ``(printer_id) -> dict | None`` that the matcher calls for each
+        printer whose model matches ``pipeline.target_model_class``.
+    """
+    # PR A pipelines default target_kind to 'printer_class' but PR B and
+    # earlier UI only let users pin a specific_printer; treat
+    # ``target_printer_id is not None`` as the source of truth for the
+    # specific-printer path until the editor exposes target_kind explicitly.
+    if pipeline.target_printer_id is not None or pipeline.target_kind == "specific_printer":
+        # Specific-printer branch (PR B parity).
+        if pipeline.target_printer_id is None:
+            return EligibilityReport(
+                ok=False,
+                target_kind="specific_printer",
+                target_printer_id=None,
+                target_printer_name=None,
+                target_model_class=None,
+                issues=(EligibilityIssue(kind="printer_not_set"),),
+            )
+
+        printer = (
+            await db.execute(select(Printer).where(Printer.id == pipeline.target_printer_id))
+        ).scalar_one_or_none()
+        if printer is None:
+            return EligibilityReport(
+                ok=False,
+                target_kind="specific_printer",
+                target_printer_id=pipeline.target_printer_id,
+                target_printer_name=None,
+                target_model_class=None,
+                issues=(EligibilityIssue(kind="printer_not_found"),),
+            )
+
+        ok, issues = await _check_one_printer(db, pipeline, printer, printer_raw_status)
+        return EligibilityReport(
+            ok=ok,
+            target_kind="specific_printer",
+            target_printer_id=printer.id,
+            target_printer_name=printer.name,
+            target_model_class=None,
+            issues=issues,
+        )
+
+    # Class-targeting branch (PR C).
+    if not pipeline.target_model_class:
+        return EligibilityReport(
+            ok=False,
+            target_kind="printer_class",
+            target_printer_id=None,
+            target_printer_name=None,
+            target_model_class=None,
+            issues=(EligibilityIssue(kind="class_not_set"),),
+        )
+
+    candidates = (await db.execute(select(Printer).where(Printer.model == pipeline.target_model_class))).scalars().all()
+
+    if not candidates:
+        return EligibilityReport(
+            ok=False,
+            target_kind="printer_class",
+            target_printer_id=None,
+            target_printer_name=None,
+            target_model_class=pipeline.target_model_class,
+            issues=(
+                EligibilityIssue(
+                    kind="no_class_matches",
+                    expected=pipeline.target_model_class,
+                ),
+            ),
+        )
+
+    reports: list[PerPrinterReport] = []
+    if status_lookup is None:
+        # Treat all printers as offline when no lookup was provided — keeps
+        # the matcher pure-ish for unit tests.
+        for printer in candidates:
+            ok, issues = await _check_one_printer(db, pipeline, printer, None)
+            reports.append(
+                PerPrinterReport(
+                    printer_id=printer.id,
+                    printer_name=printer.name,
+                    ok=ok,
+                    issues=issues,
+                )
+            )
+    else:
+        for printer in candidates:
+            raw = status_lookup(printer.id)
+            ok, issues = await _check_one_printer(db, pipeline, printer, raw)
+            reports.append(
+                PerPrinterReport(
+                    printer_id=printer.id,
+                    printer_name=printer.name,
+                    ok=ok,
+                    issues=issues,
+                )
+            )
+
+    any_ok = any(r.ok for r in reports)
     return EligibilityReport(
-        ok=not blocking_issues,
-        target_printer_id=printer.id,
-        target_printer_name=target_name,
-        issues=tuple(issues),
+        ok=any_ok,
+        target_kind="printer_class",
+        target_printer_id=None,
+        target_printer_name=None,
+        target_model_class=pipeline.target_model_class,
+        issues=(),
+        printer_reports=tuple(reports),
     )

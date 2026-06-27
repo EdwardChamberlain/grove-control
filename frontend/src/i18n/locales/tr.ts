@@ -4,6 +4,7 @@ export default {
     printers: 'Yazıcılar',
     archives: 'Arşivler',
     queue: 'Baskı Kuyruğu',
+    pipelineRuns: 'Pipeline çalıştırmaları',
     stats: 'İstatistikler',
     profiles: 'Profiller',
     maintenance: 'Bakım',
@@ -101,6 +102,8 @@ export default {
     now: 'Şimdi',
     collapse: 'Daralt',
     expand: 'Genişlet',
+    previous: 'Önceki',
+    next: 'Sonraki',
     viewArchive: 'Arşivi gör',
     viewInFileManager: 'Dosya Yöneticisinde gör',
     addedBy: '{{username}} tarafından eklendi',
@@ -1045,6 +1048,39 @@ export default {
   },
 
   // Kuyruk sayfası
+  // Pipeline Runs dashboard (#1425 PR C).
+  pipelineRuns: {
+    title: 'Pipeline çalıştırmaları',
+    loading: 'Yükleniyor…',
+    empty: 'Henüz pipeline çalıştırması yok.',
+    filter: {
+      pipeline: 'Pipeline',
+      status: 'Durum',
+      all: 'Tümü',
+    },
+    copies: '{{n}} kopya',
+    failedCount: '{{n}} başarısız',
+    copyN: 'Kopya {{n}}',
+    retryFailed: 'Başarısızları tekrar dene',
+    retryOf: '#{{n}} yeniden denemesi',
+    pagination: '{{total}} içinden {{start}}–{{end}}',
+    toast: {
+      cancelled: 'Çalıştırma iptal edildi',
+      cancelFailed: 'İptal başarısız',
+      retryStarted: 'Yeniden deneme başlatıldı',
+      retryFailed: 'Yeniden deneme başarısız',
+    },
+    jobStatus: {
+      pending: 'beklemede',
+      awaiting_printer: 'yazıcı bekleniyor',
+      queued: 'kuyrukta',
+      printing: 'yazdırılıyor',
+      completed: 'tamamlandı',
+      failed: 'başarısız',
+      cancelled: 'iptal edildi',
+    },
+  },
+
   queue: {
     title: 'Baskı Kuyruğu',
     subtitle: 'Baskı işlerinizi zamanlayın ve yönetin',
@@ -2558,6 +2594,12 @@ export default {
     },
 
 
+    pipelineLimits: {
+      title: 'Dilimleyici pipeline limitleri',
+      maxCopiesLabel: 'Çalıştırma başına maksimum kopya',
+      maxCopiesDesc: 'Bir pipeline çalıştırıldığında operatörlerin isteyebileceği kopya sayısı üst sınırı. Sunucu tarafı sert sınır 1000\'dir.',
+    },
+
     // Slicer Pipelines (#1425): list/edit/delete preset bundles users saved
     // from the Slice dialog. Lives in Settings → Workflow → Pipelines sub-tab.
     pipelines: {
@@ -2576,6 +2618,16 @@ export default {
         description: 'Açıklama',
         targetPrinter: 'Hedef yazıcı',
         noTarget: '— Hedef yok —',
+        targetKind: 'Hedef türü',
+        targetKindSpecific: 'Belirli yazıcı',
+        targetKindClass: 'Yazıcı sınıfı',
+        targetModelClass: 'Yazıcı modeli',
+        fanoutStrategy: 'Dağıtım stratejisi',
+        fanout: {
+          max_parallel: 'Maksimum paralel — eşleşen boş yazıcılara dağıt',
+          round_robin: 'Sırayla — uygun yazıcılar arasında döndür',
+          fill_one_first: 'Önce birini doldur — tüm kopyaları tek yazıcıya sabitle',
+        },
       },
       action: {
         save: 'Kaydet',
@@ -2607,6 +2659,7 @@ export default {
           in_progress: 'yazdırılıyor',
           completed: 'tamamlandı',
           failed: 'başarısız',
+          partial_failure: 'kısmi başarısızlık',
           cancelled: 'iptal edildi',
         },
       },
@@ -3841,6 +3894,9 @@ export default {
       empty: 'Henüz kayıtlı pipeline yok. Dilimleme diyalogunu açın ve oluşturmak için "Pipeline olarak kaydet"e tıklayın.',
       noTarget: 'Hedef yazıcı belirlenmemiş',
       noTargetMessage: 'Bu pipeline\'ın hedef yazıcısı yok. Birini seçmek için Ayarlar\'da açın.',
+      copies: 'Kopyalar',
+      copiesHint: 'maks {{n}}',
+      classTarget: 'Herhangi {{model}}',
       toast: {
         started: 'Pipeline çalıştırması başladı',
         failed: 'Çalıştırma başlatılamadı',
@@ -3854,6 +3910,8 @@ export default {
         filamentColor: 'Filament yuvası {{slot}}: renk farklı (beklenen {{expected}}, AMS\'de {{actual}})',
         amsSlotMissing: 'AMS yuvası {{slot}} bu yazıcıda yok',
         filamentUnverified: 'Filament yuvası {{slot}} bulut / standart ön ayardan geldiği için statik olarak doğrulanamadı.',
+        noClassMatches: 'Bu kurulumda pipeline\'ın hedef model sınıfıyla ({{expected}}) eşleşen yazıcı yok.',
+        classNotSet: 'Pipeline hedefi yazıcı sınıfı olarak ayarlanmış ancak model seçilmemiş.',
       },
     },
   },

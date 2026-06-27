@@ -670,6 +670,14 @@ async def run_migrations(conn):
     """
     from sqlalchemy import text
 
+    # Migration: Add parent_run_id column to pipeline_runs (#1425 PR C).
+    # Links a retry-failed run back to its parent so the dashboard can show
+    # "Retry of run #N" inline. Idempotent on both SQLite and Postgres.
+    await _safe_execute(
+        conn,
+        "ALTER TABLE pipeline_runs ADD COLUMN parent_run_id INTEGER REFERENCES pipeline_runs(id) ON DELETE SET NULL",
+    )
+
     # Migration: Add source_archive_id column to pipeline_runs (#1425 PR B follow-up).
     # Allows a pipeline run to source from an archive's source 3MF in addition
     # to a library file. Idempotent — _safe_execute swallows the "already exists"

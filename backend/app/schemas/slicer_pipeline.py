@@ -49,10 +49,14 @@ class SlicerPipelineUpdate(BaseModel):
 
     # PR B target binding. ``target_kind='specific_printer'`` requires
     # ``target_printer_id`` to be set OR cleared in the same payload (route
-    # handler enforces). ``target_kind='printer_class'`` is the PR A default;
-    # PR B leaves the class column unwired (PR C wires it).
+    # handler enforces). ``target_kind='printer_class'`` is wired by PR C
+    # together with ``target_model_class`` (a Bambu model code like 'X1C')
+    # and the fanout strategy that distributes copies across matching
+    # printers.
     target_kind: Literal["specific_printer", "printer_class"] | None = None
     target_printer_id: int | None = None
+    target_model_class: str | None = Field(default=None, max_length=20)
+    fanout_strategy: Literal["max_parallel", "fill_one_first", "round_robin"] | None = None
 
 
 class SlicerPipelineResponse(SlicerPipelineBase):

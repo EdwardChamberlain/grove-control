@@ -166,6 +166,12 @@ async def update_pipeline(
             row.target_printer_id = None
         else:
             row.target_printer_id = data.target_printer_id
+    # PR C — class targeting + fanout strategy. Empty string from the frontend
+    # also clears the class (radio toggled away).
+    if data.target_model_class is not None:
+        row.target_model_class = data.target_model_class or None
+    if data.fanout_strategy is not None:
+        row.fanout_strategy = data.fanout_strategy
 
     await db.commit()
     await db.refresh(row)

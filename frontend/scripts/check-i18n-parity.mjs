@@ -181,6 +181,7 @@ const FR_COGNATES = [
   'Token', 'Server', 'Port', 'Plate', 'Layer', 'Active', 'Total', 'Avatar',
   'Job', 'Modal', 'Pin', 'Pro', 'Mini', 'Studio', 'Excellent', 'Description',
   'Pipeline', 'Pipelines', 'Filament {{n}}',  // #1425 — Slicer Pipelines (FR)
+  'Copies', '{{n}} copies', 'max {{n}}',  // #1425 PR C — French uses these forms verbatim
   'Action', 'Actions', 'Date', 'Type', 'Cache', 'Service', 'Configuration',
   'Archives', 'Maintenance', 'Notifications', 'Notification', 'Position',
   'Pause', 'Solution', 'Source', 'Version', 'Format', 'Documentation',
@@ -220,6 +221,7 @@ const IT_COGNATES = [
   'AMS Filament Backup',  // Bambu Lab product/firmware feature name
   'Email',  // common loanword in Italian, used verbatim in UI labels
   'Pipeline', 'slicing',  // #1425 — Slicer Pipelines (cognate in IT)
+  'max {{n}}',  // #1425 PR C — same form in Italian (max + number)
   'Status', 'Tag', 'Tags', 'Online', 'Offline', 'Standard', 'Filament',
   'Filaments', 'Software', 'Hardware', 'Stop', 'Reset', 'Test', 'Code',
   'Token', 'Server', 'Port', 'Plate', 'Layer', 'Modal', 'Pin', 'Pro', 'Mini',

@@ -4,6 +4,7 @@ export default {
     printers: 'Imprimantes',
     archives: 'Archives',
     queue: 'File d\'attente d\'impression',
+    pipelineRuns: 'Exécutions de pipeline',
     stats: 'Statistiques',
     profiles: 'Profils',
     maintenance: 'Maintenance',
@@ -101,6 +102,8 @@ export default {
     now: 'Maintenant',
     collapse: 'Réduire',
     expand: 'Développer',
+    previous: 'Précédent',
+    next: 'Suivant',
     viewArchive: 'Voir l\'archive',
     viewInFileManager: 'Voir dans le gestionnaire de fichiers',
     addedBy: 'Ajouté par {{username}}',
@@ -1042,6 +1045,39 @@ export default {
       start_command_failed: 'L\'imprimante a rejeté la commande de démarrage',
     },
     dismiss: 'Fermer',
+  },
+
+  // Pipeline Runs dashboard (#1425 PR C).
+  pipelineRuns: {
+    title: 'Exécutions de pipeline',
+    loading: 'Chargement…',
+    empty: 'Aucune exécution de pipeline pour le moment.',
+    filter: {
+      pipeline: 'Pipeline',
+      status: 'Statut',
+      all: 'Toutes',
+    },
+    copies: '{{n}} copies',
+    failedCount: '{{n}} échouées',
+    copyN: 'Copie {{n}}',
+    retryFailed: 'Réessayer les échouées',
+    retryOf: 'réessai de #{{n}}',
+    pagination: '{{start}}–{{end}} sur {{total}}',
+    toast: {
+      cancelled: 'Exécution annulée',
+      cancelFailed: 'Annulation échouée',
+      retryStarted: 'Réessai démarré',
+      retryFailed: 'Réessai échoué',
+    },
+    jobStatus: {
+      pending: 'en attente',
+      awaiting_printer: 'attente imprimante',
+      queued: 'en file',
+      printing: 'impression',
+      completed: 'terminée',
+      failed: 'échouée',
+      cancelled: 'annulée',
+    },
   },
 
   // Queue page
@@ -2543,6 +2579,12 @@ export default {
       commandError: 'Échec de l\'envoi de la commande',
     },
 
+    pipelineLimits: {
+      title: 'Limites des pipelines du trancheur',
+      maxCopiesLabel: 'Copies maximales par exécution',
+      maxCopiesDesc: 'Limite supérieure du nombre de copies que les opérateurs peuvent demander lors de l\'exécution d\'un pipeline. La limite stricte côté serveur est 1000.',
+    },
+
     // Slicer Pipelines (#1425): list/edit/delete preset bundles users saved
     // from the Slice dialog. Lives in Settings → Workflow → Pipelines sub-tab.
     pipelines: {
@@ -2561,6 +2603,16 @@ export default {
         description: 'Description',
         targetPrinter: 'Imprimante cible',
         noTarget: '— Aucune cible —',
+        targetKind: 'Type de cible',
+        targetKindSpecific: 'Imprimante spécifique',
+        targetKindClass: 'Classe d\'imprimante',
+        targetModelClass: 'Modèle d\'imprimante',
+        fanoutStrategy: 'Stratégie de distribution',
+        fanout: {
+          max_parallel: 'Max parallèle — distribuer sur toute imprimante libre correspondante',
+          round_robin: 'Round robin — alterner entre imprimantes éligibles',
+          fill_one_first: 'Remplir une d\'abord — épingler toutes les copies à une imprimante',
+        },
       },
       action: {
         save: 'Enregistrer',
@@ -2592,6 +2644,7 @@ export default {
           in_progress: 'impression',
           completed: 'terminé',
           failed: 'échec',
+          partial_failure: 'échec partiel',
           cancelled: 'annulé',
         },
       },
@@ -3840,6 +3893,9 @@ export default {
       empty: 'Aucun pipeline enregistré pour le moment. Ouvrez le dialogue Trancher et cliquez sur « Enregistrer comme pipeline » pour en créer un.',
       noTarget: 'Aucune imprimante cible définie',
       noTargetMessage: 'Ce pipeline n\'a pas d\'imprimante cible. Ouvrez-le dans les Paramètres pour en choisir une.',
+      copies: 'Copies',
+      copiesHint: 'max {{n}}',
+      classTarget: 'N\'importe quel {{model}}',
       toast: {
         started: 'Exécution de pipeline démarrée',
         failed: 'Impossible de démarrer l\'exécution',
@@ -3853,6 +3909,8 @@ export default {
         filamentColor: 'Emplacement filament {{slot}} : couleur différente (attendu {{expected}}, AMS a {{actual}})',
         amsSlotMissing: 'Emplacement AMS {{slot}} indisponible sur cette imprimante',
         filamentUnverified: 'L\'emplacement filament {{slot}} provient d\'un préréglage cloud / standard et n\'a pas pu être vérifié statiquement.',
+        noClassMatches: 'Aucune imprimante de cette installation ne correspond à la classe de modèle cible du pipeline ({{expected}}).',
+        classNotSet: 'La cible du pipeline est une classe d\'imprimante mais aucun modèle n\'a été choisi.',
       },
     },
   },

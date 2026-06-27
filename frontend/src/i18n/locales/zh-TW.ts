@@ -4,6 +4,7 @@ export default {
     printers: '印表機',
     archives: '歸檔',
     queue: '列印佇列',
+    pipelineRuns: '管線執行',
     stats: '統計',
     profiles: '設定檔案',
     maintenance: '維護',
@@ -101,6 +102,8 @@ export default {
     now: '現在',
     collapse: '收起',
     expand: '展開',
+    previous: '上一頁',
+    next: '下一頁',
     viewArchive: '檢視歸檔',
     viewInFileManager: '在檔案管理器中檢視',
     addedBy: '由 {{username}} 新增',
@@ -1042,6 +1045,39 @@ export default {
       start_command_failed: '印表機拒絕了開始命令',
     },
     dismiss: '關閉',
+  },
+
+  // Pipeline Runs dashboard (#1425 PR C).
+  pipelineRuns: {
+    title: '管線執行',
+    loading: '載入中…',
+    empty: '尚無管線執行。',
+    filter: {
+      pipeline: '管線',
+      status: '狀態',
+      all: '全部',
+    },
+    copies: '{{n}} 份',
+    failedCount: '{{n}} 失敗',
+    copyN: '副本 {{n}}',
+    retryFailed: '重試失敗的',
+    retryOf: '#{{n}} 的重試',
+    pagination: '{{total}} 中的 {{start}}–{{end}}',
+    toast: {
+      cancelled: '執行已取消',
+      cancelFailed: '取消失敗',
+      retryStarted: '已開始重試',
+      retryFailed: '重試失敗',
+    },
+    jobStatus: {
+      pending: '等待中',
+      awaiting_printer: '等待印表機',
+      queued: '排隊中',
+      printing: '列印中',
+      completed: '已完成',
+      failed: '失敗',
+      cancelled: '已取消',
+    },
   },
 
   // Queue page
@@ -2542,6 +2578,12 @@ export default {
     },
 
 
+    pipelineLimits: {
+      title: '切片機管線限制',
+      maxCopiesLabel: '每次執行最大副本數',
+      maxCopiesDesc: '操作員執行管線時可請求的副本數上限。伺服器端硬性上限為 1000。',
+    },
+
     // Slicer Pipelines (#1425): list/edit/delete preset bundles users saved
     // from the Slice dialog. Lives in Settings → Workflow → Pipelines sub-tab.
     pipelines: {
@@ -2560,6 +2602,16 @@ export default {
         description: '描述',
         targetPrinter: '目標印表機',
         noTarget: '— 無目標 —',
+        targetKind: '目標類型',
+        targetKindSpecific: '特定印表機',
+        targetKindClass: '印表機類別',
+        targetModelClass: '印表機型號',
+        fanoutStrategy: '分發策略',
+        fanout: {
+          max_parallel: '最大並行 — 分發到任何空閒匹配的印表機',
+          round_robin: '輪替 — 在合格印表機間循環',
+          fill_one_first: '先填一台 — 將所有副本固定到一台印表機',
+        },
       },
       action: {
         save: '儲存',
@@ -2591,6 +2643,7 @@ export default {
           in_progress: '列印中',
           completed: '已完成',
           failed: '失敗',
+          partial_failure: '部分失敗',
           cancelled: '已取消',
         },
       },
@@ -3839,6 +3892,9 @@ export default {
       empty: '尚未儲存管線。請開啟切片對話框並點擊「另存為管線」建立一個。',
       noTarget: '未設定目標印表機',
       noTargetMessage: '此管線沒有目標印表機。請在設定中開啟並選擇一個。',
+      copies: '副本數',
+      copiesHint: '最多 {{n}}',
+      classTarget: '任意 {{model}}',
       toast: {
         started: '管線執行已開始',
         failed: '無法啟動執行',
@@ -3852,6 +3908,8 @@ export default {
         filamentColor: '耗材槽 {{slot}}：顏色不同（預期 {{expected}}，AMS 實際 {{actual}}）',
         amsSlotMissing: '此印表機上沒有 AMS 槽 {{slot}}',
         filamentUnverified: '耗材槽 {{slot}} 來自雲端 / 標準預設，無法靜態驗證。',
+        noClassMatches: '此安裝中沒有符合該管線目標型號類別（{{expected}}）的印表機。',
+        classNotSet: '管線目標設定為印表機類別但未選擇型號。',
       },
     },
   },

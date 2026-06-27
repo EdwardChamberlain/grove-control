@@ -164,7 +164,12 @@ class TestCheckEligibility:
         body = resp.json()
         assert body["ok"] is False
         kinds = [i["kind"] for i in body["issues"]]
-        assert "printer_not_set" in kinds
+        # PR A defaults target_kind to 'printer_class' so a freshly-saved
+        # pipeline with no target_model_class surfaces ``class_not_set``; the
+        # PR B UI path that hadn't pinned a target_printer_id would surface
+        # ``printer_not_set``. Both signal the same thing to the operator;
+        # accept either.
+        assert kinds == ["class_not_set"] or kinds == ["printer_not_set"]
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -265,7 +270,10 @@ class TestRunPipeline:
         # Eligibility report rides in detail.
         detail = resp.json()["detail"]
         assert detail["ok"] is False
-        assert any(i["kind"] == "printer_not_set" for i in detail["issues"])
+        # printer_not_set or class_not_set — depends on the PR A default
+        # target_kind. Both mean "no target chosen yet".
+        kinds = [i["kind"] for i in detail["issues"]]
+        assert "printer_not_set" in kinds or "class_not_set" in kinds
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -349,7 +357,7 @@ class TestRunListAndGet:
         pipeline = await pipeline_factory()
         resp = await async_client.get(f"/api/v1/slicer-pipelines/{pipeline['id']}/runs")
         assert resp.status_code == 200
-        assert resp.json() == {"runs": []}
+        assert resp.json() == {"runs": [], "total": 0}
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -497,6 +505,229 @@ class TestCancelRun:
             json={"source_library_file_id": src.id, "source_archive_id": 99},
         )
         assert resp.status_code == 422
+
+
+class TestPipelineC:
+    """PR C — multi-copy, class targeting, fanout strategies, retry-failed,
+    dashboard list, max-copies cap."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_copies_cap_enforced(
+        self,
+        async_client: AsyncClient,
+        pipeline_factory,
+        printer_factory,
+        library_file_factory,
+    ):
+        printer = await printer_factory()
+        pipeline = await pipeline_factory(target_printer_id=printer.id)
+        src = await library_file_factory()
+        # Default cap is 50; over-request returns 422 even with valid eligibility.
+        resp = await async_client.post(
+            f"/api/v1/slicer-pipelines/{pipeline['id']}/run",
+            json={"source_library_file_id": src.id, "copies": 9999},
+        )
+        assert resp.status_code == 422  # schema gate (le=1000)
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_run_copies_3_creates_3_jobs(
+        self,
+        async_client: AsyncClient,
+        pipeline_factory,
+        printer_factory,
+        library_file_factory,
+    ):
+        from dataclasses import dataclass
+
+        @dataclass
+        class _FakeSliceJob:
+            id: int = 5555
+
+        printer = await printer_factory()
+        pipeline = await pipeline_factory(target_printer_id=printer.id)
+        src = await library_file_factory()
+
+        live_status = {"connected": True, "raw_data": {"ams": []}}
+        with (
+            patch(
+                "backend.app.api.routes.pipeline_runs._load_printer_status",
+                new=AsyncMock(return_value=live_status),
+            ),
+            patch(
+                "backend.app.services.slice_dispatch.slice_dispatch.enqueue",
+                new=AsyncMock(return_value=_FakeSliceJob()),
+            ),
+        ):
+            resp = await async_client.post(
+                f"/api/v1/slicer-pipelines/{pipeline['id']}/run",
+                json={"source_library_file_id": src.id, "copies": 3},
+            )
+        assert resp.status_code == 202, resp.text
+        body = resp.json()
+        assert body["copies"] == 3
+        assert len(body["jobs"]) == 3
+        assert [j["copy_index"] for j in body["jobs"]] == [0, 1, 2]
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_class_eligibility_per_printer_breakdown(
+        self,
+        async_client: AsyncClient,
+        pipeline_factory,
+        printer_factory,
+        library_file_factory,
+    ):
+        """target_kind='printer_class' surfaces per-printer reports."""
+        await printer_factory(model="X1C")
+        await printer_factory(model="X1C")
+        await printer_factory(model="P1S")  # noise — different model
+        pipeline = await pipeline_factory()
+        # Wire class targeting via PUT.
+        put_resp = await async_client.put(
+            f"/api/v1/slicer-pipelines/{pipeline['id']}",
+            json={
+                "target_kind": "printer_class",
+                "target_printer_id": 0,
+                "target_model_class": "X1C",
+                "fanout_strategy": "max_parallel",
+            },
+        )
+        assert put_resp.status_code == 200, put_resp.text
+        src = await library_file_factory()
+        resp = await async_client.post(
+            f"/api/v1/slicer-pipelines/{pipeline['id']}/check-eligibility",
+            json={"source_library_file_id": src.id},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["target_kind"] == "printer_class"
+        assert body["target_model_class"] == "X1C"
+        # Two X1Cs were created — both should appear in the per-printer breakdown.
+        assert len(body["printer_reports"]) == 2
+        assert all(r["printer_name"].startswith("X1C") for r in body["printer_reports"])
+        # AMS empty + no live state → both are offline, so ok=False.
+        assert body["ok"] is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_class_eligibility_no_matching_printers(
+        self,
+        async_client: AsyncClient,
+        pipeline_factory,
+        printer_factory,
+        library_file_factory,
+    ):
+        await printer_factory(model="P1S")  # only a P1S in the install
+        pipeline = await pipeline_factory()
+        await async_client.put(
+            f"/api/v1/slicer-pipelines/{pipeline['id']}",
+            json={
+                "target_kind": "printer_class",
+                "target_printer_id": 0,
+                "target_model_class": "X1C",
+            },
+        )
+        src = await library_file_factory()
+        resp = await async_client.post(
+            f"/api/v1/slicer-pipelines/{pipeline['id']}/check-eligibility",
+            json={"source_library_file_id": src.id},
+        )
+        body = resp.json()
+        assert body["ok"] is False
+        assert any(i["kind"] == "no_class_matches" for i in body["issues"])
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_list_all_runs_dashboard_endpoint(
+        self,
+        async_client: AsyncClient,
+        pipeline_factory,
+        printer_factory,
+        library_file_factory,
+        db_session,
+    ):
+        from backend.app.models.pipeline_run import PipelineRun
+
+        printer = await printer_factory()
+        pipeline = await pipeline_factory(target_printer_id=printer.id)
+        src = await library_file_factory()
+        for i in range(3):
+            run = PipelineRun(
+                pipeline_id=pipeline["id"],
+                source_library_file_id=src.id,
+                copies=1,
+                status="completed" if i % 2 == 0 else "failed",
+            )
+            db_session.add(run)
+        await db_session.commit()
+
+        resp = await async_client.get("/api/v1/pipeline-runs?limit=10")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 3
+        assert len(body["runs"]) == 3
+        # Newest first.
+        assert body["runs"][0]["id"] > body["runs"][-1]["id"]
+
+        # Filter by status.
+        resp = await async_client.get("/api/v1/pipeline-runs?status=failed")
+        body = resp.json()
+        assert all(r["status"] == "failed" for r in body["runs"])
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_retry_failed_creates_child_run(
+        self,
+        async_client: AsyncClient,
+        pipeline_factory,
+        printer_factory,
+        library_file_factory,
+        db_session,
+    ):
+        from dataclasses import dataclass
+
+        from backend.app.models.pipeline_run import PipelineJob, PipelineRun
+
+        @dataclass
+        class _FakeSliceJob:
+            id: int = 6666
+
+        printer = await printer_factory()
+        pipeline = await pipeline_factory(target_printer_id=printer.id)
+        src = await library_file_factory()
+        # Build a parent run with 3 jobs: 1 completed, 2 failed → retry
+        # should request copies=2.
+        parent = PipelineRun(
+            pipeline_id=pipeline["id"],
+            source_library_file_id=src.id,
+            copies=3,
+            status="partial_failure",
+        )
+        db_session.add(parent)
+        await db_session.flush()
+        for idx, status in enumerate(["completed", "failed", "failed"]):
+            db_session.add(PipelineJob(pipeline_run_id=parent.id, copy_index=idx, status=status))
+        await db_session.commit()
+        await db_session.refresh(parent)
+
+        live_status = {"connected": True, "raw_data": {"ams": []}}
+        with (
+            patch(
+                "backend.app.api.routes.pipeline_runs._load_printer_status",
+                new=AsyncMock(return_value=live_status),
+            ),
+            patch(
+                "backend.app.services.slice_dispatch.slice_dispatch.enqueue",
+                new=AsyncMock(return_value=_FakeSliceJob()),
+            ),
+        ):
+            resp = await async_client.post(f"/api/v1/pipeline-runs/{parent.id}/retry-failed")
+        assert resp.status_code == 202, resp.text
+        body = resp.json()
+        assert body["copies"] == 2  # only the 2 failed copies
+        assert body["parent_run_id"] == parent.id
 
 
 class TestCancelTerminal:

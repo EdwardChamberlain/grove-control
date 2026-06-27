@@ -4,6 +4,7 @@ export default {
     printers: '打印机',
     archives: '归档',
     queue: '打印队列',
+    pipelineRuns: '流水线运行',
     stats: '统计',
     profiles: '配置文件',
     maintenance: '维护',
@@ -101,6 +102,8 @@ export default {
     now: '现在',
     collapse: '收起',
     expand: '展开',
+    previous: '上一页',
+    next: '下一页',
     viewArchive: '查看归档',
     viewInFileManager: '在文件管理器中查看',
     addedBy: '由 {{username}} 添加',
@@ -1042,6 +1045,39 @@ export default {
       start_command_failed: '打印机拒绝了开始命令',
     },
     dismiss: '关闭',
+  },
+
+  // Pipeline Runs dashboard (#1425 PR C).
+  pipelineRuns: {
+    title: '流水线运行',
+    loading: '加载中…',
+    empty: '暂无流水线运行。',
+    filter: {
+      pipeline: '流水线',
+      status: '状态',
+      all: '全部',
+    },
+    copies: '{{n}} 份',
+    failedCount: '{{n}} 失败',
+    copyN: '副本 {{n}}',
+    retryFailed: '重试失败的',
+    retryOf: '#{{n}} 的重试',
+    pagination: '{{total}} 中的 {{start}}–{{end}}',
+    toast: {
+      cancelled: '运行已取消',
+      cancelFailed: '取消失败',
+      retryStarted: '已开始重试',
+      retryFailed: '重试失败',
+    },
+    jobStatus: {
+      pending: '等待中',
+      awaiting_printer: '等待打印机',
+      queued: '排队中',
+      printing: '打印中',
+      completed: '已完成',
+      failed: '失败',
+      cancelled: '已取消',
+    },
   },
 
   // Queue page
@@ -2542,6 +2578,12 @@ export default {
     },
 
 
+    pipelineLimits: {
+      title: '切片机流水线限制',
+      maxCopiesLabel: '每次运行最大副本数',
+      maxCopiesDesc: '操作员运行流水线时可请求的副本数上限。服务器端硬性上限为 1000。',
+    },
+
     // Slicer Pipelines (#1425): list/edit/delete preset bundles users saved
     // from the Slice dialog. Lives in Settings → Workflow → Pipelines sub-tab.
     pipelines: {
@@ -2560,6 +2602,16 @@ export default {
         description: '描述',
         targetPrinter: '目标打印机',
         noTarget: '— 无目标 —',
+        targetKind: '目标类型',
+        targetKindSpecific: '特定打印机',
+        targetKindClass: '打印机类别',
+        targetModelClass: '打印机型号',
+        fanoutStrategy: '分发策略',
+        fanout: {
+          max_parallel: '最大并行 — 分发到任何空闲匹配的打印机',
+          round_robin: '轮询 — 在合格打印机间循环',
+          fill_one_first: '先填一台 — 将所有副本固定到一台打印机',
+        },
       },
       action: {
         save: '保存',
@@ -2591,6 +2643,7 @@ export default {
           in_progress: '打印中',
           completed: '已完成',
           failed: '失败',
+          partial_failure: '部分失败',
           cancelled: '已取消',
         },
       },
@@ -3839,6 +3892,9 @@ export default {
       empty: '尚未保存流水线。请打开切片对话框并点击"另存为流水线"创建一个。',
       noTarget: '未设置目标打印机',
       noTargetMessage: '此流水线没有目标打印机。请在设置中打开并选择一个。',
+      copies: '副本数',
+      copiesHint: '最多 {{n}}',
+      classTarget: '任意 {{model}}',
       toast: {
         started: '流水线运行已开始',
         failed: '无法启动运行',
@@ -3852,6 +3908,8 @@ export default {
         filamentColor: '耗材槽 {{slot}}：颜色不同（期望 {{expected}}，AMS 实际 {{actual}}）',
         amsSlotMissing: '此打印机上没有 AMS 槽 {{slot}}',
         filamentUnverified: '耗材槽 {{slot}} 来自云端 / 标准预设，无法静态验证。',
+        noClassMatches: '此安装中没有匹配该流水线目标型号类别（{{expected}}）的打印机。',
+        classNotSet: '流水线目标设置为打印机类别但未选择型号。',
       },
     },
   },

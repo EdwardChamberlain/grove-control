@@ -140,6 +140,15 @@ class AppSettings(BaseModel):
     # Default printer for operations
     default_printer_id: int | None = Field(default=None, description="Default printer ID for uploads, reprints, etc.")
 
+    # Slicer Pipelines (#1425 PR C). Cap on the ``copies`` field in the
+    # Run-with-pipeline modal — keeps a misclick from queueing 5000 prints.
+    pipeline_max_copies: int = Field(
+        default=50,
+        ge=1,
+        le=1000,
+        description="Upper bound on the copies an operator can request when running a Slicer Pipeline. Larger fleets / production rigs can raise this; the hard ceiling at 1000 is a sanity guard against fat-fingered input.",
+    )
+
     # Virtual Printer
     virtual_printer_enabled: bool = Field(default=False, description="Enable virtual printer for slicer uploads")
     virtual_printer_access_code: str = Field(default="", description="Access code for virtual printer authentication")
@@ -458,6 +467,7 @@ class AppSettingsUpdate(BaseModel):
     date_format: str | None = None
     time_format: str | None = None
     default_printer_id: int | None = None
+    pipeline_max_copies: int | None = None
     virtual_printer_enabled: bool | None = None
     virtual_printer_access_code: str | None = None
     virtual_printer_mode: str | None = None

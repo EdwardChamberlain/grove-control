@@ -3,6 +3,7 @@ export default {
     printers: '프린터',
     archives: '아카이브',
     queue: '대기열',
+    pipelineRuns: '파이프라인 실행',
     stats: '통계',
     profiles: '프로필',
     maintenance: '유지보수',
@@ -98,6 +99,8 @@ export default {
     now: '지금',
     collapse: '접기',
     expand: '펼치기',
+    previous: '이전',
+    next: '다음',
     viewArchive: '아카이브 보기',
     viewInFileManager: '파일 관리자에서 보기',
     addedBy: '{{username}}님이 추가함',
@@ -998,6 +1001,39 @@ export default {
     },
     dismiss: '닫기',
   },
+  // Pipeline Runs dashboard (#1425 PR C).
+  pipelineRuns: {
+    title: '파이프라인 실행',
+    loading: '불러오는 중…',
+    empty: '아직 파이프라인 실행이 없습니다.',
+    filter: {
+      pipeline: '파이프라인',
+      status: '상태',
+      all: '전체',
+    },
+    copies: '사본 {{n}}',
+    failedCount: '실패 {{n}}',
+    copyN: '사본 {{n}}',
+    retryFailed: '실패 재시도',
+    retryOf: '#{{n}}의 재시도',
+    pagination: '{{total}} 중 {{start}}–{{end}}',
+    toast: {
+      cancelled: '실행 취소됨',
+      cancelFailed: '취소 실패',
+      retryStarted: '재시도 시작됨',
+      retryFailed: '재시도 실패',
+    },
+    jobStatus: {
+      pending: '대기 중',
+      awaiting_printer: '프린터 대기 중',
+      queued: '대기 중',
+      printing: '인쇄 중',
+      completed: '완료됨',
+      failed: '실패',
+      cancelled: '취소됨',
+    },
+  },
+
   queue: {
     title: '인쇄 대기열',
     subtitle: '인쇄 작업을 예약하고 관리하세요',
@@ -2410,6 +2446,12 @@ export default {
     energyCostBadge: '에너지',
     passwordRequirements: '최소 8자, 대문자, 소문자, 숫자, 특수문자 각 1개 이상 포함',
 
+    pipelineLimits: {
+      title: '슬라이서 파이프라인 한도',
+      maxCopiesLabel: '실행당 최대 사본 수',
+      maxCopiesDesc: '운영자가 파이프라인 실행 시 요청할 수 있는 사본 수의 상한. 서버 측 절대 상한은 1000입니다.',
+    },
+
     // Slicer Pipelines (#1425): list/edit/delete preset bundles users saved
     // from the Slice dialog. Lives in Settings → Workflow → Pipelines sub-tab.
     pipelines: {
@@ -2428,6 +2470,16 @@ export default {
         description: '설명',
         targetPrinter: '대상 프린터',
         noTarget: '— 대상 없음 —',
+        targetKind: '대상 유형',
+        targetKindSpecific: '특정 프린터',
+        targetKindClass: '프린터 클래스',
+        targetModelClass: '프린터 모델',
+        fanoutStrategy: '분산 전략',
+        fanout: {
+          max_parallel: '최대 병렬 — 일치하는 유휴 프린터에 분산',
+          round_robin: '라운드 로빈 — 적격 프린터를 순환',
+          fill_one_first: '하나 먼저 채우기 — 모든 사본을 한 프린터에 고정',
+        },
       },
       action: {
         save: '저장',
@@ -2459,6 +2511,7 @@ export default {
           in_progress: '인쇄 중',
           completed: '완료됨',
           failed: '실패',
+          partial_failure: '부분 실패',
           cancelled: '취소됨',
         },
       },
@@ -3646,6 +3699,9 @@ export default {
       empty: '저장된 파이프라인이 없습니다. 슬라이스 대화상자를 열고 "파이프라인으로 저장"을 클릭하여 생성하세요.',
       noTarget: '대상 프린터가 설정되지 않음',
       noTargetMessage: '이 파이프라인에는 대상 프린터가 없습니다. 설정에서 열어 선택하세요.',
+      copies: '사본 수',
+      copiesHint: '최대 {{n}}',
+      classTarget: '임의의 {{model}}',
       toast: {
         started: '파이프라인 실행 시작됨',
         failed: '실행을 시작할 수 없습니다',
@@ -3659,6 +3715,8 @@ export default {
         filamentColor: '필라멘트 슬롯 {{slot}}: 색상이 다릅니다 (예상 {{expected}}, AMS {{actual}})',
         amsSlotMissing: 'AMS 슬롯 {{slot}}이(가) 이 프린터에서 사용 불가',
         filamentUnverified: '필라멘트 슬롯 {{slot}}은(는) 클라우드/표준 프리셋이며 정적으로 검증할 수 없습니다.',
+        noClassMatches: '이 설치에서 파이프라인의 대상 모델 클래스({{expected}})와 일치하는 프린터가 없습니다.',
+        classNotSet: '파이프라인 대상이 프린터 클래스로 설정되었지만 모델이 선택되지 않았습니다.',
       },
     },
   },

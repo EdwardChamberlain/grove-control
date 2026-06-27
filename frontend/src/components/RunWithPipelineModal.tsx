@@ -34,6 +34,7 @@ export function RunWithPipelineModal({ source, onClose }: RunWithPipelineModalPr
 
   const [picked, setPicked] = useState<SlicerPipeline | null>(null);
   const [report, setReport] = useState<PipelineEligibilityReport | null>(null);
+  const [copies, setCopies] = useState<number>(1);
   const { trackJob } = useSliceJobTracker();
 
   const { data: list, isLoading: pipelinesLoading } = useQuery({
@@ -44,6 +45,13 @@ export function RunWithPipelineModal({ source, onClose }: RunWithPipelineModalPr
     queryKey: ['printers'],
     queryFn: () => api.getPrinters(),
   });
+  // Cap from settings (PR C). Falls back to 50 when the fetch is in-flight or
+  // missing — same default the backend writes.
+  const { data: settings } = useQuery({
+    queryKey: ['app-settings'],
+    queryFn: () => api.getSettings(),
+  });
+  const maxCopies = settings?.pipeline_max_copies ?? 50;
 
   const sourceRef = { kind: source.kind, id: source.id } as const;
   const checkMutation = useMutation({
@@ -53,7 +61,7 @@ export function RunWithPipelineModal({ source, onClose }: RunWithPipelineModalPr
 
   const runMutation = useMutation({
     mutationFn: ({ pipelineId, force }: { pipelineId: number; force: boolean }) =>
-      api.runPipeline(pipelineId, sourceRef, force),
+      api.runPipeline(pipelineId, sourceRef, force, copies),
     onSuccess: (run) => {
       queryClient.invalidateQueries({ queryKey: ['slicer-pipelines'] });
       queryClient.invalidateQueries({ queryKey: ['pipeline-runs'] });
@@ -78,7 +86,10 @@ export function RunWithPipelineModal({ source, onClose }: RunWithPipelineModalPr
   }, {} as Record<number, PrinterType>);
 
   const handlePick = async (pipeline: SlicerPipeline) => {
-    if (!pipeline.target_printer_id) {
+    const hasTarget =
+      pipeline.target_printer_id ||
+      (pipeline.target_kind === 'printer_class' && pipeline.target_model_class);
+    if (!hasTarget) {
       showToast(
         t('library.runWithPipeline.noTargetMessage', 'This pipeline has no target printer set. Open it in Settings to pick one.'),
         'error',
@@ -154,6 +165,9 @@ export function RunWithPipelineModal({ source, onClose }: RunWithPipelineModalPr
               printerById={printerById}
               loading={pipelinesLoading || checkMutation.isPending}
               onPick={handlePick}
+              copies={copies}
+              maxCopies={maxCopies}
+              onCopiesChange={setCopies}
             />
           )}
         </div>
@@ -168,12 +182,18 @@ function PickStep({
   printerById,
   loading,
   onPick,
+  copies,
+  maxCopies,
+  onCopiesChange,
 }: {
   source: { filename: string };
   pipelines: SlicerPipeline[];
   printerById: Record<number, { name: string }>;
   loading: boolean;
   onPick: (p: SlicerPipeline) => void;
+  copies: number;
+  maxCopies: number;
+  onCopiesChange: (n: number) => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -182,6 +202,28 @@ function PickStep({
         {t('library.runWithPipeline.sourceHint', 'Source')}:{' '}
         <span className="text-white">{source.filename}</span>
       </p>
+      <div className="flex items-center gap-2">
+        <label className="text-xs text-bambu-gray" htmlFor="run-pipeline-copies">
+          {t('library.runWithPipeline.copies', 'Copies')}:
+        </label>
+        <input
+          id="run-pipeline-copies"
+          type="number"
+          min={1}
+          max={maxCopies}
+          value={copies}
+          onChange={(e) => {
+            const n = parseInt(e.target.value, 10);
+            if (Number.isNaN(n)) return;
+            onCopiesChange(Math.max(1, Math.min(maxCopies, n)));
+          }}
+          aria-label={t('library.runWithPipeline.copies', 'Copies')}
+          className="w-20 px-2 py-1 text-xs bg-bambu-dark border border-bambu-dark-tertiary rounded text-white"
+        />
+        <span className="text-xs text-bambu-gray/60">
+          {t('library.runWithPipeline.copiesHint', 'max {{n}}', { n: maxCopies })}
+        </span>
+      </div>
       {loading && (
         <div className="flex items-center gap-2 text-sm text-bambu-gray">
           <Loader2 className="w-4 h-4 animate-spin" />
@@ -199,13 +241,18 @@ function PickStep({
       {!loading && pipelines.length > 0 && (
         <ul className="space-y-1.5" aria-label={t('library.runWithPipeline.pipelineListAria', 'Available pipelines')}>
           {pipelines.map((p) => {
+            const isClass = p.target_kind === 'printer_class';
             const targetName = p.target_printer_id ? printerById[p.target_printer_id]?.name : null;
+            const classLabel = isClass && p.target_model_class
+              ? t('library.runWithPipeline.classTarget', 'Any {{model}}', { model: p.target_model_class })
+              : null;
+            const hasTarget = !!(p.target_printer_id || (isClass && p.target_model_class));
             return (
               <li key={p.id}>
                 <button
                   type="button"
                   onClick={() => onPick(p)}
-                  disabled={!p.target_printer_id}
+                  disabled={!hasTarget}
                   className="w-full text-left px-3 py-2 rounded-md border border-bambu-dark-tertiary bg-bambu-dark/40 hover:bg-bambu-dark-tertiary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   <div className="flex items-center gap-2">
@@ -214,7 +261,9 @@ function PickStep({
                   </div>
                   <div className="mt-1 text-xs text-bambu-gray flex items-center gap-1">
                     <PrinterIcon className="w-3 h-3" />
-                    {targetName ? (
+                    {classLabel ? (
+                      <span>{classLabel}</span>
+                    ) : targetName ? (
                       <span>{targetName}</span>
                     ) : (
                       <span className="text-amber-400">

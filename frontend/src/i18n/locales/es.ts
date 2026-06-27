@@ -4,6 +4,7 @@ export default {
     printers: 'Impresoras',
     archives: 'Archivos',
     queue: 'Cola de impresión',
+    pipelineRuns: 'Ejecuciones de pipeline',
     stats: 'Estadísticas',
     profiles: 'Perfiles',
     maintenance: 'Mantenimiento',
@@ -101,6 +102,8 @@ export default {
     now: 'Ahora',
     collapse: 'Contraer',
     expand: 'Expandir',
+    previous: 'Anterior',
+    next: 'Siguiente',
     viewArchive: 'Ver archivo',
     viewInFileManager: 'Ver en el gestor de archivos',
     addedBy: 'Añadido por {{username}}',
@@ -1042,6 +1045,39 @@ export default {
       start_command_failed: 'La impresora rechazó el comando de inicio',
     },
     dismiss: 'Cerrar',
+  },
+
+  // Pipeline Runs dashboard (#1425 PR C).
+  pipelineRuns: {
+    title: 'Ejecuciones de pipeline',
+    loading: 'Cargando…',
+    empty: 'Aún no hay ejecuciones de pipeline.',
+    filter: {
+      pipeline: 'Pipeline',
+      status: 'Estado',
+      all: 'Todas',
+    },
+    copies: '{{n}} copias',
+    failedCount: '{{n}} fallidas',
+    copyN: 'Copia {{n}}',
+    retryFailed: 'Reintentar fallidas',
+    retryOf: 'reintento de #{{n}}',
+    pagination: '{{start}}–{{end}} de {{total}}',
+    toast: {
+      cancelled: 'Ejecución cancelada',
+      cancelFailed: 'Cancelación fallida',
+      retryStarted: 'Reintento iniciado',
+      retryFailed: 'Reintento fallido',
+    },
+    jobStatus: {
+      pending: 'pendiente',
+      awaiting_printer: 'esperando impresora',
+      queued: 'en cola',
+      printing: 'imprimiendo',
+      completed: 'completada',
+      failed: 'fallida',
+      cancelled: 'cancelada',
+    },
   },
 
   // Queue page
@@ -2557,6 +2593,12 @@ export default {
     },
 
 
+    pipelineLimits: {
+      title: 'Límites de pipelines del cortador',
+      maxCopiesLabel: 'Copias máximas por ejecución',
+      maxCopiesDesc: 'Límite superior de copias que los operadores pueden solicitar al ejecutar una pipeline. El límite máximo del servidor es 1000.',
+    },
+
     // Slicer Pipelines (#1425): list/edit/delete preset bundles users saved
     // from the Slice dialog. Lives in Settings → Workflow → Pipelines sub-tab.
     pipelines: {
@@ -2575,6 +2617,16 @@ export default {
         description: 'Descripción',
         targetPrinter: 'Impresora de destino',
         noTarget: '— Sin destino —',
+        targetKind: 'Tipo de destino',
+        targetKindSpecific: 'Impresora específica',
+        targetKindClass: 'Clase de impresora',
+        targetModelClass: 'Modelo de impresora',
+        fanoutStrategy: 'Estrategia de distribución',
+        fanout: {
+          max_parallel: 'Máximo paralelo — distribuir entre cualquier impresora libre coincidente',
+          round_robin: 'Round robin — alternar entre impresoras elegibles',
+          fill_one_first: 'Llenar una primero — fijar todas las copias a una impresora',
+        },
       },
       action: {
         save: 'Guardar',
@@ -2606,6 +2658,7 @@ export default {
           in_progress: 'imprimiendo',
           completed: 'completada',
           failed: 'fallida',
+          partial_failure: 'fallo parcial',
           cancelled: 'cancelada',
         },
       },
@@ -3854,6 +3907,9 @@ export default {
       empty: 'Aún no hay pipelines guardadas. Abre el diálogo Cortar y haz clic en "Guardar como pipeline" para crear una.',
       noTarget: 'Sin impresora de destino',
       noTargetMessage: 'Esta pipeline no tiene impresora de destino. Ábrela en Ajustes para elegir una.',
+      copies: 'Copias',
+      copiesHint: 'máx {{n}}',
+      classTarget: 'Cualquier {{model}}',
       toast: {
         started: 'Ejecución de pipeline iniciada',
         failed: 'No se pudo iniciar la ejecución',
@@ -3867,6 +3923,8 @@ export default {
         filamentColor: 'Slot de filamento {{slot}}: color distinto (esperado {{expected}}, AMS tiene {{actual}})',
         amsSlotMissing: 'Slot AMS {{slot}} no disponible en esta impresora',
         filamentUnverified: 'Slot de filamento {{slot}} proviene de un preset de nube / estándar y no se pudo verificar estáticamente.',
+        noClassMatches: 'Ninguna impresora en esta instalación coincide con la clase de modelo objetivo de la pipeline ({{expected}}).',
+        classNotSet: 'El destino de la pipeline es una clase de impresora pero no se eligió ningún modelo.',
       },
     },
   },

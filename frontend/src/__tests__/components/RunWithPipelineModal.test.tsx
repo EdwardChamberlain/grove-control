@@ -131,6 +131,7 @@ describe('RunWithPipelineModal', () => {
         1,
         { kind: 'libraryFile', id: 99 },
         false,
+        1,
       );
       expect(onClose).toHaveBeenCalled();
     });
@@ -165,6 +166,7 @@ describe('RunWithPipelineModal', () => {
         1,
         { kind: 'archive', id: 7 },
         false,
+        1,
       );
     });
   });
@@ -202,7 +204,7 @@ describe('RunWithPipelineModal', () => {
     // Clicking Run anyway fires the run with force=true and the new source-kind shape.
     await user.click(screen.getByRole('button', { name: /Run anyway/i }));
     await waitFor(() => {
-      expect(mockApi.runPipeline).toHaveBeenCalledWith(1, { kind: 'libraryFile', id: 99 }, true);
+      expect(mockApi.runPipeline).toHaveBeenCalledWith(1, { kind: 'libraryFile', id: 99 }, true, 1);
     });
   });
 });

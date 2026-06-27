@@ -4425,6 +4425,47 @@ export function SettingsPage() {
           </div>
           {/* Right Column */}
           <div className="lg:w-1/2 space-y-3">
+
+          {/* Slicer Pipelines (#1425 PR C). Cap on the copies input in
+              the Run-with-pipeline modal to prevent fat-fingered queue
+              floods. Hard ceiling at 1000 enforced server-side. */}
+          <Card id="card-pipelines">
+            <CardHeader>
+              <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                <Workflow className="w-4 h-4 text-bambu-green" />
+                {t('settings.pipelineLimits.title', 'Slicer Pipeline limits')}
+              </h3>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex-1">
+                  <p className="text-sm text-white">
+                    {t('settings.pipelineLimits.maxCopiesLabel', 'Max copies per run')}
+                  </p>
+                  <p className="text-xs text-bambu-gray mt-0.5">
+                    {t(
+                      'settings.pipelineLimits.maxCopiesDesc',
+                      'Upper bound on the copies operators can request when running a pipeline. Server-side hard cap is 1000.',
+                    )}
+                  </p>
+                </div>
+                <input
+                  type="number"
+                  min={1}
+                  max={1000}
+                  value={localSettings.pipeline_max_copies ?? 50}
+                  onChange={(e) => {
+                    const n = parseInt(e.target.value, 10);
+                    if (Number.isNaN(n)) return;
+                    updateSetting('pipeline_max_copies', Math.max(1, Math.min(1000, n)));
+                  }}
+                  aria-label={t('settings.pipelineLimits.maxCopiesLabel', 'Max copies per run')}
+                  className="w-24 px-2 py-1 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-sm"
+                />
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Slicer */}
           <Card id="card-slicer">
             <CardHeader>
