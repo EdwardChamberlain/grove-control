@@ -1016,7 +1016,40 @@ export default {
     batchCancelled: '已取消剩余批次项目',
     cancelBatchConfirmTitle: '取消批次',
     cancelBatchConfirmMessage: '取消此批次中所有剩余的待处理项目？',
-    batch: '批次',
+    batch: {
+      defaultName: '批次',
+      label: '{{count}} 项',
+      label_plural: '{{count}} 项',
+      pendingCount: '{{count}} 待处理',
+      pendingCount_plural: '{{count}} 待处理',
+      expand: '展开批次',
+      collapse: '折叠批次',
+      groupAsBatch: '组合为批次…',
+      groupAsBatchDescription: '将选中的 {{count}} 项组合为一个可折叠的批次。',
+      nameLabel: '批次名称',
+      namePlaceholder: '例如：周五礼物',
+      create: '创建批次',
+      ungroup: '取消分组',
+      ungroupConfirmTitle: '取消批次分组？',
+      ungroupConfirmMessage: '项目将保留在队列中，但不再分组在一起。',
+    },
+    tabs: {
+      queue: '队列',
+      history: '历史',
+      timeline: '时间线',
+    },
+    layout: {
+      flatList: '列表',
+      byPrinter: '按打印机',
+      groupByPrinter: '按打印机分组',
+    },
+    history: {
+      emptyTitle: '暂无历史',
+      emptyDescription: '已完成、已取消和失败的打印将在此显示。',
+    },
+    dragGhost: {
+      multiCount: '{{count}} 项',
+    },
     // Sections
     sections: {
       currentlyPrinting: '正在打印',
@@ -1144,6 +1177,10 @@ export default {
       updateFailed: '更新项目失败',
       bulkCancelled: '已取消 {{count}} 个项目',
       bulkCancelFailed: '批量取消项目失败',
+      batchCreated: '已创建批次"{{name}}"',
+      batchCreateFailed: '创建批次失败',
+      batchUngrouped: '已取消分组 {{count}} 项',
+      batchUngroupFailed: '取消批次分组失败',
     },
     // Timeline view
     timeline: {
@@ -1151,6 +1188,7 @@ export default {
       timelineView: '时间线',
       unassigned: '未分配',
       noData: '当天没有计划的打印任务',
+      nothingCommitted: '此时间窗口内没有已确定的计划。暂存项目、等待项目以及空闲打印机上的 ASAP 任务不会显示 — 设置计划时间或释放暂存项目以在此处查看。',
       allDoneBy: '所有打印预计在 {{time}} 前完成',
       staged: '暂存',
       filterAll: '全部显示',
@@ -1167,6 +1205,12 @@ export default {
         next: '后一天',
         today: '今天',
       },
+      window: {
+        back12h: '后退 12 小时',
+        forward12h: '前进 12 小时',
+        now: '现在',
+      },
+      printerColumnHeader: '打印机',
     },
     // Permissions
     permissions: {

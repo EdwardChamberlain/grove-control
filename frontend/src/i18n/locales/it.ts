@@ -1016,7 +1016,40 @@ export default {
     batchCancelled: 'Elementi rimanenti del lotto annullati',
     cancelBatchConfirmTitle: 'Annulla lotto',
     cancelBatchConfirmMessage: 'Annullare tutti gli elementi in sospeso rimanenti in questo lotto?',
-    batch: 'Lotto',
+    batch: {
+      defaultName: 'Lotto',
+      label: '{{count}} elemento',
+      label_plural: '{{count}} elementi',
+      pendingCount: '{{count}} in attesa',
+      pendingCount_plural: '{{count}} in attesa',
+      expand: 'Espandi lotto',
+      collapse: 'Comprimi lotto',
+      groupAsBatch: 'Raggruppa come lotto…',
+      groupAsBatchDescription: 'Combina gli {{count}} elementi selezionati in un unico lotto comprimibile.',
+      nameLabel: 'Nome lotto',
+      namePlaceholder: 'es. Regali del venerdì',
+      create: 'Crea lotto',
+      ungroup: 'Separa',
+      ungroupConfirmTitle: 'Separare il lotto?',
+      ungroupConfirmMessage: 'Gli elementi resteranno in coda ma non saranno più raggruppati.',
+    },
+    tabs: {
+      queue: 'Coda',
+      history: 'Cronologia',
+      timeline: 'Linea temporale',
+    },
+    layout: {
+      flatList: 'Elenco',
+      byPrinter: 'Per stampante',
+      groupByPrinter: 'Raggruppa per stampante',
+    },
+    history: {
+      emptyTitle: 'Nessuna cronologia',
+      emptyDescription: 'Le stampe completate, annullate e fallite appariranno qui.',
+    },
+    dragGhost: {
+      multiCount: '{{count}} elementi',
+    },
     // Sections
     sections: {
       currentlyPrinting: 'In stampa',
@@ -1144,6 +1177,10 @@ export default {
       updateFailed: 'Aggiornamento elementi non riuscito',
       bulkCancelled: 'Annullati {{count}} elementi',
       bulkCancelFailed: 'Annullamento elementi non riuscito',
+      batchCreated: 'Lotto «{{name}}» creato',
+      batchCreateFailed: 'Creazione lotto non riuscita',
+      batchUngrouped: '{{count}} elemento/i separato/i',
+      batchUngroupFailed: 'Separazione del lotto non riuscita',
     },
     // Timeline view
     timeline: {
@@ -1151,6 +1188,7 @@ export default {
       timelineView: 'Cronologia',
       unassigned: 'Non assegnato',
       noData: 'Nessuna stampa programmata per questo giorno',
+      nothingCommitted: 'Nessuna pianificazione confermata in questa finestra. Elementi preparati, in attesa e ASAP su stampanti inattive non sono mostrati — imposta un orario pianificato o rilascia un elemento preparato per vederlo qui.',
       allDoneBy: 'Tutte le stampe completate entro le {{time}}',
       staged: 'In attesa',
       filterAll: 'Mostra tutto',
@@ -1167,6 +1205,12 @@ export default {
         next: 'Giorno successivo',
         today: 'Oggi',
       },
+      window: {
+        back12h: 'Indietro di 12 ore',
+        forward12h: 'Avanti di 12 ore',
+        now: 'Adesso',
+      },
+      printerColumnHeader: 'Stampante',
     },
     // Permissions
     permissions: {

@@ -1016,7 +1016,40 @@ export default {
     batchCancelled: '已取消剩餘批次項目',
     cancelBatchConfirmTitle: '取消批次',
     cancelBatchConfirmMessage: '取消此批次中所有剩餘的待處理項目？',
-    batch: '批次',
+    batch: {
+      defaultName: '批次',
+      label: '{{count}} 項',
+      label_plural: '{{count}} 項',
+      pendingCount: '{{count}} 待處理',
+      pendingCount_plural: '{{count}} 待處理',
+      expand: '展開批次',
+      collapse: '收合批次',
+      groupAsBatch: '組合為批次…',
+      groupAsBatchDescription: '將選取的 {{count}} 項組合為一個可收合的批次。',
+      nameLabel: '批次名稱',
+      namePlaceholder: '例如：週五禮物',
+      create: '建立批次',
+      ungroup: '取消分組',
+      ungroupConfirmTitle: '取消批次分組？',
+      ungroupConfirmMessage: '項目將保留在佇列中，但不再分組在一起。',
+    },
+    tabs: {
+      queue: '佇列',
+      history: '歷史',
+      timeline: '時間軸',
+    },
+    layout: {
+      flatList: '清單',
+      byPrinter: '依印表機',
+      groupByPrinter: '依印表機分組',
+    },
+    history: {
+      emptyTitle: '目前沒有歷史記錄',
+      emptyDescription: '已完成、已取消與失敗的列印將顯示於此。',
+    },
+    dragGhost: {
+      multiCount: '{{count}} 項',
+    },
     // Sections
     sections: {
       currentlyPrinting: '正在列印',
@@ -1144,6 +1177,10 @@ export default {
       updateFailed: '更新項目失敗',
       bulkCancelled: '已取消 {{count}} 個項目',
       bulkCancelFailed: '批次取消項目失敗',
+      batchCreated: '已建立批次「{{name}}」',
+      batchCreateFailed: '建立批次失敗',
+      batchUngrouped: '已取消分組 {{count}} 項',
+      batchUngroupFailed: '取消批次分組失敗',
     },
     // Timeline view
     timeline: {
@@ -1151,6 +1188,7 @@ export default {
       timelineView: '時間線',
       unassigned: '未分配',
       noData: '當天沒有計畫的列印任務',
+      nothingCommitted: '此時間視窗內沒有已確定的排程。暫存項目、等待項目以及閒置印表機上的 ASAP 任務不會顯示 — 設定排程時間或釋放暫存項目即可在此處查看。',
       allDoneBy: '所有列印預計在 {{time}} 前完成',
       staged: '暫存',
       filterAll: '全部顯示',
@@ -1167,6 +1205,12 @@ export default {
         next: '後一天',
         today: '今天',
       },
+      window: {
+        back12h: '後退 12 小時',
+        forward12h: '前進 12 小時',
+        now: '現在',
+      },
+      printerColumnHeader: '印表機',
     },
     // Permissions
     permissions: {

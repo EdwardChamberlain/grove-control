@@ -1016,7 +1016,40 @@ export default {
     batchCancelled: 'Éléments restants du lot annulés',
     cancelBatchConfirmTitle: 'Annuler le lot',
     cancelBatchConfirmMessage: 'Annuler tous les éléments en attente restants dans ce lot ?',
-    batch: 'Lot',
+    batch: {
+      defaultName: 'Lot',
+      label: '{{count}} élément',
+      label_plural: '{{count}} éléments',
+      pendingCount: '{{count}} en attente',
+      pendingCount_plural: '{{count}} en attente',
+      expand: 'Développer le lot',
+      collapse: 'Réduire le lot',
+      groupAsBatch: 'Grouper en lot…',
+      groupAsBatchDescription: 'Combiner les {{count}} éléments sélectionnés en un seul lot repliable.',
+      nameLabel: 'Nom du lot',
+      namePlaceholder: 'p. ex. Cadeaux du vendredi',
+      create: 'Créer le lot',
+      ungroup: 'Dégrouper',
+      ungroupConfirmTitle: 'Dégrouper le lot ?',
+      ungroupConfirmMessage: 'Les éléments resteront dans la file mais ne seront plus groupés.',
+    },
+    tabs: {
+      queue: 'File',
+      history: 'Historique',
+      timeline: 'Chronologie',
+    },
+    layout: {
+      flatList: 'Liste',
+      byPrinter: 'Par imprimante',
+      groupByPrinter: 'Grouper par imprimante',
+    },
+    history: {
+      emptyTitle: 'Aucun historique',
+      emptyDescription: 'Les impressions terminées, annulées et échouées apparaîtront ici.',
+    },
+    dragGhost: {
+      multiCount: '{{count}} éléments',
+    },
     // Sections
     sections: {
       currentlyPrinting: 'En cours',
@@ -1144,6 +1177,10 @@ export default {
       updateFailed: 'Échec mise à jour',
       bulkCancelled: '{{count}} éléments annulés',
       bulkCancelFailed: 'Échec annulation',
+      batchCreated: 'Lot « {{name}} » créé',
+      batchCreateFailed: 'Échec de la création du lot',
+      batchUngrouped: '{{count}} élément(s) dégroupé(s)',
+      batchUngroupFailed: 'Échec du dégroupement du lot',
     },
     // Timeline view
     timeline: {
@@ -1151,6 +1188,7 @@ export default {
       timelineView: 'Chronologie',
       unassigned: 'Non attribué',
       noData: 'Aucune impression planifiée pour ce jour',
+      nothingCommitted: 'Aucun horaire confirmé dans cette fenêtre. Les éléments en attente d’action, les éléments bloqués et les jobs ASAP sur des imprimantes inactives ne sont pas affichés — définissez une heure planifiée ou libérez un élément en attente pour qu’il apparaisse ici.',
       allDoneBy: 'Toutes les impressions terminées vers {{time}}',
       staged: 'En attente',
       filterAll: 'Tout afficher',
@@ -1167,6 +1205,12 @@ export default {
         next: 'Jour suivant',
         today: 'Aujourd\'hui',
       },
+      window: {
+        back12h: 'Reculer de 12 heures',
+        forward12h: 'Avancer de 12 heures',
+        now: 'Maintenant',
+      },
+      printerColumnHeader: 'Imprimante',
     },
     // Permissions
     permissions: {

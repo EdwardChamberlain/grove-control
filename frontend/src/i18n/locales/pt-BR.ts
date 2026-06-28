@@ -1016,7 +1016,40 @@ export default {
     batchCancelled: 'Itens restantes do lote cancelados',
     cancelBatchConfirmTitle: 'Cancelar lote',
     cancelBatchConfirmMessage: 'Cancelar todos os itens pendentes restantes neste lote?',
-    batch: 'Lote',
+    batch: {
+      defaultName: 'Lote',
+      label: '{{count}} item',
+      label_plural: '{{count}} itens',
+      pendingCount: '{{count}} pendente',
+      pendingCount_plural: '{{count}} pendentes',
+      expand: 'Expandir lote',
+      collapse: 'Recolher lote',
+      groupAsBatch: 'Agrupar como lote…',
+      groupAsBatchDescription: 'Combine os {{count}} itens selecionados em um único lote recolhível.',
+      nameLabel: 'Nome do lote',
+      namePlaceholder: 'ex. Presentes de sexta',
+      create: 'Criar lote',
+      ungroup: 'Desagrupar',
+      ungroupConfirmTitle: 'Desagrupar lote?',
+      ungroupConfirmMessage: 'Os itens permanecerão na fila mas não estarão mais agrupados.',
+    },
+    tabs: {
+      queue: 'Fila',
+      history: 'Histórico',
+      timeline: 'Linha do tempo',
+    },
+    layout: {
+      flatList: 'Lista',
+      byPrinter: 'Por impressora',
+      groupByPrinter: 'Agrupar por impressora',
+    },
+    history: {
+      emptyTitle: 'Sem histórico ainda',
+      emptyDescription: 'Impressões concluídas, canceladas e com falha aparecerão aqui.',
+    },
+    dragGhost: {
+      multiCount: '{{count}} itens',
+    },
     // Sections
     sections: {
       currentlyPrinting: 'Imprimindo Atualmente',
@@ -1144,6 +1177,10 @@ export default {
       updateFailed: 'Falha ao atualizar itens',
       bulkCancelled: 'Cancelado {{count}} item(s)',
       bulkCancelFailed: 'Falha ao cancelar itens',
+      batchCreated: 'Lote "{{name}}" criado',
+      batchCreateFailed: 'Falha ao criar o lote',
+      batchUngrouped: '{{count}} item(ns) desagrupado(s)',
+      batchUngroupFailed: 'Falha ao desagrupar o lote',
     },
     // Timeline view
     timeline: {
@@ -1151,6 +1188,7 @@ export default {
       timelineView: 'Linha do tempo',
       unassigned: 'Não atribuído',
       noData: 'Nenhuma impressão agendada para este dia',
+      nothingCommitted: 'Sem programações confirmadas nesta janela. Itens preparados, itens em espera e trabalhos ASAP em impressoras ociosas não são mostrados — defina um horário agendado ou libere um item preparado para vê-lo aqui.',
       allDoneBy: 'Todas as impressões concluídas até {{time}}',
       staged: 'Preparado',
       filterAll: 'Mostrar tudo',
@@ -1167,6 +1205,12 @@ export default {
         next: 'Próximo dia',
         today: 'Hoje',
       },
+      window: {
+        back12h: 'Voltar 12 horas',
+        forward12h: 'Avançar 12 horas',
+        now: 'Agora',
+      },
+      printerColumnHeader: 'Impressora',
     },
     // Permissions
     permissions: {

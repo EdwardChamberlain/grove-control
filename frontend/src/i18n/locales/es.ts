@@ -1016,7 +1016,40 @@ export default {
     batchCancelled: 'Elementos restantes del lote cancelados',
     cancelBatchConfirmTitle: 'Cancelar lote',
     cancelBatchConfirmMessage: '¿Cancelar todos los elementos pendientes restantes de este lote?',
-    batch: 'Lote',
+    batch: {
+      defaultName: 'Lote',
+      label: '{{count}} elemento',
+      label_plural: '{{count}} elementos',
+      pendingCount: '{{count}} pendiente',
+      pendingCount_plural: '{{count}} pendientes',
+      expand: 'Expandir lote',
+      collapse: 'Contraer lote',
+      groupAsBatch: 'Agrupar como lote…',
+      groupAsBatchDescription: 'Combinar los {{count}} elementos seleccionados en un único lote contraíble.',
+      nameLabel: 'Nombre del lote',
+      namePlaceholder: 'p. ej., Regalos del viernes',
+      create: 'Crear lote',
+      ungroup: 'Desagrupar',
+      ungroupConfirmTitle: '¿Desagrupar lote?',
+      ungroupConfirmMessage: 'Los elementos permanecerán en la cola pero ya no estarán agrupados.',
+    },
+    tabs: {
+      queue: 'Cola',
+      history: 'Historial',
+      timeline: 'Cronología',
+    },
+    layout: {
+      flatList: 'Lista',
+      byPrinter: 'Por impresora',
+      groupByPrinter: 'Agrupar por impresora',
+    },
+    history: {
+      emptyTitle: 'Sin historial todavía',
+      emptyDescription: 'Las impresiones completadas, canceladas y fallidas aparecerán aquí.',
+    },
+    dragGhost: {
+      multiCount: '{{count}} elementos',
+    },
     // Sections
     sections: {
       currentlyPrinting: 'Imprimiendo actualmente',
@@ -1144,6 +1177,10 @@ export default {
       updateFailed: 'Error al actualizar los elementos',
       bulkCancelled: 'Se cancelaron {{count}} elemento(s)',
       bulkCancelFailed: 'Error al cancelar los elementos',
+      batchCreated: 'Lote "{{name}}" creado',
+      batchCreateFailed: 'Error al crear el lote',
+      batchUngrouped: '{{count}} elemento(s) desagrupado(s)',
+      batchUngroupFailed: 'Error al desagrupar el lote',
     },
     // Timeline view
     timeline: {
@@ -1151,6 +1188,7 @@ export default {
       timelineView: 'Cronología',
       unassigned: 'Sin asignar',
       noData: 'No hay impresiones programadas para este día',
+      nothingCommitted: 'No hay programaciones comprometidas en esta ventana. Los elementos preparados, los elementos en espera y los trabajos ASAP en impresoras inactivas no se muestran — establece una hora programada o libera un elemento preparado para verlo aquí.',
       allDoneBy: 'Todas las impresiones estimadas para las {{time}}',
       staged: 'Preparado',
       filterAll: 'Mostrar todo',
@@ -1167,6 +1205,12 @@ export default {
         next: 'Día siguiente',
         today: 'Hoy',
       },
+      window: {
+        back12h: '12 horas atrás',
+        forward12h: '12 horas adelante',
+        now: 'Ahora',
+      },
+      printerColumnHeader: 'Impresora',
     },
     // Permissions
     permissions: {

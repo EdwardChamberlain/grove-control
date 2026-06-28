@@ -1015,7 +1015,40 @@ export default {
     batchCancelled: '残りのバッチアイテムをキャンセルしました',
     cancelBatchConfirmTitle: 'バッチをキャンセル',
     cancelBatchConfirmMessage: 'このバッチの残りの保留中アイテムをすべてキャンセルしますか？',
-    batch: 'バッチ',
+    batch: {
+      defaultName: 'バッチ',
+      label: '{{count}}件',
+      label_plural: '{{count}}件',
+      pendingCount: '{{count}}件待機中',
+      pendingCount_plural: '{{count}}件待機中',
+      expand: 'バッチを展開',
+      collapse: 'バッチを折りたたむ',
+      groupAsBatch: 'バッチとしてグループ化…',
+      groupAsBatchDescription: '選択した{{count}}件をひとつの折りたたみ可能なバッチにまとめます。',
+      nameLabel: 'バッチ名',
+      namePlaceholder: '例：金曜のプレゼント',
+      create: 'バッチを作成',
+      ungroup: 'グループ解除',
+      ungroupConfirmTitle: 'バッチのグループを解除しますか？',
+      ungroupConfirmMessage: 'アイテムはキューに残りますが、グループ化されなくなります。',
+    },
+    tabs: {
+      queue: 'キュー',
+      history: '履歴',
+      timeline: 'タイムライン',
+    },
+    layout: {
+      flatList: 'リスト',
+      byPrinter: 'プリンター別',
+      groupByPrinter: 'プリンター別にグループ化',
+    },
+    history: {
+      emptyTitle: '履歴はまだありません',
+      emptyDescription: '完了・キャンセル・失敗した印刷がここに表示されます。',
+    },
+    dragGhost: {
+      multiCount: '{{count}}件',
+    },
     // Sections
     sections: {
       currentlyPrinting: '印刷中',
@@ -1143,6 +1176,10 @@ export default {
       updateFailed: 'アイテムの更新に失敗しました',
       bulkCancelled: '{{count}}件のアイテムをキャンセルしました',
       bulkCancelFailed: 'アイテムのキャンセルに失敗しました',
+      batchCreated: 'バッチ「{{name}}」を作成しました',
+      batchCreateFailed: 'バッチの作成に失敗しました',
+      batchUngrouped: '{{count}}件のグループを解除しました',
+      batchUngroupFailed: 'バッチのグループ解除に失敗しました',
     },
     // Timeline view
     timeline: {
@@ -1150,6 +1187,7 @@ export default {
       timelineView: 'タイムライン',
       unassigned: '未割当',
       noData: 'この日の予定された印刷はありません',
+      nothingCommitted: 'この時間枠に確定したスケジュールはありません。手動開始のステージ済み項目、待機中の項目、アイドル状態のプリンターのASAPジョブは表示されません — 予定時刻を設定するか、ステージ済み項目をリリースすると表示されます。',
       allDoneBy: 'すべての印刷は {{time}} までに完了予定',
       staged: 'ステージング',
       filterAll: 'すべて表示',
@@ -1166,6 +1204,12 @@ export default {
         next: '翌日',
         today: '今日',
       },
+      window: {
+        back12h: '12時間戻る',
+        forward12h: '12時間進む',
+        now: '現在',
+      },
+      printerColumnHeader: 'プリンター',
     },
     // Permissions
     permissions: {

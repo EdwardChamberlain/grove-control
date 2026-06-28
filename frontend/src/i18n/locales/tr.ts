@@ -1016,7 +1016,40 @@ export default {
     batchCancelled: 'Kalan yığın öğeleri iptal edildi',
     cancelBatchConfirmTitle: 'Yığını İptal Et',
     cancelBatchConfirmMessage: 'Bu yığındaki tüm bekleyen öğeler iptal edilsin mi?',
-    batch: 'Yığın',
+    batch: {
+      defaultName: 'Yığın',
+      label: '{{count}} öğe',
+      label_plural: '{{count}} öğe',
+      pendingCount: '{{count}} bekleyen',
+      pendingCount_plural: '{{count}} bekleyen',
+      expand: 'Yığını genişlet',
+      collapse: 'Yığını daralt',
+      groupAsBatch: 'Yığın olarak grupla…',
+      groupAsBatchDescription: 'Seçilen {{count}} öğeyi tek bir daraltılabilir yığında birleştirin.',
+      nameLabel: 'Yığın adı',
+      namePlaceholder: 'örn. Cuma hediyeleri',
+      create: 'Yığın oluştur',
+      ungroup: 'Gruptan çıkar',
+      ungroupConfirmTitle: 'Yığını gruptan çıkar?',
+      ungroupConfirmMessage: 'Öğeler kuyrukta kalacak ancak artık birlikte gruplanmayacak.',
+    },
+    tabs: {
+      queue: 'Kuyruk',
+      history: 'Geçmiş',
+      timeline: 'Zaman çizelgesi',
+    },
+    layout: {
+      flatList: 'Liste',
+      byPrinter: 'Yazıcıya göre',
+      groupByPrinter: 'Yazıcıya göre grupla',
+    },
+    history: {
+      emptyTitle: 'Henüz geçmiş yok',
+      emptyDescription: 'Tamamlanan, iptal edilen ve başarısız baskılar burada görünür.',
+    },
+    dragGhost: {
+      multiCount: '{{count}} öğe',
+    },
     // Bölümler
     sections: {
       currentlyPrinting: 'Şu Anda Yazdırılan',
@@ -1144,6 +1177,10 @@ export default {
       updateFailed: 'Öğeler güncellenemedi',
       bulkCancelled: '{{count}} öğe iptal edildi',
       bulkCancelFailed: 'Öğeler iptal edilemedi',
+      batchCreated: '"{{name}}" yığını oluşturuldu',
+      batchCreateFailed: 'Yığın oluşturma başarısız',
+      batchUngrouped: '{{count}} öğe gruptan çıkarıldı',
+      batchUngroupFailed: 'Yığını gruptan çıkarma başarısız',
     },
     // Zaman çizelgesi görünümü
     timeline: {
@@ -1151,6 +1188,7 @@ export default {
       timelineView: 'Zaman Çizelgesi',
       unassigned: 'Atanmamış',
       noData: 'Bu gün için zamanlanmış baskı yok',
+      nothingCommitted: 'Bu pencerede onaylanmış programlar yok. Hazırlanmış öğeler, beklemedeki öğeler ve boştaki yazıcılardaki ASAP işleri gösterilmez — burada görmek için zamanlanmış bir saat belirleyin veya hazırlanmış bir öğeyi serbest bırakın.',
       allDoneBy: 'Tüm baskıların {{time}}\'e kadar bitmesi tahmin ediliyor',
       staged: 'Hazırlandı',
       filterAll: 'Tümünü Göster',
@@ -1167,6 +1205,12 @@ export default {
         next: 'Sonraki gün',
         today: 'Bugün',
       },
+      window: {
+        back12h: '12 saat geri',
+        forward12h: '12 saat ileri',
+        now: 'Şimdi',
+      },
+      printerColumnHeader: 'Yazıcı',
     },
     // İzinler
     permissions: {

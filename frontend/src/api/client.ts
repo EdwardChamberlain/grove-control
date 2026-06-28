@@ -1905,6 +1905,8 @@ export interface PrintQueueItem {
   printer_name?: string | null;
   print_time_seconds?: number | null;  // Estimated print time from archive or library file
   filament_used_grams?: number | null;  // Estimated print weight from archive or library file
+  filament_type?: string | null;  // e.g. "PLA", "PETG"
+  filament_color?: string | null;  // Hex RGBA from the slicer
   bed_type?: string | null;  // Build plate type for this print (per-plate accurate, #1281)
   // User tracking (Issue #206)
   created_by_id?: number | null;
@@ -1963,8 +1965,20 @@ export interface PrintQueueItemCreate {
   gcode_injection?: boolean;
   // Batch: create multiple copies (creates a batch if > 1)
   quantity?: number;
+  // Existing batch to add this item into (multi-plate auto-batch flow).
+  batch_id?: number | null;
   // Project to associate the resulting archive with
   project_id?: number;
+}
+
+export interface PrintBatchCreate {
+  name: string;
+  archive_id?: number | null;
+  library_file_id?: number | null;
+  /** When set, the listed pending items are assigned to the new batch
+   *  (manual "Group as batch"). When omitted/empty, an empty batch is
+   *  returned so the client can pass batch_id on subsequent addToQueue calls. */
+  item_ids?: number[];
 }
 
 export interface PrintQueueItemUpdate {
@@ -4674,6 +4688,16 @@ export const api = {
   getBatch: (id: number) => request<PrintBatch>(`/queue/batches/${id}`),
   cancelBatch: (id: number) =>
     request<{ message: string }>(`/queue/batches/${id}`, { method: 'DELETE' }),
+  createBatch: (data: PrintBatchCreate) =>
+    request<PrintBatch>('/queue/batches', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  ungroupBatch: (id: number) =>
+    request<{ ungrouped_count: number; message: string }>(
+      `/queue/batches/${id}/ungroup`,
+      { method: 'POST' },
+    ),
 
   // K-Profiles
   getKProfiles: (printerId: number, nozzleDiameter = '0.4') =>

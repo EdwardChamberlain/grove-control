@@ -1016,7 +1016,40 @@ export default {
     batchCancelled: 'Verbleibende Stapeleinträge abgebrochen',
     cancelBatchConfirmTitle: 'Stapel abbrechen',
     cancelBatchConfirmMessage: 'Alle verbleibenden ausstehenden Einträge in diesem Stapel abbrechen?',
-    batch: 'Stapel',
+    batch: {
+      defaultName: 'Stapel',
+      label: '{{count}} Eintrag',
+      label_plural: '{{count}} Einträge',
+      pendingCount: '{{count}} ausstehend',
+      pendingCount_plural: '{{count}} ausstehend',
+      expand: 'Stapel ausklappen',
+      collapse: 'Stapel einklappen',
+      groupAsBatch: 'Als Stapel gruppieren…',
+      groupAsBatchDescription: 'Fasse die {{count}} ausgewählten Einträge zu einem einklappbaren Stapel zusammen.',
+      nameLabel: 'Stapelname',
+      namePlaceholder: 'z. B. Freitagsgeschenke',
+      create: 'Stapel erstellen',
+      ungroup: 'Gruppierung aufheben',
+      ungroupConfirmTitle: 'Stapel auflösen?',
+      ungroupConfirmMessage: 'Die Einträge bleiben in der Warteschlange, sind aber nicht mehr gruppiert.',
+    },
+    tabs: {
+      queue: 'Warteschlange',
+      history: 'Verlauf',
+      timeline: 'Zeitachse',
+    },
+    layout: {
+      flatList: 'Liste',
+      byPrinter: 'Nach Drucker',
+      groupByPrinter: 'Nach Drucker gruppieren',
+    },
+    history: {
+      emptyTitle: 'Noch kein Verlauf',
+      emptyDescription: 'Abgeschlossene, abgebrochene und fehlgeschlagene Drucke erscheinen hier.',
+    },
+    dragGhost: {
+      multiCount: '{{count}} Einträge',
+    },
     // Sections
     sections: {
       currentlyPrinting: 'Aktuell druckend',
@@ -1144,6 +1177,10 @@ export default {
       updateFailed: 'Elemente konnten nicht aktualisiert werden',
       bulkCancelled: '{{count}} Element(e) abgebrochen',
       bulkCancelFailed: 'Elemente konnten nicht abgebrochen werden',
+      batchCreated: 'Stapel „{{name}}“ erstellt',
+      batchCreateFailed: 'Stapel konnte nicht erstellt werden',
+      batchUngrouped: '{{count}} Eintrag/Einträge aus Stapel gelöst',
+      batchUngroupFailed: 'Stapel konnte nicht aufgelöst werden',
     },
     // Timeline view
     timeline: {
@@ -1151,6 +1188,7 @@ export default {
       timelineView: 'Zeitstrahl',
       unassigned: 'Nicht zugewiesen',
       noData: 'Keine geplanten Drucke für diesen Tag',
+      nothingCommitted: 'Keine festgelegten Pläne in diesem Zeitfenster. Vorgemerkte Einträge, wartende Einträge und ASAP-Aufträge auf inaktiven Druckern werden nicht angezeigt — leg eine geplante Zeit fest oder gib einen vorgemerkten Eintrag frei, damit er hier erscheint.',
       allDoneBy: 'Alle Drucke voraussichtlich fertig um {{time}}',
       staged: 'Bereitgestellt',
       filterAll: 'Alle anzeigen',
@@ -1167,6 +1205,12 @@ export default {
         next: 'Nächster Tag',
         today: 'Heute',
       },
+      window: {
+        back12h: '12 Stunden zurück',
+        forward12h: '12 Stunden vor',
+        now: 'Jetzt',
+      },
+      printerColumnHeader: 'Drucker',
     },
     // Permissions
     permissions: {
