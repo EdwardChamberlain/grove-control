@@ -2217,7 +2217,7 @@ function SinglePrinterCockpit({
     canUseMachineTools ? 'cursor-pointer hover:bg-bambu-dark-tertiary' : 'cursor-default opacity-80'
   }`;
   const iconControlClass = 'relative inline-flex h-10 min-w-0 items-center justify-center gap-2 rounded-lg px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50';
-  const jogButtonClass = 'flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-500/15 text-indigo-300 transition-colors hover:bg-indigo-500/30 disabled:cursor-not-allowed disabled:opacity-50';
+  const jogButtonClass = 'flex h-8 w-8 shrink-0 items-center justify-center rounded bg-indigo-500/15 text-indigo-300 transition-colors hover:bg-indigo-500/30 disabled:cursor-not-allowed disabled:opacity-50';
   const currentPrintLabel = activePrintName || t('printers.noActiveJob', 'No active job');
   const plateDetectionEnabled = plateDetectionMutation.isPending && plateDetectionMutation.variables != null
     ? plateDetectionMutation.variables
@@ -2640,7 +2640,7 @@ function SinglePrinterCockpit({
               </div>
               <div className="flex items-start justify-center gap-3 rounded-lg bg-bambu-dark/70 px-3 py-2.5">
                 <div className="flex items-center justify-center gap-3">
-                  <div className="grid grid-cols-3 gap-1.5">
+                  <div className="grid grid-cols-3 gap-1">
                     <div />
                     <button type="button" className={jogButtonClass} disabled={!canJog || xyJogMutation.isPending} onClick={() => xyJogMutation.mutate({ x: 0, y: jogStep })} aria-label="Move Y forward"><ArrowUp className="h-4 w-4" /></button>
                     <div />
@@ -2651,14 +2651,14 @@ function SinglePrinterCockpit({
                     <button type="button" className={jogButtonClass} disabled={!canJog || xyJogMutation.isPending} onClick={() => xyJogMutation.mutate({ x: 0, y: -jogStep })} aria-label="Move Y back"><ArrowDown className="h-4 w-4" /></button>
                     <div />
                   </div>
-                  <div className="flex flex-col items-center gap-1.5">
+                  <div className="flex flex-col items-center gap-1">
                     <button type="button" className={jogButtonClass} disabled={!canJog || bedJogMutation.isPending} onClick={() => bedJogMutation.mutate(-jogStep)} aria-label={t('printers.bedJog.up')}><ArrowUp className="h-4 w-4" /></button>
-                    <div className="flex h-10 w-10 items-center justify-center text-bambu-gray/80"><Layers className="h-4 w-4" /></div>
+                    <div className="flex h-8 w-8 items-center justify-center text-bambu-gray/80"><Layers className="h-4 w-4" /></div>
                     <button type="button" className={jogButtonClass} disabled={!canJog || bedJogMutation.isPending} onClick={() => bedJogMutation.mutate(jogStep)} aria-label={t('printers.bedJog.down')}><ArrowDown className="h-4 w-4" /></button>
                   </div>
-                  <div className="flex flex-col items-center gap-1.5">
+                  <div className="flex flex-col items-center gap-1">
                     <button type="button" className={jogButtonClass} disabled={!canJog || extruderJogMutation.isPending} onClick={() => extruderJogMutation.mutate(-jogStep)} aria-label="Retract filament"><ArrowUp className="h-4 w-4" /></button>
-                    <div className="flex h-10 w-10 items-center justify-center text-bambu-gray/80"><span className="text-sm font-semibold leading-none">E</span></div>
+                    <div className="flex h-8 w-8 items-center justify-center text-bambu-gray/80"><span className="text-sm font-semibold leading-none">E</span></div>
                     <button type="button" className={jogButtonClass} disabled={!canJog || extruderJogMutation.isPending} onClick={() => extruderJogMutation.mutate(jogStep)} aria-label="Extrude filament"><ArrowDown className="h-4 w-4" /></button>
                   </div>
                 </div>
