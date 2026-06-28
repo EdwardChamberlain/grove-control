@@ -1944,6 +1944,7 @@ function SinglePrinterCockpit({
   const [printAfterUpload, setPrintAfterUpload] = useState<{ id: number; filename: string } | null>(null);
   const [reprintEntry, setReprintEntry] = useState<PrintLogEntry | null>(null);
   const [isCheckingPlate, setIsCheckingPlate] = useState(false);
+  const [showHealthStatusMenu, setShowHealthStatusMenu] = useState(false);
 
   const { data: status } = useQuery({
     queryKey: ['printerStatus', printer.id],
@@ -2117,6 +2118,21 @@ function SinglePrinterCockpit({
       error: t('printers.health.error', 'Error'),
     },
   });
+  const healthStatusRowClass = 'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium';
+  const maintenanceDueCount = maintenanceInfo?.due_count ?? 0;
+  const maintenanceWarningCount = maintenanceInfo?.warning_count ?? 0;
+  const healthPlateLabel = isPrintingOrPaused
+    ? t('printers.plateStatus.inUse')
+    : needsPlateClear
+      ? t('printers.plateStatus.notCleared')
+      : t('printers.plateStatus.cleared');
+  const networkHealthClass = !status?.connected
+    ? 'bg-status-error/20 text-status-error'
+    : status.wired_network || status.wifi_signal == null || status.wifi_signal >= -60
+      ? 'bg-status-ok/20 text-status-ok'
+      : status.wifi_signal >= -80
+        ? 'bg-status-warning/20 text-status-warning'
+        : 'bg-status-error/20 text-status-error';
 
   const activePrintName = status?.current_print && isPrintingOrPaused
     ? formatPrintName(status.subtask_name || status.current_print || null, status.gcode_file, t)
@@ -2237,13 +2253,69 @@ function SinglePrinterCockpit({
               <div className="min-w-0">
                 <div className="flex min-w-0 items-center gap-3">
                   <h2 className="min-w-0 flex-1 truncate text-3xl font-semibold leading-none text-white">{printer.name}</h2>
-                  <span
-                    className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${printerHealth.className}`}
-                    title={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
-                    aria-label={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
-                  >
-                    <Activity className="h-4 w-4" />
-                  </span>
+                  <div className="relative shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setShowHealthStatusMenu((open) => !open)}
+                      className={`inline-flex h-9 w-9 items-center justify-center rounded-lg transition-opacity hover:opacity-80 ${printerHealth.className}`}
+                      title={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
+                      aria-label={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
+                    >
+                      <Activity className="h-4 w-4" />
+                    </button>
+                    {showHealthStatusMenu && (
+                      <>
+                        <div className="fixed inset-0 z-40" onClick={() => setShowHealthStatusMenu(false)} />
+                        <div className="absolute right-0 top-full z-50 mt-1 flex w-[240px] flex-col overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary shadow-2xl">
+                          <div className="shrink-0 px-3 py-2.5 text-center text-sm font-medium text-white">Status details</div>
+                          <div className="h-px bg-bambu-dark-tertiary" />
+                          <div className="space-y-1.5 p-2.5">
+                            <div className={`${healthStatusRowClass} ${status?.connected ? 'bg-status-ok/20 text-status-ok' : 'bg-status-error/20 text-status-error'}`}>
+                              {status?.connected ? <Link className="h-3 w-3" /> : <Unlink className="h-3 w-3" />}
+                              <span>{t('printers.status.connection', 'Connection')}:</span>
+                              <span>{status?.connected ? t('printers.connection.connected') : t('printers.connection.offline')}</span>
+                            </div>
+                            {requirePlateClear && status?.connected && (
+                              <div className={`${healthStatusRowClass} ${needsPlateClear ? 'bg-status-warning/20 text-status-warning' : 'bg-status-ok/20 text-status-ok'}`}>
+                                <PlateClearedIcon className="h-3 w-3" />
+                                <span>{t('printers.plateStatus.title', 'Plate')}:</span>
+                                <span>{healthPlateLabel}</span>
+                              </div>
+                            )}
+                            <div className={`${healthStatusRowClass} ${networkHealthClass}`}>
+                              {status?.wired_network ? <Cable className="h-3 w-3" /> : <Signal className="h-3 w-3" />}
+                              <span>{t('printers.status.network', 'Network')}:</span>
+                              <span>{!status?.connected ? t('printers.connection.offline') : status.wired_network ? t('printers.connection.ethernet', 'Ethernet') : status.wifi_signal != null ? `${status.wifi_signal}dBm` : t('common.unknown', 'Unknown')}</span>
+                            </div>
+                            <div className={`${healthStatusRowClass} ${!status?.connected ? 'bg-status-error/20 text-status-error' : knownHmsErrors.length > 0 ? knownHmsErrors.some((error) => error.severity <= 2) ? 'bg-status-error/20 text-status-error' : 'bg-status-warning/20 text-status-warning' : 'bg-status-ok/20 text-status-ok'}`}>
+                              <AlertTriangle className="h-3 w-3" />
+                              <span>{t('printers.status.errors', 'Errors')}:</span>
+                              <span>{status?.connected ? knownHmsErrors.length > 0 ? t('printers.status.errorCount', '{{count}} active', { count: knownHmsErrors.length }) : t('common.ok', 'OK') : t('common.unknown', 'Unknown')}</span>
+                            </div>
+                            <div className={`${healthStatusRowClass} ${maintenanceDueCount > 0 ? 'bg-status-error/20 text-status-error' : maintenanceWarningCount > 0 ? 'bg-status-warning/20 text-status-warning' : 'bg-status-ok/20 text-status-ok'}`}>
+                              <Wrench className="h-3 w-3" />
+                              <span>{t('maintenance.title', 'Maintenance')}:</span>
+                              <span>{maintenanceDueCount > 0 ? t('maintenance.dueCount', { count: maintenanceDueCount }) : maintenanceWarningCount > 0 ? t('maintenance.warningCount', { count: maintenanceWarningCount }) : t('common.ok', 'OK')}</span>
+                            </div>
+                            {(firmwareInfo?.current_version || status?.firmware_version) && (
+                              <div className={`${healthStatusRowClass} ${firmwareInfo?.update_available ? 'bg-status-warning/20 text-status-warning' : 'bg-status-ok/20 text-status-ok'}`}>
+                                {firmwareInfo?.update_available ? <Download className="h-3 w-3" /> : <CheckCircle className="h-3 w-3" />}
+                                <span>{t('printers.status.firmware', 'Firmware')}:</span>
+                                <span>{firmwareInfo?.update_available ? t('printers.status.updateAvailable', 'Update available') : firmwareInfo?.current_version || status?.firmware_version}</span>
+                              </div>
+                            )}
+                            {status?.connected && hasDoorSensor && (
+                              <div className={`${healthStatusRowClass} ${status.door_open ? 'bg-status-warning/20 text-status-warning' : 'bg-status-ok/20 text-status-ok'}`}>
+                                {status.door_open ? <DoorOpen className="h-3 w-3" /> : <DoorClosed className="h-3 w-3" />}
+                                <span>{t('printers.status.door', 'Door')}:</span>
+                                <span>{status.door_open ? t('printers.door.open') : t('printers.door.closed')}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
                 <p className="truncate pl-0.5 text-base leading-tight text-bambu-gray">
                   {printer.model || t('common.unknown', 'Unknown')}
