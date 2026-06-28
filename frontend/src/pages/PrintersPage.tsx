@@ -2180,7 +2180,6 @@ function SinglePrinterCockpit({
   const reprintableRecentPrints = recentPrints.filter(entry => entry.archive_id != null).slice(0, 3);
   const controlBusy = stopPrintMutation.isPending || pausePrintMutation.isPending || resumePrintMutation.isPending;
   const canControl = !!status?.connected && hasPermission('printers:control');
-  const heroPrintImage = status?.cover_url && isPrintingOrPaused ? withStreamToken(status.cover_url) : null;
   const canUseMachineTools = !!status?.connected && canControl;
   const canJog = canUseMachineTools && !isPrintingOrPaused;
   const isAirductCapable = ['P2S', 'X2D', 'H2D', 'H2D Pro', 'H2C', 'H2S'].includes(printer.model ?? '');
@@ -2225,14 +2224,15 @@ function SinglePrinterCockpit({
       <div className="relative grid h-full min-h-0 gap-3 p-3 xl:grid-cols-[minmax(0,1.45fr)_minmax(21rem,0.8fr)]">
         <div className="grid min-h-0 gap-3 xl:grid-rows-[minmax(12rem,0.72fr)_minmax(12rem,0.78fr)]">
           <section className="relative min-h-0 overflow-hidden rounded-xl border border-white/10 bg-bambu-dark">
-            {heroPrintImage && (
-              <img
-                src={heroPrintImage}
-                alt=""
-                className="absolute inset-0 h-full w-full object-cover opacity-20"
-              />
-            )}
-            <div className="absolute inset-0 bg-gradient-to-br from-bambu-dark/95 via-bambu-dark/75 to-bambu-green/20" />
+            <img
+              src="/img/camera_placeholder.png"
+              alt=""
+              className="absolute inset-0 h-full w-full object-cover opacity-70"
+            />
+            <div
+              className="absolute inset-0"
+              style={{ background: 'linear-gradient(to top, rgb(15 23 31 / 0.72) 0%, rgb(15 23 31 / 0.72) 20%, rgb(15 23 31 / 0) 35%, rgb(15 23 31 / 0) 100%)' }}
+            />
             <div className="relative flex h-full min-h-0 flex-col gap-3 p-4">
               <div className="min-w-0">
                 <div className="flex min-w-0 items-center gap-3">
@@ -2251,13 +2251,7 @@ function SinglePrinterCockpit({
                 </p>
               </div>
 
-              <div className="relative flex min-h-0 flex-1 items-center justify-center">
-                <img
-                  src={getPrinterImage(printer.model)}
-                  alt={printer.model || t('common.printer')}
-                  className="relative max-h-full max-w-[70%] object-contain drop-shadow-2xl"
-                />
-              </div>
+              <div className="min-h-0 flex-1" />
 
               <div className="min-w-0">
                 <div className="mb-2 flex items-center justify-between gap-3">
