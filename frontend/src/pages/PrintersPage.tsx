@@ -1923,14 +1923,12 @@ function SinglePrinterCockpit({
   printer,
   maintenanceInfo,
   requirePlateClear,
-  timeFormat = 'system',
   checkPrinterFirmware = true,
   currencySymbol,
 }: {
   printer: Printer;
   maintenanceInfo?: PrinterMaintenanceInfo;
   requirePlateClear?: boolean;
-  timeFormat?: 'system' | '12h' | '24h';
   checkPrinterFirmware?: boolean;
   currencySymbol: string;
 }) {
@@ -1945,6 +1943,16 @@ function SinglePrinterCockpit({
   const [reprintEntry, setReprintEntry] = useState<PrintLogEntry | null>(null);
   const [isCheckingPlate, setIsCheckingPlate] = useState(false);
   const [showHealthStatusMenu, setShowHealthStatusMenu] = useState(false);
+  const [configureSlotModal, setConfigureSlotModal] = useState<{
+    amsId: number;
+    trayId: number;
+    trayCount: number;
+    trayType?: string;
+    trayColor?: string;
+    traySubBrands?: string;
+    trayInfoIdx?: string;
+    caliIdx?: number | null;
+  } | null>(null);
 
   const { data: status } = useQuery({
     queryKey: ['printerStatus', printer.id],
@@ -2137,15 +2145,6 @@ function SinglePrinterCockpit({
   const activePrintName = status?.current_print && isPrintingOrPaused
     ? formatPrintName(status.subtask_name || status.current_print || null, status.gcode_file, t)
     : null;
-  const etaLabel = status?.remaining_time != null && status.remaining_time > 0
-    ? formatETA(status.remaining_time, timeFormat, t)
-    : '--:--';
-  const remainingLabel = status?.remaining_time != null && status.remaining_time > 0
-    ? formatDuration(status.remaining_time * 60)
-    : '---';
-  const layerLabel = status?.layer_num != null && status?.total_layers
-    ? `${status.layer_num}/${status.total_layers}`
-    : '---';
   const temp = status?.temperatures;
   const printEntries = useMemo(() => printLog?.items ?? [], [printLog?.items]);
   const printerStats = useMemo(() => {
@@ -2234,11 +2233,122 @@ function SinglePrinterCockpit({
     }
   };
 
+  const jogPanel = (
+    <section className="min-h-0 rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
+      <div className="mb-2 flex items-center gap-2">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">Jog</span>
+        <div className="h-[2px] flex-1 bg-bambu-dark-tertiary" />
+      </div>
+      <div className="flex items-start justify-center gap-3 rounded-lg bg-bambu-dark/70 px-3 py-2.5">
+        <div className="flex items-center justify-center gap-3">
+          <div className="grid grid-cols-3 gap-1">
+            <div />
+            <button type="button" className={jogButtonClass} disabled={!canJog || xyJogMutation.isPending} onClick={() => xyJogMutation.mutate({ x: 0, y: jogStep })} aria-label="Move Y forward"><ArrowUp className="h-4 w-4" /></button>
+            <div />
+            <button type="button" className={jogButtonClass} disabled={!canJog || xyJogMutation.isPending} onClick={() => xyJogMutation.mutate({ x: -jogStep, y: 0 })} aria-label="Move X left"><ArrowLeft className="h-4 w-4" /></button>
+            <button type="button" className={jogButtonClass} disabled={!canJog || homeAxesMutation.isPending} onClick={() => homeAxesMutation.mutate('all')} aria-label={t('printers.bedJog.homeZ')}><Home className="h-4 w-4" /></button>
+            <button type="button" className={jogButtonClass} disabled={!canJog || xyJogMutation.isPending} onClick={() => xyJogMutation.mutate({ x: jogStep, y: 0 })} aria-label="Move X right"><ArrowRight className="h-4 w-4" /></button>
+            <div />
+            <button type="button" className={jogButtonClass} disabled={!canJog || xyJogMutation.isPending} onClick={() => xyJogMutation.mutate({ x: 0, y: -jogStep })} aria-label="Move Y back"><ArrowDown className="h-4 w-4" /></button>
+            <div />
+          </div>
+          <div className="flex flex-col items-center gap-1">
+            <button type="button" className={jogButtonClass} disabled={!canJog || bedJogMutation.isPending} onClick={() => bedJogMutation.mutate(-jogStep)} aria-label={t('printers.bedJog.up')}><ArrowUp className="h-4 w-4" /></button>
+            <div className="flex h-8 w-8 items-center justify-center text-bambu-gray/80"><Layers className="h-4 w-4" /></div>
+            <button type="button" className={jogButtonClass} disabled={!canJog || bedJogMutation.isPending} onClick={() => bedJogMutation.mutate(jogStep)} aria-label={t('printers.bedJog.down')}><ArrowDown className="h-4 w-4" /></button>
+          </div>
+          <div className="flex flex-col items-center gap-1">
+            <button type="button" className={jogButtonClass} disabled={!canJog || extruderJogMutation.isPending} onClick={() => extruderJogMutation.mutate(-jogStep)} aria-label="Retract filament"><ArrowUp className="h-4 w-4" /></button>
+            <div className="flex h-8 w-8 items-center justify-center text-bambu-gray/80"><span className="text-sm font-semibold leading-none">E</span></div>
+            <button type="button" className={jogButtonClass} disabled={!canJog || extruderJogMutation.isPending} onClick={() => extruderJogMutation.mutate(jogStep)} aria-label="Extrude filament"><ArrowDown className="h-4 w-4" /></button>
+          </div>
+        </div>
+        <div className="self-stretch border-l border-bambu-dark-tertiary" />
+        <div className="flex min-w-20 flex-col gap-1">
+          <div className="text-center text-[10px] font-semibold uppercase leading-tight tracking-wider text-white">{t('printers.bedJog.step')}</div>
+          <div className="grid gap-1">
+            {[1, 10, 50, 100].map((step) => (
+              <button key={step} type="button" onClick={() => setJogStep(step)} className={`rounded px-2 py-1 text-[10px] transition-colors ${jogStep === step ? 'bg-indigo-500/20 text-indigo-300' : 'bg-bambu-dark text-bambu-gray hover:bg-bambu-dark-tertiary'}`}>
+                {step}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+
+  const renderCockpitFilamentSlot = (tray: AMSUnit['tray'][number] | undefined, amsId: number, trayId: number, trayCount: number) => {
+    const isEmpty = !tray?.tray_type;
+    const emptyKind = getEmptySlotKind(tray);
+    const fillLevel = tray?.tray_type && tray.remain >= 0 ? tray.remain : null;
+    return (
+      <button
+        key={trayId}
+        type="button"
+        onClick={() => setConfigureSlotModal({
+          amsId,
+          trayId,
+          trayCount,
+          trayType: tray?.tray_type || undefined,
+          trayColor: tray?.tray_color || undefined,
+          traySubBrands: tray?.tray_sub_brands || undefined,
+          trayInfoIdx: tray?.tray_info_idx || undefined,
+          caliIdx: tray?.cali_idx,
+        })}
+        disabled={!hasPermission('printers:control')}
+        className={`min-w-14 rounded-lg bg-bambu-dark-secondary p-1 text-center transition-colors hover:bg-bambu-dark-tertiary disabled:cursor-not-allowed disabled:opacity-60 ${isEmpty ? 'opacity-60' : ''}`}
+        title={!hasPermission('printers:control') ? t('printers.permission.noControl') : t('ams.configureSlot', 'Configure slot')}
+      >
+        <FilamentSlotCircle trayColor={tray?.tray_color} trayType={tray?.tray_type} isEmpty={isEmpty} emptyKind={emptyKind} slotNumber={trayId + 1} />
+        <div className="truncate text-[9px] font-bold text-white">{tray?.tray_type || t(emptyKind === 'reset' ? 'ams.slotUnconfigured' : 'ams.slotEmpty')}</div>
+        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-black/30">
+          {fillLevel != null && !isEmpty && <div className="h-full rounded-full" style={{ width: `${fillLevel}%`, backgroundColor: getFillBarColor(fillLevel) }} />}
+        </div>
+      </button>
+    );
+  };
+
+  const filamentPanel = ((status?.ams?.length ?? 0) > 0 || (status?.vt_tray?.length ?? 0) > 0) ? (
+    <div className="mt-1">
+      <div className="mb-2 flex items-center gap-2">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">{t('printers.filaments')}</span>
+        <div className="h-[2px] flex-1 bg-bambu-dark-tertiary" />
+      </div>
+      <div className="flex min-w-0 gap-2 overflow-x-auto pb-1">
+        {status?.ams?.map((ams) => (
+          <div key={ams.id} className="min-w-[15rem] flex-1 rounded-lg bg-bambu-dark p-2">
+            <div className="mb-1.5 flex min-h-7 items-center justify-between gap-2 rounded-lg bg-bambu-dark-secondary px-2 py-1">
+              <span className="truncate text-[10px] font-medium text-white">{getAmsLabel(ams.id, ams.tray.length)}</span>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {ams.humidity != null && <HumidityIndicator humidity={ams.humidity} compact />}
+                {ams.temp != null && <TemperatureIndicator temp={ams.temp} compact />}
+              </div>
+            </div>
+            <div className={`grid gap-1 ${ams.tray.length === 1 ? 'grid-cols-1' : 'grid-cols-4'}`}>
+              {Array.from({ length: ams.tray.length === 1 ? 1 : 4 }, (_, slotIdx) => renderCockpitFilamentSlot(ams.tray[slotIdx] || ams.tray.find((candidate) => candidate.id === slotIdx), ams.id, slotIdx, ams.tray.length))}
+            </div>
+          </div>
+        ))}
+        {(status?.vt_tray?.length ?? 0) > 0 && (
+          <div className="min-w-24 rounded-lg bg-bambu-dark p-2">
+            <div className="mb-1.5 flex min-h-7 items-center rounded-lg bg-bambu-dark-secondary px-2 py-1">
+              <span className="truncate text-[10px] font-medium text-white">{t('printers.external')}</span>
+            </div>
+            <div className={`grid gap-1 ${status!.vt_tray.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+              {[...status!.vt_tray].sort((a, b) => (a.id ?? 254) - (b.id ?? 254)).map((tray) => renderCockpitFilamentSlot(tray, 255, (tray.id ?? 254) - 254, status!.vt_tray.length))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  ) : null;
+
   return (
     <>
     <div className="relative h-full min-h-0 overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-gradient-to-br from-bambu-dark-secondary via-bambu-dark to-bambu-dark-secondary shadow-xl">
       <div className="relative grid h-full min-h-0 gap-3 p-3 xl:grid-cols-[minmax(0,1.45fr)_minmax(21rem,0.8fr)]">
-        <div className="grid min-h-0 gap-3 xl:grid-rows-[minmax(12rem,0.72fr)_minmax(12rem,0.78fr)]">
+        <div className="grid min-h-0 gap-3 xl:grid-rows-[minmax(12rem,1fr)_auto_auto]">
           <section className="relative min-h-0 overflow-hidden rounded-xl border border-white/10 bg-bambu-dark">
             <img
               src="/img/camera_placeholder.png"
@@ -2342,10 +2452,9 @@ function SinglePrinterCockpit({
             </div>
           </section>
 
-          <section className="grid min-h-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <CockpitMetricCard icon={Gauge} label={t('printers.progress', 'Progress')} value={isPrintingOrPaused ? `${Math.round(progress)}%` : '---'} detail={currentPrintLabel} />
-            <CockpitMetricCard icon={Clock} label={t('printers.remaining', 'Remaining')} value={remainingLabel} detail={`${t('printers.eta', 'ETA')} ${etaLabel}`} />
-            <CockpitMetricCard icon={Layers} label={t('printers.layers', 'Layers')} value={layerLabel} detail={t('printers.layerProgress', 'Layer progress')} />
+          {jogPanel}
+
+          <section className="grid min-h-0 gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <CockpitMetricCard icon={BarChart3} label={t('stats.successRate', 'Success rate')} value={`${printerStats.successRate}%`} detail={`${printerStats.completed} / ${printerStats.failed} / ${printerStats.cancelled}`} />
             <CockpitMetricCard icon={Package} label={t('stats.totalPrints', 'Total prints')} value={`${printLog?.total ?? printEntries.length}`} detail={t('stats.topFilament', 'Top filament: {{filament}}', { filament: printerStats.topFilament })} />
             <CockpitMetricCard icon={Clock} label={t('stats.printTime', 'Print time')} value={`${printerStats.durationHours.toFixed(1)}h`} detail={`${maintenanceInfo?.total_print_hours?.toFixed(1) ?? '0.0'}h ${t('maintenance.title', 'Maintenance')}`} />
@@ -2632,55 +2741,7 @@ function SinglePrinterCockpit({
                 )}
               </div>
 
-              <div className="mt-1 flex items-center gap-2">
-                <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">
-                  Jog
-                </span>
-                <div className="h-[2px] flex-1 bg-bambu-dark-tertiary" />
-              </div>
-              <div className="flex items-start justify-center gap-3 rounded-lg bg-bambu-dark/70 px-3 py-2.5">
-                <div className="flex items-center justify-center gap-3">
-                  <div className="grid grid-cols-3 gap-1">
-                    <div />
-                    <button type="button" className={jogButtonClass} disabled={!canJog || xyJogMutation.isPending} onClick={() => xyJogMutation.mutate({ x: 0, y: jogStep })} aria-label="Move Y forward"><ArrowUp className="h-4 w-4" /></button>
-                    <div />
-                    <button type="button" className={jogButtonClass} disabled={!canJog || xyJogMutation.isPending} onClick={() => xyJogMutation.mutate({ x: -jogStep, y: 0 })} aria-label="Move X left"><ArrowLeft className="h-4 w-4" /></button>
-                    <button type="button" className={jogButtonClass} disabled={!canJog || homeAxesMutation.isPending} onClick={() => homeAxesMutation.mutate('all')} aria-label={t('printers.bedJog.homeZ')}><Home className="h-4 w-4" /></button>
-                    <button type="button" className={jogButtonClass} disabled={!canJog || xyJogMutation.isPending} onClick={() => xyJogMutation.mutate({ x: jogStep, y: 0 })} aria-label="Move X right"><ArrowRight className="h-4 w-4" /></button>
-                    <div />
-                    <button type="button" className={jogButtonClass} disabled={!canJog || xyJogMutation.isPending} onClick={() => xyJogMutation.mutate({ x: 0, y: -jogStep })} aria-label="Move Y back"><ArrowDown className="h-4 w-4" /></button>
-                    <div />
-                  </div>
-                  <div className="flex flex-col items-center gap-1">
-                    <button type="button" className={jogButtonClass} disabled={!canJog || bedJogMutation.isPending} onClick={() => bedJogMutation.mutate(-jogStep)} aria-label={t('printers.bedJog.up')}><ArrowUp className="h-4 w-4" /></button>
-                    <div className="flex h-8 w-8 items-center justify-center text-bambu-gray/80"><Layers className="h-4 w-4" /></div>
-                    <button type="button" className={jogButtonClass} disabled={!canJog || bedJogMutation.isPending} onClick={() => bedJogMutation.mutate(jogStep)} aria-label={t('printers.bedJog.down')}><ArrowDown className="h-4 w-4" /></button>
-                  </div>
-                  <div className="flex flex-col items-center gap-1">
-                    <button type="button" className={jogButtonClass} disabled={!canJog || extruderJogMutation.isPending} onClick={() => extruderJogMutation.mutate(-jogStep)} aria-label="Retract filament"><ArrowUp className="h-4 w-4" /></button>
-                    <div className="flex h-8 w-8 items-center justify-center text-bambu-gray/80"><span className="text-sm font-semibold leading-none">E</span></div>
-                    <button type="button" className={jogButtonClass} disabled={!canJog || extruderJogMutation.isPending} onClick={() => extruderJogMutation.mutate(jogStep)} aria-label="Extrude filament"><ArrowDown className="h-4 w-4" /></button>
-                  </div>
-                </div>
-                <div className="self-stretch border-l border-bambu-dark-tertiary" />
-                <div className="flex min-w-20 flex-col gap-1">
-                  <div className="text-center text-[10px] font-semibold uppercase leading-tight tracking-wider text-white">
-                    {t('printers.bedJog.step')}
-                  </div>
-                  <div className="grid gap-1">
-                    {[1, 10, 50, 100].map(step => (
-                      <button
-                        key={step}
-                        type="button"
-                        onClick={() => setJogStep(step)}
-                        className={`rounded px-2 py-1 text-[10px] transition-colors ${jogStep === step ? 'bg-indigo-500/20 text-indigo-300' : 'bg-bambu-dark text-bambu-gray hover:bg-bambu-dark-tertiary'}`}
-                      >
-                        {step}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
+              {filamentPanel}
             </div>
           </section>
         </div>
@@ -2713,7 +2774,7 @@ function SinglePrinterCockpit({
     )}
     {printAfterUpload && (
       <PrintModal
-        mode="add-to-queue"
+        mode="create"
         libraryFileId={printAfterUpload.id}
         archiveName={printAfterUpload.filename}
         initialSelectedPrinterIds={[printer.id]}
@@ -2724,12 +2785,25 @@ function SinglePrinterCockpit({
     )}
     {reprintEntry?.archive_id && (
       <PrintModal
-        mode="reprint"
+        mode="create"
         archiveId={reprintEntry.archive_id}
         archiveName={reprintEntry.print_name || t('archives.untitledPrint', 'Untitled print')}
         initialSelectedPrinterIds={[printer.id]}
         onClose={() => setReprintEntry(null)}
         onSuccess={() => setReprintEntry(null)}
+      />
+    )}
+    {configureSlotModal && (
+      <ConfigureAmsSlotModal
+        isOpen
+        onClose={() => setConfigureSlotModal(null)}
+        printerId={printer.id}
+        slotInfo={configureSlotModal}
+        printerModel={mapModelCode(printer.model) || undefined}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ['slotPresets', printer.id] });
+          queryClient.invalidateQueries({ queryKey: ['printerStatus', printer.id] });
+        }}
       />
     )}
     </>
@@ -10059,7 +10133,6 @@ export function PrintersPage() {
               printer={selectedSinglePrinter}
               maintenanceInfo={maintenanceByPrinter[selectedSinglePrinter.id]}
               requirePlateClear={settings?.require_plate_clear === true}
-              timeFormat={settings?.time_format || 'system'}
               checkPrinterFirmware={settings?.check_printer_firmware !== false}
               currencySymbol={getCurrencySymbol(appSettings?.currency || 'USD')}
             />
