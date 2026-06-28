@@ -6040,8 +6040,23 @@ async def lifespan(app: FastAPI):
 
         await tl_layer_change(printer_id, layer_num)
 
-        # First layer complete notification (layer_num >= 2 means layer 1 is done)
-        if 2 <= layer_num <= 5 and not _first_layer_notified.get(printer_id, False):
+        # First layer complete notification (layer_num >= 2 means layer 1 is done).
+        # Gate on actual printing state — Bambu firmware ticks layer_num during
+        # the pre-print calibration sequence (homing / mesh-level / bed scan /
+        # nozzle clean), so a bare layer_num check can fire minutes before the
+        # first real extrusion. We require gcode_state == RUNNING and
+        # mc_print_sub_stage in (0 = "Printing", None) so calibration sub-stages
+        # (1, 9, 14, ...) are excluded. The window widens to [2, 10] because if
+        # the layer counter advanced past 2 during PREPARE, the next on_layer_change
+        # edge fires later; _first_layer_notified stays clear until we actually send
+        # so a deferred re-evaluation can win. See issue #1837.
+        if 2 <= layer_num <= 10 and not _first_layer_notified.get(printer_id, False):
+            client = printer_manager.get_client(printer_id)
+            state = client.state if client else None
+            if not state or state.state != "RUNNING":
+                return
+            if state.mc_print_sub_stage not in (None, 0):
+                return
             _first_layer_notified[printer_id] = True
             try:
                 async with async_session() as db:
@@ -6052,8 +6067,6 @@ async def lifespan(app: FastAPI):
                     if not printer:
                         return
                     printer_name = printer.name
-                    client = printer_manager.get_client(printer_id)
-                    state = client.state if client else None
                     filename = (state.subtask_name or state.gcode_file or "Unknown") if state else "Unknown"
                     total_layers = state.total_layers if state else 0
 
