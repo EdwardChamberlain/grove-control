@@ -2141,7 +2141,7 @@ export default {
     defaultPrinterDescription: 'Preseleziona questa stampante per upload, ristampe e altre operazioni.',
     slicerBambuStudio: 'Bambu Studio',
     slicerOrcaSlicer: 'OrcaSlicer',
-    sidebarOrderDescription: 'Trascina gli elementi nella barra laterale per riordinare. Ripristina l\'ordine predefinito qui.',
+    sidebarOrderDescription: 'Usa il layout della barra laterale per riordinare gli elementi, ripristinare la visibilità e gestire i link personalizzati.',
     setDefault: 'Imposta predefinito',
     sidebarOrderSetDefaultHint: 'Imposta predefinito applica l\'ordine attuale del menu agli utenti che non hanno ancora personalizzato il proprio.',
     sidebarDefaultSet: 'L\'ordine predefinito del menu è stato impostato.',
@@ -3678,6 +3678,28 @@ export default {
     reportPartialUsageDesc: 'Quando una stampa fallisce o viene annullata, segnala il filamento stimato usato fino a quel punto in base all\'avanzamento layer.',
   },
 
+  locations: {
+    title: 'Ubicazioni di stoccaggio',
+    subtitle: 'Gestisci scaffali, cassetti e altri posti fisici per le bobine',
+    add: 'Aggiungi ubicazione',
+    addShort: 'Aggiungi',
+    edit: 'Modifica ubicazione',
+    name: 'Nome',
+    spools: 'Bobine',
+    empty: 'Nessuna ubicazione di stoccaggio. Crea il tuo primo scaffale o cassetto.',
+    manage: 'Ubicazioni',
+    createPlaceholder: 'es. Scaffale A, Cassetto 1',
+    nameRequired: 'Il nome dell\'ubicazione è obbligatorio',
+    created: 'Ubicazione creata',
+    updated: 'Ubicazione aggiornata',
+    deleted: 'Ubicazione eliminata',
+    saveFailed: 'Impossibile salvare l\'ubicazione',
+    deleteFailed: 'Impossibile eliminare l\'ubicazione',
+    deleteBlocked: 'Rimuovi prima tutte le bobine da questa ubicazione',
+    confirmDelete: 'Eliminare «{{name}}»?',
+    confirmDeleteMessage: 'Questa ubicazione verrà rimossa dal catalogo. Sposta prima le bobine.',
+  },
+
   // Inventory
   inventory: {
     title: 'Inventario Bobine',
@@ -5107,6 +5129,17 @@ export default {
 
   // External Links
   externalLinks: {
+    title: 'Link della barra laterale',
+    sidebarLayout: 'Barra laterale',
+    sidebarLayoutDescription: 'Mostra o nascondi le pagine integrate, aggiungi link esterni e trascina gli elementi per riordinare la navigazione laterale.',
+    systemPages: 'Pagine Bambuddy',
+    externalLinks: 'Link esterni',
+    visibleInSidebar: 'Visibile nella barra laterale',
+    hiddenFromSidebar: 'Nascosto nella barra laterale',
+    requiredInSidebar: 'Obbligatorio nella barra laterale',
+    hidePage: 'Nascondi pagina',
+    showPage: 'Mostra pagina',
+    settingsCannotBeHidden: 'Le impostazioni non possono essere nascoste',
     noLinksConfigured: 'Nessun link esterno configurato',
     deleteLink: 'Elimina link',
     removeCustomIcon: 'Rimuovi icona personalizzata',

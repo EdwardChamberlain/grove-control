@@ -2189,7 +2189,7 @@ export default {
     defaultPrinterDescription: 'Yüklemeler, tekrar baskılar ve diğer işlemler için bu yazıcıyı önceden seç.',
     slicerBambuStudio: 'Bambu Studio',
     slicerOrcaSlicer: 'OrcaSlicer',
-    sidebarOrderDescription: 'Yeniden sıralamak için kenar çubuğundaki öğeleri sürükleyin. Varsayılan sıraya buradan sıfırlayın.',
+    sidebarOrderDescription: 'Öğeleri yeniden sıralamak, görünürlüğü sıfırlamak ve özel bağlantıları yönetmek için Kenar çubuğu düzenini kullanın.',
     setDefault: 'Varsayılan Yap',
     sidebarOrderSetDefaultHint: 'Varsayılan ayarla, mevcut menü sırasını henüz özelleştirmemiş kullanıcılara uygular.',
     sidebarDefaultSet: 'Varsayılan menü sırası ayarlandı.',
@@ -3679,6 +3679,28 @@ export default {
     reportPartialUsageDesc: 'Bir baskı başarısız olduğunda veya iptal edildiğinde, katman ilerlemesine göre o noktaya kadar kullanılan tahmini filamenti bildir.',
   },
 
+  locations: {
+    title: 'Depolama Konumları',
+    subtitle: 'Makaralarınız için raf, çekmece ve diğer fiziksel depolama yerlerini yönetin',
+    add: 'Konum Ekle',
+    addShort: 'Ekle',
+    edit: 'Konumu Düzenle',
+    name: 'Ad',
+    spools: 'Makaralar',
+    empty: 'Henüz depolama konumu yok. İlk rafınızı veya çekmecenizi oluşturun.',
+    manage: 'Konumlar',
+    createPlaceholder: 'örn. Raf A, Çekmece 1',
+    nameRequired: 'Konum adı zorunludur',
+    created: 'Konum oluşturuldu',
+    updated: 'Konum güncellendi',
+    deleted: 'Konum silindi',
+    saveFailed: 'Konum kaydedilemedi',
+    deleteFailed: 'Konum silinemedi',
+    deleteBlocked: 'Silmeden önce bu konumdaki tüm makaraları taşıyın',
+    confirmDelete: '"{{name}}" silinsin mi?',
+    confirmDeleteMessage: 'Bu konum kataloğdan kaldırılacak. Önce makaralar taşınmalıdır.',
+  },
+
   // Envanter
   inventory: {
     title: 'Makara Envanteri',
@@ -5062,6 +5084,17 @@ export default {
 
   // Harici Bağlantılar
   externalLinks: {
+    title: 'Kenar çubuğu bağlantıları',
+    sidebarLayout: 'Kenar çubuğu',
+    sidebarLayoutDescription: 'Yerleşik sayfaları gösterin veya gizleyin, harici bağlantılar ekleyin ve kenar çubuğu gezinmesini yeniden sıralamak için öğeleri sürükleyin.',
+    systemPages: 'Bambuddy sayfaları',
+    externalLinks: 'Harici bağlantılar',
+    visibleInSidebar: 'Kenar çubuğunda görünür',
+    hiddenFromSidebar: 'Kenar çubuğunda gizli',
+    requiredInSidebar: 'Kenar çubuğunda gerekli',
+    hidePage: 'Sayfayı gizle',
+    showPage: 'Sayfayı göster',
+    settingsCannotBeHidden: 'Ayarlar gizlenemez',
     noLinksConfigured: 'Yapılandırılmış harici bağlantı yok',
     deleteLink: 'Bağlantıyı Sil',
     removeCustomIcon: 'Özel simgeyi kaldır',

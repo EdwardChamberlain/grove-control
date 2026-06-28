@@ -2186,7 +2186,7 @@ export default {
     defaultPrinterDescription: '为上传、重印和其他操作预选此打印机。',
     slicerBambuStudio: 'Bambu Studio',
     slicerOrcaSlicer: 'OrcaSlicer',
-    sidebarOrderDescription: '拖拽侧边栏项目以重新排序。在此处重置为默认顺序。',
+    sidebarOrderDescription: '使用侧边栏布局重新排序项目、重置可见性并管理自定义链接。',
     setDefault: '设为默认',
     sidebarOrderSetDefaultHint: '设为默认将当前菜单顺序应用于尚未自定义的用户。',
     sidebarDefaultSet: '已设置默认菜单顺序。',
@@ -3678,6 +3678,28 @@ export default {
     reportPartialUsageDesc: '当打印失败或被取消时，根据层进度报告估计的耗材使用量。',
   },
 
+  locations: {
+    title: '存储位置',
+    subtitle: '管理货架、抽屉等线轴物理存放位置',
+    add: '添加位置',
+    addShort: '添加',
+    edit: '编辑位置',
+    name: '名称',
+    spools: '线轴',
+    empty: '尚无存储位置。创建第一个货架或抽屉。',
+    manage: '位置',
+    createPlaceholder: '例如：A 架、抽屉 1',
+    nameRequired: '位置名称为必填项',
+    created: '位置已创建',
+    updated: '位置已更新',
+    deleted: '位置已删除',
+    saveFailed: '保存位置失败',
+    deleteFailed: '删除位置失败',
+    deleteBlocked: '删除前请移走此位置上的所有线轴',
+    confirmDelete: '删除「{{name}}」？',
+    confirmDeleteMessage: '此位置将从目录中移除。请先移走线轴。',
+  },
+
   // Inventory
   inventory: {
     title: '耗材库存',
@@ -5106,6 +5128,17 @@ export default {
 
   // External Links
   externalLinks: {
+    title: '侧边栏链接',
+    sidebarLayout: '侧边栏',
+    sidebarLayoutDescription: '显示或隐藏内置页面，添加外部链接，并拖动项目以重新排序侧边栏导航。',
+    systemPages: 'Bambuddy 页面',
+    externalLinks: '外部链接',
+    visibleInSidebar: '在侧边栏中显示',
+    hiddenFromSidebar: '在侧边栏中隐藏',
+    requiredInSidebar: '侧边栏中必需',
+    hidePage: '隐藏页面',
+    showPage: '显示页面',
+    settingsCannotBeHidden: '设置不能隐藏',
     noLinksConfigured: '未配置外部链接',
     deleteLink: '删除链接',
     removeCustomIcon: '移除自定义图标',

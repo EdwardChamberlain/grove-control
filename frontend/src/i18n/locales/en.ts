@@ -2196,7 +2196,7 @@ export default {
     defaultPrinterDescription: 'Pre-select this printer for uploads, reprints, and other operations.',
     slicerBambuStudio: 'Bambu Studio',
     slicerOrcaSlicer: 'OrcaSlicer',
-    sidebarOrderDescription: 'Drag items in the sidebar to reorder. Reset to default order here.',
+    sidebarOrderDescription: 'Use Sidebar to reorder items, reset visibility, and manage custom links.',
     setDefault: 'Set Default',
     sidebarOrderSetDefaultHint: 'Set default applies the current menu order to users who haven\'t customized theirs.',
     sidebarDefaultSet: 'Default menu order has been set.',
@@ -3701,6 +3701,28 @@ export default {
     reportPartialUsageDesc: 'When a print fails or is cancelled, report the estimated filament used up to that point based on layer progress.',
   },
 
+  locations: {
+    title: 'Storage Locations',
+    subtitle: 'Manage shelves, drawers, and other physical storage spots for your spools',
+    add: 'Add Location',
+    addShort: 'Add',
+    edit: 'Edit Location',
+    name: 'Name',
+    spools: 'Spools',
+    empty: 'No storage locations yet. Create your first shelf or drawer.',
+    manage: 'Locations',
+    createPlaceholder: 'e.g. Shelf A, Drawer 1',
+    nameRequired: 'Location name is required',
+    created: 'Location created',
+    updated: 'Location updated',
+    deleted: 'Location deleted',
+    saveFailed: 'Failed to save location',
+    deleteFailed: 'Failed to delete location',
+    deleteBlocked: 'Remove all spools from this location before deleting',
+    confirmDelete: 'Delete "{{name}}"?',
+    confirmDeleteMessage: 'This location will be removed from the catalog. Spools must be moved first.',
+  },
+
   // Inventory
   inventory: {
     title: 'Spool Inventory',
@@ -5139,6 +5161,17 @@ export default {
 
   // External Links
   externalLinks: {
+    title: 'Sidebar Links',
+    sidebarLayout: 'Sidebar',
+    sidebarLayoutDescription: 'Show or hide built-in pages, add external links, and drag items to reorder the sidebar navigation.',
+    systemPages: 'Bambuddy pages',
+    externalLinks: 'External links',
+    visibleInSidebar: 'Visible in sidebar',
+    hiddenFromSidebar: 'Hidden from sidebar',
+    requiredInSidebar: 'Required in sidebar',
+    hidePage: 'Hide page',
+    showPage: 'Show page',
+    settingsCannotBeHidden: 'Settings cannot be hidden',
     noLinksConfigured: 'No external links configured',
     deleteLink: 'Delete Link',
     removeCustomIcon: 'Remove custom icon',
