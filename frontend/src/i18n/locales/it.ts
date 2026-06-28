@@ -3593,6 +3593,13 @@ export default {
     architecture: 'Architettura',
   },
 
+  // Sponsor surface (System page)
+  sponsors: {
+    sectionTitle: 'Indipendente e finanziato dalla community',
+    tagline: 'Bambuddy è gratuito e resta tale perché qualcuno sceglie di sostenerlo. Niente VC, niente lock-in cloud.',
+    viewSupporters: 'Vedi i sostenitori',
+  },
+
   // Library (K Profiles)
   library: {
     title: 'Libreria filamenti',

@@ -3594,6 +3594,13 @@ export default {
     architecture: 'Mimari',
   },
 
+  // Sponsor yüzeyi (Sistem sayfası)
+  sponsors: {
+    sectionTitle: 'Bağımsız ve topluluk destekli',
+    tagline: 'Bambuddy ücretsizdir ve böyle kalır çünkü insanlar onu desteklemeyi seçer. VC yok, bulut bağımlılığı yok.',
+    viewSupporters: 'Destekçileri görüntüle',
+  },
+
   // Kütüphane (K Profilleri)
   library: {
     title: 'Filament Kütüphanesi',

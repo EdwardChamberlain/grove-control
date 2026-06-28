@@ -3605,6 +3605,13 @@ export default {
     architecture: 'アーキテクチャ',
   },
 
+  // Sponsor surface (System page)
+  sponsors: {
+    sectionTitle: '独立・コミュニティ運営',
+    tagline: 'Bambuddyは無料で、これからも無料です。支援してくださる方々のおかげで、VCもクラウドロックインもありません。',
+    viewSupporters: 'サポーター一覧',
+  },
+
   // Library (K Profiles)
   library: {
     title: 'フィラメントライブラリ',

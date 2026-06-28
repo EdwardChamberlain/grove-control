@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Plus, Plug, AlertTriangle, RotateCcw, Bell, Download, RefreshCw, ExternalLink, Globe, Droplets, Thermometer, FileText, Edit2, Send, CheckCircle, XCircle, History, Trash2, Zap, TrendingUp, Calendar, DollarSign, Power, PowerOff, Key, Copy, Database, X, Shield, Printer, Cylinder, Wifi, Home, Video, Users, Lock, Unlock, ChevronDown, Save, Mail, Flame, Layers, ListOrdered, Code, Search, Scale, Settings as SettingsIcon, ScanEye, Cog, QrCode } from 'lucide-react';
+import { Loader2, Plus, Plug, AlertTriangle, RotateCcw, Bell, Download, RefreshCw, ExternalLink, Globe, Droplets, Thermometer, FileText, Edit2, Send, CheckCircle, XCircle, History, Trash2, Zap, TrendingUp, Calendar, DollarSign, Power, PowerOff, Key, Copy, Database, X, Shield, Printer, Cylinder, Wifi, Home, Video, Users, Lock, Unlock, ChevronDown, Save, Mail, Flame, Layers, ListOrdered, Code, Search, Scale, Settings as SettingsIcon, ScanEye, Cog, QrCode, Heart } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
@@ -1459,6 +1459,36 @@ export function SettingsPage() {
       </nav>
       <div className="flex-1 min-w-0">
       {activeTab === 'general' && (
+      <>
+      {/* Sponsor banner — prominent independence callout */}
+      <a
+        href="https://bambuddy.cool/sponsors.html?from=app-settings"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="group block mb-4 lg:mb-6 rounded-xl border border-bambu-green/30 bg-gradient-to-br from-bambu-green/15 via-bambu-green/5 to-transparent hover:border-bambu-green/50 hover:from-bambu-green/20 transition-colors"
+      >
+        <div className="flex flex-col md:flex-row items-start md:items-center gap-4 p-4 md:p-5">
+          <div className="p-3 rounded-lg bg-bambu-green/20 text-bambu-green flex-shrink-0">
+            <Heart className="w-6 h-6" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-base font-semibold text-white">
+              {t('sponsors.sectionTitle', 'Independent & community-funded')}
+            </p>
+            <p className="text-sm text-bambu-gray mt-0.5">
+              {t(
+                'sponsors.tagline',
+                'Bambuddy is free and stays that way because people choose to support it. No VC, no cloud lock-in.'
+              )}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-bambu-green/20 text-bambu-green group-hover:bg-bambu-green/30 text-sm font-medium whitespace-nowrap self-start md:self-auto">
+            {t('sponsors.viewSupporters', 'View supporters')}
+            <ExternalLink className="w-4 h-4" />
+          </div>
+        </div>
+      </a>
+
       <div className="flex flex-col lg:flex-row gap-4 lg:gap-6">
         {/* Left Column - General Settings */}
         <div className="space-y-3 flex-1 lg:max-w-xl">
@@ -2551,6 +2581,7 @@ export function SettingsPage() {
           <ExternalLinksSettings />
         </div>
       </div>
+      </>
       )}
 
       {/* Network Tab */}

@@ -3404,6 +3404,11 @@ export default {
     platform: '플랫폼',
     architecture: '아키텍처'
   },
+  sponsors: {
+    sectionTitle: '독립적·커뮤니티 후원',
+    tagline: 'Bambuddy는 무료이며, 자발적으로 후원하는 사용자 덕분에 계속 무료로 유지됩니다. VC도 없고, 클라우드 종속도 없습니다.',
+    viewSupporters: '후원자 보기'
+  },
   library: {
     title: '필라멘트 라이브러리',
     addFilament: '필라멘트 추가',

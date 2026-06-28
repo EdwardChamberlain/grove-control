@@ -3593,6 +3593,13 @@ export default {
     architecture: '架构',
   },
 
+  // Sponsor surface (System page)
+  sponsors: {
+    sectionTitle: '独立运营·社区支持',
+    tagline: 'Bambuddy 完全免费，并将持续免费——这要感谢主动支持的用户。没有风投，也没有云端绑定。',
+    viewSupporters: '查看支持者',
+  },
+
   // Library (K Profiles)
   library: {
     title: '耗材库',

@@ -3617,6 +3617,13 @@ export default {
     architecture: 'Architecture',
   },
 
+  // Sponsor surface (System page)
+  sponsors: {
+    sectionTitle: 'Independent & community-funded',
+    tagline: 'Bambuddy is free and stays that way because people choose to support it. No VC, no cloud lock-in.',
+    viewSupporters: 'View supporters',
+  },
+
   // Library (K Profiles)
   library: {
     title: 'Filament Library',
