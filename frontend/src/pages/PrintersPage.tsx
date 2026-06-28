@@ -2236,7 +2236,7 @@ function SinglePrinterCockpit({
             <div className="relative flex h-full min-h-0 flex-col gap-3 p-4">
               <div className="min-w-0">
                 <div className="flex min-w-0 items-center gap-3">
-                  <h2 className="min-w-0 flex-1 truncate text-3xl font-semibold text-white">{printer.name}</h2>
+                  <h2 className="min-w-0 flex-1 truncate text-3xl font-semibold leading-none text-white">{printer.name}</h2>
                   <span
                     className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${printerHealth.className}`}
                     title={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
@@ -2245,7 +2245,7 @@ function SinglePrinterCockpit({
                     <Activity className="h-4 w-4" />
                   </span>
                 </div>
-                <p className="mt-1 truncate text-base text-bambu-gray">
+                <p className="truncate pl-0.5 text-base leading-tight text-bambu-gray">
                   {printer.model || t('common.unknown', 'Unknown')}
                   {printer.location ? ` - ${printer.location}` : ''}
                 </p>
