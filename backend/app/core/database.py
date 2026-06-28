@@ -3079,6 +3079,40 @@ async def run_migrations(conn):
             "ALTER TABLE notification_providers ADD COLUMN on_ai_failure_detection BOOLEAN DEFAULT false",
         )
 
+    # Migration: Disambiguate the four ``user_print_*`` notification template
+    # names by appending " Email" (#1792). See ``_migrate_rename_user_print_template_names``.
+    await _migrate_rename_user_print_template_names(conn)
+
+
+_USER_PRINT_TEMPLATE_RENAMES: tuple[tuple[str, str, str], ...] = (
+    ("user_print_start", "User Print Started", "User Print Started Email"),
+    ("user_print_complete", "User Print Completed", "User Print Completed Email"),
+    ("user_print_failed", "User Print Failed", "User Print Failed Email"),
+    ("user_print_stopped", "User Print Stopped", "User Print Stopped Email"),
+)
+
+
+async def _migrate_rename_user_print_template_names(conn) -> None:
+    """Append " Email" to the four ``user_print_*`` notification template names (#1792).
+
+    The provider-level "Print Completed" and the per-user "User Print Completed"
+    rows were visually indistinguishable in the Message Templates list because
+    the seed name lacked the suffix that the EVENT_NAMES display map in
+    routes/notification_templates.py already uses ("User Print Completed Email").
+
+    Renames only rows where ``name`` is still the old default — admins who
+    renamed the template themselves keep their custom name. Standard SQL
+    UPDATE works on both SQLite and Postgres.
+    """
+    from sqlalchemy import text
+
+    async with conn.begin_nested():
+        for event_type, old_name, new_name in _USER_PRINT_TEMPLATE_RENAMES:
+            await conn.execute(
+                text("UPDATE notification_templates SET name = :new WHERE event_type = :et AND name = :old"),
+                {"new": new_name, "et": event_type, "old": old_name},
+            )
+
 
 async def seed_notification_templates():
     """Seed default notification templates if they don't exist."""
