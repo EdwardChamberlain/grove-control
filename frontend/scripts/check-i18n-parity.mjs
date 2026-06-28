@@ -119,6 +119,7 @@ function isAlwaysAllowedIdentical(value) {
   if (/^v?\d+(\.\d+)+/.test(value)) return true;        // version-like
   if (/^#[0-9a-fA-F]{3,8}$/.test(value)) return true;   // hex color
   if (/^\{\{[^}]+\}\}$/.test(value)) return true;       // pure placeholder
+  if (/^\{\{[^}]+\}\}([\s/\-–·,]+\{\{[^}]+\}\})+$/.test(value)) return true;  // placeholders joined by punctuation only ({{a}} / {{b}})
   if (/^[0-9a-fA-F]{6}$/.test(value)) return true;      // bare hex color
   if (/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(value)) return true;  // email
   if (/^https?:\/\//.test(value)) return true;          // URL
@@ -148,6 +149,7 @@ const DE_COGNATES = [
   'Pause', 'Power', 'System', 'Problem', 'Designer', 'Extruder', 'Firmware',
   'Material', 'Original', 'Position', 'Webhook', 'Workflow', 'Slicer',
   'Pipeline', 'Pipelines', 'Filament {{n}}',  // #1425 — Slicer Pipelines (DE)
+  'parallel',  // #1425 PR C polish — "parallel" is the same word in German
   'Region', 'Normal', 'Orange', 'Branch', 'Budget', 'Commit', 'Global',
   'Version', 'Slot', 'Live', 'Rate', 'Host', 'Trend', 'Min', 'Admin', 'Cloud',
   'Filament', 'Filaments', 'Software', 'Hardware', 'Avatar', 'Pin', 'Modal',
@@ -182,6 +184,7 @@ const FR_COGNATES = [
   'Job', 'Modal', 'Pin', 'Pro', 'Mini', 'Studio', 'Excellent', 'Description',
   'Pipeline', 'Pipelines', 'Filament {{n}}',  // #1425 — Slicer Pipelines (FR)
   'Copies', '{{n}} copies', 'max {{n}}',  // #1425 PR C — French uses these forms verbatim
+  'round robin',  // borrowed English term used as-is in French tech contexts
   'Action', 'Actions', 'Date', 'Type', 'Cache', 'Service', 'Configuration',
   'Archives', 'Maintenance', 'Notifications', 'Notification', 'Position',
   'Pause', 'Solution', 'Source', 'Version', 'Format', 'Documentation',
@@ -222,6 +225,7 @@ const IT_COGNATES = [
   'Email',  // common loanword in Italian, used verbatim in UI labels
   'Pipeline', 'slicing',  // #1425 — Slicer Pipelines (cognate in IT)
   'max {{n}}',  // #1425 PR C — same form in Italian (max + number)
+  'round robin',  // borrowed English term used as-is in Italian tech contexts
   'Status', 'Tag', 'Tags', 'Online', 'Offline', 'Standard', 'Filament',
   'Filaments', 'Software', 'Hardware', 'Stop', 'Reset', 'Test', 'Code',
   'Token', 'Server', 'Port', 'Plate', 'Layer', 'Modal', 'Pin', 'Pro', 'Mini',
@@ -266,6 +270,7 @@ const PT_BR_COGNATES = [
   'Bambu Cloud', 'Orca Cloud',  // brand names — same in every locale
   'AMS Filament Backup',  // Bambu Lab product/firmware feature name
   'Pipeline', 'Pipelines',  // #1425 — Slicer Pipelines (PT-BR)
+  'round robin',  // borrowed English term used as-is in Portuguese tech contexts
   'Status', 'Tag', 'Tags', 'Online', 'Offline', 'Standard', 'Filament',
   'Software', 'Hardware', 'Stop', 'Reset', 'Test', 'Code', 'Token', 'Server',
   'Port', 'Plate', 'Layer', 'Modal', 'Pin', 'Pro', 'Mini', 'Studio', 'Cache',
@@ -339,6 +344,7 @@ const ES_COGNATES = [
   'Bambu Cloud', 'Orca Cloud',  // brand names — same in every locale
   'AMS Filament Backup',  // Bambu Lab product/firmware feature name
   'Pipeline', 'Pipelines',  // #1425 — Slicer Pipelines (ES)
+  'round robin',  // borrowed English term used as-is in Spanish tech contexts
   'Error', 'Firmware', 'General', 'Control', 'Total', 'total', 'Material',
   'Material:', 'Color', 'Hex', 'Local', 'Global', 'China', 'Editable',
   'Normal', 'Metal', 'Multicolor', 'Proxy', 'Host', 'Factor', 'Original',

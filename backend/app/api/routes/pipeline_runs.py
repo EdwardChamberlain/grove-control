@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import desc, func, select
+from sqlalchemy import delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.auth import RequirePermissionIfAuthEnabled
@@ -284,6 +284,16 @@ async def _materialise_run(db: AsyncSession, run: PipelineRun) -> PipelineRunRes
             printer_name = p.name if p else None
 
         live_job_status = _compute_job_status(job.status, queue_entry)
+        # If the job WAS dispatched (had a queue_entry_id) but the entry has
+        # since been deleted from the queue page, the user's intent was
+        # cancellation. Otherwise the run would stay forever showing as
+        # ``queued`` because the persisted job.status hasn't been updated.
+        if (
+            job.queue_entry_id is not None
+            and queue_entry is None
+            and live_job_status not in ("completed", "failed", "cancelled")
+        ):
+            live_job_status = "cancelled"
         job_live_statuses.append(live_job_status)
         job_responses.append(
             PipelineJobResponse(
@@ -465,6 +475,16 @@ def _make_orchestration_callable(
                 logger.warning("pipeline_run %d or pipeline %d disappeared mid-orchestration", run_id, pipeline_id)
                 return {}
 
+            # Honour a cancel that landed between ``POST /run`` returning and
+            # this background task starting. If the run was cancelled while
+            # still in ``queued`` we must NOT flip it back to ``slicing`` —
+            # the operator's intent was to stop, and overwriting status here
+            # was the bug that left runs stuck at ``dispatching`` after a
+            # user-side cancel (#1425 PR C bug report).
+            if run.status == "cancelled":
+                logger.info("pipeline_run %d was cancelled before slicing started", run_id)
+                return {}
+
             run.status = "slicing"
             run.started_at = datetime.now(timezone.utc)
             await session.commit()
@@ -512,6 +532,17 @@ def _make_orchestration_callable(
 
             run.sliced_library_file_id = slice_response.library_file_id
 
+            # Re-check cancellation: the slice can take minutes, and the
+            # operator may have hit Cancel during that window. Refresh from
+            # the DB rather than trusting our in-memory `run` (the cancel
+            # route writes via a separate session). When cancelled, don't
+            # enqueue print queue items — that's the whole point of cancel.
+            await session.refresh(run)
+            if run.status == "cancelled":
+                logger.info("pipeline_run %d cancelled mid-slice; skipping queue enqueue", run_id)
+                await session.commit()
+                return slice_response.model_dump()
+
             # PR C: enqueue N copies per the picked assignment strategy.
             assignments = await _pick_assignments(session, pipeline, copies)
 
@@ -542,9 +573,40 @@ def _make_orchestration_callable(
 
                 job.queue_entry_id = queue_item.id
                 job.assigned_printer_id = printer_id  # may be None for max_parallel
-                job.status = "queued"
+                # Don't write job.status yet — final cancellation check below
+                # may flip it to 'cancelled' instead. dispatched_at is fine to
+                # set unconditionally since the orchestration actually got here.
                 job.dispatched_at = datetime.now(timezone.utc)
 
+            # Final cancellation check before committing 'dispatching'. The
+            # cancel route writes via a separate session so we have to refresh
+            # to see the latest. If the cancel landed in this narrow window —
+            # AFTER the post-slice refresh but BEFORE this commit — the queue
+            # entries we just created would otherwise pick up and print. Mark
+            # them + the per-copy jobs cancelled so the user's intent sticks.
+            await session.refresh(run)
+            if run.status == "cancelled":
+                logger.info(
+                    "pipeline_run %d cancelled in the dispatch window; cancelling its %d queue entries",
+                    run_id,
+                    len(jobs),
+                )
+                for job in jobs:
+                    if job.queue_entry_id:
+                        qe = (
+                            await session.execute(select(PrintQueueItem).where(PrintQueueItem.id == job.queue_entry_id))
+                        ).scalar_one_or_none()
+                        if qe is not None and qe.status in ("pending", "queued"):
+                            qe.status = "cancelled"
+                    if job.status not in ("completed", "failed", "cancelled"):
+                        job.status = "cancelled"
+                        job.completed_at = datetime.now(timezone.utc)
+                await session.commit()
+                await _publish_run_event(session, run)
+                return slice_response.model_dump()
+
+            for job in jobs:
+                job.status = "queued"
             run.status = "dispatching"
             await session.commit()
             await _publish_run_event(session, run)
@@ -720,13 +782,17 @@ async def list_all_runs(
     offset: int = 0,
     pipeline_id: int | None = None,
     status: str | None = None,
+    target_printer_id: int | None = None,
+    target_model_class: str | None = None,
     _: User | None = RequirePermissionIfAuthEnabled(Permission.PIPELINES_READ),
     db: AsyncSession = Depends(get_db),
 ):
-    """Dashboard list. Newest first; filters on pipeline_id + status. The
-    `status` filter matches the persisted snapshot, not the live roll-up —
-    in-progress runs may appear under `dispatching` until the next state
-    transition writes through."""
+    """Dashboard list. Newest first; filters on pipeline_id + status +
+    target_printer_id + target_model_class. The ``status`` filter matches
+    the persisted snapshot, not the live roll-up — in-progress runs may
+    appear under ``dispatching`` until the next state transition writes
+    through. ``target_*`` filters JOIN to the pipeline so runs whose
+    pipeline currently points at the printer / class are returned."""
     limit = max(1, min(limit, 100))
     offset = max(0, offset)
 
@@ -738,6 +804,15 @@ async def list_all_runs(
     if status:
         stmt = stmt.where(PipelineRun.status == status)
         count_stmt = count_stmt.where(PipelineRun.status == status)
+    if target_printer_id is not None or target_model_class is not None:
+        stmt = stmt.join(SlicerPipeline, SlicerPipeline.id == PipelineRun.pipeline_id)
+        count_stmt = count_stmt.join(SlicerPipeline, SlicerPipeline.id == PipelineRun.pipeline_id)
+        if target_printer_id is not None:
+            stmt = stmt.where(SlicerPipeline.target_printer_id == target_printer_id)
+            count_stmt = count_stmt.where(SlicerPipeline.target_printer_id == target_printer_id)
+        if target_model_class is not None:
+            stmt = stmt.where(SlicerPipeline.target_model_class == target_model_class)
+            count_stmt = count_stmt.where(SlicerPipeline.target_model_class == target_model_class)
 
     rows = (await db.execute(stmt.order_by(desc(PipelineRun.id)).offset(offset).limit(limit))).scalars().all()
     total = (await db.execute(count_stmt)).scalar() or 0
@@ -746,6 +821,31 @@ async def list_all_runs(
         runs=[await _materialise_run(db, r) for r in rows],
         total=total,
     )
+
+
+_TERMINAL_RUN_STATUSES = ("completed", "failed", "cancelled", "partial_failure")
+
+
+@pipeline_run_router.post("/clear")
+async def clear_terminal_runs(
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.PIPELINES_WRITE),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete every terminal pipeline run (completed / failed / cancelled /
+    partial_failure). In-flight runs (queued / slicing / dispatching /
+    in_progress) are preserved — clearing those mid-flight would lose the
+    operator's intent. Cascades to PipelineJob via the ondelete='CASCADE'
+    relationship; the linked PrintQueueItem rows stay (they have their own
+    lifecycle on the queue page)."""
+    # Count first so the response can report how many got cleared. Done
+    # under the same session/transaction as the delete so the numbers can't
+    # drift if another caller races in.
+    count_stmt = select(func.count()).select_from(PipelineRun).where(PipelineRun.status.in_(_TERMINAL_RUN_STATUSES))
+    n = (await db.execute(count_stmt)).scalar() or 0
+    if n > 0:
+        await db.execute(delete(PipelineRun).where(PipelineRun.status.in_(_TERMINAL_RUN_STATUSES)))
+        await db.commit()
+    return {"deleted": n}
 
 
 @pipeline_run_router.get("/{run_id}", response_model=PipelineRunResponse)

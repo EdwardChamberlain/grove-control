@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils';
-import { PipelineRunsPage } from '../../pages/PipelineRunsPage';
+import { PipelineRunsView } from '../../pages/PipelineRunsPage';
 import { api, type PipelineRun } from '../../api/client';
 
 vi.mock('../../api/client', () => ({
@@ -88,7 +88,7 @@ function makeRun(overrides: Partial<PipelineRun> = {}): PipelineRun {
   };
 }
 
-describe('PipelineRunsPage', () => {
+describe('PipelineRunsView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockApi.listSlicerPipelines.mockResolvedValue({ pipelines: [] });
@@ -96,7 +96,7 @@ describe('PipelineRunsPage', () => {
   });
 
   it('renders empty state when no runs exist', async () => {
-    render(<PipelineRunsPage />);
+    render(<PipelineRunsView />);
     await waitFor(() => {
       expect(screen.getByText(/No pipeline runs yet/i)).toBeInTheDocument();
     });
@@ -104,7 +104,7 @@ describe('PipelineRunsPage', () => {
 
   it('lists runs and surfaces the pipeline name + status chip', async () => {
     mockApi.listAllPipelineRuns.mockResolvedValue({ runs: [makeRun()], total: 1 });
-    render(<PipelineRunsPage />);
+    render(<PipelineRunsView />);
     await waitFor(() => {
       expect(screen.getByText(/Production Batch/i)).toBeInTheDocument();
       // Status chip uses the i18n key.
@@ -115,7 +115,7 @@ describe('PipelineRunsPage', () => {
   it('shows a Cancel button on in-flight runs and fires the mutation', async () => {
     mockApi.listAllPipelineRuns.mockResolvedValue({ runs: [makeRun()], total: 1 });
     mockApi.cancelPipelineRun.mockResolvedValue(makeRun({ status: 'cancelled' }));
-    render(<PipelineRunsPage />);
+    render(<PipelineRunsView />);
     const user = userEvent.setup();
     await waitFor(() => expect(screen.getByText(/Production Batch/i)).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: /Cancel/i }));
@@ -135,7 +135,7 @@ describe('PipelineRunsPage', () => {
       total: 1,
     });
     mockApi.retryFailedPipelineRun.mockResolvedValue(makeRun({ id: 2, parent_run_id: 1, copies: 2 }));
-    render(<PipelineRunsPage />);
+    render(<PipelineRunsView />);
     const user = userEvent.setup();
     await waitFor(() => expect(screen.getByText(/Production Batch/i)).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: /Retry failed/i }));
@@ -144,7 +144,7 @@ describe('PipelineRunsPage', () => {
 
   it('expands the row to show per-copy jobs', async () => {
     mockApi.listAllPipelineRuns.mockResolvedValue({ runs: [makeRun()], total: 1 });
-    render(<PipelineRunsPage />);
+    render(<PipelineRunsView />);
     const user = userEvent.setup();
     await waitFor(() => expect(screen.getByText(/Production Batch/i)).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: /Expand/i }));

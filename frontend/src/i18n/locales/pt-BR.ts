@@ -4,7 +4,6 @@ export default {
     printers: 'Impressoras',
     archives: 'Arquivos',
     queue: 'Fila de impressão',
-    pipelineRuns: 'Execuções de pipeline',
     stats: 'Estatísticas',
     profiles: 'Perfis',
     maintenance: 'Manutenção',
@@ -1055,8 +1054,16 @@ export default {
     filter: {
       pipeline: 'Pipeline',
       status: 'Status',
+      target: 'Destino',
       all: 'Todas',
+      allPipelines: 'Todas as pipelines',
+      allStatus: 'Todos os status',
+      allTargets: 'Todos os destinos',
+      clear: 'Limpar filtros',
+      noMatches: 'Nenhuma execução corresponde aos filtros atuais.',
     },
+    totalCount_one: '{{n}} execução',
+    totalCount_other: '{{n}} execuções',
     copies: '{{n}} cópias',
     failedCount: '{{n}} falharam',
     copyN: 'Cópia {{n}}',
@@ -1068,7 +1075,13 @@ export default {
       cancelFailed: 'Cancelamento falhou',
       retryStarted: 'Nova tentativa iniciada',
       retryFailed: 'Nova tentativa falhou',
+      cleared: '{{n}} execuções limpas',
+      clearFailed: 'Falha ao limpar',
     },
+    clearLog: 'Limpar histórico',
+    clearConfirmTitle: 'Limpar histórico?',
+    clearConfirmBody: 'Excluir todas as execuções de pipeline concluídas, falhas, canceladas e com falha parcial? Execuções em andamento são mantidas. Isso não pode ser desfeito.',
+    clearConfirmAction: 'Limpar',
     jobStatus: {
       pending: 'pendente',
       awaiting_printer: 'aguardando impressora',
@@ -1078,6 +1091,7 @@ export default {
       failed: 'falhou',
       cancelled: 'cancelada',
     },
+    cancelledByUser: 'Cancelado pelo usuário',
   },
 
   // Queue page
@@ -1159,6 +1173,7 @@ export default {
       queue: 'Fila',
       history: 'Histórico',
       timeline: 'Linha do tempo',
+      pipelines: 'Processos',
     },
     layout: {
       flatList: 'Lista',
@@ -2612,6 +2627,11 @@ export default {
           round_robin: 'Round robin — alternar entre impressoras elegíveis',
           fill_one_first: 'Encher uma primeiro — fixar todas as cópias em uma impressora',
         },
+        fanoutShort: {
+          max_parallel: 'paralelo',
+          round_robin: 'round robin',
+          fill_one_first: 'primeiro um',
+        },
       },
       action: {
         save: 'Salvar',
@@ -2624,7 +2644,21 @@ export default {
         process: 'Processo',
         filament: 'Filamento',
         filamentN: 'Filamento {{n}}',
+        filamentAll: 'Todos os {{n}} slots',
         bed: 'Mesa',
+      },
+      group: {
+        profiles: 'Perfis',
+        filaments: 'Filamentos',
+      },
+      searchPlaceholder: 'Buscar pipelines…',
+      filterTargetType: 'Filtrar por tipo de destino',
+      filterTarget: 'Filtrar por destino',
+      filter: {
+        all: 'Todos os destinos',
+        noTarget: 'Sem destino',
+        count: '{{shown}} / {{total}}',
+        noMatches: 'Nenhuma pipeline corresponde aos filtros atuais.',
       },
       toast: {
         saved: 'Pipeline salva',

@@ -4,7 +4,6 @@ export default {
     printers: '打印机',
     archives: '归档',
     queue: '打印队列',
-    pipelineRuns: '流水线运行',
     stats: '统计',
     profiles: '配置文件',
     maintenance: '维护',
@@ -1055,8 +1054,16 @@ export default {
     filter: {
       pipeline: '流水线',
       status: '状态',
+      target: '目标',
       all: '全部',
+      allPipelines: '全部流水线',
+      allStatus: '全部状态',
+      allTargets: '全部目标',
+      clear: '清除筛选',
+      noMatches: '没有运行匹配当前筛选条件。',
     },
+    totalCount_one: '{{n}} 次运行',
+    totalCount_other: '{{n}} 次运行',
     copies: '{{n}} 份',
     failedCount: '{{n}} 失败',
     copyN: '副本 {{n}}',
@@ -1068,7 +1075,13 @@ export default {
       cancelFailed: '取消失败',
       retryStarted: '已开始重试',
       retryFailed: '重试失败',
+      cleared: '已清除 {{n}} 次运行',
+      clearFailed: '清除失败',
     },
+    clearLog: '清除日志',
+    clearConfirmTitle: '清除日志？',
+    clearConfirmBody: '删除所有已完成、失败、已取消和部分失败的流水线运行？进行中的运行将保留。此操作无法撤销。',
+    clearConfirmAction: '清除',
     jobStatus: {
       pending: '等待中',
       awaiting_printer: '等待打印机',
@@ -1078,6 +1091,7 @@ export default {
       failed: '失败',
       cancelled: '已取消',
     },
+    cancelledByUser: '用户已取消',
   },
 
   // Queue page
@@ -1159,6 +1173,7 @@ export default {
       queue: '队列',
       history: '历史',
       timeline: '时间线',
+      pipelines: '流水线',
     },
     layout: {
       flatList: '列表',
@@ -2612,6 +2627,11 @@ export default {
           round_robin: '轮询 — 在合格打印机间循环',
           fill_one_first: '先填一台 — 将所有副本固定到一台打印机',
         },
+        fanoutShort: {
+          max_parallel: '并行',
+          round_robin: '轮询',
+          fill_one_first: '先填一台',
+        },
       },
       action: {
         save: '保存',
@@ -2624,7 +2644,21 @@ export default {
         process: '工艺',
         filament: '耗材',
         filamentN: '耗材 {{n}}',
+        filamentAll: '全部 {{n}} 个槽',
         bed: '热床',
+      },
+      group: {
+        profiles: '配置文件',
+        filaments: '耗材',
+      },
+      searchPlaceholder: '搜索流水线…',
+      filterTargetType: '按目标类型筛选',
+      filterTarget: '按目标筛选',
+      filter: {
+        all: '全部目标',
+        noTarget: '未设置目标',
+        count: '{{shown}} / {{total}}',
+        noMatches: '没有流水线匹配当前筛选条件。',
       },
       toast: {
         saved: '流水线已保存',

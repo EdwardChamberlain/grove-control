@@ -4,7 +4,6 @@ export default {
     printers: 'プリンター',
     archives: 'アーカイブ',
     queue: '印刷キュー',
-    pipelineRuns: 'パイプライン実行',
     stats: '統計',
     profiles: 'プロファイル',
     maintenance: 'メンテナンス',
@@ -1054,8 +1053,16 @@ export default {
     filter: {
       pipeline: 'パイプライン',
       status: 'ステータス',
+      target: '対象',
       all: 'すべて',
+      allPipelines: 'すべてのパイプライン',
+      allStatus: 'すべてのステータス',
+      allTargets: 'すべての対象',
+      clear: 'フィルターをクリア',
+      noMatches: '現在のフィルターに一致する実行はありません。',
     },
+    totalCount_one: '{{n}} 件の実行',
+    totalCount_other: '{{n}} 件の実行',
     copies: '{{n}} 部',
     failedCount: '{{n}} 失敗',
     copyN: 'コピー {{n}}',
@@ -1067,7 +1074,13 @@ export default {
       cancelFailed: 'キャンセルに失敗しました',
       retryStarted: '再試行を開始しました',
       retryFailed: '再試行に失敗しました',
+      cleared: '{{n}} 件の実行を削除しました',
+      clearFailed: '削除に失敗しました',
     },
+    clearLog: 'ログをクリア',
+    clearConfirmTitle: 'ログをクリアしますか？',
+    clearConfirmBody: '完了、失敗、キャンセル、部分的失敗のすべてのパイプライン実行を削除しますか？実行中のものは残ります。元に戻せません。',
+    clearConfirmAction: 'クリア',
     jobStatus: {
       pending: '保留中',
       awaiting_printer: 'プリンター待機中',
@@ -1077,6 +1090,7 @@ export default {
       failed: '失敗',
       cancelled: 'キャンセル',
     },
+    cancelledByUser: 'ユーザーによりキャンセル',
   },
 
   // Queue page
@@ -1158,6 +1172,7 @@ export default {
       queue: 'キュー',
       history: '履歴',
       timeline: 'タイムライン',
+      pipelines: 'パイプライン',
     },
     layout: {
       flatList: 'リスト',
@@ -2624,6 +2639,11 @@ export default {
           round_robin: 'ラウンドロビン — 適格なプリンター間で循環',
           fill_one_first: '1台ずつ埋める — すべてのコピーを1台に固定',
         },
+        fanoutShort: {
+          max_parallel: '並列',
+          round_robin: 'ラウンドロビン',
+          fill_one_first: '1台ずつ',
+        },
       },
       action: {
         save: '保存',
@@ -2636,7 +2656,21 @@ export default {
         process: 'プロセス',
         filament: 'フィラメント',
         filamentN: 'フィラメント {{n}}',
+        filamentAll: '{{n}} スロットすべて',
         bed: 'ベッド',
+      },
+      group: {
+        profiles: 'プロファイル',
+        filaments: 'フィラメント',
+      },
+      searchPlaceholder: 'パイプラインを検索…',
+      filterTargetType: '対象種別でフィルター',
+      filterTarget: '対象でフィルター',
+      filter: {
+        all: 'すべての対象',
+        noTarget: '対象未設定',
+        count: '{{shown}} / {{total}}',
+        noMatches: '現在のフィルターに一致するパイプラインはありません。',
       },
       toast: {
         saved: 'パイプラインを保存しました',

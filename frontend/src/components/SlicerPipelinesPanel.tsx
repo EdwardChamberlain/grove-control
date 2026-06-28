@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Check, Edit2, Loader2, Printer as PrinterIcon, Trash2, Workflow, X } from 'lucide-react';
+import { AlertTriangle, Check, Edit2, Loader2, Printer as PrinterIcon, Search, Trash2, Workflow, X } from 'lucide-react';
 import {
   api,
   type PipelineRun,
@@ -62,14 +62,25 @@ export function SlicerPipelinesPanel() {
       description,
       target_printer_id,
       target_kind,
+      target_model_class,
+      fanout_strategy,
     }: {
       id: number;
       name?: string;
       description?: string | null;
       target_printer_id?: number | null;
       target_kind?: 'specific_printer' | 'printer_class';
+      target_model_class?: string | null;
+      fanout_strategy?: 'max_parallel' | 'fill_one_first' | 'round_robin';
     }) =>
-      api.updateSlicerPipeline(id, { name, description, target_printer_id, target_kind }),
+      api.updateSlicerPipeline(id, {
+        name,
+        description,
+        target_printer_id,
+        target_kind,
+        target_model_class,
+        fanout_strategy,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['slicer-pipelines'] });
       showToast(t('settings.pipelines.toast.saved', 'Pipeline saved'), 'success');
@@ -90,7 +101,62 @@ export function SlicerPipelinesPanel() {
     },
   });
 
-  const pipelines = list?.pipelines ?? [];
+  // Panel-level search + filter (#1425 PR C polish). Filters by pipeline name
+  // (case-insensitive substring) and by target — the dropdown lists every
+  // distinct target in use across the saved pipelines so operators can jump
+  // straight to "show me everything for X1C #2" or "everything for the H2D
+  // class". State is local — list is small enough that re-rendering on every
+  // keystroke is fine.
+  const [searchTerm, setSearchTerm] = useState('');
+  // Encoded target filter value: '' = all, 'none' = no target set,
+  // 'p:<printer_id>' = specific printer, 'c:<model_class>' = printer class.
+  const [targetFilter, setTargetFilter] = useState<string>('');
+
+  const allPipelines = useMemo(() => list?.pipelines ?? [], [list?.pipelines]);
+
+  // Build the dropdown's options from the targets actually in use. Only
+  // printers / classes that at least one pipeline points at appear — keeps
+  // the dropdown short and meaningful for installs with many printers but
+  // few pipelines.
+  const targetOptions = useMemo(() => {
+    const printerIds = new Set<number>();
+    const classes = new Set<string>();
+    let anyWithoutTarget = false;
+    for (const p of allPipelines) {
+      if (p.target_kind === 'printer_class' && p.target_model_class) {
+        classes.add(p.target_model_class);
+      } else if (p.target_printer_id) {
+        printerIds.add(p.target_printer_id);
+      } else {
+        anyWithoutTarget = true;
+      }
+    }
+    return {
+      printers: (printers ?? []).filter((pr) => printerIds.has(pr.id)),
+      classes: Array.from(classes).sort(),
+      anyWithoutTarget,
+    };
+  }, [allPipelines, printers]);
+
+  const pipelines = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return allPipelines.filter((p) => {
+      if (term && !p.name.toLowerCase().includes(term)) return false;
+      if (targetFilter === 'none') {
+        const hasTarget = p.target_kind === 'printer_class'
+          ? !!p.target_model_class
+          : p.target_printer_id !== null;
+        if (hasTarget) return false;
+      } else if (targetFilter.startsWith('p:')) {
+        const wantId = parseInt(targetFilter.slice(2), 10);
+        if (p.target_kind === 'printer_class' || p.target_printer_id !== wantId) return false;
+      } else if (targetFilter.startsWith('c:')) {
+        const wantClass = targetFilter.slice(2);
+        if (p.target_kind !== 'printer_class' || p.target_model_class !== wantClass) return false;
+      }
+      return true;
+    });
+  }, [allPipelines, searchTerm, targetFilter]);
 
   return (
     <Card>
@@ -118,7 +184,65 @@ export function SlicerPipelinesPanel() {
             {t('settings.pipelines.loadError', 'Could not load pipelines.')}
           </div>
         )}
-        {!isLoading && !error && pipelines.length === 0 && (
+        {/* Search + target-type filter. Only render when there are pipelines
+            to filter; the empty-state hint reads better without controls. */}
+        {!isLoading && !error && allPipelines.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            <div className="relative flex-1 min-w-[12rem]">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-bambu-gray pointer-events-none" />
+              <input
+                type="search"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder={t('settings.pipelines.searchPlaceholder', 'Search pipelines…')}
+                aria-label={t('settings.pipelines.searchPlaceholder', 'Search pipelines…')}
+                className="w-full pl-7 pr-2 py-1 text-xs bg-bambu-dark border border-bambu-dark-tertiary rounded text-white"
+              />
+            </div>
+            <select
+              value={targetFilter}
+              onChange={(e) => setTargetFilter(e.target.value)}
+              aria-label={t('settings.pipelines.filterTarget', 'Filter by target')}
+              className="text-xs px-2 py-1 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white"
+            >
+              <option value="">
+                {t('settings.pipelines.filter.all', 'All targets')}
+              </option>
+              {targetOptions.printers.length > 0 && (
+                <optgroup label={t('settings.pipelines.field.targetKindSpecific', 'Specific printer')}>
+                  {targetOptions.printers.map((p) => (
+                    <option key={`p-${p.id}`} value={`p:${p.id}`}>
+                      {p.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {targetOptions.classes.length > 0 && (
+                <optgroup label={t('settings.pipelines.field.targetKindClass', 'Printer class')}>
+                  {targetOptions.classes.map((c) => (
+                    <option key={`c-${c}`} value={`c:${c}`}>
+                      {t('library.runWithPipeline.classTarget', 'Any {{model}}', { model: c })}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {targetOptions.anyWithoutTarget && (
+                <option value="none">
+                  {t('settings.pipelines.filter.noTarget', 'No target set')}
+                </option>
+              )}
+            </select>
+            {(searchTerm || targetFilter) && (
+              <span className="text-xs text-bambu-gray">
+                {t('settings.pipelines.filter.count', '{{shown}} / {{total}}', {
+                  shown: pipelines.length,
+                  total: allPipelines.length,
+                })}
+              </span>
+            )}
+          </div>
+        )}
+        {!isLoading && !error && allPipelines.length === 0 && (
           <div className="text-sm text-bambu-gray space-y-2">
             <p>{t('settings.pipelines.empty.title', 'No pipelines yet.')}</p>
             <p>
@@ -128,6 +252,11 @@ export function SlicerPipelinesPanel() {
               )}
             </p>
           </div>
+        )}
+        {!isLoading && !error && allPipelines.length > 0 && pipelines.length === 0 && (
+          <p className="text-sm text-bambu-gray">
+            {t('settings.pipelines.filter.noMatches', 'No pipelines match the current filters.')}
+          </p>
         )}
         {!isLoading && !error && pipelines.length > 0 && (
           <div className="space-y-2">
@@ -215,6 +344,19 @@ function PipelineRow({
   const printerName = resolveName(presets, 'printer', pipeline.printer_preset);
   const processName = resolveName(presets, 'process', pipeline.process_preset);
   const filamentResolutions = pipeline.filament_presets.map((f) => resolveName(presets, 'filament', f));
+  // Collapse identical filaments into a single "All N slots" line — most
+  // production pipelines load the same filament into every AMS slot, and
+  // listing the same line three times is just noise. Compares raw preset
+  // refs (source + id) rather than resolved names so the dedup is correct
+  // even when ``presets`` hasn't loaded yet.
+  const filamentsAllIdentical =
+    pipeline.filament_presets.length > 1 &&
+    pipeline.filament_presets.every(
+      (f) =>
+        f.source === pipeline.filament_presets[0].source &&
+        f.id === pipeline.filament_presets[0].id,
+    );
+
   const hasStaleRef =
     presets !== undefined &&
     (printerName === null || processName === null || filamentResolutions.some((n) => n === null));
@@ -381,7 +523,42 @@ function PipelineRow({
             </div>
           ) : (
             <>
-              <h4 className="text-sm font-medium text-white truncate">{pipeline.name}</h4>
+              {/* Header: name + inline target chip (PR C polish). The target
+                  context — specific printer name OR class+strategy — is the
+                  thing the operator most needs to read at a glance, so it
+                  rides up here next to the title instead of buried below. */}
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                <h4 className="text-sm font-medium text-white truncate">{pipeline.name}</h4>
+                <span
+                  className={`text-xs px-1.5 py-0.5 rounded inline-flex items-center gap-1 ${
+                    needsTarget
+                      ? 'bg-amber-500/15 text-amber-400'
+                      : 'bg-bambu-dark-tertiary text-bambu-gray'
+                  }`}
+                >
+                  <PrinterIcon className="w-3 h-3" />
+                  {needsTarget ? (
+                    t('settings.pipelines.noTargetHint', 'Set a target printer to run this')
+                  ) : isClassTargeting ? (
+                    <>
+                      {t('library.runWithPipeline.classTarget', 'Any {{model}}', {
+                        model: pipeline.target_model_class,
+                      })}
+                      {pipeline.fanout_strategy && (
+                        <span className="text-bambu-gray/60">
+                          {' · '}
+                          {t(
+                            `settings.pipelines.field.fanoutShort.${pipeline.fanout_strategy}`,
+                            pipeline.fanout_strategy,
+                          )}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    targetPrinter?.name ?? ''
+                  )}
+                </span>
+              </div>
               {pipeline.description && (
                 <p className="text-xs text-bambu-gray mt-0.5">{pipeline.description}</p>
               )}
@@ -430,60 +607,68 @@ function PipelineRow({
       </div>
 
       {!editing && (
-        <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1 text-xs">
-          <PresetLine
-            label={t('settings.pipelines.slot.printer', 'Printer')}
-            ref={pipeline.printer_preset}
-            name={printerName}
-          />
-          <PresetLine
-            label={t('settings.pipelines.slot.process', 'Process')}
-            ref={pipeline.process_preset}
-            name={processName}
-          />
-          {pipeline.filament_presets.map((f, i) => (
-            <PresetLine
-              key={i}
-              label={
-                pipeline.filament_presets.length > 1
-                  ? t('settings.pipelines.slot.filamentN', 'Filament {{n}}', { n: i + 1 })
-                  : t('settings.pipelines.slot.filament', 'Filament')
-              }
-              ref={f}
-              name={filamentResolutions[i]}
-            />
-          ))}
-          {pipeline.bed_type && (
-            <div className="text-bambu-gray">
-              <span className="font-medium text-bambu-gray/80">
-                {t('settings.pipelines.slot.bed', 'Bed')}:
-              </span>{' '}
-              <span className="text-white">{pipeline.bed_type}</span>
+        <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2 text-xs">
+          {/* Profiles group — printer / process / bed. These travel together
+              because they describe the slicer profile bundle that produces a
+              single gcode. The full preset name (including the BambuStudio
+              ``@BBL <model>`` suffix) is shown verbatim so the user can match
+              it 1:1 against what they see in the slicer. */}
+          <div className="space-y-0.5">
+            <div className="text-[10px] uppercase tracking-wide text-bambu-gray/60">
+              {t('settings.pipelines.group.profiles', 'Profiles')}
             </div>
-          )}
-          <div className="text-bambu-gray flex items-center gap-1">
-            <PrinterIcon className="w-3 h-3" />
-            <span className="font-medium text-bambu-gray/80">
-              {isClassTargeting
-                ? t('settings.pipelines.field.targetModelClass', 'Printer model')
-                : t('settings.pipelines.field.targetPrinter', 'Target printer')}
-              :
-            </span>{' '}
-            {isClassTargeting && pipeline.target_model_class ? (
-              <span className="text-white">
-                {pipeline.target_model_class}
-                {pipeline.fanout_strategy && (
-                  <span className="text-bambu-gray/60">
-                    {' '}· {t(`settings.pipelines.field.fanout.${pipeline.fanout_strategy}`, pipeline.fanout_strategy)}
-                  </span>
-                )}
-              </span>
-            ) : targetPrinter ? (
-              <span className="text-white">{targetPrinter.name}</span>
+            <PresetLine
+              label={t('settings.pipelines.slot.printer', 'Printer')}
+              ref={pipeline.printer_preset}
+              name={printerName}
+            />
+            <PresetLine
+              label={t('settings.pipelines.slot.process', 'Process')}
+              ref={pipeline.process_preset}
+              name={processName}
+            />
+            {pipeline.bed_type && (
+              <div className="text-bambu-gray">
+                <span className="font-medium text-bambu-gray/80">
+                  {t('settings.pipelines.slot.bed', 'Bed')}:
+                </span>{' '}
+                <span className="text-white">{pipeline.bed_type}</span>
+              </div>
+            )}
+          </div>
+          {/* Filaments group — one per AMS slot. When every slot is the same
+              filament (the common single-color production-batch case) we
+              collapse them into a single ``All 4 slots: PLA Basic`` line. */}
+          <div className="space-y-0.5">
+            <div className="text-[10px] uppercase tracking-wide text-bambu-gray/60">
+              {t('settings.pipelines.group.filaments', 'Filaments')}
+              {pipeline.filament_presets.length > 1 && (
+                <span className="text-bambu-gray/60 normal-case ml-1">
+                  ({pipeline.filament_presets.length})
+                </span>
+              )}
+            </div>
+            {filamentsAllIdentical ? (
+              <PresetLine
+                label={t('settings.pipelines.slot.filamentAll', 'All {{n}} slots', {
+                  n: pipeline.filament_presets.length,
+                })}
+                ref={pipeline.filament_presets[0]}
+                name={filamentResolutions[0]}
+              />
             ) : (
-              <span className="text-amber-400">
-                {t('settings.pipelines.noTargetHint', 'Set a target printer to run this')}
-              </span>
+              pipeline.filament_presets.map((f, i) => (
+                <PresetLine
+                  key={i}
+                  label={
+                    pipeline.filament_presets.length > 1
+                      ? t('settings.pipelines.slot.filamentN', 'Filament {{n}}', { n: i + 1 })
+                      : t('settings.pipelines.slot.filament', 'Filament')
+                  }
+                  ref={f}
+                  name={filamentResolutions[i]}
+                />
+              ))
             )}
           </div>
         </div>

@@ -4,7 +4,6 @@ export default {
     printers: 'Stampanti',
     archives: 'Archivi',
     queue: 'Coda di stampa',
-    pipelineRuns: 'Esecuzioni pipeline',
     stats: 'Statistiche',
     profiles: 'Profili',
     maintenance: 'Manutenzione',
@@ -1055,8 +1054,16 @@ export default {
     filter: {
       pipeline: 'Pipeline',
       status: 'Stato',
+      target: 'Destinazione',
       all: 'Tutte',
+      allPipelines: 'Tutte le pipeline',
+      allStatus: 'Tutti gli stati',
+      allTargets: 'Tutte le destinazioni',
+      clear: 'Pulisci filtri',
+      noMatches: 'Nessuna esecuzione corrisponde ai filtri attuali.',
     },
+    totalCount_one: '{{n}} esecuzione',
+    totalCount_other: '{{n}} esecuzioni',
     copies: '{{n}} copie',
     failedCount: '{{n}} fallite',
     copyN: 'Copia {{n}}',
@@ -1068,7 +1075,13 @@ export default {
       cancelFailed: 'Annullamento fallito',
       retryStarted: 'Ritentativo avviato',
       retryFailed: 'Ritentativo fallito',
+      cleared: '{{n}} esecuzioni eliminate',
+      clearFailed: 'Eliminazione fallita',
     },
+    clearLog: 'Cancella cronologia',
+    clearConfirmTitle: 'Cancellare la cronologia?',
+    clearConfirmBody: 'Eliminare tutte le esecuzioni di pipeline completate, fallite, annullate e con fallimento parziale? Le esecuzioni in corso sono conservate. Questa operazione non può essere annullata.',
+    clearConfirmAction: 'Cancella',
     jobStatus: {
       pending: 'in attesa',
       awaiting_printer: 'in attesa stampante',
@@ -1078,6 +1091,7 @@ export default {
       failed: 'fallita',
       cancelled: 'annullata',
     },
+    cancelledByUser: 'Annullato dall\'utente',
   },
 
   // Queue page
@@ -1159,6 +1173,7 @@ export default {
       queue: 'Coda',
       history: 'Cronologia',
       timeline: 'Linea temporale',
+      pipelines: 'Pipeline',
     },
     layout: {
       flatList: 'Elenco',
@@ -2612,6 +2627,11 @@ export default {
           round_robin: 'Round robin — alterna tra stampanti idonee',
           fill_one_first: 'Riempi una prima — assegna tutte le copie a una stampante',
         },
+        fanoutShort: {
+          max_parallel: 'parallelo',
+          round_robin: 'round robin',
+          fill_one_first: 'prima una',
+        },
       },
       action: {
         save: 'Salva',
@@ -2624,7 +2644,21 @@ export default {
         process: 'Processo',
         filament: 'Filamento',
         filamentN: 'Filamento {{n}}',
+        filamentAll: 'Tutti i {{n}} slot',
         bed: 'Piatto',
+      },
+      group: {
+        profiles: 'Profili',
+        filaments: 'Filamenti',
+      },
+      searchPlaceholder: 'Cerca pipeline…',
+      filterTargetType: 'Filtra per tipo di destinazione',
+      filterTarget: 'Filtra per destinazione',
+      filter: {
+        all: 'Tutte le destinazioni',
+        noTarget: 'Nessuna destinazione',
+        count: '{{shown}} / {{total}}',
+        noMatches: 'Nessuna pipeline corrisponde ai filtri attuali.',
       },
       toast: {
         saved: 'Pipeline salvata',

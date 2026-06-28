@@ -4,7 +4,6 @@ export default {
     printers: 'Imprimantes',
     archives: 'Archives',
     queue: 'File d\'attente d\'impression',
-    pipelineRuns: 'Exécutions de pipeline',
     stats: 'Statistiques',
     profiles: 'Profils',
     maintenance: 'Maintenance',
@@ -1055,8 +1054,16 @@ export default {
     filter: {
       pipeline: 'Pipeline',
       status: 'Statut',
+      target: 'Cible',
       all: 'Toutes',
+      allPipelines: 'Tous les pipelines',
+      allStatus: 'Tous les statuts',
+      allTargets: 'Toutes les cibles',
+      clear: 'Effacer les filtres',
+      noMatches: 'Aucune exécution ne correspond aux filtres actuels.',
     },
+    totalCount_one: '{{n}} exécution',
+    totalCount_other: '{{n}} exécutions',
     copies: '{{n}} copies',
     failedCount: '{{n}} échouées',
     copyN: 'Copie {{n}}',
@@ -1068,7 +1075,13 @@ export default {
       cancelFailed: 'Annulation échouée',
       retryStarted: 'Réessai démarré',
       retryFailed: 'Réessai échoué',
+      cleared: '{{n}} exécutions effacées',
+      clearFailed: 'Échec de l\'effacement',
     },
+    clearLog: 'Effacer le journal',
+    clearConfirmTitle: 'Effacer le journal ?',
+    clearConfirmBody: 'Supprimer toutes les exécutions de pipeline terminées, échouées, annulées et en échec partiel ? Les exécutions en cours sont conservées. Ceci ne peut pas être annulé.',
+    clearConfirmAction: 'Effacer',
     jobStatus: {
       pending: 'en attente',
       awaiting_printer: 'attente imprimante',
@@ -1078,6 +1091,7 @@ export default {
       failed: 'échouée',
       cancelled: 'annulée',
     },
+    cancelledByUser: 'Annulé par l\'utilisateur',
   },
 
   // Queue page
@@ -1159,6 +1173,7 @@ export default {
       queue: 'File',
       history: 'Historique',
       timeline: 'Chronologie',
+      pipelines: 'Exécutions',
     },
     layout: {
       flatList: 'Liste',
@@ -2613,6 +2628,11 @@ export default {
           round_robin: 'Round robin — alterner entre imprimantes éligibles',
           fill_one_first: 'Remplir une d\'abord — épingler toutes les copies à une imprimante',
         },
+        fanoutShort: {
+          max_parallel: 'parallèle',
+          round_robin: 'round robin',
+          fill_one_first: 'remplir une',
+        },
       },
       action: {
         save: 'Enregistrer',
@@ -2625,7 +2645,21 @@ export default {
         process: 'Processus',
         filament: 'Filament',
         filamentN: 'Filament {{n}}',
+        filamentAll: 'Tous les {{n}} emplacements',
         bed: 'Plateau',
+      },
+      group: {
+        profiles: 'Profils',
+        filaments: 'Filaments',
+      },
+      searchPlaceholder: 'Rechercher des pipelines…',
+      filterTargetType: 'Filtrer par type de cible',
+      filterTarget: 'Filtrer par cible',
+      filter: {
+        all: 'Toutes les cibles',
+        noTarget: 'Aucune cible',
+        count: '{{shown}} / {{total}}',
+        noMatches: 'Aucun pipeline ne correspond aux filtres actuels.',
       },
       toast: {
         saved: 'Pipeline enregistré',

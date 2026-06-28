@@ -4,7 +4,6 @@ export default {
     printers: '印表機',
     archives: '歸檔',
     queue: '列印佇列',
-    pipelineRuns: '管線執行',
     stats: '統計',
     profiles: '設定檔案',
     maintenance: '維護',
@@ -1055,8 +1054,16 @@ export default {
     filter: {
       pipeline: '管線',
       status: '狀態',
+      target: '目標',
       all: '全部',
+      allPipelines: '全部管線',
+      allStatus: '全部狀態',
+      allTargets: '全部目標',
+      clear: '清除篩選',
+      noMatches: '沒有執行符合目前的篩選條件。',
     },
+    totalCount_one: '{{n}} 次執行',
+    totalCount_other: '{{n}} 次執行',
     copies: '{{n}} 份',
     failedCount: '{{n}} 失敗',
     copyN: '副本 {{n}}',
@@ -1068,7 +1075,13 @@ export default {
       cancelFailed: '取消失敗',
       retryStarted: '已開始重試',
       retryFailed: '重試失敗',
+      cleared: '已清除 {{n}} 次執行',
+      clearFailed: '清除失敗',
     },
+    clearLog: '清除日誌',
+    clearConfirmTitle: '清除日誌？',
+    clearConfirmBody: '刪除所有已完成、失敗、已取消和部分失敗的管線執行？進行中的執行將保留。此操作無法復原。',
+    clearConfirmAction: '清除',
     jobStatus: {
       pending: '等待中',
       awaiting_printer: '等待印表機',
@@ -1078,6 +1091,7 @@ export default {
       failed: '失敗',
       cancelled: '已取消',
     },
+    cancelledByUser: '使用者已取消',
   },
 
   // Queue page
@@ -1159,6 +1173,7 @@ export default {
       queue: '佇列',
       history: '歷史',
       timeline: '時間軸',
+      pipelines: '管線',
     },
     layout: {
       flatList: '清單',
@@ -2612,6 +2627,11 @@ export default {
           round_robin: '輪替 — 在合格印表機間循環',
           fill_one_first: '先填一台 — 將所有副本固定到一台印表機',
         },
+        fanoutShort: {
+          max_parallel: '並行',
+          round_robin: '輪替',
+          fill_one_first: '先填一台',
+        },
       },
       action: {
         save: '儲存',
@@ -2624,7 +2644,21 @@ export default {
         process: '製程',
         filament: '耗材',
         filamentN: '耗材 {{n}}',
+        filamentAll: '全部 {{n}} 個槽',
         bed: '熱床',
+      },
+      group: {
+        profiles: '設定檔',
+        filaments: '耗材',
+      },
+      searchPlaceholder: '搜尋管線…',
+      filterTargetType: '依目標類型篩選',
+      filterTarget: '依目標篩選',
+      filter: {
+        all: '全部目標',
+        noTarget: '未設定目標',
+        count: '{{shown}} / {{total}}',
+        noMatches: '沒有管線符合目前的篩選條件。',
       },
       toast: {
         saved: '管線已儲存',

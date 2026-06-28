@@ -4,7 +4,6 @@ export default {
     printers: 'Printers',
     archives: 'Archives',
     queue: 'Print Queue',
-    pipelineRuns: 'Pipeline Runs',
     stats: 'Statistics',
     profiles: 'Profiles',
     maintenance: 'Maintenance',
@@ -1064,20 +1063,35 @@ export default {
     filter: {
       pipeline: 'Pipeline',
       status: 'Status',
+      target: 'Target',
       all: 'All',
+      allPipelines: 'All pipelines',
+      allStatus: 'All statuses',
+      allTargets: 'All targets',
+      clear: 'Clear filters',
+      noMatches: 'No runs match the current filters.',
     },
+    totalCount_one: '{{n}} run',
+    totalCount_other: '{{n}} runs',
     copies: '{{n}} copies',
     failedCount: '{{n}} failed',
     copyN: 'Copy {{n}}',
     retryFailed: 'Retry failed',
     retryOf: 'retry of #{{n}}',
     pagination: '{{start}}–{{end}} of {{total}}',
+    cancelledByUser: 'Cancelled by user',
     toast: {
       cancelled: 'Run cancelled',
       cancelFailed: 'Cancel failed',
       retryStarted: 'Retry started',
       retryFailed: 'Retry failed',
+      cleared: '{{n}} runs cleared',
+      clearFailed: 'Clear failed',
     },
+    clearLog: 'Clear log',
+    clearConfirmTitle: 'Clear log?',
+    clearConfirmBody: 'Delete every completed, failed, cancelled, and partial-failure pipeline run? In-flight runs are kept. This cannot be undone.',
+    clearConfirmAction: 'Clear',
     jobStatus: {
       pending: 'pending',
       awaiting_printer: 'awaiting printer',
@@ -1169,6 +1183,7 @@ export default {
       queue: 'Queue',
       history: 'History',
       timeline: 'Timeline',
+      pipelines: 'Pipelines',
     },
     // Layout toggle on the Queue tab — distinct from the sort dropdown
     // (those control order; these control whether items render as one flat
@@ -2647,6 +2662,14 @@ export default {
           round_robin: 'Round robin — cycle through eligible printers',
           fill_one_first: 'Fill one first — pin all copies to one printer',
         },
+        // Short labels for the inline target chip on each pipeline card.
+        // The verbose ones above explain the strategy in the editor; the
+        // card just needs a compact reminder of which one is in use.
+        fanoutShort: {
+          max_parallel: 'parallel',
+          round_robin: 'round robin',
+          fill_one_first: 'fill one first',
+        },
       },
       action: {
         save: 'Save',
@@ -2659,7 +2682,23 @@ export default {
         process: 'Process',
         filament: 'Filament',
         filamentN: 'Filament {{n}}',
+        filamentAll: 'All {{n}} slots',
         bed: 'Bed',
+      },
+      // PR C polish — grouped sections in the card body, plus the
+      // panel-level search + filter row.
+      group: {
+        profiles: 'Profiles',
+        filaments: 'Filaments',
+      },
+      searchPlaceholder: 'Search pipelines…',
+      filterTargetType: 'Filter by target type',
+      filterTarget: 'Filter by target',
+      filter: {
+        all: 'All targets',
+        noTarget: 'No target set',
+        count: '{{shown}} / {{total}}',
+        noMatches: 'No pipelines match the current filters.',
       },
       toast: {
         saved: 'Pipeline saved',

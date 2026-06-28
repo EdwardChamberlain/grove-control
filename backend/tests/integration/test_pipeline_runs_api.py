@@ -730,6 +730,173 @@ class TestPipelineC:
         assert body["parent_run_id"] == parent.id
 
 
+class TestPolishFollowUp:
+    """Polish-pass fixes: dashboard target filters, clear endpoint, and the
+    deleted-queue-entry → cancelled rollup behaviour."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_dashboard_filters_by_target_printer(
+        self,
+        async_client: AsyncClient,
+        pipeline_factory,
+        printer_factory,
+        library_file_factory,
+        db_session,
+    ):
+        from backend.app.models.pipeline_run import PipelineRun
+
+        printer_a = await printer_factory()
+        printer_b = await printer_factory()
+        pipe_a = await pipeline_factory(target_printer_id=printer_a.id)
+        pipe_b = await pipeline_factory(target_printer_id=printer_b.id)
+        src = await library_file_factory()
+        for pipe in (pipe_a, pipe_a, pipe_b):
+            db_session.add(
+                PipelineRun(
+                    pipeline_id=pipe["id"],
+                    source_library_file_id=src.id,
+                    copies=1,
+                    status="completed",
+                )
+            )
+        await db_session.commit()
+
+        resp = await async_client.get(f"/api/v1/pipeline-runs?target_printer_id={printer_a.id}")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 2
+        assert all(r["target_printer_id"] == printer_a.id for r in body["runs"])
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_dashboard_filters_by_target_model_class(
+        self,
+        async_client: AsyncClient,
+        pipeline_factory,
+        printer_factory,
+        library_file_factory,
+        db_session,
+    ):
+        from backend.app.models.pipeline_run import PipelineRun
+
+        await printer_factory(model="X1C")
+        await printer_factory(model="P1S")
+        # Two pipelines, one class-targeting X1C, one P1S.
+        pipe_x = await pipeline_factory()
+        await async_client.put(
+            f"/api/v1/slicer-pipelines/{pipe_x['id']}",
+            json={"target_kind": "printer_class", "target_printer_id": 0, "target_model_class": "X1C"},
+        )
+        pipe_p = await pipeline_factory()
+        await async_client.put(
+            f"/api/v1/slicer-pipelines/{pipe_p['id']}",
+            json={"target_kind": "printer_class", "target_printer_id": 0, "target_model_class": "P1S"},
+        )
+        src = await library_file_factory()
+        for pipe in (pipe_x, pipe_p, pipe_p):
+            db_session.add(
+                PipelineRun(
+                    pipeline_id=pipe["id"],
+                    source_library_file_id=src.id,
+                    copies=1,
+                    status="completed",
+                )
+            )
+        await db_session.commit()
+
+        resp = await async_client.get("/api/v1/pipeline-runs?target_model_class=P1S")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 2
+        assert all(r["target_model_class"] == "P1S" for r in body["runs"])
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_clear_endpoint_deletes_terminal_runs_only(
+        self,
+        async_client: AsyncClient,
+        pipeline_factory,
+        printer_factory,
+        library_file_factory,
+        db_session,
+    ):
+        from backend.app.models.pipeline_run import PipelineRun
+
+        printer = await printer_factory()
+        pipe = await pipeline_factory(target_printer_id=printer.id)
+        src = await library_file_factory()
+        for status in ("completed", "failed", "cancelled", "partial_failure", "dispatching", "in_progress"):
+            db_session.add(
+                PipelineRun(
+                    pipeline_id=pipe["id"],
+                    source_library_file_id=src.id,
+                    copies=1,
+                    status=status,
+                )
+            )
+        await db_session.commit()
+
+        resp = await async_client.post("/api/v1/pipeline-runs/clear")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["deleted"] == 4  # 4 terminal statuses cleared
+
+        # The in-flight rows survive.
+        survivors = (await async_client.get("/api/v1/pipeline-runs")).json()
+        assert survivors["total"] == 2
+        assert {r["status"] for r in survivors["runs"]} == {"dispatching", "in_progress"}
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_deleted_queue_entry_rolls_up_as_cancelled(
+        self,
+        async_client: AsyncClient,
+        pipeline_factory,
+        printer_factory,
+        library_file_factory,
+        db_session,
+    ):
+        """When the queue entry that a PipelineJob is linked to gets deleted
+        from the print-queue page, the job's live status should roll up to
+        ``cancelled`` so the run doesn't sit forever showing ``queued`` /
+        ``dispatching``."""
+        from backend.app.models.pipeline_run import PipelineJob, PipelineRun
+
+        printer = await printer_factory()
+        pipe = await pipeline_factory(target_printer_id=printer.id)
+        src = await library_file_factory()
+        # Simulate the state PR C leaves a successful dispatch in: run is
+        # 'dispatching' and the job has a queue_entry_id pointing at a
+        # PrintQueueItem that no longer exists.
+        run = PipelineRun(
+            pipeline_id=pipe["id"],
+            source_library_file_id=src.id,
+            copies=1,
+            status="dispatching",
+        )
+        db_session.add(run)
+        await db_session.flush()
+        db_session.add(
+            PipelineJob(
+                pipeline_run_id=run.id,
+                copy_index=0,
+                queue_entry_id=999999,  # Doesn't exist — simulates manual delete from queue.
+                assigned_printer_id=printer.id,
+                status="queued",
+            )
+        )
+        await db_session.commit()
+        await db_session.refresh(run)
+
+        resp = await async_client.get(f"/api/v1/pipeline-runs/{run.id}")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        # Job rolled up to cancelled because the queue entry is gone.
+        assert body["jobs"][0]["status"] == "cancelled"
+        # Run also rolls up — all jobs cancelled → run reads as cancelled.
+        assert body["status"] == "cancelled"
+
+
 class TestCancelTerminal:
     @pytest.mark.asyncio
     @pytest.mark.integration

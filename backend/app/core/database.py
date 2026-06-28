@@ -3345,7 +3345,7 @@ async def seed_default_groups():
 
     from sqlalchemy import select
 
-    from backend.app.core.permissions import DEFAULT_GROUPS
+    from backend.app.core.permissions import ALL_PERMISSIONS, DEFAULT_GROUPS
     from backend.app.models.group import Group
     from backend.app.models.user import User
 
@@ -3498,63 +3498,31 @@ async def seed_default_groups():
                 group.permissions = perms
         await session.commit()
 
-        # Backfill library:purge + archives:purge for the Administrators group
-        # on existing installs. Both permissions were added after Administrators
-        # was first seeded, so upgrading users miss them even though the default
-        # config (ALL_PERMISSIONS) includes them for fresh installs.
+        # Backfill: sync the Administrators system group to ALL_PERMISSIONS.
+        # Administrators' contract is full access to every feature — fresh
+        # installs get that via DEFAULT_GROUPS["Administrators"]["permissions"]
+        # = ALL_PERMISSIONS. Upgrading installs would otherwise stay frozen at
+        # whatever permission set existed when they were first seeded, so a
+        # newly-added Permission enum member silently leaves admins gated out
+        # of the feature it controls.
+        #
+        # Generalises the previous one-off admin backfills (library:purge,
+        # archives:purge, the OWN/ALL read-flag set + legacy read flags,
+        # orca_cloud:auth, printer_sensor_history:read, …): every current
+        # Permission enum value is appended to the admin group if missing.
+        # Additive only — never removes a permission an operator added by
+        # hand. Run AFTER the legacy-rename migration above so the renamed
+        # OWN/ALL variants land in the group before the sync sees them.
         result = await session.execute(select(Group).where(Group.name == "Administrators"))
         admin_group = result.scalar_one_or_none()
         if admin_group and admin_group.permissions is not None:
             perms = list(admin_group.permissions)
             added = False
-            for new_perm in ("library:purge", "archives:purge"):
+            for new_perm in ALL_PERMISSIONS:
                 if new_perm not in perms:
                     perms.append(new_perm)
                     added = True
-                    logger.info("Added %s to Administrators group (backfill)", new_perm)
-            if added:
-                admin_group.permissions = perms
-        await session.commit()
-
-        # Backfill the read flag set for the Administrators group on existing
-        # installs (maziggy/bambuddy-security #2). Two layers:
-        #
-        # (a) New OWN/ALL splits — `archives:read_own` etc. Fresh installs get
-        #     these via ALL_PERMISSIONS; upgrades need the explicit backfill
-        #     so admin's permission set matches a fresh install's.
-        #
-        # (b) Legacy `archives:read` / `library:read` / `queue:read`. The
-        #     frontend still gates download / preview UI on these LEGACY
-        #     strings (see ArchivesPage / FileManagerPage), so admin needs
-        #     them retained even though the new API uses the OWN/ALL split.
-        #     The PERMISSION_MIGRATION_ALL map deliberately doesn't rename
-        #     read flags for admin — this backfill ensures they're present
-        #     even if they were stripped by hand or by an older migration.
-        #
-        # Also includes orca_cloud:auth for parity with fresh-install
-        # behaviour (ALL_PERMISSIONS covers it; backfill makes sure an
-        # admin role that's been customised since seed still has it).
-        result = await session.execute(select(Group).where(Group.name == "Administrators"))
-        admin_group = result.scalar_one_or_none()
-        if admin_group and admin_group.permissions is not None:
-            perms = list(admin_group.permissions)
-            added = False
-            for new_perm in (
-                "archives:read",
-                "archives:read_own",
-                "archives:read_all",
-                "library:read",
-                "library:read_own",
-                "library:read_all",
-                "queue:read",
-                "queue:read_own",
-                "queue:read_all",
-                "orca_cloud:auth",
-            ):
-                if new_perm not in perms:
-                    perms.append(new_perm)
-                    added = True
-                    logger.info("Added %s to Administrators group (backfill)", new_perm)
+                    logger.info("Added %s to Administrators group (ALL_PERMISSIONS sync)", new_perm)
             if added:
                 admin_group.permissions = perms
         await session.commit()
@@ -3613,25 +3581,18 @@ async def seed_default_groups():
                 group.permissions = perms
         await session.commit()
 
-        # Backfill pipeline permissions (#1425). Pipelines were added after
-        # initial seeding, so existing groups need them appended:
-        #   - Administrators: all three (matches fresh-install ALL_PERMISSIONS)
+        # Backfill pipeline permissions (#1425) for non-admin groups.
+        # Administrators is handled by the ALL_PERMISSIONS sync above.
         #   - Operators: all three (matches fresh-install DEFAULT_GROUPS)
-        #   - Viewers + any group with library:read_own or settings:read:
+        #   - Any other group with library:read_own or settings:read:
         #     pipelines:read only
         result = await session.execute(select(Group))
         for group in result.scalars().all():
-            if not group.permissions:
+            if not group.permissions or group.name == "Administrators":
                 continue
             perms = list(group.permissions)
             changed = False
-            if group.name == "Administrators":
-                for new_perm in ("pipelines:read", "pipelines:write", "pipelines:run"):
-                    if new_perm not in perms:
-                        perms.append(new_perm)
-                        changed = True
-                        logger.info("Added %s to Administrators group (backfill)", new_perm)
-            elif group.name == "Operators":
+            if group.name == "Operators":
                 for new_perm in ("pipelines:read", "pipelines:write", "pipelines:run"):
                     if new_perm not in perms:
                         perms.append(new_perm)

@@ -6390,17 +6390,26 @@ export const api = {
     offset?: number;
     pipelineId?: number;
     status?: string;
+    targetPrinterId?: number;
+    targetModelClass?: string;
   } = {}) => {
     const search = new URLSearchParams();
     if (params.limit) search.set('limit', String(params.limit));
     if (params.offset) search.set('offset', String(params.offset));
     if (params.pipelineId) search.set('pipeline_id', String(params.pipelineId));
     if (params.status) search.set('status', params.status);
+    if (params.targetPrinterId) search.set('target_printer_id', String(params.targetPrinterId));
+    if (params.targetModelClass) search.set('target_model_class', params.targetModelClass);
     const q = search.toString();
     return request<PipelineRunListResponse>(
       `/pipeline-runs${q ? '?' + q : ''}`,
     );
   },
+  // Clear terminal pipeline runs (#1425 PR C polish). Deletes all runs in
+  // a terminal state (completed/failed/cancelled/partial_failure); in-flight
+  // runs are preserved.
+  clearTerminalPipelineRuns: () =>
+    request<{ deleted: number }>('/pipeline-runs/clear', { method: 'POST' }),
   getPipelineRun: (runId: number) =>
     request<PipelineRun>(`/pipeline-runs/${runId}`),
   cancelPipelineRun: (runId: number) =>

@@ -3,7 +3,6 @@ export default {
     printers: '프린터',
     archives: '아카이브',
     queue: '대기열',
-    pipelineRuns: '파이프라인 실행',
     stats: '통계',
     profiles: '프로필',
     maintenance: '유지보수',
@@ -1009,8 +1008,16 @@ export default {
     filter: {
       pipeline: '파이프라인',
       status: '상태',
+      target: '대상',
       all: '전체',
+      allPipelines: '모든 파이프라인',
+      allStatus: '모든 상태',
+      allTargets: '모든 대상',
+      clear: '필터 지우기',
+      noMatches: '현재 필터와 일치하는 실행이 없습니다.',
     },
+    totalCount_one: '{{n}}회 실행',
+    totalCount_other: '{{n}}회 실행',
     copies: '사본 {{n}}',
     failedCount: '실패 {{n}}',
     copyN: '사본 {{n}}',
@@ -1022,7 +1029,13 @@ export default {
       cancelFailed: '취소 실패',
       retryStarted: '재시도 시작됨',
       retryFailed: '재시도 실패',
+      cleared: '{{n}}회 실행 삭제됨',
+      clearFailed: '삭제 실패',
     },
+    clearLog: '로그 지우기',
+    clearConfirmTitle: '로그를 지울까요?',
+    clearConfirmBody: '완료, 실패, 취소, 부분 실패한 모든 파이프라인 실행을 삭제합니까? 진행 중인 실행은 유지됩니다. 되돌릴 수 없습니다.',
+    clearConfirmAction: '지우기',
     jobStatus: {
       pending: '대기 중',
       awaiting_printer: '프린터 대기 중',
@@ -1032,6 +1045,7 @@ export default {
       failed: '실패',
       cancelled: '취소됨',
     },
+    cancelledByUser: '사용자에 의해 취소됨',
   },
 
   queue: {
@@ -1101,6 +1115,7 @@ export default {
       queue: '큐',
       history: '기록',
       timeline: '타임라인',
+      pipelines: '파이프라인',
     },
     layout: {
       flatList: '목록',
@@ -2480,6 +2495,11 @@ export default {
           round_robin: '라운드 로빈 — 적격 프린터를 순환',
           fill_one_first: '하나 먼저 채우기 — 모든 사본을 한 프린터에 고정',
         },
+        fanoutShort: {
+          max_parallel: '병렬',
+          round_robin: '라운드 로빈',
+          fill_one_first: '하나 먼저',
+        },
       },
       action: {
         save: '저장',
@@ -2492,7 +2512,21 @@ export default {
         process: '프로세스',
         filament: '필라멘트',
         filamentN: '필라멘트 {{n}}',
+        filamentAll: '전체 {{n}} 슬롯',
         bed: '베드',
+      },
+      group: {
+        profiles: '프로필',
+        filaments: '필라멘트',
+      },
+      searchPlaceholder: '파이프라인 검색…',
+      filterTargetType: '대상 유형으로 필터',
+      filterTarget: '대상으로 필터',
+      filter: {
+        all: '모든 대상',
+        noTarget: '대상 미설정',
+        count: '{{shown}} / {{total}}',
+        noMatches: '현재 필터와 일치하는 파이프라인이 없습니다.',
       },
       toast: {
         saved: '파이프라인이 저장되었습니다',
