@@ -2243,7 +2243,7 @@ function SinglePrinterCockpit({
             <img
               src="/img/camera_placeholder.png"
               alt=""
-              className="absolute inset-0 h-full w-full object-cover opacity-70"
+              className="absolute inset-0 h-full w-full object-cover"
             />
             <div
               className="absolute inset-0"
