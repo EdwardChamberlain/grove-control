@@ -888,7 +888,7 @@ async def apply_update(
             "is_windows_installer": True,
             "message": (
                 "Windows installations are updated by re-running the installer. "
-                "Download the latest installer from the Bambuddy releases page."
+                "Download the latest installer from the Grove Control releases page."
             ),
         }
 
