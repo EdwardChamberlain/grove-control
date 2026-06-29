@@ -11,6 +11,8 @@ import { api, supportApi, pendingUploadsApi, type Permission } from '../api/clie
 import { getIconByName } from './IconPicker';
 import { useIsSidebarCompact } from '../hooks/useIsSidebarCompact';
 import { useColorCatalogVersion } from '../hooks/useColorCatalogVersion';
+import { useUnknownTagPrompt } from '../hooks/useUnknownTagPrompt';
+import { UnknownSpoolModal } from './UnknownSpoolModal';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { Card, CardHeader, CardContent } from './Card';
@@ -111,6 +113,10 @@ export function Layout() {
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 
+  // Unknown-spool prompt — surfaces a confirmation modal when the AMS reports a
+  // tag with no inventory match (only when `auto_add_unknown_rfid` is off).
+  const unknownSpool = useUnknownTagPrompt();
+
   // Fetch default sidebar order via a public endpoint (no settings:read needed)
   const { data: defaultSidebarData } = useQuery({
     queryKey: ['default-sidebar-order'],
@@ -150,6 +156,14 @@ export function Layout() {
     }
   }, [defaultSidebarData?.default_sidebar_order, setSidebarOrder, user, authEnabled]);
 
+  // Check advanced auth status — the notifications nav item is gated on it
+  // (rendered only when authEnabled && advanced_auth_enabled && user_notifications_enabled).
+  const { data: advancedAuthStatus } = useQuery({
+    queryKey: ['advancedAuthStatus'],
+    queryFn: api.getAdvancedAuthStatus,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    enabled: authEnabled,
+  });
   const { data: updateCheck } = useQuery({
     queryKey: ['updateCheck'],
     queryFn: api.checkForUpdates,
@@ -259,23 +273,40 @@ export function Layout() {
     const result: string[] = [];
     const seen = new Set<string>();
 
-    // Map nav item IDs to the permission required to see them
-    const navPermissions: Record<string, Permission> = {
-      archives: 'archives:read',
-      queue: 'queue:read',
+    // Map nav item IDs to the permission(s) required to see them. Resources
+    // that ship in three tiers (legacy `*:read` + granular `*:read_own` /
+    // `*:read_all`) list all three: the default Operators group is seeded
+    // with `_own` only, so gating on the legacy alone hides the entry from
+    // every non-admin user even though the underlying API accepts their
+    // request (#1755).
+    const navPermissions: Record<string, Permission | Permission[]> = {
+      archives: ['archives:read', 'archives:read_own', 'archives:read_all'],
+      queue: ['queue:read', 'queue:read_own', 'queue:read_all'],
       stats: 'stats:read',
       profiles: 'kprofiles:read',
       maintenance: 'maintenance:read',
       projects: 'projects:read',
       inventory: 'inventory:read',
-      files: 'library:read',
+      files: ['library:read', 'library:read_own', 'library:read_all'],
       makerworld: 'makerworld:view',
       settings: 'settings:read',
     };
 
     const isHidden = (id: string) => {
+      // User-toggled hide (#1673) wins first — cheapest check, explicit intent.
       if (hiddenSystemItemIds.includes(id)) return true;
-      if (authEnabled && id in navPermissions && !hasPermission(navPermissions[id])) return true;
+      // Permission gate accepts Permission | Permission[] so resources with
+      // granular `*:read_own` / `*:read_all` tiers (default Operators group)
+      // don't get hidden from users who only hold the granular variant (#1755).
+      if (authEnabled && id in navPermissions) {
+        const required = navPermissions[id];
+        const granted = Array.isArray(required)
+          ? required.some((p) => hasPermission(p))
+          : hasPermission(required);
+        if (!granted) return true;
+      }
+      // notifications nav item also requires advanced auth to be enabled and user_notifications_enabled setting
+      if (id === 'notifications' && (!authEnabled || !advancedAuthStatus?.advanced_auth_enabled || (settings?.user_notifications_enabled === false))) return true;
       return false;
     };
 
@@ -893,6 +924,13 @@ export function Layout() {
         )}
         <Outlet />
       </main>
+
+      <UnknownSpoolModal
+        prompt={unknownSpool.prompt}
+        isPending={unknownSpool.isPending}
+        onConfirm={unknownSpool.confirm}
+        onCancel={unknownSpool.cancel}
+      />
 
       {/* Keyboard Shortcuts Modal */}
       {showShortcuts && (

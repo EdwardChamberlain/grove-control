@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
 
+from backend.app.services.hms_actions import HMSAction, get_actions_for_error_code
+
 logger = logging.getLogger(__name__)
 
 # AMS module name prefixes used in get_version responses.
@@ -29,6 +31,23 @@ logger = logging.getLogger(__name__)
 #   "n3f/<id>"  – AMS 2 Pro (H2D Pro and similar)
 #   "n3s/<id>"  – AMS HT (H2D Pro and similar; IDs typically start at 128)
 _AMS_MODULE_PREFIXES = ("ams/", "n3f/", "n3s/")
+
+
+def parse_ams_filament_backup_from_cfg(cfg_raw: object) -> bool | None:
+    """Extract AMS Filament Backup state from a Bambu push_status ``print.cfg`` value.
+
+    OrcaSlicer reads bit 18 of the hex string via
+    ``get_flag_bits(cfg, 18)`` (DeviceManager.cpp:4961). Old-protocol families
+    (A1 / A1 Mini) omit ``cfg`` entirely; this returns ``None`` for any input
+    that doesn't yield a clean integer so downstream consumers preserve today's
+    behaviour rather than treating "absent" as "OFF".
+    """
+    if not isinstance(cfg_raw, str) or not cfg_raw:
+        return None
+    try:
+        return bool((int(cfg_raw, 16) >> 18) & 1)
+    except ValueError:
+        return None
 
 
 def apply_tray_exist_bits(
@@ -152,6 +171,22 @@ class HMSError:
     module: int
     severity: int  # 1=fatal, 2=serious, 3=common, 4=info
     message: str = ""
+    # User-facing remediation actions from the bundled HMS catalog (e.g. "RESUME_PRINTING",
+    # "CHECK_ASSISTANT"). Defaults to an empty list rather than None so the field always
+    # satisfies HMSErrorResponse.actions: list[str] — a future code path that builds an
+    # HMSError without explicitly passing actions can't silently land None on the schema
+    # boundary and raise ValidationError at routes/printers.py response time.
+    actions: list[str] = field(default_factory=list)
+    # The `subtask_id` snapshotted from PrinterState when this error surfaced; Bambu's
+    # HMS-aware commands echo it back as `job_id`. None for idle errors with no job.
+    job_id: str | None = None
+    # Canonical hex identifier for the firmware's `err` matching: 16 chars for the
+    # 64-bit `hms[]` array path (`f"{attr:08X}{code:08X}"`), 8 chars for the
+    # 32-bit `print_error` path. The frontend echoes this back to
+    # execute_hms_action; the truncated 8-char short code that `_parse_status`
+    # used to send caused the firmware to silently reject HMS commands on H2C
+    # (#1830) and on `hms[]`-sourced faults generally.
+    full_code: str = ""
 
 
 # HMS short codes the firmware emits during normal user-cancel sequences.
@@ -330,6 +365,11 @@ class PrinterState:
     # Developer LAN mode: parsed from MQTT "fun" field bit 0x20000000
     # True = dev mode ON (no encryption), False = dev mode OFF (encryption required), None = unknown
     developer_mode: bool | None = None
+    # AMS Filament Backup: bit 18 of top-level print.cfg hex on new-protocol Bambu
+    # printers (H/X/P/H2 families). True=ON, False=OFF, None=unknown (e.g. A1 family
+    # which uses the old protocol path; field not yet found). Consumers must treat
+    # None as "no opinion" — preserving today's behaviour, NOT as "disabled".
+    ams_filament_backup: bool | None = None
 
 
 # Stage name mapping from BambuStudio DeviceManager.cpp
@@ -474,6 +514,11 @@ class BambuMQTTClient:
         # Per-AMS previous dry_time, used to detect the falling edge above.
         # Seeded lazily as we observe each AMS unit.
         self._previous_dry_times: dict[int, int] = {}
+        # Per-AMS active-cycle target params (filament + temp) we sent on the
+        # last start. Bambu does not echo these back in the per-tick AMS push
+        # — only the dry_time countdown — so we cache what we sent to drive
+        # the UI badge. Cleared on stop or on the dry_time falling edge to 0.
+        self._drying_targets: dict[int, dict[str, object]] = {}
 
         self.state = PrinterState()
         self._client: mqtt.Client | None = None
@@ -653,7 +698,7 @@ class BambuMQTTClient:
         #
         # Two routing paths:
         #
-        # Async-context callers (background_dispatch.py:993 — dispatch deadline)
+        # Async-context callers (queue dispatch deadline)
         #   → full client teardown + fresh client_id. Wipes paho's client-side
         #     QoS 1 queue, which is exactly the #1136 reproducer: an unacked
         #     `project_file` from the broken session would otherwise replay on
@@ -1017,6 +1062,33 @@ class BambuMQTTClient:
                     f"[{self.serial_number}] Received gcode_state: {print_data.get('gcode_state')}, "
                     f"gcode_file: {print_data.get('gcode_file')}, subtask_name: {print_data.get('subtask_name')}"
                 )
+
+            # AMS Filament Backup state lives in bit 18 of top-level print.cfg on
+            # new-protocol printers. Verified against OrcaSlicer's
+            # DeviceManager.cpp:4961 SetAutoRefillEnabled(get_flag_bits(cfg, 18))
+            # and live H2D ON/OFF capture 2026-06-20.
+            #
+            # Hold-timer guard: when the user just toggled via the badge, the
+            # next 1-2 push_status frames may still carry the printer's OLD cfg
+            # for ~3 s before the firmware reflects the change. Without this
+            # gate the UI would flicker ON→OFF→ON. Same pattern xcam uses.
+            new_backup = parse_ams_filament_backup_from_cfg(print_data.get("cfg"))
+            if new_backup is not None and new_backup != self.state.ams_filament_backup:
+                hold_start = self._xcam_hold_start.get("print_option_auto_switch_filament")
+                if hold_start is not None and (time.time() - hold_start) <= self._xcam_hold_time:
+                    logger.debug(
+                        "[%s] AMS Filament Backup push ignored (hold active for %.1fs)",
+                        self.serial_number,
+                        time.time() - hold_start,
+                    )
+                else:
+                    logger.info(
+                        "[%s] AMS Filament Backup: %s",
+                        self.serial_number,
+                        "ON" if new_backup else "OFF",
+                    )
+                    self.state.ams_filament_backup = new_backup
+                    self._xcam_hold_start.pop("print_option_auto_switch_filament", None)
 
             # Detect dual-nozzle BEFORE processing AMS data (tray_now disambiguation needs it)
             # device.extruder.info with >= 2 entries only exists on dual-nozzle printers (H2D, H2D Pro)
@@ -1717,35 +1789,55 @@ class BambuMQTTClient:
                                 self.state.tray_now = parsed_tray_now
                 elif not self._is_dual_nozzle and 0 <= parsed_tray_now <= 3:
                     # Single-nozzle printer with tray_now in 0-3 range.
-                    # P2S (and possibly other models) with multiple AMS units sends LOCAL slot IDs
-                    # in tray_now, not global tray IDs (#420). Use the MQTT mapping field
-                    # (snow-encoded) to resolve the correct AMS unit.
-                    ams_exist_raw = ams_data.get("ams_exist_bits", "0")
-                    try:
-                        ams_exist = int(ams_exist_raw, 16) if isinstance(ams_exist_raw, str) else int(ams_exist_raw)
-                    except (ValueError, TypeError):
-                        ams_exist = 0
-                    num_ams = bin(ams_exist).count("1")
-
-                    if num_ams > 1:
-                        # Multiple AMS on single-nozzle — tray_now is likely a local slot ID.
-                        # Cross-reference with MQTT mapping field to find the correct AMS unit.
-                        mapping_raw = self.state.raw_data.get("mapping")
-                        resolved = self._resolve_local_slot_from_mapping(parsed_tray_now, mapping_raw)
-                        if resolved is not None:
-                            if resolved != parsed_tray_now:
-                                logger.debug(
-                                    f"[{self.serial_number}] Multi-AMS tray_now: "
-                                    f"local slot {parsed_tray_now} -> global ID {resolved} (from mapping)"
-                                )
-                            self.state.tray_now = resolved
-                        else:
-                            # No mapping available (not printing, or ambiguous) — use as-is.
-                            # This matches the old behavior and is correct for AMS 0.
-                            self.state.tray_now = parsed_tray_now
+                    # #1822: H2S firmware reports tray_now as the AMS's idle
+                    # slot (typically 0) when the active feed is actually the
+                    # external spool. X1C / P1S / A1 correctly report 254 in
+                    # that case; H2S does not. When the slicer-captured
+                    # ams_mapping is all-external (every entry == -1), the
+                    # print can only be feeding from the external spool, so
+                    # promote tray_now to 254. Mixed (e.g. [5, -1]) and
+                    # AMS-only mappings are NOT overridden — there's no
+                    # evidence the firmware misreports in those cases. Prints
+                    # started without a captured mapping (printer-screen start,
+                    # or before Bambuddy connected) fall through unchanged.
+                    captured = self._captured_ams_mapping
+                    if captured and all(s == -1 for s in captured):
+                        if self.state.tray_now != 254:
+                            logger.debug(
+                                f"[{self.serial_number}] tray_now external-spool override (#1822): "
+                                f"slot {parsed_tray_now} -> 254 (ams_mapping={captured})"
+                            )
+                        self.state.tray_now = 254
                     else:
-                        # Single AMS — local slot 0-3 equals global ID
-                        self.state.tray_now = parsed_tray_now
+                        # P2S (and possibly other models) with multiple AMS units sends LOCAL slot IDs
+                        # in tray_now, not global tray IDs (#420). Use the MQTT mapping field
+                        # (snow-encoded) to resolve the correct AMS unit.
+                        ams_exist_raw = ams_data.get("ams_exist_bits", "0")
+                        try:
+                            ams_exist = int(ams_exist_raw, 16) if isinstance(ams_exist_raw, str) else int(ams_exist_raw)
+                        except (ValueError, TypeError):
+                            ams_exist = 0
+                        num_ams = bin(ams_exist).count("1")
+
+                        if num_ams > 1:
+                            # Multiple AMS on single-nozzle — tray_now is likely a local slot ID.
+                            # Cross-reference with MQTT mapping field to find the correct AMS unit.
+                            mapping_raw = self.state.raw_data.get("mapping")
+                            resolved = self._resolve_local_slot_from_mapping(parsed_tray_now, mapping_raw)
+                            if resolved is not None:
+                                if resolved != parsed_tray_now:
+                                    logger.debug(
+                                        f"[{self.serial_number}] Multi-AMS tray_now: "
+                                        f"local slot {parsed_tray_now} -> global ID {resolved} (from mapping)"
+                                    )
+                                self.state.tray_now = resolved
+                            else:
+                                # No mapping available (not printing, or ambiguous) — use as-is.
+                                # This matches the old behavior and is correct for AMS 0.
+                                self.state.tray_now = parsed_tray_now
+                        else:
+                            # Single AMS — local slot 0-3 equals global ID
+                            self.state.tray_now = parsed_tray_now
                 else:
                     # tray_now > 3 means it's already a global ID, or 255 means unloaded
                     # Note: Do NOT clear pending_tray_target on tray_now=255 here.
@@ -1987,38 +2079,40 @@ class BambuMQTTClient:
 
         # Detect AMS drying-complete falling edge per-unit (#1349). When an
         # AMS's `dry_time` transitions from >0 to 0 the cycle just finished
-        # — fire the callback so smart-plug auto-off-after-drying can run.
-        # Works identically for queue-triggered, ambient, and manual drying
-        # because we observe the firmware-reported state, not our own intent.
-        if self.on_drying_complete:
-            for ams_unit in merged_ams:
-                try:
-                    ams_id = int(ams_unit.get("id", -1))
-                except (TypeError, ValueError):
-                    continue
-                if ams_id < 0:
-                    continue
-                # Only evaluate the edge when this update carries an explicit
-                # dry_time. An absent / unparseable value is NOT zero — treating
-                # it as 0 lets a tray-only partial fake a drying-complete edge
-                # (#1462). Skip without touching the remembered value so the
-                # next update that DOES carry dry_time sees the true previous.
-                raw_dry_time = ams_unit.get("dry_time")
-                if raw_dry_time is None:
-                    continue
-                try:
-                    current = int(raw_dry_time)
-                except (TypeError, ValueError):
-                    continue
-                previous = self._previous_dry_times.get(ams_id, 0)
-                self._previous_dry_times[ams_id] = current
-                if previous > 0 and current == 0:
-                    logger.info(
-                        "[%s] AMS %d drying complete (dry_time %d → 0)",
-                        self.serial_number,
-                        ams_id,
-                        previous,
-                    )
+        # — fire the callback so smart-plug auto-off-after-drying can run,
+        # and drop our cached target-cycle params so the badge stops claiming
+        # an active cycle. Works identically for queue-triggered, ambient,
+        # and manual drying because we observe the firmware-reported state.
+        for ams_unit in merged_ams:
+            try:
+                ams_id = int(ams_unit.get("id", -1))
+            except (TypeError, ValueError):
+                continue
+            if ams_id < 0:
+                continue
+            # Only evaluate the edge when this update carries an explicit
+            # dry_time. An absent / unparseable value is NOT zero — treating
+            # it as 0 lets a tray-only partial fake a drying-complete edge
+            # (#1462). Skip without touching the remembered value so the
+            # next update that DOES carry dry_time sees the true previous.
+            raw_dry_time = ams_unit.get("dry_time")
+            if raw_dry_time is None:
+                continue
+            try:
+                current = int(raw_dry_time)
+            except (TypeError, ValueError):
+                continue
+            previous = self._previous_dry_times.get(ams_id, 0)
+            self._previous_dry_times[ams_id] = current
+            if previous > 0 and current == 0:
+                logger.info(
+                    "[%s] AMS %d drying complete (dry_time %d → 0)",
+                    self.serial_number,
+                    ams_id,
+                    previous,
+                )
+                self._drying_targets.pop(ams_id, None)
+                if self.on_drying_complete:
                     self.on_drying_complete(ams_id)
 
         # Create a hash of relevant AMS data to detect changes
@@ -2084,7 +2178,14 @@ class BambuMQTTClient:
             if new_layer > old_layer and self.on_layer_change:
                 self.on_layer_change(new_layer)
         if "total_layer_num" in data:
-            self.state.total_layers = int(data["total_layer_num"])
+            # Some firmware (P1S observed) resets `total_layer_num` to 0 at
+            # print end — same shape as the `layer_num` reset guarded above.
+            # Preserve the last known good value so the usage-tracker split
+            # path (#1771) has a denominator that survives the reset frame.
+            # Explicit reset to 0 happens on print start (`_handle_print_start`).
+            new_total = int(data["total_layer_num"])
+            if new_total > 0:
+                self.state.total_layers = new_total
 
         # Fan speeds (MQTT sends as string "0"-"15" representing speed levels, or percentage)
         # Convert to 0-100 percentage for display
@@ -2646,12 +2747,24 @@ class BambuMQTTClient:
                         short_code = f"{(attr >> 16) & 0xFFFF:04X}_{code & 0xFFFF:04X}"
                         if short_code in _HMS_USER_ACTION_CODES:
                             continue
+                        # Catalog has both 8-char keys (base class) and 16-char keys
+                        # (specific variants). The full 16-char identifier preserves
+                        # the 32 bits of `attr_low` + `code_high` that the short_code
+                        # discards — that's the firmware's matching key, so try it
+                        # first and fall back to the short form.
+                        full_code = f"{attr:08X}{code:08X}"
+                        actions = get_actions_for_error_code(self.serial_number[:3], full_code)
+                        if not actions:
+                            actions = get_actions_for_error_code(self.serial_number[:3], short_code.replace("_", ""))
                         self.state.hms_errors.append(
                             HMSError(
                                 code=f"0x{code:x}" if code else "0x0",
                                 attr=attr,
                                 module=module,
                                 severity=severity if severity > 0 else 2,
+                                actions=actions,
+                                job_id=self.state.subtask_id,
+                                full_code=full_code,
                             )
                         )
 
@@ -2697,12 +2810,35 @@ class BambuMQTTClient:
                             existing_short_codes.add(f"{e_module:04X}_{e_error:04X}")
 
                         if short_code not in existing_short_codes:
+                            # Bambu's HMS catalog keys by 3-letter device code (the SN
+                            # prefix) and a 16-char short error code without the
+                            # underscore separator we store internally.
+                            actions = get_actions_for_error_code(self.serial_number[:3], short_code.replace("_", ""))
+                            # Bambu pushes the current job as `subtask_id` on the
+                            # state stream; the HMS-action commands echo it back as
+                            # `job_id`. The error payload itself doesn't carry the
+                            # id, so snapshot it from the live state at parse time
+                            # and freeze it on the HMSError so subsequent
+                            # job changes don't invalidate the action.
+                            job_id = self.state.subtask_id
+                            logger.debug(
+                                "[%s, %s] HMS available actions: %s (job_id=%s)",
+                                self.serial_number[:3],
+                                short_code.replace("_", ""),
+                                actions,
+                                job_id,
+                            )
                             self.state.hms_errors.append(
                                 HMSError(
                                     code=f"0x{error:x}",
                                     attr=print_error,  # Store full value for display
                                     module=module >> 8,  # High byte of module (e.g., 0x05)
                                     severity=3,  # Warning level for print_error
+                                    actions=actions,
+                                    job_id=job_id,
+                                    # print_error is already 32-bit — `f"{print_error:08X}"`
+                                    # is the firmware's matching key with no truncation.
+                                    full_code=f"{print_error:08X}",
                                 )
                             )
 
@@ -3071,6 +3207,12 @@ class BambuMQTTClient:
             self.state.hms_errors = []
             # Reset layer tracking for new print (needed for layer-based timelapse)
             self.state.layer_num = 0
+            # Reset total_layers so the previous print's value can't bleed into
+            # this print's usage-tracker split before the new push_status arrives
+            # with the slicer's total (#1771 follow-on to the preservation guard
+            # above at line ~2135 — the guard now ignores firmware-reset 0s, so
+            # the explicit reset has to happen here instead).
+            self.state.total_layers = 0
             # Reset completion tracking for new print
             self._was_running = True
             self._completion_triggered = False
@@ -3439,6 +3581,7 @@ class BambuMQTTClient:
         timelapse: bool = False,
         use_ams: bool = True,
         nozzle_offset_cali: bool = False,
+        nozzle_mapping: str | None = None,
     ):
         """Start a print job on the printer.
 
@@ -3457,6 +3600,13 @@ class BambuMQTTClient:
             use_ams: Use AMS for automatic filament changes
             nozzle_offset_cali: Run nozzle offset calibration before print
                 (dual-nozzle printers only — silently ignored on single-nozzle).
+            nozzle_mapping: Opaque JSON string captured from BambuStudio's
+                project_file for H2C rack-swap (O1C2) (#1780). When non-null
+                AND the printer is dual-nozzle, parsed and injected as the
+                `nozzle_mapping` array on the dispatched project_file so the
+                firmware honours the user's slicer pick instead of falling
+                back to "last matching nozzle" auto-pick. Silently ignored
+                on single-nozzle printers.
         """
         if self._client and self.state.connected:
             # Bambu print command format — matches Bambu Studio's format.
@@ -3613,6 +3763,27 @@ class BambuMQTTClient:
             if ams_mapping is not None:
                 command["print"]["ams_mapping"] = flat_ams_mapping
                 command["print"]["ams_mapping2"] = ams_mapping2
+
+            # H2C dual-nozzle-rack slicer-pick preservation (#1780).
+            # `nozzle_mapping` carries per-filament physical nozzle position
+            # IDs (`list[int]`), JSON-string-encoded when it leaves the queue
+            # item; parse here so the wire ships an array, matching
+            # BambuStudio's project_file shape. Gate by `is_dual_nozzle`
+            # defensively — single-nozzle firmwares would ignore the field
+            # but we err on the side of not emitting unrecognised fields. A
+            # parse failure is logged but never blocks the dispatch — the
+            # firmware will fall back to its auto-pick path, which is the
+            # pre-fix behaviour.
+            if is_dual_nozzle and nozzle_mapping:
+                try:
+                    command["print"]["nozzle_mapping"] = json.loads(nozzle_mapping)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "[%s] Invalid nozzle_mapping JSON on dispatch, omitting from "
+                        "project_file (firmware will auto-pick): %r",
+                        self.serial_number,
+                        nozzle_mapping,
+                    )
 
             logger.info("[%s] Sending print command: %s", self.serial_number, json.dumps(command))
             self._client.publish(self.topic_publish, json.dumps(command), qos=1)
@@ -3781,8 +3952,18 @@ class BambuMQTTClient:
         # Update local state immediately
         if option_name == "auto_recovery":
             self.state.print_options.auto_recovery_step_loss = enabled
+        elif option_name == "auto_switch_filament":
+            self.state.ams_filament_backup = enabled
 
         return True
+
+    def set_ams_filament_backup(self, enabled: bool) -> bool:
+        """Toggle AMS Filament Backup (a.k.a. auto-switch / auto-refill).
+
+        Mirrors BambuStudio's "AMS Filament Backup" checkbox. Verified payload
+        shape from H2D capture 2026-06-20.
+        """
+        return self._set_print_option("auto_switch_filament", enabled)
 
     def start_calibration(
         self,
@@ -3971,6 +4152,15 @@ class BambuMQTTClient:
             self.serial_number,
             wire_json,
         )
+        # Track the active-cycle target so the badge can show "PETG @ 65°C"
+        # while drying. Bambu only echoes dry_time on subsequent pushes.
+        if mode == 1:
+            self._drying_targets[ams_id] = {
+                "filament": filament or "",
+                "temp": int(temp),
+            }
+        else:
+            self._drying_targets.pop(ams_id, None)
         return True
 
     def _handle_kprofile_response(self, data: dict):
@@ -5240,4 +5430,219 @@ class BambuMQTTClient:
         pushall = {"pushing": {"command": "pushall", "sequence_id": "0"}}
         self._client.publish(self.topic_publish, json.dumps(pushall), qos=1)
         logger.info("[%s] Set liveview %s", self.serial_number, "enabled" if enable else "disabled")
+        return True
+
+    def execute_hms_action(self, print_error: str, action: str, job_id: str | None = None) -> bool:
+        """Dispatch the user's choice from the HMS-error modal as a printer command.
+
+        Args:
+            print_error: Canonical hex identifier for the fault — 8 chars for the
+                32-bit `print_error` path, 16 chars for the 64-bit `hms[]` path
+                (HMSError.full_code). Carried through unchanged from the route.
+                Only the `idle_ignore` branch puts it on the wire; resume / stop
+                use BambuStudio's plain shape (verified against a live H2D, the
+                `err`-bearing shape is silently rejected by the firmware).
+            action: One of HMSAction's string values.
+            job_id: The `subtask_id` snapshotted onto the HMSError at parse-time.
+                Preserved for symmetry with the catalog but no longer sent —
+                BambuStudio's actual resume/stop commands are plain and the
+                firmware doesn't echo `job_id` back on the response either.
+
+        Returns False when the MQTT client is offline or when `action` is unknown
+        so the route surfaces it as a 4xx rather than a silent no-op.
+        """
+
+        if not self._client or not self.state.connected:
+            logger.warning("[%s] Cannot execute HMS action: not connected", self.serial_number)
+            return False
+
+        # Always re-push the full state after a command so the modal's underlying
+        # status query reflects the new error list (or absence) on the next tick.
+        def publish(payload: dict):
+            self._client.publish(self.topic_publish, json.dumps(payload), qos=1)
+            self._client.publish(
+                self.topic_publish, json.dumps({"pushing": {"command": "pushall", "sequence_id": "0"}}), qos=1
+            )
+
+        def hms_resume():
+            # BambuStudio's actual shape — plain resume, no err / no job_id.
+            # The `err`-bearing shape (`err`, `param: "reserve"`, `job_id`) is
+            # silently rejected by Bambu firmware on print_error- and hms[]-sourced
+            # faults alike; verified by injecting candidate shapes against a live
+            # H2D paused on a wrong-plate HMS. See #1830 §(2).
+            publish(
+                {
+                    "print": {
+                        "command": "resume",
+                        "param": "",
+                        "sequence_id": "0",
+                    }
+                }
+            )
+
+        def hms_stop():
+            # Same as hms_resume — BambuStudio's actual shape is plain. The
+            # `err`-bearing variant is silently rejected; verified on the H2D.
+            publish(
+                {
+                    "print": {
+                        "command": "stop",
+                        "param": "",
+                        "sequence_id": "0",
+                    }
+                }
+            )
+
+        def hms_ignore(persistent: bool = False):
+            # `idle_ignore` is BambuStudio's "dismiss this warning" command for
+            # non-pause warnings. type=0 dismisses once, type=1 hides the same
+            # warning permanently.
+            #
+            # For HMS-paused state, `idle_ignore` is silently rejected by the
+            # firmware regardless of `err` (verified on a live H2D — see
+            # #1830 §(2)). The user-facing intent of "Ignore and resume" on a
+            # paused print is to continue, so we dispatch a plain resume
+            # instead. The `persistent` flag is informational in that branch —
+            # firmware can't honour "don't remind" through a resume — but the
+            # button still does what the user expects.
+            #
+            # NB: PrinterState's `state` field carries the MQTT `gcode_state`
+            # value verbatim — line 2144 stores `data["gcode_state"]` onto it.
+            if self.state.state == "PAUSE":
+                hms_resume()
+                return
+            publish(
+                {
+                    "print": {
+                        "command": "idle_ignore",
+                        "err": print_error,
+                        "type": 1 if persistent else 0,
+                        "sequence_id": "0",
+                    }
+                }
+            )
+
+        def ams_control(param: str):
+            publish(
+                {
+                    "print": {
+                        "command": "ams_control",
+                        "param": param,
+                        "sequence_id": "0",
+                    }
+                }
+            )
+
+        def clean_print_error():
+            # Matches the existing `clear_hms_errors` shape — Bambu does not
+            # expect `print_error` in the body; the command clears whatever
+            # error dialog is currently active on the printer.
+            publish(
+                {
+                    "print": {
+                        "command": "clean_print_error",
+                        "sequence_id": "0",
+                    }
+                }
+            )
+
+        def uiop_close():
+            # `err` is the 8-char hex short code (already a string from the
+            # frontend), uppercased for consistency with how BambuStudio sends it.
+            publish(
+                {
+                    "system": {
+                        "command": "uiop",
+                        "name": "print_error",
+                        "action": "close",
+                        "source": 1,
+                        "type": "dialog",
+                        "err": print_error.upper(),
+                        "sequence_id": "0",
+                    }
+                }
+            )
+
+        match action:
+            case (
+                HMSAction.RESUME_PRINTING
+                | HMSAction.RESUME_PRINTING_DEFECTS
+                | HMSAction.RESUME_PRINTING_PROBELM_SOLVED
+                | HMSAction.PROBLEM_SOLVED_RESUME
+                | HMSAction.FILAMENT_LOAD_RESUME
+                | HMSAction.PROCEED
+            ):
+                hms_resume()
+
+            case HMSAction.STOP_PRINTING:
+                hms_stop()
+
+            case HMSAction.IGNORE_RESUME | HMSAction.NO_REMINDER_NEXT_TIME:
+                hms_ignore(persistent=False)
+
+            case HMSAction.IGNORE_NO_REMINDER_NEXT_TIME | HMSAction.DONT_REMIND_NEXT_TIME:
+                hms_ignore(persistent=True)
+
+            case HMSAction.FILAMENT_EXTRUDED | HMSAction.DBL_CHECK_DONE:
+                ams_control("done")
+
+            case (
+                HMSAction.RETRY_FILAMENT_EXTRUDED
+                | HMSAction.CONTINUE
+                | HMSAction.RETRY_PROBLEM_SOLVED
+                | HMSAction.DBL_CHECK_RETRY
+            ):
+                ams_control("resume")
+
+            case HMSAction.ABORT:
+                ams_control("abort")
+
+            case HMSAction.OK_BUTTON:
+                clean_print_error()
+
+            case HMSAction.DBL_CHECK_OK:
+                clean_print_error()
+                uiop_close()
+
+            case HMSAction.DBL_CHECK_RESUME:
+                # Plain resume — not HMS-aware, no err/job_id.
+                publish(
+                    {
+                        "print": {
+                            "command": "resume",
+                            "param": "",
+                            "sequence_id": "0",
+                        }
+                    }
+                )
+
+            case HMSAction.REFRESH_NOZZLE:
+                publish({"print": {"command": "refresh_nozzle", "sequence_id": "0"}})
+
+            case HMSAction.TURN_OFF_FIRE_ALARM:
+                publish({"print": {"command": "buzzer_ctrl", "mode": 0, "sequence_id": "0"}})
+
+            case HMSAction.STOP_DRYING:
+                publish({"print": {"command": "auto_stop_ams_dry", "sequence_id": "0"}})
+
+            case HMSAction.DISABLE_PURIFICATION:
+                publish({"print": {"command": "close_air_filt", "sequence_id": "0"}})
+
+            case (
+                HMSAction.CHECK_ASSISTANT
+                | HMSAction.JUMP_TO_LIVEVIEW
+                | HMSAction.OK_JUMP_RACK
+                | HMSAction.REMOVE_CLOSE_BTN
+                | HMSAction.LOAD_VIRTUAL_TRAY
+                | HMSAction.CANCLE
+                | HMSAction.DBL_CHECK_CANCEL
+            ):
+                # UI-only actions — the printer's own screen handles these; the
+                # modal still surfaces them so the user has parity with Studio.
+                pass
+
+            case _:
+                logger.warning("[%s] Unknown HMS action '%s'", self.serial_number, action)
+                return False
+
         return True

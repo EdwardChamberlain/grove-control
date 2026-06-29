@@ -438,6 +438,11 @@ export function AssignSpoolModal({ isOpen, onClose, printerId, amsId, trayId, tr
                         {Math.max(0, Math.round(spool.label_weight - spool.weight_used))} / {spool.label_weight}g
                       </p>
                     )}
+                    {spool.note && (
+                      <p className="text-[10px] text-bambu-gray/70 mt-1 truncate" title={spool.note}>
+                        {spool.note}
+                      </p>
+                    )}
                   </button>
                 ))}
               </div>
@@ -511,6 +516,11 @@ export function AssignSpoolModal({ isOpen, onClose, printerId, amsId, trayId, tr
                             {spool.label_weight && (
                               <p className="text-xs text-bambu-gray mt-1">
                                 {Math.max(0, Math.round(spool.label_weight - spool.weight_used))} / {spool.label_weight}g
+                              </p>
+                            )}
+                            {spool.note && (
+                              <p className="text-[10px] text-bambu-gray/70 mt-1 truncate" title={spool.note}>
+                                {spool.note}
                               </p>
                             )}
                           </button>

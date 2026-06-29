@@ -1,5 +1,5 @@
 /**
- * Test that legacy reprint mode now goes through the queue-backed print path.
+ * Test that create mode now goes through the queue-backed create path.
  *
  * Separate file because vi.mock(ToastContext) must be module-scoped
  * and would interfere with the main PrintModal test suite.
@@ -53,11 +53,11 @@ describe('PrintModal dispatch toast', () => {
     );
   });
 
-  it('shows queued toast in legacy reprint mode', async () => {
+  it('shows queued toast in create mode', async () => {
     const user = userEvent.setup();
     render(
       <PrintModal
-        mode="reprint"
+        mode="create"
         archiveId={1}
         archiveName="Benchy"
         onClose={mockOnClose}
@@ -82,5 +82,114 @@ describe('PrintModal dispatch toast', () => {
 
     const toastMessages = mockShowToast.mock.calls.map(call => call[0]);
     expect(toastMessages).toContain('Print queued');
+  });
+
+  it('uses wait-for-idle copy when an ASAP target is offline', async () => {
+    server.use(
+      http.get('/api/v1/printers/:id/status', () => {
+        return HttpResponse.json({ connected: false, state: null, ams: [], vt_tray: [] });
+      }),
+    );
+
+    const user = userEvent.setup();
+    render(
+      <PrintModal
+        mode="create"
+        archiveId={1}
+        archiveName="Benchy"
+        initialSelectedPrinterIds={[1]}
+        onClose={mockOnClose}
+        onSuccess={mockOnSuccess}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^print$/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /^print$/i }));
+
+    await waitFor(() => {
+      expect(mockOnClose).toHaveBeenCalled();
+    });
+
+    const toastMessages = mockShowToast.mock.calls.map(call => call[0]);
+    expect(toastMessages).toContain('Will start when printer is idle');
+    expect(toastMessages).not.toContain('Print queued');
+  });
+
+  it('uses wait-for-idle copy when an ASAP target is held for plate clear', async () => {
+    server.use(
+      http.get('/api/v1/printers/:id/status', () => {
+        return HttpResponse.json({
+          connected: true,
+          state: 'FINISH',
+          awaiting_plate_clear: true,
+          ams: [],
+          vt_tray: [],
+        });
+      }),
+    );
+
+    const user = userEvent.setup();
+    render(
+      <PrintModal
+        mode="create"
+        archiveId={1}
+        archiveName="Benchy"
+        initialSelectedPrinterIds={[1]}
+        onClose={mockOnClose}
+        onSuccess={mockOnSuccess}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^print$/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /^print$/i }));
+
+    await waitFor(() => {
+      expect(mockOnClose).toHaveBeenCalled();
+    });
+
+    const toastMessages = mockShowToast.mock.calls.map(call => call[0]);
+    expect(toastMessages).toContain('Will start when printer is idle');
+  });
+
+  it('uses wait-for-idle copy when an ASAP target is drying filament', async () => {
+    server.use(
+      http.get('/api/v1/printers/:id/status', () => {
+        return HttpResponse.json({
+          connected: true,
+          state: 'IDLE',
+          awaiting_plate_clear: false,
+          ams: [{ id: 0, dry_time: 25, tray: [] }],
+          vt_tray: [],
+        });
+      }),
+    );
+
+    const user = userEvent.setup();
+    render(
+      <PrintModal
+        mode="create"
+        archiveId={1}
+        archiveName="Benchy"
+        initialSelectedPrinterIds={[1]}
+        onClose={mockOnClose}
+        onSuccess={mockOnSuccess}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^print$/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', { name: /^print$/i }));
+
+    await waitFor(() => {
+      expect(mockOnClose).toHaveBeenCalled();
+    });
+
+    const toastMessages = mockShowToast.mock.calls.map(call => call[0]);
+    expect(toastMessages).toContain('Will start when printer is idle');
   });
 });

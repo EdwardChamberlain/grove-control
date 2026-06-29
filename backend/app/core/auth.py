@@ -88,6 +88,7 @@ _APIKEY_SCOPE_BY_PERMISSION: dict[Permission, str] = {
     Permission.EXTERNAL_LINKS_READ: "can_read_status",
     Permission.FIRMWARE_READ: "can_read_status",
     Permission.AMS_HISTORY_READ: "can_read_status",
+    Permission.PRINTER_SENSOR_HISTORY_READ: "can_read_status",
     Permission.STATS_READ: "can_read_status",
     Permission.STATS_FILTER_BY_USER: "can_read_status",
     Permission.SYSTEM_READ: "can_read_status",
@@ -111,13 +112,21 @@ _APIKEY_SCOPE_BY_PERMISSION: dict[Permission, str] = {
     Permission.PRINTERS_AMS_RFID: "can_control_printer",
     Permission.PRINTERS_CLEAR_PLATE: "can_control_printer",
     Permission.SMART_PLUGS_CONTROL: "can_control_printer",
-    # can_manage_library — file-manager scope (upload/rename/delete OWN library
+    # can_manage_library — file-manager scope (upload/rename/delete library
     # entries + MakerWorld import which downloads files into the library).
-    # Bulk/ALL-ownership library ops (UPDATE_ALL / DELETE_ALL / PURGE) stay
-    # admin-only because they cross the user boundary.
+    # OWN and ALL ownership variants map to the same scope so the
+    # `require_ownership_permission` checker (which gates on `all_perm`)
+    # passes the API key through. This matches `can_queue` and the
+    # archives/inventory scopes — API keys have no per-row ownership identity
+    # (line 1663), so splitting OWN/ALL across allowlist/denylist made the
+    # whole library curation surface unreachable for API keys (#1832).
+    # LIBRARY_PURGE stays admin-only as a genuinely destructive op that
+    # bypasses the soft-delete window.
     Permission.LIBRARY_UPLOAD: "can_manage_library",
     Permission.LIBRARY_UPDATE_OWN: "can_manage_library",
+    Permission.LIBRARY_UPDATE_ALL: "can_manage_library",
     Permission.LIBRARY_DELETE_OWN: "can_manage_library",
+    Permission.LIBRARY_DELETE_ALL: "can_manage_library",
     Permission.MAKERWORLD_IMPORT: "can_manage_library",
     # can_manage_inventory — inventory write scope. Covers the documented
     # spool/catalog/forecast write surface AND the SpoolBuddy kiosk endpoints
@@ -182,8 +191,11 @@ _APIKEY_DENIED_PERMISSIONS: frozenset[Permission] = frozenset(
         Permission.ARCHIVES_DELETE_OWN,
         Permission.ARCHIVES_DELETE_ALL,
         Permission.ARCHIVES_PURGE,
-        Permission.LIBRARY_UPDATE_ALL,
-        Permission.LIBRARY_DELETE_ALL,
+        # LIBRARY_UPDATE_ALL / LIBRARY_DELETE_ALL moved to the allowlist
+        # under `can_manage_library` (#1832) — split between allow/deny made
+        # the whole library curation surface unreachable for API keys via
+        # `require_ownership_permission`. Purge stays denied as a genuinely
+        # destructive op.
         Permission.LIBRARY_PURGE,
         Permission.PROJECTS_CREATE,
         Permission.PROJECTS_UPDATE,
@@ -421,9 +433,41 @@ def _get_jwt_secret() -> str:
 SECRET_KEY = _get_jwt_secret()
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours (M-2: reduced from 7 days)
+# Hard ceiling for the admin-configurable session policy (#1706). 30 days
+# matches the Pydantic le=720 on AppSettings.session_max_hours; defense in
+# depth so a tampered settings row can't request an absurd lifetime.
+SESSION_MAX_HOURS_HARD_CEILING = 720
 
 # HTTP Bearer token
 security = HTTPBearer(auto_error=False)
+
+
+async def resolve_session_max_minutes(db: AsyncSession) -> int:
+    """Return the session-lifetime ceiling (minutes) honoured by login routes.
+
+    Reads ``session_max_hours`` from the settings table (#1706), clamps to
+    [1h, 720h], and falls back to the audit-default 24h if the row is
+    missing, blank, or unparseable.
+
+    DB errors are NOT caught here — login is already in a DB transaction and
+    a broken DB must abort the login rather than silently extend or shrink
+    the session lifetime.
+    """
+    default_minutes = ACCESS_TOKEN_EXPIRE_MINUTES
+    result = await db.execute(select(Settings).where(Settings.key == "session_max_hours"))
+    row = result.scalar_one_or_none()
+    if row is None or not row.value:
+        return default_minutes
+    try:
+        hours = int(row.value)
+    except (TypeError, ValueError):
+        return default_minutes
+    if hours < 1:
+        return default_minutes
+    if hours > SESSION_MAX_HOURS_HARD_CEILING:
+        hours = SESSION_MAX_HOURS_HARD_CEILING
+    return hours * 60
+
 
 # --- Slicer download tokens ---
 # Short-lived, single-use tokens for slicer protocol handlers that can't send
@@ -649,7 +693,9 @@ def _is_token_fresh(iat: int | float | None, user: User) -> bool:
     Used to invalidate all sessions after a password reset/change (M-R7-B).
     All tokens without an iat claim are unconditionally rejected — every token
     issued by this server carries iat, so absence means the token is forged or
-    from a pre-iat code path whose max TTL (24 h) has long since expired.
+    from a pre-iat code path whose max TTL at the time (24 h) has long since
+    expired. The post-#1706 admin-set ceiling does not relax this — an iat-less
+    token still cannot have been issued by current code.
     """
     if iat is None:
         return False
