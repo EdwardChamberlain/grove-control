@@ -117,14 +117,13 @@ Example:
 ## Release Process
 
 1. Update `VERSION` and run `python scripts/check_version.py`
-2. Update `CHANGELOG.md`
-3. Create a PR with these changes
-4. After merge, tag the release:
+2. Create a PR with these changes
+3. After merge, tag the release:
    ```bash
    git tag v0.1.x
    git push origin v0.1.x
    ```
-5. Push the tag and let the Docker publish workflow build and publish the release image
+4. Push the tag and let the Docker publish workflow build and publish the release image
 
 ## Dependabot (Optional)
 
