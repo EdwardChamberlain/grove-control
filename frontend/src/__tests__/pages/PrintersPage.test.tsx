@@ -422,66 +422,47 @@ describe('PrintersPage', () => {
       expect(screen.queryByText('Plate Clear')).not.toBeInTheDocument();
     });
 
-    it('shows an icon-only plate clear action in small card view', async () => {
-      let awaitingPlateClear = true;
-
-      server.use(
-        http.get('/api/v1/printers/', () => {
-          return HttpResponse.json([mockPrinters[0]]);
-        }),
-        http.get('/api/v1/printers/:id/status', () => {
-          return HttpResponse.json({ ...mockPrinterStatus, state: 'FINISH', awaiting_plate_clear: awaitingPlateClear });
-        }),
-        http.post('/api/v1/printers/:id/clear-plate', () => {
-          awaitingPlateClear = false;
-          return HttpResponse.json({ success: true, message: 'Plate cleared' });
-        })
-      );
-
+    it('opens status details from the list health indicator without opening the expanded card', async () => {
+      localStorage.setItem('printerViewMode', 'list');
       render(<PrintersPage />);
 
       await waitFor(() => {
         expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
       });
 
-      fireEvent.click(screen.getByRole('button', { name: 'Cards' }));
-
-      await waitFor(() => {
-        expect(screen.queryByText('Mark plate as cleared')).not.toBeInTheDocument();
-      });
-
-      const clearButton = screen.getByRole('button', { name: 'Mark plate as cleared' });
-
-      fireEvent.click(clearButton);
-
-      await waitFor(() => {
-        expect(screen.queryByRole('button', { name: 'Mark plate as cleared' })).not.toBeInTheDocument();
-      });
-    });
-
-    it('dismisses small-card status details without opening the medium-card drilldown', async () => {
-      const { container } = render(<PrintersPage />);
-
-      await waitFor(() => {
-        expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
-      });
-
-      fireEvent.click(screen.getByRole('button', { name: 'Cards' }));
       fireEvent.click(screen.getAllByLabelText(/Machine health:/)[0]);
 
-      await waitFor(() => {
-        expect(screen.getByText('Status details')).toBeInTheDocument();
-      });
-
-      const backdrop = container.querySelector('.fixed.inset-0.z-40');
+      const statusDetails = await screen.findByText('Status details');
+      const backdrop = statusDetails.parentElement?.previousElementSibling;
       expect(backdrop).toBeInTheDocument();
-
       fireEvent.click(backdrop!);
 
       await waitFor(() => {
         expect(screen.queryByText('Status details')).not.toBeInTheDocument();
       });
+      expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
+    });
 
+    it('returns from a list clickthrough to the list view', async () => {
+      localStorage.setItem('printerViewMode', 'list');
+      render(<PrintersPage />);
+
+      const printerName = await screen.findByText('X1 Carbon');
+      fireEvent.click(printerName);
+      fireEvent.click(await screen.findByRole('button', { name: 'Back' }));
+
+      expect(screen.getByRole('button', { name: 'List' })).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
+    });
+
+    it('returns from a single-printer clickthrough to the list view', async () => {
+      localStorage.setItem('printerViewMode', 'detail');
+      render(<PrintersPage />);
+
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Back' }));
+
+      expect(screen.getByRole('button', { name: 'List' })).toHaveAttribute('aria-pressed', 'true');
       expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
     });
 

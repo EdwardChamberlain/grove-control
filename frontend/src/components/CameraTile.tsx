@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, VideoOff, WifiOff } from 'lucide-react';
+import { AlertTriangle, Maximize2, VideoOff, WifiOff } from 'lucide-react';
 import { getAuthToken, withStreamToken } from '../api/client';
 import { formatDuration } from '../utils/date';
 
@@ -15,6 +15,7 @@ interface CameraTileProps {
   snapshotIntervalMs: number;
   connected: boolean;
   onClick?: () => void;
+  onOpenFullscreen?: () => void;
   // Optional status overlay — wired by CameraWall from the shared
   // ['printerStatus', id] query. All optional so existing tests don't break.
   statusMode?: CameraTileStatusMode;
@@ -65,6 +66,7 @@ export function CameraTile({
   snapshotIntervalMs,
   connected,
   onClick,
+  onOpenFullscreen,
   statusMode = 'off',
   printerState = null,
   progress = null,
@@ -132,6 +134,13 @@ export function CameraTile({
     if (onClick) onClick();
   };
 
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      handleClick();
+    }
+  };
+
   const transform = cameraRotation ? `rotate(${cameraRotation}deg)` : undefined;
 
   const bucket = classifyState(printerState, hmsErrorCount);
@@ -144,13 +153,19 @@ export function CameraTile({
   const progressPct = progress != null ? Math.round(progress) : null;
   const hasLayers = layerNum != null && totalLayers != null && totalLayers > 0;
   const hasRemaining = remainingMin != null && remainingMin > 0;
+  const displayedProgress = isPrintingOrPaused && progressPct != null
+    ? Math.max(0, Math.min(100, progressPct))
+    : 0;
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={handleClick}
+      onKeyDown={handleKeyDown}
       className="group relative aspect-video w-full overflow-hidden rounded-lg border border-bambu-dark-tertiary bg-black text-left focus:outline-none focus:ring-2 focus:ring-bambu-green"
       title={printerName}
+      aria-label={printerName}
     >
       {!connected || mode === 'paused' ? (
         <div className="absolute inset-0 flex items-center justify-center bg-bambu-dark/60">
@@ -178,24 +193,9 @@ export function CameraTile({
         />
       )}
 
-      {/* Status chip (top-left) */}
-      {showChip && (
-        <span
-          className={`absolute left-2 top-2 flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${BUCKET_CHIP_CLASS[bucket]}`}
-        >
-          {hmsErrorCount > 0 && (
-            <AlertTriangle
-              className="h-3 w-3"
-              aria-hidden="true"
-            />
-          )}
-          <span>{t(`printers.status.${bucket}`)}</span>
-        </span>
-      )}
-
-      {/* Mode indicator (top-right) */}
+      {/* Mode indicator (top-left) */}
       <span
-        className={`absolute right-2 top-2 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+        className={`absolute left-2 top-2 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
           mode === 'live'
             ? 'bg-red-500/80 text-white'
             : mode === 'snapshot'
@@ -210,8 +210,38 @@ export function CameraTile({
             : t('printers.camWall.off')}
       </span>
 
+      {onOpenFullscreen && (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onOpenFullscreen();
+          }}
+          className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded bg-black/65 text-white transition-colors hover:bg-black/85 focus:outline-none focus:ring-2 focus:ring-bambu-green"
+          title={t('printers.camWall.openFullScreen', 'Open full screen')}
+          aria-label={t('printers.camWall.openFullScreen', 'Open full screen')}
+        >
+          <Maximize2 className="h-3.5 w-3.5" />
+        </button>
+      )}
+
+      {/* Status chip */}
+      {showChip && (
+        <span
+          className={`absolute left-2 top-8 flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${BUCKET_CHIP_CLASS[bucket]}`}
+        >
+          {hmsErrorCount > 0 && (
+            <AlertTriangle
+              className="h-3 w-3"
+              aria-hidden="true"
+            />
+          )}
+          <span>{t(`printers.status.${bucket}`)}</span>
+        </span>
+      )}
+
       {/* Bottom overlay: name + (when full) print info */}
-      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/55 to-transparent px-2 pb-1.5 pt-3 text-white">
+      <div className="absolute inset-x-0 bottom-1.5 px-2 pb-1.5 pt-3 text-white">
         {showInfoStrip && (
           <div className="mb-0.5 space-y-0.5 text-[11px] leading-tight text-white/90">
             {fileLabel && (
@@ -243,6 +273,20 @@ export function CameraTile({
         )}
         <span className="block truncate text-xs font-medium">{printerName}</span>
       </div>
-    </button>
+
+      <div
+        role="progressbar"
+        aria-label={t('printers.camWall.progressLabel', 'Print progress')}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={displayedProgress}
+        className="absolute inset-x-0 bottom-0 h-1.5 overflow-hidden bg-bambu-dark-tertiary"
+      >
+        <div
+          className={`h-full rounded-r-full transition-all ${bucket === 'paused' ? 'bg-status-warning' : 'bg-bambu-green'}`}
+          style={{ width: `${displayedProgress}%` }}
+        />
+      </div>
+    </div>
   );
 }

@@ -12,6 +12,7 @@ interface CameraWallProps {
   snapshotIntervalSec: number;
   statusMode: CameraTileStatusMode;
   onTileClick: (printerId: number, printerName: string) => void;
+  onOpenFullscreen: (printerId: number, printerName: string) => void;
   onChangeMaxLive: (next: number) => void;
   onChangeSnapshotIntervalSec: (next: number) => void;
   onChangeStatusMode: (next: CameraTileStatusMode) => void;
@@ -29,6 +30,7 @@ export function CameraWall({
   snapshotIntervalSec,
   statusMode,
   onTileClick,
+  onOpenFullscreen,
   onChangeMaxLive,
   onChangeSnapshotIntervalSec,
   onChangeStatusMode,
@@ -259,6 +261,7 @@ export function CameraWall({
                   filterKnownHMSErrors(statusByPrinter.get(p.id)?.hms_errors ?? []).length
                 }
                 onClick={() => onTileClick(p.id, p.name)}
+                onOpenFullscreen={() => onOpenFullscreen(p.id, p.name)}
               />
             </div>
           );

@@ -82,7 +82,6 @@ import {
   SlidersHorizontal,
   Stethoscope,
   Activity,
-  LayoutGrid,
   LineChart as LineChartIcon,
   MonitorPlay,
   List,
@@ -1163,18 +1162,24 @@ function StatusSummaryBar({ printers }: { printers: Printer[] | undefined }) {
 
 type SortOption = 'name' | 'status' | 'model' | 'location' | 'eta';
 type ViewMode = 'expanded' | 'compact';
-type PrinterPageViewMode = 'cards' | 'detail' | 'single' | 'list';
+type PrinterPageViewMode = 'detail' | 'single' | 'list' | 'camwall';
 
-const PRINTER_PAGE_VIEW_MODES: PrinterPageViewMode[] = ['cards', 'detail', 'single', 'list'];
+const PRINTER_PAGE_VIEW_MODES: PrinterPageViewMode[] = ['detail', 'single', 'list', 'camwall'];
 
-function normalizePrinterPageViewMode(value: string | null, legacyCardSize: string | null): PrinterPageViewMode {
+function normalizePrinterPageViewMode(value: string | null, legacyCardSize: string | null, legacyPageView: string | null): PrinterPageViewMode {
+  if (legacyPageView === 'camwall') {
+    return 'camwall';
+  }
+  if (value === 'cards') {
+    return 'list';
+  }
   if (value && PRINTER_PAGE_VIEW_MODES.includes(value as PrinterPageViewMode)) {
     return value as PrinterPageViewMode;
   }
 
   switch (legacyCardSize) {
     case '1':
-      return 'cards';
+      return 'list';
     case '4':
       return 'single';
     default:
@@ -1610,6 +1615,156 @@ function mapModelCode(ssdpModel: string | null): string {
   return modelMap[ssdpModel] || ssdpModel;
 }
 
+function ListHealthStatusMenu({
+  status,
+  printerHealth,
+  knownHmsErrors,
+  maintenanceInfo,
+  requirePlateClear,
+  needsPlateClear,
+  firmwareInfo,
+  hasDoorSensor,
+}: {
+  status?: PrinterStatus;
+  printerHealth: PrinterHealthMeta;
+  knownHmsErrors: HMSError[];
+  maintenanceInfo?: PrinterMaintenanceInfo;
+  requirePlateClear?: boolean;
+  needsPlateClear: boolean;
+  firmwareInfo?: FirmwareUpdateInfo;
+  hasDoorSensor: boolean;
+}) {
+  const { t } = useTranslation();
+  const [isOpen, setIsOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
+  const rowClass = 'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium';
+  const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
+  const maintenanceDueCount = maintenanceInfo?.due_count ?? 0;
+  const maintenanceWarningCount = maintenanceInfo?.warning_count ?? 0;
+  const plateLabel = isPrintingOrPaused
+    ? t('printers.plateStatus.inUse')
+    : needsPlateClear
+      ? t('printers.plateStatus.notCleared')
+      : t('printers.plateStatus.cleared');
+  const networkClass = !status?.connected
+    ? 'bg-status-error/20 text-status-error'
+    : status.wired_network || status.wifi_signal == null || status.wifi_signal >= -60
+      ? 'bg-status-ok/20 text-status-ok'
+      : status.wifi_signal >= -80
+        ? 'bg-status-warning/20 text-status-warning'
+        : 'bg-status-error/20 text-status-error';
+
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    const measure = () => {
+      const rect = buttonRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setCoords(computePopoverPosition({
+        triggerRect: rect,
+        popoverWidth: 240,
+        estimatedHeight: 320,
+        horizontalAlign: 'center',
+      }));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    window.addEventListener('scroll', measure, true);
+    return () => {
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('scroll', measure, true);
+    };
+  }, [isOpen]);
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          setIsOpen((open) => !open);
+        }}
+        className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-opacity hover:opacity-80 ${printerHealth.className}`}
+        title={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
+        aria-label={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
+        aria-expanded={isOpen}
+      >
+        <Activity className="h-4 w-4" />
+      </button>
+      {isOpen && createPortal(
+        <>
+          <div
+            className="fixed inset-0 z-[1000]"
+            onClick={(event) => {
+              event.stopPropagation();
+              setIsOpen(false);
+            }}
+          />
+          <div
+            className="fixed z-[1001] flex w-[240px] flex-col overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary shadow-2xl"
+            style={{
+              top: coords?.top ?? -9999,
+              left: coords?.left ?? -9999,
+              visibility: coords ? 'visible' : 'hidden',
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="shrink-0 px-3 py-2.5 text-center text-sm font-medium text-white">
+              {t('printers.health.statusDetails', 'Status details')}
+            </div>
+            <div className="h-px bg-bambu-dark-tertiary" />
+            <div className="space-y-1.5 p-2.5">
+              <div className={`${rowClass} ${status?.connected ? 'bg-status-ok/20 text-status-ok' : 'bg-status-error/20 text-status-error'}`}>
+                {status?.connected ? <Link className="h-3 w-3" /> : <Unlink className="h-3 w-3" />}
+                <span>{t('printers.status.connection', 'Connection')}:</span>
+                <span>{status?.connected ? t('printers.connection.connected') : t('printers.connection.offline')}</span>
+              </div>
+              {requirePlateClear && status?.connected && (
+                <div className={`${rowClass} ${needsPlateClear ? 'bg-status-warning/20 text-status-warning' : 'bg-status-ok/20 text-status-ok'}`}>
+                  <PlateClearedIcon className="h-3 w-3" />
+                  <span>{t('printers.plateStatus.title', 'Plate')}:</span>
+                  <span>{plateLabel}</span>
+                </div>
+              )}
+              <div className={`${rowClass} ${networkClass}`}>
+                {status?.wired_network ? <Cable className="h-3 w-3" /> : <Signal className="h-3 w-3" />}
+                <span>{t('printers.status.network', 'Network')}:</span>
+                <span>{!status?.connected ? t('printers.connection.offline') : status.wired_network ? t('printers.connection.ethernet', 'Ethernet') : status.wifi_signal != null ? `${status.wifi_signal}dBm` : t('common.unknown', 'Unknown')}</span>
+              </div>
+              <div className={`${rowClass} ${!status?.connected ? 'bg-status-error/20 text-status-error' : knownHmsErrors.length > 0 ? knownHmsErrors.some((error) => error.severity <= 2) ? 'bg-status-error/20 text-status-error' : 'bg-status-warning/20 text-status-warning' : 'bg-status-ok/20 text-status-ok'}`}>
+                <AlertTriangle className="h-3 w-3" />
+                <span>{t('printers.status.errors', 'Errors')}:</span>
+                <span>{status?.connected ? knownHmsErrors.length > 0 ? t('printers.status.errorCount', '{{count}} active', { count: knownHmsErrors.length }) : t('common.ok', 'OK') : t('common.unknown', 'Unknown')}</span>
+              </div>
+              <div className={`${rowClass} ${maintenanceDueCount > 0 ? 'bg-status-error/20 text-status-error' : maintenanceWarningCount > 0 ? 'bg-status-warning/20 text-status-warning' : 'bg-status-ok/20 text-status-ok'}`}>
+                <Wrench className="h-3 w-3" />
+                <span>{t('maintenance.title', 'Maintenance')}:</span>
+                <span>{maintenanceDueCount > 0 ? t('maintenance.dueCount', { count: maintenanceDueCount }) : maintenanceWarningCount > 0 ? t('maintenance.warningCount', { count: maintenanceWarningCount }) : t('common.ok', 'OK')}</span>
+              </div>
+              {(firmwareInfo?.current_version || status?.firmware_version) && (
+                <div className={`${rowClass} ${firmwareInfo?.update_available ? 'bg-status-warning/20 text-status-warning' : 'bg-status-ok/20 text-status-ok'}`}>
+                  {firmwareInfo?.update_available ? <Download className="h-3 w-3" /> : <CheckCircle className="h-3 w-3" />}
+                  <span>{t('printers.status.firmware', 'Firmware')}:</span>
+                  <span>{firmwareInfo?.update_available ? t('printers.status.updateAvailable', 'Update available') : firmwareInfo?.current_version || status?.firmware_version}</span>
+                </div>
+              )}
+              {status?.connected && hasDoorSensor && (
+                <div className={`${rowClass} ${status.door_open ? 'bg-status-warning/20 text-status-warning' : 'bg-status-ok/20 text-status-ok'}`}>
+                  {status.door_open ? <DoorOpen className="h-3 w-3" /> : <DoorClosed className="h-3 w-3" />}
+                  <span>{t('printers.status.door', 'Door')}:</span>
+                  <span>{status.door_open ? t('printers.door.open') : t('printers.door.closed')}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </>,
+        document.body,
+      )}
+    </>
+  );
+}
+
 function PrinterListRow({
   printer,
   hideIfDisconnected,
@@ -1618,7 +1773,7 @@ function PrinterListRow({
   selectionMode,
   isSelected,
   onToggleSelect,
-  onOpenExpandedCard,
+  onOpenSinglePrinter,
   timeFormat = 'system',
   checkPrinterFirmware = true,
 }: {
@@ -1629,7 +1784,7 @@ function PrinterListRow({
   selectionMode?: boolean;
   isSelected?: boolean;
   onToggleSelect?: (id: number) => void;
-  onOpenExpandedCard: (id: number) => void;
+  onOpenSinglePrinter: (id: number) => void;
   timeFormat?: 'system' | '12h' | '24h';
   checkPrinterFirmware?: boolean;
 }) {
@@ -1703,13 +1858,13 @@ function PrinterListRow({
           onToggleSelect?.(printer.id);
           return;
         }
-        onOpenExpandedCard(printer.id);
+        onOpenSinglePrinter(printer.id);
       }}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           if (selectionMode) onToggleSelect?.(printer.id);
-          else onOpenExpandedCard(printer.id);
+          else onOpenSinglePrinter(printer.id);
         }
       }}
       className={`border-b border-bambu-dark-tertiary text-sm transition-colors last:border-b-0 hover:bg-bambu-dark ${isSelected ? 'bg-bambu-green/10' : ''}`}
@@ -1742,13 +1897,16 @@ function PrinterListRow({
             aria-label={printStatusTitle}
           />
           <span className="min-w-12 shrink-0 text-right text-xs font-medium tabular-nums text-white">{etaLabel}</span>
-          <span
-            className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${printerHealth.className}`}
-            title={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
-            aria-label={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
-          >
-            <Activity className="h-4 w-4" />
-          </span>
+          <ListHealthStatusMenu
+            status={status}
+            printerHealth={printerHealth}
+            knownHmsErrors={knownHmsErrors}
+            maintenanceInfo={maintenanceInfo}
+            requirePlateClear={requirePlateClear}
+            needsPlateClear={needsPlateClear}
+            firmwareInfo={firmwareInfo}
+            hasDoorSensor={hasDoorSensor}
+          />
         </div>
       </div>
 
@@ -1779,13 +1937,16 @@ function PrinterListRow({
         </div>
         <div className="min-w-0">
           <span className="inline-flex max-w-full items-center gap-2">
-            <span
-              className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${printerHealth.className}`}
-              title={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
-              aria-label={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
-            >
-              <Activity className="h-4 w-4" />
-            </span>
+            <ListHealthStatusMenu
+              status={status}
+              printerHealth={printerHealth}
+              knownHmsErrors={knownHmsErrors}
+              maintenanceInfo={maintenanceInfo}
+              requirePlateClear={requirePlateClear}
+              needsPlateClear={needsPlateClear}
+              firmwareInfo={firmwareInfo}
+              hasDoorSensor={hasDoorSensor}
+            />
             <span className={`truncate text-sm font-medium ${status ? 'text-white' : 'text-bambu-gray'}`}>{printerHealth.label}</span>
           </span>
         </div>
@@ -9016,6 +9177,7 @@ export function PrintersPage() {
     return normalizePrinterPageViewMode(
       localStorage.getItem('printerViewMode'),
       localStorage.getItem('printerCardSize'),
+      localStorage.getItem('printerPageView'),
     );
   });
   const [selectedSinglePrinterId, setSelectedSinglePrinterId] = useState<number | null>(() => {
@@ -9024,13 +9186,8 @@ export function PrintersPage() {
     return Number.isFinite(parsed) ? parsed : null;
   });
   const [singlePrinterReturnView, setSinglePrinterReturnView] = useState<PrinterPageViewMode | null>(null);
-  const cardSize = printerPageViewMode === 'cards' ? 1 : printerPageViewMode === 'single' ? 4 : 2;
-  const viewMode: ViewMode = printerPageViewMode === 'cards' ? 'compact' : 'expanded';
-  const [compactDrilldownPrinterId, setCompactDrilldownPrinterId] = useState<number | null>(null);
-  // Page view: 'cards' = printer cards (default), 'camwall' = grid of live camera tiles
-  const [pageView, setPageView] = useState<'cards' | 'camwall'>(() => {
-    return localStorage.getItem('printerPageView') === 'camwall' ? 'camwall' : 'cards';
-  });
+  const cardSize = 2;
+  const viewMode: ViewMode = 'expanded';
   // Cam-wall settings — per-user, no backend write (a Pi 4 install caps the
   // live count lower than a NUC; default 4 is the documented Pi 4 ceiling).
   const [camWallMaxLive, setCamWallMaxLive] = useState<number>(() => {
@@ -9053,29 +9210,8 @@ export function PrintersPage() {
     setPrinterPageViewModeState(mode);
     localStorage.setItem('printerViewMode', mode);
     localStorage.removeItem('printerCardSize');
-    if (mode !== 'detail') {
-      setCompactDrilldownPrinterId(null);
-    }
+    localStorage.removeItem('printerPageView');
   }, []);
-  const scrollPrinterIntoView = useCallback((printerId: number) => {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const card = document.getElementById(`printer-card-${printerId}`);
-        if (!card) return;
-        const fixedHeaderHeight = document.querySelector('header')?.getBoundingClientRect().height ?? 56;
-        const top = card.getBoundingClientRect().top + window.scrollY - fixedHeaderHeight - 16;
-        window.scrollTo({
-          top: Math.max(0, top),
-          behavior: 'smooth',
-        });
-      });
-    });
-  }, []);
-  const openCompactCard = useCallback((printerId: number) => {
-    setCompactDrilldownPrinterId(printerId);
-    setPrinterPageViewMode('detail');
-    scrollPrinterIntoView(printerId);
-  }, [scrollPrinterIntoView, setPrinterPageViewMode]);
   const openSinglePrinter = useCallback((printerId: number) => {
     setSelectedSinglePrinterId(printerId);
     localStorage.setItem('singlePrinterViewId', String(printerId));
@@ -9085,18 +9221,9 @@ export function PrintersPage() {
   }, [printerPageViewMode, setPrinterPageViewMode]);
   const returnFromSinglePrinter = useCallback(() => {
     if (!singlePrinterReturnView) return;
-    const returnView = singlePrinterReturnView;
     setSinglePrinterReturnView(null);
-    setPrinterPageViewMode(returnView);
+    setPrinterPageViewMode('list');
   }, [setPrinterPageViewMode, singlePrinterReturnView]);
-  const returnToCompactCards = useCallback(() => {
-    const printerId = compactDrilldownPrinterId;
-    setCompactDrilldownPrinterId(null);
-    setPrinterPageViewMode('cards');
-    if (printerId != null) {
-      scrollPrinterIntoView(printerId);
-    }
-  }, [compactDrilldownPrinterId, scrollPrinterIntoView, setPrinterPageViewMode]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [locationFilter, setLocationFilter] = useState<string>('all');
@@ -9455,9 +9582,6 @@ export function PrintersPage() {
   };
 
   const getGridClasses = () => {
-    if (printerPageViewMode === 'cards') {
-      return 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5';
-    }
     return 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3';
   };
 
@@ -9806,48 +9930,11 @@ export function PrintersPage() {
         </button>
       </div>
 
-      {/* Page view toggle: Cards / Cam Wall */}
-      <div className={`flex h-8 items-center bg-bambu-dark rounded-lg border border-bambu-dark-tertiary ${inMenu ? 'w-full' : ''}`}>
-        <button
-          type="button"
-          onClick={() => {
-            setPageView('cards');
-            localStorage.setItem('printerPageView', 'cards');
-          }}
-          className={`flex h-full items-center gap-1 rounded-l-lg px-2 text-xs font-medium transition-colors ${inMenu ? 'flex-1 justify-center' : ''} ${
-            pageView === 'cards' ? 'bg-bambu-green text-white' : 'text-white hover:bg-bambu-dark-tertiary'
-          }`}
-          title={t('printers.pageView.cardViews', 'Card views')}
-          aria-label={t('printers.pageView.cardViews', 'Card views')}
-          aria-pressed={pageView === 'cards'}
-        >
-          <LayoutGrid className="w-3.5 h-3.5" />
-          {inMenu && <span>{t('printers.pageView.cards')}</span>}
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setPageView('camwall');
-            localStorage.setItem('printerPageView', 'camwall');
-          }}
-          className={`flex h-full items-center gap-1 rounded-r-lg px-2 text-xs font-medium transition-colors ${inMenu ? 'flex-1 justify-center' : ''} ${
-            pageView === 'camwall' ? 'bg-bambu-green text-white' : 'text-white hover:bg-bambu-dark-tertiary'
-          }`}
-          title={t('printers.pageView.camWall')}
-          aria-pressed={pageView === 'camwall'}
-          disabled={!hasPermission('camera:view')}
-        >
-          <MonitorPlay className="w-3.5 h-3.5" />
-          {inMenu && <span>{t('printers.pageView.camWall')}</span>}
-        </button>
-      </div>
-
-
       {/* View selector */}
       <div className={`flex h-8 items-center bg-bambu-dark rounded-lg border border-bambu-dark-tertiary ${inMenu ? 'w-full' : ''}`}>
         {([
           { mode: 'list' as const, label: t('printers.view.list', 'List'), icon: <List className="h-4 w-4" /> },
-          { mode: 'cards' as const, label: t('printers.view.cards', 'Cards'), icon: <LayoutGrid className="h-4 w-4" /> },
+          { mode: 'camwall' as const, label: t('printers.pageView.camWall', 'Camera wall'), icon: <MonitorPlay className="h-4 w-4" /> },
           { mode: 'detail' as const, label: t('printers.view.detailCards', 'Detail cards'), icon: <Layers className="h-4 w-4" /> },
           { mode: 'single' as const, label: t('printers.view.singlePrinter', 'Single printer'), icon: <PrinterIcon className="h-4 w-4" /> },
         ]).map((option, index, options) => {
@@ -9856,9 +9943,6 @@ export function PrintersPage() {
             <button
               key={option.mode}
               onClick={() => {
-                if (option.mode !== 'detail') {
-                  setCompactDrilldownPrinterId(null);
-                }
                 if (option.mode === 'single' && !selectedSinglePrinter && sortedPrinters[0]) {
                   setSelectedSinglePrinterId(sortedPrinters[0].id);
                   localStorage.setItem('singlePrinterViewId', String(sortedPrinters[0].id));
@@ -9866,7 +9950,7 @@ export function PrintersPage() {
                 setSinglePrinterReturnView(null);
                 setPrinterPageViewMode(option.mode);
               }}
-              className={`flex h-full items-center justify-center px-2 transition-colors ${inMenu ? 'flex-1' : ''} ${
+              className={`flex h-full items-center justify-center px-2 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${inMenu ? 'flex-1' : ''} ${
                 index === 0 ? 'rounded-l-lg' : ''
               } ${
                 index === options.length - 1 ? 'rounded-r-lg' : ''
@@ -9878,6 +9962,7 @@ export function PrintersPage() {
               title={option.label}
               aria-label={option.label}
               aria-pressed={isSelected}
+              disabled={option.mode === 'camwall' && !hasPermission('camera:view')}
             >
               {option.icon}
             </button>
@@ -10060,12 +10145,13 @@ export function PrintersPage() {
             <p className="text-bambu-gray">{t('printers.noSearchResults')}</p>
           </CardContent>
         </Card>
-      ) : pageView === 'camwall' ? (
+      ) : printerPageViewMode === 'camwall' ? (
         <CameraWall
           printers={sortedPrinters}
           maxLive={camWallMaxLive}
           snapshotIntervalSec={camWallSnapshotSec}
-          onTileClick={(id, name) => {
+          onTileClick={(id) => openSinglePrinter(id)}
+          onOpenFullscreen={(id, name) => {
             const cameraMode = settings?.camera_view_mode || 'window';
             if (cameraMode === 'embedded') {
               setEmbeddedCameraPrinters(prev => new Map(prev).set(id, { id, name }));
@@ -10158,7 +10244,7 @@ export function PrintersPage() {
                 selectionMode={selectionMode}
                 isSelected={selectedPrinterIds.has(printer.id)}
                 onToggleSelect={toggleSelect}
-                onOpenExpandedCard={openCompactCard}
+                onOpenSinglePrinter={openSinglePrinter}
                 timeFormat={settings?.time_format || 'system'}
                 checkPrinterFirmware={settings?.check_printer_firmware !== false}
               />
@@ -10215,7 +10301,7 @@ export function PrintersPage() {
                   </h2>
                 }
               >
-                <div className={`grid gap-4 ${cardSize === 4 ? 'gap-6' : ''} ${getGridClasses()}`}>
+                <div className={`grid gap-4 ${getGridClasses()}`}>
                   {groupPrinters.map((printer) => (
                     <PrinterCard
                       key={printer.id}
@@ -10254,7 +10340,6 @@ export function PrintersPage() {
                       selectionMode={selectionMode}
                       isSelected={selectedPrinterIds.has(printer.id)}
                       onToggleSelect={toggleSelect}
-                      onOpenCompactCard={openCompactCard}
                       onOpenSinglePrinter={openSinglePrinter}
                     />
                   ))}
@@ -10265,7 +10350,7 @@ export function PrintersPage() {
         </div>
       ) : (
         /* Regular grid view */
-        <div className={`grid gap-4 ${cardSize === 4 ? 'gap-6' : ''} ${getGridClasses()}`}>
+        <div className={`grid gap-4 ${getGridClasses()}`}>
           {sortedPrinters.map((printer) => (
             <PrinterCard
               key={printer.id}
@@ -10304,23 +10389,10 @@ export function PrintersPage() {
               selectionMode={selectionMode}
               isSelected={selectedPrinterIds.has(printer.id)}
               onToggleSelect={toggleSelect}
-              onOpenCompactCard={openCompactCard}
               onOpenSinglePrinter={openSinglePrinter}
             />
           ))}
         </div>
-      )}
-
-      {printerPageViewMode === 'detail' && compactDrilldownPrinterId != null && (
-        <button
-          type="button"
-          onClick={returnToCompactCards}
-          className={`fixed bottom-5 left-1/2 z-40 inline-flex -translate-x-1/2 items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium shadow-xl transition-colors ${accentButtonClass}`}
-          title={t('common.back', 'Back')}
-        >
-          <ArrowLeft className="w-4 h-4" />
-          {t('common.back', 'Back')}
-        </button>
       )}
 
       {printerPageViewMode === 'single' && singlePrinterReturnView && (
