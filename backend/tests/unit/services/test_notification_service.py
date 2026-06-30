@@ -2216,7 +2216,9 @@ class TestNtfyOutbound:
         notification client must too."""
         client = await service._get_client()
         try:
-            assert client.headers.get("user-agent") == "Grove Control/1.0 (+https://github.com/maziggy/bambuddy)"
+            assert client.headers.get("user-agent") == (
+                "Grove Control/1.0 (+https://github.com/EdwardChamberlain/grove-control)"
+            )
         finally:
             await service.close()
 
