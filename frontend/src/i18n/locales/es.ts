@@ -2339,8 +2339,6 @@ export default {
     releaseNotes: 'Notas de la versión',
     updateViaDocker: 'Actualizar mediante Docker Compose:',
     updateViaHomeAssistant: 'Las actualizaciones las gestiona el Supervisor de Home Assistant. Abra Ajustes → Complementos → Grove Control en Home Assistant para instalar la nueva versión.',
-    updateViaWindowsInstaller: 'Las instalaciones en Windows se actualizan volviendo a ejecutar el instalador. Descarga la nueva versión abajo — tus datos, ajustes e impresoras se conservan.',
-    downloadWindowsInstaller: 'Descargar instalador para v{{version}}',
     installUpdate: 'Instalar actualización',
     latestVersionRunning: 'Está ejecutando la versión más reciente',
     failedToCheckUpdates: 'Error al buscar actualizaciones: {{error}}',

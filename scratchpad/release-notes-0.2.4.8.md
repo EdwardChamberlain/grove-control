@@ -44,10 +44,6 @@ cd frontend && sudo npm i
 sudo systemctl start bambuddy
 ```
 
-**Windows install**
-
-Download `bambuddy-0.2.4.8-windows-x64-setup.exe` from this release page (or the unversioned `bambuddy-windows-x64-setup.exe` alias for an always-latest link). The In-app "Install Update" button on Windows installs now uses the same release-asset flow — no more "Could not find git executable" failures.
-
 ---
 **Highlights**
 
@@ -148,7 +144,6 @@ Smaller-but-load-bearing: **per-printer Maintenance Mode** (#1476) so a printer 
 
 - Docker installer escalates on EACCES instead of failing on `/opt/bambuddy` (#1774, reported by @jmoore-skild). Auto-sudo on the directory create when needed.
 
-- In-app "Install Update" on Windows installer switched to release-asset update flow — no more "Could not find git executable" failures.
 
 **UI / rendering**
 
