@@ -250,13 +250,13 @@ async def test_snapshot_masks_ip_addresses_in_all_diagnostic_fields():
 
 @pytest.mark.asyncio
 async def test_snapshot_runs_probes_concurrently_not_sequentially():
-    """Total wall-clock for N printers should be O(slowest), not O(sum) —
-    this is what makes the feature usable on a fleet. Set each probe to
-    take 0.2 s; with 4 printers, sequential is 0.8 s, concurrent is 0.2 s.
-    Allow margin for scheduling and the test still catches a regression
-    to sequential execution.
+    """All printer probes must start before any probe needs to finish.
+
+    A synchronization barrier verifies concurrency directly without relying
+    on wall-clock thresholds, which become unreliable when pytest-xdist runs
+    many CPU-contending workers.
     """
-    import time
+    import asyncio
 
     printers = [
         SimpleNamespace(id=i, name=f"P{i}", ip_address=f"1.1.1.{i}", serial_number=f"s{i}", access_code="a")
@@ -264,27 +264,37 @@ async def test_snapshot_runs_probes_concurrently_not_sequentially():
     ]
     db = _make_db_with_printers_and_vps(printers, [])
 
-    async def slow_diag(*a, **k):
-        import asyncio
+    all_started = asyncio.Event()
+    release_probes = asyncio.Event()
+    started = 0
 
-        await asyncio.sleep(0.2)
+    async def blocked_diag(*a, **k):
+        nonlocal started
+        started += 1
+        if started == len(printers):
+            all_started.set()
+        await release_probes.wait()
         return SimpleNamespace(model_dump=lambda: {"ok": True})
 
     with (
         patch(
-            "backend.app.services.printer_diagnostic.run_connection_diagnostic", new=AsyncMock(side_effect=slow_diag)
+            "backend.app.services.printer_diagnostic.run_connection_diagnostic",
+            new=AsyncMock(side_effect=blocked_diag),
         ),
         patch(
             "backend.app.services.diagnostic_snapshot._run_log_health",
             new=AsyncMock(return_value={"findings": []}),
         ),
     ):
-        start = time.monotonic()
-        out = await collect_diagnostic_snapshot(db)
-        elapsed = time.monotonic() - start
+        snapshot_task = asyncio.create_task(collect_diagnostic_snapshot(db))
+        try:
+            await asyncio.wait_for(all_started.wait(), timeout=5)
+        except TimeoutError:
+            release_probes.set()
+            await snapshot_task
+            pytest.fail(f"only {started} of {len(printers)} probes started concurrently")
+        release_probes.set()
+        out = await snapshot_task
 
     assert len(out["connection_diagnostics"]) == 4
-    # Concurrent should be ~0.2 s; sequential would be ~0.8 s. Use 0.5 s
-    # as the threshold — slack enough for slow CI, tight enough to catch
-    # a regression to sequential execution.
-    assert elapsed < 0.5, f"snapshot ran sequentially: {elapsed:.2f}s for 4 x 0.2s probes"
+    assert started == 4

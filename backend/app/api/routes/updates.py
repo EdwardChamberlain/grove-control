@@ -827,7 +827,6 @@ async def apply_update(
                 "git pull && docker compose build --pull && docker compose up -d"
             ),
         }
-
     # Discover which release tag to install. Resolved here (where we have
     # a DB session) and passed into the background task; the BG task can't
     # reuse this request's session since FastAPI closes it on response.

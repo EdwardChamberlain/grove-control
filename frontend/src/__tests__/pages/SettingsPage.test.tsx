@@ -488,6 +488,7 @@ describe('SettingsPage', () => {
       expect(screen.queryByText(/Home Assistant Supervisor/i)).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /install update/i })).not.toBeInTheDocument();
     });
+
   });
 
   describe('tabs navigation', () => {
@@ -602,6 +603,29 @@ describe('SettingsPage', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Queue Auto-Drying')).toBeInTheDocument();
+      });
+    });
+
+    it('shows per-filament humidity threshold editor on Workflow tab (#1605)', async () => {
+      const user = userEvent.setup();
+      render(<SettingsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Workflow')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByText('Workflow'));
+
+      await waitFor(() => {
+        expect(screen.getByText('Humidity Thresholds')).toBeInTheDocument();
+        // Default row is unique to the humidity editor (drying presets has no
+        // default row), so we can pin it without disambiguating from the
+        // adjacent drying-presets table that also lists PLA/ASA/etc.
+        expect(screen.getByText('Default (unknown types)')).toBeInTheDocument();
+        // Filament rows render in both tables — assert by count instead of
+        // a single getByText. 8 default filaments × 2 tables = 16 PLAs etc.
+        expect(screen.getAllByText('PLA').length).toBeGreaterThanOrEqual(2);
+        expect(screen.getAllByText('ASA').length).toBeGreaterThanOrEqual(2);
       });
     });
 
@@ -1136,45 +1160,38 @@ describe('SettingsPage', () => {
       expect(screen.queryByPlaceholderText(/api\/frame\.jpeg\?src=printer/)).not.toBeInTheDocument();
     });
 
-    it(
-      'PATCHes the printer with external_camera_snapshot_url when the user types into the input',
-      async () => {
-        let receivedBody: Record<string, unknown> | null = null;
-        server.use(
-          http.get('/api/v1/printers/', () => HttpResponse.json([mjpegPrinter])),
-          http.patch('/api/v1/printers/7', async ({ request }) => {
-            receivedBody = (await request.json()) as Record<string, unknown>;
-            return HttpResponse.json({ ...mjpegPrinter, ...receivedBody });
-          }),
-        );
+    it('PATCHes the printer with external_camera_snapshot_url when the input changes', async () => {
+      let receivedBody: Record<string, unknown> | null = null;
+      server.use(
+        http.get('/api/v1/printers/', () => HttpResponse.json([mjpegPrinter])),
+        http.patch('/api/v1/printers/7', async ({ request }) => {
+          receivedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json({ ...mjpegPrinter, ...receivedBody });
+        }),
+      );
 
-        render(<SettingsPage />);
+      render(<SettingsPage />);
 
-        const input = await waitFor(() =>
-          screen.getByPlaceholderText(/api\/frame\.jpeg\?src=printer/),
-        );
+      const input = await waitFor(() =>
+        screen.getByPlaceholderText(/api\/frame\.jpeg\?src=printer/),
+      );
 
-        const user = userEvent.setup();
-        await user.type(input, 'http://192.168.1.61:1984/api/frame.jpeg?src=printer');
+      fireEvent.change(input, {
+        target: { value: 'http://192.168.1.61:1984/api/frame.jpeg?src=printer' },
+      });
 
-        // Save is debounced by 800ms; assert the PATCH eventually fires with
-        // the typed snapshot URL.
-        await waitFor(
-          () => {
-            expect(receivedBody).not.toBeNull();
-            expect(receivedBody!.external_camera_snapshot_url).toBe(
-              'http://192.168.1.61:1984/api/frame.jpeg?src=printer',
-            );
-          },
-          { timeout: 5000 },
-        );
-      },
-      // Per-test timeout raised to 15s — `user.type()` of a 49-char URL plus
-      // the 800ms save debounce fits in 5s locally (~2.3s typical) but blows
-      // past it on slow GitHub Actions runners (5000ms timeout was the failure
-      // mode on PR #1263).
-      15_000,
-    );
+      // Save is debounced by 800ms; assert the PATCH eventually fires with
+      // the changed snapshot URL.
+      await waitFor(
+        () => {
+          expect(receivedBody).not.toBeNull();
+          expect(receivedBody!.external_camera_snapshot_url).toBe(
+            'http://192.168.1.61:1984/api/frame.jpeg?src=printer',
+          );
+        },
+        { timeout: 5000 },
+      );
+    });
   });
 
   describe('theme mode buttons', () => {
