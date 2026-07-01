@@ -29,6 +29,7 @@ import {
   Unlink,
   Signal,
   Clock,
+  Timer,
   MoreVertical,
   Trash2,
   RefreshCw,
@@ -90,7 +91,7 @@ import {
 } from 'lucide-react';
 
 import { useNavigate } from 'react-router-dom';
-import { api, discoveryApi, firmwareApi, withStreamToken, ApiError } from '../api/client';
+import { api, discoveryApi, firmwareApi, getAuthToken, withStreamToken, ApiError } from '../api/client';
 import { formatDateOnly, formatETA, formatDuration, parseUTCDate } from '../utils/date';
 import { getCurrencySymbol } from '../utils/currency';
 import type { Printer, PrinterCreate, PrinterStatus, AMSUnit, DiscoveredPrinter, FirmwareUpdateInfo, FirmwareUploadStatus, LinkedSpoolInfo, SpoolAssignment, HMSError, InventorySpool, SmartPlug, PrinterDiagnosticResult, PrintLogEntry } from '../api/client';
@@ -2060,22 +2061,24 @@ function CockpitMetricCard({
   label,
   value,
   detail,
+  compact = false,
   className = '',
 }: {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   value: string;
   detail?: string;
+  compact?: boolean;
   className?: string;
 }) {
   return (
-    <div className={`rounded-xl border border-white/5 bg-bambu-dark/70 p-3 shadow-sm ${className}`}>
-      <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-bambu-gray">
-        <Icon className="h-4 w-4 text-bambu-green" />
+    <div className={`rounded-xl border border-white/5 bg-bambu-dark/70 shadow-sm ${compact ? 'min-w-0 p-2' : 'p-3'} ${className}`}>
+      <div className={`flex items-center font-medium uppercase tracking-wide text-bambu-gray ${compact ? 'gap-1 text-[9px]' : 'gap-2 text-xs'}`}>
+        <Icon className={`${compact ? 'h-3 w-3' : 'h-4 w-4'} shrink-0 text-bambu-green`} />
         <span className="truncate">{label}</span>
       </div>
-      <div className="mt-2 truncate text-2xl font-semibold tabular-nums text-white">{value}</div>
-      {detail && <div className="mt-1 truncate text-xs text-bambu-gray">{detail}</div>}
+      <div className={`${compact ? 'mt-1 text-base' : 'mt-2 text-2xl'} truncate font-semibold tabular-nums text-white`}>{value}</div>
+      {detail && <div className={`mt-1 truncate text-bambu-gray ${compact ? 'text-[9px]' : 'text-xs'}`}>{detail}</div>}
     </div>
   );
 }
@@ -2104,6 +2107,8 @@ function SinglePrinterCockpit({
   const [reprintEntry, setReprintEntry] = useState<PrintLogEntry | null>(null);
   const [isCheckingPlate, setIsCheckingPlate] = useState(false);
   const [showHealthStatusMenu, setShowHealthStatusMenu] = useState(false);
+  const [loadedCameraPrinterId, setLoadedCameraPrinterId] = useState<number | null>(null);
+  const [failedCameraPrinterId, setFailedCameraPrinterId] = useState<number | null>(null);
   const [configureSlotModal, setConfigureSlotModal] = useState<{
     amsId: number;
     trayId: number;
@@ -2132,6 +2137,26 @@ function SinglePrinterCockpit({
     queryFn: () => api.getPrintLog({ printerId: printer.id, limit: 250 }),
     staleTime: 60 * 1000,
   });
+  const cameraStreamUrl = useMemo(
+    () => withStreamToken(`/api/v1/printers/${printer.id}/camera/stream?fps=15`),
+    [printer.id],
+  );
+  const cameraLoaded = loadedCameraPrinterId === printer.id;
+  const cameraFailed = failedCameraPrinterId === printer.id;
+
+  useEffect(() => {
+    if (!status?.connected) return;
+    return () => {
+      const headers: Record<string, string> = {};
+      const token = getAuthToken();
+      if (token) headers.Authorization = `Bearer ${token}`;
+      fetch(`/api/v1/printers/${printer.id}/camera/stop`, {
+        method: 'POST',
+        keepalive: true,
+        headers,
+      }).catch(() => {});
+    };
+  }, [printer.id, status?.connected]);
 
   const invalidateStatus = () => queryClient.invalidateQueries({ queryKey: ['printerStatus', printer.id] });
   const stopPrintMutation = useMutation({
@@ -2315,12 +2340,18 @@ function SinglePrinterCockpit({
     const outcomeTotal = completed + failed;
     const filamentByType = new Map<string, number>();
     let durationSeconds = 0;
+    let completedDurationSeconds = 0;
+    let completedDurationCount = 0;
     let filamentGrams = 0;
     let totalCost = 0;
     let energyKwh = 0;
 
     printEntries.forEach(entry => {
       durationSeconds += entry.duration_seconds ?? 0;
+      if (entry.status === 'completed' && entry.duration_seconds != null && entry.duration_seconds > 0) {
+        completedDurationSeconds += entry.duration_seconds;
+        completedDurationCount += 1;
+      }
       filamentGrams += entry.filament_used_grams ?? 0;
       totalCost += entry.cost ?? 0;
       energyKwh += entry.energy_kwh ?? 0;
@@ -2337,6 +2368,7 @@ function SinglePrinterCockpit({
       cancelled,
       successRate: outcomeTotal ? Math.round((completed / outcomeTotal) * 100) : 0,
       durationHours: durationSeconds / 3600,
+      averageDurationSeconds: completedDurationCount > 0 ? completedDurationSeconds / completedDurationCount : null,
       filamentGrams,
       totalCost,
       energyKwh,
@@ -2395,7 +2427,7 @@ function SinglePrinterCockpit({
   };
 
   const jogPanel = (
-    <section className="min-h-0 rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
+    <div className="mt-3 min-h-0">
       <div className="mb-2 flex items-center gap-2">
         <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">Jog</span>
         <div className="h-[2px] flex-1 bg-bambu-dark-tertiary" />
@@ -2436,7 +2468,7 @@ function SinglePrinterCockpit({
           </div>
         </div>
       </div>
-    </section>
+    </div>
   );
 
   const renderCockpitFilamentSlot = (tray: AMSUnit['tray'][number] | undefined, amsId: number, trayId: number, trayCount: number) => {
@@ -2471,7 +2503,7 @@ function SinglePrinterCockpit({
   };
 
   const filamentPanel = ((status?.ams?.length ?? 0) > 0 || (status?.vt_tray?.length ?? 0) > 0) ? (
-    <div className="mt-1">
+    <section className="min-h-0 rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
       <div className="mb-2 flex items-center gap-2">
         <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">{t('printers.filaments')}</span>
         <div className="h-[2px] flex-1 bg-bambu-dark-tertiary" />
@@ -2502,24 +2534,31 @@ function SinglePrinterCockpit({
           </div>
         )}
       </div>
-    </div>
+    </section>
   ) : null;
 
   return (
     <>
     <div className="relative h-full min-h-0 overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-gradient-to-br from-bambu-dark-secondary via-bambu-dark to-bambu-dark-secondary shadow-xl">
       <div className="relative grid h-full min-h-0 gap-3 p-3 xl:grid-cols-[minmax(0,1.45fr)_minmax(21rem,0.8fr)]">
-        <div className="grid min-h-0 gap-3 xl:grid-rows-[minmax(12rem,1fr)_auto_auto]">
-          <section className="relative min-h-0 overflow-hidden rounded-xl border border-white/10 bg-bambu-dark">
+        <div className="grid min-h-0 gap-3 xl:grid-rows-[auto_minmax(0,1fr)]">
+          <section className="relative aspect-video w-full min-h-0 overflow-hidden rounded-xl border border-white/10 bg-bambu-dark">
             <img
               src="/img/camera_placeholder.png"
               alt=""
               className="absolute inset-0 h-full w-full object-cover"
             />
-            <div
-              className="absolute inset-0"
-              style={{ background: 'linear-gradient(to top, rgb(15 23 31 / 0.72) 0%, rgb(15 23 31 / 0.72) 20%, rgb(15 23 31 / 0) 35%, rgb(15 23 31 / 0) 100%)' }}
-            />
+            {status?.connected && !cameraFailed && (
+              <img
+                key={printer.id}
+                src={cameraStreamUrl}
+                alt={t('printers.cameraFeed', '{{printer}} camera', { printer: printer.name })}
+                className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ${cameraLoaded ? 'opacity-100' : 'opacity-0'}`}
+                style={{ transform: printer.camera_rotation ? `rotate(${printer.camera_rotation}deg)` : undefined }}
+                onLoad={() => setLoadedCameraPrinterId(printer.id)}
+                onError={() => setFailedCameraPrinterId(printer.id)}
+              />
+            )}
             <div className="relative flex h-full min-h-0 flex-col gap-3 p-4">
               <div className="min-w-0">
                 <div className="flex min-w-0 items-center gap-3">
@@ -2613,18 +2652,10 @@ function SinglePrinterCockpit({
             </div>
           </section>
 
-          {jogPanel}
-
-          <section className="grid min-h-0 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            <CockpitMetricCard icon={BarChart3} label={t('stats.successRate', 'Success rate')} value={`${printerStats.successRate}%`} detail={`${printerStats.completed} / ${printerStats.failed} / ${printerStats.cancelled}`} />
-            <CockpitMetricCard icon={Package} label={t('stats.totalPrints', 'Total prints')} value={`${printLog?.total ?? printEntries.length}`} detail={t('stats.topFilament', 'Top filament: {{filament}}', { filament: printerStats.topFilament })} />
-            <CockpitMetricCard icon={Clock} label={t('stats.printTime', 'Print time')} value={`${printerStats.durationHours.toFixed(1)}h`} detail={`${maintenanceInfo?.total_print_hours?.toFixed(1) ?? '0.0'}h ${t('maintenance.title', 'Maintenance')}`} />
-            <CockpitMetricCard icon={Package} label={t('stats.filamentUsed', 'Filament used')} value={formatCockpitWeight(printerStats.filamentGrams)} detail={`${currencySymbol}${printerStats.totalCost.toFixed(2)} ${t('stats.filamentCost', 'filament cost')}`} />
-            <CockpitMetricCard icon={Zap} label={t('stats.energyUsed', 'Energy used')} value={`${printerStats.energyKwh.toFixed(2)} kWh`} detail={t('stats.fromPrintHistory', 'From print history')} />
-          </section>
+          {filamentPanel}
         </div>
 
-        <div className="grid min-h-0 gap-3 xl:grid-rows-[auto_minmax(0,1fr)]">
+        <div className="grid min-h-0 gap-3 xl:grid-rows-[auto_minmax(0,1fr)_auto]">
           <section className="rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
             {showClearPlateButton ? (
               <button
@@ -2902,8 +2933,17 @@ function SinglePrinterCockpit({
                 )}
               </div>
 
-              {filamentPanel}
             </div>
+            {jogPanel}
+          </section>
+
+          <section className="grid min-h-0 grid-cols-3 gap-1.5">
+            <CockpitMetricCard compact icon={BarChart3} label={t('stats.successRate', 'Success rate')} value={`${printerStats.successRate}%`} detail={`${printerStats.completed} / ${printerStats.failed} / ${printerStats.cancelled}`} />
+            <CockpitMetricCard compact icon={Package} label={t('stats.totalPrints', 'Total prints')} value={`${printLog?.total ?? printEntries.length}`} detail={t('stats.topFilament', 'Top filament: {{filament}}', { filament: printerStats.topFilament })} />
+            <CockpitMetricCard compact icon={Clock} label={t('stats.printTime', 'Print time')} value={`${printerStats.durationHours.toFixed(1)}h`} detail={`${maintenanceInfo?.total_print_hours?.toFixed(1) ?? '0.0'}h ${t('maintenance.title', 'Maintenance')}`} />
+            <CockpitMetricCard compact icon={Package} label={t('stats.filamentUsed', 'Filament used')} value={formatCockpitWeight(printerStats.filamentGrams)} detail={`${currencySymbol}${printerStats.totalCost.toFixed(2)} ${t('stats.filamentCost', 'filament cost')}`} />
+            <CockpitMetricCard compact icon={Zap} label={t('stats.energyUsed', 'Energy used')} value={`${printerStats.energyKwh.toFixed(2)} kWh`} detail={t('stats.fromPrintHistory', 'From print history')} />
+            <CockpitMetricCard compact icon={Timer} label={t('stats.averagePrintTime', 'Average time')} value={printerStats.averageDurationSeconds != null ? formatDuration(Math.round(printerStats.averageDurationSeconds)) : '---'} detail={t('stats.completedPrintAverage', 'Completed prints')} />
           </section>
         </div>
       </div>

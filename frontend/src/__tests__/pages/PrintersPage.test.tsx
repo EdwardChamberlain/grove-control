@@ -466,6 +466,23 @@ describe('PrintersPage', () => {
       expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
     });
 
+    it('keeps the hero placeholder visible until the single-printer camera loads', async () => {
+      const { container } = render(<PrintersPage />);
+
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+      const camera = await screen.findByAltText('X1 Carbon camera');
+      const placeholder = container.querySelector('img[src="/img/camera_placeholder.png"]');
+      expect(placeholder).toBeInTheDocument();
+      expect(camera).toHaveClass('opacity-0');
+
+      fireEvent.load(camera);
+
+      await waitFor(() => {
+        expect(camera).toHaveClass('opacity-100');
+      });
+      expect(placeholder).toBeInTheDocument();
+    });
+
     it('hides green plate clear status and action while idle', async () => {
       render(<PrintersPage />);
 
