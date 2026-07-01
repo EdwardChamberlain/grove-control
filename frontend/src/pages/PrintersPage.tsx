@@ -2511,7 +2511,7 @@ function SinglePrinterCockpit({
       <div className="flex min-w-0 gap-2 overflow-x-auto pb-1">
         {status?.ams?.map((ams) => (
           <div key={ams.id} className="min-w-[15rem] flex-1 rounded-lg bg-bambu-dark p-2">
-            <div className="mb-1.5 flex min-h-7 items-center justify-between gap-2 rounded-lg bg-bambu-dark-secondary px-2 py-1">
+            <div className="mb-1.5 flex min-h-7 items-center justify-between gap-2 rounded-lg bg-bambu-dark-secondary py-1 pl-2 pr-4">
               <span className="truncate text-[10px] font-medium text-white">{getAmsLabel(ams.id, ams.tray.length)}</span>
               <div className="flex shrink-0 items-center gap-1.5">
                 {ams.humidity != null && <HumidityIndicator humidity={ams.humidity} compact />}
@@ -9220,6 +9220,9 @@ export function PrintersPage() {
       localStorage.getItem('printerPageView'),
     );
   });
+  const [isMobilePrinterView, setIsMobilePrinterView] = useState(() => (
+    typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 767px)').matches
+  ));
   const [selectedSinglePrinterId, setSelectedSinglePrinterId] = useState<number | null>(() => {
     const saved = localStorage.getItem('singlePrinterViewId');
     const parsed = saved ? Number(saved) : NaN;
@@ -9238,27 +9241,38 @@ export function PrintersPage() {
     const saved = parseInt(localStorage.getItem('camWallSnapshotSec') || '', 10);
     return Number.isFinite(saved) && saved > 0 ? saved : 8;
   });
-  // 'off' hides the printer-state overlay; 'compact' shows only a state chip;
-  // 'full' adds progress, layer, and time-left on printing/paused tiles.
-  // Defaulting to 'full' because the cards already show this info — users who
-  // pick cam-wall view still want to glance the same details without flipping.
-  const [camWallStatusMode, setCamWallStatusMode] = useState<'off' | 'compact' | 'full'>(() => {
-    const saved = localStorage.getItem('camWallStatusMode');
-    return saved === 'off' || saved === 'compact' || saved === 'full' ? saved : 'full';
-  });
   const setPrinterPageViewMode = useCallback((mode: PrinterPageViewMode) => {
     setPrinterPageViewModeState(mode);
     localStorage.setItem('printerViewMode', mode);
     localStorage.removeItem('printerCardSize');
     localStorage.removeItem('printerPageView');
   }, []);
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const mediaQuery = window.matchMedia('(max-width: 767px)');
+    const handleChange = (event: MediaQueryListEvent) => setIsMobilePrinterView(event.matches);
+    setIsMobilePrinterView(mediaQuery.matches);
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, []);
+  useEffect(() => {
+    if (!isMobilePrinterView || printerPageViewMode !== 'single') return;
+    setSinglePrinterReturnView(null);
+    setPrinterPageViewMode('detail');
+  }, [isMobilePrinterView, printerPageViewMode, setPrinterPageViewMode]);
   const openSinglePrinter = useCallback((printerId: number) => {
     setSelectedSinglePrinterId(printerId);
     localStorage.setItem('singlePrinterViewId', String(printerId));
+    if (isMobilePrinterView) {
+      setSinglePrinterReturnView(null);
+      setPrinterPageViewMode('detail');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
     setSinglePrinterReturnView(printerPageViewMode === 'single' ? null : printerPageViewMode);
     setPrinterPageViewMode('single');
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, [printerPageViewMode, setPrinterPageViewMode]);
+  }, [isMobilePrinterView, printerPageViewMode, setPrinterPageViewMode]);
   const returnFromSinglePrinter = useCallback(() => {
     if (!singlePrinterReturnView) return;
     setSinglePrinterReturnView(null);
@@ -9977,7 +9991,7 @@ export function PrintersPage() {
           { mode: 'camwall' as const, label: t('printers.pageView.camWall', 'Camera wall'), icon: <MonitorPlay className="h-4 w-4" /> },
           { mode: 'detail' as const, label: t('printers.view.detailCards', 'Detail cards'), icon: <Layers className="h-4 w-4" /> },
           { mode: 'single' as const, label: t('printers.view.singlePrinter', 'Single printer'), icon: <PrinterIcon className="h-4 w-4" /> },
-        ]).map((option, index, options) => {
+        ]).filter((option) => !isMobilePrinterView || option.mode !== 'single').map((option, index, options) => {
           const isSelected = printerPageViewMode === option.mode;
           return (
             <button
@@ -10208,7 +10222,6 @@ export function PrintersPage() {
               window.open(`/camera/${id}`, `camera-${id}`, features);
             }
           }}
-          statusMode={camWallStatusMode}
           onChangeMaxLive={(next) => {
             setCamWallMaxLive(next);
             localStorage.setItem('camWallMaxLive', String(next));
@@ -10217,13 +10230,9 @@ export function PrintersPage() {
             setCamWallSnapshotSec(next);
             localStorage.setItem('camWallSnapshotSec', String(next));
           }}
-          onChangeStatusMode={(next) => {
-            setCamWallStatusMode(next);
-            localStorage.setItem('camWallStatusMode', next);
-          }}
         />
 
-      ) : printerPageViewMode === 'single' && selectedSinglePrinter ? (
+      ) : printerPageViewMode === 'single' && !isMobilePrinterView && selectedSinglePrinter ? (
         <div className="grid h-[calc(100vh-14rem)] min-h-0 gap-4 overflow-hidden lg:grid-cols-[17.5rem_minmax(0,1fr)]">
           <aside className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary p-3">
             <div className="mb-3 text-center">
@@ -10435,7 +10444,7 @@ export function PrintersPage() {
         </div>
       )}
 
-      {printerPageViewMode === 'single' && singlePrinterReturnView && (
+      {printerPageViewMode === 'single' && !isMobilePrinterView && singlePrinterReturnView && (
         <button
           type="button"
           onClick={returnFromSinglePrinter}

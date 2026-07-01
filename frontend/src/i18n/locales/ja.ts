@@ -205,19 +205,12 @@ export default {
       summary: 'ライブ {{live}}件、スナップ {{snap}}件、合計 {{total}}件',
       layer: 'レイヤー {{cur}}/{{total}}',
       timeLeft: '残り {{time}}',
-      statusMode: {
-        off: 'オフ',
-        compact: 'コンパクト',
-        full: 'フル',
-      },
       settings: {
         title: 'カメラウォール設定',
         maxLive: '最大ライブ配信数',
         maxLiveHint: '同時にライブ配信するタイル数。残りはスナップショットとして更新されます。',
         snapshotInterval: 'スナップショット間隔（秒）',
         snapshotIntervalHint: '非ライブのタイルが新しいスナップショットを取得する頻度。',
-        statusOverlay: 'ステータス表示',
-        statusOverlayHint: 'コンパクト：状態バッジのみ。フル：＋進捗・レイヤー・残り時間。',
       },
     },
     // Controls

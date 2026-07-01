@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, Maximize2, VideoOff, WifiOff } from 'lucide-react';
+import { Maximize2, VideoOff, WifiOff } from 'lucide-react';
 import { getAuthToken, withStreamToken } from '../api/client';
-import { formatDuration } from '../utils/date';
 
 export type CameraTileMode = 'live' | 'snapshot' | 'paused';
-export type CameraTileStatusMode = 'off' | 'compact' | 'full';
 
 interface CameraTileProps {
   printerId: number;
@@ -16,16 +14,8 @@ interface CameraTileProps {
   connected: boolean;
   onClick?: () => void;
   onOpenFullscreen?: () => void;
-  // Optional status overlay — wired by CameraWall from the shared
-  // ['printerStatus', id] query. All optional so existing tests don't break.
-  statusMode?: CameraTileStatusMode;
   printerState?: string | null;
   progress?: number | null;
-  remainingMin?: number | null;
-  layerNum?: number | null;
-  totalLayers?: number | null;
-  printName?: string | null;
-  hmsErrorCount?: number;
 }
 
 // Tiles render lighter than EmbeddedCameraViewer's full window: lower fps,
@@ -35,8 +25,7 @@ const LIVE_FPS = 8;
 
 type StatusBucket = 'printing' | 'paused' | 'finished' | 'error' | 'idle';
 
-function classifyState(state: string | null | undefined, hmsErrorCount: number): StatusBucket {
-  if (hmsErrorCount > 0) return 'error';
+function classifyState(state: string | null | undefined): StatusBucket {
   switch (state) {
     case 'RUNNING':
       return 'printing';
@@ -50,14 +39,6 @@ function classifyState(state: string | null | undefined, hmsErrorCount: number):
   }
 }
 
-const BUCKET_CHIP_CLASS: Record<StatusBucket, string> = {
-  printing: 'bg-bambu-green/85 text-black',
-  paused: 'bg-amber-500/85 text-black',
-  finished: 'bg-sky-500/80 text-white',
-  error: 'bg-red-500/85 text-white',
-  idle: 'bg-bambu-dark-tertiary/80 text-bambu-gray',
-};
-
 export function CameraTile({
   printerId,
   printerName,
@@ -67,14 +48,8 @@ export function CameraTile({
   connected,
   onClick,
   onOpenFullscreen,
-  statusMode = 'off',
   printerState = null,
   progress = null,
-  remainingMin = null,
-  layerNum = null,
-  totalLayers = null,
-  printName = null,
-  hmsErrorCount = 0,
 }: CameraTileProps) {
   const { t } = useTranslation();
   const [bust, setBust] = useState(0);
@@ -143,16 +118,9 @@ export function CameraTile({
 
   const transform = cameraRotation ? `rotate(${cameraRotation}deg)` : undefined;
 
-  const bucket = classifyState(printerState, hmsErrorCount);
-  // Hide chip for idle to keep cold walls clean; always show when something
-  // is happening (printing/paused/finished/error).
-  const showChip = connected && statusMode !== 'off' && bucket !== 'idle';
+  const bucket = classifyState(printerState);
   const isPrintingOrPaused = bucket === 'printing' || bucket === 'paused';
-  const showInfoStrip = connected && statusMode === 'full' && isPrintingOrPaused;
-  const fileLabel = printName ?? null;
   const progressPct = progress != null ? Math.round(progress) : null;
-  const hasLayers = layerNum != null && totalLayers != null && totalLayers > 0;
-  const hasRemaining = remainingMin != null && remainingMin > 0;
   const displayedProgress = isPrintingOrPaused && progressPct != null
     ? Math.max(0, Math.min(100, progressPct))
     : 0;
@@ -225,52 +193,8 @@ export function CameraTile({
         </button>
       )}
 
-      {/* Status chip */}
-      {showChip && (
-        <span
-          className={`absolute left-2 top-8 flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${BUCKET_CHIP_CLASS[bucket]}`}
-        >
-          {hmsErrorCount > 0 && (
-            <AlertTriangle
-              className="h-3 w-3"
-              aria-hidden="true"
-            />
-          )}
-          <span>{t(`printers.status.${bucket}`)}</span>
-        </span>
-      )}
-
-      {/* Bottom overlay: name + (when full) print info */}
+      {/* Printer name */}
       <div className="absolute inset-x-0 bottom-1.5 px-2 pb-1.5 pt-3 text-white">
-        {showInfoStrip && (
-          <div className="mb-0.5 space-y-0.5 text-[11px] leading-tight text-white/90">
-            {fileLabel && (
-              <div className="truncate" title={fileLabel}>
-                {fileLabel}
-              </div>
-            )}
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-bambu-gray">
-              {progressPct != null && (
-                <span className="font-semibold text-white">{progressPct}%</span>
-              )}
-              {hasLayers && (
-                <span>
-                  {t('printers.camWall.layer', {
-                    cur: layerNum,
-                    total: totalLayers,
-                  })}
-                </span>
-              )}
-              {hasRemaining && (
-                <span>
-                  {t('printers.camWall.timeLeft', {
-                    time: formatDuration((remainingMin ?? 0) * 60),
-                  })}
-                </span>
-              )}
-            </div>
-          </div>
-        )}
         <span className="block truncate text-xs font-medium">{printerName}</span>
       </div>
 

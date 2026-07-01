@@ -206,19 +206,12 @@ export default {
       summary: '{{live}} en vivo, {{snap}} fotos, {{total}} en total',
       layer: 'Capa {{cur}}/{{total}}',
       timeLeft: 'quedan {{time}}',
-      statusMode: {
-        off: 'Apagado',
-        compact: 'Compacto',
-        full: 'Completo',
-      },
       settings: {
         title: 'Ajustes del muro de cámaras',
         maxLive: 'Máx. transmisiones en vivo',
         maxLiveHint: 'Cuántos mosaicos transmiten en vivo a la vez. Los demás se actualizan como fotos.',
         snapshotInterval: 'Intervalo de fotos (segundos)',
         snapshotIntervalHint: 'Con qué frecuencia los mosaicos no en vivo obtienen una nueva foto.',
-        statusOverlay: 'Superposición de estado',
-        statusOverlayHint: 'Compacto: solo insignia de estado. Completo: + progreso, capa, tiempo restante.',
       },
     },
     // Controls

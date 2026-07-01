@@ -206,19 +206,12 @@ export default {
       summary: '{{live}} canlı, {{snap}} fotoğraf, toplam {{total}}',
       layer: 'Katman {{cur}}/{{total}}',
       timeLeft: '{{time}} kaldı',
-      statusMode: {
-        off: 'Kapalı',
-        compact: 'Sade',
-        full: 'Tam',
-      },
       settings: {
         title: 'Kamera duvarı ayarları',
         maxLive: 'Maks. canlı yayın',
         maxLiveHint: 'Aynı anda kaç döşemenin canlı yayın yaptığı. Diğerleri foto olarak yenilenir.',
         snapshotInterval: 'Foto aralığı (saniye)',
         snapshotIntervalHint: 'Canlı olmayan döşemelerin ne sıklıkla yeni bir foto aldığı.',
-        statusOverlay: 'Durum kaplaması',
-        statusOverlayHint: 'Sade: yalnızca durum rozeti. Tam: + ilerleme, katman, kalan süre.',
       },
     },
     // Kontroller

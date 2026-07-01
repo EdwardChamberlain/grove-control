@@ -2,7 +2,7 @@
  * Tests for the PrintersPage component.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { screen, waitFor, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils';
@@ -71,6 +71,10 @@ const selectToolbarDropdownOption = async (triggerName: RegExp, optionName: RegE
 };
 
 describe('PrintersPage', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
     localStorage.removeItem('printerCardSize');
     localStorage.removeItem('printerViewMode');
@@ -452,6 +456,30 @@ describe('PrintersPage', () => {
       fireEvent.click(await screen.findByRole('button', { name: 'Back' }));
 
       expect(screen.getByRole('button', { name: 'List' })).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
+    });
+
+    it('hides single-printer view and routes list clickthroughs to detail cards on mobile', async () => {
+      vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
+        matches: query === '(max-width: 767px)',
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })));
+      localStorage.setItem('printerViewMode', 'list');
+      render(<PrintersPage />);
+
+      const printerNames = await screen.findAllByText('X1 Carbon');
+      expect(screen.queryByRole('button', { name: 'Single printer' })).not.toBeInTheDocument();
+      fireEvent.click(printerNames[0]);
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Detail cards' })).toHaveAttribute('aria-pressed', 'true');
+      });
       expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
     });
 

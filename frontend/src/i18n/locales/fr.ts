@@ -206,19 +206,12 @@ export default {
       summary: '{{live}} en direct, {{snap}} captures, {{total}} au total',
       layer: 'Couche {{cur}}/{{total}}',
       timeLeft: '{{time}} restantes',
-      statusMode: {
-        off: 'Arrêt',
-        compact: 'Compact',
-        full: 'Complet',
-      },
       settings: {
         title: 'Paramètres du mur de caméras',
         maxLive: 'Flux en direct max.',
         maxLiveHint: 'Combien de vignettes diffusent en direct à la fois. Les autres se rafraîchissent en captures.',
         snapshotInterval: 'Intervalle de capture (secondes)',
         snapshotIntervalHint: 'À quelle fréquence les vignettes hors direct récupèrent une nouvelle capture.',
-        statusOverlay: 'Overlay de statut',
-        statusOverlayHint: 'Compact : badge de statut seul. Complet : + progression, couche, temps restant.',
       },
     },
     // Controls

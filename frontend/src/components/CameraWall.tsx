@@ -2,38 +2,32 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQueries } from '@tanstack/react-query';
 import { Settings as SettingsIcon } from 'lucide-react';
-import { CameraTile, type CameraTileMode, type CameraTileStatusMode } from './CameraTile';
-import { filterKnownHMSErrors } from './HMSErrorModal';
+import { CameraTile, type CameraTileMode } from './CameraTile';
 import { api, type Printer, type PrinterStatus } from '../api/client';
 
 interface CameraWallProps {
   printers: Printer[];
   maxLive: number;
   snapshotIntervalSec: number;
-  statusMode: CameraTileStatusMode;
   onTileClick: (printerId: number, printerName: string) => void;
   onOpenFullscreen: (printerId: number, printerName: string) => void;
   onChangeMaxLive: (next: number) => void;
   onChangeSnapshotIntervalSec: (next: number) => void;
-  onChangeStatusMode: (next: CameraTileStatusMode) => void;
 }
 
 const MIN_MAX_LIVE = 1;
 const MAX_MAX_LIVE = 16;
 const MIN_SNAPSHOT_SEC = 2;
 const MAX_SNAPSHOT_SEC = 60;
-const STATUS_MODES: CameraTileStatusMode[] = ['off', 'compact', 'full'];
 
 export function CameraWall({
   printers,
   maxLive,
   snapshotIntervalSec,
-  statusMode,
   onTileClick,
   onOpenFullscreen,
   onChangeMaxLive,
   onChangeSnapshotIntervalSec,
-  onChangeStatusMode,
 }: CameraWallProps) {
   const { t } = useTranslation();
   const tileRefs = useRef<Map<number, HTMLDivElement | null>>(new Map());
@@ -193,36 +187,6 @@ export function CameraWall({
                   {t('printers.camWall.settings.snapshotIntervalHint')}
                 </span>
               </label>
-              <div className="space-y-1">
-                <span className="block text-xs font-medium text-white">
-                  {t('printers.camWall.settings.statusOverlay')}
-                </span>
-                <div
-                  role="radiogroup"
-                  aria-label={t('printers.camWall.settings.statusOverlay')}
-                  className="flex overflow-hidden rounded-md border border-bambu-dark-tertiary"
-                >
-                  {STATUS_MODES.map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      role="radio"
-                      aria-checked={statusMode === m}
-                      onClick={() => onChangeStatusMode(m)}
-                      className={`flex-1 px-2 py-1 text-xs ${
-                        statusMode === m
-                          ? 'bg-bambu-green text-black font-semibold'
-                          : 'bg-bambu-dark text-white hover:bg-bambu-dark-tertiary'
-                      }`}
-                    >
-                      {t(`printers.camWall.statusMode.${m}`)}
-                    </button>
-                  ))}
-                </div>
-                <span className="block text-[11px] text-bambu-gray">
-                  {t('printers.camWall.settings.statusOverlayHint')}
-                </span>
-              </div>
             </div>
           )}
         </div>
@@ -246,20 +210,8 @@ export function CameraWall({
                 mode={mode}
                 snapshotIntervalMs={snapshotIntervalSec * 1000}
                 connected={statusByPrinter.get(p.id)?.connected ?? false}
-                statusMode={statusMode}
                 printerState={statusByPrinter.get(p.id)?.state ?? null}
                 progress={statusByPrinter.get(p.id)?.progress ?? null}
-                remainingMin={statusByPrinter.get(p.id)?.remaining_time ?? null}
-                layerNum={statusByPrinter.get(p.id)?.layer_num ?? null}
-                totalLayers={statusByPrinter.get(p.id)?.total_layers ?? null}
-                printName={
-                  statusByPrinter.get(p.id)?.subtask_name ??
-                  statusByPrinter.get(p.id)?.gcode_file ??
-                  null
-                }
-                hmsErrorCount={
-                  filterKnownHMSErrors(statusByPrinter.get(p.id)?.hms_errors ?? []).length
-                }
                 onClick={() => onTileClick(p.id, p.name)}
                 onOpenFullscreen={() => onOpenFullscreen(p.id, p.name)}
               />

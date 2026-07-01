@@ -206,19 +206,12 @@ export default {
       summary: '{{live}} ao vivo, {{snap}} fotos, {{total}} no total',
       layer: 'Camada {{cur}}/{{total}}',
       timeLeft: 'faltam {{time}}',
-      statusMode: {
-        off: 'Desligado',
-        compact: 'Compacto',
-        full: 'Completo',
-      },
       settings: {
         title: 'Configurações do mural de câmeras',
         maxLive: 'Máx. transmissões ao vivo',
         maxLiveHint: 'Quantos blocos transmitem ao vivo simultaneamente. Os demais atualizam como fotos.',
         snapshotInterval: 'Intervalo de foto (segundos)',
         snapshotIntervalHint: 'Com que frequência os blocos não ao vivo buscam uma nova foto.',
-        statusOverlay: 'Sobreposição de status',
-        statusOverlayHint: 'Compacto: apenas o selo de status. Completo: + progresso, camada e tempo restante.',
       },
     },
     // Controls

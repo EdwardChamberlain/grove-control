@@ -206,19 +206,12 @@ export default {
       summary: '{{live}} live, {{snap}} foto, {{total}} totali',
       layer: 'Strato {{cur}}/{{total}}',
       timeLeft: '{{time}} rimanenti',
-      statusMode: {
-        off: 'Off',
-        compact: 'Compatto',
-        full: 'Completo',
-      },
       settings: {
         title: 'Impostazioni muro telecamere',
         maxLive: 'Max stream live',
         maxLiveHint: 'Quante tessere trasmettono in live contemporaneamente. Le altre si aggiornano come foto.',
         snapshotInterval: 'Intervallo foto (secondi)',
         snapshotIntervalHint: 'Con quale frequenza le tessere non live scaricano una nuova foto.',
-        statusOverlay: 'Overlay di stato',
-        statusOverlayHint: 'Compatto: solo badge di stato. Completo: + avanzamento, strato, tempo residuo.',
       },
     },
     // Controls

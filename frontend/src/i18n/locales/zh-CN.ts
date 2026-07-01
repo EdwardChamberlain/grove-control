@@ -206,19 +206,12 @@ export default {
       summary: '直播 {{live}} 个，快照 {{snap}} 个，共 {{total}} 个',
       layer: '第 {{cur}}/{{total}} 层',
       timeLeft: '剩余 {{time}}',
-      statusMode: {
-        off: '关闭',
-        compact: '简洁',
-        full: '完整',
-      },
       settings: {
         title: '摄像头墙设置',
         maxLive: '最大直播数',
         maxLiveHint: '同时直播的画面数量。其他画面以快照刷新。',
         snapshotInterval: '快照刷新间隔（秒）',
         snapshotIntervalHint: '非直播画面获取新快照的频率。',
-        statusOverlay: '状态叠加',
-        statusOverlayHint: '简洁：仅显示状态标签。完整：加上进度、层数、剩余时间。',
       },
     },
     // Controls
