@@ -584,6 +584,17 @@ export default {
       title: 'Dieser Slot ist Filament {{n}} im aktiven Druck',
       ariaLabel: 'Aktiver Druck-Slot {{n}}',
     },
+    health: {
+      healthy: 'Gesund', attentionRequired: 'Aufmerksamkeit erforderlich', error: 'Fehler',
+      title: 'Maschinenzustand: {{status}}', statusDetails: 'Statusdetails',
+    },
+    single: {
+      machineList: 'Maschinen', machineCountOne: '1 Drucker', machineCount: '{{count}} Drucker', quickReprint: 'Schneller Nachdruck',
+      jog: 'Verfahren', moveYForward: 'Y vorwärts bewegen', moveXLeft: 'X nach links bewegen', moveXRight: 'X nach rechts bewegen', moveYBack: 'Y rückwärts bewegen',
+      retractFilament: 'Filament zurückziehen', extrudeFilament: 'Filament extrudieren',
+      setNozzleTemperature: 'Düsentemperatur einstellen', setBedTemperature: 'Druckbetttemperatur einstellen', setChamberTemperature: 'Kammertemperatur einstellen', setFanSpeed: '{{fan}}-Geschwindigkeit einstellen',
+      chamberLightState: 'Kammerlicht {{state}}', nozzleTemperatureSet: 'Düsentemperatur eingestellt', bedTemperatureSet: 'Druckbetttemperatur eingestellt', chamberTemperatureSet: 'Kammertemperatur eingestellt', fanSpeedSet: 'Lüftergeschwindigkeit eingestellt',
+    },
     // Filaments section
     filaments: 'Filamente',
     // Camera
@@ -1312,6 +1323,9 @@ export default {
     energyCost: 'Energiekosten',
     energyWarmingUpTooltip: 'Die Energieerfassung sammelt noch stündliche Snapshots. Zeitraumwerte werden genau, sobald vor dem gewählten Bereich mindestens ein Snapshot vorliegt. Frühe Werte können zu niedrig sein.',
     averagePrintTime: 'Durchschnittliche Druckzeit',
+    topFilament: 'Häufigstes Filament: {{filament}}',
+    fromPrintHistory: 'Aus dem Druckverlauf',
+    completedPrintAverage: 'Abgeschlossene Drucke',
     printsPerDay: 'Drucke pro Tag',
     byPrinter: 'Nach Drucker',
     printsByPrinter: 'Drucke nach Drucker',

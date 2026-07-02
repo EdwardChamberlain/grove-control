@@ -583,6 +583,17 @@ export default {
       title: 'このスロットはアクティブな印刷のフィラメント {{n}} です',
       ariaLabel: 'アクティブ印刷スロット {{n}}',
     },
+    health: {
+      healthy: '正常', attentionRequired: '要確認', error: 'エラー',
+      title: 'マシン状態: {{status}}', statusDetails: '状態の詳細',
+    },
+    single: {
+      machineList: 'マシン', machineCountOne: 'プリンター1台', machineCount: 'プリンター{{count}}台', quickReprint: 'クイック再印刷',
+      jog: 'ジョグ', moveYForward: 'Yを前へ移動', moveXLeft: 'Xを左へ移動', moveXRight: 'Xを右へ移動', moveYBack: 'Yを後ろへ移動',
+      retractFilament: 'フィラメントを引き戻す', extrudeFilament: 'フィラメントを押し出す',
+      setNozzleTemperature: 'ノズル温度を設定', setBedTemperature: 'ベッド温度を設定', setChamberTemperature: 'チャンバー温度を設定', setFanSpeed: '{{fan}}速度を設定',
+      chamberLightState: 'チャンバーライト {{state}}', nozzleTemperatureSet: 'ノズル温度を設定しました', bedTemperatureSet: 'ベッド温度を設定しました', chamberTemperatureSet: 'チャンバー温度を設定しました', fanSpeedSet: 'ファン速度を設定しました',
+    },
     // Filaments section
     filaments: 'フィラメント',
     // Camera
@@ -1311,6 +1322,9 @@ export default {
     energyCost: 'エネルギーコスト',
     energyWarmingUpTooltip: 'エネルギー追跡は毎時スナップショットを収集中です。選択範囲の前に少なくとも1つのスナップショットが存在すると、期間合計が正確になります。初期値は過小になる場合があります。',
     averagePrintTime: '平均印刷時間',
+    topFilament: '最多フィラメント: {{filament}}',
+    fromPrintHistory: '印刷履歴から',
+    completedPrintAverage: '完了した印刷',
     printsPerDay: '1日あたりの印刷数',
     byPrinter: 'プリンター別',
     printsByPrinter: 'プリンター別印刷数',

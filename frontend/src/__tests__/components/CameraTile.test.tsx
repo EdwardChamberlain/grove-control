@@ -115,6 +115,25 @@ describe('CameraTile', () => {
     expect(onClick).toHaveBeenCalledOnce();
   });
 
+  it('does not trigger tile navigation from fullscreen keyboard events', async () => {
+    const onClick = vi.fn();
+    render(
+      <CameraTile
+        printerId={5}
+        printerName="X1C-Camera"
+        mode="live"
+        snapshotIntervalMs={5000}
+        connected
+        onClick={onClick}
+        onOpenFullscreen={vi.fn()}
+      />,
+    );
+    await flushMicrotasks();
+
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Open full screen' }), { key: 'Enter' });
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
   it('shows printer progress across the bottom of the camera frame', async () => {
     render(
       <CameraTile

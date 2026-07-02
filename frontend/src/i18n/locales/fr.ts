@@ -584,6 +584,17 @@ export default {
       title: 'Cet emplacement est le filament {{n}} dans l\'impression active',
       ariaLabel: 'Emplacement d\'impression active {{n}}',
     },
+    health: {
+      healthy: 'Sain', attentionRequired: 'Attention requise', error: 'Erreur',
+      title: 'État de la machine : {{status}}', statusDetails: 'Détails de l’état',
+    },
+    single: {
+      machineList: 'Machines', machineCountOne: '1 imprimante', machineCount: '{{count}} imprimantes', quickReprint: 'Réimpression rapide',
+      jog: 'Déplacement', moveYForward: 'Déplacer Y vers l’avant', moveXLeft: 'Déplacer X à gauche', moveXRight: 'Déplacer X à droite', moveYBack: 'Déplacer Y vers l’arrière',
+      retractFilament: 'Rétracter le filament', extrudeFilament: 'Extruder le filament',
+      setNozzleTemperature: 'Régler la température de la buse', setBedTemperature: 'Régler la température du plateau', setChamberTemperature: 'Régler la température de la chambre', setFanSpeed: 'Régler la vitesse de {{fan}}',
+      chamberLightState: 'Éclairage de chambre {{state}}', nozzleTemperatureSet: 'Température de buse réglée', bedTemperatureSet: 'Température du plateau réglée', chamberTemperatureSet: 'Température de chambre réglée', fanSpeedSet: 'Vitesse du ventilateur réglée',
+    },
     // Filaments section
     filaments: 'Filaments',
     // Camera
@@ -1312,6 +1323,9 @@ export default {
     energyCost: 'Coût énergie',
     energyWarmingUpTooltip: 'Le suivi énergétique collecte encore des instantanés horaires. Les totaux par période deviendront précis dès qu’un instantané existera avant la plage sélectionnée. Les premières valeurs peuvent être sous-estimées.',
     averagePrintTime: 'Temps moyen par impression',
+    topFilament: 'Filament principal : {{filament}}',
+    fromPrintHistory: 'Depuis l’historique d’impression',
+    completedPrintAverage: 'Impressions terminées',
     printsPerDay: 'Impressions par jour',
     byPrinter: 'Par imprimante',
     printsByPrinter: 'Impressions par imprimante',

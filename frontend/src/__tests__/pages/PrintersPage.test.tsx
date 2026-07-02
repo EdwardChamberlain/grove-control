@@ -511,6 +511,107 @@ describe('PrintersPage', () => {
       expect(placeholder).toBeInTheDocument();
     });
 
+    it('provides AMS filament backup and skip objects controls in the single-printer cockpit', async () => {
+      server.use(
+        http.get('/api/v1/printers/:id/status', () => {
+          return HttpResponse.json({
+            ...mockPrinterStatus,
+            state: 'RUNNING',
+            current_print: 'multi-object.3mf',
+            printable_objects_count: 2,
+            ams_filament_backup: false,
+            ams: [{
+              id: 0,
+              humidity: 35,
+              temp: 25,
+              tray: [{ id: 0, tray_type: 'PLA', tray_color: 'FF0000FF', remain: 80 }],
+            }],
+          });
+        }),
+        http.get('/api/v1/printers/:id/print/objects', () => {
+          return HttpResponse.json({
+            objects: [
+              { id: 1, name: 'Part 1', x: 10, y: 10, skipped: false },
+              { id: 2, name: 'Part 2', x: 20, y: 20, skipped: false },
+            ],
+            total: 2,
+            skipped_count: 0,
+            is_printing: true,
+            bbox_all: [0, 0, 30, 30],
+          });
+        }),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+
+      fireEvent.click(await screen.findByRole('button', { name: /AMS Filament Backup is OFF/ }));
+      expect((await screen.findAllByText('AMS Filament Backup')).length).toBeGreaterThan(0);
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+      const skipObjectsButton = screen.getByRole('button', { name: 'Skip Objects' });
+      expect(skipObjectsButton).toBeEnabled();
+      fireEvent.click(skipObjectsButton);
+      expect((await screen.findAllByText('Skip Objects')).length).toBeGreaterThan(1);
+    });
+
+    it('restores the homing warning before single-printer Z movement', async () => {
+      sessionStorage.clear();
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Move plate up' }));
+
+      expect(await screen.findByText('Printer is not homed')).toBeInTheDocument();
+      expect(screen.getAllByRole('button', { name: 'Auto Home' }).length).toBeGreaterThan(1);
+      expect(screen.getByRole('button', { name: 'Move anyway' })).toBeInTheDocument();
+    });
+
+    it('uses configured presets and enables chamber heat control in the cockpit', async () => {
+      server.use(
+        http.get('/api/v1/settings/ui-preferences', () => {
+          return HttpResponse.json({
+            ams_humidity_good: 40,
+            ams_humidity_fair: 60,
+            ams_temp_good: 30,
+            ams_temp_fair: 35,
+            require_plate_clear: true,
+            nozzle_temp_presets: '[131,221,271]',
+            bed_temp_presets: '[51,71,91]',
+            chamber_temp_presets: '[31,41,51]',
+            fan_speed_presets: '[33,66,99]',
+          });
+        }),
+        http.get('/api/v1/printers/:id/status', () => {
+          return HttpResponse.json({
+            ...mockPrinterStatus,
+            supports_chamber_heater: true,
+          });
+        }),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+
+      const nozzleTile = screen.getByText('Nozzle').closest('button');
+      expect(nozzleTile).not.toBeNull();
+      fireEvent.click(nozzleTile!);
+      expect(await screen.findByRole('button', { name: '131 C' })).toBeInTheDocument();
+      const nozzlePopover = screen.getByText('Set Nozzle Temperature').parentElement;
+      fireEvent.click(nozzlePopover?.previousElementSibling as Element);
+
+      const chamberTile = screen.getByText('Chamber').closest('button');
+      expect(chamberTile).not.toBeNull();
+      expect(chamberTile).toBeEnabled();
+      fireEvent.click(chamberTile!);
+      expect(await screen.findByRole('button', { name: '41 C' })).toBeInTheDocument();
+      const chamberPopover = screen.getByText('Set Chamber Temperature').parentElement;
+      fireEvent.click(chamberPopover?.previousElementSibling as Element);
+
+      fireEvent.click(screen.getByTitle('Part Cooling Fan: 0%'));
+      expect(await screen.findByRole('button', { name: '33 %' })).toBeInTheDocument();
+    });
+
     it('hides green plate clear status and action while idle', async () => {
       render(<PrintersPage />);
 

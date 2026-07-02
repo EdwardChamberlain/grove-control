@@ -552,6 +552,17 @@ export default {
       title: '이 슬롯은 활성 인쇄의 필라멘트 {{n}}입니다',
       ariaLabel: '활성 인쇄 슬롯 {{n}}'
     },
+    health: {
+      healthy: '정상', attentionRequired: '주의 필요', error: '오류',
+      title: '장비 상태: {{status}}', statusDetails: '상태 세부 정보',
+    },
+    single: {
+      machineList: '장비', machineCountOne: '프린터 1대', machineCount: '프린터 {{count}}대', quickReprint: '빠른 재인쇄',
+      jog: '이동', moveYForward: 'Y 앞으로 이동', moveXLeft: 'X 왼쪽으로 이동', moveXRight: 'X 오른쪽으로 이동', moveYBack: 'Y 뒤로 이동',
+      retractFilament: '필라멘트 후퇴', extrudeFilament: '필라멘트 압출',
+      setNozzleTemperature: '노즐 온도 설정', setBedTemperature: '베드 온도 설정', setChamberTemperature: '챔버 온도 설정', setFanSpeed: '{{fan}} 속도 설정',
+      chamberLightState: '챔버 조명 {{state}}', nozzleTemperatureSet: '노즐 온도 설정됨', bedTemperatureSet: '베드 온도 설정됨', chamberTemperatureSet: '챔버 온도 설정됨', fanSpeedSet: '팬 속도 설정됨',
+    },
     filaments: '필라멘트',
     openCameraOverlay: '카메라 오버레이 열기',
     openCameraWindow: '새 창에서 카메라 열기',
@@ -1254,6 +1265,9 @@ export default {
     energyCost: '에너지 비용',
     energyWarmingUpTooltip: '에너지 추적이 시간별 스냅샷을 수집 중입니다. 날짜 범위 합계는 선택한 범위 이전에 하나 이상의 스냅샷이 존재하면 정확해집니다. 초기 값이 적게 집계될 수 있습니다.',
     averagePrintTime: '평균 인쇄 시간',
+    topFilament: '주요 필라멘트: {{filament}}',
+    fromPrintHistory: '인쇄 기록 기준',
+    completedPrintAverage: '완료된 인쇄',
     printsPerDay: '일일 인쇄 수',
     byPrinter: '프린터별',
     printsByPrinter: '프린터별 인쇄',

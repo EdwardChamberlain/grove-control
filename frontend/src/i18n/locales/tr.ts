@@ -584,6 +584,17 @@ export default {
       title: 'Bu slot, aktif baskıdaki {{n}} numaralı filament',
       ariaLabel: 'Aktif baskı slotu {{n}}',
     },
+    health: {
+      healthy: 'Sağlıklı', attentionRequired: 'Dikkat gerekli', error: 'Hata',
+      title: 'Makine durumu: {{status}}', statusDetails: 'Durum ayrıntıları',
+    },
+    single: {
+      machineList: 'Makineler', machineCountOne: '1 yazıcı', machineCount: '{{count}} yazıcı', quickReprint: 'Hızlı yeniden yazdırma',
+      jog: 'Hareket', moveYForward: 'Y ileri hareket', moveXLeft: 'X sola hareket', moveXRight: 'X sağa hareket', moveYBack: 'Y geri hareket',
+      retractFilament: 'Filamenti geri çek', extrudeFilament: 'Filamenti ekstrüde et',
+      setNozzleTemperature: 'Nozul sıcaklığını ayarla', setBedTemperature: 'Tabla sıcaklığını ayarla', setChamberTemperature: 'Hazne sıcaklığını ayarla', setFanSpeed: '{{fan}} hızını ayarla',
+      chamberLightState: 'Hazne ışığı {{state}}', nozzleTemperatureSet: 'Nozul sıcaklığı ayarlandı', bedTemperatureSet: 'Tabla sıcaklığı ayarlandı', chamberTemperatureSet: 'Hazne sıcaklığı ayarlandı', fanSpeedSet: 'Fan hızı ayarlandı',
+    },
     // Filamentler bölümü
     filaments: 'Filamentler',
     // Kamera
@@ -1313,6 +1324,9 @@ export default {
     energyCost: 'Enerji Maliyeti',
     energyWarmingUpTooltip: 'Enerji takibi hâlâ saatlik anlık görüntüler topluyor. Tarih aralığı toplamları, seçilen aralıktan önce en az bir anlık görüntü olduğunda doğru hâle gelir. Erken değerler eksik sayabilir.',
     averagePrintTime: 'Ortalama Baskı Süresi',
+    topFilament: 'En çok kullanılan filament: {{filament}}',
+    fromPrintHistory: 'Baskı geçmişinden',
+    completedPrintAverage: 'Tamamlanan baskılar',
     printsPerDay: 'Günlük Baskı',
     byPrinter: 'Yazıcıya Göre',
     printsByPrinter: 'Yazıcıya Göre Baskılar',

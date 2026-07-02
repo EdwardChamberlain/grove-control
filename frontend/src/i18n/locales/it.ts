@@ -584,6 +584,17 @@ export default {
       title: 'Questo slot è il filamento {{n}} nella stampa attiva',
       ariaLabel: 'Slot stampa attiva {{n}}',
     },
+    health: {
+      healthy: 'Integra', attentionRequired: 'Richiede attenzione', error: 'Errore',
+      title: 'Stato macchina: {{status}}', statusDetails: 'Dettagli stato',
+    },
+    single: {
+      machineList: 'Macchine', machineCountOne: '1 stampante', machineCount: '{{count}} stampanti', quickReprint: 'Ristampa rapida',
+      jog: 'Movimento', moveYForward: 'Sposta Y avanti', moveXLeft: 'Sposta X a sinistra', moveXRight: 'Sposta X a destra', moveYBack: 'Sposta Y indietro',
+      retractFilament: 'Ritira filamento', extrudeFilament: 'Estrudi filamento',
+      setNozzleTemperature: 'Imposta temperatura ugello', setBedTemperature: 'Imposta temperatura piano', setChamberTemperature: 'Imposta temperatura camera', setFanSpeed: 'Imposta velocità {{fan}}',
+      chamberLightState: 'Luce camera {{state}}', nozzleTemperatureSet: 'Temperatura ugello impostata', bedTemperatureSet: 'Temperatura piano impostata', chamberTemperatureSet: 'Temperatura camera impostata', fanSpeedSet: 'Velocità ventola impostata',
+    },
     // Filaments section
     filaments: 'Filamenti',
     // Camera
@@ -1312,6 +1323,9 @@ export default {
     energyCost: 'Costo energia',
     energyWarmingUpTooltip: 'Il tracciamento energia sta ancora raccogliendo snapshot orari. I totali per intervallo diventeranno accurati quando esisterà almeno uno snapshot prima dell’intervallo selezionato. I primi valori potrebbero essere sottostimati.',
     averagePrintTime: 'Tempo medio di stampa',
+    topFilament: 'Filamento principale: {{filament}}',
+    fromPrintHistory: 'Dalla cronologia di stampa',
+    completedPrintAverage: 'Stampe completate',
     printsPerDay: 'Stampe al giorno',
     byPrinter: 'Per stampante',
     printsByPrinter: 'Stampe per stampante',
