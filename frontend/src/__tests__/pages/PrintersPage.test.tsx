@@ -569,9 +569,12 @@ describe('PrintersPage', () => {
 
       fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
       const camera = await screen.findByAltText('X1 Carbon camera');
-      const placeholder = container.querySelector('img[src="/img/camera_placeholder.png"]');
+      const placeholder = container.querySelector('img[src="/img/camera_placeholder_X1C.png"]');
       expect(placeholder).toBeInTheDocument();
       expect(camera).toHaveClass('opacity-0');
+
+      fireEvent.error(placeholder!);
+      expect(container.querySelector('img[src="/img/camera_placeholder.png"]')).toBeInTheDocument();
 
       fireEvent.load(camera);
 
@@ -579,6 +582,67 @@ describe('PrintersPage', () => {
         expect(camera).toHaveClass('opacity-100');
       });
       expect(placeholder).toBeInTheDocument();
+    });
+
+    it('releases the active camera when switching machines or leaving cockpit view', async () => {
+      const stoppedPrinterIds: string[] = [];
+      server.use(
+        http.post('/api/v1/printers/:id/camera/stop', ({ params }) => {
+          stoppedPrinterIds.push(String(params.id));
+          return HttpResponse.json({ success: true });
+        }),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+      await screen.findByAltText('X1 Carbon camera');
+
+      fireEvent.click(screen.getByTitle('P1S Backup'));
+      await screen.findByAltText('P1S Backup camera');
+      await waitFor(() => expect(stoppedPrinterIds).toContain('1'));
+
+      fireEvent.click(screen.getByRole('button', { name: 'Detail cards' }));
+      await waitFor(() => expect(stoppedPrinterIds).toContain('2'));
+    });
+
+    it('offers recent reprints from the print dialog instead of the cockpit card', async () => {
+      server.use(
+        http.get('/api/v1/print-log/', () => HttpResponse.json({
+          items: [{
+            id: 41,
+            archive_id: 17,
+            print_name: 'Sample Widget',
+            printer_name: 'X1 Carbon',
+            printer_id: 1,
+            status: 'completed',
+            started_at: '2026-06-30T09:00:00Z',
+            completed_at: '2026-06-30T10:00:00Z',
+            duration_seconds: 3600,
+            filament_type: 'PLA',
+            filament_color: 'FFFFFFFF',
+            filament_used_grams: 12,
+            cost: 0.3,
+            energy_kwh: 0.1,
+            energy_cost: 0.02,
+            failure_reason: null,
+            thumbnail_path: null,
+            created_by_id: null,
+            created_by_username: null,
+            created_at: '2026-06-30T09:00:00Z',
+          }],
+          total: 1,
+        })),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+      await screen.findByText('Top filament: PLA');
+
+      expect(screen.queryByText('Quick reprint')).not.toBeInTheDocument();
+      fireEvent.click(await screen.findByRole('button', { name: 'Start print' }));
+
+      expect(await screen.findByText('Quick reprint')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Sample Widget/ })).toBeInTheDocument();
     });
 
     it('provides AMS filament backup and skip objects controls in the single-printer cockpit', async () => {
@@ -614,6 +678,18 @@ describe('PrintersPage', () => {
 
       render(<PrintersPage />);
       fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+
+      const statusPane = await screen.findByTestId('cockpit-status-pane');
+      expect(screen.getByTestId('printers-page')).toHaveClass('flex', 'h-[calc(100dvh-3.5rem)]');
+      expect(screen.getByTestId('cockpit-layout')).toHaveClass('flex-1', 'min-h-0');
+      expect(statusPane).toHaveClass('overflow-y-auto');
+      expect(statusPane).not.toHaveClass('z-20');
+      expect(within(statusPane).getByText('Jog')).toBeInTheDocument();
+      expect(within(statusPane).getByText('Statistics')).toBeInTheDocument();
+      expect(within(statusPane).getByText('Success Rate')).toBeInTheDocument();
+
+      expect(await screen.findByTestId('cockpit-filament-pane')).toHaveClass('min-h-0');
+      expect(screen.getByTestId('cockpit-filament-scroll')).toHaveClass('overflow-auto');
 
       fireEvent.click(await screen.findByRole('button', { name: /AMS Filament Backup is OFF/ }));
       expect((await screen.findAllByText('AMS Filament Backup')).length).toBeGreaterThan(0);
@@ -696,7 +772,9 @@ describe('PrintersPage', () => {
     it('hides green plate in use status while printing and hides the clear action', async () => {
       server.use(
         http.get('/api/v1/printers/:id/status', () => {
-          return HttpResponse.json({ ...mockPrinterStatus, state: 'RUNNING', awaiting_plate_clear: false });
+          // The backend can briefly retain this flag while a new print is active.
+          // A stale warning must not surface as a green "Plate in Use" pill.
+          return HttpResponse.json({ ...mockPrinterStatus, state: 'RUNNING', awaiting_plate_clear: true });
         })
       );
 

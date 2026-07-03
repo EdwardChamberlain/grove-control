@@ -21,6 +21,7 @@ from collections.abc import Callable
 import httpx
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.app.api.routes.library import _slicer_rejection_message
 from backend.app.core.config import settings as app_settings
@@ -88,16 +89,19 @@ async def _wait_for_job(client: AsyncClient, job_id: int, timeout: float = 5.0) 
 
 
 async def _get_committed_row(db_session, model, row_id: int):
-    """Read a row committed by a background job through a fresh transaction.
+    """Read a row committed by a background job through a fresh session.
 
     Fixture setup refreshes leave the assertion session in a read transaction.
     SQLite may retain that snapshot under pytest-xdist, hiding rows committed by
     the slice job's separate session even after the job reports completion.
     """
     await db_session.rollback()
-    row = await db_session.get(model, row_id)
-    assert row is not None
-    return row
+    assert db_session.bind is not None
+    session_factory = async_sessionmaker(db_session.bind, class_=AsyncSession, expire_on_commit=False)
+    async with session_factory() as read_session:
+        row = await read_session.get(model, row_id)
+        assert row is not None
+        return row
 
 
 # ---------------------------------------------------------------------------
