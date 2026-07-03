@@ -569,9 +569,12 @@ describe('PrintersPage', () => {
 
       fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
       const camera = await screen.findByAltText('X1 Carbon camera');
-      const placeholder = container.querySelector('img[src="/img/camera_placeholder.png"]');
+      const placeholder = container.querySelector('img[src="/img/camera_placeholder_X1C.png"]');
       expect(placeholder).toBeInTheDocument();
       expect(camera).toHaveClass('opacity-0');
+
+      fireEvent.error(placeholder!);
+      expect(container.querySelector('img[src="/img/camera_placeholder.png"]')).toBeInTheDocument();
 
       fireEvent.load(camera);
 

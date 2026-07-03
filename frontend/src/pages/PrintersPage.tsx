@@ -2095,6 +2095,13 @@ function formatCockpitWeight(grams: number): string {
   return `${Math.round(grams)}g`;
 }
 
+function getCameraPlaceholderUrl(model?: string | null): string {
+  const modelName = model?.trim();
+  return modelName
+    ? `/img/camera_placeholder_${encodeURIComponent(modelName)}.png`
+    : '/img/camera_placeholder.png';
+}
+
 function CockpitMetricCard({
   icon: Icon,
   label,
@@ -2159,6 +2166,7 @@ function SinglePrinterCockpit({
   const [showNotHomedModal, setShowNotHomedModal] = useState<null | { distance: number }>(null);
   const [loadedCameraPrinterId, setLoadedCameraPrinterId] = useState<number | null>(null);
   const [failedCameraPrinterId, setFailedCameraPrinterId] = useState<number | null>(null);
+  const [failedPlaceholderUrl, setFailedPlaceholderUrl] = useState<string | null>(null);
   const [configureSlotModal, setConfigureSlotModal] = useState<{
     amsId: number;
     trayId: number;
@@ -2200,6 +2208,10 @@ function SinglePrinterCockpit({
   );
   const cameraLoaded = loadedCameraPrinterId === printer.id;
   const cameraFailed = failedCameraPrinterId === printer.id;
+  const modelPlaceholderUrl = getCameraPlaceholderUrl(printer.model);
+  const cameraPlaceholderUrl = failedPlaceholderUrl === modelPlaceholderUrl
+    ? '/img/camera_placeholder.png'
+    : modelPlaceholderUrl;
 
   useEffect(() => {
     if (!status?.connected) return;
@@ -2646,9 +2658,10 @@ function SinglePrinterCockpit({
         <div className="grid min-h-0 gap-3 xl:grid-rows-[auto_minmax(0,1fr)]">
           <section className="relative aspect-video w-full min-h-0 overflow-hidden rounded-xl border border-white/10 bg-bambu-dark">
             <img
-              src="/img/camera_placeholder.png"
+              src={cameraPlaceholderUrl}
               alt=""
               className="absolute inset-0 h-full w-full object-cover"
+              onError={() => setFailedPlaceholderUrl(modelPlaceholderUrl)}
             />
             {status?.connected && !cameraFailed && (
               <img
