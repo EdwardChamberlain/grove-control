@@ -57,7 +57,6 @@ from backend.app.api.routes import (
     slice_jobs,
     slicer_presets,
     smart_plugs,
-    sponsor_prompt,
     spoolbuddy,
     spoolman,
     spoolman_inventory,
@@ -6739,7 +6738,6 @@ app.include_router(user_notifications.router, prefix=app_settings.api_prefix)
 app.include_router(spoolman.router, prefix=app_settings.api_prefix)
 app.include_router(spoolman_inventory.router, prefix=app_settings.api_prefix)
 app.include_router(updates.router, prefix=app_settings.api_prefix)
-app.include_router(sponsor_prompt.router, prefix=app_settings.api_prefix)
 app.include_router(maintenance.router, prefix=app_settings.api_prefix)
 app.include_router(camera.router, prefix=app_settings.api_prefix)
 app.include_router(external_links.router, prefix=app_settings.api_prefix)

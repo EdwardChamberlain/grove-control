@@ -3730,18 +3730,6 @@ export default {
     architecture: 'Architektur',
   },
 
-  // Sponsor surface (System page)
-  sponsors: {
-    sectionTitle: 'Unabhängig & von der Community finanziert',
-    tagline: 'Grove Control ist kostenlos und bleibt es, weil Menschen es freiwillig unterstützen. Kein VC, kein Cloud-Zwang.',
-    viewSupporters: 'Unterstützer ansehen',
-    toastPrints: 'Du hast {{count}} Drucke mit Grove Control abgeschlossen. Grove Control bleibt kostenlos dank seiner Unterstützer.',
-    toastCost: 'Du hast {{total}} an Filament mit Grove Control verfolgt. Sieh dir an, wer das Projekt unabhängig hält.',
-    toastArchives: '{{count}} Drucke mit Grove Control archiviert. Sieh dir an, wer es unabhängig hält.',
-    toastAnniversary: 'Ein Jahr mit Grove Control! Sieh dir an, wer das Projekt unabhängig hält.',
-    toastVersionUpdate: 'Aktualisiert auf v{{version}}. Grove Control bleibt kostenlos dank seiner Unterstützer.',
-  },
-
   // Library (K Profiles)
   library: {
     title: 'Filament-Bibliothek',

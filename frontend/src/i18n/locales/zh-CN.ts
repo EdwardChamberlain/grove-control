@@ -3718,18 +3718,6 @@ export default {
     architecture: '架构',
   },
 
-  // Sponsor surface (System page)
-  sponsors: {
-    sectionTitle: '独立运营·社区支持',
-    tagline: 'Grove Control 完全免费，并将持续免费——这要感谢主动支持的用户。没有风投，也没有云端绑定。',
-    viewSupporters: '查看支持者',
-    toastPrints: '你已经用 Grove Control 完成了 {{count}} 次打印。Grove Control 之所以免费，离不开支持者。',
-    toastCost: '你已经用 Grove Control 追踪了 {{total}} 的耗材。看看是谁让项目保持独立。',
-    toastArchives: '用 Grove Control 归档了 {{count}} 次打印。看看是谁让它保持独立。',
-    toastAnniversary: '与 Grove Control 相伴一年了！看看是谁让项目保持独立。',
-    toastVersionUpdate: '已更新至 v{{version}}。Grove Control 之所以免费，离不开支持者。',
-  },
-
   // Library (K Profiles)
   library: {
     title: '耗材库',

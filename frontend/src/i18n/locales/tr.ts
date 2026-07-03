@@ -3720,18 +3720,6 @@ export default {
     architecture: 'Mimari',
   },
 
-  // Sponsor yüzeyi (Sistem sayfası)
-  sponsors: {
-    sectionTitle: 'Bağımsız ve topluluk destekli',
-    tagline: 'Grove Control ücretsizdir ve böyle kalır çünkü insanlar onu desteklemeyi seçer. VC yok, bulut bağımlılığı yok.',
-    viewSupporters: 'Destekçileri görüntüle',
-    toastPrints: 'Grove Control ile {{count}} baskı tamamladın. Grove Control, destekçileri sayesinde ücretsiz kalıyor.',
-    toastCost: 'Grove Control ile {{total}} kadar filament takip ettin. Projeyi bağımsız tutanları gör.',
-    toastArchives: '{{count}} baskı Grove Control ile arşivlendi. Bağımsız kalmasını sağlayanları gör.',
-    toastAnniversary: 'Grove Control ile bir yılı doldurdun! Projeyi bağımsız tutanları gör.',
-    toastVersionUpdate: 'v{{version}} sürümüne güncellendi. Grove Control, destekçileri sayesinde ücretsiz kalıyor.',
-  },
-
   // Kütüphane (K Profilleri)
   library: {
     title: 'Filament Kütüphanesi',

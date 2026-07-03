@@ -3531,16 +3531,6 @@ export default {
     platform: '플랫폼',
     architecture: '아키텍처'
   },
-  sponsors: {
-    sectionTitle: '독립적·커뮤니티 후원',
-    tagline: 'Grove Control는 무료이며, 자발적으로 후원하는 사용자 덕분에 계속 무료로 유지됩니다. VC도 없고, 클라우드 종속도 없습니다.',
-    viewSupporters: '후원자 보기',
-    toastPrints: 'Grove Control로 {{count}}회 인쇄를 완료했습니다. Grove Control는 후원자 덕분에 무료로 유지됩니다.',
-    toastCost: 'Grove Control로 {{total}}만큼의 필라멘트를 추적했습니다. 프로젝트를 독립적으로 유지하는 사람들을 만나보세요.',
-    toastArchives: 'Grove Control로 {{count}}회 인쇄를 아카이브했습니다. 독립성을 지지하는 사람들을 만나보세요.',
-    toastAnniversary: 'Grove Control와 함께한 지 1년입니다! 프로젝트를 독립적으로 유지하는 사람들을 만나보세요.',
-    toastVersionUpdate: 'v{{version}}로 업데이트되었습니다. Grove Control는 후원자 덕분에 무료로 유지됩니다.'
-  },
   library: {
     title: '필라멘트 라이브러리',
     addFilament: '필라멘트 추가',

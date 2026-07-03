@@ -3730,18 +3730,6 @@ export default {
     architecture: 'アーキテクチャ',
   },
 
-  // Sponsor surface (System page)
-  sponsors: {
-    sectionTitle: '独立・コミュニティ運営',
-    tagline: 'Grove Controlは無料で、これからも無料です。支援してくださる方々のおかげで、VCもクラウドロックインもありません。',
-    viewSupporters: 'サポーター一覧',
-    toastPrints: 'Grove Controlで{{count}}件の印刷を完了しました。Grove Controlは支援者のおかげで無料で提供されています。',
-    toastCost: 'Grove Controlで{{total}}分のフィラメントを記録しました。プロジェクトを支えてくれている方々をご覧ください。',
-    toastArchives: '{{count}}件の印刷をGrove Controlでアーカイブしました。独立を支えてくれている方々をご覧ください。',
-    toastAnniversary: 'Grove Controlとの1周年です！プロジェクトを支えてくれている方々をご覧ください。',
-    toastVersionUpdate: 'v{{version}}にアップデートされました。Grove Controlは支援者のおかげで無料で提供されています。',
-  },
-
   // Library (K Profiles)
   library: {
     title: 'フィラメントライブラリ',
