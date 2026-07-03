@@ -729,7 +729,12 @@ class TestCrossClassSliceAllLoop:
 
         # The merged archive has plate_1..plate_3.gcode inside its one
         # output 3MF (single Grove Control archive, three plates).
+        # End the transaction opened by refresh(h2d) above before reading a
+        # row committed by the background job's separate session. Without
+        # this, SQLite can retain the earlier snapshot under pytest-xdist.
+        await db_session.rollback()
         new_archive = await db_session.get(PrintArchive, final["result"]["archive_id"])
+        assert new_archive is not None
         archive_path = tmp_path / new_archive.file_path
         with zipfile.ZipFile(archive_path, "r") as zf:
             entries = set(zf.namelist())
