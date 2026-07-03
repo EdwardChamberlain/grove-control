@@ -27,7 +27,7 @@ class TestTimelapseSessionManagement:
         _active_sessions.clear()
 
         with patch("backend.app.services.layer_timelapse.settings") as mock_settings:
-            mock_settings.base_dir = Path("/tmp/test_bambuddy")
+            mock_settings.base_dir = Path("/tmp/test_grove_control")
 
             session = start_session(
                 printer_id=1,
@@ -63,7 +63,7 @@ class TestTimelapseSessionManagement:
         _active_sessions.clear()
 
         with patch("backend.app.services.layer_timelapse.settings") as mock_settings:
-            mock_settings.base_dir = Path("/tmp/test_bambuddy")
+            mock_settings.base_dir = Path("/tmp/test_grove_control")
 
             # Start first session
             session1 = start_session(1, 100, "http://cam1/", "mjpeg")
@@ -107,7 +107,7 @@ class TestTimelapseSessionManagement:
         _active_sessions.clear()
 
         with patch("backend.app.services.layer_timelapse.settings") as mock_settings:
-            mock_settings.base_dir = Path("/tmp/test_bambuddy")
+            mock_settings.base_dir = Path("/tmp/test_grove_control")
 
             session = start_session(1, 100, "http://cam/", "mjpeg")
 
@@ -141,7 +141,7 @@ class TestTimelapseSession:
         _active_sessions.clear()
 
         with patch("backend.app.services.layer_timelapse.settings") as mock_settings:
-            mock_settings.base_dir = Path("/tmp/test_bambuddy")
+            mock_settings.base_dir = Path("/tmp/test_grove_control")
 
             session = TimelapseSession(
                 printer_id=1,

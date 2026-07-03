@@ -261,14 +261,14 @@ SAMPLE_DATA: dict[str, dict[str, str]] = {
     "user_created": {
         "username": "john_doe",
         "password": "<generated-password>",
-        "login_url": "https://bambuddy.example.com/login",
+        "login_url": "https://grove-control.example.com/login",
         "app_name": "Grove Control",
         "timestamp": "2024-01-15 14:30",
     },
     "password_reset": {
         "username": "john_doe",
         "password": "<new-password>",
-        "login_url": "https://bambuddy.example.com/login",
+        "login_url": "https://grove-control.example.com/login",
         "app_name": "Grove Control",
         "timestamp": "2024-01-15 14:30",
     },
