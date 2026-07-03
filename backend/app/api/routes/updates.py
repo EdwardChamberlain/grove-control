@@ -1,6 +1,7 @@
 """Update checking and management routes."""
 
 import asyncio
+import base64
 import logging
 import os
 import re
@@ -14,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.auth import RequirePermissionIfAuthEnabled
-from backend.app.core.config import APP_VERSION, GITHUB_REPO, settings
+from backend.app.core.config import APP_VERSION, GITHUB_BRANCH, GITHUB_REPO, settings
 from backend.app.core.database import get_db
 from backend.app.core.permissions import Permission
 from backend.app.models.settings import Settings
@@ -183,7 +184,7 @@ def _parse_github_remote(url: str) -> tuple[str, str] | None:
 
 async def _origin_points_at_repo(git_path: str, git_config: list[str], app_dir, expected_repo: str) -> bool:
     """Return True iff the working tree's `origin` already resolves to
-    `<owner>/<repo>` matching `expected_repo` (e.g. "maziggy/bambuddy"),
+    `<owner>/<repo>` matching `expected_repo` (e.g. "EdwardChamberlain/grove-control"),
     regardless of whether it's the SSH or HTTPS form. Used to skip the
     `git remote set-url origin https://...` rewrite when the developer's
     SSH origin is already correct — see `_perform_update` for context.
@@ -320,6 +321,7 @@ async def get_version():
     return {
         "version": APP_VERSION,
         "repo": GITHUB_REPO,
+        "branch": GITHUB_BRANCH,
     }
 
 
@@ -341,11 +343,6 @@ async def check_for_updates(
             "latest_version": None,
             "message": "Update checks are disabled",
         }
-
-    # Check if beta updates should be included
-    result = await db.execute(select(Settings).where(Settings.key == "include_beta_updates"))
-    beta_setting = result.scalar_one_or_none()
-    include_beta = beta_setting and beta_setting.value.lower() == "true"
 
     # Short-circuit if we're still inside a GitHub rate-limit backoff window (#1420).
     backoff_remaining = _seconds_until_github_unblocked()
@@ -374,7 +371,7 @@ async def check_for_updates(
     try:
         async with httpx.AsyncClient() as client:
             response = await client.get(
-                f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=20",
+                f"https://api.github.com/repos/{GITHUB_REPO}/contents/VERSION?ref={GITHUB_BRANCH}",
                 headers={"Accept": "application/vnd.github.v3+json"},
                 timeout=10.0,
             )
@@ -396,57 +393,41 @@ async def check_for_updates(
                 }
 
             if response.status_code == 404:
-                # No releases yet
+                # The configured branch or its VERSION file does not exist.
                 _update_status = {
                     "status": "idle",
                     "progress": 100,
-                    "message": "No releases found",
+                    "message": f"VERSION not found on {GITHUB_BRANCH}",
                     "error": None,
                 }
                 return {
                     "update_available": False,
                     "current_version": APP_VERSION,
                     "latest_version": None,
-                    "message": "No releases found",
+                    "message": f"VERSION not found on {GITHUB_BRANCH}",
                 }
 
             response.raise_for_status()
-            releases = response.json()
+            version_data = response.json()
+            encoded_version = version_data.get("content", "") if isinstance(version_data, dict) else ""
+            try:
+                latest_version = base64.b64decode(encoded_version, validate=True).decode("utf-8").strip()
+            except (ValueError, UnicodeDecodeError):
+                latest_version = ""
 
-            # Find the appropriate release based on beta setting
-            release_data = None
-            for release in releases:
-                tag = release.get("tag_name", "")
-                if include_beta:
-                    # Accept any release (first = newest)
-                    release_data = release
-                    break
-                else:
-                    # Skip prereleases (based on version parsing, not GitHub flag)
-                    parsed = parse_version(tag)
-                    if parsed[4] == 0:  # is_prerelease == 0
-                        release_data = release
-                        break
-
-            if not release_data:
+            if not latest_version:
                 _update_status = {
                     "status": "idle",
                     "progress": 100,
-                    "message": "No releases found",
+                    "message": f"Invalid VERSION on {GITHUB_BRANCH}",
                     "error": None,
                 }
                 return {
                     "update_available": False,
                     "current_version": APP_VERSION,
                     "latest_version": None,
-                    "message": "No releases found",
+                    "message": f"Invalid VERSION on {GITHUB_BRANCH}",
                 }
-
-            latest_version = release_data.get("tag_name", "").lstrip("v")
-            release_name = release_data.get("name", latest_version)
-            release_notes = release_data.get("body", "")
-            release_url = release_data.get("html_url", "")
-            published_at = release_data.get("published_at", "")
 
             update_available = is_newer_version(latest_version, APP_VERSION)
 
@@ -469,10 +450,10 @@ async def check_for_updates(
                 "update_available": update_available,
                 "current_version": APP_VERSION,
                 "latest_version": latest_version,
-                "release_name": release_name,
-                "release_notes": release_notes,
-                "release_url": release_url,
-                "published_at": published_at,
+                "release_name": f"{GITHUB_BRANCH} branch",
+                "release_notes": "",
+                "release_url": f"https://github.com/{GITHUB_REPO}/tree/{GITHUB_BRANCH}",
+                "published_at": "",
                 "is_docker": is_docker,
                 "is_ha_addon": is_ha_addon,
                 "update_method": update_method,
@@ -494,67 +475,10 @@ async def check_for_updates(
         }
 
 
-async def _discover_target_release(db: AsyncSession) -> str | None:
-    """Look up the tag we should install from GitHub releases.
-
-    Same selection logic the GUI's update-check uses: respect
-    `include_beta_updates`, skip prereleases when the user opted out, take
-    the first matching release. Returns the raw tag name (e.g. `v0.2.4b1`)
-    so the git ref is unambiguous, or None if there's no release to install.
-
-    The previous in-app updater path was hardcoded to `git fetch origin main
-    && git reset --hard origin/main`, which silently no-ops whenever main
-    isn't where the latest release lives — e.g. during a beta release cycle
-    where the next stable hasn't been merged to main yet. Anchoring to the
-    release tag instead lets the GUI install whatever GitHub says is latest.
-    """
-    result = await db.execute(select(Settings).where(Settings.key == "include_beta_updates"))
-    beta_setting = result.scalar_one_or_none()
-    include_beta = beta_setting and beta_setting.value.lower() == "true"
-
-    if _seconds_until_github_unblocked() > 0:
-        logger.warning("Skipping update target discovery: GitHub rate-limit backoff still active")
-        return None
-
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=20",
-                headers={"Accept": "application/vnd.github.v3+json"},
-                timeout=10.0,
-            )
-            if _is_github_rate_limit_response(response):
-                _record_github_rate_limit(response)
-                return None
-            response.raise_for_status()
-            releases = response.json()
-    except (httpx.HTTPError, ValueError) as exc:
-        logger.error("Could not fetch GitHub releases for update target: %s", exc)
-        return None
-
-    for release in releases:
-        tag = release.get("tag_name", "")
-        if not tag:
-            continue
-        if include_beta:
-            return tag
-        # Skip prereleases (parsed from version, not GitHub flag — GitHub's
-        # is_prerelease flag isn't always set on dailies).
-        parsed = parse_version(tag)
-        if parsed[4] == 0:
-            return tag
-    return None
-
-
 async def _perform_update(target_ref: str):
     """Perform the actual update using git fetch and reset.
 
-    `target_ref` is whatever git ref the caller wants to land on — typically
-    a release tag like `v0.2.4b1` resolved by `_discover_target_release`,
-    but accepts any ref `git reset --hard` understands (`origin/main`, a
-    branch, a sha). Tag-based refs are the production path because they pin
-    the install to a specific release artifact instead of whatever happens
-    to be on a moving branch.
+    `target_ref` is the remote-tracking branch selected by the update workflow.
     """
     global _update_status
 
@@ -598,7 +522,7 @@ async def _perform_update(target_ref: str):
         # origin to HTTPS unconditionally on the assumption that systemd
         # service users wouldn't have SSH keys configured — which is fine
         # for that case, but stomps on developer checkouts where origin is
-        # legitimately `git@github.com:maziggy/bambuddy.git` and the user
+        # legitimately points at Grove Control over SSH and the user
         # auths via SSH keys. After the rewrite, `git push` prompts for
         # HTTPS credentials and fails.
         # New behaviour: read the current origin, parse out the
@@ -628,25 +552,13 @@ async def _perform_update(target_ref: str):
             "error": None,
         }
 
-        # Fetch branches AND tags from origin so any ref the caller passes
-        # (release tag like `v0.2.4b1`, a branch like `main`, or a sha) is
-        # locally resolvable for the reset below. `--tags` is required —
-        # plain `git fetch origin` doesn't bring tags by default, so a
-        # release tag would not be resolvable.
-        #
-        # `--force` lets a moved tag on the remote overwrite the local copy.
-        # Without it, any tag that was re-tagged upstream (e.g. v0.2.1 being
-        # re-pointed after a hotfix re-tag) makes `git fetch --tags` return
-        # a non-zero exit even though every other ref fetched cleanly —
-        # which we'd then surface as "Failed to fetch updates" to the user.
-        # The in-app updater's contract is "sync me to the remote"; force-
-        # overwriting a stale local tag matches that intent.
+        # Fetch the canonical Grove Control remote before resetting to its
+        # configured branch.
         process = await asyncio.create_subprocess_exec(
             git_path,
             *git_config,
             "fetch",
             "--prune",
-            "--tags",
             "--force",
             "origin",
             cwd=str(app_dir),
@@ -673,12 +585,8 @@ async def _perform_update(target_ref: str):
             "error": None,
         }
 
-        # Hard reset to the target ref (clean update, no merge conflicts).
-        # `target_ref` is typically a release tag like `v0.2.4b1` resolved
-        # from the GitHub releases API by `_discover_target_release`. The
-        # local branch name doesn't change — only HEAD moves. Falling back
-        # to `origin/main` here was the source of the "in-app updater can't
-        # reach beta releases" bug.
+        # Hard reset to the configured remote branch (clean update, no merge
+        # conflicts). The local branch name does not change; only HEAD moves.
         process = await asyncio.create_subprocess_exec(
             git_path,
             *git_config,
@@ -790,7 +698,6 @@ async def _perform_update(target_ref: str):
 @router.post("/apply")
 async def apply_update(
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db),
     _: User | None = RequirePermissionIfAuthEnabled(Permission.SETTINGS_UPDATE),
 ):
     """Apply available update (git pull + rebuild)."""
@@ -827,22 +734,8 @@ async def apply_update(
                 "git pull && docker compose build --pull && docker compose up -d"
             ),
         }
-    # Discover which release tag to install. Resolved here (where we have
-    # a DB session) and passed into the background task; the BG task can't
-    # reuse this request's session since FastAPI closes it on response.
-    target_ref = await _discover_target_release(db)
-    if target_ref is None:
-        return {
-            "success": False,
-            "message": (
-                "Could not determine a release to install. Either GitHub is "
-                "unreachable or no release matches your update channel "
-                "(check the include_beta_updates setting)."
-            ),
-        }
-
     # Start update in background
-    background_tasks.add_task(_perform_update, target_ref)
+    background_tasks.add_task(_perform_update, f"origin/{GITHUB_BRANCH}")
 
     _update_status = {
         "status": "downloading",

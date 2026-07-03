@@ -55,7 +55,10 @@ class AppSettings(BaseModel):
     # Updates
     check_updates: bool = Field(default=True, description="Automatically check for updates on startup")
     check_printer_firmware: bool = Field(default=True, description="Check for printer firmware updates from Bambu Lab")
-    include_beta_updates: bool = Field(default=False, description="Include beta/prerelease versions in update checks")
+    include_beta_updates: bool = Field(
+        default=False,
+        description="Legacy setting retained for API compatibility; updates track the configured branch",
+    )
 
     # Language
     language: str = Field(default="en", description="UI language (en, de, fr, ja, it, pt-BR)")
