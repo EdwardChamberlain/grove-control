@@ -349,6 +349,9 @@ describe('PrintersPage', () => {
 
     it('shows plate clear status and action on finished printers when not cleared', async () => {
       server.use(
+        http.get('/api/v1/printers/', () => {
+          return HttpResponse.json([mockPrinters[0]]);
+        }),
         http.get('/api/v1/printers/:id/status', () => {
           return HttpResponse.json({ ...mockPrinterStatus, state: 'FINISH', awaiting_plate_clear: true });
         })
@@ -357,7 +360,7 @@ describe('PrintersPage', () => {
       render(<PrintersPage />);
 
       await waitFor(() => {
-        expect(screen.getAllByText('Plate not Clear').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('Plate not Clear')).toHaveLength(1);
       });
 
       expect(screen.getAllByRole('button', { name: 'Mark plate as cleared' }).length).toBeGreaterThan(0);
@@ -445,6 +448,73 @@ describe('PrintersPage', () => {
         expect(screen.queryByText('Status details')).not.toBeInTheDocument();
       });
       expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
+    });
+
+    it('shows an icon-only plate-clear action in the list printer-name field when needed', async () => {
+      let awaitingPlateClear = true;
+      server.use(
+        http.get('/api/v1/printers/:id/status', ({ params }) => {
+          return HttpResponse.json({
+            ...mockPrinterStatus,
+            state: 'FINISH',
+            awaiting_plate_clear: params.id === '1' && awaitingPlateClear,
+          });
+        }),
+        http.post('/api/v1/printers/:id/clear-plate', () => {
+          awaitingPlateClear = false;
+          return HttpResponse.json({ success: true, message: 'Plate cleared' });
+        }),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'List' }));
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'List' })).toHaveAttribute('aria-pressed', 'true');
+      });
+
+      const clearButtons = await screen.findAllByRole('button', { name: 'Mark plate as cleared' });
+      expect(clearButtons).toHaveLength(2); // Both responsive row variants are present in jsdom.
+      clearButtons.forEach((button) => expect(button).not.toHaveTextContent('Mark plate as cleared'));
+      fireEvent.click(clearButtons[0]);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('button', { name: 'Mark plate as cleared' })).not.toBeInTheDocument();
+      });
+    });
+
+    it('shows and handles the plate-clear action on a camera-wall tile', async () => {
+      let awaitingPlateClear = true;
+      vi.stubGlobal('IntersectionObserver', class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      });
+      server.use(
+        http.get('/api/v1/printers/:id/status', ({ params }) => {
+          return HttpResponse.json({
+            ...mockPrinterStatus,
+            state: 'FINISH',
+            awaiting_plate_clear: params.id === '1' && awaitingPlateClear,
+          });
+        }),
+        http.post('/api/v1/printers/:id/clear-plate', () => {
+          awaitingPlateClear = false;
+          return HttpResponse.json({ success: true, message: 'Plate cleared' });
+        }),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Cam wall' }));
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Cam wall' })).toHaveAttribute('aria-pressed', 'true');
+      });
+
+      const clearButton = await screen.findByRole('button', { name: 'Mark plate as cleared' });
+      fireEvent.click(clearButton);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('button', { name: 'Mark plate as cleared' })).not.toBeInTheDocument();
+      });
     });
 
     it('returns from a list clickthrough to the list view', async () => {

@@ -98,6 +98,9 @@ async def set_setting(db: AsyncSession, key: str, value: str) -> None:
 
 async def _build_settings_response(db: AsyncSession, is_api_key: bool = False) -> AppSettings:
     """Build the full settings response, scrubbing secrets for API-key callers."""
+    # Schema defaults apply only when no value has been persisted. Iterating the
+    # settings table below must keep taking precedence so upgrades retain explicit
+    # choices such as require_plate_clear=false.
     settings_dict = DEFAULT_SETTINGS.model_dump()
 
     result = await db.execute(select(Settings))

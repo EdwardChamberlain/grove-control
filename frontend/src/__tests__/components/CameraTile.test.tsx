@@ -134,6 +134,28 @@ describe('CameraTile', () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
+  it('keeps the plate-clear action separate from tile navigation', async () => {
+    const onClick = vi.fn();
+    const onClearPlate = vi.fn();
+    render(
+      <CameraTile
+        printerId={5}
+        printerName="X1C-Camera"
+        mode="live"
+        snapshotIntervalMs={5000}
+        connected
+        showClearPlate
+        onClick={onClick}
+        onClearPlate={onClearPlate}
+      />,
+    );
+    await flushMicrotasks();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mark plate as cleared' }));
+    expect(onClearPlate).toHaveBeenCalledOnce();
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
   it('shows printer progress across the bottom of the camera frame', async () => {
     render(
       <CameraTile

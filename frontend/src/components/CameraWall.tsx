@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useQueries } from '@tanstack/react-query';
+import { useMutation, useQueries, useQueryClient } from '@tanstack/react-query';
 import { Settings as SettingsIcon } from 'lucide-react';
 import { CameraTile, type CameraTileMode } from './CameraTile';
 import { api, type Printer, type PrinterStatus } from '../api/client';
+import { useToast } from '../contexts/ToastContext';
+import { useAuth } from '../contexts/AuthContext';
 
 interface CameraWallProps {
   printers: Printer[];
+  requirePlateClear: boolean;
   maxLive: number;
   snapshotIntervalSec: number;
   onTileClick: (printerId: number, printerName: string) => void;
@@ -22,6 +25,7 @@ const MAX_SNAPSHOT_SEC = 60;
 
 export function CameraWall({
   printers,
+  requirePlateClear,
   maxLive,
   snapshotIntervalSec,
   onTileClick,
@@ -30,7 +34,22 @@ export function CameraWall({
   onChangeSnapshotIntervalSec,
 }: CameraWallProps) {
   const { t } = useTranslation();
+  const { showToast } = useToast();
+  const { hasPermission } = useAuth();
+  const queryClient = useQueryClient();
   const tileRefs = useRef<Map<number, HTMLDivElement | null>>(new Map());
+  const clearPlateMutation = useMutation({
+    mutationFn: (printerId: number) => api.clearPlate(printerId),
+    onSuccess: (_result, printerId) => {
+      showToast(t('queue.clearPlateSuccess'));
+      queryClient.setQueryData(['printerStatus', printerId], (old: PrinterStatus | undefined) =>
+        old ? { ...old, awaiting_plate_clear: false } : old
+      );
+      queryClient.invalidateQueries({ queryKey: ['printerStatus', printerId] });
+      queryClient.invalidateQueries({ queryKey: ['queue', printerId] });
+    },
+    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
+  });
 
   // Reuses the same ['printerStatus', id] cache that each PrinterCard
   // populates, so flipping between Cards and Cam Wall is instant.
@@ -195,6 +214,10 @@ export function CameraWall({
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {printers.map((p) => {
           const mode = modeByPrinter.get(p.id) ?? 'paused';
+          const status = statusByPrinter.get(p.id);
+          const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
+          const needsPlateClear = requirePlateClear && status?.connected === true
+            && status.awaiting_plate_clear === true && !isPrintingOrPaused;
           return (
             <div
               key={p.id}
@@ -212,6 +235,10 @@ export function CameraWall({
                 connected={statusByPrinter.get(p.id)?.connected ?? false}
                 printerState={statusByPrinter.get(p.id)?.state ?? null}
                 progress={statusByPrinter.get(p.id)?.progress ?? null}
+                showClearPlate={needsPlateClear}
+                clearPlatePending={clearPlateMutation.isPending && clearPlateMutation.variables === p.id}
+                clearPlateDisabled={!hasPermission('printers:clear_plate')}
+                onClearPlate={() => clearPlateMutation.mutate(p.id)}
                 onClick={() => onTileClick(p.id, p.name)}
                 onOpenFullscreen={() => onOpenFullscreen(p.id, p.name)}
               />

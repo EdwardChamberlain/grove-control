@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Maximize2, VideoOff, WifiOff } from 'lucide-react';
+import { Loader2, Maximize2, VideoOff, WifiOff } from 'lucide-react';
 import { getAuthToken, withStreamToken } from '../api/client';
+import { PlateClearedIcon } from './icons/PlateClearedIcon';
 
 export type CameraTileMode = 'live' | 'snapshot' | 'paused';
 
@@ -16,6 +17,10 @@ interface CameraTileProps {
   onOpenFullscreen?: () => void;
   printerState?: string | null;
   progress?: number | null;
+  showClearPlate?: boolean;
+  clearPlatePending?: boolean;
+  clearPlateDisabled?: boolean;
+  onClearPlate?: () => void;
 }
 
 // Tiles render lighter than EmbeddedCameraViewer's full window: lower fps,
@@ -50,6 +55,10 @@ export function CameraTile({
   onOpenFullscreen,
   printerState = null,
   progress = null,
+  showClearPlate = false,
+  clearPlatePending = false,
+  clearPlateDisabled = false,
+  onClearPlate,
 }: CameraTileProps) {
   const { t } = useTranslation();
   const [bust, setBust] = useState(0);
@@ -186,8 +195,24 @@ export function CameraTile({
         </button>
       )}
 
+      {showClearPlate && onClearPlate && (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onClearPlate();
+          }}
+          disabled={clearPlatePending || clearPlateDisabled}
+          className="absolute bottom-3 right-2 z-30 inline-flex h-8 w-8 items-center justify-center rounded-lg border border-yellow-400/50 bg-yellow-500/25 text-yellow-300 shadow transition-colors hover:bg-yellow-500/40 focus:outline-none focus:ring-2 focus:ring-yellow-400 disabled:cursor-not-allowed disabled:opacity-50"
+          title={clearPlateDisabled ? t('printers.permission.noControl') : t('printers.plateStatus.markCleared')}
+          aria-label={t('printers.plateStatus.markCleared')}
+        >
+          {clearPlatePending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlateClearedIcon className="h-4 w-4" />}
+        </button>
+      )}
+
       {/* Printer name */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-1.5 z-20 px-2 pb-1.5 pt-3 text-white">
+      <div className={`pointer-events-none absolute inset-x-0 bottom-1.5 z-20 px-2 pb-1.5 pt-3 text-white ${showClearPlate ? 'pr-12' : ''}`}>
         <span className="block truncate text-xs font-medium">{printerName}</span>
       </div>
 
