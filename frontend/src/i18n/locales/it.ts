@@ -186,13 +186,6 @@ export default {
       ascending: 'Ordina crescente',
       descending: 'Ordina decrescente',
     },
-    // Card size
-    cardSize: {
-      small: 'Schede piccole',
-      medium: 'Schede medie',
-      large: 'Schede grandi',
-      extraLarge: 'Schede extra grandi',
-    },
     pageView: {
       cards: 'Schede',
       camWall: 'Muro telecamere',

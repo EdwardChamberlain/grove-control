@@ -1685,7 +1685,7 @@ function ListHealthStatusMenu({
           event.stopPropagation();
           setIsOpen((open) => !open);
         }}
-        className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-opacity hover:opacity-80 ${printerHealth.className}`}
+        className={`pointer-events-auto inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-opacity hover:opacity-80 ${printerHealth.className}`}
         title={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
         aria-label={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
         aria-expanded={isOpen}
@@ -1849,28 +1849,33 @@ function PrinterListRow({
     return null;
   }
 
+  const activateRow = () => {
+    if (selectionMode) {
+      onToggleSelect?.(printer.id);
+      return;
+    }
+    onOpenSinglePrinter(printer.id);
+  };
+
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onClick={() => {
-        if (selectionMode) {
-          onToggleSelect?.(printer.id);
-          return;
-        }
-        onOpenSinglePrinter(printer.id);
+      onClick={(event) => {
+        if ((event.target as HTMLElement).closest('button')) return;
+        activateRow();
       }}
-      onKeyDown={(e) => {
-        if (e.target !== e.currentTarget) return;
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          if (selectionMode) onToggleSelect?.(printer.id);
-          else onOpenSinglePrinter(printer.id);
-        }
-      }}
-      className={`border-b border-bambu-dark-tertiary text-sm transition-colors last:border-b-0 hover:bg-bambu-dark ${isSelected ? 'bg-bambu-green/10' : ''}`}
+      className={`relative border-b border-bambu-dark-tertiary text-sm transition-colors last:border-b-0 hover:bg-bambu-dark ${isSelected ? 'bg-bambu-green/10' : ''}`}
     >
-      <div className="flex min-w-0 items-center gap-3 px-3 py-2.5 md:hidden">
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          activateRow();
+        }}
+        className="absolute inset-0 z-0 w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-bambu-green"
+        aria-label={printer.name}
+        aria-pressed={selectionMode ? !!isSelected : undefined}
+      />
+      <div className="pointer-events-none relative z-10 flex min-w-0 items-center gap-3 px-3 py-2.5 md:hidden">
         {selectionMode && (
           <button
             type="button"
@@ -1878,7 +1883,7 @@ function PrinterListRow({
               e.stopPropagation();
               onToggleSelect?.(printer.id);
             }}
-            className="shrink-0 text-bambu-gray hover:text-bambu-green"
+            className="pointer-events-auto shrink-0 text-bambu-gray hover:text-bambu-green"
             aria-label={isSelected ? t('printers.bulk.deselectPrinter', 'Deselect printer') : t('printers.bulk.selectPrinter', 'Select printer')}
           >
             {isSelected ? <CheckSquare className="h-4 w-4 text-bambu-green" /> : <Square className="h-4 w-4" />}
@@ -1911,7 +1916,7 @@ function PrinterListRow({
         </div>
       </div>
 
-      <div className="hidden min-w-[820px] grid-cols-[minmax(15rem,1.5fr)_minmax(8rem,0.8fr)_minmax(9rem,0.9fr)_minmax(13rem,1.25fr)_minmax(10rem,0.85fr)] items-center gap-3 px-3 py-2.5 md:grid">
+      <div className="pointer-events-none relative z-10 hidden min-w-[820px] grid-cols-[minmax(15rem,1.5fr)_minmax(8rem,0.8fr)_minmax(9rem,0.9fr)_minmax(13rem,1.25fr)_minmax(10rem,0.85fr)] items-center gap-3 px-3 py-2.5 md:grid">
         <div className="flex min-w-0 items-center gap-3">
           {selectionMode && (
             <button
@@ -1920,7 +1925,7 @@ function PrinterListRow({
                 e.stopPropagation();
                 onToggleSelect?.(printer.id);
               }}
-              className="shrink-0 text-bambu-gray hover:text-bambu-green"
+              className="pointer-events-auto shrink-0 text-bambu-gray hover:text-bambu-green"
               aria-label={isSelected ? t('printers.bulk.deselectPrinter', 'Deselect printer') : t('printers.bulk.selectPrinter', 'Select printer')}
             >
               {isSelected ? <CheckSquare className="h-4 w-4 text-bambu-green" /> : <Square className="h-4 w-4" />}

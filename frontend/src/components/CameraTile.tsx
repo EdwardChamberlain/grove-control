@@ -109,14 +109,6 @@ export function CameraTile({
     if (onClick) onClick();
   };
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.target !== event.currentTarget) return;
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      handleClick();
-    }
-  };
-
   const transform = cameraRotation ? `rotate(${cameraRotation}deg)` : undefined;
 
   const bucket = classifyState(printerState);
@@ -127,15 +119,7 @@ export function CameraTile({
     : 0;
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={handleClick}
-      onKeyDown={handleKeyDown}
-      className="group relative aspect-video w-full overflow-hidden rounded-lg border border-bambu-dark-tertiary bg-black text-left focus:outline-none focus:ring-2 focus:ring-bambu-green"
-      title={printerName}
-      aria-label={printerName}
-    >
+    <div className="group relative aspect-video w-full overflow-hidden rounded-lg border border-bambu-dark-tertiary bg-black text-left">
       {!connected || mode === 'paused' ? (
         <div className="absolute inset-0 flex items-center justify-center bg-bambu-dark/60">
           {connected ? (
@@ -162,9 +146,17 @@ export function CameraTile({
         />
       )}
 
+      <button
+        type="button"
+        onClick={handleClick}
+        className="absolute inset-0 z-10 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-bambu-green"
+        title={printerName}
+        aria-label={printerName}
+      />
+
       {/* Mode indicator (top-left) */}
       <span
-        className={`absolute left-2 top-2 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+        className={`pointer-events-none absolute left-2 top-2 z-20 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
           mode === 'live'
             ? 'bg-red-500/80 text-white'
             : mode === 'snapshot'
@@ -186,7 +178,7 @@ export function CameraTile({
             event.stopPropagation();
             onOpenFullscreen();
           }}
-          className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded bg-black/65 text-white transition-colors hover:bg-black/85 focus:outline-none focus:ring-2 focus:ring-bambu-green"
+          className="absolute right-2 top-2 z-30 inline-flex h-7 w-7 items-center justify-center rounded bg-black/65 text-white transition-colors hover:bg-black/85 focus:outline-none focus:ring-2 focus:ring-bambu-green"
           title={t('printers.camWall.openFullScreen', 'Open full screen')}
           aria-label={t('printers.camWall.openFullScreen', 'Open full screen')}
         >
@@ -195,7 +187,7 @@ export function CameraTile({
       )}
 
       {/* Printer name */}
-      <div className="absolute inset-x-0 bottom-1.5 px-2 pb-1.5 pt-3 text-white">
+      <div className="pointer-events-none absolute inset-x-0 bottom-1.5 z-20 px-2 pb-1.5 pt-3 text-white">
         <span className="block truncate text-xs font-medium">{printerName}</span>
       </div>
 
@@ -205,7 +197,7 @@ export function CameraTile({
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={displayedProgress}
-        className="absolute inset-x-0 bottom-0 h-1.5 overflow-hidden bg-bambu-dark-tertiary"
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-1.5 overflow-hidden bg-bambu-dark-tertiary"
       >
         <div
           className={`h-full rounded-r-full transition-all ${bucket === 'paused' ? 'bg-status-warning' : 'bg-bambu-green'}`}

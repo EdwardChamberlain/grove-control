@@ -186,13 +186,6 @@ export default {
       ascending: 'Artan sırala',
       descending: 'Azalan sırala',
     },
-    // Kart boyutu
-    cardSize: {
-      small: 'Küçük kartlar',
-      medium: 'Orta kartlar',
-      large: 'Büyük kartlar',
-      extraLarge: 'Çok büyük kartlar',
-    },
     pageView: {
       cards: 'Kartlar',
       camWall: 'Kamera duvarı',

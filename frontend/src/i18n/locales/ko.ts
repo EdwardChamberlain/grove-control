@@ -174,12 +174,6 @@ export default {
       ascending: '오름차순 정렬',
       descending: '내림차순 정렬'
     },
-    cardSize: {
-      small: '작은 카드',
-      medium: '중간 카드',
-      large: '큰 카드',
-      extraLarge: '아주 큰 카드'
-    },
     pageView: {
       cards: '카드',
       camWall: '카메라 월'

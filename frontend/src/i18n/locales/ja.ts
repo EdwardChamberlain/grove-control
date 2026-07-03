@@ -185,13 +185,6 @@ export default {
       ascending: '昇順で並べ替え',
       descending: '降順で並べ替え',
     },
-    // Card size
-    cardSize: {
-      small: '小',
-      medium: '中',
-      large: '大',
-      extraLarge: '特大',
-    },
     pageView: {
       cards: 'カード',
       camWall: 'カメラウォール',

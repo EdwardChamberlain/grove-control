@@ -186,13 +186,6 @@ export default {
       ascending: 'Aufsteigend sortieren',
       descending: 'Absteigend sortieren',
     },
-    // Card size
-    cardSize: {
-      small: 'Kleine Karten',
-      medium: 'Mittlere Karten',
-      large: 'Große Karten',
-      extraLarge: 'Extra große Karten',
-    },
     pageView: {
       cards: 'Karten',
       camWall: 'Kamera-Wand',

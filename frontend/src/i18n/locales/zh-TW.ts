@@ -186,13 +186,6 @@ export default {
       ascending: '升序排列',
       descending: '降序排列',
     },
-    // Card size
-    cardSize: {
-      small: '小卡片',
-      medium: '中卡片',
-      large: '大卡片',
-      extraLarge: '超大卡片',
-    },
     pageView: {
       cards: '卡片',
       camWall: '攝影機牆',

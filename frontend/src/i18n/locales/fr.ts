@@ -186,13 +186,6 @@ export default {
       ascending: 'Tri croissant',
       descending: 'Tri décroissant',
     },
-    // Card size
-    cardSize: {
-      small: 'Petites cartes',
-      medium: 'Cartes moyennes',
-      large: 'Grandes cartes',
-      extraLarge: 'Très grandes cartes',
-    },
     pageView: {
       cards: 'Cartes',
       camWall: 'Mur de caméras',
