@@ -44,123 +44,13 @@ For detailed feature documentation, see the project documentation.
 <summary><strong>Click to expand screenshots</strong></summary>
 
 <p align="center">
-  <img src="docs/screenshots/printers.png" alt="Printers" width="800">
-  <br><em>Real-time printer monitoring with AMS status</em>
+  <img src="docs/screenshots/printers-cockpit.png" alt="Printers" width="800">
+  <br><em>Real-time printer monitoring</em>
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/archives.png" alt="Archives" width="800">
-  <br><em>Print archive with 3D preview and project assignment</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/reprint_ams_mapping.png" alt="Reprint AMS Mapping" width="800">
-  <br><em>Re-print with AMS filament mapping preview</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/edit-timelapse.png" alt="Timelapse Editor" width="800">
-  <br><em>Built-in timelapse editor with trim, speed, and music</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/projects.png" alt="Projects" width="800">
-  <br><em>Group related prints into projects</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/project-detail-1.png" alt="Project Detail" width="800">
-  <br><em>Project detail view with assigned archives</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/project-detail-2.png" alt="Project Detail Timeline" width="800">
-  <br><em>Project timeline and print history</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/print-queue.png" alt="Queue" width="800">
-  <br><em>Print scheduling and queue management</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/schedule-print.png" alt="Schedule Print" width="800">
-  <br><em>Schedule prints for specific date and time</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/statistics.png" alt="Statistics" width="800">
-  <br><em>Customizable statistics dashboard</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/maintenance-1.png" alt="Maintenance" width="800">
-  <br><em>Maintenance tracking per printer</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/maintenance-2.png" alt="Maintenance Settings" width="800">
-  <br><em>Configure maintenance types and intervals</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/cloud_profiles-1.png" alt="Cloud Profiles" width="800">
-  <br><em>Bambu Cloud filament profiles</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/cloud_profiles-2.png" alt="Cloud Profiles Edit" width="800">
-  <br><em>Edit filament preset settings</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/k_profiles-1.png" alt="K-Profiles" width="800">
-  <br><em>Pressure advance (K-factor) profiles</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/k_profiles-2.png" alt="K-Profiles Edit" width="800">
-  <br><em>Edit K-factor profile settings</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/settings-general.png" alt="Settings" width="800">
-  <br><em>General configuration and integrations</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/settings-powerplugs.png" alt="Smart Plugs" width="800">
-  <br><em>Smart plug control and energy monitoring</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/settings_notifications.png" alt="Notifications" width="800">
-  <br><em>Multi-provider notification system</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/settings_api_keys.png" alt="API Keys" width="800">
-  <br><em>API keys and webhook endpoints</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/settings-virtual-printer.png" alt="Virtual Printer Settings" width="800">
-  <br><em>Virtual printer configuration</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/slicer-virtual-printer.png" alt="Slicer Virtual Printer" width="800">
-  <br><em>Virtual printer appears in Bambu Studio/Orca Slicer</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/mqtt-debug-log.png" alt="MQTT Debug Log" width="800">
-  <br><em>MQTT debug logging for troubleshooting</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/quick_power_plug_sidebar.png" alt="Quick Power Plug" width="400">
-  <br><em>Quick power plug control in sidebar</em>
+  <img src="docs/screenshots/printers-list.png" alt="Archives" width="800">
+  <br><em>List view of all connected machines</em>
 </p>
 
 </details>
