@@ -1604,7 +1604,7 @@ export default {
       disabled: 'LDAP-Authentifizierung deaktiviert',
       feature1: 'Benutzer können sich mit LDAP-Anmeldedaten anmelden',
       feature2: 'Lokales Admin-Konto bleibt als Fallback erhalten',
-      feature3: 'LDAP-Gruppen werden bei der Anmeldung BamBuddy-Gruppen zugeordnet',
+      feature3: 'LDAP-Gruppen werden bei der Anmeldung Grove Control-Gruppen zugeordnet',
       serverConfig: 'LDAP-Server-Konfiguration',
       serverUrl: 'Server-URL',
       serverUrlHint: 'Verwenden Sie ldap:// für Standard oder ldaps:// für SSL-Verbindungen',
@@ -1617,12 +1617,12 @@ export default {
       userFilterHint: '{username} wird durch den Anmeldenamen ersetzt. Verwenden Sie (uid={username}) für OpenLDAP.',
       advanced: 'Erweitert',
       autoProvision: 'Benutzer automatisch anlegen',
-      autoProvisionHint: 'Automatisch ein BamBuddy-Konto bei der ersten LDAP-Anmeldung erstellen',
+      autoProvisionHint: 'Automatisch ein Grove Control-Konto bei der ersten LDAP-Anmeldung erstellen',
       defaultGroup: 'Standardgruppe',
       defaultGroupNone: '— Keine (kein Fallback) —',
       defaultGroupHint: 'Fallback-Gruppe, die zugewiesen wird, wenn sich ein LDAP-Benutzer authentifiziert, aber in keiner zugeordneten LDAP-Gruppe enthalten ist. Leer lassen, um nicht zugeordnete Benutzer ohne Berechtigungen zu belassen.',
       groupMapping: 'Gruppenzuordnung (JSON)',
-      groupMappingHint: 'LDAP-Gruppen-DNs BamBuddy-Gruppen zuordnen. Verfügbare Gruppen: ',
+      groupMappingHint: 'LDAP-Gruppen-DNs Grove Control-Gruppen zuordnen. Verfügbare Gruppen: ',
       testConnection: 'Verbindung testen',
       settingsSaved: 'LDAP-Einstellungen gespeichert',
       errors: {
@@ -2329,7 +2329,7 @@ export default {
     // Updates
     printerFirmware: 'Drucker-Firmware',
     checkFirmwareDescription: 'Nach Firmware-Updates von Bambu Lab suchen',
-    bambuddySoftware: 'Grove Control-Software',
+    groveControlSoftware: 'Grove Control-Software',
     autoCheckDescription: 'Automatisch beim Start nach neuen Versionen suchen',
     checkNow: 'Jetzt prüfen',
     updateAvailableVersion: 'Update verfügbar: v{{version}}',
@@ -2346,7 +2346,7 @@ export default {
     // Network tab
     externalUrl: 'Externe URL',
     externalUrlDescription: 'Die externe URL, unter der Grove Control erreichbar ist. Wird für Benachrichtigungsbilder und externe Integrationen verwendet.',
-    bambuddyUrl: 'Grove Control-URL',
+    groveControlUrl: 'Grove Control-URL',
     externalUrlHint: 'Protokoll und Port angeben (z.B. http://192.168.1.100:8000)',
     ftpRetry: 'FTP-Wiederholung',
     ftpRetryDescription: 'FTP-Operationen bei unzuverlässigem Drucker-WLAN wiederholen. Gilt für 3MF-Downloads, Druck-Uploads, Zeitraffer-Downloads und Firmware-Updates.',
@@ -2372,7 +2372,7 @@ export default {
     haConnectionFailed: 'Verbindung zu Home Assistant fehlgeschlagen.',
     // MQTT
     mqttPublishing: 'MQTT-Veröffentlichung',
-    mqttDescription: 'BamBuddy-Ereignisse an einen externen MQTT-Broker zur Integration mit Node-RED, Home Assistant und anderen Automatisierungssystemen veröffentlichen.',
+    mqttDescription: 'Grove Control-Ereignisse an einen externen MQTT-Broker zur Integration mit Node-RED, Home Assistant und anderen Automatisierungssystemen veröffentlichen.',
     mqttEnableDescription: 'Ereignisse an externen MQTT-Broker veröffentlichen',
     brokerHostname: 'Broker-Hostname',
     port: 'Port',
@@ -3728,18 +3728,6 @@ export default {
     imageName: 'Image-Name',
     platform: 'Plattform',
     architecture: 'Architektur',
-  },
-
-  // Sponsor surface (System page)
-  sponsors: {
-    sectionTitle: 'Unabhängig & von der Community finanziert',
-    tagline: 'Grove Control ist kostenlos und bleibt es, weil Menschen es freiwillig unterstützen. Kein VC, kein Cloud-Zwang.',
-    viewSupporters: 'Unterstützer ansehen',
-    toastPrints: 'Du hast {{count}} Drucke mit Grove Control abgeschlossen. Grove Control bleibt kostenlos dank seiner Unterstützer.',
-    toastCost: 'Du hast {{total}} an Filament mit Grove Control verfolgt. Sieh dir an, wer das Projekt unabhängig hält.',
-    toastArchives: '{{count}} Drucke mit Grove Control archiviert. Sieh dir an, wer es unabhängig hält.',
-    toastAnniversary: 'Ein Jahr mit Grove Control! Sieh dir an, wer das Projekt unabhängig hält.',
-    toastVersionUpdate: 'Aktualisiert auf v{{version}}. Grove Control bleibt kostenlos dank seiner Unterstützer.',
   },
 
   // Library (K Profiles)

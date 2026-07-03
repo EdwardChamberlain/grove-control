@@ -28,7 +28,7 @@ describe('buildApiKeyQrPayload', () => {
   });
 
   it('round-trips the values back out of the query string', () => {
-    const baseUrl = 'https://my.bambuddy.example:8443';
+    const baseUrl = 'https://my.grove-control.example:8443';
     const key = 'bb_ZZ/99+aa==';
     const payload = buildApiKeyQrPayload(baseUrl, key);
 

@@ -111,7 +111,6 @@ All printers require **Developer Mode** enabled for LAN access.
 
 ## Links
 
-- **Documentation:** [wiki.bambuddy.cool](http://wiki.bambuddy.cool)
 - **GitHub:** [github.com/EdwardChamberlain/grove-control](https://github.com/EdwardChamberlain/grove-control)
 - **Issues:** [GitHub Issues](https://github.com/EdwardChamberlain/grove-control/issues)
 

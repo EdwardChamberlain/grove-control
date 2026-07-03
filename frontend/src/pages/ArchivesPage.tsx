@@ -3232,16 +3232,7 @@ export function ArchivesPage() {
               {t('archives.no3mfBanner.title')}
             </div>
             <div className="text-xs text-amber-200/80 mt-1">
-              {t('archives.no3mfBanner.body')}{' '}
-              <a
-                href="https://wiki.bambuddy.cool/getting-started/#step-4-enable-store-sent-files-on-external-storage"
-                target="_blank"
-                rel="noreferrer"
-                className="underline hover:text-amber-100 inline-flex items-center gap-1"
-              >
-                {t('archives.no3mfBanner.docsLink')}
-                <ExternalLink className="w-3 h-3" />
-              </a>
+              {t('archives.no3mfBanner.body')}
             </div>
           </div>
           <button

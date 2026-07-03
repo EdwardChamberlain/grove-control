@@ -20,7 +20,7 @@ BAMBU_API_BASE_CN = "https://api.bambulab.cn"
 # OrcaSlicer fork was called out for in the May 2026 Bambu Lab blog post
 # ("Setting the record straight on cloud access and community"): we do not
 # introduce ourselves as official Bambu Studio.
-_USER_AGENT = "Grove Control/1.0 (+https://github.com/maziggy/bambuddy)"
+_USER_AGENT = "Grove Control/1.0 (+https://github.com/EdwardChamberlain/grove-control)"
 
 # Cloudflare protection on Bambu Lab's edge intermittently returns interstitials /
 # challenges instead of the JSON the API normally produces (issue #1575). The

@@ -222,7 +222,7 @@ class TestBambuCloudTOTPVerification:
             assert "bambulab.com" in result["message"]
 
     @pytest.mark.asyncio
-    async def test_verify_totp_uses_honest_bambuddy_user_agent(self, cloud_service):
+    async def test_verify_totp_uses_honest_grove_control_user_agent(self, cloud_service):
         """TOTP verification identifies as Grove Control, not as a browser.
 
         The TOTP endpoint previously sent a Chrome User-Agent + Origin/Referer

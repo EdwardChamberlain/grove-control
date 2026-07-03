@@ -22,6 +22,7 @@ def _read_app_version() -> str:
 # Application version - read from the repository root VERSION file.
 APP_VERSION = _read_app_version()
 GITHUB_REPO = "EdwardChamberlain/grove-control"
+GITHUB_BRANCH = "main"
 
 # Data directory - for persistent data (database, archives)
 # Use DATA_DIR env var if set (Docker), otherwise use project root (local dev)

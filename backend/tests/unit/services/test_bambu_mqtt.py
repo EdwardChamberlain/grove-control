@@ -1904,7 +1904,7 @@ class TestRequestTopicAmsMapping:
         assert "ams_mapping" in start_data
         assert start_data["ams_mapping"] is None
 
-    def test_first_running_push_after_bambuddy_restart_does_not_fire_print_start(self, mqtt_client):
+    def test_first_running_push_after_grove_control_restart_does_not_fire_print_start(self, mqtt_client):
         """Regression for #1304: Grove Control restart mid-print misfired plate check + archive.
 
         When Grove Control restarts while a print is already in progress, the freshly
@@ -5997,7 +5997,7 @@ class TestTrayNowH2SExternalSpoolOverride:
     """H2S firmware reports tray_now as the AMS's idle slot (typically 0)
     instead of 254 when the active feed is the external spool.
 
-    Bambuddy detects the all-external case via the slicer-captured
+    Grove Control detects the all-external case via the slicer-captured
     ams_mapping (every entry == -1) and promotes tray_now to 254 so the
     UI active-tray highlight matches the real feed.
 
@@ -6019,7 +6019,7 @@ class TestTrayNowH2SExternalSpoolOverride:
 
     def test_all_external_mapping_promotes_tray_now_to_254(self, mqtt_client):
         """Reporter's scenario: H2S, single nozzle, captured ams_mapping=[-1],
-        firmware sends tray_now=0 -> Bambuddy promotes to 254."""
+        firmware sends tray_now=0 -> Grove Control promotes to 254."""
         mqtt_client._captured_ams_mapping = [-1]
         mqtt_client._process_message(_ams_payload(0))
         assert mqtt_client.state.tray_now == 254
@@ -6047,7 +6047,7 @@ class TestTrayNowH2SExternalSpoolOverride:
         assert mqtt_client.state.tray_now == 0
 
     def test_no_captured_mapping_does_not_override(self, mqtt_client):
-        """Prints started from the printer screen (or before Bambuddy
+        """Prints started from the printer screen (or before Grove Control
         connected) have no captured ams_mapping. Behaviour unchanged from
         pre-#1822 — we accept the wrong value rather than guess."""
         mqtt_client._captured_ams_mapping = None

@@ -3355,7 +3355,7 @@ async def seed_default_groups():
     # `_own` — that closes the IDOR (operators with a custom `archives:read`
     # row can no longer read cross-user data) and the UI gates degrade to
     # disabled-button state until the frontend is migrated to also accept
-    # `_own` (separate change). See maziggy/bambuddy-security #2.
+    # `_own` (separate change).
     PERMISSION_MIGRATION_ALL = {
         "queue:update": "queue:update_all",
         "queue:delete": "queue:delete_all",
@@ -3507,7 +3507,7 @@ async def seed_default_groups():
         await session.commit()
 
         # Backfill the read flag set for the Administrators group on existing
-        # installs (maziggy/bambuddy-security #2). Two layers:
+        # installs. Two layers:
         #
         # (a) New OWN/ALL splits — `archives:read_own` etc. Fresh installs get
         #     these via ALL_PERMISSIONS; upgrades need the explicit backfill

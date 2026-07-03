@@ -3999,7 +3999,6 @@ async def slice_and_persist_as_archive(
     )
     db.add(new_archive)
     await db.commit()
-    await db.refresh(new_archive)
 
     return SliceArchiveResponse(
         archive_id=new_archive.id,

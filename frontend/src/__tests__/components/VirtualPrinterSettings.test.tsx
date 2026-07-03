@@ -476,14 +476,6 @@ describe('VirtualPrinterSettings', () => {
       });
     });
 
-    it('shows link to setup guide', async () => {
-      render(<VirtualPrinterSettings />);
-
-      await waitFor(() => {
-        expect(screen.getByText('Read the setup guide before enabling')).toBeInTheDocument();
-      });
-    });
-
     it('shows how it works section', async () => {
       render(<VirtualPrinterSettings />);
 

@@ -759,7 +759,7 @@ class VirtualPrinterInstance:
                     if raw is not None:
                         # BambuStudio's NetworkAgent embeds this as parsed
                         # JSON in the project_file body (matching the
-                        # ams_mapping shape Bambuddy already consumes as
+                        # ams_mapping shape Grove Control already consumes as
                         # list[int]). Accept a JSON-encoded string defensively
                         # in case any path arrives stringified.
                         if isinstance(raw, str):

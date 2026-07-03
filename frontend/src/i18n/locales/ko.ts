@@ -2197,7 +2197,7 @@ export default {
     lowDiskSpaceDescription: '여유 디스크 공간이 이 임계값 아래로 떨어지면 경고 표시',
     printerFirmware: '프린터 펌웨어',
     checkFirmwareDescription: 'Bambu Lab의 프린터 펌웨어 업데이트 확인',
-    bambuddySoftware: 'Grove Control 소프트웨어',
+    groveControlSoftware: 'Grove Control 소프트웨어',
     autoCheckDescription: '시작 시 자동으로 새 버전 확인',
     checkNow: '지금 확인',
     updateAvailableVersion: '업데이트 가능: v{{version}}',
@@ -2212,7 +2212,7 @@ export default {
     goToBackup: '백업으로 이동',
     externalUrl: '외부 URL',
     externalUrlDescription: 'Grove Control에 접근할 수 있는 외부 URL. 알림 이미지 및 외부 통합에 사용됩니다.',
-    bambuddyUrl: 'Grove Control URL',
+    groveControlUrl: 'Grove Control URL',
     externalUrlHint: '프로토콜과 포트를 포함하세요 (예: http://192.168.1.100:8000)',
     ftpRetry: 'FTP 재시도',
     ftpRetryDescription: '프린터 WiFi가 불안정할 때 FTP 작업을 재시도합니다.',
@@ -3530,16 +3530,6 @@ export default {
     imageName: '이미지 이름',
     platform: '플랫폼',
     architecture: '아키텍처'
-  },
-  sponsors: {
-    sectionTitle: '독립적·커뮤니티 후원',
-    tagline: 'Grove Control는 무료이며, 자발적으로 후원하는 사용자 덕분에 계속 무료로 유지됩니다. VC도 없고, 클라우드 종속도 없습니다.',
-    viewSupporters: '후원자 보기',
-    toastPrints: 'Grove Control로 {{count}}회 인쇄를 완료했습니다. Grove Control는 후원자 덕분에 무료로 유지됩니다.',
-    toastCost: 'Grove Control로 {{total}}만큼의 필라멘트를 추적했습니다. 프로젝트를 독립적으로 유지하는 사람들을 만나보세요.',
-    toastArchives: 'Grove Control로 {{count}}회 인쇄를 아카이브했습니다. 독립성을 지지하는 사람들을 만나보세요.',
-    toastAnniversary: 'Grove Control와 함께한 지 1년입니다! 프로젝트를 독립적으로 유지하는 사람들을 만나보세요.',
-    toastVersionUpdate: 'v{{version}}로 업데이트되었습니다. Grove Control는 후원자 덕분에 무료로 유지됩니다.'
   },
   library: {
     title: '필라멘트 라이브러리',

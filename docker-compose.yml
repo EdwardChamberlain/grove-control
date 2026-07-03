@@ -75,7 +75,7 @@ services:
       # Mount scheduled backup output to NAS or external storage
       # Backups default to DATA_DIR/backups/ inside the data volume.
       # Uncomment to store them externally (e.g. on a NAS share).
-      #- /path/to/nas/bambuddy-backups:/app/data/backups
+      #- /path/to/nas/grove-control-backups:/app/data/backups
       #
       # Tailscale integration (optional): mount the host's tailscaled socket
       # so Grove Control can request Let's Encrypt certs for virtual printers via
@@ -109,7 +109,7 @@ services:
       # show up as your user on the host. Defaults to 1000:1000.
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
-      # Port BamBuddy runs on (default: 8000)
+      # Port Grove Control runs on (default: 8000)
       # Usage: PORT=8080 docker compose up -d
       - PORT=${PORT:-8000}
       # Virtual printer: Set to the Docker host's IP when using bridge mode (ports:).
@@ -118,7 +118,7 @@ services:
       #- VIRTUAL_PRINTER_PASV_ADDRESS=
       #
       # External PostgreSQL (optional — uses SQLite by default)
-      # Example: DATABASE_URL=postgresql+asyncpg://bambuddy:password@db-host:5432/bambuddy
+      # Example: DATABASE_URL=postgresql+asyncpg://grove_control:password@db-host:5432/grove_control
       #- DATABASE_URL=
       #
       # Slicer API sidecar (optional — Settings → "Use Slicer API" toggles this on).
@@ -152,18 +152,18 @@ services:
   # Uncomment to run Postgres alongside Grove Control (or use an external Postgres host)
   #postgres:
   #  image: postgres:16-alpine
-  #  container_name: bambuddy-db
+  #  container_name: grove-control-db
   #  restart: unless-stopped
   #  environment:
-  #    POSTGRES_USER: bambuddy
+  #    POSTGRES_USER: grove_control
   #    POSTGRES_PASSWORD: changeme
-  #    POSTGRES_DB: bambuddy
+  #    POSTGRES_DB: grove_control
   #  volumes:
-  #    - bambuddy_pgdata:/var/lib/postgresql/data
+  #    - grove_control_pgdata:/var/lib/postgresql/data
   #  ports:
   #    - "5432:5432"
 
 volumes:
   bambuddy_data:
   bambuddy_logs:
-  #bambuddy_pgdata:
+  #grove_control_pgdata:
