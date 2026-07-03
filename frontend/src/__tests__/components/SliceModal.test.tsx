@@ -26,6 +26,7 @@ vi.mock('../../api/client', () => ({
     getArchivePlates: vi.fn(),
     getLibraryFileFilamentRequirements: vi.fn(),
     getArchiveFilamentRequirements: vi.fn(),
+    getSlicerPrinterModels: vi.fn(),
     getSettings: vi.fn().mockResolvedValue({}),
     updateSettings: vi.fn().mockResolvedValue({}),
   },
@@ -40,6 +41,7 @@ const mockApi = api as unknown as {
   getArchivePlates: ReturnType<typeof vi.fn>;
   getLibraryFileFilamentRequirements: ReturnType<typeof vi.fn>;
   getArchiveFilamentRequirements: ReturnType<typeof vi.fn>;
+  getSlicerPrinterModels: ReturnType<typeof vi.fn>;
 };
 
 function makeUnified(overrides: Partial<UnifiedPresetsResponse> = {}): UnifiedPresetsResponse {
@@ -121,6 +123,7 @@ describe('SliceModal', () => {
       plate_id: 1,
       filaments: [],
     });
+    mockApi.getSlicerPrinterModels.mockResolvedValue({});
   });
 
   it('auto-selects the highest-priority tier per slot on first load', async () => {
@@ -139,10 +142,12 @@ describe('SliceModal', () => {
     // process preset so the related controls cluster — and defaults to "".
     const selects = screen.getAllByRole('combobox') as HTMLSelectElement[];
     expect(selects).toHaveLength(4);
-    expect(selects[0].value).toBe('local:1');
-    expect(selects[1].value).toBe('local:2');
-    expect(selects[2].value).toBe('');
-    expect(selects[3].value).toBe('local:3');
+    await waitFor(() => {
+      expect(selects[0].value).toBe('local:1');
+      expect(selects[1].value).toBe('local:2');
+      expect(selects[2].value).toBe('');
+      expect(selects[3].value).toBe('local:3');
+    });
 
     // Slice button is enabled because all three slots auto-defaulted and
     // the preview-slice query has resolved (mock returns immediately).
@@ -191,7 +196,7 @@ describe('SliceModal', () => {
 
     await waitFor(() => expect(screen.getByText('Imported X1C 0.4')).toBeDefined());
     const selects = screen.getAllByRole('combobox') as HTMLSelectElement[];
-    expect(selects[0].value).toBe('local:1');
+    await waitFor(() => expect(selects[0].value).toBe('local:1'));
   });
 
   it('falls back to standard when both cloud and local are empty', async () => {
@@ -205,7 +210,9 @@ describe('SliceModal', () => {
 
     await waitFor(() => expect(screen.getByText('Bambu Lab X1 Carbon 0.4 nozzle')).toBeDefined());
     const selects = screen.getAllByRole('combobox') as HTMLSelectElement[];
-    expect(selects[0].value).toBe('standard:Bambu Lab X1 Carbon 0.4 nozzle');
+    await waitFor(() => {
+      expect(selects[0].value).toBe('standard:Bambu Lab X1 Carbon 0.4 nozzle');
+    });
   });
 
   it('sends source-aware refs (not legacy bare ints) on submit', async () => {

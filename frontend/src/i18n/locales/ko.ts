@@ -193,11 +193,6 @@ export default {
       summary: '라이브 {{live}}개, 스냅 {{snap}}개, 총 {{total}}개',
       layer: '레이어 {{cur}}/{{total}}',
       timeLeft: '{{time}} 남음',
-      statusMode: {
-        off: '꺼짐',
-        compact: '간단',
-        full: '전체'
-      },
       settings: {
         title: '카메라 월 설정',
         maxLive: '최대 라이브 스트림',
