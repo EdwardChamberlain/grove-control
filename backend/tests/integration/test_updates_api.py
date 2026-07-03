@@ -342,7 +342,7 @@ class TestUpdatesAPI:
             proc = MagicMock()
             # origin is set to a fork — must be rewritten.
             if "get-url" in args and "origin" in args:
-                proc.communicate = AsyncMock(return_value=(b"git@github.com:somefork/bambuddy.git\n", b""))
+                proc.communicate = AsyncMock(return_value=(b"git@github.com:somefork/grove-control.git\n", b""))
             else:
                 proc.communicate = AsyncMock(return_value=(b"", b""))
             proc.returncode = 0
