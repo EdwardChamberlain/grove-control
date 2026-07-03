@@ -349,6 +349,9 @@ describe('PrintersPage', () => {
 
     it('shows plate clear status and action on finished printers when not cleared', async () => {
       server.use(
+        http.get('/api/v1/printers/', () => {
+          return HttpResponse.json([mockPrinters[0]]);
+        }),
         http.get('/api/v1/printers/:id/status', () => {
           return HttpResponse.json({ ...mockPrinterStatus, state: 'FINISH', awaiting_plate_clear: true });
         })
@@ -357,7 +360,7 @@ describe('PrintersPage', () => {
       render(<PrintersPage />);
 
       await waitFor(() => {
-        expect(screen.getAllByText('Plate not Clear').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('Plate not Clear')).toHaveLength(1);
       });
 
       expect(screen.getAllByRole('button', { name: 'Mark plate as cleared' }).length).toBeGreaterThan(0);

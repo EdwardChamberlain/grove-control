@@ -5280,7 +5280,6 @@ function PrinterCard({
                         <div className="flex h-24 max-[520px]:h-20 min-w-0 flex-1 flex-col justify-between pt-1">
                           <div className="flex min-h-[18px] items-center gap-2 pr-8">
                             <p className="min-w-0 truncate text-sm text-bambu-gray">{getStatusDisplay(status.state, status.stg_cur_name)}</p>
-                            {plateStatusPill}
                           </div>
                           <p className={`min-h-[18px] truncate pr-8 text-sm ${printName ? 'text-white' : 'text-bambu-gray/70'}`}>
                             {printName || t('printers.noActiveJob', 'No active job')}
