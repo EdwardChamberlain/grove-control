@@ -1608,7 +1608,7 @@ export default {
       disabled: 'LDAP kimlik doğrulama devre dışı bırakıldı',
       feature1: 'Kullanıcılar LDAP kimlik bilgileriyle giriş yapabilir',
       feature2: 'Yerel yönetici hesabı yedek olarak kalır',
-      feature3: 'LDAP grupları giriş sırasında BamBuddy gruplarına eşlenir',
+      feature3: 'LDAP grupları giriş sırasında Grove Control gruplarına eşlenir',
       serverConfig: 'LDAP Sunucu Yapılandırması',
       serverUrl: 'Sunucu URL',
       serverUrlHint: 'SSL için ldaps:// veya StartTLS ile ldap:// kullanın',
@@ -1621,12 +1621,12 @@ export default {
       userFilterHint: '{username} giriş kullanıcı adıyla değiştirilir. OpenLDAP için (uid={username}) kullanın.',
       advanced: 'Gelişmiş',
       autoProvision: 'Kullanıcıları otomatik tedarik et',
-      autoProvisionHint: 'İlk LDAP girişinde otomatik olarak BamBuddy hesabı oluştur',
+      autoProvisionHint: 'İlk LDAP girişinde otomatik olarak Grove Control hesabı oluştur',
       defaultGroup: 'Varsayılan grup',
       defaultGroupNone: '— Hiçbiri (yedek yok) —',
       defaultGroupHint: 'Bir LDAP kullanıcısı kimlik doğruladığında ancak eşlenmiş herhangi bir LDAP grubunda listelenmediğinde atanan yedek grup. Eşlenmemiş kullanıcıları izinsiz bırakmak için boş bırakın.',
       groupMapping: 'Grup Eşleme (JSON)',
-      groupMappingHint: 'LDAP grup DN\'lerini BamBuddy gruplarına eşle. Kullanılabilir gruplar: ',
+      groupMappingHint: 'LDAP grup DN\'lerini Grove Control gruplarına eşle. Kullanılabilir gruplar: ',
       testConnection: 'Bağlantıyı Test Et',
       settingsSaved: 'LDAP ayarları kaydedildi',
       errors: {
@@ -2333,7 +2333,7 @@ export default {
     // Güncellemeler
     printerFirmware: 'Yazıcı Firmware',
     checkFirmwareDescription: "Bambu Lab'dan yazıcı firmware güncellemelerini kontrol et",
-    bambuddySoftware: 'Grove Control Yazılımı',
+    groveControlSoftware: 'Grove Control Yazılımı',
     autoCheckDescription: 'Başlangıçta otomatik olarak yeni sürümleri kontrol et',
     checkNow: 'Şimdi kontrol et',
     updateAvailableVersion: 'Güncelleme mevcut: v{{version}}',
@@ -2350,7 +2350,7 @@ export default {
     // Ağ sekmesi
     externalUrl: 'Harici URL',
     externalUrlDescription: 'Grove Control\'nin erişilebildiği harici URL. Bildirim görüntüleri ve harici entegrasyonlar için kullanılır.',
-    bambuddyUrl: 'Grove Control URL',
+    groveControlUrl: 'Grove Control URL',
     externalUrlHint: 'Protokol ve port dahil edin (örn., http://192.168.1.100:8000)',
     ftpRetry: 'FTP Yeniden Dene',
     ftpRetryDescription: 'Yazıcı WiFi güvenilmez olduğunda FTP işlemlerini yeniden dene. 3MF indirmelerine, baskı yüklemelerine, zaman atlamalı video indirmelerine ve firmware güncellemelerine uygulanır.',
@@ -2376,7 +2376,7 @@ export default {
     haConnectionFailed: "Home Assistant'a bağlanılamadı.",
     // MQTT
     mqttPublishing: 'MQTT Yayınlama',
-    mqttDescription: 'Node-RED, Home Assistant ve diğer otomasyon sistemleriyle entegrasyon için BamBuddy olaylarını harici bir MQTT brokerına yayınla.',
+    mqttDescription: 'Node-RED, Home Assistant ve diğer otomasyon sistemleriyle entegrasyon için Grove Control olaylarını harici bir MQTT brokerına yayınla.',
     mqttEnableDescription: 'Olayları harici MQTT brokerına yayınla',
     brokerHostname: 'Broker ana bilgisayar adı',
     port: 'Port',
@@ -5525,7 +5525,7 @@ export default {
   // E-posta Ayarları
   emailSettings: {
     placeholders: {
-      fromName: 'BamBuddy',
+      fromName: 'Grove Control',
     },
   },
 

@@ -1114,7 +1114,7 @@ async def export_spools_csv(
     content = serialize(spools)
     # Date-stamp the filename so repeat exports don't overwrite each other in
     # the browser's default download folder.
-    filename = f"bambuddy_inventory_{datetime.now(timezone.utc).strftime('%Y%m%d')}.csv"
+    filename = f"grove_control_inventory_{datetime.now(timezone.utc).strftime('%Y%m%d')}.csv"
     return Response(
         content=content,
         media_type="text/csv",

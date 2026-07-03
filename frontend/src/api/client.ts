@@ -5119,7 +5119,7 @@ export const api = {
       throw new Error(error.detail || `HTTP ${response.status}`);
     }
     const disposition = response.headers.get('Content-Disposition');
-    const filename = parseContentDispositionFilename(disposition) || 'bambuddy_inventory.csv';
+    const filename = parseContentDispositionFilename(disposition) || 'grove_control_inventory.csv';
     const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -7074,7 +7074,7 @@ export const supportApi = {
     }
     // Get filename from Content-Disposition header or use default
     const disposition = response.headers.get('Content-Disposition');
-    const filename = parseContentDispositionFilename(disposition) || 'bambuddy-support.zip';
+    const filename = parseContentDispositionFilename(disposition) || 'grove-control-support.zip';
 
     // Download the blob
     const blob = await response.blob();

@@ -13,7 +13,7 @@ side-effect-free):
 
 Universal across install shapes:
 
-- On the Bambuddy Appliance: both files exist by the time bambuddy.service
+- On the Grove Control Appliance: both files exist by the time bambuddy.service
   starts; we surface their values to the frontend.
 - On Docker / manual installs: both files are absent; we degrade silently.
 

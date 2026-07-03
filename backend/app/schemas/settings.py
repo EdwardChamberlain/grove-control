@@ -370,15 +370,15 @@ class AppSettings(BaseModel):
     ldap_security: str = Field(default="starttls", description="LDAP security: 'starttls' or 'ldaps'")
     ldap_group_mapping: str = Field(
         default="",
-        description="JSON: LDAP group to BamBuddy group mapping {ldap_group_dn: bambuddy_group_name}",
+        description="JSON: LDAP group to Grove Control group mapping {ldap_group_dn: bambuddy_group_name}",
     )
     ldap_auto_provision: bool = Field(
         default=False,
-        description="Auto-create BamBuddy user on first successful LDAP login",
+        description="Auto-create Grove Control user on first successful LDAP login",
     )
     ldap_default_group: str = Field(
         default="",
-        description="Fallback BamBuddy group name assigned when an LDAP user authenticates but has no mapped groups. Empty = no fallback.",
+        description="Fallback Grove Control group name assigned when an LDAP user authenticates but has no mapped groups. Empty = no fallback.",
     )
 
     # Obico AI failure detection (#172)
@@ -561,7 +561,9 @@ class AppSettingsUpdate(BaseModel):
         except json.JSONDecodeError:
             raise ValueError("ldap_group_mapping must be valid JSON or empty")
         if not isinstance(parsed, dict):
-            raise ValueError("ldap_group_mapping must be a JSON object mapping LDAP group DNs to BamBuddy group names")
+            raise ValueError(
+                "ldap_group_mapping must be a JSON object mapping LDAP group DNs to Grove Control group names"
+            )
         return v
 
     @field_validator("obico_enabled_printers")

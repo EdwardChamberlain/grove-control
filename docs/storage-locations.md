@@ -26,7 +26,7 @@ Structured storage locations let you manage physical shelves, drawers, and drybo
 
 ## Spoolman mode
 
-Bambuddy keeps a local location catalog. When Spoolman integration is enabled:
+Grove Control keeps a local location catalog. When Spoolman integration is enabled:
 
 - Assigning a location writes the location **name** to Spoolman's `location` field
 - Listing locations syncs distinct names from Spoolman into the catalog

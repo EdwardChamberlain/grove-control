@@ -1618,7 +1618,7 @@ export default {
       disabled: 'LDAP authentication disabled',
       feature1: 'Users can login with LDAP credentials',
       feature2: 'Local admin account remains as fallback',
-      feature3: 'LDAP groups are mapped to BamBuddy groups on login',
+      feature3: 'LDAP groups are mapped to Grove Control groups on login',
       serverConfig: 'LDAP Server Configuration',
       serverUrl: 'Server URL',
       serverUrlHint: 'Use ldaps:// for SSL or ldap:// with StartTLS',
@@ -1631,12 +1631,12 @@ export default {
       userFilterHint: '{username} is replaced with the login username. Use (uid={username}) for OpenLDAP.',
       advanced: 'Advanced',
       autoProvision: 'Auto-provision users',
-      autoProvisionHint: 'Automatically create a BamBuddy account on first LDAP login',
+      autoProvisionHint: 'Automatically create a Grove Control account on first LDAP login',
       defaultGroup: 'Default group',
       defaultGroupNone: '— None (no fallback) —',
       defaultGroupHint: 'Fallback group assigned when an LDAP user authenticates but is not listed in any mapped LDAP group. Leave empty to leave unmapped users without permissions.',
       groupMapping: 'Group Mapping (JSON)',
-      groupMappingHint: 'Map LDAP group DNs to BamBuddy groups. Available groups: ',
+      groupMappingHint: 'Map LDAP group DNs to Grove Control groups. Available groups: ',
       testConnection: 'Test Connection',
       settingsSaved: 'LDAP settings saved',
       errors: {
@@ -2343,7 +2343,7 @@ export default {
     // Updates
     printerFirmware: 'Printer Firmware',
     checkFirmwareDescription: 'Check for printer firmware updates from Bambu Lab',
-    bambuddySoftware: 'Grove Control Software',
+    groveControlSoftware: 'Grove Control Software',
     autoCheckDescription: 'Automatically check for new versions on startup',
     checkNow: 'Check now',
     updateAvailableVersion: 'Update available: v{{version}}',
@@ -2360,7 +2360,7 @@ export default {
     // Network tab
     externalUrl: 'External URL',
     externalUrlDescription: 'The external URL where Grove Control is accessible. Used for notification images and external integrations.',
-    bambuddyUrl: 'Grove Control URL',
+    groveControlUrl: 'Grove Control URL',
     externalUrlHint: 'Include protocol and port (e.g., http://192.168.1.100:8000)',
     ftpRetry: 'FTP Retry',
     ftpRetryDescription: 'Retry FTP operations when printer WiFi is unreliable. Applies to 3MF downloads, print uploads, timelapse downloads, and firmware updates.',
@@ -2386,7 +2386,7 @@ export default {
     haConnectionFailed: 'Failed to connect to Home Assistant.',
     // MQTT
     mqttPublishing: 'MQTT Publishing',
-    mqttDescription: 'Publish BamBuddy events to an external MQTT broker for integration with Node-RED, Home Assistant, and other automation systems.',
+    mqttDescription: 'Publish Grove Control events to an external MQTT broker for integration with Node-RED, Home Assistant, and other automation systems.',
     mqttEnableDescription: 'Publish events to external MQTT broker',
     brokerHostname: 'Broker hostname',
     port: 'Port',
@@ -5605,7 +5605,7 @@ export default {
   // Email Settings
   emailSettings: {
     placeholders: {
-      fromName: 'BamBuddy',
+      fromName: 'Grove Control',
     },
   },
 

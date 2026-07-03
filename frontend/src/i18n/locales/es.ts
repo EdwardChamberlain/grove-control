@@ -2332,7 +2332,7 @@ export default {
     // Updates
     printerFirmware: 'Firmware de la impresora',
     checkFirmwareDescription: 'Buscar actualizaciones de firmware de la impresora de Bambu Lab',
-    bambuddySoftware: 'Software de Grove Control',
+    groveControlSoftware: 'Software de Grove Control',
     autoCheckDescription: 'Buscar automáticamente nuevas versiones al iniciar',
     checkNow: 'Buscar ahora',
     updateAvailableVersion: 'Actualización disponible: v{{version}}',
@@ -2349,7 +2349,7 @@ export default {
     // Network tab
     externalUrl: 'URL externa',
     externalUrlDescription: 'La URL externa donde Grove Control es accesible. Se usa para las imágenes de notificación y las integraciones externas.',
-    bambuddyUrl: 'URL de Grove Control',
+    groveControlUrl: 'URL de Grove Control',
     externalUrlHint: 'Incluya el protocolo y el puerto (p. ej., http://192.168.1.100:8000)',
     ftpRetry: 'Reintento de FTP',
     ftpRetryDescription: 'Reintentar las operaciones FTP cuando el Wi-Fi de la impresora no es fiable. Se aplica a las descargas de 3MF, las subidas de impresión, las descargas de time-lapse y las actualizaciones de firmware.',
@@ -5589,7 +5589,7 @@ export default {
   // Email Settings
   emailSettings: {
     placeholders: {
-      fromName: 'BamBuddy',
+      fromName: 'Grove Control',
     },
   },
 

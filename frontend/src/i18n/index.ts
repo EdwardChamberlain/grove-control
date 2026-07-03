@@ -59,7 +59,7 @@ i18n
   });
 
 /**
- * Bambuddy Appliance hook: on the first SPA load after the firstboot wizard
+ * Grove Control Appliance hook: on the first SPA load after the firstboot wizard
  * runs, /api/v1/system/appliance returns the locale the user picked. We
  * apply it once (gated by a localStorage flag) and stop. On non-appliance
  * installs the endpoint either 404s or returns nulls — silent no-op.

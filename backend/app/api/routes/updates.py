@@ -411,7 +411,11 @@ async def check_for_updates(
             version_data = response.json()
             encoded_version = version_data.get("content", "") if isinstance(version_data, dict) else ""
             try:
-                latest_version = base64.b64decode(encoded_version, validate=True).decode("utf-8").strip()
+                # GitHub's Contents API may line-wrap Base64 payloads. Remove
+                # transport whitespace before strict validation so a valid
+                # VERSION file is not rejected.
+                compact_version = "".join(encoded_version.split())
+                latest_version = base64.b64decode(compact_version, validate=True).decode("utf-8").strip()
             except (ValueError, UnicodeDecodeError):
                 latest_version = ""
 

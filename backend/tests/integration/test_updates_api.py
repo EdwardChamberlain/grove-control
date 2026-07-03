@@ -92,7 +92,8 @@ class TestUpdatesAPI:
         would mis-classify them."""
         import httpx as _httpx
 
-        branch_version = {"content": "OTk5LjkuOQ=="}
+        # GitHub may wrap Base64 content; update checks must tolerate it.
+        branch_version = {"content": "OTk5Ljku\nOQ==\n"}
 
         class _Resp:
             status_code = 200

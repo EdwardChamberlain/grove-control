@@ -2402,7 +2402,7 @@ export function SettingsPage() {
                 </label>
               </div>
               <div className="border-t border-bambu-dark-tertiary pt-4">
-                <p className="text-xs font-medium text-bambu-gray uppercase tracking-wider mb-4">{t('settings.bambuddySoftware')}</p>
+                <p className="text-xs font-medium text-bambu-gray uppercase tracking-wider mb-4">{t('settings.groveControlSoftware')}</p>
               </div>
               <div className="flex items-center justify-between">
                 <div>
@@ -2566,7 +2566,7 @@ export function SettingsPage() {
               </p>
               <div>
                 <label className="block text-sm text-bambu-gray mb-1">
-                  {t('settings.bambuddyUrl')}
+                  {t('settings.groveControlUrl')}
                 </label>
                 <input
                   type="text"

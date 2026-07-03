@@ -1,6 +1,6 @@
 # Spoolman Inventory UI — Test Plan
 
-**Build under test:** either branch `feature/spoolman-inventory-ui` OR docker image `bambuddy:spoolman-test_20260505` (both contain the merge with dev as of 2026-05-05)
+**Build under test:** either branch `feature/spoolman-inventory-ui` OR docker image `grove-control:spoolman-test_20260505` (both contain the merge with dev as of 2026-05-05)
 **Issued:** 2026-05-05
 
 ---
@@ -62,7 +62,7 @@ Within each section (B and C in particular), do the row once with the Bambu spoo
 ## Pre-flight setup
 
 ### Required environment
-- [ ] Grove Control running, either built from branch `feature/spoolman-inventory-ui` **or** pulled from docker image `bambuddy:spoolman-test_20260505`
+- [ ] Grove Control running, either built from branch `feature/spoolman-inventory-ui` **or** pulled from docker image `grove-control:spoolman-test_20260505`
 - [ ] At least **two** Bambu Lab printers connected (single-printer setups miss multi-printer assignment bugs)
 - [ ] At least **one printer with a multi-AMS configuration** (dual AMS / AMS HT) — single-AMS users miss "wrong-AMS" routing
 - [ ] **OrcaSlicer** (preferred) installed on a machine that can reach the printers. BambuStudio acceptable but see the bug warning under [How to verify in the slicer](#how-to-verify-in-the-slicer).
@@ -82,10 +82,10 @@ Take a snapshot so you can tell whether something changed unexpectedly:
 
 ```bash
 # from your Grove Control admin shell, or via the API:
-curl -s ${BAMBUDDY_URL}/api/v1/inventory/spools | jq 'length'
-curl -s ${BAMBUDDY_URL}/api/v1/inventory/assignments | jq 'length'
-curl -s ${BAMBUDDY_URL}/api/v1/spoolman/inventory/spools | jq 'length'   # spoolman mode
-curl -s ${BAMBUDDY_URL}/api/v1/spoolman/inventory/slot-assignments | jq 'length'
+curl -s ${GROVE_CONTROL_URL}/api/v1/inventory/spools | jq 'length'
+curl -s ${GROVE_CONTROL_URL}/api/v1/inventory/assignments | jq 'length'
+curl -s ${GROVE_CONTROL_URL}/api/v1/spoolman/inventory/spools | jq 'length'   # spoolman mode
+curl -s ${GROVE_CONTROL_URL}/api/v1/spoolman/inventory/slot-assignments | jq 'length'
 ```
 
 Record the counts. Re-check at the end of testing.
@@ -327,7 +327,7 @@ These are bugs the recent fix commits addressed. **If any of these reproduces, f
 | D9 | Storage location modified silently on save | Edit a spool → set "Storage location" to exactly `Shelf 3, slot B` → Save → reload → Edit again. The field must read **exactly** `Shelf 3, slot B` — no extra spaces, no quote characters, no duplication. | _ | _ |
 | D10 | Bulk weight update doesn't apply to all spools | In the catalog (or Spoolman filament list), edit an entry's spool_weight → Save / Apply → return to inventory. **Every** spool linked to that catalog entry must show the new weight, not just the most recent one. | _ | _ |
 | D11 | Spoolman on a private LAN IP is rejected | Set the Spoolman URL to a private LAN address (e.g. `http://192.168.1.50:7912` or `http://10.0.0.20:7912`) → Save → reload. Spoolman pages must load. (Earlier builds blocked private IPs as a security measure; this confirms the fix.) | N/A | _ |
-| D12 | API key can no longer read settings *(skip if you don't use API keys)* | Settings → API Keys → create a key. From a terminal: `curl -H "Authorization: Bearer <key>" <bambuddy-url>/api/v1/settings` — must return the settings JSON, not "403 Forbidden". | _ | _ |
+| D12 | API key can no longer read settings *(skip if you don't use API keys)* | Settings → API Keys → create a key. From a terminal: `curl -H "Authorization: Bearer <key>" <grove-control-url>/api/v1/settings` — must return the settings JSON, not "403 Forbidden". | _ | _ |
 
 ---
 
@@ -366,7 +366,7 @@ For each F row, please post a comment on issue **TBD** with:
 - Printer model + firmware
 - Slicer + version
 - A screenshot of the slicer's slot detail modal (for any B/C section failure)
-- Grove Control logs from the relevant 60s window (`docker logs bambuddy --since 1m`)
+- Grove Control logs from the relevant 60s window (`docker logs grove-control --since 1m`)
 
 ---
 

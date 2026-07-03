@@ -89,7 +89,7 @@ Examples:
 ## Updating
 
 ```bash
-cd /path/to/bambuddy
+cd /path/to/grove-control
 docker compose pull
 docker compose up -d
 ```
@@ -98,7 +98,7 @@ If you use a locally built Docker image with `--build`, update the checkout firs
 rebuild:
 
 ```bash
-cd /path/to/bambuddy
+cd /path/to/grove-control
 git pull
 docker compose up -d --build
 ```

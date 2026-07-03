@@ -1799,7 +1799,7 @@ class BambuMQTTClient:
                     # AMS-only mappings are NOT overridden — there's no
                     # evidence the firmware misreports in those cases. Prints
                     # started without a captured mapping (printer-screen start,
-                    # or before Bambuddy connected) fall through unchanged.
+                    # or before Grove Control connected) fall through unchanged.
                     captured = self._captured_ams_mapping
                     if captured and all(s == -1 for s in captured):
                         if self.state.tray_now != 254:

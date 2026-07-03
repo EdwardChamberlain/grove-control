@@ -257,7 +257,7 @@ docker compose down
 docker compose up -d
 
 # Shell access
-docker compose exec bambuddy /bin/bash
+docker compose exec grove-control /bin/bash
 ```
 
 **Custom Port:**

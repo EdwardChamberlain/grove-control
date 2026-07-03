@@ -19,7 +19,7 @@ body:
       label: Product
       description: Which product is affected?
       options:
-        - Bambuddy
+        - Grove Control
         - SpoolBuddy
     validations:
       required: true
@@ -122,8 +122,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: Bambuddy Version
-      description: Which version of Bambuddy are you running? (Check Settings page)
+      label: Grove Control Version
+      description: Which version of Grove Control are you running? (Check Settings page)
       placeholder: e.g., 0.2.5
     validations:
       required: true
@@ -146,7 +146,7 @@ body:
     id: installation
     attributes:
       label: Installation Method
-      description: How did you install Bambuddy?
+      description: How did you install Grove Control?
       options:
         - Manual (git clone)
         - Docker
@@ -158,7 +158,7 @@ body:
     id: os
     attributes:
       label: Operating System
-      description: What OS is Bambuddy running on?
+      description: What OS is Grove Control running on?
       options:
         - Linux (Ubuntu/Debian)
         - Linux (Other)
@@ -185,7 +185,7 @@ body:
       description: |
         Drag and drop your support package .zip here, or paste relevant logs. Enable DEBUG mode for verbose logging.
 
-        Reports without a Support Package or logs almost always go back-and-forth for a week before any progress is made. If you genuinely cannot generate one (e.g. Bambuddy itself won't start), write WHY here.
+        Reports without a Support Package or logs almost always go back-and-forth for a week before any progress is made. If you genuinely cannot generate one (e.g. Grove Control itself won't start), write WHY here.
       placeholder: |
         Drag and drop your support package .zip file here, or paste logs / explain why you cannot attach one...
     validations:
