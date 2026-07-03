@@ -189,6 +189,7 @@ describe('CameraTile', () => {
       />,
     );
     await flushMicrotasks();
+    const liveImage = screen.getByAltText('X1C-Stop');
     fetchMock.mockClear();
 
     await act(async () => {
@@ -207,5 +208,31 @@ describe('CameraTile', () => {
       String(url).includes('/api/v1/printers/11/camera/stop'),
     );
     expect(stopCalls.length).toBeGreaterThan(0);
+    expect(liveImage).toHaveAttribute('src', '');
+  });
+
+  it('releases a live stream when the camera-wall tile unmounts', async () => {
+    const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+    const { unmount } = render(
+      <CameraTile
+        printerId={12}
+        printerName="P1S-To-Cockpit"
+        mode="live"
+        snapshotIntervalMs={5000}
+        connected
+      />,
+    );
+    await flushMicrotasks();
+    const liveImage = screen.getByAltText('P1S-To-Cockpit');
+    fetchMock.mockClear();
+
+    unmount();
+
+    expect(liveImage).toHaveAttribute('src', '');
+    expect(fetchMock.mock.calls.some(([url]) =>
+      String(url).includes('/api/v1/printers/12/camera/stop'),
+    )).toBe(true);
   });
 });

@@ -63,16 +63,18 @@ export function CameraTile({
   const { t } = useTranslation();
   const [bust, setBust] = useState(0);
   const [errored, setErrored] = useState(false);
-  const lastModeRef = useRef<CameraTileMode>(mode);
+  const liveImagesRef = useRef(new Map<number, HTMLImageElement>());
 
   // Tell the backend to release its MJPEG transcoder when this tile stops
   // being live — either by unmounting or by transitioning to snapshot/paused.
   // EmbeddedCameraViewer uses the same /camera/stop with keepalive on unmount.
   useEffect(() => {
-    const wasLive = lastModeRef.current === 'live';
-    const isLive = mode === 'live';
-    lastModeRef.current = mode;
-    if (wasLive && !isLive) {
+    const liveImages = liveImagesRef.current;
+    return () => {
+      if (mode !== 'live') return;
+      const liveImage = liveImages.get(printerId);
+      if (liveImage) liveImage.src = '';
+      liveImages.delete(printerId);
       const headers: Record<string, string> = {};
       const token = getAuthToken();
       if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -81,25 +83,13 @@ export function CameraTile({
         keepalive: true,
         headers,
       }).catch(() => {});
-    }
-    setErrored(false);
-    setBust((b) => b + 1);
+    };
   }, [mode, printerId]);
 
   useEffect(() => {
-    return () => {
-      if (lastModeRef.current === 'live') {
-        const headers: Record<string, string> = {};
-        const token = getAuthToken();
-        if (token) headers['Authorization'] = `Bearer ${token}`;
-        fetch(`/api/v1/printers/${printerId}/camera/stop`, {
-          method: 'POST',
-          keepalive: true,
-          headers,
-        }).catch(() => {});
-      }
-    };
-  }, [printerId]);
+    setErrored(false);
+    setBust((b) => b + 1);
+  }, [mode, printerId]);
 
   useEffect(() => {
     if (mode !== 'snapshot') return;
@@ -144,6 +134,9 @@ export function CameraTile({
         </div>
       ) : (
         <img
+          ref={(element) => {
+            if (mode === 'live' && element) liveImagesRef.current.set(printerId, element);
+          }}
           key={`${mode}-${bust}`}
           src={mode === 'live' ? liveUrl : snapshotUrl}
           alt={printerName}

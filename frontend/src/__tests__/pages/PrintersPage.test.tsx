@@ -584,6 +584,27 @@ describe('PrintersPage', () => {
       expect(placeholder).toBeInTheDocument();
     });
 
+    it('releases the active camera when switching machines or leaving cockpit view', async () => {
+      const stoppedPrinterIds: string[] = [];
+      server.use(
+        http.post('/api/v1/printers/:id/camera/stop', ({ params }) => {
+          stoppedPrinterIds.push(String(params.id));
+          return HttpResponse.json({ success: true });
+        }),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+      await screen.findByAltText('X1 Carbon camera');
+
+      fireEvent.click(screen.getByTitle('P1S Backup'));
+      await screen.findByAltText('P1S Backup camera');
+      await waitFor(() => expect(stoppedPrinterIds).toContain('1'));
+
+      fireEvent.click(screen.getByRole('button', { name: 'Detail cards' }));
+      await waitFor(() => expect(stoppedPrinterIds).toContain('2'));
+    });
+
     it('offers recent reprints from the print dialog instead of the cockpit card', async () => {
       server.use(
         http.get('/api/v1/print-log/', () => HttpResponse.json({

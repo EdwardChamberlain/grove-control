@@ -2167,6 +2167,7 @@ function SinglePrinterCockpit({
   const [loadedCameraPrinterId, setLoadedCameraPrinterId] = useState<number | null>(null);
   const [failedCameraPrinterId, setFailedCameraPrinterId] = useState<number | null>(null);
   const [failedPlaceholderUrl, setFailedPlaceholderUrl] = useState<string | null>(null);
+  const cameraImageRef = useRef<HTMLImageElement>(null);
   const [configureSlotModal, setConfigureSlotModal] = useState<{
     amsId: number;
     trayId: number;
@@ -2215,7 +2216,9 @@ function SinglePrinterCockpit({
 
   useEffect(() => {
     if (!status?.connected) return;
+    const cameraImage = cameraImageRef.current;
     return () => {
+      if (cameraImage) cameraImage.src = '';
       const headers: Record<string, string> = {};
       const token = getAuthToken();
       if (token) headers.Authorization = `Bearer ${token}`;
@@ -2665,6 +2668,7 @@ function SinglePrinterCockpit({
             />
             {status?.connected && !cameraFailed && (
               <img
+                ref={cameraImageRef}
                 key={printer.id}
                 src={cameraStreamUrl}
                 alt={t('printers.cameraFeed', '{{printer}} camera', { printer: printer.name })}
