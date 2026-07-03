@@ -96,6 +96,7 @@ class TestApiKeyRbacAllowed:
         mock_client.base_url = "http://localhost:7912"
         mock_client.health_check = AsyncMock(return_value=True)
         mock_client.get_all_spools = AsyncMock(return_value=[])
+        mock_client.get_distinct_locations = AsyncMock(return_value=[])
         with patch(
             "backend.app.api.routes.spoolman_inventory._get_client",
             AsyncMock(return_value=mock_client),
@@ -299,9 +300,15 @@ class TestCheckApiKeyPermissionsMatrix:
         ("PRINTERS_CONTROL", "can_control_printer", "start/stop print"),
         ("PRINTERS_FILES", "can_control_printer", "send file to printer"),
         ("SMART_PLUGS_CONTROL", "can_control_printer", "smart plug on/off"),
-        # can_manage_library
+        # can_manage_library — OWN and ALL ownership variants both fold into
+        # the same scope (#1832): API keys have no per-row ownership identity,
+        # so splitting OWN/ALL across allowlist/denylist made the curation
+        # surface unreachable. PURGE stays admin-only.
         ("LIBRARY_UPLOAD", "can_manage_library", "upload library file"),
+        ("LIBRARY_UPDATE_OWN", "can_manage_library", "rename own library file"),
+        ("LIBRARY_UPDATE_ALL", "can_manage_library", "rename any library file"),
         ("LIBRARY_DELETE_OWN", "can_manage_library", "delete own library file"),
+        ("LIBRARY_DELETE_ALL", "can_manage_library", "delete any library file"),
         ("MAKERWORLD_IMPORT", "can_manage_library", "import from MakerWorld"),
         # can_manage_inventory
         ("INVENTORY_CREATE", "can_manage_inventory", "create spool record"),
@@ -320,7 +327,8 @@ class TestCheckApiKeyPermissionsMatrix:
         "FIRMWARE_UPDATE",
         # Unmapped administrative (allowlist fail-closed catches these too)
         "PRINTERS_CREATE",
-        "LIBRARY_DELETE_ALL",
+        # LIBRARY_DELETE_ALL / LIBRARY_UPDATE_ALL moved to can_manage_library
+        # under #1832 — covered by the _SCOPE_CASES matrix above.
         "LIBRARY_PURGE",
         "DISCOVERY_SCAN",
     ]

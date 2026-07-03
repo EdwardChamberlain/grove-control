@@ -96,7 +96,7 @@ def assert_under(parent: Path, candidate: Path, *, http: bool = True) -> Path:
 
 
 def _is_relative_to(child: Path, parent: Path) -> bool:
-    # ``Path.is_relative_to`` exists in Python 3.9+. Bambuddy targets 3.11+
+    # ``Path.is_relative_to`` exists in Python 3.9+. Grove Control targets 3.11+
     # (per pyproject) so this is safe.
     try:
         return child.is_relative_to(parent)

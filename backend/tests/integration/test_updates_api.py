@@ -46,21 +46,15 @@ class TestUpdatesAPI:
 
     @pytest.mark.asyncio
     async def test_apply_update_non_docker(self, async_client: AsyncClient):
-        """Test non-Docker path - mock _perform_update + _discover_target_release
-        to prevent side effects (network call to GitHub releases API + actual
-        git/pip subprocesses)."""
+        """A native update schedules the Grove Control main branch."""
         with (
             patch("backend.app.api.routes.updates._is_ha_addon", return_value=False),
             patch("backend.app.api.routes.updates._is_docker_environment", return_value=False),
-            patch(
-                "backend.app.api.routes.updates._discover_target_release",
-                new_callable=AsyncMock,
-                return_value="v9.9.9",
-            ),
-            patch("backend.app.api.routes.updates._perform_update", new_callable=AsyncMock),
+            patch("backend.app.api.routes.updates._perform_update", new_callable=AsyncMock) as perform_update,
         ):
             response = await async_client.post("/api/v1/updates/apply")
         assert response.json()["success"] is True
+        perform_update.assert_awaited_once_with("origin/main")
 
     def test_is_docker_with_dockerenv(self):
         from backend.app.api.routes.updates import _is_docker_environment
@@ -98,13 +92,8 @@ class TestUpdatesAPI:
         would mis-classify them."""
         import httpx as _httpx
 
-        fake_release = {
-            "tag_name": "v999.9.9",
-            "name": "Far Future Release",
-            "body": "",
-            "html_url": "https://example.invalid/r",
-            "published_at": "2099-01-01T00:00:00Z",
-        }
+        # GitHub may wrap Base64 content; update checks must tolerate it.
+        branch_version = {"content": "OTk5Ljku\nOQ==\n"}
 
         class _Resp:
             status_code = 200
@@ -113,7 +102,7 @@ class TestUpdatesAPI:
                 return None
 
             def json(self):
-                return [fake_release]
+                return branch_version
 
         class _FakeClient:
             async def __aenter__(self):
@@ -122,7 +111,8 @@ class TestUpdatesAPI:
             async def __aexit__(self, *_):
                 return None
 
-            async def get(self, *_, **__):
+            async def get(self, url, **__):
+                assert url == ("https://api.github.com/repos/EdwardChamberlain/grove-control/contents/VERSION?ref=main")
                 return _Resp()
 
         with (
@@ -143,13 +133,7 @@ class TestUpdatesAPI:
     async def test_check_docker_only_returns_docker_method(self, async_client: AsyncClient):
         import httpx as _httpx
 
-        fake_release = {
-            "tag_name": "v999.9.9",
-            "name": "Far Future Release",
-            "body": "",
-            "html_url": "https://example.invalid/r",
-            "published_at": "2099-01-01T00:00:00Z",
-        }
+        branch_version = {"content": "OTk5LjkuOQ=="}
 
         class _Resp:
             status_code = 200
@@ -158,7 +142,7 @@ class TestUpdatesAPI:
                 return None
 
             def json(self):
-                return [fake_release]
+                return branch_version
 
         class _FakeClient:
             async def __aenter__(self):
@@ -259,34 +243,34 @@ class TestUpdatesAPI:
         it as 'reset to expected URL'."""
         from backend.app.api.routes.updates import _parse_github_remote
 
-        assert _parse_github_remote("git@github.com:maziggy/bambuddy.git") == (
-            "maziggy",
-            "bambuddy",
+        assert _parse_github_remote("git@github.com:EdwardChamberlain/grove-control.git") == (
+            "EdwardChamberlain",
+            "grove-control",
         )
-        assert _parse_github_remote("git@github.com:maziggy/bambuddy") == (
-            "maziggy",
-            "bambuddy",
+        assert _parse_github_remote("git@github.com:EdwardChamberlain/grove-control") == (
+            "EdwardChamberlain",
+            "grove-control",
         )
-        assert _parse_github_remote("https://github.com/maziggy/bambuddy.git") == (
-            "maziggy",
-            "bambuddy",
+        assert _parse_github_remote("https://github.com/EdwardChamberlain/grove-control.git") == (
+            "EdwardChamberlain",
+            "grove-control",
         )
-        assert _parse_github_remote("https://github.com/maziggy/bambuddy") == (
-            "maziggy",
-            "bambuddy",
+        assert _parse_github_remote("https://github.com/EdwardChamberlain/grove-control") == (
+            "EdwardChamberlain",
+            "grove-control",
         )
         # Non-GitHub host → None (we don't claim ownership over arbitrary
         # forge URLs).
-        assert _parse_github_remote("git@gitlab.com:maziggy/bambuddy.git") is None
+        assert _parse_github_remote("git@gitlab.com:EdwardChamberlain/grove-control.git") is None
         # Empty / malformed → None.
         assert _parse_github_remote("") is None
         assert _parse_github_remote("not-a-url") is None
-        assert _parse_github_remote("https://github.com/maziggy") is None  # no /repo
+        assert _parse_github_remote("https://github.com/EdwardChamberlain") is None  # no /repo
 
     @pytest.mark.asyncio
     async def test_perform_update_preserves_ssh_origin_when_pointing_at_correct_repo(self, tmp_path):
         """Regression for the developer-checkout footgun: if origin already
-        points at github.com/maziggy/bambuddy via SSH, the updater must
+        points at github.com/EdwardChamberlain/grove-control via SSH, the updater must
         leave it alone instead of clobbering it with HTTPS. Pre-fix, every
         Apply Update click rewrote `git@github.com:...` to `https://...`,
         breaking subsequent `git push` for any developer testing the
@@ -308,7 +292,9 @@ class TestUpdatesAPI:
             # SSH URL. Every other subprocess returns successfully with no
             # output.
             if "get-url" in args and "origin" in args:
-                proc.communicate = AsyncMock(return_value=(b"git@github.com:maziggy/bambuddy.git\n", b""))
+                proc.communicate = AsyncMock(
+                    return_value=(b"git@github.com:EdwardChamberlain/grove-control.git\n", b"")
+                )
             else:
                 proc.communicate = AsyncMock(return_value=(b"", b""))
             proc.returncode = 0
@@ -357,7 +343,7 @@ class TestUpdatesAPI:
             proc = MagicMock()
             # origin is set to a fork — must be rewritten.
             if "get-url" in args and "origin" in args:
-                proc.communicate = AsyncMock(return_value=(b"git@github.com:somefork/bambuddy.git\n", b""))
+                proc.communicate = AsyncMock(return_value=(b"git@github.com:somefork/grove-control.git\n", b""))
             else:
                 proc.communicate = AsyncMock(return_value=(b"", b""))
             proc.returncode = 0
@@ -383,16 +369,8 @@ class TestUpdatesAPI:
         )
 
     @pytest.mark.asyncio
-    async def test_perform_update_resets_to_target_ref_not_hardcoded_main(self, tmp_path):
-        """Regression for the hardcoded-`origin/main` limitation: the in-app
-        updater must reset to the caller-supplied target ref (typically a
-        release tag like `v0.2.4b1` discovered from the GitHub releases API)
-        so beta releases that don't live on main can actually be installed.
-        Pre-fix, `_perform_update` issued `git reset --hard origin/main`
-        verbatim and silently no-op'd whenever the latest release wasn't on
-        main — leaving a 0.2.3.x user clicking *Apply Update* stranded on
-        0.2.3.x. Also asserts the fetch step uses `--tags` so a tag ref is
-        actually resolvable post-fetch."""
+    async def test_perform_update_resets_to_main_branch(self, tmp_path):
+        """The updater fetches Grove Control and resets to origin/main."""
         from backend.app.api.routes import updates as updates_module
 
         app_dir = tmp_path / "app"
@@ -407,7 +385,7 @@ class TestUpdatesAPI:
             calls.append({"args": args, "cwd": kwargs.get("cwd")})
             proc = MagicMock()
             if "get-url" in args and "origin" in args:
-                proc.communicate = AsyncMock(return_value=(b"git@github.com:maziggy/bambuddy.git\n", b""))
+                proc.communicate = AsyncMock(return_value=(b"git@github.com:somefork/old-project.git\n", b""))
             else:
                 proc.communicate = AsyncMock(return_value=(b"", b""))
             proc.returncode = 0
@@ -423,42 +401,23 @@ class TestUpdatesAPI:
                 side_effect=fake_create_subprocess_exec,
             ),
         ):
-            await updates_module._perform_update("v0.2.4b1")
+            await updates_module._perform_update("origin/main")
 
-        # Reset target must be the caller-supplied ref, not "origin/main".
         reset_calls = [c for c in calls if "reset" in c["args"] and "--hard" in c["args"]]
         assert reset_calls, "git reset must be invoked"
         reset_target = reset_calls[0]["args"][-1]
-        assert reset_target == "v0.2.4b1", (
-            f"Expected reset target to be the caller-supplied ref 'v0.2.4b1'; "
-            f"got {reset_target!r}. Regression to a hardcoded 'origin/main' "
-            "would re-introduce the in-app-updater-can't-install-betas bug."
-        )
+        assert reset_target == "origin/main"
 
-        # Fetch must include --tags so v0.2.4b1 (a tag) is locally resolvable.
         fetch_calls = [c for c in calls if "fetch" in c["args"]]
         assert fetch_calls
-        assert "--tags" in fetch_calls[0]["args"], (
-            "Fetch must use --tags so release-tag refs (the production path "
-            "for tag-based updates) are resolvable for the subsequent reset. "
-            f"Captured fetch call: {fetch_calls[0]['args']}"
-        )
-        # Fetch must include --force so a re-pointed tag on the remote
-        # (common after re-tagging a release post-release-notes edit) doesn't
-        # surface as "Failed to fetch updates" to the user just because their
-        # local copy of the moved tag would be clobbered. The relevant target
-        # ref is fetched fine; we only want git's tag-clobber to be silent.
+        assert "--tags" not in fetch_calls[0]["args"]
         assert "--force" in fetch_calls[0]["args"], (
-            "Fetch must use --force so re-pointed tags on the remote don't "
-            "fail the whole fetch (the rest of the refs update cleanly). "
-            f"Captured fetch call: {fetch_calls[0]['args']}"
+            f"Fetch must force-sync the remote branch. Captured fetch call: {fetch_calls[0]['args']}"
         )
 
     @pytest.mark.asyncio
-    async def test_apply_update_passes_discovered_release_to_perform_update(self, async_client: AsyncClient):
-        """End-to-end glue: the route handler calls `_discover_target_release`
-        to pick the tag (respecting include_beta_updates), then schedules
-        `_perform_update` with that tag — not with no arg, not with main."""
+    async def test_apply_update_passes_main_branch_to_perform_update(self, async_client: AsyncClient):
+        """End-to-end glue schedules the configured main branch."""
         from backend.app.api.routes import updates as updates_module
 
         captured_ref: list[str] = []
@@ -466,48 +425,15 @@ class TestUpdatesAPI:
         async def fake_perform_update(target_ref):
             captured_ref.append(target_ref)
 
-        async def fake_discover(_db):
-            return "v0.2.4b1"
-
         with (
             patch.object(updates_module, "_is_ha_addon", return_value=False),
             patch.object(updates_module, "_is_docker_environment", return_value=False),
             patch.object(updates_module, "_perform_update", side_effect=fake_perform_update),
-            patch.object(updates_module, "_discover_target_release", side_effect=fake_discover),
         ):
             response = await async_client.post("/api/v1/updates/apply")
 
         assert response.json()["success"] is True
-        assert captured_ref == ["v0.2.4b1"], (
-            f"apply_update must pass the discovered tag to _perform_update; captured invocations: {captured_ref}"
-        )
-
-    @pytest.mark.asyncio
-    async def test_apply_update_returns_clear_error_when_no_release_resolves(self, async_client: AsyncClient):
-        """If GitHub is unreachable or no release matches the user's channel,
-        the route returns a useful error instead of silently kicking off an
-        update that can't possibly land. Avoids the previous failure mode
-        where in-app update appeared to succeed but did nothing."""
-        from backend.app.api.routes import updates as updates_module
-
-        async def fake_discover(_db):
-            return None
-
-        # The route guards against a concurrent update via the module-global
-        # `_update_status` — reset it so a previous test that left the status
-        # mid-flight doesn't short-circuit this one.
-        updates_module._update_status = {"status": "idle", "progress": 0, "message": "", "error": None}
-
-        with (
-            patch.object(updates_module, "_is_ha_addon", return_value=False),
-            patch.object(updates_module, "_is_docker_environment", return_value=False),
-            patch.object(updates_module, "_discover_target_release", side_effect=fake_discover),
-        ):
-            response = await async_client.post("/api/v1/updates/apply")
-
-        body = response.json()
-        assert body["success"] is False
-        assert "release" in body["message"].lower()
+        assert captured_ref == ["origin/main"]
 
     @pytest.mark.asyncio
     async def test_perform_update_runs_pip_in_app_dir_not_data_dir(self, tmp_path):
@@ -599,7 +525,7 @@ class TestUpdatesAPI:
             calls.append({"args": args, "cwd": kwargs.get("cwd")})
             proc = MagicMock()
             if "get-url" in args and "origin" in args:
-                proc.communicate = AsyncMock(return_value=(b"git@github.com:maziggy/bambuddy.git\n", b""))
+                proc.communicate = AsyncMock(return_value=(b"git@github.com:somefork/old-project.git\n", b""))
             else:
                 proc.communicate = AsyncMock(return_value=(b"", b""))
             proc.returncode = 0

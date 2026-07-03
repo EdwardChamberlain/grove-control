@@ -61,13 +61,33 @@ class TestUiPreferencesEndpoint:
     @pytest.mark.asyncio
     async def test_returns_require_plate_clear(self, async_client: AsyncClient):
         """The field that drove #1293: PrintersPage gates the Clear Plate button
-        on this. Must be present in the response."""
+        on this. A fresh install must expose the new enabled-by-default value."""
         response = await async_client.get("/api/v1/settings/ui-preferences")
         assert response.status_code == 200
         data = response.json()
         assert "require_plate_clear" in data
         # Type must be bool (frontend does === true checks)
         assert isinstance(data["require_plate_clear"], bool)
+        assert data["require_plate_clear"] is True
+
+    @pytest.mark.asyncio
+    async def test_persisted_disabled_plate_clear_choice_overrides_new_default(
+        self, async_client: AsyncClient, db_session
+    ):
+        """Upgrades must retain an explicit opt-out even though fresh installs
+        now default to requiring plate-clear confirmation."""
+        from backend.app.models.settings import Settings
+
+        db_session.add(Settings(key="require_plate_clear", value="false"))
+        await db_session.commit()
+
+        ui_response = await async_client.get("/api/v1/settings/ui-preferences")
+        assert ui_response.status_code == 200
+        assert ui_response.json()["require_plate_clear"] is False
+
+        settings_response = await async_client.get("/api/v1/settings/")
+        assert settings_response.status_code == 200
+        assert settings_response.json()["require_plate_clear"] is False
 
     @pytest.mark.asyncio
     async def test_returns_expected_field_set(self, async_client: AsyncClient):
@@ -83,11 +103,16 @@ class TestUiPreferencesEndpoint:
             "time_format",
             "date_format",
             "drying_presets",
+            "ams_humidity_thresholds",
             "ams_humidity_good",
             "ams_humidity_fair",
             "ams_temp_good",
             "ams_temp_fair",
             "bed_cooled_threshold",
+            "nozzle_temp_presets",
+            "bed_temp_presets",
+            "chamber_temp_presets",
+            "fan_speed_presets",
         }
         assert set(data.keys()) == expected
 

@@ -1,4 +1,4 @@
-"""Shared test fixtures for BamBuddy backend tests."""
+"""Shared test fixtures for Grove Control backend tests."""
 
 import asyncio
 import atexit
@@ -27,7 +27,7 @@ from backend.app.core.config import settings  # noqa: E402
 settings.log_to_file = False
 
 # Use a temp directory for plate calibration to avoid deleting real calibration files
-_test_plate_cal_dir = Path(tempfile.mkdtemp(prefix="bambuddy_test_plate_cal_"))
+_test_plate_cal_dir = Path(tempfile.mkdtemp(prefix="grove_control_test_plate_cal_"))
 settings.plate_calibration_dir = _test_plate_cal_dir
 
 
@@ -79,6 +79,20 @@ def mfa_encryption_isolation(monkeypatch, tmp_path):
     enc_mod._fernet_instance = None
     enc_mod._warn_shown = False
     enc_mod._key_source = None
+
+
+@pytest.fixture(autouse=True)
+def reset_spoolman_location_sync_cache():
+    """Drop the per-URL Spoolman location-sync TTL cache between tests.
+
+    Without this, a test that runs the sync against `http://localhost:7912`
+    will skip the sync in any later test that uses the same URL within 60
+    real seconds — test ordering would then leak assertions across runs."""
+    from backend.app.services.location_service import _spoolman_location_sync_cache_clear
+
+    _spoolman_location_sync_cache_clear()
+    yield
+    _spoolman_location_sync_cache_clear()
 
 
 @pytest.fixture(scope="session")

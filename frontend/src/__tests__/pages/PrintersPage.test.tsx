@@ -2,8 +2,8 @@
  * Tests for the PrintersPage component.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
-import { screen, waitFor, fireEvent } from '@testing-library/react';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { screen, waitFor, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils';
 import { PrintersPage } from '../../pages/PrintersPage';
@@ -19,6 +19,7 @@ const mockPrinters = [
     access_code: '12345678',
     model: 'X1C',
     enabled: true,
+    is_active: true,
     nozzle_diameter: 0.4,
     nozzle_type: 'hardened_steel',
     location: 'Workshop',
@@ -34,6 +35,7 @@ const mockPrinters = [
     access_code: '87654321',
     model: 'P1S',
     enabled: false,
+    is_active: true,
     nozzle_diameter: 0.4,
     nozzle_type: 'stainless_steel',
     location: null,
@@ -69,8 +71,14 @@ const selectToolbarDropdownOption = async (triggerName: RegExp, optionName: RegE
 };
 
 describe('PrintersPage', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
     localStorage.removeItem('printerCardSize');
+    localStorage.removeItem('printerViewMode');
+    localStorage.removeItem('singlePrinterViewId');
 
     server.use(
       http.get('/api/v1/printers/', () => {
@@ -182,6 +190,132 @@ describe('PrintersPage', () => {
         expect(screen.getAllByText(/25/)).toBeTruthy();
       });
     });
+
+    it('sets left and right nozzle temperatures from the nozzle selector', async () => {
+      localStorage.setItem('printerCardSize', '2');
+      const temperatureRequests: Array<{ target: string | null; nozzle: string | null }> = [];
+      const dualNozzlePrinter = { ...mockPrinters[0], model: 'H2D', nozzle_count: 2 };
+      const dualNozzleStatus = {
+        ...mockPrinterStatus,
+        active_extruder: 0,
+        temperatures: {
+          ...mockPrinterStatus.temperatures,
+          nozzle: 31,
+          nozzle_target: 0,
+          nozzle_2: 32,
+          nozzle_2_target: 0,
+        },
+        nozzle_rack: [
+          { id: 0, nozzle_type: 'HS', nozzle_diameter: '0.4', wear: 5, stat: 1, max_temp: 300, serial_number: '', filament_color: '', filament_id: '', filament_type: '' },
+          { id: 1, nozzle_type: 'HS', nozzle_diameter: '0.4', wear: 3, stat: 1, max_temp: 300, serial_number: '', filament_color: '', filament_id: '', filament_type: '' },
+        ],
+      };
+
+      server.use(
+        http.get('/api/v1/printers/', () => HttpResponse.json([dualNozzlePrinter])),
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json(dualNozzleStatus)),
+        http.post('/api/v1/printers/:id/temperature/nozzle', ({ request }) => {
+          const url = new URL(request.url);
+          temperatureRequests.push({
+            target: url.searchParams.get('target'),
+            nozzle: url.searchParams.get('nozzle'),
+          });
+          return HttpResponse.json({ success: true, message: 'Nozzle temperature set' });
+        })
+      );
+
+      render(<PrintersPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('L / R')).toBeInTheDocument();
+      });
+
+      // Dual-nozzle temps live on the L/R temperature card, not the nozzle-select card.
+      fireEvent.click(screen.getByText('L / R').parentElement!);
+
+      const leftTempBox = screen.getByText('Left Temp').parentElement!.parentElement!;
+      fireEvent.click(within(leftTempBox).getByRole('button', { name: '220 C' }));
+
+      await waitFor(() => {
+        expect(temperatureRequests).toContainEqual({ target: '220', nozzle: '1' });
+      });
+
+      fireEvent.click(screen.getByText('L / R').parentElement!);
+
+      const rightTempBox = screen.getByText('Right Temp').parentElement!.parentElement!;
+      fireEvent.click(within(rightTempBox).getByRole('button', { name: '260 C' }));
+
+      await waitFor(() => {
+        expect(temperatureRequests).toContainEqual({ target: '260', nozzle: '0' });
+      });
+    });
+  });
+
+  describe('fan badges', () => {
+    // Chamber fan only exists on enclosed Bambu models. Open-frame printers
+    // (A1, A1 Mini, A2L, P1P) have no chamber fan — the firmware reports
+    // big_fan2_speed as 0 there and the widget would be dead UI.
+    const statusWithFans = {
+      ...mockPrinterStatus,
+      cooling_fan_speed: 53,
+      big_fan1_speed: 53,
+      big_fan2_speed: 53,
+    };
+
+    const renderWithPrinter = (printer: typeof mockPrinters[number]) => {
+      server.use(
+        http.get('/api/v1/printers/', () => HttpResponse.json([printer])),
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json(statusWithFans)),
+      );
+      render(<PrintersPage />);
+    };
+
+    it('hides chamber fan badge on A1 Mini (open-frame, no chamber fan)', async () => {
+      renderWithPrinter({ ...mockPrinters[0], model: 'A1 Mini' });
+
+      await waitFor(() => {
+        // Part-cooling badge confirms the fan row rendered.
+        expect(screen.getByTitle('Part Cooling Fan')).toBeInTheDocument();
+      });
+      expect(screen.getByTitle('Auxiliary Fan')).toBeInTheDocument();
+      expect(screen.queryByTitle('Chamber Fan')).not.toBeInTheDocument();
+    });
+
+    it('hides chamber fan badge on A1 (open-frame)', async () => {
+      renderWithPrinter({ ...mockPrinters[0], model: 'A1' });
+
+      await waitFor(() => {
+        expect(screen.getByTitle('Part Cooling Fan')).toBeInTheDocument();
+      });
+      expect(screen.queryByTitle('Chamber Fan')).not.toBeInTheDocument();
+    });
+
+    it('hides chamber fan badge on P1P (open-frame)', async () => {
+      renderWithPrinter({ ...mockPrinters[0], model: 'P1P' });
+
+      await waitFor(() => {
+        expect(screen.getByTitle('Part Cooling Fan')).toBeInTheDocument();
+      });
+      expect(screen.queryByTitle('Chamber Fan')).not.toBeInTheDocument();
+    });
+
+    it('shows chamber fan badge on X1C (enclosed)', async () => {
+      renderWithPrinter({ ...mockPrinters[0], model: 'X1C' });
+
+      await waitFor(() => {
+        expect(screen.getByTitle('Chamber Fan')).toBeInTheDocument();
+      });
+      expect(screen.getByTitle('Part Cooling Fan')).toBeInTheDocument();
+      expect(screen.getByTitle('Auxiliary Fan')).toBeInTheDocument();
+    });
+
+    it('shows chamber fan badge on P1S (enclosed)', async () => {
+      renderWithPrinter({ ...mockPrinters[0], model: 'P1S' });
+
+      await waitFor(() => {
+        expect(screen.getByTitle('Chamber Fan')).toBeInTheDocument();
+      });
+    });
   });
 
   describe('empty state', () => {
@@ -215,6 +349,9 @@ describe('PrintersPage', () => {
 
     it('shows plate clear status and action on finished printers when not cleared', async () => {
       server.use(
+        http.get('/api/v1/printers/', () => {
+          return HttpResponse.json([mockPrinters[0]]);
+        }),
         http.get('/api/v1/printers/:id/status', () => {
           return HttpResponse.json({ ...mockPrinterStatus, state: 'FINISH', awaiting_plate_clear: true });
         })
@@ -223,7 +360,7 @@ describe('PrintersPage', () => {
       render(<PrintersPage />);
 
       await waitFor(() => {
-        expect(screen.getAllByText('Plate not Clear').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('Plate not Clear')).toHaveLength(1);
       });
 
       expect(screen.getAllByRole('button', { name: 'Mark plate as cleared' }).length).toBeGreaterThan(0);
@@ -292,36 +429,87 @@ describe('PrintersPage', () => {
       expect(screen.queryByText('Plate Clear')).not.toBeInTheDocument();
     });
 
-    it('shows an icon-only plate clear action in small card view', async () => {
-      let awaitingPlateClear = true;
-
-      server.use(
-        http.get('/api/v1/printers/', () => {
-          return HttpResponse.json([mockPrinters[0]]);
-        }),
-        http.get('/api/v1/printers/:id/status', () => {
-          return HttpResponse.json({ ...mockPrinterStatus, state: 'FINISH', awaiting_plate_clear: awaitingPlateClear });
-        }),
-        http.post('/api/v1/printers/:id/clear-plate', () => {
-          awaitingPlateClear = false;
-          return HttpResponse.json({ success: true, message: 'Plate cleared' });
-        })
-      );
-
+    it('opens status details from the list health indicator without opening the expanded card', async () => {
+      localStorage.setItem('printerViewMode', 'list');
       render(<PrintersPage />);
 
       await waitFor(() => {
         expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
       });
 
-      fireEvent.click(screen.getByRole('button', { name: 'S' }));
+      fireEvent.click(screen.getAllByLabelText(/Machine health:/)[0]);
+
+      const statusDetails = await screen.findByText('Status details');
+      const backdrop = statusDetails.parentElement?.previousElementSibling;
+      expect(backdrop).toBeInTheDocument();
+      fireEvent.click(backdrop!);
 
       await waitFor(() => {
-        expect(screen.queryByText('Mark plate as cleared')).not.toBeInTheDocument();
+        expect(screen.queryByText('Status details')).not.toBeInTheDocument();
+      });
+      expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
+    });
+
+    it('shows an icon-only plate-clear action in the list printer-name field when needed', async () => {
+      let awaitingPlateClear = true;
+      server.use(
+        http.get('/api/v1/printers/:id/status', ({ params }) => {
+          return HttpResponse.json({
+            ...mockPrinterStatus,
+            state: 'FINISH',
+            awaiting_plate_clear: params.id === '1' && awaitingPlateClear,
+          });
+        }),
+        http.post('/api/v1/printers/:id/clear-plate', () => {
+          awaitingPlateClear = false;
+          return HttpResponse.json({ success: true, message: 'Plate cleared' });
+        }),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'List' }));
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'List' })).toHaveAttribute('aria-pressed', 'true');
       });
 
-      const clearButton = screen.getByRole('button', { name: 'Mark plate as cleared' });
+      const clearButtons = await screen.findAllByRole('button', { name: 'Mark plate as cleared' });
+      expect(clearButtons).toHaveLength(2); // Both responsive row variants are present in jsdom.
+      clearButtons.forEach((button) => expect(button).not.toHaveTextContent('Mark plate as cleared'));
+      fireEvent.click(clearButtons[0]);
 
+      await waitFor(() => {
+        expect(screen.queryByRole('button', { name: 'Mark plate as cleared' })).not.toBeInTheDocument();
+      });
+    });
+
+    it('shows and handles the plate-clear action on a camera-wall tile', async () => {
+      let awaitingPlateClear = true;
+      vi.stubGlobal('IntersectionObserver', class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      });
+      server.use(
+        http.get('/api/v1/printers/:id/status', ({ params }) => {
+          return HttpResponse.json({
+            ...mockPrinterStatus,
+            state: 'FINISH',
+            awaiting_plate_clear: params.id === '1' && awaitingPlateClear,
+          });
+        }),
+        http.post('/api/v1/printers/:id/clear-plate', () => {
+          awaitingPlateClear = false;
+          return HttpResponse.json({ success: true, message: 'Plate cleared' });
+        }),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Cam wall' }));
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Cam wall' })).toHaveAttribute('aria-pressed', 'true');
+      });
+
+      const clearButton = await screen.findByRole('button', { name: 'Mark plate as cleared' });
       fireEvent.click(clearButton);
 
       await waitFor(() => {
@@ -329,30 +517,245 @@ describe('PrintersPage', () => {
       });
     });
 
-    it('dismisses small-card status details without opening the medium-card drilldown', async () => {
+    it('returns from a list clickthrough to the list view', async () => {
+      localStorage.setItem('printerViewMode', 'list');
+      render(<PrintersPage />);
+
+      const printerName = await screen.findByText('X1 Carbon');
+      fireEvent.click(printerName);
+      fireEvent.click(await screen.findByRole('button', { name: 'Back' }));
+
+      expect(screen.getByRole('button', { name: 'List' })).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
+    });
+
+    it('hides single-printer view and routes list clickthroughs to detail cards on mobile', async () => {
+      vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
+        matches: query === '(max-width: 767px)',
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })));
+      localStorage.setItem('printerViewMode', 'list');
+      render(<PrintersPage />);
+
+      const printerNames = await screen.findAllByText('X1 Carbon');
+      expect(screen.queryByRole('button', { name: 'Single printer' })).not.toBeInTheDocument();
+      fireEvent.click(printerNames[0]);
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Detail cards' })).toHaveAttribute('aria-pressed', 'true');
+      });
+      expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
+    });
+
+    it('returns from a single-printer clickthrough to the list view', async () => {
+      localStorage.setItem('printerViewMode', 'detail');
+      render(<PrintersPage />);
+
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Back' }));
+
+      expect(screen.getByRole('button', { name: 'List' })).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
+    });
+
+    it('keeps the hero placeholder visible until the single-printer camera loads', async () => {
       const { container } = render(<PrintersPage />);
 
-      await waitFor(() => {
-        expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
-      });
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+      const camera = await screen.findByAltText('X1 Carbon camera');
+      const placeholder = container.querySelector('img[src="/img/camera_placeholder_X1C.png"]');
+      expect(placeholder).toBeInTheDocument();
+      expect(camera).toHaveClass('opacity-0');
 
-      fireEvent.click(screen.getByRole('button', { name: 'S' }));
-      fireEvent.click(screen.getAllByLabelText(/Machine health:/)[0]);
+      fireEvent.error(placeholder!);
+      expect(container.querySelector('img[src="/img/camera_placeholder.png"]')).toBeInTheDocument();
 
-      await waitFor(() => {
-        expect(screen.getByText('Status details')).toBeInTheDocument();
-      });
-
-      const backdrop = container.querySelector('.fixed.inset-0.z-40');
-      expect(backdrop).toBeInTheDocument();
-
-      fireEvent.click(backdrop!);
+      fireEvent.load(camera);
 
       await waitFor(() => {
-        expect(screen.queryByText('Status details')).not.toBeInTheDocument();
+        expect(camera).toHaveClass('opacity-100');
       });
+      expect(placeholder).toBeInTheDocument();
+    });
 
-      expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
+    it('releases the active camera when switching machines or leaving cockpit view', async () => {
+      const stoppedPrinterIds: string[] = [];
+      server.use(
+        http.post('/api/v1/printers/:id/camera/stop', ({ params }) => {
+          stoppedPrinterIds.push(String(params.id));
+          return HttpResponse.json({ success: true });
+        }),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+      await screen.findByAltText('X1 Carbon camera');
+
+      fireEvent.click(screen.getByTitle('P1S Backup'));
+      await screen.findByAltText('P1S Backup camera');
+      await waitFor(() => expect(stoppedPrinterIds).toContain('1'));
+
+      fireEvent.click(screen.getByRole('button', { name: 'Detail cards' }));
+      await waitFor(() => expect(stoppedPrinterIds).toContain('2'));
+    });
+
+    it('offers recent reprints from the print dialog instead of the cockpit card', async () => {
+      server.use(
+        http.get('/api/v1/print-log/', () => HttpResponse.json({
+          items: [{
+            id: 41,
+            archive_id: 17,
+            print_name: 'Sample Widget',
+            printer_name: 'X1 Carbon',
+            printer_id: 1,
+            status: 'completed',
+            started_at: '2026-06-30T09:00:00Z',
+            completed_at: '2026-06-30T10:00:00Z',
+            duration_seconds: 3600,
+            filament_type: 'PLA',
+            filament_color: 'FFFFFFFF',
+            filament_used_grams: 12,
+            cost: 0.3,
+            energy_kwh: 0.1,
+            energy_cost: 0.02,
+            failure_reason: null,
+            thumbnail_path: null,
+            created_by_id: null,
+            created_by_username: null,
+            created_at: '2026-06-30T09:00:00Z',
+          }],
+          total: 1,
+        })),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+      await screen.findByText('Top filament: PLA');
+
+      expect(screen.queryByText('Quick reprint')).not.toBeInTheDocument();
+      fireEvent.click(await screen.findByRole('button', { name: 'Start print' }));
+
+      expect(await screen.findByText('Quick reprint')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Sample Widget/ })).toBeInTheDocument();
+    });
+
+    it('provides AMS filament backup and skip objects controls in the single-printer cockpit', async () => {
+      server.use(
+        http.get('/api/v1/printers/:id/status', () => {
+          return HttpResponse.json({
+            ...mockPrinterStatus,
+            state: 'RUNNING',
+            current_print: 'multi-object.3mf',
+            printable_objects_count: 2,
+            ams_filament_backup: false,
+            ams: [{
+              id: 0,
+              humidity: 35,
+              temp: 25,
+              tray: [{ id: 0, tray_type: 'PLA', tray_color: 'FF0000FF', remain: 80 }],
+            }],
+          });
+        }),
+        http.get('/api/v1/printers/:id/print/objects', () => {
+          return HttpResponse.json({
+            objects: [
+              { id: 1, name: 'Part 1', x: 10, y: 10, skipped: false },
+              { id: 2, name: 'Part 2', x: 20, y: 20, skipped: false },
+            ],
+            total: 2,
+            skipped_count: 0,
+            is_printing: true,
+            bbox_all: [0, 0, 30, 30],
+          });
+        }),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+
+      const statusPane = await screen.findByTestId('cockpit-status-pane');
+      expect(screen.getByTestId('printers-page')).toHaveClass('flex', 'h-[calc(100dvh-3.5rem)]');
+      expect(screen.getByTestId('cockpit-layout')).toHaveClass('flex-1', 'min-h-0');
+      expect(statusPane).toHaveClass('overflow-y-auto');
+      expect(statusPane).not.toHaveClass('z-20');
+      expect(within(statusPane).getByText('Jog')).toBeInTheDocument();
+      expect(within(statusPane).getByText('Statistics')).toBeInTheDocument();
+      expect(within(statusPane).getByText('Success Rate')).toBeInTheDocument();
+
+      expect(await screen.findByTestId('cockpit-filament-pane')).toHaveClass('min-h-0');
+      expect(screen.getByTestId('cockpit-filament-scroll')).toHaveClass('overflow-auto');
+
+      fireEvent.click(await screen.findByRole('button', { name: /AMS Filament Backup is OFF/ }));
+      expect((await screen.findAllByText('AMS Filament Backup')).length).toBeGreaterThan(0);
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+      const skipObjectsButton = screen.getByRole('button', { name: 'Skip Objects' });
+      expect(skipObjectsButton).toBeEnabled();
+      fireEvent.click(skipObjectsButton);
+      expect((await screen.findAllByText('Skip Objects')).length).toBeGreaterThan(1);
+    });
+
+    it('restores the homing warning before single-printer Z movement', async () => {
+      sessionStorage.clear();
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Move plate up' }));
+
+      expect(await screen.findByText('Printer is not homed')).toBeInTheDocument();
+      expect(screen.getAllByRole('button', { name: 'Auto Home' }).length).toBeGreaterThan(1);
+      expect(screen.getByRole('button', { name: 'Move anyway' })).toBeInTheDocument();
+    });
+
+    it('uses configured presets and enables chamber heat control in the cockpit', async () => {
+      server.use(
+        http.get('/api/v1/settings/ui-preferences', () => {
+          return HttpResponse.json({
+            ams_humidity_good: 40,
+            ams_humidity_fair: 60,
+            ams_temp_good: 30,
+            ams_temp_fair: 35,
+            require_plate_clear: true,
+            nozzle_temp_presets: '[131,221,271]',
+            bed_temp_presets: '[51,71,91]',
+            chamber_temp_presets: '[31,41,51]',
+            fan_speed_presets: '[33,66,99]',
+          });
+        }),
+        http.get('/api/v1/printers/:id/status', () => {
+          return HttpResponse.json({
+            ...mockPrinterStatus,
+            supports_chamber_heater: true,
+          });
+        }),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+
+      const nozzleTile = screen.getByText('Nozzle').closest('button');
+      expect(nozzleTile).not.toBeNull();
+      fireEvent.click(nozzleTile!);
+      expect(await screen.findByRole('button', { name: '131 C' })).toBeInTheDocument();
+      const nozzlePopover = screen.getByText('Set Nozzle Temperature').parentElement;
+      fireEvent.click(nozzlePopover?.previousElementSibling as Element);
+
+      const chamberTile = screen.getByText('Chamber').closest('button');
+      expect(chamberTile).not.toBeNull();
+      expect(chamberTile).toBeEnabled();
+      fireEvent.click(chamberTile!);
+      expect(await screen.findByRole('button', { name: '41 C' })).toBeInTheDocument();
+      const chamberPopover = screen.getByText('Set Chamber Temperature').parentElement;
+      fireEvent.click(chamberPopover?.previousElementSibling as Element);
+
+      fireEvent.click(screen.getByTitle('Part Cooling Fan: 0%'));
+      expect(await screen.findByRole('button', { name: '33 %' })).toBeInTheDocument();
     });
 
     it('hides green plate clear status and action while idle', async () => {
@@ -369,7 +772,9 @@ describe('PrintersPage', () => {
     it('hides green plate in use status while printing and hides the clear action', async () => {
       server.use(
         http.get('/api/v1/printers/:id/status', () => {
-          return HttpResponse.json({ ...mockPrinterStatus, state: 'RUNNING', awaiting_plate_clear: false });
+          // The backend can briefly retain this flag while a new print is active.
+          // A stale warning must not surface as a green "Plate in Use" pill.
+          return HttpResponse.json({ ...mockPrinterStatus, state: 'RUNNING', awaiting_plate_clear: true });
         })
       );
 
@@ -437,6 +842,89 @@ describe('PrintersPage', () => {
       // Disabled printers have visual indication
       const disabledPrinter = screen.getByText('P1S Backup').closest('div');
       expect(disabledPrinter).toBeInTheDocument();
+    });
+  });
+
+  describe('maintenance mode (#1476)', () => {
+    // Wraps the backend is_active flag — already gates MQTT, queue dispatch,
+    // scheduler, metrics, picker. These tests pin the UI surface: status
+    // panel swap, pill swap, and the PATCH on toggle.
+    const inMaintenancePrinter = { ...mockPrinters[0], is_active: false };
+
+    it('shows the maintenance status panel instead of the print container', async () => {
+      server.use(
+        http.get('/api/v1/printers/', () => HttpResponse.json([inMaintenancePrinter])),
+        http.get('/api/v1/printers/:id/status', () =>
+          HttpResponse.json({ ...mockPrinterStatus, connected: false }),
+        ),
+      );
+      render(<PrintersPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('In Maintenance')).toBeInTheDocument();
+      });
+      // Exit button rendered
+      expect(screen.getByRole('button', { name: /exit maintenance/i })).toBeInTheDocument();
+      // The "No active job" / "Ready to print" copy from the normal status
+      // panel must NOT be present — confirms the swap, not a stacked render.
+      expect(screen.queryByText(/no active job/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/ready to print/i)).not.toBeInTheDocument();
+    });
+
+    it('shows the amber Maintenance pill in the header (no Connected/Offline)', async () => {
+      server.use(
+        http.get('/api/v1/printers/', () => HttpResponse.json([inMaintenancePrinter])),
+        http.get('/api/v1/printers/:id/status', () =>
+          HttpResponse.json({ ...mockPrinterStatus, connected: false }),
+        ),
+      );
+      render(<PrintersPage />);
+
+      // The header pill row contains "Maintenance" exactly once.
+      await waitFor(() => {
+        expect(screen.getAllByText('Maintenance').length).toBeGreaterThan(0);
+      });
+      // No connection diagnostic CTA (that's reserved for involuntary offline).
+      expect(screen.queryByRole('button', { name: /run.*diagnostic/i })).not.toBeInTheDocument();
+    });
+
+    it('PATCHes is_active=true when the Exit button is clicked', async () => {
+      const patchedBodies: unknown[] = [];
+      server.use(
+        http.get('/api/v1/printers/', () => HttpResponse.json([inMaintenancePrinter])),
+        http.get('/api/v1/printers/:id/status', () =>
+          HttpResponse.json({ ...mockPrinterStatus, connected: false }),
+        ),
+        http.patch('/api/v1/printers/:id', async ({ request }) => {
+          const body = await request.json();
+          patchedBodies.push(body);
+          return HttpResponse.json({ ...inMaintenancePrinter, is_active: true });
+        }),
+      );
+      render(<PrintersPage />);
+
+      const exit = await screen.findByRole('button', { name: /exit maintenance/i });
+      fireEvent.click(exit);
+
+      await waitFor(() => {
+        expect(patchedBodies.length).toBeGreaterThan(0);
+      });
+      expect(patchedBodies[0]).toEqual(expect.objectContaining({ is_active: true }));
+    });
+
+    it('renders the regular status panel when is_active=true', async () => {
+      server.use(
+        http.get('/api/v1/printers/', () => HttpResponse.json([{ ...mockPrinters[0], is_active: true }])),
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json(mockPrinterStatus)),
+      );
+      render(<PrintersPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
+      });
+      // Active printer never shows the maintenance panel.
+      expect(screen.queryByText('In Maintenance')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /exit maintenance/i })).not.toBeInTheDocument();
     });
   });
 
@@ -1035,6 +1523,8 @@ describe('PrintersPage Phase 13 — EmptySlotHoverCard onAssignSpool wiring', ()
   beforeEach(() => {
     phase13EmptySlotProps.length = 0;
     localStorage.removeItem('printerCardSize');
+    localStorage.removeItem('printerViewMode');
+    localStorage.removeItem('singlePrinterViewId');
 
     server.use(
       http.get('/api/v1/printers/', () => HttpResponse.json(mockPrinters)),
@@ -1146,6 +1636,8 @@ describe('PrintersPage Phase 14 — Local-Branch BL-detection symmetry', () => {
   beforeEach(() => {
     phase14HoverCardProps.length = 0;
     localStorage.removeItem('printerCardSize');
+    localStorage.removeItem('printerViewMode');
+    localStorage.removeItem('singlePrinterViewId');
 
     server.use(
       http.get('/api/v1/printers/', () => HttpResponse.json(mockPrinters)),

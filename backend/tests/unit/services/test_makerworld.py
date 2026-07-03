@@ -104,7 +104,7 @@ class TestGetDesign:
         assert url == "https://api.bambulab.com/v1/design-service/design/1"
 
     @pytest.mark.asyncio
-    async def test_sends_honest_bambuddy_user_agent(self, service):
+    async def test_sends_honest_grove_control_user_agent(self, service):
         """The client identifies honestly as Grove Control, not as Firefox.
 
         Earlier iterations of this code stripped ``x-bbl-*`` Bambu-app

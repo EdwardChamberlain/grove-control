@@ -5,12 +5,24 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings
 
-# Application version - single source of truth
-APP_VERSION = "0.2.4.7"
-GITHUB_REPO = "maziggy/bambuddy"
-
 # App directory - where the application is installed (for static files)
 _app_dir = Path(__file__).resolve().parent.parent.parent.parent
+
+
+def _read_app_version() -> str:
+    version_file = _app_dir / "VERSION"
+    try:
+        version = version_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        logging.warning("Could not read VERSION file at %s; using unknown version", version_file)
+        return "0.0.0+unknown"
+    return version or "0.0.0+unknown"
+
+
+# Application version - read from the repository root VERSION file.
+APP_VERSION = _read_app_version()
+GITHUB_REPO = "EdwardChamberlain/grove-control"
+GITHUB_BRANCH = "main"
 
 # Data directory - for persistent data (database, archives)
 # Use DATA_DIR env var if set (Docker), otherwise use project root (local dev)

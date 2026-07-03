@@ -1,8 +1,8 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, AlertTriangle, Loader2, Pencil, Printer, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { PrintQueueItemCreate, PrintQueueItemUpdate, SpoolAssignment } from '../../api/client';
+import type { PrinterStatus, PrintQueueItemCreate, PrintQueueItemUpdate, SpoolAssignment } from '../../api/client';
 import { api } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { Card, CardContent } from '../Card';
@@ -15,7 +15,7 @@ import { getColorName } from '../../utils/colors';
 import { getCurrencySymbol } from '../../utils/currency';
 import { getBedTypeInfo } from '../../utils/bedType';
 import { toDateTimeLocalValue, parseUTCDate } from '../../utils/date';
-import { getGlobalTrayId, isPlaceholderDate } from '../../utils/amsHelpers';
+import { getGlobalTrayId, isPlaceholderDate, effectivePreferLowest } from '../../utils/amsHelpers';
 import { FilamentMapping } from './FilamentMapping';
 import { FilamentOverride } from './FilamentOverride';
 import { PlateSelector } from './PlateSelector';
@@ -32,10 +32,9 @@ import type {
 import { DEFAULT_PRINT_OPTIONS, DEFAULT_SCHEDULE_OPTIONS } from './types';
 
 /**
- * Unified PrintModal component that handles three modes:
- * - 'reprint': Legacy alias for creating a print queue item
- * - 'add-to-queue': Legacy alias for creating a print queue item
- * - 'edit-queue-item': Edit existing queue item (supports multi-printer)
+ * Unified PrintModal component that handles queue item creation and editing.
+ * - 'create': Create a print queue item from an archive or library file
+ * - 'edit-queue-item': Edit existing queue item
  *
  * Both archiveId and libraryFileId are supported. Library files are archived at
  * print start time by the scheduler, not when queued.
@@ -80,7 +79,7 @@ export function PrintModal({
     return [];
   });
 
-  // Multi-select plates: in add-to-queue mode users can pick a subset of plates
+  // Multi-select plates: create mode users can pick a subset of plates
   const [selectedPlates, setSelectedPlates] = useState<Set<number>>(() => {
     if (mode === 'edit-queue-item' && queueItem?.plate_id != null) {
       return new Set([queueItem.plate_id]);
@@ -270,6 +269,34 @@ export function PrintModal({
     enabled: !isEditing && assignmentMode === 'printer',
   });
 
+  // Fetch per-printer Map<globalTrayId, gramsRemaining> via the dedicated
+  // backend endpoint (#1766). Server-side mirrors `_build_inventory_remain_overrides`
+  // so internal and Spoolman modes both work uniformly, VT/external slots are
+  // excluded, and negative grams are clamped — single source of truth between
+  // the client-side preview and dispatch-time picks.
+  const inventoryRemainQueries = useQueries({
+    queries: selectedPrinters.map((printerId) => ({
+      queryKey: ['printer-inventory-remain', printerId],
+      queryFn: () => api.getInventoryRemain(printerId),
+      staleTime: 30 * 1000,
+      enabled: selectedPrinters.length > 0,
+    })),
+  });
+  const inventoryByTrayIdPerPrinter = useMemo(() => {
+    const result = new Map<number, Map<number, number>>();
+    selectedPrinters.forEach((printerId, idx) => {
+      const data = inventoryRemainQueries[idx]?.data?.inventory_remain_g;
+      if (!data) return;
+      const printerMap = new Map<number, number>();
+      Object.entries(data).forEach(([key, grams]) => {
+        const gtid = Number(key);
+        if (!Number.isNaN(gtid)) printerMap.set(gtid, grams);
+      });
+      result.set(printerId, printerMap);
+    });
+    return result;
+  }, [selectedPrinters, inventoryRemainQueries]);
+
   // Fetch archive details to get sliced_for_model
   const { data: archiveDetails } = useQuery({
     queryKey: ['archive', archiveId],
@@ -340,8 +367,49 @@ export function PrintModal({
     enabled: !!effectivePrinterId,
   });
 
+  // Single-printer flow: gate prefer_lowest on this printer's backup state.
+  // Multi-printer flow gates per-printer inside the hook (different printers
+  // may have different backup states), so we pass the raw setting down.
+  const singlePrinterPreferLowest = effectivePreferLowest(
+    settings?.prefer_lowest_filament,
+    printerStatus?.ams_filament_backup,
+  );
+
+  const isPrinterCurrentlyDispatchable = (status: PrinterStatus | undefined): boolean => {
+    if (!status?.connected) return false;
+    if (status.awaiting_plate_clear) return false;
+    if (status.ams?.some((ams) => ams.dry_time > 0)) return false;
+    return ['IDLE', 'FINISH', 'FAILED'].includes(status.state ?? '');
+  };
+
+  const asapToastShouldPromiseLaterStart = async (): Promise<boolean> => {
+    if (scheduleOptions.scheduleType !== 'asap' || assignmentMode !== 'printer') return false;
+    if (selectedPrinters.length === 0) return false;
+
+    try {
+      const statuses = await Promise.all(
+        selectedPrinters.map((printerId) =>
+          queryClient.fetchQuery({
+            queryKey: ['printer-status', printerId],
+            queryFn: () => api.getPrinterStatus(printerId),
+            staleTime: 0,
+          }),
+        ),
+      );
+      return statuses.some((status) => !isPrinterCurrentlyDispatchable(status));
+    } catch {
+      return true;
+    }
+  };
+
   // Get AMS mapping from hook (only when single printer selected)
-  const { amsMapping } = useFilamentMapping(effectiveFilamentReqs, printerStatus, manualMappings, settings?.prefer_lowest_filament);
+  const { amsMapping } = useFilamentMapping(
+    effectiveFilamentReqs,
+    printerStatus,
+    manualMappings,
+    singlePrinterPreferLowest,
+    effectivePrinterId ? inventoryByTrayIdPerPrinter.get(effectivePrinterId) : undefined,
+  );
 
   // Multi-printer filament mapping (for per-printer configuration)
   const multiPrinterMapping = useMultiPrinterFilamentMapping(
@@ -352,6 +420,7 @@ export function PrintModal({
     perPrinterConfigs,
     setPerPrinterConfigs,
     settings?.prefer_lowest_filament,
+    inventoryByTrayIdPerPrinter,
   );
 
   // Auto-select first plate when plates load (single or multi-plate)
@@ -632,6 +701,31 @@ export function PrintModal({
 
     const filamentOverridesArray = buildFilamentOverridesArray();
 
+    // Multi-plate auto-batch: when the user adds 2+ plates from one source in
+    // a single create submission, pre-create a PrintBatch and pass its
+    // id to each subsequent addToQueue call so the queue UI groups them as a
+    // collapsible batch. Only triggered for single-target submissions —
+    // multi-printer fan-out keeps the old per-item shape.
+    const shouldAutoBatch =
+      mode === 'create'
+      && platesToQueue.length > 1
+      && (assignmentMode === 'model' || selectedPrinters.length === 1);
+    let autoBatchId: number | null = null;
+    if (shouldAutoBatch) {
+      try {
+        const baseName = (archiveName || '').replace(/\.gcode\.3mf$/i, '').replace(/\.3mf$/i, '');
+        const batchName = `${baseName || 'Batch'} · ${platesToQueue.length} plates`;
+        const batch = await api.createBatch({
+          name: batchName,
+          archive_id: isLibraryFile ? undefined : archiveId,
+          library_file_id: isLibraryFile ? libraryFileId : undefined,
+        });
+        autoBatchId = batch.id;
+      } catch {
+        // Non-fatal: fall back to ungrouped items so the queue still works.
+        autoBatchId = null;
+      }
+    }
     const asapInsertionCounts = new Map<string, number>();
 
     const applyAsapInsertion = (
@@ -647,7 +741,7 @@ export function PrintModal({
       asapInsertionCounts.set(scopeKey, insertPosition + itemCount - 1);
     };
 
-    // Common queue data for add-to-queue and edit modes
+    // Common queue data for create and edit modes
     const getQueueData = (printerId: number | null, plateOverride?: number | null): PrintQueueItemCreate => ({
       printer_id: assignmentMode === 'printer' ? printerId : null,
       target_model: assignmentMode === 'model' ? targetModel : null,
@@ -671,6 +765,7 @@ export function PrintModal({
         : undefined,
       ...printOptions,
       project_id: projectId ?? undefined,
+      batch_id: autoBatchId ?? undefined,
       cleanup_library_after_dispatch: cleanupLibraryAfterDispatch,
     });
 
@@ -795,9 +890,21 @@ export function PrintModal({
           showToast('Queue item updated');
         }
       } else if (results.success === 1) {
-        showToast(assignmentMode === 'model' ? `Queued for any ${targetModel}` : t('queue.printQueued'));
+        const waitForIdleToast = await asapToastShouldPromiseLaterStart();
+        showToast(
+          waitForIdleToast
+            ? t('queue.printQueuedWillStartWhenIdle')
+            : assignmentMode === 'model'
+              ? `Queued for any ${targetModel}`
+              : t('queue.printQueued'),
+        );
       } else {
-        showToast(t('queue.itemsQueued', { count: results.success }));
+        const waitForIdleToast = await asapToastShouldPromiseLaterStart();
+        showToast(
+          waitForIdleToast
+            ? t('queue.printQueuedWillStartWhenIdle')
+            : t('queue.itemsQueued', { count: results.success }),
+        );
       }
       queryClient.invalidateQueries({ queryKey: ['queue'] });
       onSuccess?.();
@@ -827,6 +934,20 @@ export function PrintModal({
 
   // Quantity only applies for single-printer or model-based assignment (not multi-printer)
   const effectiveQuantity = (assignmentMode === 'printer' && selectedPrinters.length > 1) ? 1 : quantity;
+
+  // Keep scheduleOptions.gcodeInjection in sync with the checkbox's render
+  // condition. The checkbox only renders for create + snippets configured +
+  // quantity > 1, so if the user ticks it at quantity 2 then drops back to 1
+  // the box hides but the state stays true.
+  useEffect(() => {
+    if (
+      mode === 'create' &&
+      scheduleOptions.gcodeInjection &&
+      (effectiveQuantity <= 1 || !settings?.gcode_snippets)
+    ) {
+      setScheduleOptions((opts) => ({ ...opts, gcodeInjection: false }));
+    }
+  }, [mode, effectiveQuantity, settings?.gcode_snippets, scheduleOptions.gcodeInjection]);
 
   // Modal title and action button text based on mode
   const getModalConfig = () => {
@@ -1040,7 +1161,7 @@ export function PrintModal({
             )}
 
             {/* Print options */}
-            {(mode === 'reprint' || effectivePrinterCount > 0 || (assignmentMode === 'model' && targetModel)) && (
+            {(mode === 'create' || effectivePrinterCount > 0 || (assignmentMode === 'model' && targetModel)) && (
               <PrintOptionsPanel
                 options={printOptions}
                 onChange={setPrintOptions}

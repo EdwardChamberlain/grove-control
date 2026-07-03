@@ -1,4 +1,4 @@
-import { useState, useRef, type DragEvent } from 'react';
+import { useState, useRef, useEffect, type DragEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Upload,
@@ -36,9 +36,13 @@ interface FileUploadModalProps {
   validateFile?: (file: File) => string | undefined;
   /** Restrict file picker to specific file types (e.g. ".gcode,.gcode.3mf") */
   accept?: string;
+  /** Pre-seed the modal with files (e.g. from a page-wide drop) on first mount. */
+  initialFiles?: File[];
+  /** Optional actions shown above the drop zone. */
+  beforeDropZone?: ReactNode;
 }
 
-export function FileUploadModal({ folderId, onClose, onUploadComplete, onFileUploaded, autoUpload, validateFile, accept }: FileUploadModalProps) {
+export function FileUploadModal({ folderId, onClose, onUploadComplete, onFileUploaded, autoUpload, validateFile, accept, initialFiles, beforeDropZone }: FileUploadModalProps) {
   const { t } = useTranslation();
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -153,6 +157,18 @@ export function FileUploadModal({ folderId, onClose, onUploadComplete, onFileUpl
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
+  // Seed once on mount when the parent passed initialFiles (page-wide drop).
+  // The ref/list shape means a subsequent re-render with the same files won't
+  // double-add — only the first non-empty initialFiles arg ever flows through.
+  const seededInitialRef = useRef(false);
+  useEffect(() => {
+    if (seededInitialRef.current) return;
+    if (!initialFiles || initialFiles.length === 0) return;
+    seededInitialRef.current = true;
+    addFiles(initialFiles);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const hasZipFiles = files.some((f) => f.isZip && f.status === 'pending');
   const hasStlFiles = files.some((f) => f.file.name.toLowerCase().endsWith('.stl') && f.status === 'pending');
   const has3mfFiles = files.some((f) => f.is3mf && f.status === 'pending');
@@ -161,7 +177,7 @@ export function FileUploadModal({ folderId, onClose, onUploadComplete, onFileUpl
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-      <div className="bg-bambu-dark-secondary rounded-lg w-full max-w-lg border border-bambu-dark-tertiary">
+      <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-lg flex-col rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary">
         <div className="p-4 border-b border-bambu-dark-tertiary flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">{t('fileManager.uploadFiles')}</h2>
           <button onClick={onClose} className="p-1 hover:bg-bambu-dark rounded">
@@ -169,7 +185,9 @@ export function FileUploadModal({ folderId, onClose, onUploadComplete, onFileUpl
           </button>
         </div>
 
-        <div className="p-4 space-y-4">
+        <div className="min-h-0 space-y-4 overflow-y-auto p-4">
+          {beforeDropZone}
+
           {/* Drop Zone */}
           <div
             onDragOver={handleDragOver}

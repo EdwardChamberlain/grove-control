@@ -71,7 +71,7 @@ const mockSystemInfo = {
     platform_release: '5.15.0',
     platform_version: '#1 SMP',
     architecture: 'x86_64',
-    hostname: 'bambuddy-server',
+    hostname: 'grove-control-server',
     python_version: '3.11.0',
     uptime_seconds: 86400,
     uptime_formatted: '1d',
@@ -133,7 +133,7 @@ describe('SystemInfoPage', () => {
     });
 
     expect(screen.getByText('v0.1.5b')).toBeInTheDocument();
-    expect(screen.getByText('bambuddy-server')).toBeInTheDocument();
+    expect(screen.getByText('grove-control-server')).toBeInTheDocument();
     expect(screen.getByText('1d')).toBeInTheDocument();
   });
 

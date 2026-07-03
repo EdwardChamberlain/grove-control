@@ -38,29 +38,28 @@ This keeps everyone on the same page, avoids wasted effort on changes that may n
 
 ## Documentation Requirements
 
-Features and user-visible behavior changes **must** include matching documentation updates in the docs repos:
+Features and user-visible behavior changes **must** include matching documentation updates in the docs repo:
 
-- **[bambuddy-wiki](https://github.com/maziggy/bambuddy-wiki)** — end-user guide (installation, configuration, feature walkthroughs, reference)
-- **[bambuddy-website](https://github.com/maziggy/bambuddy-website)** — marketing site (updated only when the change affects public claims or feature lists)
+- **Documentation** — end-user guide (installation, configuration, feature walkthroughs, reference)
 
 ### When docs updates are required
 
-| Change | Needs wiki? | Needs website? |
-|---|---|---|
-| New feature | ✅ | Maybe (if in the feature list) |
-| New config key / setting | ✅ | ❌ |
-| New port, URL, API endpoint | ✅ | ❌ |
-| Installation or upgrade steps change | ✅ | ✅ |
-| UI change that affects screenshots | ✅ | ❌ |
-| Bug fix with no observable behavior change | ❌ | ❌ |
-| Internal refactor | ❌ | ❌ |
-| Test-only change | ❌ | ❌ |
+| Change | Needs docs? |
+|---|---|
+| New feature | ✅ |
+| New config key / setting | ✅ |
+| New port, URL, API endpoint | ✅ |
+| Installation or upgrade steps change | ✅ |
+| UI change that affects screenshots | ✅ |
+| Bug fix with no observable behavior change | ❌ |
+| Internal refactor | ❌ |
+| Test-only change | ❌ |
 
 ### Workflow
 
-1. Open your code PR here in `bambuddy`
-2. Open companion PR(s) in `bambuddy-wiki` and/or `bambuddy-website`
-3. **Link the companion PR(s) in the code PR description** (the PR template has a dedicated section)
+1. Open your code PR here in `grove-control`
+2. Open any matching docs PR
+3. **Link the companion PR in the code PR description** (the PR template has a dedicated section)
 4. Merge the PRs together — usually code first, then docs, unless the docs reference new things that don't exist yet
 
 If your change truly doesn't need docs (internal refactor, silent bug fix), say so in the PR description and give a one-line reason.
@@ -69,14 +68,13 @@ If your change truly doesn't need docs (internal refactor, silent bug fix), say 
 
 Clone the docs repo and run it locally to see your changes rendered with the real theme before opening the PR:
 
-- **Wiki** (`bambuddy-wiki`) — `pip install -r requirements.txt && mkdocs serve` — live-reload on `http://localhost:8000`
-- **Website** (`bambuddy-website`) — static HTML/CSS, open the changed file directly or serve with `python -m http.server`
+- **Docs** — `pip install -r requirements.txt && mkdocs serve` — live-reload on `http://localhost:8000`
 
 Review like you would the production site. Catch broken links, layout regressions, typos, missing images. If it looks right, open the PR.
 
 ### Editing docs without a local clone
 
-Both docs repos can be edited directly in the browser, no `git clone` required:
+The docs repo can be edited directly in the browser, no `git clone` required:
 
 - **GitHub web editor** — click the pencil icon on any file in the repo
 - **github.dev** — press `.` (period) on any repo page to open VS Code in your browser, with multi-file editing and syntax highlighting
@@ -86,12 +84,12 @@ Both docs repos can be edited directly in the browser, no `git clone` required:
 1. **Fork the repository** on GitHub
 2. **Clone your fork** locally:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/bambuddy.git
-   cd bambuddy
+   git clone https://github.com/YOUR_USERNAME/grove-control.git
+   cd grove-control
    ```
 3. **Add the upstream remote**:
    ```bash
-   git remote add upstream https://github.com/maziggy/bambuddy.git
+   git remote add upstream https://github.com/EdwardChamberlain/grove-control.git
    ```
 
 ## Development Setup
@@ -295,7 +293,11 @@ Permissions follow the `resource:action` pattern (e.g., `filaments:read`, `print
 | `update` | Modify existing resources |
 | `delete` | Remove resources |
 
-Some resources have additional actions (e.g., `printers:control` for start/stop, `printers:files` for file transfer).
+Some resources have additional actions. Examples: `printers:control` for live printer controls
+such as stop/pause/resume, `printers:files` for printer storage access, `queue:create` for
+creating queue items that may dispatch immediately when scheduled ASAP, `library:upload` for
+File Manager uploads/imports, and `archives:reprint_own` / `archives:reprint_all` for archive
+reprint eligibility. Archive reprint still needs `queue:create` before it can enqueue a job.
 
 ### Adding New Permissions
 
@@ -386,7 +388,7 @@ All checks must pass before merging. Run `./test_all.sh` locally before pushing 
 
 ## Reporting Bugs
 
-Use the [Bug Report template](https://github.com/maziggy/bambuddy/issues/new?template=bug_report.yml) and include:
+Use the [Bug Report template](https://github.com/EdwardChamberlain/grove-control/issues/new?template=bug_report.yml) and include:
 
 - Clear description of the bug
 - Steps to reproduce
@@ -397,7 +399,7 @@ Use the [Bug Report template](https://github.com/maziggy/bambuddy/issues/new?tem
 
 ## Requesting Features
 
-Use the [Feature Request template](https://github.com/maziggy/bambuddy/issues/new?template=feature_request.yml) and include:
+Use the [Feature Request template](https://github.com/EdwardChamberlain/grove-control/issues/new?template=feature_request.yml) and include:
 
 - Clear description of the feature
 - Use case / problem it solves
@@ -406,9 +408,8 @@ Use the [Feature Request template](https://github.com/maziggy/bambuddy/issues/ne
 
 ## Questions?
 
-- Check the [Documentation](http://wiki.bambuddy.cool)
-- Open a [Discussion](https://github.com/maziggy/bambuddy/discussions)
-- Review existing [Issues](https://github.com/maziggy/bambuddy/issues)
+- Open a [Discussion](https://github.com/EdwardChamberlain/grove-control/discussions)
+- Review existing [Issues](https://github.com/EdwardChamberlain/grove-control/issues)
 
 ---
 

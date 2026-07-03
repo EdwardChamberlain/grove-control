@@ -265,8 +265,8 @@ def create_diagram():
     internet_x = 510
 
     # Grove Control section (center-right)
-    bambuddy_x = 700
-    bambuddy_box = [560, 140, 840, 500]
+    grove_control_x = 700
+    grove_control_box = [560, 140, 840, 500]
 
     # Local section (right)
     local_x = 1050
@@ -290,25 +290,25 @@ def create_diagram():
     draw_cloud_icon(draw, internet_x, section_y, 80, INTERNET_COLOR)
     draw.text((internet_x, section_y + 55), "Internet", font=fonts['label'], fill=TEXT_LABEL, anchor="mm")
 
-    # === BAMBUDDY SERVER ===
-    draw_rounded_rect(draw, bambuddy_box, 12, fill=CONTAINER_BG, outline=BAMBU_GREEN_DIM, width=2)
-    draw.text((bambuddy_x, 165), "BAMBUDDY SERVER", font=fonts['label'], fill=BAMBU_GREEN, anchor="mm")
+    # === GROVE CONTROL SERVER ===
+    draw_rounded_rect(draw, grove_control_box, 12, fill=CONTAINER_BG, outline=BAMBU_GREEN_DIM, width=2)
+    draw.text((grove_control_x, 165), "GROVE CONTROL SERVER", font=fonts['label'], fill=BAMBU_GREEN, anchor="mm")
 
     # Server icon
-    draw_server_icon(draw, bambuddy_x, section_y - 50, 70, BAMBU_GREEN)
-    draw.text((bambuddy_x, section_y + 20), "TLS Proxy", font=fonts['heading'], fill=TEXT_PRIMARY, anchor="mm")
+    draw_server_icon(draw, grove_control_x, section_y - 50, 70, BAMBU_GREEN)
+    draw.text((grove_control_x, section_y + 20), "TLS Proxy", font=fonts['heading'], fill=TEXT_PRIMARY, anchor="mm")
 
     # Incoming ports (left side of Grove Control)
-    draw.text((bambuddy_x, section_y + 70), "LISTEN PORTS", font=fonts['small'], fill=TEXT_LABEL, anchor="mm")
-    draw_rounded_rect(draw, [bambuddy_x - 55, section_y + 85, bambuddy_x + 55, section_y + 130],
+    draw.text((grove_control_x, section_y + 70), "LISTEN PORTS", font=fonts['small'], fill=TEXT_LABEL, anchor="mm")
+    draw_rounded_rect(draw, [grove_control_x - 55, section_y + 85, grove_control_x + 55, section_y + 130],
                       6, fill=(35, 35, 45), outline=CONTAINER_BORDER, width=1)
-    draw.text((bambuddy_x, section_y + 98), "FTP", font=fonts['small'], fill=TEXT_SECONDARY, anchor="mm")
-    draw.text((bambuddy_x, section_y + 115), "990", font=fonts['port'], fill=BAMBU_GREEN, anchor="mm")
+    draw.text((grove_control_x, section_y + 98), "FTP", font=fonts['small'], fill=TEXT_SECONDARY, anchor="mm")
+    draw.text((grove_control_x, section_y + 115), "990", font=fonts['port'], fill=BAMBU_GREEN, anchor="mm")
 
-    draw_rounded_rect(draw, [bambuddy_x - 55, section_y + 140, bambuddy_x + 55, section_y + 185],
+    draw_rounded_rect(draw, [grove_control_x - 55, section_y + 140, grove_control_x + 55, section_y + 185],
                       6, fill=(35, 35, 45), outline=CONTAINER_BORDER, width=1)
-    draw.text((bambuddy_x, section_y + 153), "MQTT", font=fonts['small'], fill=TEXT_SECONDARY, anchor="mm")
-    draw.text((bambuddy_x, section_y + 170), "8883", font=fonts['port'], fill=BAMBU_GREEN, anchor="mm")
+    draw.text((grove_control_x, section_y + 153), "MQTT", font=fonts['small'], fill=TEXT_SECONDARY, anchor="mm")
+    draw.text((grove_control_x, section_y + 170), "8883", font=fonts['port'], fill=BAMBU_GREEN, anchor="mm")
 
     # === LOCAL NETWORK ZONE ===
     draw_rounded_rect(draw, local_box, 12, fill=CONTAINER_BG, outline=CONTAINER_BORDER, width=1)
@@ -377,22 +377,23 @@ def create_diagram():
         draw.text((fx - 68, features_y), feature, font=fonts['small'], fill=TEXT_SECONDARY, anchor="lm")
 
     # Grove Control branding
-    draw.text((WIDTH // 2, HEIGHT - 30), "bambuddy.cool", font=fonts['small'], fill=TEXT_LABEL, anchor="mm")
+    draw.text((WIDTH // 2, HEIGHT - 30), "Grove Control", font=fonts['small'], fill=TEXT_LABEL, anchor="mm")
 
     return img
 
 def main():
     """Generate and save the diagram."""
     img = create_diagram()
+    repo_root = Path(__file__).resolve().parents[2]
 
-    output_path = Path("/opt/claude/projects/bambuddy/docs/images/proxy-mode-diagram.png")
+    output_path = repo_root / "docs/images/proxy-mode-diagram.png"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     img.save(output_path, "PNG", dpi=(150, 150))
     print(f"Diagram saved to: {output_path}")
 
     # Also save to frontend docs
-    frontend_path = Path("/opt/claude/projects/bambuddy/frontend/docs/proxy-mode-diagram.png")
+    frontend_path = repo_root / "frontend/docs/proxy-mode-diagram.png"
     frontend_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(frontend_path, "PNG", dpi=(150, 150))
     print(f"Also saved to: {frontend_path}")

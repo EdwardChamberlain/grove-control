@@ -21,6 +21,7 @@ from collections.abc import Callable
 import httpx
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.app.api.routes.library import _slicer_rejection_message
 from backend.app.core.config import settings as app_settings
@@ -85,6 +86,22 @@ async def _wait_for_job(client: AsyncClient, job_id: int, timeout: float = 5.0) 
             return body
         await asyncio.sleep(0.05)
     raise AssertionError(f"slice job {job_id} did not finish in {timeout}s")
+
+
+async def _get_committed_row(db_session, model, row_id: int):
+    """Read a row committed by a background job through a fresh session.
+
+    Fixture setup refreshes leave the assertion session in a read transaction.
+    SQLite may retain that snapshot under pytest-xdist, hiding rows committed by
+    the slice job's separate session even after the job reports completion.
+    """
+    await db_session.rollback()
+    assert db_session.bind is not None
+    session_factory = async_sessionmaker(db_session.bind, class_=AsyncSession, expire_on_commit=False)
+    async with session_factory() as read_session:
+        row = await read_session.get(model, row_id)
+        assert row is not None
+        return row
 
 
 # ---------------------------------------------------------------------------
@@ -729,7 +746,7 @@ class TestCrossClassSliceAllLoop:
 
         # The merged archive has plate_1..plate_3.gcode inside its one
         # output 3MF (single Grove Control archive, three plates).
-        new_archive = await db_session.get(PrintArchive, final["result"]["archive_id"])
+        new_archive = await _get_committed_row(db_session, PrintArchive, final["result"]["archive_id"])
         archive_path = tmp_path / new_archive.file_path
         with zipfile.ZipFile(archive_path, "r") as zf:
             entries = set(zf.namelist())
@@ -802,7 +819,7 @@ class TestSliceArchiveResliceModel:
         new_id = final["result"]["archive_id"]
         assert new_id != source_id
 
-        new_archive = await db_session.get(PrintArchive, new_id)
+        new_archive = await _get_committed_row(db_session, PrintArchive, new_id)
         # The fix: the re-sliced archive reflects H2D — the printer it was
         # sliced for — instead of inheriting X1C from the source archive.
         assert new_archive.sliced_for_model == "H2D"
@@ -866,7 +883,7 @@ class TestSliceArchiveResliceModel:
         final = await _wait_for_job(async_client, resp.json()["job_id"])
         assert final["status"] == "completed", final
 
-        new_archive = await db_session.get(PrintArchive, final["result"]["archive_id"])
+        new_archive = await _get_committed_row(db_session, PrintArchive, final["result"]["archive_id"])
         assert new_archive.sliced_for_model == "H2D"
         # Card / reprint modal will now fall back to the sliced_for_model
         # badge instead of showing the source printer's name.
@@ -901,6 +918,7 @@ class TestSliceArchiveResliceModel:
             sliced_for_model="X1C",
             with_run=False,
         )
+        source_printer_id = source_printer.id
 
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(
@@ -927,10 +945,10 @@ class TestSliceArchiveResliceModel:
         final = await _wait_for_job(async_client, resp.json()["job_id"])
         assert final["status"] == "completed", final
 
-        new_archive = await db_session.get(PrintArchive, final["result"]["archive_id"])
+        new_archive = await _get_committed_row(db_session, PrintArchive, final["result"]["archive_id"])
         assert new_archive.sliced_for_model == "X1C"
         # Same-model: keep the source's printer assignment so reprint pre-selects it.
-        assert new_archive.printer_id == source_printer.id
+        assert new_archive.printer_id == source_printer_id
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -959,6 +977,7 @@ class TestSliceArchiveResliceModel:
             sliced_for_model=None,
             with_run=False,
         )
+        source_printer_id = source_printer.id
 
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(
@@ -985,9 +1004,9 @@ class TestSliceArchiveResliceModel:
         final = await _wait_for_job(async_client, resp.json()["job_id"])
         assert final["status"] == "completed", final
 
-        new_archive = await db_session.get(PrintArchive, final["result"]["archive_id"])
+        new_archive = await _get_committed_row(db_session, PrintArchive, final["result"]["archive_id"])
         # Insufficient info to decide cross-model → preserve printer_id.
-        assert new_archive.printer_id == source_printer.id
+        assert new_archive.printer_id == source_printer_id
 
 
 class TestSliceArchiveReslicedThumbnail:
@@ -1064,7 +1083,7 @@ class TestSliceArchiveReslicedThumbnail:
         final = await _wait_for_job(async_client, resp.json()["job_id"])
         assert final["status"] == "completed", final
 
-        new = await db_session.get(PrintArchive, final["result"]["archive_id"])
+        new = await _get_committed_row(db_session, PrintArchive, final["result"]["archive_id"])
         assert new.thumbnail_path is not None
         thumb_full = tmp_path / new.thumbnail_path
         assert thumb_full.read_bytes() == source_plate_marker, (
@@ -1127,7 +1146,7 @@ class TestSliceArchiveReslicedThumbnail:
         final = await _wait_for_job(async_client, resp.json()["job_id"])
         assert final["status"] == "completed", final
 
-        new = await db_session.get(PrintArchive, final["result"]["archive_id"])
+        new = await _get_committed_row(db_session, PrintArchive, final["result"]["archive_id"])
         assert new.thumbnail_path is not None
         thumb_full = tmp_path / new.thumbnail_path
         assert thumb_full.read_bytes() == b"COVER_ART_FALLBACK"
@@ -1193,7 +1212,7 @@ class TestSliceArchiveReslicedBedType:
         final = await _wait_for_job(async_client, resp.json()["job_id"])
         assert final["status"] == "completed", final
 
-        new = await db_session.get(PrintArchive, final["result"]["archive_id"])
+        new = await _get_committed_row(db_session, PrintArchive, final["result"]["archive_id"])
         assert new.bed_type == "Textured PEI Plate"
 
     @pytest.mark.asyncio
@@ -1250,7 +1269,7 @@ class TestSliceArchiveReslicedBedType:
         final = await _wait_for_job(async_client, resp.json()["job_id"])
         assert final["status"] == "completed", final
 
-        new = await db_session.get(PrintArchive, final["result"]["archive_id"])
+        new = await _get_committed_row(db_session, PrintArchive, final["result"]["archive_id"])
         assert new.bed_type == "Cool Plate"
 
 

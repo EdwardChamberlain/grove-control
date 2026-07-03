@@ -2,13 +2,14 @@
  * Tests for the QueuePage component.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils';
 import { QueuePage } from '../../pages/QueuePage';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
+import { setAuthToken } from '../../api/client';
 
 // Mock queue data
 const mockQueueItems = [
@@ -143,6 +144,10 @@ describe('QueuePage', () => {
     );
   });
 
+  afterEach(() => {
+    setAuthToken(null);
+  });
+
   describe('rendering', () => {
     it('renders the page title', async () => {
       render(<QueuePage />);
@@ -198,7 +203,11 @@ describe('QueuePage', () => {
     });
 
     it('shows completed items in history', async () => {
+      const user = userEvent.setup();
       render(<QueuePage />);
+
+      // The History tab now owns the completed/cancelled/failed list.
+      await user.click(await screen.findByRole('button', { name: /^History/ }));
 
       await waitFor(() => {
         expect(screen.getByText('Completed Print')).toBeInTheDocument();
@@ -329,7 +338,10 @@ describe('QueuePage', () => {
     });
 
     it('shows re-queue button for history items', async () => {
+      const user = userEvent.setup();
       render(<QueuePage />);
+
+      await user.click(await screen.findByRole('button', { name: /^History/ }));
 
       await waitFor(() => {
         expect(screen.getByText('Completed Print')).toBeInTheDocument();
@@ -342,7 +354,11 @@ describe('QueuePage', () => {
 
   describe('clear history', () => {
     it('shows clear history button when history exists', async () => {
+      const user = userEvent.setup();
       render(<QueuePage />);
+
+      // Clear History only renders inside the History tab now.
+      await user.click(await screen.findByRole('button', { name: /^History/ }));
 
       await waitFor(() => {
         expect(screen.getByText('Clear History')).toBeInTheDocument();
@@ -352,6 +368,8 @@ describe('QueuePage', () => {
     it('opens confirm modal when clicking clear history', async () => {
       const user = userEvent.setup();
       render(<QueuePage />);
+
+      await user.click(await screen.findByRole('button', { name: /^History/ }));
 
       await waitFor(() => {
         expect(screen.getByText('Clear History')).toBeInTheDocument();
@@ -403,6 +421,68 @@ describe('QueuePage', () => {
       await waitFor(() => {
         expect(screen.getByTitle('Start Print')).toBeInTheDocument();
       });
+    });
+
+    it('allows an owner with queue update permission to start without printer control permission', async () => {
+      setAuthToken('queue-owner-token');
+      server.use(
+        http.get('*/api/v1/auth/status', () =>
+          HttpResponse.json({ auth_enabled: true, requires_setup: false }),
+        ),
+        http.get('*/api/v1/auth/me', () =>
+          HttpResponse.json({
+            id: 7,
+            username: 'queue-owner',
+            is_admin: false,
+            permissions: ['queue:update_own'],
+          }),
+        ),
+        http.get('/api/v1/queue/', () =>
+          HttpResponse.json([
+            {
+              ...mockQueueItems[0],
+              manual_start: true,
+              created_by_id: 7,
+            },
+          ]),
+        ),
+      );
+
+      render(<QueuePage />);
+
+      const startButton = await screen.findByTitle('Start Print');
+      expect(startButton).toBeEnabled();
+    });
+
+    it('does not allow printer control permission to bypass queue ownership', async () => {
+      setAuthToken('printer-controller-token');
+      server.use(
+        http.get('*/api/v1/auth/status', () =>
+          HttpResponse.json({ auth_enabled: true, requires_setup: false }),
+        ),
+        http.get('*/api/v1/auth/me', () =>
+          HttpResponse.json({
+            id: 7,
+            username: 'printer-controller',
+            is_admin: false,
+            permissions: ['printers:control'],
+          }),
+        ),
+        http.get('/api/v1/queue/', () =>
+          HttpResponse.json([
+            {
+              ...mockQueueItems[0],
+              manual_start: true,
+              created_by_id: 7,
+            },
+          ]),
+        ),
+      );
+
+      render(<QueuePage />);
+
+      const startButton = await screen.findByTitle('You do not have permission to start prints');
+      expect(startButton).toBeDisabled();
     });
   });
 
@@ -504,7 +584,11 @@ describe('QueuePage', () => {
 
       render(<QueuePage />);
 
-      const playButton = await screen.findByTitle(/Start Print|do not have permission to start prints/i);
+      const playButton = await waitFor(() => {
+        const button = document.querySelector<HTMLButtonElement>('button[title="Start Print"], button[title="You do not have permission to start prints"]');
+        expect(button).not.toBeNull();
+        return button!;
+      });
       await userEvent.click(playButton);
 
       // Wait for the start endpoint to be hit (the 409 path returns to onError).

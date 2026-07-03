@@ -15,7 +15,7 @@ To protect the `main` branch, go to **Settings > Rules > Rulesets > New ruleset 
 
 ### Step 2: Bypass List (optional)
 
-Add yourself (`@maziggy`) to bypass if you want to push directly in emergencies.
+Add yourself to bypass if you want to push directly in emergencies.
 Set "Always" or "Pull requests only" based on preference.
 
 ### Step 3: Target Branches
@@ -101,30 +101,22 @@ npm run test:run
 
 ## CODEOWNERS
 
-The `CODEOWNERS` file automatically requests reviews from `@maziggy` for all changes.
+The `CODEOWNERS` file automatically requests reviews from `@EdwardChamberlain` for all changes.
 
 To add more code owners:
 1. Edit `.github/CODEOWNERS`
 2. Add GitHub usernames with `@` prefix
 3. Assign specific paths to specific owners
 
-Example:
-```
-/backend/ @maziggy @backend-contributor
-/frontend/ @maziggy @frontend-contributor
-```
-
 ## Release Process
 
-1. Update version in `pyproject.toml`
-2. Update `CHANGELOG.md`
-3. Create a PR with these changes
-4. After merge, tag the release:
-   ```bash
-   git tag v0.1.x
-   git push origin v0.1.x
-   ```
-5. Run `docker-publish.sh` to publish Docker image
+1. Update `VERSION` and run `python scripts/check_version.py`
+2. Create a PR with these changes
+3. Merge the version change into `main`
+4. In GitHub, open **Actions** and select the **Docker Publish** workflow
+5. Select **Run workflow** to build the image from `main` and publish it to GHCR with both tags:
+   - `latest`
+   - `vX.Y.Z`, using the version in `VERSION`
 
 ## Dependabot (Optional)
 

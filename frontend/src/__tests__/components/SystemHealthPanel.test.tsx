@@ -65,10 +65,6 @@ describe('SystemHealthPanel', () => {
     expect(screen.getByText('You can fix this')).toBeInTheDocument();
     expect(screen.getByText('FTP connection permission error to [IP]')).toBeInTheDocument();
 
-    const link = screen.getByRole('link', { name: /How to fix/i });
-    expect(link).toHaveAttribute(
-      'href',
-      'https://wiki.bambuddy.cool/reference/troubleshooting/#wrong-access-code',
-    );
+    expect(screen.queryByRole('link', { name: /How to fix/i })).not.toBeInTheDocument();
   });
 });
