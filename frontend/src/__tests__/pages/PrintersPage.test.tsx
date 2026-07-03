@@ -655,6 +655,15 @@ describe('PrintersPage', () => {
       render(<PrintersPage />);
       fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
 
+      const statusPane = await screen.findByTestId('cockpit-status-pane');
+      expect(statusPane).toHaveClass('overflow-y-auto');
+      expect(within(statusPane).getByText('Jog')).toBeInTheDocument();
+      expect(within(statusPane).getByText('Stats')).toBeInTheDocument();
+      expect(within(statusPane).getByText('Success Rate')).toBeInTheDocument();
+
+      expect(await screen.findByTestId('cockpit-filament-pane')).toHaveClass('min-h-0');
+      expect(screen.getByTestId('cockpit-filament-scroll')).toHaveClass('overflow-auto');
+
       fireEvent.click(await screen.findByRole('button', { name: /AMS Filament Backup is OFF/ }));
       expect((await screen.findAllByText('AMS Filament Backup')).length).toBeGreaterThan(0);
       fireEvent.click(screen.getByRole('button', { name: 'Close' }));

@@ -2601,8 +2601,8 @@ function SinglePrinterCockpit({
   };
 
   const filamentPanel = ((status?.ams?.length ?? 0) > 0 || (status?.vt_tray?.length ?? 0) > 0) ? (
-    <section className="min-h-0 rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
-      <div className="mb-2 flex items-center gap-2">
+    <section data-testid="cockpit-filament-pane" className="flex min-h-0 flex-col rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
+      <div className="mb-2 flex shrink-0 items-center gap-2">
         <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">{t('printers.filaments')}</span>
         <AmsBackupBadge
           state={status?.ams_filament_backup ?? null}
@@ -2610,7 +2610,7 @@ function SinglePrinterCockpit({
         />
         <div className="h-[2px] flex-1 bg-bambu-dark-tertiary" />
       </div>
-      <div className="flex min-w-0 gap-2 overflow-x-auto pb-1">
+      <div data-testid="cockpit-filament-scroll" className="flex min-h-0 min-w-0 gap-2 overflow-auto pb-1">
         {status?.ams?.map((ams) => (
           <div key={ams.id} className="min-w-[15rem] flex-1 rounded-lg bg-bambu-dark p-2">
             <div className="mb-1.5 flex min-h-7 items-center justify-between gap-2 rounded-lg bg-bambu-dark-secondary py-1 pl-2 pr-4">
@@ -2754,7 +2754,7 @@ function SinglePrinterCockpit({
           {filamentPanel}
         </div>
 
-        <div className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
+        <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3">
           <section className="rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
             {showClearPlateButton ? (
               <button
@@ -2805,7 +2805,7 @@ function SinglePrinterCockpit({
             )}
           </section>
 
-          <section className="relative z-20 min-h-0 overflow-visible rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
+          <section data-testid="cockpit-status-pane" className="relative z-20 min-h-0 overflow-y-auto overscroll-contain rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
             <div className="mb-2 flex items-center gap-2">
               <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">
                 {t('printers.status.title', 'Status')}
@@ -3060,15 +3060,20 @@ function SinglePrinterCockpit({
 
             </div>
             {jogPanel}
-          </section>
-
-          <section className="grid min-h-0 grid-cols-3 gap-1.5">
-            <CockpitMetricCard compact icon={BarChart3} label={t('stats.successRate', 'Success rate')} value={`${printerStats.successRate}%`} detail={`${printerStats.completed} / ${printerStats.failed} / ${printerStats.cancelled}`} />
-            <CockpitMetricCard compact icon={Package} label={t('stats.totalPrints', 'Total prints')} value={`${printLog?.total ?? printEntries.length}`} detail={t('stats.topFilament', 'Top filament: {{filament}}', { filament: printerStats.topFilament })} />
-            <CockpitMetricCard compact icon={Clock} label={t('stats.printTime', 'Print time')} value={`${printerStats.durationHours.toFixed(1)}h`} detail={`${maintenanceInfo?.total_print_hours?.toFixed(1) ?? '0.0'}h ${t('maintenance.title', 'Maintenance')}`} />
-            <CockpitMetricCard compact icon={Package} label={t('stats.filamentUsed', 'Filament used')} value={formatCockpitWeight(printerStats.filamentGrams)} detail={`${currencySymbol}${printerStats.totalCost.toFixed(2)} ${t('stats.filamentCost', 'filament cost')}`} />
-            <CockpitMetricCard compact icon={Zap} label={t('stats.energyUsed', 'Energy used')} value={`${printerStats.energyKwh.toFixed(2)} kWh`} detail={t('stats.fromPrintHistory', 'From print history')} />
-            <CockpitMetricCard compact icon={Timer} label={t('stats.averagePrintTime', 'Average time')} value={printerStats.averageDurationSeconds != null ? formatDuration(Math.round(printerStats.averageDurationSeconds)) : '---'} detail={t('stats.completedPrintAverage', 'Completed prints')} />
+            <div className="mb-2 mt-3 flex items-center gap-2">
+              <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">
+                {t('printers.single.stats', 'Stats')}
+              </span>
+              <div className="h-[2px] flex-1 bg-bambu-dark-tertiary" />
+            </div>
+            <div className="grid min-h-0 grid-cols-3 gap-1.5">
+              <CockpitMetricCard compact icon={BarChart3} label={t('stats.successRate', 'Success rate')} value={`${printerStats.successRate}%`} detail={`${printerStats.completed} / ${printerStats.failed} / ${printerStats.cancelled}`} />
+              <CockpitMetricCard compact icon={Package} label={t('stats.totalPrints', 'Total prints')} value={`${printLog?.total ?? printEntries.length}`} detail={t('stats.topFilament', 'Top filament: {{filament}}', { filament: printerStats.topFilament })} />
+              <CockpitMetricCard compact icon={Clock} label={t('stats.printTime', 'Print time')} value={`${printerStats.durationHours.toFixed(1)}h`} detail={`${maintenanceInfo?.total_print_hours?.toFixed(1) ?? '0.0'}h ${t('maintenance.title', 'Maintenance')}`} />
+              <CockpitMetricCard compact icon={Package} label={t('stats.filamentUsed', 'Filament used')} value={formatCockpitWeight(printerStats.filamentGrams)} detail={`${currencySymbol}${printerStats.totalCost.toFixed(2)} ${t('stats.filamentCost', 'filament cost')}`} />
+              <CockpitMetricCard compact icon={Zap} label={t('stats.energyUsed', 'Energy used')} value={`${printerStats.energyKwh.toFixed(2)} kWh`} detail={t('stats.fromPrintHistory', 'From print history')} />
+              <CockpitMetricCard compact icon={Timer} label={t('stats.averagePrintTime', 'Average time')} value={printerStats.averageDurationSeconds != null ? formatDuration(Math.round(printerStats.averageDurationSeconds)) : '---'} detail={t('stats.completedPrintAverage', 'Completed prints')} />
+            </div>
           </section>
         </div>
       </div>
