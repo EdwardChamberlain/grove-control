@@ -656,6 +656,8 @@ describe('PrintersPage', () => {
       fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
 
       const statusPane = await screen.findByTestId('cockpit-status-pane');
+      expect(screen.getByTestId('printers-page')).toHaveClass('flex', 'h-[calc(100dvh-3.5rem)]');
+      expect(screen.getByTestId('cockpit-layout')).toHaveClass('flex-1', 'min-h-0');
       expect(statusPane).toHaveClass('overflow-y-auto');
       expect(within(statusPane).getByText('Jog')).toBeInTheDocument();
       expect(within(statusPane).getByText('Stats')).toBeInTheDocument();

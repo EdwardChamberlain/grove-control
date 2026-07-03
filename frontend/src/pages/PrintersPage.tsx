@@ -10213,8 +10213,15 @@ export function PrintersPage() {
   );
 
   return (
-    <div className="p-4 md:p-8">
-      <div className="space-y-3 mb-6">
+    <div
+      data-testid="printers-page"
+      className={`p-4 md:p-8 ${
+        printerPageViewMode === 'single' && !isMobilePrinterView
+          ? 'flex h-[calc(100dvh-3.5rem)] flex-col overflow-hidden min-[1144px]:h-dvh'
+          : ''
+      }`}
+    >
+      <div className="mb-6 shrink-0 space-y-3">
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-3">
             <PrinterIcon className="w-7 h-7 text-bambu-green" />
@@ -10338,7 +10345,7 @@ export function PrintersPage() {
         />
 
       ) : printerPageViewMode === 'single' && !isMobilePrinterView && selectedSinglePrinter ? (
-        <div className="grid h-[calc(100vh-14rem)] min-h-0 gap-4 overflow-hidden lg:grid-cols-[17.5rem_minmax(0,1fr)]">
+        <div data-testid="cockpit-layout" className="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[17.5rem_minmax(0,1fr)]">
           <aside className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary p-3">
             <div className="mb-3 text-center">
               <div className="min-w-0">
