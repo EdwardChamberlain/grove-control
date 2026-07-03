@@ -1790,6 +1790,8 @@ function PrinterListRow({
 }) {
   const { t } = useTranslation();
   const { hasPermission } = useAuth();
+  const { showToast } = useToast();
+  const queryClient = useQueryClient();
   const { data: status } = useQuery({
     queryKey: ['printerStatus', printer.id],
     queryFn: () => api.getPrinterStatus(printer.id),
@@ -1807,6 +1809,34 @@ function PrinterListRow({
   const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
   const progress = Math.max(0, Math.min(100, status?.progress ?? 0));
   const needsPlateClear = !!requirePlateClear && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
+  const showClearPlateButton = status?.connected === true && needsPlateClear;
+  const clearPlateMutation = useMutation({
+    mutationFn: () => api.clearPlate(printer.id),
+    onSuccess: () => {
+      showToast(t('queue.clearPlateSuccess'));
+      queryClient.setQueryData(['printerStatus', printer.id], (old: PrinterStatus | undefined) =>
+        old ? { ...old, awaiting_plate_clear: false } : old
+      );
+      queryClient.invalidateQueries({ queryKey: ['printerStatus', printer.id] });
+      queryClient.invalidateQueries({ queryKey: ['queue', printer.id] });
+    },
+    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
+  });
+  const renderClearPlateButton = () => showClearPlateButton ? (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        clearPlateMutation.mutate();
+      }}
+      disabled={clearPlateMutation.isPending || !hasPermission('printers:clear_plate')}
+      className="pointer-events-auto inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-yellow-400/40 bg-yellow-500/20 text-yellow-400 transition-colors hover:bg-yellow-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+      title={!hasPermission('printers:clear_plate') ? t('printers.permission.noControl') : t('printers.plateStatus.markCleared')}
+      aria-label={t('printers.plateStatus.markCleared')}
+    >
+      {clearPlateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlateClearedIcon className="h-4 w-4" />}
+    </button>
+  ) : null;
   const hasDoorSensor = ['X1C', 'X1', 'X1E', 'X2D', 'P2S', 'H2D', 'H2D Pro', 'H2C', 'H2S'].includes(printer.model ?? '');
   const printerHealth = getPrinterHealthMeta({
     connected: status?.connected,
@@ -1889,9 +1919,12 @@ function PrinterListRow({
             {isSelected ? <CheckSquare className="h-4 w-4 text-bambu-green" /> : <Square className="h-4 w-4" />}
           </button>
         )}
-        <div className="min-w-0 flex-1">
-          <div className="truncate font-medium text-white">{printer.name}</div>
-          <div className="truncate text-xs text-bambu-gray">{printer.model || jobStatusLabel}</div>
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-medium text-white">{printer.name}</div>
+            <div className="truncate text-xs text-bambu-gray">{printer.model || jobStatusLabel}</div>
+          </div>
+          {renderClearPlateButton()}
         </div>
         <div className="flex min-w-0 max-w-[58%] shrink-0 items-center gap-2">
           <span className="min-w-0 max-w-28 truncate text-right text-xs font-medium text-white" title={mobilePrintStatusLabel}>
@@ -1936,10 +1969,11 @@ function PrinterListRow({
             alt={printer.model || t('common.printer')}
             className="h-10 w-10 shrink-0 rounded-lg object-contain"
           />
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="truncate font-medium text-white">{printer.name}</div>
             <div className="truncate text-xs text-bambu-gray">{printer.model || t('common.unknown', 'Unknown')}</div>
           </div>
+          {renderClearPlateButton()}
         </div>
         <div className="min-w-0">
           <span className="inline-flex max-w-full items-center gap-2">
@@ -10266,6 +10300,7 @@ export function PrintersPage() {
       ) : printerPageViewMode === 'camwall' ? (
         <CameraWall
           printers={sortedPrinters}
+          requirePlateClear={settings?.require_plate_clear === true}
           maxLive={camWallMaxLive}
           snapshotIntervalSec={camWallSnapshotSec}
           onTileClick={(id) => openSinglePrinter(id)}
