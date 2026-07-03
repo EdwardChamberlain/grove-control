@@ -582,7 +582,7 @@ export default {
       title: 'État de la machine : {{status}}', statusDetails: 'Détails de l’état',
     },
     single: {
-      machineList: 'Parc machines', machineCountOne: '1 imprimante', machineCount: '{{count}} imprimantes', quickReprint: 'Réimpression rapide', stats: 'Statistiques',
+      machineList: 'Parc machines', machineCountOne: '1 imprimante', machineCount: '{{count}} imprimantes', quickReprint: 'Réimpression rapide',
       jog: 'Déplacement', moveYForward: 'Déplacer Y vers l’avant', moveXLeft: 'Déplacer X à gauche', moveXRight: 'Déplacer X à droite', moveYBack: 'Déplacer Y vers l’arrière',
       retractFilament: 'Rétracter le filament', extrudeFilament: 'Extruder le filament',
       setNozzleTemperature: 'Régler la température de la buse', setBedTemperature: 'Régler la température du plateau', setChamberTemperature: 'Régler la température de la chambre', setFanSpeed: 'Régler la vitesse de {{fan}}',

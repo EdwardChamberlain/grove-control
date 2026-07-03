@@ -3062,7 +3062,7 @@ function SinglePrinterCockpit({
             {jogPanel}
             <div className="mb-2 mt-3 flex items-center gap-2">
               <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">
-                {t('printers.single.stats', 'Stats')}
+                {t('stats.title')}
               </span>
               <div className="h-[2px] flex-1 bg-bambu-dark-tertiary" />
             </div>

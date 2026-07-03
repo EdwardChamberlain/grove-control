@@ -582,7 +582,7 @@ export default {
       title: '设备健康状态：{{status}}', statusDetails: '状态详情',
     },
     single: {
-      machineList: '设备', machineCountOne: '1 台打印机', machineCount: '{{count}} 台打印机', quickReprint: '快速重印', stats: '统计',
+      machineList: '设备', machineCountOne: '1 台打印机', machineCount: '{{count}} 台打印机', quickReprint: '快速重印',
       jog: '点动', moveYForward: 'Y 轴向前移动', moveXLeft: 'X 轴向左移动', moveXRight: 'X 轴向右移动', moveYBack: 'Y 轴向后移动',
       retractFilament: '回抽耗材', extrudeFilament: '挤出耗材',
       setNozzleTemperature: '设置喷嘴温度', setBedTemperature: '设置热床温度', setChamberTemperature: '设置腔体温度', setFanSpeed: '设置{{fan}}速度',
