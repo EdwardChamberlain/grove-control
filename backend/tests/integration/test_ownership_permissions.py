@@ -995,7 +995,7 @@ class TestUserItemsCountAndDeletion(TestOwnershipPermissionsSetup):
 
 
 class TestReadIDORClosure(TestOwnershipPermissionsSetup):
-    """Regression tests pinning maziggy/bambuddy-security #2 — IDOR on
+    """Regression tests for an IDOR on
     archives / library / queue read paths.
 
     Before the fix, ARCHIVES_READ / LIBRARY_READ / QUEUE_READ were flat
@@ -1136,7 +1136,7 @@ class TestReadIDORClosure(TestOwnershipPermissionsSetup):
         self, async_client: AsyncClient, auth_setup, db_session
     ):
         """Library IDOR closure (same shape as archives — closed in the same PR
-        per maziggy/bambuddy-security #2)."""
+        as required by the ownership security model)."""
         from backend.app.models.library import LibraryFile
 
         admin_file = LibraryFile(

@@ -408,7 +408,6 @@ Use the [Feature Request template](https://github.com/EdwardChamberlain/grove-co
 
 ## Questions?
 
-- Check the [Documentation](http://wiki.bambuddy.cool)
 - Open a [Discussion](https://github.com/EdwardChamberlain/grove-control/discussions)
 - Review existing [Issues](https://github.com/EdwardChamberlain/grove-control/issues)
 

@@ -10,9 +10,8 @@ body:
 
         **Before you submit, please:**
         1. Search [existing issues](https://github.com/EdwardChamberlain/grove-control/issues?q=is%3Aissue) — your problem may already be reported or resolved.
-        2. Skim the [Troubleshooting wiki](https://wiki.bambuddy.cool/reference/troubleshooting/) — roughly 1 in 5 closed bug reports turn out to be setup or configuration issues already documented there.
-        3. If your printer won't connect / won't print / camera won't load, run the in-app **Connection Diagnostic** (printer card or System → Diagnostics) FIRST. Most connection bugs are diagnosed in 30 seconds by the diagnostic and need no GitHub issue.
-        4. Generate a **Support Package** from System → Download Support Package — without it, most bugs cannot be investigated.
+        2. If your printer won't connect / won't print / camera won't load, run the in-app **Connection Diagnostic** (printer card or System → Diagnostics) FIRST. Most connection bugs are diagnosed in 30 seconds by the diagnostic and need no GitHub issue.
+        3. Generate a **Support Package** from System → Download Support Package — without it, most bugs cannot be investigated.
 
   - type: dropdown
     id: product
@@ -179,8 +178,6 @@ body:
         Create and attach a **Support Package** from **System → Download Support Package**.
         It bundles logs, system info, and configuration (sensitive data redacted) — without it, most bugs cannot be reproduced or investigated.
 
-        Detailed instructions: [Debug Logging Guide](https://wiki.bambuddy.cool/features/system-info/?h=debug#enable-debug-logging)
-
   - type: textarea
     id: logs
     attributes:
@@ -214,8 +211,6 @@ body:
       label: Final checks
       options:
         - label: I searched existing (open AND closed) issues and this bug hasn't already been reported or resolved
-          required: true
-        - label: I checked the [Troubleshooting wiki](https://wiki.bambuddy.cool/reference/troubleshooting/) and the relevant feature page for my issue
           required: true
         - label: I am using the latest version of Grove Control
           required: true

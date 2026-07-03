@@ -120,5 +120,4 @@ docker compose up -d
 
 ## Support
 
-- Documentation: https://wiki.bambuddy.cool
 - Issues: https://github.com/EdwardChamberlain/grove-control/issues

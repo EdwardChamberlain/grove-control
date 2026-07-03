@@ -985,7 +985,7 @@ async def sync_from_filamentcolors(
             # outbound client (bambu_cloud, makerworld, firmware_check).
             async with httpx.AsyncClient(
                 timeout=120.0,
-                headers={"User-Agent": "Grove Control/1.0 (+https://github.com/maziggy/bambuddy)"},
+                headers={"User-Agent": "Grove Control/1.0 (+https://github.com/EdwardChamberlain/grove-control)"},
             ) as client:
                 page = 1
                 while True:

@@ -328,18 +328,6 @@ In Bambu Studio or OrcaSlicer, enable **"Store sent files on external storage"**
 
 ---
 
-## 📚 Documentation
-
-Full documentation available at **[wiki.bambuddy.cool](http://wiki.bambuddy.cool)**:
-
-- [Installation](http://wiki.bambuddy.cool/getting-started/installation/) — Docker Compose setup
-- [Getting Started](http://wiki.bambuddy.cool/getting-started/) — First printer setup
-- [Features](http://wiki.bambuddy.cool/features/) — Detailed feature guides
-- [Troubleshooting](http://wiki.bambuddy.cool/reference/troubleshooting/) — Common issues & solutions
-- [API Reference](http://wiki.bambuddy.cool/reference/api/) — REST API documentation
-
----
-
 ## 🖨️ Supported Printers
 
 | Series | Models |
@@ -387,7 +375,7 @@ AGPL-3.0 License — see [LICENSE](LICENSE) for details.
 
 ## 🙏 Acknowledgments
 
-- [Bambuddy](https://bambuddy.cool) by MartinNYHC — Grove Control is built on and forked from the Bambuddy project, and owes a great deal to the strong foundation and awesome work behind it.
+- Bambuddy by MartinNYHC — Grove Control is built on and forked from the Bambuddy project, and owes a great deal to the strong foundation and awesome work behind it.
 - [Bambu Lab](https://bambulab.com/) for amazing printers
 - The reverse engineering community for protocol documentation
 - All testers and contributors

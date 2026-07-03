@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Plus, Printer, ExternalLink, AlertTriangle, Info, FileText, ShieldCheck, Copy, Check, Download } from 'lucide-react';
+import { Loader2, Plus, Printer, AlertTriangle, Info, FileText, ShieldCheck, Copy, Check, Download } from 'lucide-react';
 import { multiVirtualPrinterApi, virtualPrinterApi } from '../api/client';
 import { Card, CardContent } from './Card';
 import { Button } from './Button';
@@ -92,15 +92,6 @@ export function VirtualPrinterList() {
               <div className="text-xs">
                 <p className="text-white font-medium">{t('virtualPrinter.setupRequired.title')}</p>
                 <p className="text-bambu-gray mt-1">{t('virtualPrinter.setupRequired.description')}</p>
-                <a
-                  href="https://wiki.bambuddy.cool/features/virtual-printer/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 mt-2 px-3 py-1.5 bg-yellow-500/20 border border-yellow-500/50 rounded text-yellow-400 hover:bg-yellow-500/30 transition-colors text-xs"
-                >
-                  <ExternalLink className="w-3 h-3" />
-                  {t('virtualPrinter.setupRequired.readGuide')}
-                </a>
               </div>
             </div>
           </CardContent>

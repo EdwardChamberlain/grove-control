@@ -37,8 +37,8 @@ self.addEventListener('install', (event) => {
 // kiosk deploy-pickup scenario) lives in sw-register.js via a
 // `controllerchange` listener, gated on whether the page already had a SW
 // controller at load time. That gate distinguishes first-install (where a
-// reload would race the in-flight React mount — observed on every fresh
-// *.demo.bambuddy.cool subdomain, and in Firefox the activate's waitUntil
+// reload would race the in-flight React mount — observed on fresh installs,
+// and in Firefox the activate's waitUntil
 // hung on `client.navigate` until the document load was aborted with a
 // Corrupted-Content error) from upgrade-on-existing-client (where the reload
 // is wanted).

@@ -52,7 +52,7 @@ ORCA_REDIRECT_URI = "http://localhost:41172/callback"
 # without impersonating Orca's desktop client (which would be CWE-style
 # falsified-identity and was the exact thing called out in Bambu Lab's May 2026
 # blog post about cloud-access etiquette).
-_USER_AGENT = "Grove Control/1.0 (+https://github.com/maziggy/bambuddy)"
+_USER_AGENT = "Grove Control/1.0 (+https://github.com/EdwardChamberlain/grove-control)"
 
 # Refresh access tokens when they have less than this much life left, on the
 # theory that a slow downstream API call shouldn't expire the token mid-flight.

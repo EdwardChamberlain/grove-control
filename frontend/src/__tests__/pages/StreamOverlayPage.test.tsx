@@ -129,7 +129,7 @@ describe('StreamOverlayPage', () => {
       await waitFor(() => {
         const logo = screen.getByAltText('Grove Control');
         const link = logo.closest('a');
-        expect(link).toHaveAttribute('href', 'https://github.com/maziggy/bambuddy');
+        expect(link).toHaveAttribute('href', 'https://github.com/EdwardChamberlain/grove-control');
       });
     });
   });

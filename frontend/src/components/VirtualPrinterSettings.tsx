@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Check, AlertTriangle, Printer, Eye, EyeOff, Info, ChevronDown, ExternalLink, ArrowRightLeft } from 'lucide-react';
+import { Loader2, Check, AlertTriangle, Printer, Eye, EyeOff, Info, ChevronDown, ArrowRightLeft } from 'lucide-react';
 import { api, virtualPrinterApi } from '../api/client';
 import { Card, CardContent, CardHeader } from './Card';
 import { Button } from './Button';
@@ -483,15 +483,6 @@ export function VirtualPrinterSettings() {
                 <p className="text-bambu-gray mb-3">
                   {t('virtualPrinter.setupRequired.description')}
                 </p>
-                <a
-                  href="https://wiki.bambuddy.cool/features/virtual-printer/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-yellow-500/20 border border-yellow-500/50 rounded-md text-yellow-400 hover:bg-yellow-500/30 transition-colors"
-                >
-                  <ExternalLink className="w-4 h-4" />
-                  {t('virtualPrinter.setupRequired.readGuide')}
-                </a>
               </div>
             </div>
           </CardContent>

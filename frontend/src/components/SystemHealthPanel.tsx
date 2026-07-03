@@ -1,9 +1,7 @@
 import type { ElementType } from 'react';
 import { useTranslation } from 'react-i18next';
-import { XCircle, AlertTriangle, CheckCircle2, ExternalLink, Wrench, ServerCog, Bug } from 'lucide-react';
+import { XCircle, AlertTriangle, CheckCircle2, Wrench, ServerCog, Bug } from 'lucide-react';
 import type { LogFinding, LogFindingCategory, SystemHealthResult } from '../api/client';
-
-const WIKI_TROUBLESHOOTING = 'https://wiki.bambuddy.cool/reference/troubleshooting/';
 
 const CATEGORY_META: Record<LogFindingCategory, { icon: ElementType; badgeClass: string }> = {
   layer8: { icon: Wrench, badgeClass: 'bg-bambu-green/15 text-bambu-green border-bambu-green/30' },
@@ -55,19 +53,10 @@ function FindingCard({ finding }: { finding: LogFinding }) {
         {finding.sample}
       </div>
 
-      <div className="flex items-center justify-between gap-2 flex-wrap">
+      <div className="flex items-center gap-2 flex-wrap">
         <span className="text-xs text-bambu-gray">
           {t('systemHealth.occurrences', { times: finding.count, lastSeen: finding.last_seen })}
         </span>
-        <a
-          href={`${WIKI_TROUBLESHOOTING}#${finding.wiki_anchor}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-bambu-green hover:underline"
-        >
-          {t('systemHealth.learnMore')}
-          <ExternalLink className="w-3 h-3" />
-        </a>
       </div>
     </div>
   );

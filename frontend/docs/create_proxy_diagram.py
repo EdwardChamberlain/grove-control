@@ -377,7 +377,7 @@ def create_diagram():
         draw.text((fx - 68, features_y), feature, font=fonts['small'], fill=TEXT_SECONDARY, anchor="lm")
 
     # Grove Control branding
-    draw.text((WIDTH // 2, HEIGHT - 30), "bambuddy.cool", font=fonts['small'], fill=TEXT_LABEL, anchor="mm")
+    draw.text((WIDTH // 2, HEIGHT - 30), "Grove Control", font=fonts['small'], fill=TEXT_LABEL, anchor="mm")
 
     return img
 
