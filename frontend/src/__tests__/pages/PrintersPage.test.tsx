@@ -659,6 +659,7 @@ describe('PrintersPage', () => {
       expect(screen.getByTestId('printers-page')).toHaveClass('flex', 'h-[calc(100dvh-3.5rem)]');
       expect(screen.getByTestId('cockpit-layout')).toHaveClass('flex-1', 'min-h-0');
       expect(statusPane).toHaveClass('overflow-y-auto');
+      expect(statusPane).not.toHaveClass('z-20');
       expect(within(statusPane).getByText('Jog')).toBeInTheDocument();
       expect(within(statusPane).getByText('Statistics')).toBeInTheDocument();
       expect(within(statusPane).getByText('Success Rate')).toBeInTheDocument();

@@ -2805,7 +2805,7 @@ function SinglePrinterCockpit({
             )}
           </section>
 
-          <section data-testid="cockpit-status-pane" className="relative z-20 min-h-0 overflow-y-auto overscroll-contain rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
+          <section data-testid="cockpit-status-pane" className="relative min-h-0 overflow-y-auto overscroll-contain rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
             <div className="mb-2 flex items-center gap-2">
               <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">
                 {t('printers.status.title', 'Status')}
