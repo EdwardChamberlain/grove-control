@@ -581,6 +581,46 @@ describe('PrintersPage', () => {
       expect(placeholder).toBeInTheDocument();
     });
 
+    it('offers recent reprints from the print dialog instead of the cockpit card', async () => {
+      server.use(
+        http.get('/api/v1/print-log/', () => HttpResponse.json({
+          items: [{
+            id: 41,
+            archive_id: 17,
+            print_name: 'Sample Widget',
+            printer_name: 'X1 Carbon',
+            printer_id: 1,
+            status: 'completed',
+            started_at: '2026-06-30T09:00:00Z',
+            completed_at: '2026-06-30T10:00:00Z',
+            duration_seconds: 3600,
+            filament_type: 'PLA',
+            filament_color: 'FFFFFFFF',
+            filament_used_grams: 12,
+            cost: 0.3,
+            energy_kwh: 0.1,
+            energy_cost: 0.02,
+            failure_reason: null,
+            thumbnail_path: null,
+            created_by_id: null,
+            created_by_username: null,
+            created_at: '2026-06-30T09:00:00Z',
+          }],
+          total: 1,
+        })),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+      await screen.findByText('Top filament: PLA');
+
+      expect(screen.queryByText('Quick reprint')).not.toBeInTheDocument();
+      fireEvent.click(await screen.findByRole('button', { name: 'Start print' }));
+
+      expect(await screen.findByText('Quick reprint')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Sample Widget/ })).toBeInTheDocument();
+    });
+
     it('provides AMS filament backup and skip objects controls in the single-printer cockpit', async () => {
       server.use(
         http.get('/api/v1/printers/:id/status', () => {
@@ -696,7 +736,9 @@ describe('PrintersPage', () => {
     it('hides green plate in use status while printing and hides the clear action', async () => {
       server.use(
         http.get('/api/v1/printers/:id/status', () => {
-          return HttpResponse.json({ ...mockPrinterStatus, state: 'RUNNING', awaiting_plate_clear: false });
+          // The backend can briefly retain this flag while a new print is active.
+          // A stale warning must not surface as a green "Plate in Use" pill.
+          return HttpResponse.json({ ...mockPrinterStatus, state: 'RUNNING', awaiting_plate_clear: true });
         })
       );
 

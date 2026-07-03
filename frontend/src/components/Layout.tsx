@@ -529,7 +529,7 @@ export function Layout() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 p-2 overflow-y-auto">
+        <nav className="min-h-0 flex-1 overflow-y-auto p-2">
           <ul className="relative flex flex-col gap-2">
             {activeSidebarIndex >= 0 && (
               <li

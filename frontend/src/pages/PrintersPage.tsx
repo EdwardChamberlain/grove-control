@@ -2489,11 +2489,11 @@ function SinglePrinterCockpit({
     { mode: 3, label: t('printers.speed.sport', 'Sport') },
     { mode: 4, label: t('printers.speed.ludicrous', 'Ludicrous') },
   ];
-  const statusControlClass = `relative min-h-[3.75rem] flex-1 rounded-lg bg-bambu-dark px-2 py-2 text-center flex flex-col justify-center items-center transition-colors ${
+  const statusControlClass = `relative min-h-[3.25rem] flex-1 rounded-lg bg-bambu-dark px-2 py-1.5 text-center flex flex-col justify-center items-center transition-colors ${
     canUseMachineTools ? 'cursor-pointer hover:bg-bambu-dark-tertiary' : 'cursor-default opacity-80'
   }`;
-  const iconControlClass = 'relative inline-flex h-10 min-w-0 items-center justify-center gap-2 rounded-lg px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50';
-  const jogButtonClass = 'flex h-8 w-8 shrink-0 items-center justify-center rounded bg-indigo-500/15 text-indigo-300 transition-colors hover:bg-indigo-500/30 disabled:cursor-not-allowed disabled:opacity-50';
+  const iconControlClass = 'relative inline-flex h-9 min-w-0 items-center justify-center gap-2 rounded-lg px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50';
+  const jogButtonClass = 'flex h-7 w-7 shrink-0 items-center justify-center rounded bg-indigo-500/15 text-indigo-300 transition-colors hover:bg-indigo-500/30 disabled:cursor-not-allowed disabled:opacity-50';
   const currentPrintLabel = activePrintName || t('printers.noActiveJob', 'No active job');
   const plateDetectionEnabled = plateDetectionMutation.isPending && plateDetectionMutation.variables != null
     ? plateDetectionMutation.variables
@@ -2530,7 +2530,7 @@ function SinglePrinterCockpit({
         <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">{t('printers.single.jog')}</span>
         <div className="h-[2px] flex-1 bg-bambu-dark-tertiary" />
       </div>
-      <div className="flex items-start justify-center gap-3 rounded-lg bg-bambu-dark/70 px-3 py-2.5">
+      <div className="flex items-start justify-center gap-3 rounded-lg bg-bambu-dark/70 px-3 py-2">
         <div className="flex items-center justify-center gap-3">
           <div className="grid grid-cols-3 gap-1">
             <div />
@@ -2545,12 +2545,12 @@ function SinglePrinterCockpit({
           </div>
           <div className="flex flex-col items-center gap-1">
             <button type="button" className={jogButtonClass} disabled={!canJog || bedJogMutation.isPending} onClick={() => requestBedJog(-jogStep)} aria-label={t('printers.bedJog.up')}><ArrowUp className="h-4 w-4" /></button>
-            <div className="flex h-8 w-8 items-center justify-center text-bambu-gray/80"><Layers className="h-4 w-4" /></div>
+            <div className="flex h-7 w-7 items-center justify-center text-bambu-gray/80"><Layers className="h-4 w-4" /></div>
             <button type="button" className={jogButtonClass} disabled={!canJog || bedJogMutation.isPending} onClick={() => requestBedJog(jogStep)} aria-label={t('printers.bedJog.down')}><ArrowDown className="h-4 w-4" /></button>
           </div>
           <div className="flex flex-col items-center gap-1">
             <button type="button" className={jogButtonClass} disabled={!canJog || extruderJogMutation.isPending} onClick={() => extruderJogMutation.mutate(-jogStep)} aria-label={t('printers.single.retractFilament')}><ArrowUp className="h-4 w-4" /></button>
-            <div className="flex h-8 w-8 items-center justify-center text-bambu-gray/80"><span className="text-sm font-semibold leading-none">E</span></div>
+            <div className="flex h-7 w-7 items-center justify-center text-bambu-gray/80"><span className="text-sm font-semibold leading-none">E</span></div>
             <button type="button" className={jogButtonClass} disabled={!canJog || extruderJogMutation.isPending} onClick={() => extruderJogMutation.mutate(jogStep)} aria-label={t('printers.single.extrudeFilament')}><ArrowDown className="h-4 w-4" /></button>
           </div>
         </div>
@@ -2739,10 +2739,7 @@ function SinglePrinterCockpit({
 
               <div className="min-w-0">
                 <div className="mb-2 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-white">{currentPrintLabel}</p>
-                    <p className="mt-1 truncate text-xs text-bambu-gray">{t('printers.currentPrint', 'Current print')}</p>
-                  </div>
+                  <p className="min-w-0 flex-1 truncate text-xl font-semibold text-white">{currentPrintLabel}</p>
                   <span className="shrink-0 text-3xl font-semibold tabular-nums text-white">
                     {isPrintingOrPaused ? `${Math.round(progress)}%` : '---'}
                   </span>
@@ -2757,14 +2754,14 @@ function SinglePrinterCockpit({
           {filamentPanel}
         </div>
 
-        <div className="grid min-h-0 gap-3 xl:grid-rows-[auto_minmax(0,1fr)_auto]">
+        <div className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
           <section className="rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
             {showClearPlateButton ? (
               <button
                 type="button"
                 onClick={() => clearPlateMutation.mutate()}
                 disabled={clearPlateMutation.isPending || !hasPermission('printers:clear_plate')}
-                className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-yellow-500/20 px-3 text-sm font-medium text-yellow-400 transition-colors hover:bg-yellow-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-yellow-500/20 px-3 text-sm font-medium text-yellow-400 transition-colors hover:bg-yellow-500/30 disabled:cursor-not-allowed disabled:opacity-50"
                 title={!hasPermission('printers:clear_plate') ? t('printers.permission.noControl') : t('printers.plateStatus.markCleared')}
               >
                 {clearPlateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlateClearedIcon className="h-4 w-4" />}
@@ -2776,7 +2773,7 @@ function SinglePrinterCockpit({
                   type="button"
                   onClick={() => (isPaused ? resumePrintMutation.mutate() : pausePrintMutation.mutate())}
                   disabled={!canControl || controlBusy}
-                  className={`flex h-11 items-center justify-center gap-2 rounded-lg text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                  className={`flex h-10 items-center justify-center gap-2 rounded-lg text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                     isPaused
                       ? 'bg-bambu-green/20 text-bambu-green hover:bg-bambu-green/30'
                       : 'bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30'
@@ -2789,7 +2786,7 @@ function SinglePrinterCockpit({
                   type="button"
                   onClick={() => stopPrintMutation.mutate()}
                   disabled={!canControl || controlBusy}
-                  className="flex h-11 items-center justify-center gap-2 rounded-lg bg-red-500/20 text-sm font-medium text-red-400 transition-colors hover:bg-red-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="flex h-10 items-center justify-center gap-2 rounded-lg bg-red-500/20 text-sm font-medium text-red-400 transition-colors hover:bg-red-500/30 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Square className="h-4 w-4" />
                   {t('printers.stop')}
@@ -2800,7 +2797,7 @@ function SinglePrinterCockpit({
                 type="button"
                 onClick={() => setShowUploadForPrint(true)}
                 disabled={!hasPermission('queue:create')}
-                className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-bambu-green px-3 text-sm font-medium text-white transition-colors hover:bg-bambu-green-light disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-bambu-green px-3 text-sm font-medium text-white transition-colors hover:bg-bambu-green-light disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Play className="h-4 w-4" />
                 {t('printers.startPrint', 'Start print')}
@@ -2871,7 +2868,7 @@ function SinglePrinterCockpit({
               </button>
               <button
                 type="button"
-                className={hasChamberHeater ? statusControlClass : 'flex min-h-[3.75rem] flex-1 flex-col items-center justify-center rounded-lg bg-bambu-dark px-2 py-2 text-center'}
+                className={hasChamberHeater ? statusControlClass : 'flex min-h-[3.25rem] flex-1 flex-col items-center justify-center rounded-lg bg-bambu-dark px-2 py-1.5 text-center'}
                 onClick={() => hasChamberHeater && canUseMachineTools && setStatusControlMenu(statusControlMenu === 'chamber-temp' ? null : 'chamber-temp')}
                 disabled={!hasChamberHeater || !canUseMachineTools}
                 title={hasChamberHeater && !canUseMachineTools ? t('printers.permission.noControl') : undefined}
@@ -2902,7 +2899,7 @@ function SinglePrinterCockpit({
                 <button
                   key={key}
                   type="button"
-                  className={`relative flex min-w-0 flex-1 items-center justify-center gap-1 rounded-lg bg-bambu-dark px-2 py-2 transition-colors ${
+                  className={`relative flex min-w-0 flex-1 items-center justify-center gap-1 rounded-lg bg-bambu-dark px-2 py-1.5 transition-colors ${
                     value > 0 ? 'text-white hover:bg-bambu-dark-tertiary' : 'text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white'
                   } disabled:cursor-not-allowed disabled:opacity-50`}
                   onClick={() => canUseMachineTools && setStatusControlMenu(statusControlMenu === `fan-${key}` ? null : `fan-${key}`)}
@@ -2934,25 +2931,6 @@ function SinglePrinterCockpit({
                 {issueItems.map(item => <div key={item} className="truncate">{item}</div>)}
               </div>
             )}
-            {reprintableRecentPrints.length > 0 && (
-              <div className="mt-3 border-t border-bambu-dark-tertiary pt-2">
-                <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-bambu-gray">{t('printers.single.quickReprint', 'Quick reprint')}</div>
-                <div className="grid gap-1.5">
-                  {reprintableRecentPrints.map(entry => (
-                    <button
-                      key={entry.id}
-                      type="button"
-                      onClick={() => setReprintEntry(entry)}
-                      className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-bambu-dark-tertiary"
-                    >
-                      <span className="truncate text-xs text-white">{entry.print_name || t('archives.untitledPrint', 'Untitled print')}</span>
-                      <span className="text-[11px] text-bambu-gray">{formatDateOnly(entry.completed_at || entry.started_at || entry.created_at, { month: 'short', day: 'numeric' })}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
             <div className="mt-3 flex items-center gap-2">
               <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">
                 {t('printers.controls')}
@@ -3118,6 +3096,29 @@ function SinglePrinterCockpit({
           setShowUploadForPrint(false);
           setPrintAfterUpload({ id: uploadedFile.id, filename: uploadedFile.filename });
         }}
+        beforeDropZone={reprintableRecentPrints.length > 0 ? (
+          <section>
+            <div className="mb-2 text-[10px] font-medium uppercase tracking-wide text-bambu-gray">
+              {t('printers.single.quickReprint', 'Quick reprint')}
+            </div>
+            <div className="grid gap-1.5">
+              {reprintableRecentPrints.map(entry => (
+                <button
+                  key={entry.id}
+                  type="button"
+                  onClick={() => {
+                    setShowUploadForPrint(false);
+                    setReprintEntry(entry);
+                  }}
+                  className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 rounded-md bg-bambu-dark px-2.5 py-2 text-left transition-colors hover:bg-bambu-dark-tertiary"
+                >
+                  <span className="truncate text-xs text-white">{entry.print_name || t('archives.untitledPrint', 'Untitled print')}</span>
+                  <span className="text-[11px] text-bambu-gray">{formatDateOnly(entry.completed_at || entry.started_at || entry.created_at, { month: 'short', day: 'numeric' })}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        ) : undefined}
       />
     )}
     {printAfterUpload && (
@@ -3825,7 +3826,7 @@ function PrinterCard({
   });
   const lastPrint = lastPrints?.[0];
   const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
-  const needsPlateClear = requirePlateClear && status?.awaiting_plate_clear === true;
+  const needsPlateClear = requirePlateClear && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
   const showClearPlateButton = status?.connected && needsPlateClear && !isPrintingOrPaused;
   const activePrintName = status?.current_print && isPrintingOrPaused
     ? formatPrintName(status.subtask_name || status.current_print || null, status.gcode_file, t, activePlateLabel)
