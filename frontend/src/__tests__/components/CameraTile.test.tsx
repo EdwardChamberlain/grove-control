@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, screen } from '@testing-library/react';
+import { act, fireEvent, screen } from '@testing-library/react';
 import { render } from '../utils';
 import { CameraTile } from '../../components/CameraTile';
 
@@ -88,6 +88,69 @@ describe('CameraTile', () => {
     );
     await flushMicrotasks();
     expect(screen.queryByAltText('H2D-Booth')).toBeNull();
+  });
+
+  it('keeps tile navigation separate from the full-screen action', async () => {
+    const onClick = vi.fn();
+    const onOpenFullscreen = vi.fn();
+    render(
+      <CameraTile
+        printerId={5}
+        printerName="X1C-Camera"
+        mode="live"
+        snapshotIntervalMs={5000}
+        connected
+        onClick={onClick}
+        onOpenFullscreen={onOpenFullscreen}
+      />,
+    );
+    await flushMicrotasks();
+
+    fireEvent.click(screen.getByRole('button', { name: 'X1C-Camera' }));
+    expect(onClick).toHaveBeenCalledOnce();
+    expect(onOpenFullscreen).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open full screen' }));
+    expect(onOpenFullscreen).toHaveBeenCalledOnce();
+    expect(onClick).toHaveBeenCalledOnce();
+  });
+
+  it('does not trigger tile navigation from fullscreen keyboard events', async () => {
+    const onClick = vi.fn();
+    render(
+      <CameraTile
+        printerId={5}
+        printerName="X1C-Camera"
+        mode="live"
+        snapshotIntervalMs={5000}
+        connected
+        onClick={onClick}
+        onOpenFullscreen={vi.fn()}
+      />,
+    );
+    await flushMicrotasks();
+
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Open full screen' }), { key: 'Enter' });
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('shows printer progress across the bottom of the camera frame', async () => {
+    render(
+      <CameraTile
+        printerId={6}
+        printerName="P1S-Printing"
+        mode="live"
+        snapshotIntervalMs={5000}
+        connected
+        printerState="RUNNING"
+        progress={64}
+      />,
+    );
+    await flushMicrotasks();
+
+    const progressbar = screen.getByRole('progressbar', { name: 'Print progress' });
+    expect(progressbar).toHaveAttribute('aria-valuenow', '64');
+    expect(progressbar.firstElementChild).toHaveStyle({ width: '64%' });
   });
 
   it('POSTs /camera/stop when leaving live mode', async () => {

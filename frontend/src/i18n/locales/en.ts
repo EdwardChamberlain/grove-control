@@ -186,13 +186,6 @@ export default {
       ascending: 'Sort ascending',
       descending: 'Sort descending',
     },
-    // Card size
-    cardSize: {
-      small: 'Small cards',
-      medium: 'Medium cards',
-      large: 'Large cards',
-      extraLarge: 'Extra large cards',
-    },
     pageView: {
       cards: 'Cards',
       camWall: 'Cam wall',
@@ -206,19 +199,12 @@ export default {
       summary: '{{live}} live, {{snap}} snapshots, {{total}} total',
       layer: 'Layer {{cur}}/{{total}}',
       timeLeft: '{{time}} left',
-      statusMode: {
-        off: 'Off',
-        compact: 'Compact',
-        full: 'Full',
-      },
       settings: {
         title: 'Cam wall settings',
         maxLive: 'Max live streams',
         maxLiveHint: 'How many tiles stream live at once. Others refresh as snapshots.',
         snapshotInterval: 'Snapshot interval (seconds)',
         snapshotIntervalHint: 'How often non-live tiles fetch a fresh snapshot.',
-        statusOverlay: 'Status overlay',
-        statusOverlayHint: 'Compact: state badge only. Full: + progress, layer, time left.',
       },
     },
     // Controls
@@ -594,6 +580,17 @@ export default {
     activeJobSlot: {
       title: 'This slot is filament {{n}} in the active print',
       ariaLabel: 'Active print slot {{n}}',
+    },
+    health: {
+      healthy: 'Healthy', attentionRequired: 'Requires attention', error: 'Error',
+      title: 'Machine health: {{status}}', statusDetails: 'Status details',
+    },
+    single: {
+      machineList: 'Machines', machineCountOne: '1 printer', machineCount: '{{count}} printers', quickReprint: 'Quick reprint',
+      jog: 'Jog', moveYForward: 'Move Y forward', moveXLeft: 'Move X left', moveXRight: 'Move X right', moveYBack: 'Move Y back',
+      retractFilament: 'Retract filament', extrudeFilament: 'Extrude filament',
+      setNozzleTemperature: 'Set Nozzle Temperature', setBedTemperature: 'Set Bed Temperature', setChamberTemperature: 'Set Chamber Temperature', setFanSpeed: 'Set {{fan}} Speed',
+      chamberLightState: 'Chamber light {{state}}', nozzleTemperatureSet: 'Nozzle temperature set', bedTemperatureSet: 'Bed temperature set', chamberTemperatureSet: 'Chamber temperature set', fanSpeedSet: 'Fan speed set',
     },
     // Filaments section
     filaments: 'Filaments',
@@ -1330,6 +1327,9 @@ export default {
     energyCost: 'Energy Cost',
     energyWarmingUpTooltip: 'Energy tracking is still collecting hourly snapshots. Date-range totals will become accurate once at least one snapshot exists before the selected range. Early values may undercount.',
     averagePrintTime: 'Average Print Time',
+    topFilament: 'Top filament: {{filament}}',
+    fromPrintHistory: 'From print history',
+    completedPrintAverage: 'Completed prints',
     printsPerDay: 'Prints per Day',
     byPrinter: 'By Printer',
     printsByPrinter: 'Prints by Printer',

@@ -186,13 +186,6 @@ export default {
       ascending: '升序排列',
       descending: '降序排列',
     },
-    // Card size
-    cardSize: {
-      small: '小卡片',
-      medium: '中卡片',
-      large: '大卡片',
-      extraLarge: '超大卡片',
-    },
     pageView: {
       cards: '卡片',
       camWall: '摄像头墙',
@@ -206,19 +199,12 @@ export default {
       summary: '直播 {{live}} 个，快照 {{snap}} 个，共 {{total}} 个',
       layer: '第 {{cur}}/{{total}} 层',
       timeLeft: '剩余 {{time}}',
-      statusMode: {
-        off: '关闭',
-        compact: '简洁',
-        full: '完整',
-      },
       settings: {
         title: '摄像头墙设置',
         maxLive: '最大直播数',
         maxLiveHint: '同时直播的画面数量。其他画面以快照刷新。',
         snapshotInterval: '快照刷新间隔（秒）',
         snapshotIntervalHint: '非直播画面获取新快照的频率。',
-        statusOverlay: '状态叠加',
-        statusOverlayHint: '简洁：仅显示状态标签。完整：加上进度、层数、剩余时间。',
       },
     },
     // Controls
@@ -590,6 +576,17 @@ export default {
     activeJobSlot: {
       title: '此料槽在当前打印中是耗材 {{n}}',
       ariaLabel: '当前打印料槽 {{n}}',
+    },
+    health: {
+      healthy: '健康', attentionRequired: '需要注意', error: '错误',
+      title: '设备健康状态：{{status}}', statusDetails: '状态详情',
+    },
+    single: {
+      machineList: '设备', machineCountOne: '1 台打印机', machineCount: '{{count}} 台打印机', quickReprint: '快速重印',
+      jog: '点动', moveYForward: 'Y 轴向前移动', moveXLeft: 'X 轴向左移动', moveXRight: 'X 轴向右移动', moveYBack: 'Y 轴向后移动',
+      retractFilament: '回抽耗材', extrudeFilament: '挤出耗材',
+      setNozzleTemperature: '设置喷嘴温度', setBedTemperature: '设置热床温度', setChamberTemperature: '设置腔体温度', setFanSpeed: '设置{{fan}}速度',
+      chamberLightState: '腔体灯{{state}}', nozzleTemperatureSet: '喷嘴温度已设置', bedTemperatureSet: '热床温度已设置', chamberTemperatureSet: '腔体温度已设置', fanSpeedSet: '风扇速度已设置',
     },
     // Filaments section
     filaments: '耗材',
@@ -1319,6 +1316,9 @@ export default {
     energyCost: '能源成本',
     energyWarmingUpTooltip: '能耗追踪正在收集每小时快照。当所选范围之前至少存在一个快照时，时间段合计将变得准确。早期数值可能偏低。',
     averagePrintTime: '平均打印时间',
+    topFilament: '常用耗材：{{filament}}',
+    fromPrintHistory: '来自打印历史',
+    completedPrintAverage: '已完成打印',
     printsPerDay: '每日打印次数',
     byPrinter: '按打印机',
     printsByPrinter: '各打印机打印次数',

@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, VideoOff, WifiOff } from 'lucide-react';
+import { Maximize2, VideoOff, WifiOff } from 'lucide-react';
 import { getAuthToken, withStreamToken } from '../api/client';
-import { formatDuration } from '../utils/date';
 
 export type CameraTileMode = 'live' | 'snapshot' | 'paused';
-export type CameraTileStatusMode = 'off' | 'compact' | 'full';
 
 interface CameraTileProps {
   printerId: number;
@@ -15,16 +13,9 @@ interface CameraTileProps {
   snapshotIntervalMs: number;
   connected: boolean;
   onClick?: () => void;
-  // Optional status overlay — wired by CameraWall from the shared
-  // ['printerStatus', id] query. All optional so existing tests don't break.
-  statusMode?: CameraTileStatusMode;
+  onOpenFullscreen?: () => void;
   printerState?: string | null;
   progress?: number | null;
-  remainingMin?: number | null;
-  layerNum?: number | null;
-  totalLayers?: number | null;
-  printName?: string | null;
-  hmsErrorCount?: number;
 }
 
 // Tiles render lighter than EmbeddedCameraViewer's full window: lower fps,
@@ -34,8 +25,7 @@ const LIVE_FPS = 8;
 
 type StatusBucket = 'printing' | 'paused' | 'finished' | 'error' | 'idle';
 
-function classifyState(state: string | null | undefined, hmsErrorCount: number): StatusBucket {
-  if (hmsErrorCount > 0) return 'error';
+function classifyState(state: string | null | undefined): StatusBucket {
   switch (state) {
     case 'RUNNING':
       return 'printing';
@@ -49,14 +39,6 @@ function classifyState(state: string | null | undefined, hmsErrorCount: number):
   }
 }
 
-const BUCKET_CHIP_CLASS: Record<StatusBucket, string> = {
-  printing: 'bg-bambu-green/85 text-black',
-  paused: 'bg-amber-500/85 text-black',
-  finished: 'bg-sky-500/80 text-white',
-  error: 'bg-red-500/85 text-white',
-  idle: 'bg-bambu-dark-tertiary/80 text-bambu-gray',
-};
-
 export function CameraTile({
   printerId,
   printerName,
@@ -65,14 +47,9 @@ export function CameraTile({
   snapshotIntervalMs,
   connected,
   onClick,
-  statusMode = 'off',
+  onOpenFullscreen,
   printerState = null,
   progress = null,
-  remainingMin = null,
-  layerNum = null,
-  totalLayers = null,
-  printName = null,
-  hmsErrorCount = 0,
 }: CameraTileProps) {
   const { t } = useTranslation();
   const [bust, setBust] = useState(0);
@@ -134,24 +111,15 @@ export function CameraTile({
 
   const transform = cameraRotation ? `rotate(${cameraRotation}deg)` : undefined;
 
-  const bucket = classifyState(printerState, hmsErrorCount);
-  // Hide chip for idle to keep cold walls clean; always show when something
-  // is happening (printing/paused/finished/error).
-  const showChip = connected && statusMode !== 'off' && bucket !== 'idle';
+  const bucket = classifyState(printerState);
   const isPrintingOrPaused = bucket === 'printing' || bucket === 'paused';
-  const showInfoStrip = connected && statusMode === 'full' && isPrintingOrPaused;
-  const fileLabel = printName ?? null;
   const progressPct = progress != null ? Math.round(progress) : null;
-  const hasLayers = layerNum != null && totalLayers != null && totalLayers > 0;
-  const hasRemaining = remainingMin != null && remainingMin > 0;
+  const displayedProgress = isPrintingOrPaused && progressPct != null
+    ? Math.max(0, Math.min(100, progressPct))
+    : 0;
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      className="group relative aspect-video w-full overflow-hidden rounded-lg border border-bambu-dark-tertiary bg-black text-left focus:outline-none focus:ring-2 focus:ring-bambu-green"
-      title={printerName}
-    >
+    <div className="group relative aspect-video w-full overflow-hidden rounded-lg border border-bambu-dark-tertiary bg-black text-left">
       {!connected || mode === 'paused' ? (
         <div className="absolute inset-0 flex items-center justify-center bg-bambu-dark/60">
           {connected ? (
@@ -178,24 +146,17 @@ export function CameraTile({
         />
       )}
 
-      {/* Status chip (top-left) */}
-      {showChip && (
-        <span
-          className={`absolute left-2 top-2 flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${BUCKET_CHIP_CLASS[bucket]}`}
-        >
-          {hmsErrorCount > 0 && (
-            <AlertTriangle
-              className="h-3 w-3"
-              aria-hidden="true"
-            />
-          )}
-          <span>{t(`printers.status.${bucket}`)}</span>
-        </span>
-      )}
+      <button
+        type="button"
+        onClick={handleClick}
+        className="absolute inset-0 z-10 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-bambu-green"
+        title={printerName}
+        aria-label={printerName}
+      />
 
-      {/* Mode indicator (top-right) */}
+      {/* Mode indicator (top-left) */}
       <span
-        className={`absolute right-2 top-2 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+        className={`pointer-events-none absolute left-2 top-2 z-20 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
           mode === 'live'
             ? 'bg-red-500/80 text-white'
             : mode === 'snapshot'
@@ -210,39 +171,39 @@ export function CameraTile({
             : t('printers.camWall.off')}
       </span>
 
-      {/* Bottom overlay: name + (when full) print info */}
-      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/55 to-transparent px-2 pb-1.5 pt-3 text-white">
-        {showInfoStrip && (
-          <div className="mb-0.5 space-y-0.5 text-[11px] leading-tight text-white/90">
-            {fileLabel && (
-              <div className="truncate" title={fileLabel}>
-                {fileLabel}
-              </div>
-            )}
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-bambu-gray">
-              {progressPct != null && (
-                <span className="font-semibold text-white">{progressPct}%</span>
-              )}
-              {hasLayers && (
-                <span>
-                  {t('printers.camWall.layer', {
-                    cur: layerNum,
-                    total: totalLayers,
-                  })}
-                </span>
-              )}
-              {hasRemaining && (
-                <span>
-                  {t('printers.camWall.timeLeft', {
-                    time: formatDuration((remainingMin ?? 0) * 60),
-                  })}
-                </span>
-              )}
-            </div>
-          </div>
-        )}
+      {onOpenFullscreen && (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onOpenFullscreen();
+          }}
+          className="absolute right-2 top-2 z-30 inline-flex h-7 w-7 items-center justify-center rounded bg-black/65 text-white transition-colors hover:bg-black/85 focus:outline-none focus:ring-2 focus:ring-bambu-green"
+          title={t('printers.camWall.openFullScreen', 'Open full screen')}
+          aria-label={t('printers.camWall.openFullScreen', 'Open full screen')}
+        >
+          <Maximize2 className="h-3.5 w-3.5" />
+        </button>
+      )}
+
+      {/* Printer name */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-1.5 z-20 px-2 pb-1.5 pt-3 text-white">
         <span className="block truncate text-xs font-medium">{printerName}</span>
       </div>
-    </button>
+
+      <div
+        role="progressbar"
+        aria-label={t('printers.camWall.progressLabel', 'Print progress')}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={displayedProgress}
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-1.5 overflow-hidden bg-bambu-dark-tertiary"
+      >
+        <div
+          className={`h-full rounded-r-full transition-all ${bucket === 'paused' ? 'bg-status-warning' : 'bg-bambu-green'}`}
+          style={{ width: `${displayedProgress}%` }}
+        />
+      </div>
+    </div>
   );
 }

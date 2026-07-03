@@ -174,12 +174,6 @@ export default {
       ascending: '오름차순 정렬',
       descending: '내림차순 정렬'
     },
-    cardSize: {
-      small: '작은 카드',
-      medium: '중간 카드',
-      large: '큰 카드',
-      extraLarge: '아주 큰 카드'
-    },
     pageView: {
       cards: '카드',
       camWall: '카메라 월'
@@ -193,19 +187,12 @@ export default {
       summary: '라이브 {{live}}개, 스냅 {{snap}}개, 총 {{total}}개',
       layer: '레이어 {{cur}}/{{total}}',
       timeLeft: '{{time}} 남음',
-      statusMode: {
-        off: '꺼짐',
-        compact: '간단',
-        full: '전체'
-      },
       settings: {
         title: '카메라 월 설정',
         maxLive: '최대 라이브 스트림',
         maxLiveHint: '동시에 라이브 스트리밍할 타일 수. 나머지는 스냅샷으로 갱신됩니다.',
         snapshotInterval: '스냅샷 간격(초)',
         snapshotIntervalHint: '비라이브 타일이 새 스냅샷을 가져오는 주기.',
-        statusOverlay: '상태 표시',
-        statusOverlayHint: '간단: 상태 배지만 표시. 전체: + 진행률, 레이어, 남은 시간.'
       }
     },
     hideOffline: '오프라인 숨기기',
@@ -553,6 +540,17 @@ export default {
     activeJobSlot: {
       title: '이 슬롯은 활성 인쇄의 필라멘트 {{n}}입니다',
       ariaLabel: '활성 인쇄 슬롯 {{n}}'
+    },
+    health: {
+      healthy: '정상', attentionRequired: '주의 필요', error: '오류',
+      title: '장비 상태: {{status}}', statusDetails: '상태 세부 정보',
+    },
+    single: {
+      machineList: '장비', machineCountOne: '프린터 1대', machineCount: '프린터 {{count}}대', quickReprint: '빠른 재인쇄',
+      jog: '이동', moveYForward: 'Y 앞으로 이동', moveXLeft: 'X 왼쪽으로 이동', moveXRight: 'X 오른쪽으로 이동', moveYBack: 'Y 뒤로 이동',
+      retractFilament: '필라멘트 후퇴', extrudeFilament: '필라멘트 압출',
+      setNozzleTemperature: '노즐 온도 설정', setBedTemperature: '베드 온도 설정', setChamberTemperature: '챔버 온도 설정', setFanSpeed: '{{fan}} 속도 설정',
+      chamberLightState: '챔버 조명 {{state}}', nozzleTemperatureSet: '노즐 온도 설정됨', bedTemperatureSet: '베드 온도 설정됨', chamberTemperatureSet: '챔버 온도 설정됨', fanSpeedSet: '팬 속도 설정됨',
     },
     filaments: '필라멘트',
     openCameraOverlay: '카메라 오버레이 열기',
@@ -1256,6 +1254,9 @@ export default {
     energyCost: '에너지 비용',
     energyWarmingUpTooltip: '에너지 추적이 시간별 스냅샷을 수집 중입니다. 날짜 범위 합계는 선택한 범위 이전에 하나 이상의 스냅샷이 존재하면 정확해집니다. 초기 값이 적게 집계될 수 있습니다.',
     averagePrintTime: '평균 인쇄 시간',
+    topFilament: '주요 필라멘트: {{filament}}',
+    fromPrintHistory: '인쇄 기록 기준',
+    completedPrintAverage: '완료된 인쇄',
     printsPerDay: '일일 인쇄 수',
     byPrinter: '프린터별',
     printsByPrinter: '프린터별 인쇄',

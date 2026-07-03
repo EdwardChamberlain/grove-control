@@ -186,13 +186,6 @@ export default {
       ascending: '升序排列',
       descending: '降序排列',
     },
-    // Card size
-    cardSize: {
-      small: '小卡片',
-      medium: '中卡片',
-      large: '大卡片',
-      extraLarge: '超大卡片',
-    },
     pageView: {
       cards: '卡片',
       camWall: '攝影機牆',
@@ -206,19 +199,12 @@ export default {
       summary: '直播 {{live}} 個，快照 {{snap}} 個，共 {{total}} 個',
       layer: '第 {{cur}}/{{total}} 層',
       timeLeft: '剩餘 {{time}}',
-      statusMode: {
-        off: '關閉',
-        compact: '精簡',
-        full: '完整',
-      },
       settings: {
         title: '攝影機牆設定',
         maxLive: '最大直播數',
         maxLiveHint: '同時直播的畫面數量。其他畫面以快照重新整理。',
         snapshotInterval: '快照重新整理間隔（秒）',
         snapshotIntervalHint: '非直播畫面取得新快照的頻率。',
-        statusOverlay: '狀態疊加',
-        statusOverlayHint: '精簡：僅顯示狀態標籤。完整：加上進度、層數、剩餘時間。',
       },
     },
     // Controls
@@ -590,6 +576,17 @@ export default {
     activeJobSlot: {
       title: '此料槽在目前列印中是耗材 {{n}}',
       ariaLabel: '目前列印料槽 {{n}}',
+    },
+    health: {
+      healthy: '健康', attentionRequired: '需要注意', error: '錯誤',
+      title: '設備健康狀態：{{status}}', statusDetails: '狀態詳情',
+    },
+    single: {
+      machineList: '設備', machineCountOne: '1 台印表機', machineCount: '{{count}} 台印表機', quickReprint: '快速重印',
+      jog: '點動', moveYForward: 'Y 軸向前移動', moveXLeft: 'X 軸向左移動', moveXRight: 'X 軸向右移動', moveYBack: 'Y 軸向後移動',
+      retractFilament: '回抽耗材', extrudeFilament: '擠出耗材',
+      setNozzleTemperature: '設定噴嘴溫度', setBedTemperature: '設定熱床溫度', setChamberTemperature: '設定腔體溫度', setFanSpeed: '設定{{fan}}速度',
+      chamberLightState: '腔體燈{{state}}', nozzleTemperatureSet: '噴嘴溫度已設定', bedTemperatureSet: '熱床溫度已設定', chamberTemperatureSet: '腔體溫度已設定', fanSpeedSet: '風扇速度已設定',
     },
     // Filaments section
     filaments: '耗材',
@@ -1319,6 +1316,9 @@ export default {
     energyCost: '能源成本',
     energyWarmingUpTooltip: '能耗追蹤正在收集每小時快照。當所選範圍之前至少存在一個快照時，時間段合計將變得準確。早期數值可能偏低。',
     averagePrintTime: '平均列印時間',
+    topFilament: '常用耗材：{{filament}}',
+    fromPrintHistory: '來自列印歷史',
+    completedPrintAverage: '已完成列印',
     printsPerDay: '每日列印次數',
     byPrinter: '按印表機',
     printsByPrinter: '各印表機列印次數',

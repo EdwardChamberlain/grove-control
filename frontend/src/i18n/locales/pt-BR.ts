@@ -186,13 +186,6 @@ export default {
       ascending: 'Ordem crescente',
       descending: 'Ordem decrescente',
     },
-    // Card size
-    cardSize: {
-      small: 'Cartões pequenos',
-      medium: 'Cartões médios',
-      large: 'Cartões grandes',
-      extraLarge: 'Cartões extra grandes',
-    },
     pageView: {
       cards: 'Cartões',
       camWall: 'Mural de câmeras',
@@ -206,19 +199,12 @@ export default {
       summary: '{{live}} ao vivo, {{snap}} fotos, {{total}} no total',
       layer: 'Camada {{cur}}/{{total}}',
       timeLeft: 'faltam {{time}}',
-      statusMode: {
-        off: 'Desligado',
-        compact: 'Compacto',
-        full: 'Completo',
-      },
       settings: {
         title: 'Configurações do mural de câmeras',
         maxLive: 'Máx. transmissões ao vivo',
         maxLiveHint: 'Quantos blocos transmitem ao vivo simultaneamente. Os demais atualizam como fotos.',
         snapshotInterval: 'Intervalo de foto (segundos)',
         snapshotIntervalHint: 'Com que frequência os blocos não ao vivo buscam uma nova foto.',
-        statusOverlay: 'Sobreposição de status',
-        statusOverlayHint: 'Compacto: apenas o selo de status. Completo: + progresso, camada e tempo restante.',
       },
     },
     // Controls
@@ -590,6 +576,17 @@ export default {
     activeJobSlot: {
       title: 'Este slot é o filamento {{n}} na impressão ativa',
       ariaLabel: 'Slot de impressão ativa {{n}}',
+    },
+    health: {
+      healthy: 'Saudável', attentionRequired: 'Requer atenção', error: 'Erro',
+      title: 'Saúde da máquina: {{status}}', statusDetails: 'Detalhes do status',
+    },
+    single: {
+      machineList: 'Máquinas', machineCountOne: '1 impressora', machineCount: '{{count}} impressoras', quickReprint: 'Reimpressão rápida',
+      jog: 'Movimento', moveYForward: 'Mover Y para frente', moveXLeft: 'Mover X para a esquerda', moveXRight: 'Mover X para a direita', moveYBack: 'Mover Y para trás',
+      retractFilament: 'Retrair filamento', extrudeFilament: 'Extrudar filamento',
+      setNozzleTemperature: 'Definir temperatura do bico', setBedTemperature: 'Definir temperatura da mesa', setChamberTemperature: 'Definir temperatura da câmara', setFanSpeed: 'Definir velocidade de {{fan}}',
+      chamberLightState: 'Luz da câmara {{state}}', nozzleTemperatureSet: 'Temperatura do bico definida', bedTemperatureSet: 'Temperatura da mesa definida', chamberTemperatureSet: 'Temperatura da câmara definida', fanSpeedSet: 'Velocidade do ventilador definida',
     },
     // Filaments section
     filaments: 'Filamentos',
@@ -1319,6 +1316,9 @@ export default {
     energyCost: 'Custo da Energia',
     energyWarmingUpTooltip: 'O monitoramento de energia ainda está coletando snapshots por hora. Os totais por período ficarão precisos quando houver pelo menos um snapshot antes do intervalo selecionado. Valores iniciais podem ser subestimados.',
     averagePrintTime: 'Tempo Médio de Impressão',
+    topFilament: 'Filamento principal: {{filament}}',
+    fromPrintHistory: 'Do histórico de impressões',
+    completedPrintAverage: 'Impressões concluídas',
     printsPerDay: 'Impressões por Dia',
     byPrinter: 'Por Impressora',
     printsByPrinter: 'Impressões por Impressora',
