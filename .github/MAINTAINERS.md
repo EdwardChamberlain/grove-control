@@ -118,12 +118,11 @@ Example:
 
 1. Update `VERSION` and run `python scripts/check_version.py`
 2. Create a PR with these changes
-3. After merge, tag the release:
-   ```bash
-   git tag v0.1.x
-   git push origin v0.1.x
-   ```
-4. Push the tag and let the Docker publish workflow build and publish the release image
+3. Merge the version change into `main`
+4. In GitHub, open **Actions** and select the **Docker Publish** workflow
+5. Select **Run workflow** to build the image from `main` and publish it to GHCR with both tags:
+   - `latest`
+   - `vX.Y.Z`, using the version in `VERSION`
 
 ## Dependabot (Optional)
 
