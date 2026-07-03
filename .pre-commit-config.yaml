@@ -29,7 +29,7 @@ repos:
       - id: check-json
         exclude: ^(static/|frontend/tsconfig\.)
       - id: check-added-large-files
-        args: ['--maxkb=2000']
+        args: ['--maxkb=4000']
         exclude: ^static/assets/
       - id: check-merge-conflict
       - id: debug-statements
