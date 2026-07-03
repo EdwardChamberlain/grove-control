@@ -581,7 +581,7 @@ export default {
       title: 'マシン状態: {{status}}', statusDetails: '状態の詳細',
     },
     single: {
-      machineList: 'マシン', machineCountOne: 'プリンター1台', machineCount: 'プリンター{{count}}台', quickReprint: 'クイック再印刷',
+      machineList: 'マシン', machineCountOne: 'プリンター1台', machineCount: 'プリンター{{count}}台', quickReprint: 'クイック再印刷', stats: '統計',
       jog: 'ジョグ', moveYForward: 'Yを前へ移動', moveXLeft: 'Xを左へ移動', moveXRight: 'Xを右へ移動', moveYBack: 'Yを後ろへ移動',
       retractFilament: 'フィラメントを引き戻す', extrudeFilament: 'フィラメントを押し出す',
       setNozzleTemperature: 'ノズル温度を設定', setBedTemperature: 'ベッド温度を設定', setChamberTemperature: 'チャンバー温度を設定', setFanSpeed: '{{fan}}速度を設定',

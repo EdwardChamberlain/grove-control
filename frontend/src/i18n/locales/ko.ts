@@ -546,7 +546,7 @@ export default {
       title: '장비 상태: {{status}}', statusDetails: '상태 세부 정보',
     },
     single: {
-      machineList: '장비', machineCountOne: '프린터 1대', machineCount: '프린터 {{count}}대', quickReprint: '빠른 재인쇄',
+      machineList: '장비', machineCountOne: '프린터 1대', machineCount: '프린터 {{count}}대', quickReprint: '빠른 재인쇄', stats: '통계',
       jog: '이동', moveYForward: 'Y 앞으로 이동', moveXLeft: 'X 왼쪽으로 이동', moveXRight: 'X 오른쪽으로 이동', moveYBack: 'Y 뒤로 이동',
       retractFilament: '필라멘트 후퇴', extrudeFilament: '필라멘트 압출',
       setNozzleTemperature: '노즐 온도 설정', setBedTemperature: '베드 온도 설정', setChamberTemperature: '챔버 온도 설정', setFanSpeed: '{{fan}} 속도 설정',

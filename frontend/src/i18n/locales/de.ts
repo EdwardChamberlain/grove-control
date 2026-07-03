@@ -582,7 +582,7 @@ export default {
       title: 'Maschinenzustand: {{status}}', statusDetails: 'Statusdetails',
     },
     single: {
-      machineList: 'Maschinen', machineCountOne: '1 Drucker', machineCount: '{{count}} Drucker', quickReprint: 'Schneller Nachdruck',
+      machineList: 'Maschinen', machineCountOne: '1 Drucker', machineCount: '{{count}} Drucker', quickReprint: 'Schneller Nachdruck', stats: 'Statistiken',
       jog: 'Verfahren', moveYForward: 'Y vorwärts bewegen', moveXLeft: 'X nach links bewegen', moveXRight: 'X nach rechts bewegen', moveYBack: 'Y rückwärts bewegen',
       retractFilament: 'Filament zurückziehen', extrudeFilament: 'Filament extrudieren',
       setNozzleTemperature: 'Düsentemperatur einstellen', setBedTemperature: 'Druckbetttemperatur einstellen', setChamberTemperature: 'Kammertemperatur einstellen', setFanSpeed: '{{fan}}-Geschwindigkeit einstellen',

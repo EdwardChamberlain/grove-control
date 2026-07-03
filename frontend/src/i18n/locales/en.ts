@@ -586,7 +586,7 @@ export default {
       title: 'Machine health: {{status}}', statusDetails: 'Status details',
     },
     single: {
-      machineList: 'Machines', machineCountOne: '1 printer', machineCount: '{{count}} printers', quickReprint: 'Quick reprint',
+      machineList: 'Machines', machineCountOne: '1 printer', machineCount: '{{count}} printers', quickReprint: 'Quick reprint', stats: 'Stats',
       jog: 'Jog', moveYForward: 'Move Y forward', moveXLeft: 'Move X left', moveXRight: 'Move X right', moveYBack: 'Move Y back',
       retractFilament: 'Retract filament', extrudeFilament: 'Extrude filament',
       setNozzleTemperature: 'Set Nozzle Temperature', setBedTemperature: 'Set Bed Temperature', setChamberTemperature: 'Set Chamber Temperature', setFanSpeed: 'Set {{fan}} Speed',

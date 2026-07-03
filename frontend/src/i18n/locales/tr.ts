@@ -582,7 +582,7 @@ export default {
       title: 'Makine durumu: {{status}}', statusDetails: 'Durum ayrıntıları',
     },
     single: {
-      machineList: 'Makineler', machineCountOne: '1 yazıcı', machineCount: '{{count}} yazıcı', quickReprint: 'Hızlı yeniden yazdırma',
+      machineList: 'Makineler', machineCountOne: '1 yazıcı', machineCount: '{{count}} yazıcı', quickReprint: 'Hızlı yeniden yazdırma', stats: 'İstatistikler',
       jog: 'Hareket', moveYForward: 'Y ileri hareket', moveXLeft: 'X sola hareket', moveXRight: 'X sağa hareket', moveYBack: 'Y geri hareket',
       retractFilament: 'Filamenti geri çek', extrudeFilament: 'Filamenti ekstrüde et',
       setNozzleTemperature: 'Nozul sıcaklığını ayarla', setBedTemperature: 'Tabla sıcaklığını ayarla', setChamberTemperature: 'Hazne sıcaklığını ayarla', setFanSpeed: '{{fan}} hızını ayarla',

@@ -582,7 +582,7 @@ export default {
       title: '設備健康狀態：{{status}}', statusDetails: '狀態詳情',
     },
     single: {
-      machineList: '設備', machineCountOne: '1 台印表機', machineCount: '{{count}} 台印表機', quickReprint: '快速重印',
+      machineList: '設備', machineCountOne: '1 台印表機', machineCount: '{{count}} 台印表機', quickReprint: '快速重印', stats: '統計',
       jog: '點動', moveYForward: 'Y 軸向前移動', moveXLeft: 'X 軸向左移動', moveXRight: 'X 軸向右移動', moveYBack: 'Y 軸向後移動',
       retractFilament: '回抽耗材', extrudeFilament: '擠出耗材',
       setNozzleTemperature: '設定噴嘴溫度', setBedTemperature: '設定熱床溫度', setChamberTemperature: '設定腔體溫度', setFanSpeed: '設定{{fan}}速度',
