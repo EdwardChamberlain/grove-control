@@ -375,9 +375,8 @@ AGPL-3.0 License — see [LICENSE](LICENSE) for details.
 
 ## 🙏 Acknowledgments
 
-- Bambuddy by MartinNYHC — Grove Control is built on and forked from the Bambuddy project, and owes a great deal to the strong foundation and awesome work behind it.
+- [Bambuddy by MartinNYHC](https://github.com/maziggy/bambuddy) — Grove Control is built on and forked from the Bambuddy project, and owes a great deal to the strong foundation and awesome work behind it.
 - [Bambu Lab](https://bambulab.com/) for amazing printers
-- The reverse engineering community for protocol documentation
 - All testers and contributors
 
 ---
