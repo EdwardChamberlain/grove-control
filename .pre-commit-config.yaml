@@ -29,8 +29,8 @@ repos:
       - id: check-json
         exclude: ^(static/|frontend/tsconfig\.)
       - id: check-added-large-files
-        args: ['--maxkb=4000']
-        exclude: ^static/assets/
+        args: ['--maxkb=2000']
+        exclude: ^(static/assets/|frontend/public/img/camera_placeholder\.afphoto$)
       - id: check-merge-conflict
       - id: debug-statements
       - id: detect-private-key
