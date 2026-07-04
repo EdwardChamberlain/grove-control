@@ -729,6 +729,18 @@ describe('PrintersPage', () => {
           dryingRequests.push(new URL(request.url));
           return HttpResponse.json({ status: 'started', ams_id: 0, temp: 45, duration: 12 });
         }),
+        http.get('/api/v1/printers/:id/ams-labels', () => HttpResponse.json({})),
+        http.get('/api/v1/ams-history/:printerId/:amsId', () => HttpResponse.json({
+          printer_id: 1,
+          ams_id: 0,
+          data: [],
+          min_humidity: null,
+          max_humidity: null,
+          avg_humidity: null,
+          min_temperature: null,
+          max_temperature: null,
+          avg_temperature: null,
+        })),
         http.get('/api/v1/smart-plugs/by-printer/:id', () => HttpResponse.json({
           id: 9,
           name: 'Cockpit Socket',
@@ -757,6 +769,14 @@ describe('PrintersPage', () => {
       expect(amsHeader).toHaveClass('px-2', 'py-1');
       const indicators = screen.getByTestId('cockpit-ams-indicators-0');
       expect(within(indicators).getByTitle(/Temperature:/).parentElement).toHaveClass('mr-1');
+
+      fireEvent.mouseEnter(within(amsHeader).getByText('HT-A').parentElement!);
+      expect(await screen.findByText('AMS123')).toBeInTheDocument();
+
+      fireEvent.click(within(indicators).getByTitle(/Temperature:/));
+      expect(await screen.findByText('HT-A History')).toBeInTheDocument();
+      fireEvent.click(screen.getByText('HT-A History').closest('div.fixed')!);
+
       const dryingButton = within(indicators).getByRole('button', { name: 'HT-A: Start Drying' });
       expect(dryingButton).toHaveClass('ml-1', 'px-1', 'py-0.5');
       fireEvent.click(dryingButton);

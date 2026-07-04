@@ -47,7 +47,7 @@ export function AmsDryingControl({
 // Compatibility alias for callers outside the composed AMS card implementation.
 export const AmsDryingButton = AmsDryingControl;
 
-export function AmsDryingStatus({ ams, controller }: { ams: AMSUnit; controller: AmsDryingController }) {
+export function AmsDryingStatus({ ams, controller, canControl }: { ams: AMSUnit; controller: AmsDryingController; canControl: boolean }) {
   const { t } = useTranslation();
   if (ams.dry_time <= 0) return null;
 
@@ -67,15 +67,17 @@ export function AmsDryingStatus({ ams, controller }: { ams: AMSUnit; controller:
       <span className="shrink-0 text-amber-300/70">
         {t('printers.drying.timeRemaining', { time: remaining })}
       </span>
-      <button
-        type="button"
-        onClick={() => controller.stop(ams.id)}
-        disabled={controller.isStopping}
-        className="ml-auto text-amber-400 transition-colors hover:text-amber-300 disabled:opacity-50"
-        title={t('printers.drying.stop')}
-      >
-        <X className="h-3 w-3" />
-      </button>
+      {canControl && (
+        <button
+          type="button"
+          onClick={() => controller.stop(ams.id)}
+          disabled={controller.isStopping}
+          className="ml-auto text-amber-400 transition-colors hover:text-amber-300 disabled:opacity-50"
+          title={t('printers.drying.stop')}
+        >
+          <X className="h-3 w-3" />
+        </button>
+      )}
     </div>
   );
 }

@@ -219,4 +219,27 @@ describe('PrintersPage - AMS load/unload (#891)', () => {
       expect(captured).toBe('254');
     });
   });
+
+  it('uses the full AMS hover interface in cockpit view', async () => {
+    server.use(
+      http.get('/api/v1/printers/:id/status', () => HttpResponse.json(mockIdleStatusWithAms)),
+      http.get('/api/v1/printers/:id/ams-labels', () => HttpResponse.json({})),
+    );
+
+    render(<PrintersPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+
+    const cockpit = await screen.findByTestId('cockpit-filament-pane');
+    const name = screen.getByTestId('cockpit-ams-header-0').querySelector('span');
+    expect(name).not.toBeNull();
+    fireEvent.mouseEnter(name!.parentElement!);
+    expect(await screen.findByText('AMS00')).toBeInTheDocument();
+
+    const slot = cockpit.querySelector('[data-testid="filament-slot"]');
+    expect(slot).not.toBeNull();
+    await hoverSlot(slot!);
+    expect(screen.getByText('Unload')).toBeInTheDocument();
+    expect(screen.getByText('Re-read RFID')).toBeInTheDocument();
+    expect(screen.getByText('Configure')).toBeInTheDocument();
+  });
 });
