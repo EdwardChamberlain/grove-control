@@ -835,23 +835,53 @@ describe('PrintersPage', () => {
       render(<PrintersPage />);
       fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
 
-      const nozzleTile = screen.getByText('Nozzle').closest('button');
-      expect(nozzleTile).not.toBeNull();
-      fireEvent.click(nozzleTile!);
+      const nozzleTile = screen.getByTestId('thermal-nozzle-control');
+      fireEvent.click(nozzleTile);
       expect(await screen.findByRole('button', { name: '131 C' })).toBeInTheDocument();
       const nozzlePopover = screen.getByText('Set Nozzle Temperature').parentElement;
       fireEvent.click(nozzlePopover?.previousElementSibling as Element);
 
-      const chamberTile = screen.getByText('Chamber').closest('button');
-      expect(chamberTile).not.toBeNull();
-      expect(chamberTile).toBeEnabled();
-      fireEvent.click(chamberTile!);
+      const chamberTile = screen.getByTestId('thermal-chamber-control');
+      fireEvent.click(chamberTile);
       expect(await screen.findByRole('button', { name: '41 C' })).toBeInTheDocument();
       const chamberPopover = screen.getByText('Set Chamber Temperature').parentElement;
       fireEvent.click(chamberPopover?.previousElementSibling as Element);
 
-      fireEvent.click(screen.getByTitle('Part Cooling Fan: 0%'));
+      fireEvent.click(screen.getByTitle('Part Cooling Fan'));
       expect(await screen.findByRole('button', { name: '33 %' })).toBeInTheDocument();
+    });
+
+    it('uses the expanded dual-nozzle controls in the cockpit', async () => {
+      server.use(
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+          ...mockPrinterStatus,
+          active_extruder: 0,
+          temperatures: {
+            ...mockPrinterStatus.temperatures,
+            nozzle_2: 27,
+            nozzle_2_target: 0,
+          },
+        })),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+      fireEvent.click(await screen.findByTestId('thermal-nozzle-control'));
+
+      expect(await screen.findByText('Set Nozzle Temperatures')).toBeInTheDocument();
+      expect(screen.getByText('Left Temp')).toBeInTheDocument();
+      expect(screen.getByText('Right Temp')).toBeInTheDocument();
+      expect(screen.getByTitle('Active: Right nozzle')).toBeInTheDocument();
+    });
+
+    it('opens heater history from the shared cockpit thermal controls', async () => {
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+
+      const nozzleControl = await screen.findByTestId('thermal-nozzle-control');
+      fireEvent.click(within(nozzleControl).getByTitle('View heater history'));
+
+      expect(await screen.findByText('Heater History')).toBeInTheDocument();
     });
 
     it('hides green plate clear status and action while idle', async () => {
