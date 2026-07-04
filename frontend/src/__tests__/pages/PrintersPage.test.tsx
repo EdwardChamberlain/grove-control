@@ -701,6 +701,78 @@ describe('PrintersPage', () => {
       expect((await screen.findAllByText('Skip Objects')).length).toBeGreaterThan(1);
     });
 
+    it('provides AMS drying and power socket controls in the single-printer cockpit', async () => {
+      const dryingRequests: URL[] = [];
+      const powerActions: string[] = [];
+      server.use(
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+          ...mockPrinterStatus,
+          supports_drying: true,
+          ams: [{
+            id: 0,
+            humidity: 35,
+            temp: 25,
+            is_ams_ht: false,
+            serial_number: 'AMS123',
+            sw_ver: '1.0.0',
+            module_type: 'n3f',
+            dry_time: 0,
+            dry_status: 0,
+            dry_sub_status: 0,
+            dry_sf_reason: [],
+            dry_target_temp: null,
+            dry_filament: null,
+            tray: [{ id: 0, tray_type: 'PLA', tray_color: 'FF0000FF', remain: 80, state: 10 }],
+          }],
+        })),
+        http.post('/api/v1/printers/:id/drying/start', ({ request }) => {
+          dryingRequests.push(new URL(request.url));
+          return HttpResponse.json({ status: 'started', ams_id: 0, temp: 45, duration: 12 });
+        }),
+        http.get('/api/v1/smart-plugs/by-printer/:id', () => HttpResponse.json({
+          id: 9,
+          name: 'Cockpit Socket',
+          auto_off: false,
+          auto_off_executed: false,
+        })),
+        http.get('/api/v1/smart-plugs/by-printer/:id/scripts', () => HttpResponse.json([])),
+        http.get('/api/v1/smart-plugs/:id/status', () => HttpResponse.json({
+          state: 'OFF',
+          reachable: true,
+          device_name: 'Cockpit Socket',
+          energy: { power: 42.4 },
+        })),
+        http.post('/api/v1/smart-plugs/:id/control', async ({ request }) => {
+          const body = await request.json() as { action: string };
+          powerActions.push(body.action);
+          return HttpResponse.json({ success: true, action: body.action });
+        }),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+
+      const amsHeader = await screen.findByTestId('cockpit-ams-header-0');
+      expect(amsHeader).toHaveClass('px-2', 'py-1');
+      const indicators = screen.getByTestId('cockpit-ams-indicators-0');
+      expect(within(indicators).getByTitle(/Temperature:/).parentElement).toHaveClass('mr-1');
+      const dryingButton = within(indicators).getByRole('button', { name: 'HT-A: Start Drying' });
+      expect(dryingButton).toHaveClass('ml-1', 'px-1', 'py-0.5');
+      fireEvent.click(dryingButton);
+      const dryingDialog = await screen.findByRole('dialog', { name: 'Start Drying' });
+      fireEvent.click(within(dryingDialog).getByRole('button', { name: 'Start Drying' }));
+      await waitFor(() => expect(dryingRequests).toHaveLength(1));
+      expect(dryingRequests[0].searchParams.get('filament')).toBe('PLA');
+      expect(dryingRequests[0].searchParams.get('temp')).toBe('45');
+
+      const powerControls = await screen.findByTestId('cockpit-power-controls');
+      expect(within(powerControls).getByText('Cockpit Socket')).toBeInTheDocument();
+      expect(within(powerControls).getByText('42W')).toBeInTheDocument();
+      fireEvent.click(within(powerControls).getByRole('button', { name: 'Cockpit Socket: Turn on' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Power On' }));
+      await waitFor(() => expect(powerActions).toEqual(['on']));
+    });
+
     it('restores the homing warning before single-printer Z movement', async () => {
       sessionStorage.clear();
       render(<PrintersPage />);
