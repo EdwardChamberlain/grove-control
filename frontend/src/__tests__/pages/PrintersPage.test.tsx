@@ -773,6 +773,30 @@ describe('PrintersPage', () => {
       await waitFor(() => expect(powerActions).toEqual(['on']));
     });
 
+    it('opens HMS error details from the shared cockpit status popup', async () => {
+      server.use(
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+          ...mockPrinterStatus,
+          hms_errors: [{ code: '0x4000', attr: 0x0300_0000, severity: 1 }],
+        })),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+
+      const cockpitHealthButton = (await screen.findAllByLabelText(/Machine health:/))
+        .find(button => button.classList.contains('h-9'));
+      expect(cockpitHealthButton).toBeDefined();
+      fireEvent.click(cockpitHealthButton!);
+
+      const statusDetails = await screen.findByText('Status details');
+      const popup = statusDetails.parentElement;
+      expect(within(popup!).getByText('Queue:')).toBeInTheDocument();
+      fireEvent.click(within(popup!).getByRole('button', { name: /Errors:.*1 active/ }));
+
+      expect(await screen.findByText('Errors - X1 Carbon')).toBeInTheDocument();
+    });
+
     it('restores the homing warning before single-printer Z movement', async () => {
       sessionStorage.clear();
       render(<PrintersPage />);

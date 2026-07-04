@@ -1,6 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { compareFwVersions } from '../utils/firmwareVersion';
 import { formatPrintName } from '../utils/printName';
 import { computePopoverPosition } from '../utils/popoverPosition';
 import {
@@ -30,7 +29,6 @@ import {
   Box,
   HardDrive,
   AlertTriangle,
-  AlertCircle,
   Terminal,
   Power,
   Zap,
@@ -87,7 +85,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, discoveryApi, firmwareApi, getAuthToken, withStreamToken, ApiError } from '../api/client';
 import { formatDateOnly, formatETA, formatDuration, parseUTCDate } from '../utils/date';
 import { getCurrencySymbol } from '../utils/currency';
-import type { Printer, PrinterCreate, PrinterStatus, AMSUnit, DiscoveredPrinter, FirmwareUpdateInfo, FirmwareUploadStatus, LinkedSpoolInfo, SpoolAssignment, HMSError, InventorySpool, PrinterDiagnosticResult, PrintLogEntry } from '../api/client';
+import type { Printer, PrinterCreate, PrinterStatus, AMSUnit, DiscoveredPrinter, LinkedSpoolInfo, SpoolAssignment, HMSError, InventorySpool, PrinterDiagnosticResult, PrintLogEntry } from '../api/client';
 import { Card, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -114,6 +112,8 @@ import { SkipObjectsModal, SkipObjectsIcon } from '../components/SkipObjectsModa
 import { FileUploadModal } from '../components/FileUploadModal';
 import { PrintModal } from '../components/PrintModal';
 import { PrinterPowerControls } from '../components/printer/PrinterPowerControls';
+import { PrinterHealthMenu } from '../components/printer/PrinterHealthMenu';
+import { FirmwareUpdateModal } from '../components/printer/FirmwareUpdateModal';
 import {
   AmsDryingButton,
   AmsDryingPopover,
@@ -1617,155 +1617,6 @@ function mapModelCode(ssdpModel: string | null): string {
   return modelMap[ssdpModel] || ssdpModel;
 }
 
-function ListHealthStatusMenu({
-  status,
-  printerHealth,
-  knownHmsErrors,
-  maintenanceInfo,
-  requirePlateClear,
-  needsPlateClear,
-  firmwareInfo,
-  hasDoorSensor,
-}: {
-  status?: PrinterStatus;
-  printerHealth: PrinterHealthMeta;
-  knownHmsErrors: HMSError[];
-  maintenanceInfo?: PrinterMaintenanceInfo;
-  requirePlateClear?: boolean;
-  needsPlateClear: boolean;
-  firmwareInfo?: FirmwareUpdateInfo;
-  hasDoorSensor: boolean;
-}) {
-  const { t } = useTranslation();
-  const [isOpen, setIsOpen] = useState(false);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
-  const rowClass = 'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium';
-  const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
-  const maintenanceDueCount = maintenanceInfo?.due_count ?? 0;
-  const maintenanceWarningCount = maintenanceInfo?.warning_count ?? 0;
-  const plateLabel = isPrintingOrPaused
-    ? t('printers.plateStatus.inUse')
-    : needsPlateClear
-      ? t('printers.plateStatus.notCleared')
-      : t('printers.plateStatus.cleared');
-  const networkClass = !status?.connected
-    ? 'bg-status-error/20 text-status-error'
-    : status.wired_network || status.wifi_signal == null || status.wifi_signal >= -60
-      ? 'bg-status-ok/20 text-status-ok'
-      : status.wifi_signal >= -80
-        ? 'bg-status-warning/20 text-status-warning'
-        : 'bg-status-error/20 text-status-error';
-
-  useLayoutEffect(() => {
-    if (!isOpen) return;
-    const measure = () => {
-      const rect = buttonRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      setCoords(computePopoverPosition({
-        triggerRect: rect,
-        popoverWidth: 240,
-        estimatedHeight: 320,
-        horizontalAlign: 'center',
-      }));
-    };
-    measure();
-    window.addEventListener('resize', measure);
-    window.addEventListener('scroll', measure, true);
-    return () => {
-      window.removeEventListener('resize', measure);
-      window.removeEventListener('scroll', measure, true);
-    };
-  }, [isOpen]);
-
-  return (
-    <>
-      <button
-        ref={buttonRef}
-        type="button"
-        onClick={(event) => {
-          event.stopPropagation();
-          setIsOpen((open) => !open);
-        }}
-        className={`pointer-events-auto inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-opacity hover:opacity-80 ${printerHealth.className}`}
-        title={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
-        aria-label={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
-        aria-expanded={isOpen}
-      >
-        <Activity className="h-4 w-4" />
-      </button>
-      {isOpen && createPortal(
-        <>
-          <div
-            className="fixed inset-0 z-[1000]"
-            onClick={(event) => {
-              event.stopPropagation();
-              setIsOpen(false);
-            }}
-          />
-          <div
-            className="fixed z-[1001] flex w-[240px] flex-col overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary shadow-2xl"
-            style={{
-              top: coords?.top ?? -9999,
-              left: coords?.left ?? -9999,
-              visibility: coords ? 'visible' : 'hidden',
-            }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="shrink-0 px-3 py-2.5 text-center text-sm font-medium text-white">
-              {t('printers.health.statusDetails', 'Status details')}
-            </div>
-            <div className="h-px bg-bambu-dark-tertiary" />
-            <div className="space-y-1.5 p-2.5">
-              <div className={`${rowClass} ${status?.connected ? 'bg-status-ok/20 text-status-ok' : 'bg-status-error/20 text-status-error'}`}>
-                {status?.connected ? <Link className="h-3 w-3" /> : <Unlink className="h-3 w-3" />}
-                <span>{t('printers.status.connection', 'Connection')}:</span>
-                <span>{status?.connected ? t('printers.connection.connected') : t('printers.connection.offline')}</span>
-              </div>
-              {requirePlateClear && status?.connected && (
-                <div className={`${rowClass} ${needsPlateClear ? 'bg-status-warning/20 text-status-warning' : 'bg-status-ok/20 text-status-ok'}`}>
-                  <PlateClearedIcon className="h-3 w-3" />
-                  <span>{t('printers.plateStatus.title', 'Plate')}:</span>
-                  <span>{plateLabel}</span>
-                </div>
-              )}
-              <div className={`${rowClass} ${networkClass}`}>
-                {status?.wired_network ? <Cable className="h-3 w-3" /> : <Signal className="h-3 w-3" />}
-                <span>{t('printers.status.network', 'Network')}:</span>
-                <span>{!status?.connected ? t('printers.connection.offline') : status.wired_network ? t('printers.connection.ethernet', 'Ethernet') : status.wifi_signal != null ? `${status.wifi_signal}dBm` : t('common.unknown', 'Unknown')}</span>
-              </div>
-              <div className={`${rowClass} ${!status?.connected ? 'bg-status-error/20 text-status-error' : knownHmsErrors.length > 0 ? knownHmsErrors.some((error) => error.severity <= 2) ? 'bg-status-error/20 text-status-error' : 'bg-status-warning/20 text-status-warning' : 'bg-status-ok/20 text-status-ok'}`}>
-                <AlertTriangle className="h-3 w-3" />
-                <span>{t('printers.status.errors', 'Errors')}:</span>
-                <span>{status?.connected ? knownHmsErrors.length > 0 ? t('printers.status.errorCount', '{{count}} active', { count: knownHmsErrors.length }) : t('common.ok', 'OK') : t('common.unknown', 'Unknown')}</span>
-              </div>
-              <div className={`${rowClass} ${maintenanceDueCount > 0 ? 'bg-status-error/20 text-status-error' : maintenanceWarningCount > 0 ? 'bg-status-warning/20 text-status-warning' : 'bg-status-ok/20 text-status-ok'}`}>
-                <Wrench className="h-3 w-3" />
-                <span>{t('maintenance.title', 'Maintenance')}:</span>
-                <span>{maintenanceDueCount > 0 ? t('maintenance.dueCount', { count: maintenanceDueCount }) : maintenanceWarningCount > 0 ? t('maintenance.warningCount', { count: maintenanceWarningCount }) : t('common.ok', 'OK')}</span>
-              </div>
-              {(firmwareInfo?.current_version || status?.firmware_version) && (
-                <div className={`${rowClass} ${firmwareInfo?.update_available ? 'bg-status-warning/20 text-status-warning' : 'bg-status-ok/20 text-status-ok'}`}>
-                  {firmwareInfo?.update_available ? <Download className="h-3 w-3" /> : <CheckCircle className="h-3 w-3" />}
-                  <span>{t('printers.status.firmware', 'Firmware')}:</span>
-                  <span>{firmwareInfo?.update_available ? t('printers.status.updateAvailable', 'Update available') : firmwareInfo?.current_version || status?.firmware_version}</span>
-                </div>
-              )}
-              {status?.connected && hasDoorSensor && (
-                <div className={`${rowClass} ${status.door_open ? 'bg-status-warning/20 text-status-warning' : 'bg-status-ok/20 text-status-ok'}`}>
-                  {status.door_open ? <DoorOpen className="h-3 w-3" /> : <DoorClosed className="h-3 w-3" />}
-                  <span>{t('printers.status.door', 'Door')}:</span>
-                  <span>{status.door_open ? t('printers.door.open') : t('printers.door.closed')}</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </>,
-        document.body,
-      )}
-    </>
-  );
-}
 
 function PrinterListRow({
   printer,
@@ -1938,7 +1789,8 @@ function PrinterListRow({
             aria-label={printStatusTitle}
           />
           <span className="min-w-12 shrink-0 text-right text-xs font-medium tabular-nums text-white">{etaLabel}</span>
-          <ListHealthStatusMenu
+          <PrinterHealthMenu
+            printer={printer}
             status={status}
             printerHealth={printerHealth}
             knownHmsErrors={knownHmsErrors}
@@ -1947,6 +1799,7 @@ function PrinterListRow({
             needsPlateClear={needsPlateClear}
             firmwareInfo={firmwareInfo}
             hasDoorSensor={hasDoorSensor}
+            checkPrinterFirmware={checkPrinterFirmware}
           />
         </div>
       </div>
@@ -1979,7 +1832,8 @@ function PrinterListRow({
         </div>
         <div className="min-w-0">
           <span className="inline-flex max-w-full items-center gap-2">
-            <ListHealthStatusMenu
+            <PrinterHealthMenu
+              printer={printer}
               status={status}
               printerHealth={printerHealth}
               knownHmsErrors={knownHmsErrors}
@@ -1988,6 +1842,7 @@ function PrinterListRow({
               needsPlateClear={needsPlateClear}
               firmwareInfo={firmwareInfo}
               hasDoorSensor={hasDoorSensor}
+              checkPrinterFirmware={checkPrinterFirmware}
             />
             <span className={`truncate text-sm font-medium ${status ? 'text-white' : 'text-bambu-gray'}`}>{printerHealth.label}</span>
           </span>
@@ -2157,7 +2012,6 @@ function SinglePrinterCockpit({
   const [printAfterUpload, setPrintAfterUpload] = useState<{ id: number; filename: string } | null>(null);
   const [reprintEntry, setReprintEntry] = useState<PrintLogEntry | null>(null);
   const [isCheckingPlate, setIsCheckingPlate] = useState(false);
-  const [showHealthStatusMenu, setShowHealthStatusMenu] = useState(false);
   const [showSkipObjectsModal, setShowSkipObjectsModal] = useState(false);
   const [amsBackupModalOpen, setAmsBackupModalOpen] = useState(false);
   const [showNotHomedModal, setShowNotHomedModal] = useState<null | { distance: number }>(null);
@@ -2407,21 +2261,6 @@ function SinglePrinterCockpit({
       error: t('printers.health.error', 'Error'),
     },
   });
-  const healthStatusRowClass = 'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-medium';
-  const maintenanceDueCount = maintenanceInfo?.due_count ?? 0;
-  const maintenanceWarningCount = maintenanceInfo?.warning_count ?? 0;
-  const healthPlateLabel = isPrintingOrPaused
-    ? t('printers.plateStatus.inUse')
-    : needsPlateClear
-      ? t('printers.plateStatus.notCleared')
-      : t('printers.plateStatus.cleared');
-  const networkHealthClass = !status?.connected
-    ? 'bg-status-error/20 text-status-error'
-    : status.wired_network || status.wifi_signal == null || status.wifi_signal >= -60
-      ? 'bg-status-ok/20 text-status-ok'
-      : status.wifi_signal >= -80
-        ? 'bg-status-warning/20 text-status-warning'
-        : 'bg-status-error/20 text-status-error';
 
   const activePrintName = status?.current_print && isPrintingOrPaused
     ? formatPrintName(status.subtask_name || status.current_print || null, status.gcode_file, t)
@@ -2689,69 +2528,19 @@ function SinglePrinterCockpit({
               <div className="min-w-0">
                 <div className="flex min-w-0 items-center gap-3">
                   <h2 className="min-w-0 flex-1 truncate text-3xl font-semibold leading-none text-white">{printer.name}</h2>
-                  <div className="relative shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setShowHealthStatusMenu((open) => !open)}
-                      className={`inline-flex h-9 w-9 items-center justify-center rounded-lg transition-opacity hover:opacity-80 ${printerHealth.className}`}
-                      title={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
-                      aria-label={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
-                    >
-                      <Activity className="h-4 w-4" />
-                    </button>
-                    {showHealthStatusMenu && (
-                      <>
-                        <div className="fixed inset-0 z-40" onClick={() => setShowHealthStatusMenu(false)} />
-                        <div className="absolute right-0 top-full z-50 mt-1 flex w-[240px] flex-col overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary shadow-2xl">
-                          <div className="shrink-0 px-3 py-2.5 text-center text-sm font-medium text-white">{t('printers.health.statusDetails')}</div>
-                          <div className="h-px bg-bambu-dark-tertiary" />
-                          <div className="space-y-1.5 p-2.5">
-                            <div className={`${healthStatusRowClass} ${status?.connected ? 'bg-status-ok/20 text-status-ok' : 'bg-status-error/20 text-status-error'}`}>
-                              {status?.connected ? <Link className="h-3 w-3" /> : <Unlink className="h-3 w-3" />}
-                              <span>{t('printers.status.connection', 'Connection')}:</span>
-                              <span>{status?.connected ? t('printers.connection.connected') : t('printers.connection.offline')}</span>
-                            </div>
-                            {requirePlateClear && status?.connected && (
-                              <div className={`${healthStatusRowClass} ${needsPlateClear ? 'bg-status-warning/20 text-status-warning' : 'bg-status-ok/20 text-status-ok'}`}>
-                                <PlateClearedIcon className="h-3 w-3" />
-                                <span>{t('printers.plateStatus.title', 'Plate')}:</span>
-                                <span>{healthPlateLabel}</span>
-                              </div>
-                            )}
-                            <div className={`${healthStatusRowClass} ${networkHealthClass}`}>
-                              {status?.wired_network ? <Cable className="h-3 w-3" /> : <Signal className="h-3 w-3" />}
-                              <span>{t('printers.status.network', 'Network')}:</span>
-                              <span>{!status?.connected ? t('printers.connection.offline') : status.wired_network ? t('printers.connection.ethernet', 'Ethernet') : status.wifi_signal != null ? `${status.wifi_signal}dBm` : t('common.unknown', 'Unknown')}</span>
-                            </div>
-                            <div className={`${healthStatusRowClass} ${!status?.connected ? 'bg-status-error/20 text-status-error' : knownHmsErrors.length > 0 ? knownHmsErrors.some((error) => error.severity <= 2) ? 'bg-status-error/20 text-status-error' : 'bg-status-warning/20 text-status-warning' : 'bg-status-ok/20 text-status-ok'}`}>
-                              <AlertTriangle className="h-3 w-3" />
-                              <span>{t('printers.status.errors', 'Errors')}:</span>
-                              <span>{status?.connected ? knownHmsErrors.length > 0 ? t('printers.status.errorCount', '{{count}} active', { count: knownHmsErrors.length }) : t('common.ok', 'OK') : t('common.unknown', 'Unknown')}</span>
-                            </div>
-                            <div className={`${healthStatusRowClass} ${maintenanceDueCount > 0 ? 'bg-status-error/20 text-status-error' : maintenanceWarningCount > 0 ? 'bg-status-warning/20 text-status-warning' : 'bg-status-ok/20 text-status-ok'}`}>
-                              <Wrench className="h-3 w-3" />
-                              <span>{t('maintenance.title', 'Maintenance')}:</span>
-                              <span>{maintenanceDueCount > 0 ? t('maintenance.dueCount', { count: maintenanceDueCount }) : maintenanceWarningCount > 0 ? t('maintenance.warningCount', { count: maintenanceWarningCount }) : t('common.ok', 'OK')}</span>
-                            </div>
-                            {(firmwareInfo?.current_version || status?.firmware_version) && (
-                              <div className={`${healthStatusRowClass} ${firmwareInfo?.update_available ? 'bg-status-warning/20 text-status-warning' : 'bg-status-ok/20 text-status-ok'}`}>
-                                {firmwareInfo?.update_available ? <Download className="h-3 w-3" /> : <CheckCircle className="h-3 w-3" />}
-                                <span>{t('printers.status.firmware', 'Firmware')}:</span>
-                                <span>{firmwareInfo?.update_available ? t('printers.status.updateAvailable', 'Update available') : firmwareInfo?.current_version || status?.firmware_version}</span>
-                              </div>
-                            )}
-                            {status?.connected && hasDoorSensor && (
-                              <div className={`${healthStatusRowClass} ${status.door_open ? 'bg-status-warning/20 text-status-warning' : 'bg-status-ok/20 text-status-ok'}`}>
-                                {status.door_open ? <DoorOpen className="h-3 w-3" /> : <DoorClosed className="h-3 w-3" />}
-                                <span>{t('printers.status.door', 'Door')}:</span>
-                                <span>{status.door_open ? t('printers.door.open') : t('printers.door.closed')}</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </>
-                    )}
-                  </div>
+                  <PrinterHealthMenu
+                    printer={printer}
+                    status={status}
+                    printerHealth={printerHealth}
+                    knownHmsErrors={knownHmsErrors}
+                    maintenanceInfo={maintenanceInfo}
+                    requirePlateClear={requirePlateClear}
+                    needsPlateClear={needsPlateClear}
+                    firmwareInfo={firmwareInfo}
+                    hasDoorSensor={hasDoorSensor}
+                    checkPrinterFirmware={checkPrinterFirmware}
+                    triggerClassName="h-9 w-9"
+                  />
                 </div>
                 <p className="truncate pl-0.5 text-base leading-tight text-bambu-gray">
                   {printer.model || t('common.unknown', 'Unknown')}
@@ -3544,7 +3333,6 @@ function PrinterCard({
   const [showUploadForPrint, setShowUploadForPrint] = useState(false);
   const [showPrinterInfo, setShowPrinterInfo] = useState(false);
   const [showDiagnostic, setShowDiagnostic] = useState(false);
-  const [showHealthStatusMenu, setShowHealthStatusMenu] = useState(false);
   const closePrinterInfo = useCallback(() => setShowPrinterInfo(false), []);
   const [printAfterUpload, setPrintAfterUpload] = useState<{ id: number; filename: string } | null>(null);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
@@ -3934,12 +3722,6 @@ function PrinterCard({
     </span>
   );
   const plateStatusPill = showPlateStatusPill && plateStatus ? (
-    <span className={`${statusPillBase} ${plateStatus.className}`} title={statusRowLabel(plateTitle, plateStatus.label)}>
-      <PlateClearedIcon className="w-3 h-3" />
-      <StatusRowText title={plateTitle} state={plateStatus.label} />
-    </span>
-  ) : null;
-  const healthMenuPlateStatusPill = plateStatus ? (
     <span className={`${statusPillBase} ${plateStatus.className}`} title={statusRowLabel(plateTitle, plateStatus.label)}>
       <PlateClearedIcon className="w-3 h-3" />
       <StatusRowText title={plateTitle} state={plateStatus.label} />
@@ -5029,48 +4811,20 @@ function PrinterCard({
               </div>
             </div>
             <div className="relative flex flex-shrink-0 self-stretch gap-2">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowHealthStatusMenu(!showHealthStatusMenu);
-                }}
-                className={`inline-flex h-full min-h-7 w-8 items-center justify-center rounded-lg transition-opacity hover:opacity-80 ${printerHealth.className}`}
-                title={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
-                aria-label={t('printers.health.title', 'Machine health: {{status}}', { status: printerHealth.label })}
-              >
-                <Activity className="w-4 h-4" />
-              </button>
-              {showHealthStatusMenu && (
-                <>
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowHealthStatusMenu(false);
-                    }}
-                  />
-                  <div
-                    className="absolute right-0 top-full mt-1 z-50 flex w-[240px] flex-col overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary shadow-2xl"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div className="shrink-0 px-3 py-2.5 text-center text-sm font-medium text-white">
-                      {t('printers.health.statusDetails', 'Status details')}
-                    </div>
-                    <div className="h-px bg-bambu-dark-tertiary" />
-                    <div className="space-y-1.5 p-2.5">
-                      {connectionStatusPill}
-                      {healthMenuPlateStatusPill}
-                      {networkStatusPill}
-                      {hmsStatusPill}
-                      {maintenanceStatusPill}
-                      {queueStatusPill}
-                      {firmwareStatusPill}
-                      {doorStatusPill}
-                    </div>
-                  </div>
-                </>
-              )}
+              <PrinterHealthMenu
+                printer={printer}
+                status={status}
+                printerHealth={printerHealth}
+                knownHmsErrors={knownHmsErrors}
+                maintenanceInfo={maintenanceInfo}
+                requirePlateClear={requirePlateClear}
+                needsPlateClear={needsPlateClear}
+                firmwareInfo={firmwareInfo}
+                hasDoorSensor={hasDoorSensor}
+                checkPrinterFirmware={checkPrinterFirmware}
+                queueCount={queueCount}
+                triggerClassName="h-full min-h-7 w-8"
+              />
             </div>
           </div>
 
@@ -8176,285 +7930,6 @@ export function AddPrinterModal({
   );
 }
 
-function FirmwareUpdateModal({
-  printer,
-  firmwareInfo,
-  onClose,
-}: {
-  printer: Printer;
-  firmwareInfo: FirmwareUpdateInfo;
-  onClose: () => void;
-}) {
-  const { t } = useTranslation();
-  const queryClient = useQueryClient();
-  const { showToast } = useToast();
-  const { hasPermission } = useAuth();
-  const canUpdate = hasPermission('firmware:update');
-  const [uploadStatus, setUploadStatus] = useState<FirmwareUploadStatus | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
-  const [pollInterval, setPollInterval] = useState<NodeJS.Timeout | null>(null);
-  const [selectedVersion, setSelectedVersion] = useState<string | null>(
-    firmwareInfo.update_available ? firmwareInfo.latest_version : null,
-  );
-
-  // Prepare check query — runs when a version is selected and user can update
-  const { data: prepareInfo, isLoading: isPreparing } = useQuery({
-    queryKey: ['firmwarePrepare', printer.id, selectedVersion],
-    queryFn: () => firmwareApi.prepareUpload(printer.id, selectedVersion ?? undefined),
-    staleTime: 30000,
-    enabled: !!selectedVersion && canUpdate && !isUploading,
-  });
-
-  // Start upload mutation
-  const uploadMutation = useMutation({
-    mutationFn: () => firmwareApi.startUpload(printer.id, selectedVersion ?? undefined),
-    onSuccess: () => {
-      setIsUploading(true);
-      // Start polling for status
-      const interval = setInterval(async () => {
-        try {
-          const status = await firmwareApi.getUploadStatus(printer.id);
-          setUploadStatus(status);
-          if (status.status === 'complete' || status.status === 'error') {
-            clearInterval(interval);
-            setPollInterval(null);
-            setIsUploading(false);
-            if (status.status === 'complete') {
-              showToast(t('printers.firmwareModal.uploadedToast'), 'success');
-              queryClient.invalidateQueries({ queryKey: ['firmwareUpdate', printer.id] });
-            }
-          }
-        } catch {
-          // Ignore errors during polling
-        }
-      }, 2000);
-      setPollInterval(interval);
-    },
-    onError: (error: Error) => {
-      showToast(t('printers.firmwareModal.uploadFailed', { error: error.message }), 'error');
-      setIsUploading(false);
-    },
-  });
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (pollInterval) clearInterval(pollInterval);
-    };
-  }, [pollInterval]);
-
-  const handleStartUpload = () => {
-    setUploadStatus(null);
-    uploadMutation.mutate();
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <Card className="w-full max-w-md mx-4">
-        <CardContent>
-          <div className="flex items-start gap-3 mb-4">
-            <div className={`p-2 rounded-full ${firmwareInfo.update_available ? 'bg-orange-500/20' : 'bg-status-ok/20'}`}>
-              {firmwareInfo.update_available
-                ? <Download className="w-5 h-5 text-orange-400" />
-                : <CheckCircle className="w-5 h-5 text-status-ok" />}
-            </div>
-            <div className="flex-1">
-              <h3 className="text-lg font-semibold text-white">
-                {firmwareInfo.update_available ? t('printers.firmwareModal.title') : t('printers.firmwareModal.titleUpToDate')}
-              </h3>
-              <p className="text-sm text-bambu-gray mt-1">
-                {printer.name}
-              </p>
-            </div>
-          </div>
-
-          {/* Version Info */}
-          {(() => {
-            const selectedEntry = selectedVersion
-              ? firmwareInfo.available_versions?.find((v) => v.version === selectedVersion)
-              : null;
-            const displayVersion = selectedVersion ?? firmwareInfo.latest_version;
-            const displayNotes = selectedEntry?.release_notes ?? firmwareInfo.release_notes;
-            const showSecondLine = !!displayVersion && displayVersion !== firmwareInfo.current_version;
-            return (
-              <div className="bg-bambu-dark rounded-lg p-3 mb-4">
-                <div className="flex justify-between items-center text-sm">
-                  <span className="text-bambu-gray">{t('printers.firmwareModal.currentVersion')}</span>
-                  <span className={`font-mono ${showSecondLine ? 'text-white' : 'text-status-ok'}`}>
-                    {firmwareInfo.current_version || t('common.unknown')}
-                  </span>
-                </div>
-                {showSecondLine && (
-                  <div className="flex justify-between items-center text-sm mt-1">
-                    <span className="text-bambu-gray">{t('printers.firmwareModal.latestVersion')}</span>
-                    <span className="text-orange-400 font-mono">{displayVersion}</span>
-                  </div>
-                )}
-                {displayNotes && (
-                  <details className="mt-3 text-sm" open={!showSecondLine} key={displayVersion ?? 'none'}>
-                    <summary className={`cursor-pointer hover:underline ${showSecondLine ? 'text-orange-400' : 'text-status-ok'}`}>
-                      {t('printers.firmwareModal.releaseNotes')}
-                    </summary>
-                    <div className="mt-2 text-bambu-gray text-xs max-h-40 overflow-y-auto whitespace-pre-wrap">
-                      {displayNotes}
-                    </div>
-                  </details>
-                )}
-              </div>
-            );
-          })()}
-
-          {/* Available versions list */}
-          {firmwareInfo.available_versions && firmwareInfo.available_versions.length > 0 && !isUploading && uploadStatus?.status !== 'complete' && (
-            <div className="mb-4">
-              <div className="text-xs text-bambu-gray mb-2">{t('printers.firmwareModal.availableVersions')}</div>
-              <div className="max-h-56 overflow-y-auto border border-bambu-dark-tertiary rounded-lg divide-y divide-bambu-dark-tertiary">
-                {firmwareInfo.available_versions.map((v) => {
-                  const isCurrent = firmwareInfo.current_version === v.version;
-                  const isSelected = selectedVersion === v.version;
-                  const cmp = firmwareInfo.current_version
-                    ? compareFwVersions(v.version, firmwareInfo.current_version)
-                    : 0;
-                  const relLabel = isCurrent
-                    ? t('printers.firmwareModal.currentBadge')
-                    : cmp > 0
-                      ? t('printers.firmwareModal.newerBadge')
-                      : t('printers.firmwareModal.olderBadge');
-                  const relClass = isCurrent
-                    ? 'text-bambu-gray'
-                    : cmp > 0
-                      ? 'text-orange-400'
-                      : 'text-blue-400';
-                  return (
-                    <button
-                      key={v.version}
-                      type="button"
-                      disabled={!v.file_available || !canUpdate || isCurrent}
-                      onClick={() => setSelectedVersion(v.version)}
-                      className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between gap-2 transition-colors ${
-                        isSelected ? 'bg-orange-500/10' : 'hover:bg-bambu-dark'
-                      } ${!v.file_available || !canUpdate || isCurrent ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="font-mono text-white">{v.version}</span>
-                        <span className={`text-xs ${relClass}`}>{relLabel}</span>
-                      </div>
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${
-                        isCurrent
-                          ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
-                          : v.file_available
-                            ? 'bg-bambu-green/15 text-bambu-green border border-bambu-green/30'
-                            : 'bg-bambu-gray/10 text-bambu-gray border border-bambu-gray/30'
-                      }`}>
-                        {isCurrent
-                          ? t('printers.firmwareModal.installed')
-                          : v.file_available
-                          ? t('printers.firmwareModal.usable')
-                          : t('printers.firmwareModal.unavailable')}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Status / Progress (only when a version is selected) */}
-          {!selectedVersion ? null : isPreparing ? (
-            <div className="flex items-center gap-2 text-bambu-gray text-sm mb-4">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              {t('printers.firmwareModal.checkingPrereqs')}
-            </div>
-          ) : prepareInfo && !isUploading && !uploadStatus ? (
-            <div className="mb-4">
-              {prepareInfo.can_proceed ? (
-                <div className="flex items-center gap-2 text-bambu-green text-sm">
-                  <Box className="w-4 h-4" />
-                  {t('printers.firmwareModal.sdCardReady')}
-                </div>
-              ) : (
-                <div className="space-y-1">
-                  {prepareInfo.errors.map((error, i) => (
-                    <div key={i} className="flex items-center gap-2 text-red-400 text-sm">
-                      <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                      {error}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : null}
-
-          {/* Upload Progress */}
-          {(isUploading || uploadStatus) && uploadStatus && (
-            <div className="mb-4">
-              <div className="flex items-center justify-between text-sm mb-1">
-                <span className="text-bambu-gray capitalize">{uploadStatus.status}</span>
-                <span className="text-white">{uploadStatus.progress}%</span>
-              </div>
-              <div className="w-full bg-bambu-dark-tertiary rounded-full h-2">
-                <div
-                  className={`h-2 rounded-full transition-all ${
-                    uploadStatus.status === 'error' ? 'bg-status-error' :
-                    uploadStatus.status === 'complete' ? 'bg-status-ok' : 'bg-orange-500'
-                  } ${uploadStatus.status === 'uploading' ? 'animate-pulse' : ''}`}
-                  style={{ width: `${uploadStatus.progress}%` }}
-                />
-              </div>
-              <p className="text-xs text-bambu-gray mt-1">{uploadStatus.message}</p>
-              {uploadStatus.error && (
-                <p className="text-xs text-red-400 mt-1">{uploadStatus.error}</p>
-              )}
-            </div>
-          )}
-
-          {/* Success Message */}
-          {uploadStatus?.status === 'complete' && (
-            <div className="bg-bambu-green/10 border border-bambu-green/30 rounded-lg p-3 mb-4">
-              <p className="text-sm text-bambu-green font-medium mb-2">
-                {t('printers.firmwareModal.uploadedSuccess')}
-              </p>
-              <p className="text-xs text-bambu-gray">
-                {t('printers.firmwareModal.applyInstructions')}
-              </p>
-              <ol className="text-xs text-bambu-gray mt-1 list-decimal list-inside space-y-1">
-                <li dangerouslySetInnerHTML={{ __html: t('printers.firmwareModal.step1') }} />
-                <li dangerouslySetInnerHTML={{ __html: t('printers.firmwareModal.step2') }} />
-                <li dangerouslySetInnerHTML={{ __html: t('printers.firmwareModal.step3') }} />
-                <li>{t('printers.firmwareModal.step4')}</li>
-              </ol>
-            </div>
-          )}
-
-          {/* Buttons */}
-          <div className="flex gap-2 justify-end">
-            <Button variant="secondary" onClick={onClose}>
-              {uploadStatus?.status === 'complete' ? t('printers.firmwareModal.done') : t('common.cancel')}
-            </Button>
-            {prepareInfo?.can_proceed && !isUploading && uploadStatus?.status !== 'complete' && canUpdate && (
-              <Button
-                onClick={handleStartUpload}
-                disabled={uploadMutation.isPending}
-              >
-                {uploadMutation.isPending ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                    {t('printers.firmwareModal.starting')}
-                  </>
-                ) : (
-                  <>
-                    <Download className="w-4 h-4 mr-2" />
-                    {t('printers.firmwareModal.uploadFirmware')}
-                  </>
-                )}
-              </Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
 
 function EditPrinterModal({
   printer,
