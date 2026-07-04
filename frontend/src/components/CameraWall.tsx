@@ -229,6 +229,7 @@ export function CameraWall({
               <CameraTile
                 printerId={p.id}
                 printerName={p.name}
+                printerModel={p.model}
                 cameraRotation={p.camera_rotation}
                 mode={mode}
                 snapshotIntervalMs={snapshotIntervalSec * 1000}
