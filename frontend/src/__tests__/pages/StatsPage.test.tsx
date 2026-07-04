@@ -308,10 +308,8 @@ describe('StatsPage', () => {
 
       render(<StatsPage />);
 
-      await waitFor(() => {
-        expect(screen.getByText('Filament runout')).toBeInTheDocument();
-        expect(screen.getByText('Clogged nozzle')).toBeInTheDocument();
-      });
+      expect(await screen.findByText('Filament runout', {}, { timeout: 5000 })).toBeInTheDocument();
+      expect(await screen.findByText('Clogged nozzle', {}, { timeout: 5000 })).toBeInTheDocument();
       expect(screen.queryByText('filamentRunout')).not.toBeInTheDocument();
       expect(screen.queryByText('cloggedNozzle')).not.toBeInTheDocument();
     });
@@ -331,9 +329,7 @@ describe('StatsPage', () => {
 
       render(<StatsPage />);
 
-      await waitFor(() => {
-        expect(screen.getByText('Custom legacy reason')).toBeInTheDocument();
-      });
+      expect(await screen.findByText('Custom legacy reason', {}, { timeout: 5000 })).toBeInTheDocument();
     });
 
     it('shows printer stats widget', async () => {
