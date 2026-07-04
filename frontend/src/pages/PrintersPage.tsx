@@ -102,6 +102,7 @@ import { BulkPrinterToolbar, type PrinterState } from '../components/BulkPrinter
 import { FileManagerModal } from '../components/FileManagerModal';
 import { EmbeddedCameraViewer } from '../components/EmbeddedCameraViewer';
 import { CameraWall } from '../components/CameraWall';
+import { CameraPlaceholder } from '../components/CameraPlaceholder';
 import { MQTTDebugModal } from '../components/MQTTDebugModal';
 import { HMSErrorModal, filterKnownHMSErrors } from '../components/HMSErrorModal';
 import { PrinterQueueWidget } from '../components/PrinterQueueWidget';
@@ -2095,13 +2096,6 @@ function formatCockpitWeight(grams: number): string {
   return `${Math.round(grams)}g`;
 }
 
-function getCameraPlaceholderUrl(model?: string | null): string {
-  const modelName = model?.trim();
-  return modelName
-    ? `/img/camera_placeholder_${encodeURIComponent(modelName)}.png`
-    : '/img/camera_placeholder.png';
-}
-
 function CockpitMetricCard({
   icon: Icon,
   label,
@@ -2166,7 +2160,6 @@ function SinglePrinterCockpit({
   const [showNotHomedModal, setShowNotHomedModal] = useState<null | { distance: number }>(null);
   const [loadedCameraPrinterId, setLoadedCameraPrinterId] = useState<number | null>(null);
   const [failedCameraPrinterId, setFailedCameraPrinterId] = useState<number | null>(null);
-  const [failedPlaceholderUrl, setFailedPlaceholderUrl] = useState<string | null>(null);
   const cameraImageRef = useRef<HTMLImageElement>(null);
   const [configureSlotModal, setConfigureSlotModal] = useState<{
     amsId: number;
@@ -2209,10 +2202,6 @@ function SinglePrinterCockpit({
   );
   const cameraLoaded = loadedCameraPrinterId === printer.id;
   const cameraFailed = failedCameraPrinterId === printer.id;
-  const modelPlaceholderUrl = getCameraPlaceholderUrl(printer.model);
-  const cameraPlaceholderUrl = failedPlaceholderUrl === modelPlaceholderUrl
-    ? '/img/camera_placeholder.png'
-    : modelPlaceholderUrl;
 
   useEffect(() => {
     if (!status?.connected) return;
@@ -2660,11 +2649,9 @@ function SinglePrinterCockpit({
       <div className="relative grid h-full min-h-0 gap-3 p-3 xl:grid-cols-[minmax(0,1.45fr)_minmax(21rem,0.8fr)]">
         <div className="grid min-h-0 gap-3 xl:grid-rows-[auto_minmax(0,1fr)]">
           <section className="relative aspect-video w-full min-h-0 overflow-hidden rounded-xl border border-white/10 bg-bambu-dark">
-            <img
-              src={cameraPlaceholderUrl}
-              alt=""
+            <CameraPlaceholder
+              model={printer.model}
               className="absolute inset-0 h-full w-full object-cover"
-              onError={() => setFailedPlaceholderUrl(modelPlaceholderUrl)}
             />
             {status?.connected && !cameraFailed && (
               <img

@@ -63,10 +63,11 @@ describe('CameraTile', () => {
   });
 
   it('shows an offline placeholder when not connected', async () => {
-    render(
+    const { container } = render(
       <CameraTile
         printerId={1}
         printerName="A1-Offline"
+        printerModel="P1S"
         mode="live"
         snapshotIntervalMs={5000}
         connected={false}
@@ -74,6 +75,7 @@ describe('CameraTile', () => {
     );
     await flushMicrotasks();
     expect(screen.queryByAltText('A1-Offline')).toBeNull();
+    expect(container.querySelector('img[src="/img/camera_placeholder_P1S.png"]')).not.toBeNull();
   });
 
   it('shows the paused placeholder in paused mode', async () => {
@@ -88,6 +90,32 @@ describe('CameraTile', () => {
     );
     await flushMicrotasks();
     expect(screen.queryByAltText('H2D-Booth')).toBeNull();
+  });
+
+  it('keeps the model placeholder visible while a feed loads and falls back for unknown models', async () => {
+    const { container } = render(
+      <CameraTile
+        printerId={10}
+        printerName="Unknown-Loading"
+        printerModel="Unknown Model"
+        mode="live"
+        snapshotIntervalMs={5000}
+        connected
+      />,
+    );
+    await flushMicrotasks();
+
+    const placeholder = container.querySelector('img[aria-hidden="true"]') as HTMLImageElement;
+    const feed = screen.getByAltText('Unknown-Loading');
+    expect(placeholder).not.toBeNull();
+    expect(placeholder).toHaveAttribute('src', '/img/camera_placeholder_Unknown%20Model.png');
+    expect(feed).toHaveClass('opacity-0');
+
+    fireEvent.error(placeholder);
+    expect(placeholder).toHaveAttribute('src', '/img/camera_placeholder.png');
+
+    fireEvent.load(feed);
+    expect(feed).toHaveClass('opacity-100');
   });
 
   it('keeps tile navigation separate from the full-screen action', async () => {

@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Maximize2, VideoOff, WifiOff } from 'lucide-react';
+import { Loader2, Maximize2 } from 'lucide-react';
 import { getAuthToken, withStreamToken } from '../api/client';
 import { PlateClearedIcon } from './icons/PlateClearedIcon';
+import { CameraPlaceholder } from './CameraPlaceholder';
 
 export type CameraTileMode = 'live' | 'snapshot' | 'paused';
 
 interface CameraTileProps {
   printerId: number;
   printerName: string;
+  printerModel?: string | null;
   cameraRotation?: number;
   mode: CameraTileMode;
   snapshotIntervalMs: number;
@@ -47,6 +49,7 @@ function classifyState(state: string | null | undefined): StatusBucket {
 export function CameraTile({
   printerId,
   printerName,
+  printerModel,
   cameraRotation = 0,
   mode,
   snapshotIntervalMs,
@@ -62,7 +65,7 @@ export function CameraTile({
 }: CameraTileProps) {
   const { t } = useTranslation();
   const [bust, setBust] = useState(0);
-  const [errored, setErrored] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const liveImagesRef = useRef(new Map<number, HTMLImageElement>());
 
   // Tell the backend to release its MJPEG transcoder when this tile stops
@@ -87,13 +90,16 @@ export function CameraTile({
   }, [mode, printerId]);
 
   useEffect(() => {
-    setErrored(false);
+    setLoaded(false);
     setBust((b) => b + 1);
   }, [mode, printerId]);
 
   useEffect(() => {
     if (mode !== 'snapshot') return;
-    const interval = setInterval(() => setBust((b) => b + 1), snapshotIntervalMs);
+    const interval = setInterval(() => {
+      setLoaded(false);
+      setBust((b) => b + 1);
+    }, snapshotIntervalMs);
     return () => clearInterval(interval);
   }, [mode, snapshotIntervalMs]);
 
@@ -119,20 +125,11 @@ export function CameraTile({
 
   return (
     <div className="group relative aspect-video w-full overflow-hidden rounded-lg border border-bambu-dark-tertiary bg-black text-left">
-      {!connected || mode === 'paused' ? (
-        <div className="absolute inset-0 flex items-center justify-center bg-bambu-dark/60">
-          {connected ? (
-            <VideoOff className="h-8 w-8 text-bambu-gray/70" aria-hidden="true" />
-          ) : (
-            <WifiOff className="h-8 w-8 text-bambu-gray/70" aria-hidden="true" />
-          )}
-        </div>
-      ) : errored ? (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/80 text-bambu-gray">
-          <VideoOff className="h-7 w-7" aria-hidden="true" />
-          <span className="text-xs">{t('printers.camWall.noSignal')}</span>
-        </div>
-      ) : (
+      <CameraPlaceholder
+        model={printerModel}
+        className="absolute inset-0 h-full w-full object-cover"
+      />
+      {connected && mode !== 'paused' && (
         <img
           ref={(element) => {
             if (mode === 'live' && element) liveImagesRef.current.set(printerId, element);
@@ -142,9 +139,10 @@ export function CameraTile({
           alt={printerName}
           draggable={false}
           loading="lazy"
-          className="h-full w-full select-none object-contain"
+          className={`absolute inset-0 h-full w-full select-none object-contain transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`}
           style={{ transform }}
-          onError={() => setErrored(true)}
+          onLoad={() => setLoaded(true)}
+          onError={() => setLoaded(false)}
         />
       )}
 
