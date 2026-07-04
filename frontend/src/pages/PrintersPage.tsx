@@ -12,13 +12,6 @@ import {
   parsePresetTriple,
 } from '../utils/temperatureFanPresets';
 
-// AMS drying popover dimensions — w-[240px] on the popover, estimated height
-// covers header + filament select + temp slider + duration + rotate-tray
-// toggle + buttons. Over-estimating is fine (flip-above kicks in slightly
-// earlier); under-estimating leaves the popover clipped off the bottom (the
-// original bug at #1447).
-const DRYING_POPOVER_WIDTH = 240;
-const DRYING_POPOVER_ESTIMATED_HEIGHT = 320;
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../contexts/ThemeContext';
@@ -94,7 +87,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, discoveryApi, firmwareApi, getAuthToken, withStreamToken, ApiError } from '../api/client';
 import { formatDateOnly, formatETA, formatDuration, parseUTCDate } from '../utils/date';
 import { getCurrencySymbol } from '../utils/currency';
-import type { Printer, PrinterCreate, PrinterStatus, AMSUnit, DiscoveredPrinter, FirmwareUpdateInfo, FirmwareUploadStatus, LinkedSpoolInfo, SpoolAssignment, HMSError, InventorySpool, SmartPlug, PrinterDiagnosticResult, PrintLogEntry } from '../api/client';
+import type { Printer, PrinterCreate, PrinterStatus, AMSUnit, DiscoveredPrinter, FirmwareUpdateInfo, FirmwareUploadStatus, LinkedSpoolInfo, SpoolAssignment, HMSError, InventorySpool, PrinterDiagnosticResult, PrintLogEntry } from '../api/client';
 import { Card, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -120,6 +113,14 @@ import { PlateClearedIcon } from '../components/icons/PlateClearedIcon';
 import { SkipObjectsModal, SkipObjectsIcon } from '../components/SkipObjectsModal';
 import { FileUploadModal } from '../components/FileUploadModal';
 import { PrintModal } from '../components/PrintModal';
+import { PrinterPowerControls } from '../components/printer/PrinterPowerControls';
+import {
+  AmsDryingButton,
+  AmsDryingPopover,
+  AmsDryingStatus,
+} from '../components/printer/AmsDryingControls';
+import { DRYING_PRESETS, useAmsDryingControls } from '../hooks/useAmsDryingControls';
+import type { DryingPresets } from '../hooks/useAmsDryingControls';
 import { PrinterInfoModal } from '../components/PrinterInfoModal';
 import { getAmsLabel, getGlobalTrayId, getFillBarColor, getSpoolmanFillLevel, getFallbackSpoolTag, isBambuLabSpool } from '../utils/amsHelpers';
 import { getPrinterImage, getWifiStrength, filterCompatibleQueueItems } from '../utils/printer';
@@ -2144,7 +2145,7 @@ function SinglePrinterCockpit({
   bedTempPresets?: readonly [number, number, number];
   chamberTempPresets?: readonly [number, number, number];
   fanSpeedPresets?: readonly [number, number, number];
-  dryingPresets?: Record<string, { n3f: number; n3s: number; n3f_hours: number; n3s_hours: number }>;
+  dryingPresets?: DryingPresets;
 }) {
   const { t } = useTranslation();
   const { hasPermission } = useAuth();
@@ -2159,16 +2160,6 @@ function SinglePrinterCockpit({
   const [showHealthStatusMenu, setShowHealthStatusMenu] = useState(false);
   const [showSkipObjectsModal, setShowSkipObjectsModal] = useState(false);
   const [amsBackupModalOpen, setAmsBackupModalOpen] = useState(false);
-  const [dryingPopoverAmsId, setDryingPopoverAmsId] = useState<number | null>(null);
-  const [dryingPopoverModuleType, setDryingPopoverModuleType] = useState<'n3f' | 'n3s'>('n3f');
-  const [dryingFilament, setDryingFilament] = useState('PLA');
-  const [dryingTemp, setDryingTemp] = useState(45);
-  const [dryingDuration, setDryingDuration] = useState(12);
-  const [dryingRotateTray, setDryingRotateTray] = useState(false);
-  const [dryingPopoverPos, setDryingPopoverPos] = useState<{ top: number; left: number } | null>(null);
-  const [showPowerOnConfirm, setShowPowerOnConfirm] = useState(false);
-  const [showPowerOffConfirm, setShowPowerOffConfirm] = useState(false);
-  const [haToggleConfirm, setHaToggleConfirm] = useState<SmartPlug | null>(null);
   const [showNotHomedModal, setShowNotHomedModal] = useState<null | { distance: number }>(null);
   const [loadedCameraPrinterId, setLoadedCameraPrinterId] = useState<number | null>(null);
   const [failedCameraPrinterId, setFailedCameraPrinterId] = useState<number | null>(null);
@@ -2201,21 +2192,10 @@ function SinglePrinterCockpit({
     queryFn: () => api.getPrintLog({ printerId: printer.id, limit: 250 }),
     staleTime: 60 * 1000,
   });
-  const { data: smartPlug } = useQuery({
-    queryKey: ['smartPlugByPrinter', printer.id],
-    queryFn: () => api.getSmartPlugByPrinter(printer.id),
-    // Older servers and the test fixture return [] when no socket is assigned.
-    select: (plug) => Array.isArray(plug) ? null : plug,
-  });
-  const { data: scriptPlugs } = useQuery({
-    queryKey: ['scriptPlugsByPrinter', printer.id],
-    queryFn: () => api.getScriptPlugsByPrinter(printer.id),
-  });
-  const { data: plugStatus } = useQuery({
-    queryKey: ['smartPlugStatus', smartPlug?.id],
-    queryFn: () => smartPlug ? api.getSmartPlugStatus(smartPlug.id) : null,
-    enabled: !!smartPlug,
-    refetchInterval: 10000,
+  const dryingControls = useAmsDryingControls({
+    printerId: printer.id,
+    amsUnits: status?.ams ?? [],
+    presets: dryingPresets,
   });
   const isPrintingWithObjects = (status?.state === 'RUNNING' || status?.state === 'PAUSE') && (status?.printable_objects_count ?? 0) >= 2;
   const { data: objectsData } = useQuery({
@@ -2230,13 +2210,6 @@ function SinglePrinterCockpit({
   );
   const cameraLoaded = loadedCameraPrinterId === printer.id;
   const cameraFailed = failedCameraPrinterId === printer.id;
-
-  useEffect(() => {
-    setDryingPopoverAmsId(null);
-    setShowPowerOnConfirm(false);
-    setShowPowerOffConfirm(false);
-    setHaToggleConfirm(null);
-  }, [printer.id]);
 
   useEffect(() => {
     if (!status?.connected) return;
@@ -2299,38 +2272,6 @@ function SinglePrinterCockpit({
       showToast(t(enabled ? 'printers.amsBackup.toastEnabled' : 'printers.amsBackup.toastDisabled'), 'success');
     },
     onError: (error: Error) => showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
-  });
-  const startDryingMutation = useMutation({
-    mutationFn: ({ amsId, temp, duration, filament, rotateTray }: { amsId: number; temp: number; duration: number; filament: string; rotateTray: boolean }) =>
-      api.startDrying(printer.id, amsId, temp, duration, filament, rotateTray),
-    onSuccess: () => {
-      setDryingPopoverAmsId(null);
-      invalidateStatus();
-    },
-    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
-  });
-  const stopDryingMutation = useMutation({
-    mutationFn: (amsId: number) => api.stopDrying(printer.id, amsId),
-    onSuccess: invalidateStatus,
-    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
-  });
-  const powerControlMutation = useMutation({
-    mutationFn: (action: 'on' | 'off') => smartPlug ? api.controlSmartPlug(smartPlug.id, action) : Promise.reject(new Error('No plug')),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['smartPlugStatus', smartPlug?.id] }),
-    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
-  });
-  const toggleAutoOffMutation = useMutation({
-    mutationFn: (enabled: boolean) => smartPlug ? api.updateSmartPlug(smartPlug.id, { auto_off: enabled }) : Promise.reject(new Error('No plug')),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['smartPlugByPrinter', printer.id] });
-      queryClient.invalidateQueries({ queryKey: ['smart-plugs'] });
-    },
-    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
-  });
-  const runScriptMutation = useMutation({
-    mutationFn: ({ id, action }: { id: number; action: 'on' | 'toggle' }) => api.controlSmartPlug(id, action),
-    onSuccess: () => showToast(t('printers.toast.scriptTriggered')),
-    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToRunScript'), 'error'),
   });
   const chamberLightMutation = useMutation({
     mutationFn: (on: boolean) => api.setChamberLight(printer.id, on),
@@ -2594,25 +2535,6 @@ function SinglePrinterCockpit({
       setShowNotHomedModal({ distance });
     }
   };
-  const openDryingPopover = (ams: AMSUnit, trigger: HTMLElement) => {
-    const firstTray = ams.tray.find(tray => tray.tray_type);
-    const filament = (firstTray?.tray_type || 'PLA').split(' ')[0].toUpperCase();
-    const moduleType = ams.module_type === 'n3s' ? 'n3s' : 'n3f';
-    const preset = dryingPresets[filament] || dryingPresets.PLA;
-    setDryingFilament(filament);
-    setDryingTemp(preset[moduleType]);
-    setDryingDuration(moduleType === 'n3s' ? preset.n3s_hours : preset.n3f_hours);
-    setDryingRotateTray(false);
-    setDryingPopoverModuleType(moduleType);
-    setDryingPopoverAmsId(ams.id);
-    setDryingPopoverPos(computePopoverPosition({
-      triggerRect: trigger.getBoundingClientRect(),
-      popoverWidth: DRYING_POPOVER_WIDTH,
-      estimatedHeight: DRYING_POPOVER_ESTIMATED_HEIGHT,
-      horizontalAlign: 'center',
-    }));
-  };
-
   const jogPanel = (
     <div className="mt-3 min-h-0">
       <div className="mb-2 flex items-center gap-2">
@@ -2713,47 +2635,15 @@ function SinglePrinterCockpit({
                     <TemperatureIndicator temp={ams.temp} compact />
                   </div>
                 )}
-                {status?.supports_drying && (ams.module_type === 'n3f' || ams.module_type === 'n3s') && hasPermission('printers:control') && (
-                  <button
-                    type="button"
-                    disabled={!!(ams.dry_sf_reason?.length && ams.dry_time === 0) || stopDryingMutation.isPending}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      if (ams.dry_time > 0) {
-                        stopDryingMutation.mutate(ams.id);
-                      } else if (dryingPopoverAmsId === ams.id) {
-                        setDryingPopoverAmsId(null);
-                      } else {
-                        openDryingPopover(ams, event.currentTarget);
-                      }
-                    }}
-                    className={`ml-1 flex items-center gap-0.5 rounded px-1 py-0.5 text-[9px] transition-colors disabled:cursor-not-allowed ${
-                      ams.dry_time > 0
-                        ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30'
-                        : ams.dry_sf_reason?.length
-                          ? 'bg-bambu-dark text-bambu-gray/50'
-                          : 'bg-bambu-dark text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white'
-                    }`}
-                    title={ams.dry_time > 0 ? t('printers.drying.stop') : ams.dry_sf_reason?.length ? t('printers.drying.powerRequired') : t('printers.drying.start')}
-                    aria-label={`${getAmsLabel(ams.id, ams.tray.length)}: ${ams.dry_time > 0 ? t('printers.drying.stop') : t('printers.drying.start')}`}
-                  >
-                    <Flame className="h-3 w-3" />
-                  </button>
-                )}
+                <AmsDryingButton
+                  ams={ams}
+                  supportsDrying={status?.supports_drying === true}
+                  canControl={hasPermission('printers:control')}
+                  controller={dryingControls}
+                />
               </div>
             </div>
-            {ams.dry_time > 0 && (
-              <div className="mb-1.5 flex items-center gap-1.5 rounded-lg bg-amber-500/10 px-2 py-1 text-[9px] text-amber-300/70">
-                <Flame className="h-3 w-3 shrink-0 text-amber-400" />
-                <span className="font-medium text-amber-400">{t('printers.drying.active')}</span>
-                {ams.dry_filament && ams.dry_target_temp != null && (
-                  <span className="truncate">{t('printers.drying.targetSummary', { filament: ams.dry_filament, temp: ams.dry_target_temp })}</span>
-                )}
-                <span className="ml-auto shrink-0">
-                  {ams.dry_time >= 60 ? `${Math.floor(ams.dry_time / 60)}h ${ams.dry_time % 60}m` : `${ams.dry_time}m`}
-                </span>
-              </div>
-            )}
+            {ams.dry_time > 0 && <div className="mb-1.5"><AmsDryingStatus ams={ams} controller={dryingControls} /></div>}
             <div className={`grid gap-1 ${ams.tray.length === 1 ? 'grid-cols-1' : 'grid-cols-4'}`}>
               {Array.from({ length: ams.tray.length === 1 ? 1 : 4 }, (_, slotIdx) => renderCockpitFilamentSlot(ams.tray[slotIdx] || ams.tray.find((candidate) => candidate.id === slotIdx), ams.id, slotIdx, ams.tray.length))}
             </div>
@@ -3193,74 +3083,7 @@ function SinglePrinterCockpit({
               </div>
 
             </div>
-            {smartPlug && (
-              <div className="mt-3">
-                <div className="mb-2 flex items-center gap-2">
-                  <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">{t('printers.power', 'Power')}</span>
-                  <div className="h-[2px] flex-1 bg-bambu-dark-tertiary" />
-                </div>
-                <div data-testid="cockpit-power-controls" className="flex items-center gap-2 rounded-lg bg-bambu-dark p-2">
-                  <Zap className="h-4 w-4 shrink-0 text-bambu-gray" />
-                  <span className="min-w-0 truncate text-xs text-white">{smartPlug.name}</span>
-                  <span className="shrink-0 rounded-full bg-bambu-dark-tertiary px-1.5 py-0.5 text-[10px] font-medium text-bambu-gray" title={t('smartPlugs.power')}>
-                    {plugStatus?.energy?.power != null ? `${Math.round(plugStatus.energy.power)}W` : '--'}
-                  </span>
-                  <div className="flex-1" />
-                  <button
-                    type="button"
-                    onClick={() => toggleAutoOffMutation.mutate(!smartPlug.auto_off)}
-                    disabled={toggleAutoOffMutation.isPending || smartPlug.auto_off_executed || !hasPermission('smart_plugs:control')}
-                    title={!hasPermission('smart_plugs:control') ? t('printers.permission.noSmartPlugControl') : (smartPlug.auto_off_executed ? t('printers.autoOffExecuted') : t('printers.autoOffAfterPrint'))}
-                    aria-label={t('printers.autoOffAfterPrint')}
-                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                      smartPlug.auto_off || smartPlug.auto_off_executed
-                        ? 'bg-bambu-green/20 text-bambu-green hover:bg-bambu-green/30'
-                        : 'bg-bambu-dark-tertiary text-bambu-gray hover:bg-bambu-dark-tertiary/80 hover:text-white'
-                    }`}
-                  >
-                    <Clock className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => plugStatus?.state === 'ON' ? setShowPowerOffConfirm(true) : setShowPowerOnConfirm(true)}
-                    disabled={powerControlMutation.isPending || !hasPermission('smart_plugs:control')}
-                    title={!hasPermission('smart_plugs:control') ? t('printers.permission.noSmartPlugControl') : (plugStatus?.state === 'ON' ? t('common.turnOff', 'Turn off') : t('common.turnOn', 'Turn on'))}
-                    aria-label={`${smartPlug.name}: ${plugStatus?.state === 'ON' ? t('common.turnOff', 'Turn off') : t('common.turnOn', 'Turn on')}`}
-                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                      plugStatus?.state === 'ON'
-                        ? 'bg-bambu-green/20 text-bambu-green hover:bg-bambu-green/30'
-                        : 'bg-bambu-dark-tertiary text-bambu-gray hover:bg-bambu-dark-tertiary/80 hover:text-white'
-                    }`}
-                  >
-                    <Power className="h-4 w-4" />
-                  </button>
-                </div>
-                {scriptPlugs && scriptPlugs.length > 0 && (
-                  <div className="mt-2 flex items-center gap-2">
-                    <Home className="h-3.5 w-3.5 shrink-0 text-blue-400" />
-                    <span className="text-xs text-bambu-gray">HA:</span>
-                    <div className="flex flex-wrap gap-1">
-                      {scriptPlugs.map(script => {
-                        const isScript = script.ha_entity_id?.startsWith('script.');
-                        return (
-                          <button
-                            key={script.id}
-                            type="button"
-                            onClick={() => isScript ? runScriptMutation.mutate({ id: script.id, action: 'on' }) : setHaToggleConfirm(script)}
-                            disabled={runScriptMutation.isPending || !hasPermission('smart_plugs:control')}
-                            className="flex items-center gap-1 rounded bg-blue-500/20 px-2 py-0.5 text-xs text-blue-400 transition-colors hover:bg-blue-500/30 disabled:opacity-50"
-                            title={`${isScript ? 'Run' : 'Toggle'} ${script.ha_entity_id}`}
-                          >
-                            <Play className="h-2.5 w-2.5" />
-                            {script.name}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+            <PrinterPowerControls key={printer.id} printer={printer} isPrintingOrPaused={isPrintingOrPaused} className="mt-3" />
             {jogPanel}
             <div className="mb-2 mt-3 flex items-center gap-2">
               <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">
@@ -3428,159 +3251,7 @@ function SinglePrinterCockpit({
         onClose={() => setAmsBackupModalOpen(false)}
       />
     )}
-    {dryingPopoverAmsId !== null && dryingPopoverPos && (() => {
-      const maxTemp = dryingPopoverModuleType === 'n3s' ? 85 : 65;
-      const targetAms = status?.ams?.find(ams => ams.id === dryingPopoverAmsId);
-      const trayLoaded = (targetAms?.tray ?? []).some(tray => tray.state === 11);
-      return (
-        <>
-          <div className="fixed inset-0 z-[100]" onClick={() => setDryingPopoverAmsId(null)} />
-          <div
-            role="dialog"
-            aria-label={t('printers.drying.start')}
-            className="fixed z-[101] flex w-[240px] flex-col overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary shadow-2xl"
-            style={{
-              top: dryingPopoverPos.top,
-              left: dryingPopoverPos.left,
-              maxHeight: `calc(100dvh - ${dryingPopoverPos.top}px - 8px)`,
-            }}
-            onClick={event => event.stopPropagation()}
-          >
-            <div className="flex shrink-0 items-center justify-center gap-2 px-3 py-2.5">
-              <Flame className="h-3.5 w-3.5 text-bambu-green" />
-              <span className="text-sm font-medium text-white">{t('printers.drying.start')}</span>
-            </div>
-            <div className="h-px shrink-0 bg-bambu-dark-tertiary" />
-            <div className="min-h-0 space-y-2.5 overflow-y-auto px-3 py-2.5">
-              <div>
-                <label className="mb-1 block text-[10px] font-medium text-white/70">{t('printers.filaments')}</label>
-                <ToolbarDropdown
-                  value={dryingFilament}
-                  options={Object.keys(dryingPresets).map(filament => ({ value: filament, label: filament }))}
-                  onChange={(filament) => {
-                    setDryingFilament(filament);
-                    const preset = dryingPresets[filament];
-                    if (preset) {
-                      setDryingTemp(preset[dryingPopoverModuleType]);
-                      setDryingDuration(dryingPopoverModuleType === 'n3s' ? preset.n3s_hours : preset.n3f_hours);
-                    }
-                  }}
-                  fullWidth
-                />
-              </div>
-              <div>
-                <div className="mb-1 flex items-center justify-between">
-                  <label htmlFor="cockpit-drying-temperature" className="text-[10px] font-medium text-white/70">{t('printers.drying.temperature')}</label>
-                  <div className="flex items-center gap-1">
-                    <input
-                      id="cockpit-drying-temperature"
-                      type="number"
-                      min={45}
-                      max={maxTemp}
-                      value={dryingTemp}
-                      onChange={event => setDryingTemp(Math.min(maxTemp, Math.max(45, Number(event.target.value) || 45)))}
-                      className="w-12 rounded border border-bambu-dark-tertiary bg-bambu-dark px-1 py-0.5 text-center text-[11px] text-white focus:border-bambu-green focus:outline-none"
-                    />
-                    <span className="text-[10px] text-bambu-gray">°C</span>
-                  </div>
-                </div>
-                <input type="range" min={45} max={maxTemp} value={dryingTemp} onChange={event => setDryingTemp(Number(event.target.value))} className="h-1 w-full cursor-pointer accent-bambu-green" />
-              </div>
-              <div>
-                <div className="mb-1 flex items-center justify-between">
-                  <label htmlFor="cockpit-drying-duration" className="text-[10px] font-medium text-white/70">{t('printers.drying.duration')}</label>
-                  <div className="flex items-center gap-1">
-                    <input
-                      id="cockpit-drying-duration"
-                      type="number"
-                      min={1}
-                      max={24}
-                      value={dryingDuration}
-                      onChange={event => setDryingDuration(Math.min(24, Math.max(1, Number(event.target.value) || 1)))}
-                      className="w-10 rounded border border-bambu-dark-tertiary bg-bambu-dark px-1 py-0.5 text-center text-[11px] text-white focus:border-bambu-green focus:outline-none"
-                    />
-                    <span className="text-[10px] text-bambu-gray">{t('printers.drying.hours')}</span>
-                  </div>
-                </div>
-                <input type="range" min={1} max={24} value={dryingDuration} onChange={event => setDryingDuration(Number(event.target.value))} className="h-1 w-full cursor-pointer accent-bambu-green" />
-              </div>
-              <button
-                type="button"
-                onClick={() => setDryingRotateTray(enabled => !enabled)}
-                aria-pressed={dryingRotateTray && !trayLoaded}
-                disabled={trayLoaded}
-                title={trayLoaded ? t('printers.drying.rotateUnavailableReason') : undefined}
-                className={`h-8 w-full rounded-lg border px-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                  dryingRotateTray && !trayLoaded
-                    ? 'border-bambu-green bg-bambu-green text-white'
-                    : 'border-bambu-dark-tertiary bg-bambu-dark text-white hover:bg-bambu-dark-tertiary'
-                }`}
-              >
-                {t('printers.drying.rotateTray')}
-              </button>
-            </div>
-            <div className="h-px shrink-0 bg-bambu-dark-tertiary" />
-            <div className="shrink-0 px-3 pb-3 pt-2.5">
-              <button
-                type="button"
-                onClick={() => startDryingMutation.mutate({
-                  amsId: dryingPopoverAmsId,
-                  temp: dryingTemp,
-                  duration: dryingDuration,
-                  filament: dryingFilament,
-                  rotateTray: dryingRotateTray && !trayLoaded,
-                })}
-                disabled={startDryingMutation.isPending}
-                className="w-full rounded-lg bg-bambu-green py-1.5 text-xs font-medium text-white transition-colors hover:bg-bambu-green/80 disabled:opacity-50"
-              >
-                {startDryingMutation.isPending ? t('printers.drying.startingDrying') : t('printers.drying.start')}
-              </button>
-            </div>
-          </div>
-        </>
-      );
-    })()}
-    {showPowerOnConfirm && smartPlug && (
-      <ConfirmModal
-        title={t('printers.confirm.powerOnTitle')}
-        message={t('printers.confirm.powerOnMessage', { name: printer.name })}
-        confirmText={t('printers.confirm.powerOnButton')}
-        variant="default"
-        onConfirm={() => {
-          powerControlMutation.mutate('on');
-          setShowPowerOnConfirm(false);
-        }}
-        onCancel={() => setShowPowerOnConfirm(false)}
-      />
-    )}
-    {showPowerOffConfirm && smartPlug && (
-      <ConfirmModal
-        title={t('printers.confirm.powerOffTitle')}
-        message={isPrintingOrPaused ? t('printers.confirm.powerOffWarning', { name: printer.name }) : t('printers.confirm.powerOffMessage', { name: printer.name })}
-        confirmText={t('printers.confirm.powerOffButton')}
-        variant="danger"
-        onConfirm={() => {
-          powerControlMutation.mutate('off');
-          setShowPowerOffConfirm(false);
-        }}
-        onCancel={() => setShowPowerOffConfirm(false)}
-      />
-    )}
-    {haToggleConfirm && (
-      <ConfirmModal
-        title={t('printers.confirm.haToggleTitle', { name: haToggleConfirm.name })}
-        message={isPrintingOrPaused
-          ? t('printers.confirm.haToggleWarning', { name: printer.name, entity: haToggleConfirm.ha_entity_id || haToggleConfirm.name })
-          : t('printers.confirm.haToggleMessage', { entity: haToggleConfirm.ha_entity_id || haToggleConfirm.name })}
-        confirmText={t('printers.confirm.haToggleButton')}
-        variant={isPrintingOrPaused ? 'danger' : 'default'}
-        onConfirm={() => {
-          runScriptMutation.mutate({ id: haToggleConfirm.id, action: 'toggle' });
-          setHaToggleConfirm(null);
-        }}
-        onCancel={() => setHaToggleConfirm(null)}
-      />
-    )}
+    <AmsDryingPopover controller={dryingControls} />
     </>
   );
 }
@@ -3780,19 +3451,6 @@ export function AmsNameHoverCard({
 }
 
 
-// AMS drying presets from BambuStudio filament profiles (idle mode temps)
-// Format: { n3f temp, n3s temp, n3f hours, n3s hours }
-const DRYING_PRESETS: Record<string, { n3f: number; n3s: number; n3f_hours: number; n3s_hours: number }> = {
-  'PLA':   { n3f: 45, n3s: 45, n3f_hours: 12, n3s_hours: 12 },
-  'PETG':  { n3f: 65, n3s: 65, n3f_hours: 12, n3s_hours: 12 },
-  'TPU':   { n3f: 65, n3s: 75, n3f_hours: 12, n3s_hours: 18 },
-  'ABS':   { n3f: 65, n3s: 80, n3f_hours: 12, n3s_hours: 8 },
-  'ASA':   { n3f: 65, n3s: 80, n3f_hours: 12, n3s_hours: 8 },
-  'PA':    { n3f: 65, n3s: 85, n3f_hours: 12, n3s_hours: 12 },
-  'PC':    { n3f: 65, n3s: 80, n3f_hours: 12, n3s_hours: 8 },
-  'PVA':   { n3f: 65, n3s: 85, n3f_hours: 12, n3s_hours: 18 },
-};
-
 function PrinterCard({
   printer,
   hideIfDisconnected,
@@ -3848,7 +3506,7 @@ function PrinterCard({
   cameraViewMode?: 'window' | 'embedded';
   onOpenEmbeddedCamera?: (printerId: number, printerName: string) => void;
   checkPrinterFirmware?: boolean;
-  dryingPresets?: Record<string, { n3f: number; n3s: number; n3f_hours: number; n3s_hours: number }>;
+  dryingPresets?: DryingPresets;
   requirePlateClear?: boolean;
   selectionMode?: boolean;
   isSelected?: boolean;
@@ -3870,9 +3528,6 @@ function PrinterCard({
   const [showEditModal, setShowEditModal] = useState(false);
   const [showFileManager, setShowFileManager] = useState(false);
   const [showMQTTDebug, setShowMQTTDebug] = useState(false);
-  const [showPowerOnConfirm, setShowPowerOnConfirm] = useState(false);
-  const [showPowerOffConfirm, setShowPowerOffConfirm] = useState(false);
-  const [haToggleConfirm, setHaToggleConfirm] = useState<SmartPlug | null>(null);
   const [showHMSModal, setShowHMSModal] = useState(false);
   // #1762: AMS Filament Backup status / control modal — opens from the badge.
   const [amsBackupModalOpen, setAmsBackupModalOpen] = useState(false);
@@ -3892,14 +3547,6 @@ function PrinterCard({
   const [showHealthStatusMenu, setShowHealthStatusMenu] = useState(false);
   const closePrinterInfo = useCallback(() => setShowPrinterInfo(false), []);
   const [printAfterUpload, setPrintAfterUpload] = useState<{ id: number; filename: string } | null>(null);
-  // AMS drying popover state: which AMS unit has the popover open
-  const [dryingPopoverAmsId, setDryingPopoverAmsId] = useState<number | null>(null);
-  const [dryingPopoverModuleType, setDryingPopoverModuleType] = useState<string>('n3f');
-  const [dryingFilament, setDryingFilament] = useState('PLA');
-  const [dryingTemp, setDryingTemp] = useState(50);
-  const [dryingDuration, setDryingDuration] = useState(4);
-  const [dryingRotateTray, setDryingRotateTray] = useState(false);
-  const [dryingPopoverPos, setDryingPopoverPos] = useState<{ top: number; left: number } | null>(null);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [isDropUploading, setIsDropUploading] = useState(false);
   const printerActionsMenuRef = useRef<HTMLDivElement>(null);
@@ -4112,6 +3759,11 @@ function PrinterCard({
     }
   }, [status?.ams]);
   const amsData = (status?.ams && status.ams.length > 0) ? status.ams : cachedAmsData.current;
+  const dryingControls = useAmsDryingControls({
+    printerId: printer.id,
+    amsUnits: amsData,
+    presets: dryingPresets,
+  });
 
   // Cache tray_now to prevent flickering when undefined values come in
   // Valid tray IDs: 0-253 for AMS, 254 for external spool
@@ -4127,26 +3779,6 @@ function PrinterCard({
   const effectiveTrayNow = (currentTrayNow !== undefined && currentTrayNow !== 255)
     ? currentTrayNow
     : cachedTrayNow.current;
-
-  // Fetch smart plug for this printer
-  const { data: smartPlug } = useQuery({
-    queryKey: ['smartPlugByPrinter', printer.id],
-    queryFn: () => api.getSmartPlugByPrinter(printer.id),
-  });
-
-  // Fetch script plugs for this printer (for multi-device control)
-  const { data: scriptPlugs } = useQuery({
-    queryKey: ['scriptPlugsByPrinter', printer.id],
-    queryFn: () => api.getScriptPlugsByPrinter(printer.id),
-  });
-
-  // Fetch smart plug status if plug exists (faster refresh for energy monitoring)
-  const { data: plugStatus } = useQuery({
-    queryKey: ['smartPlugStatus', smartPlug?.id],
-    queryFn: () => smartPlug ? api.getSmartPlugStatus(smartPlug.id) : null,
-    enabled: !!smartPlug,
-    refetchInterval: 10000, // 10 seconds for real-time power display
-  });
 
   // Fetch queue count for this printer
   const { data: queueItems } = useQuery({
@@ -4473,25 +4105,6 @@ function PrinterCard({
     },
   });
 
-  // AMS drying mutations
-  const startDryingMutation = useMutation({
-    mutationFn: ({ amsId, temp, duration, filament, rotateTray }: { amsId: number; temp: number; duration: number; filament: string; rotateTray: boolean }) =>
-      api.startDrying(printer.id, amsId, temp, duration, filament, rotateTray),
-    onSuccess: () => {
-      setDryingPopoverAmsId(null);
-      queryClient.invalidateQueries({ queryKey: ['printerStatus', printer.id] });
-    },
-    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
-  });
-
-  const stopDryingMutation = useMutation({
-    mutationFn: (amsId: number) => api.stopDrying(printer.id, amsId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['printerStatus', printer.id] });
-    },
-    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
-  });
-
   // AMS Filament Backup toggle (auto-switch to a backup spool when one runs out).
   // Invalidate BOTH printer-status cache keys — the codebase has two conventions
   // ('printerStatus' camelCase + 'printer-status' kebab-case used by PrintModal /
@@ -4505,34 +4118,6 @@ function PrinterCard({
       showToast(t(enabled ? 'printers.amsBackup.toastEnabled' : 'printers.amsBackup.toastDisabled'), 'success');
     },
     onError: (error: Error) => showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
-  });
-
-  // Smart plug control mutations
-  const powerControlMutation = useMutation({
-    mutationFn: (action: 'on' | 'off') =>
-      smartPlug ? api.controlSmartPlug(smartPlug.id, action) : Promise.reject('No plug'),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['smartPlugStatus', smartPlug?.id] });
-    },
-  });
-
-  const toggleAutoOffMutation = useMutation({
-    mutationFn: (enabled: boolean) =>
-      smartPlug ? api.updateSmartPlug(smartPlug.id, { auto_off: enabled }) : Promise.reject('No plug'),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['smartPlugByPrinter', printer.id] });
-      // Also invalidate the smart-plugs list to keep Settings page in sync
-      queryClient.invalidateQueries({ queryKey: ['smart-plugs'] });
-    },
-  });
-
-  // Run HA entity mutation — scripts use 'on' (trigger), switches use 'toggle'
-  const runScriptMutation = useMutation({
-    mutationFn: ({ id, action }: { id: number; action: 'on' | 'toggle' }) => api.controlSmartPlug(id, action),
-    onSuccess: () => {
-      showToast(t('printers.toast.scriptTriggered'));
-    },
-    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToRunScript'), 'error'),
   });
 
   // Print control mutations
@@ -6567,72 +6152,11 @@ function PrinterCard({
                                       />
                                     </div>
                                   )}
-                                  {/* Drying button — only for AMS 2 Pro (n3f) and AMS-HT (n3s) */}
-                                  {status.supports_drying && (ams.module_type === 'n3f' || ams.module_type === 'n3s') && hasPermission('printers:control') && (
-                                    <button
-                                      disabled={!!(ams.dry_sf_reason?.length && ams.dry_time === 0)}
-                                      onClick={(e) => {
-                                        if (ams.dry_time > 0) {
-                                          stopDryingMutation.mutate(ams.id);
-                                        } else if (dryingPopoverAmsId === ams.id) {
-                                          setDryingPopoverAmsId(null);
-                                        } else {
-                                          const firstTray = ams.tray.find(t => t.tray_type);
-                                          const filType = (firstTray?.tray_type || 'PLA').split(' ')[0].toUpperCase();
-                                          const preset = dryingPresets[filType] || dryingPresets['PLA'];
-                                          const moduleType = ams.module_type as 'n3f' | 'n3s';
-                                          setDryingFilament(filType);
-                                          setDryingTemp(preset[moduleType] || preset.n3f);
-                                          setDryingDuration(moduleType === 'n3s' ? preset.n3s_hours : preset.n3f_hours);
-                                          setDryingRotateTray(false);
-                                          setDryingPopoverModuleType(ams.module_type);
-                                          setDryingPopoverAmsId(ams.id);
-                                          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                          setDryingPopoverPos(computePopoverPosition({ triggerRect: rect, popoverWidth: DRYING_POPOVER_WIDTH, estimatedHeight: DRYING_POPOVER_ESTIMATED_HEIGHT, horizontalAlign: 'center' }));
-                                        }
-                                      }}
-                                      className={`ml-1 flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] transition-colors ${
-                                        ams.dry_time > 0
-                                          ? 'bg-amber-500/20 text-amber-400'
-                                          : ams.dry_sf_reason?.length
-                                            ? 'bg-bambu-dark text-bambu-gray/50 cursor-not-allowed'
-                                            : 'bg-bambu-dark text-bambu-gray hover:text-white hover:bg-bambu-dark/80'
-                                      }`}
-                                      title={ams.dry_time > 0 ? t('printers.drying.stop') : ams.dry_sf_reason?.length ? t('printers.drying.powerRequired') : t('printers.drying.start')}
-                                    >
-                                      <Flame className="w-3 h-3" />
-                                    </button>
-                                  )}
+                                  <AmsDryingButton ams={ams} supportsDrying={status.supports_drying === true} canControl={hasPermission('printers:control')} controller={dryingControls} />
                                 </div>
                               )}
                             </div>
-                            {/* Drying status bar */}
-                            {ams.dry_time > 0 && (
-                              <div className="flex items-center gap-2 rounded-lg bg-amber-500/10 px-2 py-1 text-[9px]">
-                                <Flame className="w-3 h-3 text-amber-400 shrink-0" />
-                                <span className="text-amber-400 font-medium">{t('printers.drying.active')}</span>
-                                {ams.dry_filament && ams.dry_target_temp != null && (
-                                  <span className="text-amber-300/70">
-                                    {t('printers.drying.targetSummary', { filament: ams.dry_filament, temp: ams.dry_target_temp })}
-                                  </span>
-                                )}
-                                <span className="text-amber-300/70">
-                                  {t('printers.drying.timeRemaining', {
-                                    time: ams.dry_time >= 60
-                                      ? `${Math.floor(ams.dry_time / 60)}h ${ams.dry_time % 60}m`
-                                      : `${ams.dry_time}m`
-                                  })}
-                                </span>
-                                <button
-                                  onClick={() => stopDryingMutation.mutate(ams.id)}
-                                  disabled={stopDryingMutation.isPending}
-                                  className="ml-auto text-amber-400 hover:text-amber-300 transition-colors disabled:opacity-50"
-                                  title={t('printers.drying.stop')}
-                                >
-                                  <X className="w-3 h-3" />
-                                </button>
-                              </div>
-                            )}
+                            <AmsDryingStatus ams={ams} controller={dryingControls} />
                             {/* Slots grid: 4 columns - always render 4 slots */}
                             <div className="grid w-full grid-cols-[repeat(4,minmax(3.5rem,1fr))] gap-1">
                               {[0, 1, 2, 3].map((slotIdx) => {
@@ -7053,66 +6577,9 @@ function PrinterCard({
                                   <NozzleBadge side={isLeftNozzle ? 'L' : 'R'} />
                                 )}
                               </div>
-                              {/* Drying button for HT AMS */}
-                              {status.supports_drying && (ams.module_type === 'n3f' || ams.module_type === 'n3s') && hasPermission('printers:control') && (
-                                <div className="relative ml-auto">
-                                  <button
-                                    onClick={(e) => {
-                                      if (ams.dry_time > 0) {
-                                        stopDryingMutation.mutate(ams.id);
-                                      } else if (dryingPopoverAmsId === ams.id) {
-                                        setDryingPopoverAmsId(null);
-                                      } else {
-                                        const firstTray = ams.tray.find(t => t.tray_type);
-                                        const filType = (firstTray?.tray_type || 'PLA').split(' ')[0].toUpperCase();
-                                        const preset = dryingPresets[filType] || dryingPresets['PLA'];
-                                        const moduleType = ams.module_type as 'n3f' | 'n3s';
-                                        setDryingFilament(filType);
-                                        setDryingTemp(preset[moduleType] || preset.n3f);
-                                        setDryingDuration(moduleType === 'n3s' ? preset.n3s_hours : preset.n3f_hours);
-                                        setDryingRotateTray(false);
-                                        setDryingPopoverModuleType(ams.module_type);
-                                        setDryingPopoverAmsId(ams.id);
-                                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                        setDryingPopoverPos(computePopoverPosition({ triggerRect: rect, popoverWidth: DRYING_POPOVER_WIDTH, estimatedHeight: DRYING_POPOVER_ESTIMATED_HEIGHT, horizontalAlign: 'center' }));
-                                      }
-                                    }}
-                                    className={`flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] transition-colors ${
-                                      ams.dry_time > 0
-                                        ? 'bg-amber-500/20 text-amber-400'
-                                        : 'bg-bambu-dark text-bambu-gray hover:text-white hover:bg-bambu-dark/80'
-                                    }`}
-                                    title={ams.dry_time > 0 ? t('printers.drying.stop') : t('printers.drying.start')}
-                                  >
-                                    <Flame className="w-3 h-3" />
-                                  </button>
-                                </div>
-                              )}
+                              <AmsDryingButton ams={ams} supportsDrying={status.supports_drying === true} canControl={hasPermission('printers:control')} controller={dryingControls} />
                             </div>
-                            {/* HT AMS drying status bar */}
-                            {ams.dry_time > 0 && (
-                              <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-lg bg-amber-500/10 px-2 py-1 text-[9px]">
-                                <Flame className="w-3 h-3 text-amber-400 shrink-0" />
-                                {ams.dry_filament && ams.dry_target_temp != null && (
-                                  <span className="text-amber-300/70 text-[8px] truncate">
-                                    {t('printers.drying.targetSummary', { filament: ams.dry_filament, temp: ams.dry_target_temp })}
-                                  </span>
-                                )}
-                                <span className="text-amber-300/70 text-[8px] truncate">
-                                  {ams.dry_time >= 60
-                                    ? `${Math.floor(ams.dry_time / 60)}h ${ams.dry_time % 60}m`
-                                    : `${ams.dry_time}m`}
-                                </span>
-                                <button
-                                  onClick={() => stopDryingMutation.mutate(ams.id)}
-                                  disabled={stopDryingMutation.isPending}
-                                  className="ml-auto text-amber-400 hover:text-amber-300 transition-colors disabled:opacity-50 shrink-0"
-                                  title={t('printers.drying.stop')}
-                                >
-                                  <X className="w-3 h-3" />
-                                </button>
-                              </div>
-                            )}
+                            <AmsDryingStatus ams={ams} controller={dryingControls} />
                             {/* Row 2: Slot (left) + Stats (right stacked) */}
                             <div className="flex gap-1.5 max-[550px]:flex-col max-[550px]:items-start">
                               {/* Slot wrapper with loading overlay */}
@@ -7550,102 +7017,7 @@ function PrinterCard({
             power row hugs the action bar at the card bottom instead of
             floating up when there's less filament content above. */}
         <div className="mt-auto">
-        {smartPlug && (
-          <div className="pt-3">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-[10px] uppercase tracking-wider text-bambu-gray font-medium">
-                {t('printers.power', 'Power')}
-              </span>
-              <div className="flex-1 h-[2px] bg-bambu-dark-tertiary" />
-            </div>
-            <div className="flex items-center gap-2 rounded-[10px] bg-bambu-dark p-2">
-              {/* Plug name + current power */}
-              <div className="flex items-center gap-2 min-w-0 pl-1">
-                <Zap className="w-4 h-4 text-bambu-gray flex-shrink-0" />
-                <span className="text-sm text-white truncate">{smartPlug.name}</span>
-                <span
-                  className="px-1.5 py-0.5 rounded-full bg-bambu-dark-tertiary text-bambu-gray text-[10px] font-medium flex-shrink-0"
-                  title={t('smartPlugs.power')}
-                >
-                  {plugStatus?.energy?.power !== null && plugStatus?.energy?.power !== undefined ? `${Math.round(plugStatus.energy.power)}W` : '--'}
-                </span>
-              </div>
-
-              {/* Spacer */}
-              <div className="flex-1" />
-
-              <div className="flex items-center gap-2">
-                {/* Auto-off */}
-                <button
-                  onClick={() => toggleAutoOffMutation.mutate(!smartPlug.auto_off)}
-                  disabled={toggleAutoOffMutation.isPending || smartPlug.auto_off_executed || !hasPermission('smart_plugs:control')}
-                  title={!hasPermission('smart_plugs:control') ? t('printers.permission.noSmartPlugControl') : (smartPlug.auto_off_executed ? t('printers.autoOffExecuted') : t('printers.autoOffAfterPrint'))}
-                  className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                    !hasPermission('smart_plugs:control')
-                      ? 'bg-bambu-dark-tertiary/50 text-bambu-gray/50'
-                      : smartPlug.auto_off || smartPlug.auto_off_executed
-                        ? 'bg-bambu-green/20 text-bambu-green hover:bg-bambu-green/30'
-                        : 'bg-bambu-dark-tertiary text-bambu-gray hover:text-white hover:bg-bambu-dark-tertiary/80'
-                  }`}
-                >
-                  <Clock className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => {
-                    if (plugStatus?.state === 'ON') {
-                      setShowPowerOffConfirm(true);
-                    } else {
-                      setShowPowerOnConfirm(true);
-                    }
-                  }}
-                  disabled={powerControlMutation.isPending || !hasPermission('smart_plugs:control')}
-                  className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                    !hasPermission('smart_plugs:control')
-                      ? 'bg-bambu-dark-tertiary/50 text-bambu-gray/50'
-                      : plugStatus?.state === 'ON'
-                        ? 'bg-bambu-green/20 text-bambu-green hover:bg-bambu-green/30'
-                        : 'bg-bambu-dark-tertiary text-bambu-gray hover:text-white hover:bg-bambu-dark-tertiary/80'
-                  }`}
-                  title={!hasPermission('smart_plugs:control') ? t('printers.permission.noSmartPlugControl') : (plugStatus?.state === 'ON' ? 'Turn off' : 'Turn on')}
-                >
-                  <Zap className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* HA entity buttons row */}
-            {scriptPlugs && scriptPlugs.length > 0 && (
-              <div className="flex items-center gap-2 mt-2">
-                <Home className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
-                <span className="text-xs text-bambu-gray">HA:</span>
-                <div className="h-[2px] w-5 bg-bambu-dark-tertiary/50" />
-                <div className="flex flex-wrap gap-1">
-                  {scriptPlugs.map(script => {
-                    const isScript = script.ha_entity_id?.startsWith('script.');
-                    return (
-                      <button
-                        key={script.id}
-                        onClick={() => {
-                          if (isScript) {
-                            runScriptMutation.mutate({ id: script.id, action: 'on' });
-                          } else {
-                            setHaToggleConfirm(script);
-                          }
-                        }}
-                        disabled={runScriptMutation.isPending}
-                        title={`${isScript ? 'Run' : 'Toggle'} ${script.ha_entity_id}`}
-                        className="px-2 py-0.5 text-xs bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 rounded transition-colors flex items-center gap-1"
-                      >
-                        <Play className="w-2.5 h-2.5" />
-                        {script.name}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+        <PrinterPowerControls key={printer.id} printer={printer} isPrintingOrPaused={isPrintingOrPaused} className="pt-3" />
 
         {/* Connection Info & Actions */}
         <div className="pt-4">
@@ -8063,21 +7435,6 @@ function PrinterCard({
         </div>
       )}
 
-      {/* Power On Confirmation */}
-      {showPowerOnConfirm && smartPlug && (
-        <ConfirmModal
-          title={t('printers.confirm.powerOnTitle')}
-          message={t('printers.confirm.powerOnMessage', { name: printer.name })}
-          confirmText={t('printers.confirm.powerOnButton')}
-          variant="default"
-          onConfirm={() => {
-            powerControlMutation.mutate('on');
-            setShowPowerOnConfirm(false);
-          }}
-          onCancel={() => setShowPowerOnConfirm(false)}
-        />
-      )}
-
       {/* Maintenance Mode mid-print confirmation (#1476) — entering maintenance
           disconnects MQTT, which stops progress tracking + completion
           notifications for the in-flight job. Idle / FINISH / FAILED states
@@ -8093,44 +7450,6 @@ function PrinterCard({
             setConfirmMaintenanceEnter(false);
           }}
           onCancel={() => setConfirmMaintenanceEnter(false)}
-        />
-      )}
-
-      {/* Power Off Confirmation */}
-      {showPowerOffConfirm && smartPlug && (
-        <ConfirmModal
-          title={t('printers.confirm.powerOffTitle')}
-          message={
-            status?.state === 'RUNNING'
-              ? t('printers.confirm.powerOffWarning', { name: printer.name })
-              : t('printers.confirm.powerOffMessage', { name: printer.name })
-          }
-          confirmText={t('printers.confirm.powerOffButton')}
-          variant="danger"
-          onConfirm={() => {
-            powerControlMutation.mutate('off');
-            setShowPowerOffConfirm(false);
-          }}
-          onCancel={() => setShowPowerOffConfirm(false)}
-        />
-      )}
-
-      {/* HA entity toggle confirmation (Show on Printer Card switches) */}
-      {haToggleConfirm && (
-        <ConfirmModal
-          title={t('printers.confirm.haToggleTitle', { name: haToggleConfirm.name })}
-          message={
-            status?.state === 'RUNNING'
-              ? t('printers.confirm.haToggleWarning', { name: printer.name, entity: haToggleConfirm.ha_entity_id || haToggleConfirm.name })
-              : t('printers.confirm.haToggleMessage', { entity: haToggleConfirm.ha_entity_id || haToggleConfirm.name })
-          }
-          confirmText={t('printers.confirm.haToggleButton')}
-          variant={status?.state === 'RUNNING' ? 'danger' : 'default'}
-          onConfirm={() => {
-            runScriptMutation.mutate({ id: haToggleConfirm.id, action: 'toggle' });
-            setHaToggleConfirm(null);
-          }}
-          onCancel={() => setHaToggleConfirm(null)}
         />
       )}
 
@@ -8345,188 +7664,7 @@ function PrinterCard({
         />
       )}
 
-      {/* AMS Drying Popover — fixed position to avoid overflow/z-index issues */}
-      {dryingPopoverAmsId !== null && dryingPopoverPos && (() => {
-        const maxTemp = dryingPopoverModuleType === 'n3s' ? 85 : 65;
-        const sliderMin = 35;
-        const sliderMax = maxTemp + 10;
-        return (
-          <>
-            {/* Backdrop */}
-            <div className="fixed inset-0 z-[100]" onClick={() => setDryingPopoverAmsId(null)} />
-            {/* Popover */}
-            <div
-              className="fixed z-[101] flex flex-col w-[240px] bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-xl shadow-2xl overflow-hidden"
-              style={{
-                top: dryingPopoverPos.top,
-                left: dryingPopoverPos.left,
-                // Cap to the space between the popover's top and the bottom
-                // viewport margin (8px, matching computePopoverPosition's
-                // margin). When the popover is taller than that space — short
-                // viewport, landscape phone, zoomed-in — the body scrolls and
-                // the footer stays pinned, so the Start button is always
-                // reachable (#1458 / #1447 follow-up). dvh (not vh) so iOS
-                // Safari's bottom toolbar overlay doesn't clip the footer
-                // (#1669, iPhone 17 Safari).
-                maxHeight: `calc(100dvh - ${dryingPopoverPos.top}px - 8px)`,
-              }}
-              onClick={e => e.stopPropagation()}
-            >
-              {/* Header */}
-              <div className="shrink-0 flex items-center justify-center gap-2 px-3 py-2.5">
-                <Flame className="w-3.5 h-3.5 text-bambu-green" />
-                <span className="text-sm text-white font-medium text-center">{t('printers.drying.start')}</span>
-              </div>
-              <div className="shrink-0 h-px bg-bambu-dark-tertiary" />
-              {/* Body */}
-              <div className="px-3 py-2.5 space-y-2.5 overflow-y-auto min-h-0">
-                {/* Filament type select */}
-                <div>
-                  <label className="text-[10px] text-white/70 font-medium mb-1 block">{t('printers.filaments')}</label>
-                  <ToolbarDropdown
-                    value={dryingFilament}
-                    options={Object.keys(dryingPresets).map(fil => ({ value: fil, label: fil }))}
-                    onChange={fil => {
-                      setDryingFilament(fil);
-                      const preset = dryingPresets[fil];
-                      if (preset) {
-                        const key = dryingPopoverModuleType === 'n3s' ? 'n3s' : 'n3f';
-                        setDryingTemp(preset[key]);
-                        setDryingDuration(dryingPopoverModuleType === 'n3s' ? preset.n3s_hours : preset.n3f_hours);
-                      }
-                    }}
-                    fullWidth
-                  />
-                </div>
-                {/* Temperature */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-[10px] text-white/70 font-medium">{t('printers.drying.temperature')}</label>
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="number"
-                        min={45}
-                        max={maxTemp}
-                        value={dryingTemp}
-                        onChange={e => setDryingTemp(Math.min(maxTemp, Math.max(45, Number(e.target.value) || 45)))}
-                        className="w-12 px-1 py-0.5 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-[11px] text-center focus:outline-none focus:border-bambu-green [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                      />
-                      <span className="text-[10px] text-bambu-gray">°C</span>
-                    </div>
-                  </div>
-                  <input
-                    type="range"
-                    min={sliderMin}
-                    max={sliderMax}
-                    value={dryingTemp}
-                    onChange={e => setDryingTemp(Math.min(maxTemp, Math.max(45, Number(e.target.value))))}
-                    className="w-full h-1 accent-bambu-green cursor-pointer"
-                  />
-                  <div className="flex justify-between text-[9px] text-bambu-gray/50 mt-0.5">
-                    <span>45°C</span>
-                    <span>{maxTemp}°C</span>
-                  </div>
-                </div>
-                {/* Duration */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-[10px] text-white/70 font-medium">{t('printers.drying.duration')}</label>
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="number"
-                        min={1}
-                        max={24}
-                        value={dryingDuration}
-                        onChange={e => setDryingDuration(Math.min(24, Math.max(1, Number(e.target.value) || 1)))}
-                        className="w-10 px-1 py-0.5 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-[11px] text-center focus:outline-none focus:border-bambu-green [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                      />
-                      <span className="text-[10px] text-bambu-gray">{t('printers.drying.hours')}</span>
-                    </div>
-                  </div>
-                  <input
-                    type="range"
-                    min={1}
-                    max={24}
-                    value={dryingDuration}
-                    onChange={e => setDryingDuration(Number(e.target.value))}
-                    className="w-full h-1 accent-bambu-green cursor-pointer"
-                  />
-                  <div className="flex justify-between text-[9px] text-bambu-gray/50 mt-0.5">
-                    <span>1h</span>
-                    <span>24h</span>
-                  </div>
-                </div>
-                {/* Rotate tray — disabled when any tray in THIS AMS has its
-                    filament threaded out into the feed tube. The whole AMS
-                    rotates as one mechanism (all 4 spools turn together), so a
-                    single loaded slot locks the entire unit. Bambu per-tray
-                    `state`: 9 = empty, 10 = spool present but not loaded
-                    (rotation possible), 11 = loaded into tube (rotation impossible).
-                    Catches both mid-print (active feed) AND idle-with-threaded-
-                    filament — the H2D's post-print state leaves filament in the
-                    tube but tray_now resets to 255, which a tray_now-only check
-                    would silently miss. */}
-                {(() => {
-                  const targetAms = dryingPopoverAmsId !== null
-                    ? amsData.find(a => a.id === dryingPopoverAmsId)
-                    : undefined;
-                  const trayLoadedInThisAms = (targetAms?.tray ?? []).some(
-                    tray => tray.state === 11,
-                  );
-                  const rotateChecked = dryingRotateTray && !trayLoadedInThisAms;
-                  return (
-                    <button
-                      type="button"
-                      onClick={() => setDryingRotateTray(enabled => !enabled)}
-                      aria-pressed={rotateChecked}
-                      disabled={trayLoadedInThisAms}
-                      title={trayLoadedInThisAms ? t('printers.drying.rotateUnavailableReason') : undefined}
-                      className={`h-8 w-full rounded-lg border px-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                        rotateChecked
-                          ? 'bg-bambu-green border-bambu-green text-white'
-                          : 'bg-bambu-dark border-bambu-dark-tertiary text-white hover:bg-bambu-dark-tertiary disabled:hover:bg-bambu-dark'
-                      }`}
-                    >
-                      {t('printers.drying.rotateTray')}
-                    </button>
-                  );
-                })()}
-              </div>
-              <div className="shrink-0 h-px bg-bambu-dark-tertiary" />
-              {/* Footer */}
-              <div className="shrink-0 px-3 pt-2.5 pb-3">
-                <button
-                  onClick={() => {
-                    if (dryingPopoverAmsId !== null) {
-                      // Clamp rotateTray off when any tray in this AMS is loaded into
-                      // the tube — the rotate UI is disabled there, but the state may
-                      // linger as `true` from a previous AMS, or a print may have
-                      // started while the popover was open. Without this clamp the
-                      // Start payload would carry rotate_tray=true and firmware would
-                      // reject with dry_sf_reason=[3] (ConsumableAtAmsOutlet).
-                      const targetAms = amsData.find(a => a.id === dryingPopoverAmsId);
-                      const trayLoadedInThisAms = (targetAms?.tray ?? []).some(
-                        tray => tray.state === 11,
-                      );
-                      startDryingMutation.mutate({
-                        amsId: dryingPopoverAmsId,
-                        temp: dryingTemp,
-                        duration: dryingDuration,
-                        filament: dryingFilament,
-                        rotateTray: dryingRotateTray && !trayLoadedInThisAms,
-                      });
-                    }
-                  }}
-                  disabled={startDryingMutation.isPending}
-                  className="w-full py-1.5 bg-bambu-green hover:bg-bambu-green/80 text-white text-xs font-medium rounded-lg transition-colors disabled:opacity-50"
-                >
-                  {startDryingMutation.isPending ? t('printers.drying.startingDrying') : t('printers.drying.start')}
-                </button>
-              </div>
-            </div>
-          </>
-        );
-      })()}
+      <AmsDryingPopover controller={dryingControls} />
     </Card>
   );
 }

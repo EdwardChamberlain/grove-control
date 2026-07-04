@@ -765,7 +765,7 @@ describe('PrintersPage', () => {
       expect(dryingRequests[0].searchParams.get('filament')).toBe('PLA');
       expect(dryingRequests[0].searchParams.get('temp')).toBe('45');
 
-      const powerControls = await screen.findByTestId('cockpit-power-controls');
+      const powerControls = await screen.findByTestId('printer-power-controls');
       expect(within(powerControls).getByText('Cockpit Socket')).toBeInTheDocument();
       expect(within(powerControls).getByText('42W')).toBeInTheDocument();
       fireEvent.click(within(powerControls).getByRole('button', { name: 'Cockpit Socket: Turn on' }));
