@@ -753,6 +753,7 @@ describe('PrintersPage', () => {
       fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
 
       const amsHeader = await screen.findByTestId('cockpit-ams-header-0');
+      expect(screen.getByTestId('ams-unit-card-compact-0')).toContainElement(amsHeader);
       expect(amsHeader).toHaveClass('px-2', 'py-1');
       const indicators = screen.getByTestId('cockpit-ams-indicators-0');
       expect(within(indicators).getByTitle(/Temperature:/).parentElement).toHaveClass('mr-1');

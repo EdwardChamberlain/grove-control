@@ -7,7 +7,7 @@ import type { AMSUnit } from '../../api/client';
 import { getAmsLabel } from '../../utils/amsHelpers';
 import type { AmsDryingController } from '../../hooks/useAmsDryingControls';
 
-export function AmsDryingButton({
+export function AmsDryingControl({
   ams,
   supportsDrying,
   canControl,
@@ -43,6 +43,9 @@ export function AmsDryingButton({
     </button>
   );
 }
+
+// Compatibility alias for callers outside the composed AMS card implementation.
+export const AmsDryingButton = AmsDryingControl;
 
 export function AmsDryingStatus({ ams, controller }: { ams: AMSUnit; controller: AmsDryingController }) {
   const { t } = useTranslation();

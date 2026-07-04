@@ -109,10 +109,18 @@ import { PrinterHealthMenu } from '../components/printer/PrinterHealthMenu';
 import { FirmwareUpdateModal } from '../components/printer/FirmwareUpdateModal';
 import { PrinterThermalControls } from '../components/printer/PrinterThermalControls';
 import {
-  AmsDryingButton,
+  AmsDryingControl,
   AmsDryingPopover,
   AmsDryingStatus,
 } from '../components/printer/AmsDryingControls';
+import {
+  AmsEnvironmentIndicators,
+  AmsSlotGrid,
+  AmsUnitHeader,
+  CompactAmsUnitCard,
+  ExpandedAmsUnitCard,
+  HtAmsUnitCard,
+} from '../components/printer/AmsCardParts';
 import { DRYING_PRESETS, useAmsDryingControls } from '../hooks/useAmsDryingControls';
 import type { DryingPresets } from '../hooks/useAmsDryingControls';
 import { PrinterInfoModal } from '../components/PrinterInfoModal';
@@ -157,67 +165,6 @@ function NozzleBadge({ side }: { side: 'L' | 'R' }) {
 // Expand nozzle type codes to material names
 // Handles full text ("hardened_steel"), 2-char codes ("HS"/"HH"), and 4-char codes ("HS01")
 // Material mapping: 00=stainless steel, 01=hardened steel, 05=tungsten carbide
-
-// Water drop SVG - empty outline (Bambu Lab style from bambu-humidity)
-function WaterDropEmpty({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 36 54" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M17.8131 0.00538C18.4463 -0.15091 20.3648 3.14642 20.8264 3.84781C25.4187 10.816 35.3089 26.9368 35.9383 34.8694C37.4182 53.5822 11.882 61.3357 2.53721 45.3789C-1.73471 38.0791 0.016 32.2049 3.178 25.0232C6.99221 16.3662 12.6411 7.90372 17.8131 0.00538ZM18.3738 7.24807L17.5881 7.48441C14.4452 12.9431 10.917 18.2341 8.19369 23.9368C4.6808 31.29 1.18317 38.5479 7.69403 45.5657C17.3058 55.9228 34.9847 46.8808 31.4604 32.8681C29.2558 24.0969 22.4207 15.2913 18.3776 7.24807H18.3738Z" fill="#C3C2C1"/>
-    </svg>
-  );
-}
-
-// Water drop SVG - half filled with blue water (Bambu Lab style from bambu-humidity)
-function WaterDropHalf({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 35 53" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M17.3165 0.0038C17.932 -0.14959 19.7971 3.08645 20.2458 3.77481C24.7103 10.6135 34.3251 26.4346 34.937 34.2198C36.3757 52.5848 11.5505 60.1942 2.46584 44.534C-1.68714 37.3735 0.0148 31.6085 3.08879 24.5603C6.79681 16.0605 12.2884 7.75907 17.3165 0.0038ZM17.8615 7.11561L17.0977 7.34755C14.0423 12.7048 10.6124 17.8974 7.96483 23.4941C4.54975 30.7107 1.14949 37.8337 7.47908 44.721C16.8233 54.8856 34.01 46.0117 30.5838 32.2595C28.4405 23.6512 21.7957 15.0093 17.8652 7.11561H17.8615Z" fill="#C3C2C1"/>
-      <path d="M5.03547 30.112C9.64453 30.4936 11.632 35.7985 16.4154 35.791C19.6339 35.7873 20.2161 33.2283 22.3853 31.6197C31.6776 24.7286 33.5835 37.4894 27.9881 44.4254C18.1878 56.5653 -1.16063 44.6013 5.03917 30.1158L5.03547 30.112Z" fill="#1F8FEB"/>
-    </svg>
-  );
-}
-
-// Water drop SVG - fully filled with blue water (Bambu Lab style from bambu-humidity)
-function WaterDropFull({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 36 54" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M17.9625 4.48059L4.77216 26.3154L2.08228 40.2175L10.0224 50.8414H23.1594L33.3246 42.1693V30.2455L17.9625 4.48059Z" fill="#1F8FEB"/>
-      <path d="M17.7948 0.00538C18.4273 -0.15091 20.3438 3.14642 20.8048 3.84781C25.3921 10.816 35.2715 26.9368 35.9001 34.8694C37.3784 53.5822 11.8702 61.3357 2.53562 45.3789C-1.73163 38.0829 0.0134 32.2087 3.1757 25.027C6.98574 16.3662 12.6284 7.90372 17.7948 0.00538ZM18.3549 7.24807L17.57 7.48441C14.4306 12.9431 10.9063 18.2341 8.1859 23.9368C4.67686 31.29 1.18305 38.5479 7.68679 45.5657C17.2881 55.9228 34.9476 46.8808 31.4271 32.8681C29.2249 24.0969 22.3974 15.2913 18.3587 7.24807H18.3549Z" fill="#C3C2C1"/>
-    </svg>
-  );
-}
-
-// Thermometer SVG - empty outline
-function ThermometerEmpty({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 12 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M6 0.5C4.6 0.5 3.5 1.6 3.5 3V12.1C2.6 12.8 2 13.9 2 15C2 17.2 3.8 19 6 19C8.2 19 10 17.2 10 15C10 13.9 9.4 12.8 8.5 12.1V3C8.5 1.6 7.4 0.5 6 0.5Z" stroke="#C3C2C1" strokeWidth="1" fill="none"/>
-      <circle cx="6" cy="15" r="2.5" stroke="#C3C2C1" strokeWidth="1" fill="none"/>
-    </svg>
-  );
-}
-
-// Thermometer SVG - half filled (gold - same as humidity fair)
-function ThermometerHalf({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 12 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <rect x="4.5" y="8" width="3" height="4.5" fill="#d4a017" rx="0.5"/>
-      <circle cx="6" cy="15" r="2" fill="#d4a017"/>
-      <path d="M6 0.5C4.6 0.5 3.5 1.6 3.5 3V12.1C2.6 12.8 2 13.9 2 15C2 17.2 3.8 19 6 19C8.2 19 10 17.2 10 15C10 13.9 9.4 12.8 8.5 12.1V3C8.5 1.6 7.4 0.5 6 0.5Z" stroke="#C3C2C1" strokeWidth="1" fill="none"/>
-    </svg>
-  );
-}
-
-// Thermometer SVG - fully filled (red - same as humidity bad)
-function ThermometerFull({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 12 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <rect x="4.5" y="3" width="3" height="9.5" fill="#c62828" rx="0.5"/>
-      <circle cx="6" cy="15" r="2" fill="#c62828"/>
-      <path d="M6 0.5C4.6 0.5 3.5 1.6 3.5 3V12.1C2.6 12.8 2 13.9 2 15C2 17.2 3.8 19 6 19C8.2 19 10 17.2 10 15C10 13.9 9.4 12.8 8.5 12.1V3C8.5 1.6 7.4 0.5 6 0.5Z" stroke="#C3C2C1" strokeWidth="1" fill="none"/>
-    </svg>
-  );
-}
 
 // Nozzle icon - schematic hot-end view (filament body + heater block + tip).
 // Added for visual parity with the thermometer icons on the dual-nozzle card
@@ -266,112 +213,6 @@ function AmsBackupBadge({ state, onClick }: AmsBackupBadgeProps) {
     </button>
   );
 }
-
-// Humidity indicator with water drop that fills based on level (Bambu Lab style)
-// Reference: https://github.com/theicedmango/bambu-humidity
-interface HumidityIndicatorProps {
-  humidity: number | string;
-  goodThreshold?: number;  // <= this is green
-  fairThreshold?: number;  // <= this is orange, > is red
-  onClick?: () => void;
-  compact?: boolean;  // Smaller version for grid layout
-}
-
-function HumidityIndicator({ humidity, goodThreshold = 40, fairThreshold = 60, onClick, compact }: HumidityIndicatorProps) {
-  const humidityValue = typeof humidity === 'string' ? parseInt(humidity, 10) : humidity;
-  const good = typeof goodThreshold === 'number' ? goodThreshold : 40;
-  const fair = typeof fairThreshold === 'number' ? fairThreshold : 60;
-
-  // Status thresholds (configurable via settings)
-  // Good: ≤goodThreshold (green #22a352), Fair: ≤fairThreshold (gold #d4a017), Bad: >fairThreshold (red #c62828)
-  let textColor: string;
-  let statusText: string;
-
-  if (isNaN(humidityValue)) {
-    textColor = '#C3C2C1';
-    statusText = 'Unknown';
-  } else if (humidityValue <= good) {
-    textColor = '#22a352'; // Green - Good
-    statusText = 'Good';
-  } else if (humidityValue <= fair) {
-    textColor = '#d4a017'; // Gold - Fair
-    statusText = 'Fair';
-  } else {
-    textColor = '#c62828'; // Red - Bad
-    statusText = 'Bad';
-  }
-
-  // Fill level based on status: Good=Empty (dry), Fair=Half, Bad=Full (wet)
-  let DropComponent: React.FC<{ className?: string }>;
-  if (isNaN(humidityValue)) {
-    DropComponent = WaterDropEmpty;
-  } else if (humidityValue <= good) {
-    DropComponent = WaterDropEmpty; // Good - empty drop (dry)
-  } else if (humidityValue <= fair) {
-    DropComponent = WaterDropHalf; // Fair - half filled
-  } else {
-    DropComponent = WaterDropFull; // Bad - full (too humid)
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex items-center gap-1 ${onClick ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
-      title={`Humidity: ${humidityValue}% - ${statusText}${onClick ? ' (click for history)' : ''}`}
-    >
-      <DropComponent className={compact ? "w-2.5 h-3" : "w-3 h-4"} />
-      <span className={`font-medium tabular-nums ${compact ? 'text-[10px]' : 'text-xs'}`} style={{ color: textColor }}>{humidityValue}%</span>
-    </button>
-  );
-}
-
-// Temperature indicator with dynamic icon and coloring
-interface TemperatureIndicatorProps {
-  temp: number;
-  goodThreshold?: number;  // <= this is blue
-  fairThreshold?: number;  // <= this is orange, > is red
-  onClick?: () => void;
-  compact?: boolean;  // Smaller version for grid layout
-}
-
-function TemperatureIndicator({ temp, goodThreshold = 28, fairThreshold = 35, onClick, compact }: TemperatureIndicatorProps) {
-  // Ensure thresholds are numbers
-  const good = typeof goodThreshold === 'number' ? goodThreshold : 28;
-  const fair = typeof fairThreshold === 'number' ? fairThreshold : 35;
-
-  let textColor: string;
-  let statusText: string;
-  let ThermoComponent: React.FC<{ className?: string }>;
-
-  if (temp <= good) {
-    textColor = '#22a352'; // Green - good (same as humidity)
-    statusText = 'Good';
-    ThermoComponent = ThermometerEmpty;
-  } else if (temp <= fair) {
-    textColor = '#d4a017'; // Gold - fair (same as humidity)
-    statusText = 'Fair';
-    ThermoComponent = ThermometerHalf;
-  } else {
-    textColor = '#c62828'; // Red - bad (same as humidity)
-    statusText = 'Bad';
-    ThermoComponent = ThermometerFull;
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex items-center gap-1 ${onClick ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
-      title={`Temperature: ${temp}°C - ${statusText}${onClick ? ' (click for history)' : ''}`}
-    >
-      <ThermoComponent className={compact ? "w-2.5 h-3" : "w-3 h-4"} />
-      <span className={`tabular-nums text-right ${compact ? 'text-[10px] w-8' : 'w-12'}`} style={{ color: textColor }}>{temp}°C</span>
-    </button>
-  );
-}
-
-
 
 /** Classify an empty AMS slot for UI rendering (#1322 follow-up).
  *
@@ -1837,31 +1678,24 @@ function SinglePrinterCockpit({
       </div>
       <div data-testid="cockpit-filament-scroll" className="flex min-h-0 min-w-0 gap-2 overflow-auto pb-1">
         {status?.ams?.map((ams) => (
-          <div key={ams.id} className="min-w-[15rem] flex-1 rounded-lg bg-bambu-dark p-2">
-            <div data-testid={`cockpit-ams-header-${ams.id}`} className="mb-1.5 flex min-h-7 w-full items-center justify-between gap-2 rounded-lg bg-bambu-dark-secondary px-2 py-1">
-              <div className="flex min-w-0 flex-1 items-center gap-1.5">
-                <span className="truncate text-[10px] font-medium text-white">{getAmsLabel(ams.id, ams.tray.length)}</span>
-              </div>
-              <div data-testid={`cockpit-ams-indicators-${ams.id}`} className="flex shrink-0 items-center gap-1.5">
-                {ams.humidity != null && <HumidityIndicator humidity={ams.humidity} compact />}
-                {ams.temp != null && (
-                  <div className="mr-1">
-                    <TemperatureIndicator temp={ams.temp} compact />
-                  </div>
-                )}
-                <AmsDryingButton
+          <CompactAmsUnitCard key={ams.id} amsId={ams.id}>
+            <div className="mb-1.5">
+              <AmsUnitHeader
+                testId={`cockpit-ams-header-${ams.id}`}
+                controlsTestId={`cockpit-ams-indicators-${ams.id}`}
+                label={<span className="truncate text-[10px] font-medium text-white">{getAmsLabel(ams.id, ams.tray.length)}</span>}
+                environment={<AmsEnvironmentIndicators ams={ams} />}
+                dryingControl={<AmsDryingControl
                   ams={ams}
                   supportsDrying={status?.supports_drying === true}
                   canControl={hasPermission('printers:control')}
                   controller={dryingControls}
-                />
-              </div>
+                />}
+              />
             </div>
             {ams.dry_time > 0 && <div className="mb-1.5"><AmsDryingStatus ams={ams} controller={dryingControls} /></div>}
-            <div className={`grid gap-1 ${ams.tray.length === 1 ? 'grid-cols-1' : 'grid-cols-4'}`}>
-              {Array.from({ length: ams.tray.length === 1 ? 1 : 4 }, (_, slotIdx) => renderCockpitFilamentSlot(ams.tray[slotIdx] || ams.tray.find((candidate) => candidate.id === slotIdx), ams.id, slotIdx, ams.tray.length))}
-            </div>
-          </div>
+            <AmsSlotGrid ams={ams} variant="compact" renderSlot={(tray, slotIdx) => renderCockpitFilamentSlot(tray, ams.id, slotIdx, ams.tray.length)} />
+          </CompactAmsUnitCard>
         ))}
         {(status?.vt_tray?.length ?? 0) > 0 && (
           <div className="min-w-24 rounded-lg bg-bambu-dark p-2">
@@ -4733,16 +4567,14 @@ function PrinterCard({
                       const isLeftNozzle = extruderId === 1;
                       const isRightNozzle = extruderId === 0;
 
+                      const historyLabel = getAmsLabel(ams.id, ams.tray.length);
                       return (
-                        <div key={ams.id} style={getAmsCardStyle(4)} className="min-w-0 p-2 bg-bambu-dark rounded-[10px] space-y-1">
-                            {/* Header: Label + Stats (no icon) */}
-                            <div className="flex w-full min-h-7 items-center justify-between gap-2 rounded-lg bg-bambu-dark-secondary px-2 py-1">
-                              <div className="flex min-w-0 flex-1 items-center gap-1.5">
-                                {/* AMS name — hover to see serial, firmware, and edit friendly name */}
-                                <AmsNameHoverCard
+                        <ExpandedAmsUnitCard key={ams.id} amsId={ams.id} style={getAmsCardStyle(4)}>
+                            <AmsUnitHeader
+                              label={<AmsNameHoverCard
                                   ams={ams}
                                   printerId={printer.id}
-                                  label={getAmsLabel(ams.id, ams.tray.length)}
+                                  label={historyLabel}
                                   amsLabels={amsLabels}
                                   canEdit={hasPermission('printers:update')}
                                   onSaved={refetchAmsLabels}
@@ -4750,52 +4582,18 @@ function PrinterCard({
                                   <span className="block truncate text-[10px] text-white font-medium cursor-default select-none">
                                     {amsLabels?.[ams.id] || getAmsLabel(ams.id, ams.tray.length)}
                                   </span>
-                                </AmsNameHoverCard>
-                                {isDualNozzle && (isLeftNozzle || isRightNozzle) && (
-                                  <NozzleBadge side={isLeftNozzle ? 'L' : 'R'} />
-                                )}
-                              </div>
-                              {(ams.humidity != null || ams.temp != null) && (
-                                <div className="flex shrink-0 items-center gap-1.5">
-                                  {ams.humidity != null && (
-                                    <HumidityIndicator
-                                      humidity={ams.humidity}
-                                      goodThreshold={amsThresholds?.humidityGood}
-                                      fairThreshold={amsThresholds?.humidityFair}
-                                      onClick={() => setAmsHistoryModal({
-                                        amsId: ams.id,
-                                        amsLabel: getAmsLabel(ams.id, ams.tray.length),
-                                        mode: 'humidity',
-                                      })}
-                                      compact
-                                    />
-                                  )}
-                                  {ams.temp != null && (
-                                    <div className="mr-1">
-                                      <TemperatureIndicator
-                                        temp={ams.temp}
-                                        goodThreshold={amsThresholds?.tempGood}
-                                        fairThreshold={amsThresholds?.tempFair}
-                                        onClick={() => setAmsHistoryModal({
-                                          amsId: ams.id,
-                                          amsLabel: getAmsLabel(ams.id, ams.tray.length),
-                                          mode: 'temperature',
-                                        })}
-                                        compact
-                                      />
-                                    </div>
-                                  )}
-                                  <AmsDryingButton ams={ams} supportsDrying={status.supports_drying === true} canControl={hasPermission('printers:control')} controller={dryingControls} />
-                                </div>
-                              )}
-                            </div>
+                                </AmsNameHoverCard>}
+                              badge={isDualNozzle && (isLeftNozzle || isRightNozzle) ? <NozzleBadge side={isLeftNozzle ? 'L' : 'R'} /> : undefined}
+                              environment={<AmsEnvironmentIndicators
+                                ams={ams}
+                                thresholds={amsThresholds}
+                                onHumidityClick={() => setAmsHistoryModal({ amsId: ams.id, amsLabel: historyLabel, mode: 'humidity' })}
+                                onTemperatureClick={() => setAmsHistoryModal({ amsId: ams.id, amsLabel: historyLabel, mode: 'temperature' })}
+                              />}
+                              dryingControl={<AmsDryingControl ams={ams} supportsDrying={status.supports_drying === true} canControl={hasPermission('printers:control')} controller={dryingControls} />}
+                            />
                             <AmsDryingStatus ams={ams} controller={dryingControls} />
-                            {/* Slots grid: 4 columns - always render 4 slots */}
-                            <div className="grid w-full grid-cols-[repeat(4,minmax(3.5rem,1fr))] gap-1">
-                              {[0, 1, 2, 3].map((slotIdx) => {
-                                // Find tray data for this slot (may be undefined if data incomplete)
-                                // Use array index if available, as tray.id may not always be set
-                                const tray = ams.tray[slotIdx] || ams.tray.find(t => t.id === slotIdx);
+                            <AmsSlotGrid ams={ams} variant="expanded" renderSlot={(tray, slotIdx) => {
                                 const hasFillLevel = tray?.tray_type && tray.remain >= 0;
                                 const isEmpty = !tray?.tray_type;
                                 const emptyKind = getEmptySlotKind(tray);
@@ -5065,9 +4863,8 @@ function PrinterCard({
                                     )}
                                   </div>
                                 );
-                              })}
-                            </div>
-                        </div>
+                              }} />
+                        </ExpandedAmsUnitCard>
                       );
                     })}
                     {/* HT AMS units */}
@@ -5188,16 +4985,14 @@ function PrinterCard({
                         // Without this override, the L view squishes HT into a sliver next to the
                         // 4-slot AMS neighbors.
                         const htCardStyle: React.CSSProperties = { flex: '1 1 11rem', minWidth: '11rem' };
+                        const historyLabel = getAmsLabel(ams.id, ams.tray.length);
                         return (
-                          <div key={ams.id} style={htCardStyle} className="min-w-0 p-2 bg-bambu-dark rounded-[10px] space-y-1">
-                            {/* Row 1: Label + Nozzle + Drying */}
-                            <div className="flex w-full min-h-7 items-center gap-1.5 rounded-lg bg-bambu-dark-secondary px-2 py-1">
-                              {/* AMS name — hover to see serial, firmware, and edit friendly name */}
-                              <div className="flex min-w-0 flex-1 items-center gap-1.5">
-                                <AmsNameHoverCard
+                          <HtAmsUnitCard key={ams.id} amsId={ams.id} style={htCardStyle}>
+                            <AmsUnitHeader
+                              label={<AmsNameHoverCard
                                   ams={ams}
                                   printerId={printer.id}
-                                  label={getAmsLabel(ams.id, ams.tray.length)}
+                                  label={historyLabel}
                                   amsLabels={amsLabels}
                                   canEdit={hasPermission('printers:update')}
                                   onSaved={refetchAmsLabels}
@@ -5205,13 +5000,10 @@ function PrinterCard({
                                   <span className="block truncate text-[10px] text-white font-medium cursor-default select-none">
                                     {amsLabels?.[ams.id] || getAmsLabel(ams.id, ams.tray.length)}
                                   </span>
-                                </AmsNameHoverCard>
-                                {isDualNozzle && (isLeftNozzle || isRightNozzle) && (
-                                  <NozzleBadge side={isLeftNozzle ? 'L' : 'R'} />
-                                )}
-                              </div>
-                              <AmsDryingButton ams={ams} supportsDrying={status.supports_drying === true} canControl={hasPermission('printers:control')} controller={dryingControls} />
-                            </div>
+                                </AmsNameHoverCard>}
+                              badge={isDualNozzle && (isLeftNozzle || isRightNozzle) ? <NozzleBadge side={isLeftNozzle ? 'L' : 'R'} /> : undefined}
+                              dryingControl={<AmsDryingControl ams={ams} supportsDrying={status.supports_drying === true} canControl={hasPermission('printers:control')} controller={dryingControls} />}
+                            />
                             <AmsDryingStatus ams={ams} controller={dryingControls} />
                             {/* Row 2: Slot (left) + Stats (right stacked) */}
                             <div className="flex gap-1.5 max-[550px]:flex-col max-[550px]:items-start">
@@ -5362,39 +5154,15 @@ function PrinterCard({
                                   </EmptySlotHoverCard>
                                 )}
                               </div>
-                              {/* Stats stacked vertically: Temp on top, Humidity below */}
-                              {(ams.humidity != null || ams.temp != null) && (
-                                <div className="flex flex-col justify-center gap-1 shrink-0 max-[550px]:w-full">
-                                  {ams.temp != null && (
-                                    <TemperatureIndicator
-                                      temp={ams.temp}
-                                      goodThreshold={amsThresholds?.tempGood}
-                                      fairThreshold={amsThresholds?.tempFair}
-                                      onClick={() => setAmsHistoryModal({
-                                        amsId: ams.id,
-                                        amsLabel: getAmsLabel(ams.id, ams.tray.length),
-                                        mode: 'temperature',
-                                      })}
-                                      compact
-                                    />
-                                  )}
-                                  {ams.humidity != null && (
-                                    <HumidityIndicator
-                                      humidity={ams.humidity}
-                                      goodThreshold={amsThresholds?.humidityGood}
-                                      fairThreshold={amsThresholds?.humidityFair}
-                                      onClick={() => setAmsHistoryModal({
-                                        amsId: ams.id,
-                                        amsLabel: getAmsLabel(ams.id, ams.tray.length),
-                                        mode: 'humidity',
-                                      })}
-                                      compact
-                                    />
-                                  )}
-                                </div>
-                              )}
+                              <AmsEnvironmentIndicators
+                                ams={ams}
+                                thresholds={amsThresholds}
+                                layout="stacked"
+                                onHumidityClick={() => setAmsHistoryModal({ amsId: ams.id, amsLabel: historyLabel, mode: 'humidity' })}
+                                onTemperatureClick={() => setAmsHistoryModal({ amsId: ams.id, amsLabel: historyLabel, mode: 'temperature' })}
+                              />
                             </div>
-                          </div>
+                          </HtAmsUnitCard>
                         );
                       })}
                       {/* External spool(s) - grouped in one card like regular AMS */}
