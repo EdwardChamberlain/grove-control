@@ -307,6 +307,24 @@ body {
   transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
+/* These must follow the theme transition rule above. That rule uses the
+   transition shorthand, so a utility declared earlier in the stylesheet is
+   otherwise replaced and the sidebar width snaps between states. */
+.sidebar-width-transition {
+  transition: width 100ms ease-out;
+}
+
+.sidebar-content-transition {
+  transition: margin-left 100ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-width-transition,
+  .sidebar-content-transition {
+    transition: none;
+  }
+}
+
 /* Toast slide-in animation */
 @keyframes slide-in {
   from {
