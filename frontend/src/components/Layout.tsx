@@ -520,7 +520,7 @@ export function Layout() {
         className={`bg-bambu-dark-secondary border-r border-bambu-dark-tertiary flex flex-col ${
           isSidebarCompact
             ? 'fixed inset-y-0 left-0 z-50 w-72 transform-gpu shadow-2xl'
-            : `sidebar-width-transition fixed inset-y-0 left-0 z-30 overflow-hidden ${sidebarExpanded ? 'w-64' : 'w-16'}`
+            : `sidebar-width-transition fixed inset-y-0 left-0 z-30 ${sidebarExpanded ? 'w-64' : 'w-16'}`
         }`}
         style={isSidebarCompact ? {
           transform: mobileDrawerOpen ? 'translate3d(0, 0, 0)' : 'translate3d(-100%, 0, 0)',
@@ -668,7 +668,7 @@ export function Layout() {
         )}
 
         {/* Footer */}
-        <div className="flex-shrink-0 p-2 border-t border-bambu-dark-tertiary">
+        <div className="relative flex-shrink-0 p-2 border-t border-bambu-dark-tertiary">
           {isSidebarCompact || sidebarExpanded ? (
             <div className="flex flex-col gap-2 px-2">
               {/* Top row: icons */}
@@ -684,9 +684,6 @@ export function Layout() {
                     >
                       <Plug className="w-5 h-5" />
                     </button>
-                    {showSwitchbar && (
-                      <SwitchbarPopover onClose={() => setShowSwitchbar(false)} />
-                    )}
                   </div>
                 )}
                 {hasPermission('system:read') ? (
@@ -789,9 +786,6 @@ export function Layout() {
                   >
                     <Plug className="w-5 h-5" />
                   </button>
-                  {showSwitchbar && (
-                    <SwitchbarPopover onClose={() => setShowSwitchbar(false)} />
-                  )}
                 </div>
               )}
               {hasPermission('system:read') ? (
@@ -857,6 +851,9 @@ export function Layout() {
                 </>
               )}
             </div>
+          )}
+          {showSwitchbar && (
+            <SwitchbarPopover onClose={() => setShowSwitchbar(false)} />
           )}
         </div>
       </aside>
