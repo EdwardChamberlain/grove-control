@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { render } from '../utils';
 import { Layout } from '../../components/Layout';
 import { http, HttpResponse } from 'msw';
@@ -76,6 +76,57 @@ describe('Layout', () => {
         const sidebar = document.querySelector('aside');
         expect(sidebar).toBeInTheDocument();
       });
+    });
+
+    it('smoothly transitions the desktop sidebar between expanded states', async () => {
+      render(<Layout />);
+
+      const sidebar = await waitFor(() => {
+        const element = document.querySelector('aside');
+        expect(element).toHaveClass('w-64', 'sidebar-width-transition');
+        expect(element).not.toHaveClass('overflow-hidden');
+        return element as HTMLElement;
+      });
+      const main = document.querySelector('main');
+      const printersLabel = sidebar.querySelector('a[href="/"] span');
+      const toggle = sidebar.querySelector('button[aria-expanded="true"]');
+
+      expect(main).toHaveClass('ml-64', 'sidebar-content-transition');
+      expect(printersLabel).toHaveClass('max-w-48', 'opacity-100');
+      expect(toggle).toBeInTheDocument();
+
+      fireEvent.click(toggle as HTMLButtonElement);
+
+      expect(sidebar).toHaveClass('w-16');
+      expect(main).toHaveClass('ml-16');
+      expect(printersLabel).toHaveClass('max-w-0', 'opacity-0');
+      expect(sidebar.querySelector('button[aria-expanded="false"]')).toBeInTheDocument();
+    });
+
+    it('renders the collapsed Smart Switches popover outside the scrolling footer', async () => {
+      vi.mocked(localStorage.getItem).mockImplementation((key) =>
+        key === 'sidebarExpanded' ? 'false' : null
+      );
+      server.use(
+        http.get('/api/v1/smart-plugs/', () =>
+          HttpResponse.json([{
+            id: 1,
+            name: 'Desk Plug',
+            plug_type: 'mqtt',
+            enabled: true,
+            show_in_switchbar: true,
+          }])
+        )
+      );
+
+      render(<Layout />);
+
+      const switchbarButton = await screen.findByTitle('Smart Switches');
+      fireEvent.mouseEnter(switchbarButton);
+
+      const popoverHeading = await screen.findByRole('heading', { name: 'Smart Switches' });
+      expect(popoverHeading.closest('.overflow-y-auto')).toBeNull();
+      expect(popoverHeading.closest('aside')).toBeInTheDocument();
     });
 
     it('renders navigation links', async () => {

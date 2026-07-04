@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Printer, Archive, ListOrdered, BarChart3, Cloud, Settings, Sun, Moon, Monitor, ChevronLeft, ChevronRight, Keyboard, Github, ArrowUpCircle, Wrench, FolderKanban, FolderOpen, X, Menu, Info, Plug, Bug, LogOut, Key, Loader2, Disc3, ShieldAlert, Globe, type LucideIcon } from 'lucide-react';
+import { Printer, Archive, ListOrdered, BarChart3, Cloud, Settings, Sun, Moon, Monitor, ChevronLeft, Keyboard, Github, ArrowUpCircle, Wrench, FolderKanban, FolderOpen, X, Menu, Info, Plug, Bug, LogOut, Key, Loader2, Disc3, ShieldAlert, Globe, type LucideIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../contexts/ThemeContext';
 import { KeyboardShortcutsModal } from './KeyboardShortcutsModal';
@@ -351,8 +351,17 @@ export function Layout() {
       ? location.pathname === '/'
       : location.pathname === navItem.to || location.pathname.startsWith(`${navItem.to}/`);
   });
-  const sidebarItemAlignmentClass = isSidebarCompact || sidebarExpanded ? 'gap-3 px-4' : 'justify-center px-2';
-  const sidebarItemBaseClass = `relative z-10 flex h-12 items-center ${sidebarItemAlignmentClass} rounded-lg transition-colors group`;
+  const sidebarItemAlignmentClass = isSidebarCompact
+    ? 'gap-3 px-4'
+    : sidebarExpanded
+      ? 'gap-3 px-4'
+      : 'gap-0 px-3.5';
+  const sidebarItemBaseClass = `relative z-10 flex h-12 items-center ${sidebarItemAlignmentClass} rounded-lg transition-[color,background-color,padding,gap] duration-100 ease-out group`;
+  const sidebarLabelClass = isSidebarCompact
+    ? 'whitespace-nowrap'
+    : `overflow-hidden whitespace-nowrap transition-[max-width,opacity,transform] duration-100 ease-out motion-reduce:transition-none ${
+        sidebarExpanded ? 'max-w-48 translate-x-0 opacity-100' : 'max-w-0 -translate-x-2 opacity-0'
+      }`;
 
   // Show update banner if update available and not dismissed for this version.
   // Suppressed when running as a Home Assistant addon — HA Supervisor surfaces
@@ -511,7 +520,7 @@ export function Layout() {
         className={`bg-bambu-dark-secondary border-r border-bambu-dark-tertiary flex flex-col ${
           isSidebarCompact
             ? 'fixed inset-y-0 left-0 z-50 w-72 transform-gpu shadow-2xl'
-            : `fixed inset-y-0 left-0 z-30 transition-all duration-300 ${sidebarExpanded ? 'w-64' : 'w-16'}`
+            : `sidebar-width-transition fixed inset-y-0 left-0 z-30 ${sidebarExpanded ? 'w-64' : 'w-16'}`
         }`}
         style={isSidebarCompact ? {
           transform: mobileDrawerOpen ? 'translate3d(0, 0, 0)' : 'translate3d(-100%, 0, 0)',
@@ -567,7 +576,7 @@ export function Layout() {
                         ) : (
                           LinkIcon && <LinkIcon className="w-5 h-5 flex-shrink-0" />
                         )}
-                        {(isSidebarCompact || sidebarExpanded) && <span>{link.name}</span>}
+                        <span className={sidebarLabelClass}>{link.name}</span>
                       </a>
                     ) : (
                       <NavLink
@@ -590,7 +599,7 @@ export function Layout() {
                         ) : (
                           LinkIcon && <LinkIcon className="w-5 h-5 flex-shrink-0" />
                         )}
-                        {(isSidebarCompact || sidebarExpanded) && <span>{link.name}</span>}
+                        <span className={sidebarLabelClass}>{link.name}</span>
                       </NavLink>
                     )}
                   </li>
@@ -633,7 +642,7 @@ export function Layout() {
                           </span>
                         )}
                       </div>
-                      {(isSidebarCompact || sidebarExpanded) && <span>{t(labelKey)}</span>}
+                      <span className={sidebarLabelClass}>{t(labelKey)}</span>
                     </NavLink>
                   </li>
                 );
@@ -648,17 +657,18 @@ export function Layout() {
             onClick={() => setSidebarExpanded(!sidebarExpanded)}
             className="p-2 mx-2 mb-2 rounded-lg hover:bg-bambu-dark-tertiary transition-colors text-bambu-gray-light hover:text-white flex items-center justify-center"
             title={sidebarExpanded ? t('nav.collapseSidebar') : t('nav.expandSidebar')}
+            aria-expanded={sidebarExpanded}
           >
-            {sidebarExpanded ? (
-              <ChevronLeft className="w-5 h-5" />
-            ) : (
-              <ChevronRight className="w-5 h-5" />
-            )}
+            <ChevronLeft
+              className={`h-5 w-5 transition-transform duration-100 ease-out motion-reduce:transition-none ${
+                sidebarExpanded ? 'rotate-0' : 'rotate-180'
+              }`}
+            />
           </button>
         )}
 
         {/* Footer */}
-        <div className="flex-shrink-0 p-2 border-t border-bambu-dark-tertiary">
+        <div className="relative flex-shrink-0 p-2 border-t border-bambu-dark-tertiary">
           {isSidebarCompact || sidebarExpanded ? (
             <div className="flex flex-col gap-2 px-2">
               {/* Top row: icons */}
@@ -674,9 +684,6 @@ export function Layout() {
                     >
                       <Plug className="w-5 h-5" />
                     </button>
-                    {showSwitchbar && (
-                      <SwitchbarPopover onClose={() => setShowSwitchbar(false)} />
-                    )}
                   </div>
                 )}
                 {hasPermission('system:read') ? (
@@ -779,9 +786,6 @@ export function Layout() {
                   >
                     <Plug className="w-5 h-5" />
                   </button>
-                  {showSwitchbar && (
-                    <SwitchbarPopover onClose={() => setShowSwitchbar(false)} />
-                  )}
                 </div>
               )}
               {hasPermission('system:read') ? (
@@ -848,11 +852,14 @@ export function Layout() {
               )}
             </div>
           )}
+          {showSwitchbar && (
+            <SwitchbarPopover onClose={() => setShowSwitchbar(false)} />
+          )}
         </div>
       </aside>
 
       {/* Main content */}
-      <main className={`flex-1 bg-bambu-dark overflow-auto transition-all duration-300 ${
+      <main className={`sidebar-content-transition flex-1 bg-bambu-dark overflow-auto ${
         isSidebarCompact ? 'mt-14' : sidebarExpanded ? 'ml-64' : 'ml-16'
       }`}>
         {/* Debug logging indicator */}
