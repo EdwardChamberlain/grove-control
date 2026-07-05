@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { Droplets, Copy, Check, Settings2, Package, Unlink } from 'lucide-react';
 import { isLightColor } from '../utils/colors';
 
-interface FilamentData {
+export interface FilamentData {
   vendor: 'Bambu Lab' | 'Generic';
   profile: string;
   colorName: string;
@@ -17,7 +17,7 @@ interface FilamentData {
   fillSource?: 'ams' | 'spoolman' | 'inventory'; // Source of fill level data
 }
 
-interface SpoolmanConfig {
+export interface SpoolmanConfig {
   enabled: boolean;
   onLinkSpool?: () => void;
   onUnlinkSpool?: () => void;
@@ -26,14 +26,14 @@ interface SpoolmanConfig {
   syncMode?: string | null; // If auto-sync is enabled, we may want to hide the unlink option for Bambu spools
 }
 
-interface InventoryConfig {
+export interface InventoryConfig {
   onAssignSpool?: () => void;
   onUnassignSpool?: () => void;
   assignedSpool?: { id: number; material: string; brand: string | null; color_name: string | null; remainingWeightGrams?: number | null } | null;
   isAssigned?: boolean;
 }
 
-interface ConfigureSlotConfig {
+export interface ConfigureSlotConfig {
   enabled: boolean;
   onConfigure?: () => void;
 }

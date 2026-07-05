@@ -153,6 +153,16 @@ export function getGlobalTrayId(
 }
 
 /**
+ * Calculate the key used by the slot-presets API response.
+ * Unlike MQTT global tray IDs, external slots retain ams_id=255 and are
+ * therefore keyed as 1020/1021. AMS-HT units use their unit ID directly.
+ */
+export function getSlotPresetKey(amsId: number, trayId: number): number {
+  if (amsId >= 128 && amsId <= 135) return amsId;
+  return amsId * 4 + trayId;
+}
+
+/**
  * Get fill bar color based on spool fill level.
  * Matches PrintersPage thresholds and Bambu Lab brand green.
  */

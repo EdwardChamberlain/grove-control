@@ -2043,7 +2043,7 @@ async def start_calibration(
 
 
 def _slot_preset_key(ams_id: int, tray_id: int) -> int:
-    # Mirrors frontend getGlobalTrayId (amsHelpers.ts): AMS-HT (128-135) is keyed
+    # Mirrors frontend getSlotPresetKey (amsHelpers.ts): AMS-HT (128-135) is keyed
     # by ams_id since each unit has a single slot and shares its global ID with
     # the unit itself. Regular AMS and external (255) use ams_id*4+tray_id.
     if 128 <= ams_id <= 135:

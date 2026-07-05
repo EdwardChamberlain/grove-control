@@ -701,6 +701,123 @@ describe('PrintersPage', () => {
       expect((await screen.findAllByText('Skip Objects')).length).toBeGreaterThan(1);
     });
 
+    it('provides AMS drying and power socket controls in the single-printer cockpit', async () => {
+      const dryingRequests: URL[] = [];
+      const powerActions: string[] = [];
+      server.use(
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+          ...mockPrinterStatus,
+          supports_drying: true,
+          ams: [{
+            id: 0,
+            humidity: 35,
+            temp: 25,
+            is_ams_ht: false,
+            serial_number: 'AMS123',
+            sw_ver: '1.0.0',
+            module_type: 'n3f',
+            dry_time: 0,
+            dry_status: 0,
+            dry_sub_status: 0,
+            dry_sf_reason: [],
+            dry_target_temp: null,
+            dry_filament: null,
+            tray: [{ id: 0, tray_type: 'PLA', tray_color: 'FF0000FF', remain: 80, state: 10 }],
+          }],
+        })),
+        http.post('/api/v1/printers/:id/drying/start', ({ request }) => {
+          dryingRequests.push(new URL(request.url));
+          return HttpResponse.json({ status: 'started', ams_id: 0, temp: 45, duration: 12 });
+        }),
+        http.get('/api/v1/printers/:id/ams-labels', () => HttpResponse.json({})),
+        http.get('/api/v1/ams-history/:printerId/:amsId', () => HttpResponse.json({
+          printer_id: 1,
+          ams_id: 0,
+          data: [],
+          min_humidity: null,
+          max_humidity: null,
+          avg_humidity: null,
+          min_temperature: null,
+          max_temperature: null,
+          avg_temperature: null,
+        })),
+        http.get('/api/v1/smart-plugs/by-printer/:id', () => HttpResponse.json({
+          id: 9,
+          name: 'Cockpit Socket',
+          auto_off: false,
+          auto_off_executed: false,
+        })),
+        http.get('/api/v1/smart-plugs/by-printer/:id/scripts', () => HttpResponse.json([])),
+        http.get('/api/v1/smart-plugs/:id/status', () => HttpResponse.json({
+          state: 'OFF',
+          reachable: true,
+          device_name: 'Cockpit Socket',
+          energy: { power: 42.4 },
+        })),
+        http.post('/api/v1/smart-plugs/:id/control', async ({ request }) => {
+          const body = await request.json() as { action: string };
+          powerActions.push(body.action);
+          return HttpResponse.json({ success: true, action: body.action });
+        }),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+
+      const amsHeader = await screen.findByTestId('cockpit-ams-header-0');
+      expect(screen.getByTestId('ams-unit-card-compact-0')).toContainElement(amsHeader);
+      expect(amsHeader).toHaveClass('px-2', 'py-1');
+      const indicators = screen.getByTestId('cockpit-ams-indicators-0');
+      expect(within(indicators).getByTitle(/Temperature:/).parentElement).toHaveClass('mr-1');
+
+      fireEvent.mouseEnter(within(amsHeader).getByText('HT-A').parentElement!);
+      expect(await screen.findByText('AMS123')).toBeInTheDocument();
+
+      fireEvent.click(within(indicators).getByTitle(/Temperature:/));
+      expect(await screen.findByText('HT-A History')).toBeInTheDocument();
+      fireEvent.click(screen.getByText('HT-A History').closest('div.fixed')!);
+
+      const dryingButton = within(indicators).getByRole('button', { name: 'HT-A: Start Drying' });
+      expect(dryingButton).toHaveClass('ml-1', 'px-1', 'py-0.5');
+      fireEvent.click(dryingButton);
+      const dryingDialog = await screen.findByRole('dialog', { name: 'Start Drying' });
+      fireEvent.click(within(dryingDialog).getByRole('button', { name: 'Start Drying' }));
+      await waitFor(() => expect(dryingRequests).toHaveLength(1));
+      expect(dryingRequests[0].searchParams.get('filament')).toBe('PLA');
+      expect(dryingRequests[0].searchParams.get('temp')).toBe('45');
+
+      const powerControls = await screen.findByTestId('printer-power-controls');
+      expect(within(powerControls).getByText('Cockpit Socket')).toBeInTheDocument();
+      expect(within(powerControls).getByText('42W')).toBeInTheDocument();
+      fireEvent.click(within(powerControls).getByRole('button', { name: 'Cockpit Socket: Turn on' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Power On' }));
+      await waitFor(() => expect(powerActions).toEqual(['on']));
+    });
+
+    it('opens HMS error details from the shared cockpit status popup', async () => {
+      server.use(
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+          ...mockPrinterStatus,
+          hms_errors: [{ code: '0x4000', attr: 0x0300_0000, severity: 1 }],
+        })),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+
+      const cockpitHealthButton = (await screen.findAllByLabelText(/Machine health:/))
+        .find(button => button.classList.contains('h-9'));
+      expect(cockpitHealthButton).toBeDefined();
+      fireEvent.click(cockpitHealthButton!);
+
+      const statusDetails = await screen.findByText('Status details');
+      const popup = statusDetails.parentElement;
+      expect(within(popup!).getByText('Queue:')).toBeInTheDocument();
+      fireEvent.click(within(popup!).getByRole('button', { name: /Errors:.*1 active/ }));
+
+      expect(await screen.findByText('Errors - X1 Carbon')).toBeInTheDocument();
+    });
+
     it('restores the homing warning before single-printer Z movement', async () => {
       sessionStorage.clear();
       render(<PrintersPage />);
@@ -739,23 +856,53 @@ describe('PrintersPage', () => {
       render(<PrintersPage />);
       fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
 
-      const nozzleTile = screen.getByText('Nozzle').closest('button');
-      expect(nozzleTile).not.toBeNull();
-      fireEvent.click(nozzleTile!);
+      const nozzleTile = screen.getByTestId('thermal-nozzle-control');
+      fireEvent.click(nozzleTile);
       expect(await screen.findByRole('button', { name: '131 C' })).toBeInTheDocument();
       const nozzlePopover = screen.getByText('Set Nozzle Temperature').parentElement;
       fireEvent.click(nozzlePopover?.previousElementSibling as Element);
 
-      const chamberTile = screen.getByText('Chamber').closest('button');
-      expect(chamberTile).not.toBeNull();
-      expect(chamberTile).toBeEnabled();
-      fireEvent.click(chamberTile!);
+      const chamberTile = screen.getByTestId('thermal-chamber-control');
+      fireEvent.click(chamberTile);
       expect(await screen.findByRole('button', { name: '41 C' })).toBeInTheDocument();
       const chamberPopover = screen.getByText('Set Chamber Temperature').parentElement;
       fireEvent.click(chamberPopover?.previousElementSibling as Element);
 
-      fireEvent.click(screen.getByTitle('Part Cooling Fan: 0%'));
+      fireEvent.click(screen.getByTitle('Part Cooling Fan'));
       expect(await screen.findByRole('button', { name: '33 %' })).toBeInTheDocument();
+    });
+
+    it('uses the expanded dual-nozzle controls in the cockpit', async () => {
+      server.use(
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+          ...mockPrinterStatus,
+          active_extruder: 0,
+          temperatures: {
+            ...mockPrinterStatus.temperatures,
+            nozzle_2: 27,
+            nozzle_2_target: 0,
+          },
+        })),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+      fireEvent.click(await screen.findByTestId('thermal-nozzle-control'));
+
+      expect(await screen.findByText('Set Nozzle Temperatures')).toBeInTheDocument();
+      expect(screen.getByText('Left Temp')).toBeInTheDocument();
+      expect(screen.getByText('Right Temp')).toBeInTheDocument();
+      expect(screen.getByTitle('Active: Right nozzle')).toBeInTheDocument();
+    });
+
+    it('opens heater history from the shared cockpit thermal controls', async () => {
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+
+      const nozzleControl = await screen.findByTestId('thermal-nozzle-control');
+      fireEvent.click(within(nozzleControl).getByTitle('View heater history'));
+
+      expect(await screen.findByText('Heater History')).toBeInTheDocument();
     });
 
     it('hides green plate clear status and action while idle', async () => {
