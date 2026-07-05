@@ -125,7 +125,7 @@ import { buildAmsInventoryConfig, resolveAmsSlotModel } from '../components/prin
 import { DRYING_PRESETS, useAmsDryingControls } from '../hooks/useAmsDryingControls';
 import type { DryingPresets } from '../hooks/useAmsDryingControls';
 import { PrinterInfoModal } from '../components/PrinterInfoModal';
-import { getAmsLabel, getGlobalTrayId, getFillBarColor, getFallbackSpoolTag } from '../utils/amsHelpers';
+import { getAmsLabel, getGlobalTrayId, getSlotPresetKey, getFillBarColor, getFallbackSpoolTag } from '../utils/amsHelpers';
 import { getPrinterImage, getWifiStrength, filterCompatibleQueueItems } from '../utils/printer';
 import { FilamentSlotCircle } from '../components/FilamentSlotCircle';
 import { Collapsible } from '../components/Collapsible';
@@ -1732,7 +1732,7 @@ function SinglePrinterCockpit({
     const globalTrayId = getGlobalTrayId(amsId, trayId, amsId === 255);
     const isActive = status?.tray_now === globalTrayId;
     const cloudInfo = tray?.tray_info_idx ? cockpitFilamentInfo?.[tray.tray_info_idx] : null;
-    const slotPreset = cockpitSlotPresets?.[globalTrayId];
+    const slotPreset = cockpitSlotPresets?.[getSlotPresetKey(amsId, trayId)];
     const isRefreshing = refreshingSlot?.amsId === amsId && refreshingSlot.slotId === trayId;
     const localAssignment = onGetAssignment?.(printer.id, amsId, trayId);
     const slotModel = resolveAmsSlotModel({
@@ -4578,7 +4578,7 @@ function PrinterCard({
                                 // Get cloud preset info if available
                                 const cloudInfo = tray?.tray_info_idx ? filamentInfo?.[tray.tray_info_idx] : null;
                                 // Get saved slot preset mapping (for user-configured slots)
-                                const slotPreset = slotPresets?.[globalTrayId];
+                                const slotPreset = slotPresets?.[getSlotPresetKey(ams.id, slotIdx)];
 
                                 const inventoryAssignment = onGetAssignment?.(printer.id, ams.id, slotIdx);
                                 const slotModel = resolveAmsSlotModel({
@@ -4779,6 +4779,7 @@ function PrinterCard({
                       const isLeftNozzle = extruderId === 1;
                       const isRightNozzle = extruderId === 0;
                       const tray = ams.tray[0];
+                      const htSlotId = tray?.id ?? 0;
                       const isEmpty = !tray?.tray_type;
                       const emptyKind = getEmptySlotKind(tray);
                       // Check if this is the currently loaded tray
@@ -4787,8 +4788,7 @@ function PrinterCard({
                       // Get cloud preset info if available
                       const cloudInfo = tray?.tray_info_idx ? filamentInfo?.[tray.tray_info_idx] : null;
                       // Get saved slot preset mapping (for user-configured slots)
-                      const slotPreset = slotPresets?.[globalTrayId];
-                      const htSlotId = tray?.id ?? 0;
+                      const slotPreset = slotPresets?.[getSlotPresetKey(ams.id, htSlotId)];
 
                         const htInventoryAssignment = onGetAssignment?.(printer.id, ams.id, htSlotId);
                         const htSlotModel = resolveAmsSlotModel({
@@ -5029,7 +5029,7 @@ function PrinterCard({
                                 ? (extTrayId === 254 ? t('printers.extL') : t('printers.extR'))
                                 : '';
                               const extCloudInfo = extTray.tray_info_idx ? filamentInfo?.[extTray.tray_info_idx] : null;
-                              const extSlotPreset = slotPresets?.[255 * 4 + slotTrayId];
+                              const extSlotPreset = slotPresets?.[getSlotPresetKey(255, slotTrayId)];
 
                               const extInventoryAssignment = onGetAssignment?.(printer.id, 255, slotTrayId);
                               const extSlotModel = resolveAmsSlotModel({
