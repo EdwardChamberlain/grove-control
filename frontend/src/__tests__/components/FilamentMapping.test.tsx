@@ -148,11 +148,11 @@ describe('FilamentMapping — FTS routing', () => {
       expect(cb).toBeInTheDocument();
       return cb;
     });
-    expect(checkbox.checked).toBe(false);
+    expect(checkbox.checked).toBe(true);
 
     fireEvent.click(checkbox);
     expect(onForceColorMatchChange).toHaveBeenCalledTimes(1);
-    expect(onForceColorMatchChange).toHaveBeenCalledWith(1, true);
+    expect(onForceColorMatchChange).toHaveBeenCalledWith(1, false);
   });
 
   it('omits the force-color-match checkbox when no handler is provided', async () => {

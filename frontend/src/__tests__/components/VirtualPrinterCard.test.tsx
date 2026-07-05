@@ -53,7 +53,7 @@ const createMockPrinter = (overrides: Partial<VirtualPrinterConfig> = {}): Virtu
   serial: '00M00A391800001',
   target_printer_id: null,
   auto_dispatch: true,
-  queue_force_color_match: false,
+  queue_force_color_match: true,
   bind_ip: null,
   remote_interface_ip: null,
   position: 0,
@@ -147,7 +147,7 @@ describe('VirtualPrinterCard - auto-dispatch toggle', () => {
 // #1188 — VP queue mode now pins per-slot type+color so the scheduler refuses
 // to dispatch onto a printer with the wrong filament loaded. The toggle is
 // mode-gated to print_queue (mirroring the auto-dispatch toggle), defaults
-// off (preserves pre-fix behaviour for upgraders), and the click both flips
+// on for safe dispatch, and the click both flips
 // the local state and POSTs the new value to the backend.
 describe('VirtualPrinterCard - force color match toggle (#1188)', () => {
   beforeEach(() => {
@@ -184,7 +184,7 @@ describe('VirtualPrinterCard - force color match toggle (#1188)', () => {
     expect(screen.queryByText('Force color match')).not.toBeInTheDocument();
   });
 
-  it('force-color-match toggle defaults off (not green) — preserves pre-fix behaviour', async () => {
+  it('force-color-match toggle renders disabled when explicitly turned off', async () => {
     const printer = createMockPrinter({ mode: 'queue', queue_force_color_match: false });
     render(<VirtualPrinterCard printer={printer} models={models} />);
 

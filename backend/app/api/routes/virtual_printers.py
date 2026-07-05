@@ -38,7 +38,7 @@ class VirtualPrinterCreate(BaseModel):
     access_code: str | None = None
     target_printer_id: int | None = None
     auto_dispatch: bool = True
-    queue_force_color_match: bool = False
+    queue_force_color_match: bool = True
     gcode_injection: bool = False
     bind_ip: str | None = None
     remote_interface_ip: str | None = None

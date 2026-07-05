@@ -968,15 +968,16 @@ async def run_migrations(conn):
         )
 
     # Migration: Add queue_force_color_match column to virtual_printers (#1188).
-    # Opt-in flag: when true, VP queue-mode uploads pin the per-slot type+color
+    # When true, VP queue-mode uploads pin the per-slot type+color
     # from the 3MF onto the queue item's filament_overrides so the scheduler
     # refuses to dispatch onto a printer with the wrong filament loaded.
-    # Default false to preserve current behaviour for upgraders.
+    # Default true so newly-created configurations are safe by default; users
+    # can still explicitly disable the setting.
     if is_sqlite():
-        await _safe_execute(conn, "ALTER TABLE virtual_printers ADD COLUMN queue_force_color_match BOOLEAN DEFAULT 0")
+        await _safe_execute(conn, "ALTER TABLE virtual_printers ADD COLUMN queue_force_color_match BOOLEAN DEFAULT 1")
     else:
         await _safe_execute(
-            conn, "ALTER TABLE virtual_printers ADD COLUMN queue_force_color_match BOOLEAN DEFAULT FALSE"
+            conn, "ALTER TABLE virtual_printers ADD COLUMN queue_force_color_match BOOLEAN DEFAULT TRUE"
         )
 
     # Per-VP opt-in for auto-print G-code injection (#1516). Default false so

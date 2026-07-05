@@ -12,7 +12,7 @@ interface FilamentOverrideProps {
   overrides: Record<number, { type: string; color: string }>;
   onChange: (overrides: Record<number, { type: string; color: string }>) => void;
 
-  /** Per-slot force color match flags. Defaults to false (opt-in) when not provided. */
+  /** Per-slot force color match flags. Missing slots default to true. */
   forceColorMatch?: Record<number, boolean>;
   /** Called when a slot's force color match checkbox is toggled. */
   onForceColorMatchChange?: (slotId: number, value: boolean) => void;
@@ -153,7 +153,7 @@ export function FilamentOverride({
               <label className="inline-flex items-center gap-1.5 text-xs text-bambu-gray cursor-pointer select-none pl-5">
                 <input
                   type="checkbox"
-                  checked={forceColorMatch?.[req.slot_id] ?? false}
+                  checked={forceColorMatch?.[req.slot_id] ?? true}
                   onChange={(e) => onForceColorMatchChange?.(req.slot_id, e.target.checked)}
                   className="accent-bambu-green w-3 h-3"
                 />

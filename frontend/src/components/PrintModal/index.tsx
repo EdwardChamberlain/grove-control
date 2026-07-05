@@ -190,7 +190,8 @@ export function PrintModal({
     return {};
   });
 
-  // Per-slot force color match flags. Default is false (opt-in).
+  // Per-slot force color match flags. Missing values default to true so newly
+  // queued jobs cannot silently dispatch with the wrong colour.
   const [forceColorMatch, setForceColorMatch] = useState<Record<number, boolean>>(() => {
     if (mode === 'edit-queue-item' && queueItem?.filament_overrides) {
       const flags: Record<number, boolean> = {};
@@ -678,7 +679,7 @@ export function PrintModal({
       if (effectiveFilamentReqs?.filaments) {
         for (const req of effectiveFilamentReqs.filaments) {
           const userOverride = filamentOverrides[req.slot_id];
-          const isForceColor = forceColorMatch[req.slot_id] ?? false;
+          const isForceColor = forceColorMatch[req.slot_id] ?? true;
           const effectiveType = userOverride?.type ?? req.type;
           const effectiveColor = userOverride?.color ?? req.color;
 
@@ -691,7 +692,7 @@ export function PrintModal({
         // Fallback: no filament requirements data — only include explicit user overrides
         for (const [slotId, { type, color }] of Object.entries(filamentOverrides)) {
           const id = parseInt(slotId, 10);
-          const isForceColor = forceColorMatch[id] ?? false;
+          const isForceColor = forceColorMatch[id] ?? true;
           entries.push({ slot_id: id, type, color, color_name: getColorName(color), force_color_match: isForceColor });
         }
       }

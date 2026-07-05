@@ -66,6 +66,13 @@ class TestVirtualPrinterInstance:
         assert instance.model == "C11"
         assert instance.access_code == "12345678"
         assert instance.serial_suffix == "391800001"
+        assert instance.queue_force_color_match is True
+
+    def test_create_request_defaults_force_color_match_on(self):
+        """New virtual printers should protect queued jobs by default."""
+        from backend.app.api.routes.virtual_printers import VirtualPrinterCreate
+
+        assert VirtualPrinterCreate().queue_force_color_match is True
 
     def test_instance_serial_property(self, instance):
         """Verify serial is generated from model prefix + suffix."""
