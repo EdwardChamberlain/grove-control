@@ -2231,7 +2231,7 @@ class TestVirtualPrinterManager:
             "target_printer_id": None,
             "auto_dispatch": True,
             "tailscale_disabled": True,  # Opt-in default (#1070 UX fix)
-            "queue_force_color_match": False,  # default — must be explicit so MagicMock truthiness doesn't trip the change detector
+            "queue_force_color_match": True,  # safe default — explicit so MagicMock truthiness doesn't trip change detection
             "gcode_injection": False,  # same reason as above
             "position": 0,
         }
