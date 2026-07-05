@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
+import { LogIn, LogOut, RefreshCw } from 'lucide-react';
 
 import { api, type AMSTray, type AMSUnit } from '../../api/client';
 import {
@@ -130,6 +131,47 @@ export function AmsSlotControl({
         </EmptySlotHoverCard>
       )}
     </div>
+  );
+}
+
+export function AmsSlotActions({
+  includeRfid = true,
+  isPrinting,
+  isRefreshing,
+  canReadRfid,
+  canControl,
+  onRefresh,
+  onLoad,
+  onUnload,
+}: {
+  includeRfid?: boolean;
+  isPrinting: boolean;
+  isRefreshing?: boolean;
+  canReadRfid: boolean;
+  canControl: boolean;
+  onRefresh: () => void;
+  onLoad: () => void;
+  onUnload: () => void;
+}) {
+  const { t } = useTranslation();
+  const actionClass = 'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-white transition-colors hover:bg-bambu-dark-tertiary disabled:cursor-not-allowed disabled:text-bambu-gray/50';
+  return (
+    <>
+      {includeRfid && (
+        <button type="button" className={actionClass} onClick={onRefresh} disabled={isPrinting || isRefreshing || !canReadRfid} title={isPrinting ? t('printers.bedJog.disabledWhilePrinting') : !canReadRfid ? t('printers.permission.noAmsRfid') : undefined}>
+          <RefreshCw className={`h-3 w-3 ${isRefreshing ? 'animate-spin' : ''}`} />
+          {t('printers.rfid.reread')}
+        </button>
+      )}
+      <button type="button" className={actionClass} onClick={onLoad} disabled={isPrinting || !canControl} title={isPrinting ? t('printers.bedJog.disabledWhilePrinting') : !canControl ? t('printers.permission.noControl') : undefined}>
+        <LogIn className="h-3 w-3" />
+        {t('printers.ams.load')}
+      </button>
+      <button type="button" className={actionClass} onClick={onUnload} disabled={isPrinting || !canControl} title={isPrinting ? t('printers.bedJog.disabledWhilePrinting') : !canControl ? t('printers.permission.noControl') : undefined}>
+        <LogOut className="h-3 w-3" />
+        {t('printers.ams.unload')}
+      </button>
+    </>
   );
 }
 

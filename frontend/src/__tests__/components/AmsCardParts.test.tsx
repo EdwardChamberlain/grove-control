@@ -1,9 +1,10 @@
-import { render, screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { AMSUnit } from '../../api/client';
 import {
   AmsEnvironmentIndicators,
+  AmsSlotActions,
   AmsSlotGrid,
   AmsUnitHeader,
   CompactAmsUnitCard,
@@ -70,5 +71,28 @@ describe('composed AMS card parts', () => {
 
     expect(screen.getByTestId('ams-unit-card-expanded-1')).toHaveClass('space-y-1');
     expect(screen.getByTestId('ams-unit-card-ht-2')).toHaveTextContent('HT');
+  });
+
+  it('applies shared permission and printing gates to slot actions', () => {
+    const onRefresh = vi.fn();
+    const onLoad = vi.fn();
+    const onUnload = vi.fn();
+    render(
+      <AmsSlotActions
+        isPrinting={false}
+        canReadRfid={false}
+        canControl
+        onRefresh={onRefresh}
+        onLoad={onLoad}
+        onUnload={onUnload}
+      />,
+    );
+
+    const reread = screen.getByRole('button', { name: /re-read/i });
+    expect(reread).toBeDisabled();
+    expect(reread).toHaveAttribute('title');
+    fireEvent.click(screen.getByRole('button', { name: /^load$/i }));
+    expect(onLoad).toHaveBeenCalledOnce();
+    expect(onRefresh).not.toHaveBeenCalled();
   });
 });
