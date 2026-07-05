@@ -41,7 +41,9 @@ atexit.register(_cleanup_test_plate_cal_dir)
 
 from backend.app.core.database import Base  # noqa: E402
 
-# Use in-memory SQLite for tests
+# Most tests are fastest on an isolated in-memory database. Integration test
+# modules that run concurrent background sessions can override the
+# ``test_database_url`` fixture with a file-backed URL.
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
 
@@ -110,9 +112,15 @@ def event_loop():
 
 
 @pytest.fixture
-async def test_engine():
-    """Create a test database engine."""
-    engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+def test_database_url():
+    """Database URL used by ``test_engine``; modules may override it."""
+    return TEST_DATABASE_URL
+
+
+@pytest.fixture
+async def test_engine(test_database_url):
+    """Create an isolated test database engine."""
+    engine = create_async_engine(test_database_url, echo=False)
 
     # Import all models to register them
     from backend.app.models import (

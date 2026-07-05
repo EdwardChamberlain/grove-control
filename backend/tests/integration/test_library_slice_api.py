@@ -90,10 +90,8 @@ async def _wait_for_job(client: AsyncClient, job_id: int, timeout: float = 5.0) 
 async def _get_committed_row(db_session, model, row_id: int):
     """Read a row committed by a background job after ending stale reads.
 
-    The in-memory SQLite engine uses one shared connection. Rolling back the
-    fixture session here can race the background session using that connection
-    and hide its just-committed archive under pytest-xdist. Commit the fixture's
-    read-only transaction, expire its identity map, and perform a fresh lookup.
+    End the fixture session's read transaction, expire its identity map, and
+    perform a fresh lookup so rows committed by the job session are visible.
     """
     await db_session.commit()
     db_session.expire_all()
@@ -105,6 +103,18 @@ async def _get_committed_row(db_session, model, row_id: int):
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def test_database_url(tmp_path):
+    """Give background slice sessions independent SQLite connections.
+
+    The default ``:memory:`` engine uses ``StaticPool``, making the request,
+    polling, fixture, and background-job sessions share one physical
+    connection. Their transaction cleanup can then erase a job's committed
+    archive. A per-test file preserves isolation and matches production.
+    """
+    return f"sqlite+aiosqlite:///{tmp_path / 'slice-test.db'}"
 
 
 @pytest.fixture
