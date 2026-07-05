@@ -1,9 +1,20 @@
 """Integration tests for Print Queue API endpoints."""
 
 import json
+import zipfile
 
 import pytest
 from httpx import AsyncClient
+
+
+def _write_queue_3mf(path, *, color: str = "#FF0000") -> None:
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr(
+            "Metadata/slice_info.config",
+            '<config><plate><metadata key="index" value="1"/>'
+            f'<filament id="1" type="PLA" color="{color}" used_g="5"/>'
+            "</plate></config>",
+        )
 
 
 class TestPrintQueueAPI:
@@ -161,6 +172,45 @@ class TestPrintQueueAPI:
         stored = await db_session.get(PrintQueueItem, result["id"], populate_existing=True)
         assert stored is not None
         assert json.loads(stored.filament_overrides) == overrides
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_printer_targeted_job_defaults_force_color_match(
+        self, async_client: AsyncClient, printer_factory, archive_factory, db_session, tmp_path
+    ):
+        """Omitting a preference derives safe forced overrides from the source 3MF."""
+        printer = await printer_factory()
+        source = tmp_path / "default-force.3mf"
+        _write_queue_3mf(source)
+        archive = await archive_factory(file_path=str(source))
+
+        response = await async_client.post(
+            "/api/v1/queue/",
+            json={"printer_id": printer.id, "archive_id": archive.id},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["filament_overrides"] == [
+            {"slot_id": 1, "type": "PLA", "color": "#FF0000", "force_color_match": True}
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_printer_targeted_job_allows_explicit_global_color_opt_out(
+        self, async_client: AsyncClient, printer_factory, archive_factory, tmp_path
+    ):
+        printer = await printer_factory()
+        source = tmp_path / "force-opt-out.3mf"
+        _write_queue_3mf(source)
+        archive = await archive_factory(file_path=str(source))
+
+        response = await async_client.post(
+            "/api/v1/queue/",
+            json={"printer_id": printer.id, "archive_id": archive.id, "force_color_match": False},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["filament_overrides"] is None
 
     @pytest.mark.asyncio
     @pytest.mark.integration

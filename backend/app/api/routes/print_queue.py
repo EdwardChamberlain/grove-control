@@ -2,11 +2,9 @@
 
 import json
 import logging
-import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-import defusedxml.ElementTree as ET
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +34,10 @@ from backend.app.schemas.print_queue import (
     PrintQueueReorder,
 )
 from backend.app.services.filament_deficit import compute_deficit_for_queue_item
+from backend.app.services.filament_requirements import (
+    build_queue_filament_overrides,
+    extract_filament_requirements,
+)
 from backend.app.services.notification_service import notification_service
 from backend.app.utils.printer_models import normalize_printer_model, normalize_printer_model_id
 from backend.app.utils.threemf_tools import (
@@ -47,67 +49,6 @@ from backend.app.utils.threemf_tools import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/queue", tags=["queue"])
-
-
-def _extract_filament_types_from_3mf(file_path: Path, plate_id: int | None = None) -> list[str]:
-    """Extract unique filament types from a 3MF file.
-
-    Args:
-        file_path: Path to the 3MF file
-        plate_id: Optional plate index to filter for (for multi-plate files)
-
-    Returns:
-        List of unique filament types (e.g., ["PLA", "PETG"])
-    """
-    types: set[str] = set()
-
-    try:
-        with zipfile.ZipFile(file_path, "r") as zf:
-            if "Metadata/slice_info.config" not in zf.namelist():
-                return []
-
-            content = zf.read("Metadata/slice_info.config").decode()
-            root = ET.fromstring(content)
-
-            if plate_id is not None:
-                # Find the plate element with matching index
-                for plate_elem in root.findall(".//plate"):
-                    plate_index = None
-                    for meta in plate_elem.findall("metadata"):
-                        if meta.get("key") == "index":
-                            try:
-                                plate_index = int(meta.get("value", "0"))
-                            except ValueError:
-                                pass  # Skip plate with unparseable index
-                            break
-
-                    if plate_index == plate_id:
-                        for filament_elem in plate_elem.findall("filament"):
-                            filament_type = filament_elem.get("type", "")
-                            used_g = filament_elem.get("used_g", "0")
-                            try:
-                                used_grams = float(used_g)
-                            except (ValueError, TypeError):
-                                used_grams = 0
-                            if used_grams > 0 and filament_type:
-                                types.add(filament_type)
-                        break
-            else:
-                # No plate_id specified - extract all filaments with used_g > 0
-                for filament_elem in root.findall(".//filament"):
-                    filament_type = filament_elem.get("type", "")
-                    used_g = filament_elem.get("used_g", "0")
-                    try:
-                        used_grams = float(used_g)
-                    except (ValueError, TypeError):
-                        used_grams = 0
-                    if used_grams > 0 and filament_type:
-                        types.add(filament_type)
-
-    except Exception as e:
-        logger.warning("Failed to extract filament types from %s: %s", file_path, e)
-
-    return sorted(types)
 
 
 # Local alias kept so existing call sites stay compact; the implementation lives
@@ -448,32 +389,42 @@ async def add_to_queue(
         except InvalidFilenameError as e:
             raise HTTPException(400, str(e)) from e
 
+    # Resolve the source once for both default force-colour overrides and
+    # model-based material validation.
+    file_path = None
+    if archive:
+        archive_path = Path(archive.file_path)
+        file_path = (
+            archive_path if archive_path.is_absolute() else settings.base_dir / archive_path
+        )  # SEC-PATH-OK: archive.file_path is DB-stored and internally generated; legacy rows may be absolute
+    elif library_file:
+        library_path = Path(library_file.file_path)
+        file_path = (
+            library_path if library_path.is_absolute() else settings.base_dir / library_path
+        )  # SEC-PATH-OK: library_file.file_path is DB-stored and internally generated; external-library rows may be absolute
+
+    requirements = extract_filament_requirements(file_path, data.plate_id) if file_path and file_path.exists() else []
+
     # Extract filament types for model-based assignment (used by scheduler for validation)
     required_filament_types = None
     if target_model_norm:
-        # Get file path from archive or library file
-        file_path = None
-        if archive:
-            file_path = settings.base_dir / archive.file_path
-        elif library_file:
-            lib_path = Path(library_file.file_path)
-            file_path = lib_path if lib_path.is_absolute() else settings.base_dir / library_file.file_path
+        filament_types = sorted({requirement["type"] for requirement in requirements if requirement.get("type")})
+        if filament_types:
+            required_filament_types = json.dumps(filament_types)
+            logger.info("Extracted filament types for model-based queue: %s", filament_types)
 
-        if file_path and file_path.exists():
-            filament_types = _extract_filament_types_from_3mf(file_path, data.plate_id)
-            if filament_types:
-                required_filament_types = json.dumps(filament_types)
-                logger.info("Extracted filament types for model-based queue: %s", filament_types)
-
-    # Persist overrides for both model-based and printer-targeted jobs. The
-    # assigned-printer dispatcher also enforces force_color_match before start.
-    filament_overrides_json = json.dumps(data.filament_overrides) if data.filament_overrides else None
+    resolved_overrides = build_queue_filament_overrides(
+        requirements,
+        data.filament_overrides,
+        force_color_match=data.force_color_match,
+    )
+    filament_overrides_json = json.dumps(resolved_overrides) if resolved_overrides else None
 
     # Model-based assignment additionally uses override types while selecting
     # a compatible printer.
-    if data.filament_overrides and target_model_norm:
+    if resolved_overrides and target_model_norm:
         # Update required_filament_types from overrides so scheduler validates against overridden types
-        override_types = sorted({o["type"] for o in data.filament_overrides if "type" in o})
+        override_types = sorted({o["type"] for o in resolved_overrides if "type" in o})
         if override_types:
             # Merge with existing types (overrides may only cover some slots)
             existing_types = set(json.loads(required_filament_types)) if required_filament_types else set()

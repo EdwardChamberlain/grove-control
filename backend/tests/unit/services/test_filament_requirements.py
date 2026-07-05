@@ -10,7 +10,10 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
-from backend.app.services.filament_requirements import extract_filament_requirements
+from backend.app.services.filament_requirements import (
+    build_queue_filament_overrides,
+    extract_filament_requirements,
+)
 
 
 def _make_3mf(
@@ -190,3 +193,26 @@ class TestExtractFilamentRequirements:
         )
         out = extract_filament_requirements(f, plate_id=1)
         assert [r["slot_id"] for r in out] == [1, 2, 3]
+
+
+class TestBuildQueueFilamentOverrides:
+    requirements = [
+        {"slot_id": 1, "type": "PLA", "color": "#FF0000"},
+        {"slot_id": 2, "type": "PETG", "color": "#000000"},
+    ]
+
+    def test_defaults_every_source_slot_to_force_colour(self):
+        assert build_queue_filament_overrides(self.requirements) == [
+            {"slot_id": 1, "type": "PLA", "color": "#FF0000", "force_color_match": True},
+            {"slot_id": 2, "type": "PETG", "color": "#000000", "force_color_match": True},
+        ]
+
+    def test_global_false_is_explicit_opt_out(self):
+        assert build_queue_filament_overrides(self.requirements, force_color_match=False) == []
+
+    def test_explicit_per_slot_false_wins_over_safe_default(self):
+        overrides = [{"slot_id": 1, "type": "PLA", "color": "#00FF00", "force_color_match": False}]
+        assert build_queue_filament_overrides(self.requirements, overrides) == [
+            {"slot_id": 1, "type": "PLA", "color": "#00FF00", "force_color_match": False},
+            {"slot_id": 2, "type": "PETG", "color": "#000000", "force_color_match": True},
+        ]

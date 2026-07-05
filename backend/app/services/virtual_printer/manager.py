@@ -699,7 +699,10 @@ class VirtualPrinterInstance:
             from backend.app.api.routes.settings import get_setting
             from backend.app.models.print_queue import PrintQueueItem
             from backend.app.services.archive import ArchiveService
-            from backend.app.services.filament_requirements import extract_filament_requirements
+            from backend.app.services.filament_requirements import (
+                build_queue_filament_overrides,
+                extract_filament_requirements,
+            )
 
             async with self._session_factory() as db:
                 name_source = await get_setting(db, "virtual_printer_archive_name_source")
@@ -843,19 +846,12 @@ class VirtualPrinterInstance:
                             types = sorted({r["type"] for r in requirements if r.get("type")})
                             if types:
                                 required_filament_types_json = json.dumps(types)
-                            if self.queue_force_color_match:
-                                overrides = [
-                                    {
-                                        "slot_id": r["slot_id"],
-                                        "type": r.get("type", ""),
-                                        "color": r.get("color", ""),
-                                        "force_color_match": True,
-                                    }
-                                    for r in requirements
-                                    if r.get("type") and r.get("color")
-                                ]
-                                if overrides:
-                                    filament_overrides_json = json.dumps(overrides)
+                            overrides = build_queue_filament_overrides(
+                                requirements,
+                                force_color_match=self.queue_force_color_match,
+                            )
+                            if overrides:
+                                filament_overrides_json = json.dumps(overrides)
 
                         queue_item = PrintQueueItem(
                             printer_id=self.target_printer_id,

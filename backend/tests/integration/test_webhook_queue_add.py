@@ -1,0 +1,89 @@
+"""Default force-colour behavior for webhook queue creation."""
+
+import json
+import zipfile
+
+import pytest
+from httpx import AsyncClient
+
+
+@pytest.fixture
+async def webhook_queue_setup(db_session, tmp_path):
+    from backend.app.core.auth import generate_api_key
+    from backend.app.models.api_key import APIKey
+    from backend.app.models.archive import PrintArchive
+    from backend.app.models.printer import Printer
+
+    source = tmp_path / "webhook.3mf"
+    with zipfile.ZipFile(source, "w") as zf:
+        zf.writestr(
+            "Metadata/slice_info.config",
+            '<config><plate><metadata key="index" value="1"/>'
+            '<filament id="1" type="PLA" color="#00FF00" used_g="5"/>'
+            "</plate></config>",
+        )
+
+    printer = Printer(
+        name="Webhook Printer",
+        ip_address="192.168.1.70",
+        serial_number="WEBHOOK0001",
+        access_code="12345678",
+        model="P1S",
+    )
+    archive = PrintArchive(
+        filename="webhook.3mf",
+        print_name="Webhook",
+        file_path=str(source),
+        file_size=source.stat().st_size,
+        content_hash="webhook-force-color",
+        status="completed",
+    )
+    full_key, key_hash, key_prefix = generate_api_key()
+    api_key = APIKey(
+        name="webhook-queue-key",
+        key_hash=key_hash,
+        key_prefix=key_prefix,
+        can_queue=True,
+        enabled=True,
+    )
+    db_session.add_all([printer, archive, api_key])
+    await db_session.commit()
+    return full_key, printer, archive
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_webhook_queue_defaults_force_color_match(async_client: AsyncClient, db_session, webhook_queue_setup):
+    from backend.app.models.print_queue import PrintQueueItem
+
+    api_key, printer, archive = webhook_queue_setup
+    response = await async_client.post(
+        "/api/v1/webhook/queue/add",
+        headers={"X-API-Key": api_key},
+        json={"printer_id": printer.id, "archive_id": archive.id},
+    )
+
+    assert response.status_code == 200, response.text
+    item = await db_session.get(PrintQueueItem, response.json()["id"], populate_existing=True)
+    assert item is not None
+    assert json.loads(item.filament_overrides) == [
+        {"slot_id": 1, "type": "PLA", "color": "#00FF00", "force_color_match": True}
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_webhook_queue_allows_explicit_color_opt_out(async_client: AsyncClient, db_session, webhook_queue_setup):
+    from backend.app.models.print_queue import PrintQueueItem
+
+    api_key, printer, archive = webhook_queue_setup
+    response = await async_client.post(
+        "/api/v1/webhook/queue/add",
+        headers={"X-API-Key": api_key},
+        json={"printer_id": printer.id, "archive_id": archive.id, "force_color_match": False},
+    )
+
+    assert response.status_code == 200, response.text
+    item = await db_session.get(PrintQueueItem, response.json()["id"], populate_existing=True)
+    assert item is not None
+    assert item.filament_overrides is None

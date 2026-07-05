@@ -1,4 +1,6 @@
+import json
 import logging
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -6,11 +8,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.auth import check_permission, check_printer_access, get_api_key
+from backend.app.core.config import settings
 from backend.app.core.database import get_db
 from backend.app.models.api_key import APIKey
 from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
+from backend.app.services.filament_requirements import (
+    build_queue_filament_overrides,
+    extract_filament_requirements,
+)
 from backend.app.services.printer_manager import printer_manager
 
 logger = logging.getLogger(__name__)
@@ -26,6 +33,8 @@ class QueueAddRequest(BaseModel):
     scheduled_time: str | None = None  # ISO format datetime
     require_previous_success: bool = False
     auto_off_after: bool = False
+    filament_overrides: list[dict] | None = None
+    force_color_match: bool = True
 
 
 class QueueAddResponse(BaseModel):
@@ -106,6 +115,17 @@ async def webhook_add_to_queue(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid scheduled_time format")
 
+    archive_path = Path(archive.file_path)
+    source_path = (
+        archive_path if archive_path.is_absolute() else settings.base_dir / archive_path
+    )  # SEC-PATH-OK: archive.file_path is DB-stored and internally generated; legacy rows may be absolute
+    requirements = extract_filament_requirements(source_path) if source_path.exists() else []
+    overrides = build_queue_filament_overrides(
+        requirements,
+        data.filament_overrides,
+        force_color_match=data.force_color_match,
+    )
+
     # Create queue item
     queue_item = PrintQueueItem(
         printer_id=data.printer_id,
@@ -115,9 +135,10 @@ async def webhook_add_to_queue(
         scheduled_time=scheduled_time,
         require_previous_success=data.require_previous_success,
         auto_off_after=data.auto_off_after,
+        filament_overrides=json.dumps(overrides) if overrides else None,
     )
     db.add(queue_item)
-    await db.flush()
+    await db.commit()
     await db.refresh(queue_item)
 
     return QueueAddResponse(

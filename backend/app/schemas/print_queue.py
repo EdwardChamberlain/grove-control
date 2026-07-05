@@ -20,7 +20,8 @@ class PrintQueueItemCreate(BaseModel):
     target_model: str | None = None  # Target printer model (mutually exclusive with printer_id)
     target_location: str | None = None  # Target location filter (only used with target_model)
     required_filament_types: list[str] | None = None  # Required filament types for model-based assignment
-    filament_overrides: list[dict] | None = None  # Filament overrides for model-based assignment
+    filament_overrides: list[dict] | None = None  # Per-slot filament requirements and force-colour preferences
+    force_color_match: bool = True  # Safe default; false is an explicit global opt-out
     # Either archive_id OR library_file_id must be provided
     archive_id: int | None = None
     library_file_id: int | None = None
@@ -69,7 +70,7 @@ class PrintQueueItemUpdate(BaseModel):
     printer_id: int | None = None
     target_model: str | None = None  # Target printer model (mutually exclusive with printer_id)
     target_location: str | None = None  # Target location filter (only used with target_model)
-    filament_overrides: list[dict] | None = None  # Filament overrides for model-based assignment
+    filament_overrides: list[dict] | None = None  # Per-slot filament requirements and force-colour preferences
     position: int | None = None
     scheduled_time: datetime | None = None
     require_previous_success: bool | None = None
@@ -99,7 +100,7 @@ class PrintQueueItemResponse(BaseModel):
     target_model: str | None = None  # Target printer model for model-based assignment
     target_location: str | None = None  # Target location filter for model-based assignment
     required_filament_types: list[str] | None = None  # Required filament types for model-based assignment
-    filament_overrides: list[dict] | None = None  # Filament overrides for model-based assignment
+    filament_overrides: list[dict] | None = None  # Per-slot filament requirements and force-colour preferences
     waiting_reason: str | None = None  # Why a model-based job hasn't started yet
     archive_id: int | None  # None if library_file_id is set (archive created at print start)
     library_file_id: int | None  # For queue items from library files

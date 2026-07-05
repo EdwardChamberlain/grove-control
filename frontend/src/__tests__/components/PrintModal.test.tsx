@@ -274,6 +274,45 @@ describe('PrintModal', () => {
         }),
       ]);
     });
+
+    it('preserves an explicit per-slot force colour opt-out', async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      server.use(
+        http.get('/api/v1/archives/:id/filament-requirements', () =>
+          HttpResponse.json({
+            filaments: [
+              { slot_id: 1, type: 'PLA', color: '#FF0000', used_grams: 10, used_meters: 3 },
+            ],
+          }),
+        ),
+        http.post('/api/v1/queue/', async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json({ id: 1, status: 'pending' });
+        }),
+      );
+      const user = userEvent.setup();
+
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Benchy"
+          initialSelectedPrinterIds={[1]}
+          onClose={mockOnClose}
+          onSuccess={mockOnSuccess}
+        />
+      );
+
+      const forceMatch = await screen.findByLabelText(/Force color match/i) as HTMLInputElement;
+      await user.click(forceMatch);
+      expect(forceMatch).not.toBeChecked();
+      await user.click(screen.getByRole('button', { name: /^print$/i }));
+
+      await waitFor(() => expect(capturedBody).not.toBeNull());
+      expect(capturedBody?.filament_overrides).toEqual([
+        expect.objectContaining({ slot_id: 1, force_color_match: false }),
+      ]);
+    });
   });
 
   describe('create mode', () => {

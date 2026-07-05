@@ -102,6 +102,54 @@ def extract_filament_requirements(file_path: Path, plate_id: int | None = None) 
     return filaments
 
 
+def build_queue_filament_overrides(
+    requirements: list[dict],
+    provided_overrides: list[dict] | None = None,
+    *,
+    force_color_match: bool = True,
+) -> list[dict]:
+    """Merge source requirements with client overrides for queue persistence.
+
+    Exact colour matching is the safe default. Clients may opt out globally
+    with ``force_color_match=False`` or per slot by explicitly providing
+    ``force_color_match: false``. Explicit per-slot values always win.
+    """
+    if not force_color_match and not provided_overrides:
+        return []
+
+    provided_by_slot = {
+        override.get("slot_id"): override
+        for override in (provided_overrides or [])
+        if isinstance(override, dict) and isinstance(override.get("slot_id"), int)
+    }
+    requirement_by_slot = {
+        requirement.get("slot_id"): requirement
+        for requirement in requirements
+        if isinstance(requirement, dict) and isinstance(requirement.get("slot_id"), int)
+    }
+
+    resolved: list[dict] = []
+    for slot_id in sorted(set(requirement_by_slot) | set(provided_by_slot)):
+        requirement = requirement_by_slot.get(slot_id, {})
+        provided = provided_by_slot.get(slot_id, {})
+        filament_type = provided.get("type", requirement.get("type", ""))
+        color = provided.get("color", requirement.get("color", ""))
+        if not filament_type or not color:
+            continue
+
+        entry = {
+            "slot_id": slot_id,
+            "type": filament_type,
+            "color": color,
+            "force_color_match": provided.get("force_color_match", force_color_match),
+        }
+        if provided.get("color_name"):
+            entry["color_name"] = provided["color_name"]
+        resolved.append(entry)
+
+    return resolved
+
+
 def _collect_filaments(parent: ET.Element, into: list[dict]) -> None:
     """Walk every `./filament` child under `parent` and append normalised
     entries to `into`. Skips filaments with `used_g <= 0` (slot present in

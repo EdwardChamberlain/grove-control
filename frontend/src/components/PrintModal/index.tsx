@@ -683,10 +683,9 @@ export function PrintModal({
           const effectiveType = userOverride?.type ?? req.type;
           const effectiveColor = userOverride?.color ?? req.color;
 
-          // Include slot if user changed the filament OR force_color_match is enabled
-          if (userOverride || isForceColor) {
-            entries.push({ slot_id: req.slot_id, type: effectiveType, color: effectiveColor, color_name: getColorName(effectiveColor), force_color_match: isForceColor });
-          }
+          // Include every known slot so an explicit unchecked value survives
+          // the API's safe force_color_match=true default.
+          entries.push({ slot_id: req.slot_id, type: effectiveType, color: effectiveColor, color_name: getColorName(effectiveColor), force_color_match: isForceColor });
         }
       } else {
         // Fallback: no filament requirements data — only include explicit user overrides
