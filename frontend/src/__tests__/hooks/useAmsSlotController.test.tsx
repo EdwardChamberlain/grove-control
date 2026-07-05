@@ -48,6 +48,8 @@ function renderController() {
     printerModel: 'X1C',
     spoolmanEnabled: true,
     canConfigure: true,
+    isDualNozzle: true,
+    amsExtruderMap: { '2': 1 },
     onUnlinkSpool: vi.fn(),
   }));
 }
@@ -61,7 +63,6 @@ describe('useAmsSlotController', () => {
       trayCount: 4,
       tray,
       slotPreset: { ams_id: 2, tray_id: 1, preset_id: 'preset-1', preset_name: 'PLA' },
-      extruderId: 1,
       location: 'AMS-C Slot 2',
       model: filledModel,
     });
@@ -87,7 +88,6 @@ describe('useAmsSlotController', () => {
       amsId: 255,
       trayId: 1,
       trayCount: 1,
-      extruderId: 0,
       location: 'External',
       emptyLocation: 'External Slot 2',
       model: emptyModel,

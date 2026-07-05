@@ -7,6 +7,7 @@ import { ConfigureAmsSlotModal } from '../components/ConfigureAmsSlotModal';
 import { LinkSpoolModal } from '../components/LinkSpoolModal';
 import { AmsSlotControl } from '../components/printer/AmsCardParts';
 import { buildAmsInventoryConfig, type AmsSlotModel } from '../components/printer/amsSlotModel';
+import { getAmsSlotExtruderId } from '../utils/amsHelpers';
 
 interface LinkSlotModalState {
   tagUid: string;
@@ -46,7 +47,6 @@ export interface AmsSlotBindingOptions {
   trayCount: number;
   tray?: AMSTray;
   slotPreset?: SlotPresetMapping;
-  extruderId?: number;
   location: string;
   emptyLocation?: string;
   model: AmsSlotModel;
@@ -59,6 +59,8 @@ interface AmsSlotControllerOptions {
   spoolmanUrl?: string | null;
   spoolmanSyncMode?: string | null;
   canConfigure: boolean;
+  isDualNozzle: boolean;
+  amsExtruderMap?: Record<string, number>;
   onUnlinkSpool: (spoolId: number) => void;
   onUnassignSpoolmanSpool?: (spoolId: number) => void;
   onUnassignInventorySpool?: (amsId: number, trayId: number) => void;
@@ -89,7 +91,7 @@ export function useAmsSlotController(options: AmsSlotControllerOptions): AmsSlot
   const [configureModal, setConfigureModal] = useState<ConfigureSlotModalState | null>(null);
 
   const getBindings = (slot: AmsSlotBindingOptions) => {
-    const { amsId, trayId, trayCount, tray, slotPreset, extruderId, location, emptyLocation, model } = slot;
+    const { amsId, trayId, trayCount, tray, slotPreset, location, emptyLocation, model } = slot;
     const filament = model.filamentData;
     const openAssign = () => setAssignModal({
       amsId,
@@ -106,7 +108,12 @@ export function useAmsSlotController(options: AmsSlotControllerOptions): AmsSlot
       amsId,
       trayId,
       trayCount,
-      extruderId,
+      extruderId: getAmsSlotExtruderId({
+        amsId,
+        trayId,
+        isDualNozzle: options.isDualNozzle,
+        amsExtruderMap: options.amsExtruderMap,
+      }),
       ...(filament ? {
         trayType: tray?.tray_type || undefined,
         trayColor: tray?.tray_color || undefined,
