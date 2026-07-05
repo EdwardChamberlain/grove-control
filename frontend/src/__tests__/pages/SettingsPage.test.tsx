@@ -1137,9 +1137,13 @@ describe('SettingsPage', () => {
 
       render(<SettingsPage />);
 
-      await waitFor(() => {
-        expect(screen.getByPlaceholderText(/api\/frame\.jpeg\?src=printer/)).toBeInTheDocument();
-      });
+      expect(
+        await screen.findByPlaceholderText(
+          /api\/frame\.jpeg\?src=printer/,
+          undefined,
+          { timeout: 5000 },
+        ),
+      ).toBeInTheDocument();
     });
 
     it('hides the snapshot URL input when camera_type is snapshot (already a single-frame source)', async () => {
