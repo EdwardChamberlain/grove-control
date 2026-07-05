@@ -153,6 +153,30 @@ export function getGlobalTrayId(
 }
 
 /**
+ * Resolve the extruder/nozzle that owns an AMS slot.
+ * Regular and HT units use the printer-reported AMS mapping. Dual-nozzle
+ * external slots are fixed: logical slot 0 is left (extruder 1), slot 1 is
+ * right (extruder 0). Single-nozzle external slots do not need a filter.
+ */
+export function getAmsSlotExtruderId({
+  amsId,
+  trayId,
+  isDualNozzle,
+  amsExtruderMap,
+}: {
+  amsId: number;
+  trayId: number;
+  isDualNozzle: boolean;
+  amsExtruderMap?: Record<string, number>;
+}): number | undefined {
+  if (amsId === 255) {
+    if (!isDualNozzle) return undefined;
+    return trayId === 0 ? 1 : 0;
+  }
+  return amsExtruderMap?.[String(amsId)];
+}
+
+/**
  * Calculate the key used by the slot-presets API response.
  * Unlike MQTT global tray IDs, external slots retain ams_id=255 and are
  * therefore keyed as 1020/1021. AMS-HT units use their unit ID directly.

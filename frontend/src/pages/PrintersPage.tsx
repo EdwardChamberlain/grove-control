@@ -92,9 +92,6 @@ import { HMSErrorModal, filterKnownHMSErrors } from '../components/HMSErrorModal
 import { PrinterQueueWidget } from '../components/PrinterQueueWidget';
 import { AMSHistoryModal } from '../components/AMSHistoryModal';
 import { AmsBackupModal } from '../components/AmsBackupModal';
-import { LinkSpoolModal } from '../components/LinkSpoolModal';
-import { AssignSpoolModal } from '../components/AssignSpoolModal';
-import { ConfigureAmsSlotModal } from '../components/ConfigureAmsSlotModal';
 import { useToast } from '../contexts/ToastContext';
 import { ChamberLight } from '../components/icons/ChamberLight';
 import { PlateClearedIcon } from '../components/icons/PlateClearedIcon';
@@ -114,18 +111,18 @@ import {
   AmsEnvironmentIndicators,
   AmsNameHoverCard,
   AmsSlotActions,
-  AmsSlotControl,
   AmsSlotGrid,
   AmsUnitHeader,
   CompactAmsUnitCard,
   ExpandedAmsUnitCard,
   HtAmsUnitCard,
 } from '../components/printer/AmsCardParts';
-import { buildAmsInventoryConfig, resolveAmsSlotModel } from '../components/printer/amsSlotModel';
+import { resolveAmsSlotModel } from '../components/printer/amsSlotModel';
+import { AmsSlot, AmsSlotControllerModals, useAmsSlotController } from '../hooks/useAmsSlotController';
 import { DRYING_PRESETS, useAmsDryingControls } from '../hooks/useAmsDryingControls';
 import type { DryingPresets } from '../hooks/useAmsDryingControls';
 import { PrinterInfoModal } from '../components/PrinterInfoModal';
-import { getAmsLabel, getGlobalTrayId, getSlotPresetKey, getFillBarColor, getFallbackSpoolTag } from '../utils/amsHelpers';
+import { getAmsLabel, getGlobalTrayId, getSlotPresetKey, getFillBarColor } from '../utils/amsHelpers';
 import { getPrinterImage, getWifiStrength, filterCompatibleQueueItems } from '../utils/printer';
 import { FilamentSlotCircle } from '../components/FilamentSlotCircle';
 import { Collapsible } from '../components/Collapsible';
@@ -1301,18 +1298,6 @@ function SinglePrinterCockpit({
   const [loadedCameraPrinterId, setLoadedCameraPrinterId] = useState<number | null>(null);
   const [failedCameraPrinterId, setFailedCameraPrinterId] = useState<number | null>(null);
   const cameraImageRef = useRef<HTMLImageElement>(null);
-  const [configureSlotModal, setConfigureSlotModal] = useState<{
-    amsId: number;
-    trayId: number;
-    trayCount: number;
-    trayType?: string;
-    trayColor?: string;
-    traySubBrands?: string;
-    trayInfoIdx?: string;
-    caliIdx?: number | null;
-    savedPresetId?: string;
-  } | null>(null);
-
   const { data: status } = useQuery({
     queryKey: ['printerStatus', printer.id],
     queryFn: () => api.getPrinterStatus(printer.id),
@@ -1339,19 +1324,6 @@ function SinglePrinterCockpit({
     amsId: number;
     amsLabel: string;
     mode: 'humidity' | 'temperature';
-  } | null>(null);
-  const [linkSpoolModal, setLinkSpoolModal] = useState<{
-    tagUid: string;
-    trayUuid: string;
-    printerId: number;
-    amsId: number;
-    trayId: number;
-  } | null>(null);
-  const [assignSpoolModal, setAssignSpoolModal] = useState<{
-    printerId: number;
-    amsId: number;
-    trayId: number;
-    trayInfo: { type: string; material?: string; profile: string; color: string; location: string };
   } | null>(null);
   const { data: amsLabels, refetch: refetchAmsLabels } = useQuery({
     queryKey: ['amsLabels', printer.id],
@@ -1406,6 +1378,19 @@ function SinglePrinterCockpit({
       queryClient.invalidateQueries({ queryKey: ['spoolman-slot-assignments'] });
     },
     onError: (error: Error) => showToast(error.message || t('spoolman.unlinkFailed'), 'error'),
+  });
+  const amsSlotController = useAmsSlotController({
+    printerId: printer.id,
+    printerModel: mapModelCode(printer.model) || undefined,
+    spoolmanEnabled: !!spoolmanEnabled,
+    spoolmanUrl,
+    spoolmanSyncMode,
+    canConfigure: hasPermission('printers:control'),
+    isDualNozzle: printer.nozzle_count === 2 || status?.temperatures?.nozzle_2 !== undefined,
+    amsExtruderMap: status?.ams_extruder_map,
+    onUnlinkSpool: spoolId => unlinkSpoolMutation.mutate(spoolId),
+    onUnassignSpoolmanSpool,
+    onUnassignInventorySpool: (amsId, trayId) => onUnassignSpool?.(printer.id, amsId, trayId),
   });
   const isPrintingWithObjects = (status?.state === 'RUNNING' || status?.state === 'PAUSE') && (status?.printable_objects_count ?? 0) >= 2;
   const { data: objectsData } = useQuery({
@@ -1750,24 +1735,7 @@ function SinglePrinterCockpit({
       spoolmanSlotAssignments,
       inventoryAssignment: localAssignment,
     });
-    const {
-      trayTag,
-      linkedSpool,
-      spoolmanAssignment: slotAssignment,
-      fillLevel,
-      filamentData,
-    } = slotModel;
-    const configureSlot = () => setConfigureSlotModal({
-      amsId,
-      trayId,
-      trayCount,
-      trayType: tray?.tray_type || undefined,
-      trayColor: tray?.tray_color || undefined,
-      traySubBrands: tray?.tray_sub_brands || undefined,
-      trayInfoIdx: tray?.tray_info_idx || undefined,
-      caliIdx: tray?.cali_idx,
-      savedPresetId: slotPreset?.preset_id,
-    });
+    const { fillLevel } = slotModel;
     const slotActions = <AmsSlotActions
       includeRfid={amsId !== 255}
       isPrinting={status?.state === 'RUNNING'}
@@ -1781,55 +1749,33 @@ function SinglePrinterCockpit({
     return (
       <div key={trayId} className="relative min-w-14">
         {isRefreshing && <div className="absolute inset-0 z-20 flex items-center justify-center rounded bg-bambu-dark-tertiary/80"><RefreshCw className="h-4 w-4 animate-spin text-bambu-green" /></div>}
-        <AmsSlotControl
-          filament={filamentData}
-          emptyKind={emptyKind}
-          actions={slotActions}
-          configureSlot={{ enabled: hasPermission('printers:control'), onConfigure: configureSlot }}
-          spoolman={filamentData ? {
-            enabled: spoolmanEnabled,
-            linkedSpoolId: slotAssignment?.spoolman_spool_id ?? linkedSpool?.id,
-            spoolmanUrl,
-            syncMode: spoolmanSyncMode,
-            onLinkSpool: slotModel.canLinkSpool ? () => setLinkSpoolModal({
-              tagUid: filamentData.tagUid || trayTag || '',
-              trayUuid: filamentData.trayUuid || '',
-              printerId: printer.id,
-              amsId,
-              trayId,
-            }) : undefined,
-            onUnlinkSpool: linkedSpool?.id ? () => unlinkSpoolMutation.mutate(linkedSpool.id) : undefined,
-          } : undefined}
-          inventory={buildAmsInventoryConfig(slotModel, {
-            onAssignSpool: () => setAssignSpoolModal({
-              printerId: printer.id,
-              amsId,
-              trayId,
-              trayInfo: { type: tray?.tray_type || filamentData!.profile, material: tray?.tray_type ?? undefined, profile: filamentData!.profile, color: filamentData!.colorHex || '', location: `${getAmsLabel(amsId, trayCount)} Slot ${trayId + 1}` },
-            }),
-            onUnassignSpoolmanSpool,
-            onUnassignInventorySpool: () => onUnassignSpool?.(printer.id, amsId, trayId),
-          })}
-          onAssignSpool={!filamentData ? () => setAssignSpoolModal({
-            printerId: printer.id,
+        <AmsSlot
+          controller={amsSlotController}
+          slot={{
             amsId,
             trayId,
-            trayInfo: { type: '', profile: '', color: '', location: `${getAmsLabel(amsId, trayCount)} Slot ${trayId + 1}` },
-          }) : undefined}
+            trayCount,
+            tray,
+            slotPreset,
+            location: `${getAmsLabel(amsId, trayCount)} Slot ${trayId + 1}`,
+            model: slotModel,
+          }}
+          emptyKind={emptyKind}
+          actions={slotActions}
         >
-          <button
-            type="button"
-            onClick={configureSlot}
-            disabled={!hasPermission('printers:control')}
-            className={`w-full rounded-lg bg-bambu-dark-secondary p-1 text-center transition-colors hover:bg-bambu-dark-tertiary disabled:cursor-not-allowed ${isEmpty ? 'opacity-60' : ''} ${isActive ? 'ring-2 ring-bambu-green ring-offset-1 ring-offset-bambu-dark' : ''}`}
-          >
-            <FilamentSlotCircle trayColor={tray?.tray_color} trayType={tray?.tray_type} isEmpty={isEmpty} emptyKind={emptyKind} slotNumber={trayId + 1} />
-            <div className="truncate text-[9px] font-bold text-white">{tray?.tray_type || t(emptyKind === 'reset' ? 'ams.slotUnconfigured' : 'ams.slotEmpty')}</div>
-            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-black/30">
-              {fillLevel != null && !isEmpty && <div className="h-full rounded-full" style={{ width: `${fillLevel}%`, backgroundColor: getFillBarColor(fillLevel) }} />}
-            </div>
-          </button>
-        </AmsSlotControl>
+          {bindings => <button
+              type="button"
+              onClick={bindings.configureSlot.onConfigure}
+              disabled={!hasPermission('printers:control')}
+              className={`w-full rounded-lg bg-bambu-dark-secondary p-1 text-center transition-colors hover:bg-bambu-dark-tertiary disabled:cursor-not-allowed ${isEmpty ? 'opacity-60' : ''} ${isActive ? 'ring-2 ring-bambu-green ring-offset-1 ring-offset-bambu-dark' : ''}`}
+            >
+              <FilamentSlotCircle trayColor={tray?.tray_color} trayType={tray?.tray_type} isEmpty={isEmpty} emptyKind={emptyKind} slotNumber={trayId + 1} />
+              <div className="truncate text-[9px] font-bold text-white">{tray?.tray_type || t(emptyKind === 'reset' ? 'ams.slotUnconfigured' : 'ams.slotEmpty')}</div>
+              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-black/30">
+                {fillLevel != null && !isEmpty && <div className="h-full rounded-full" style={{ width: `${fillLevel}%`, backgroundColor: getFillBarColor(fillLevel) }} />}
+              </div>
+            </button>}
+        </AmsSlot>
         </div>
     );
   };
@@ -2249,19 +2195,7 @@ function SinglePrinterCockpit({
         onSuccess={() => setReprintEntry(null)}
       />
     )}
-    {configureSlotModal && (
-      <ConfigureAmsSlotModal
-        isOpen
-        onClose={() => setConfigureSlotModal(null)}
-        printerId={printer.id}
-        slotInfo={configureSlotModal}
-        printerModel={mapModelCode(printer.model) || undefined}
-        onSuccess={() => {
-          queryClient.invalidateQueries({ queryKey: ['slotPresets', printer.id] });
-          queryClient.invalidateQueries({ queryKey: ['printerStatus', printer.id] });
-        }}
-      />
-    )}
+    <AmsSlotControllerModals controller={amsSlotController} />
     {showNotHomedModal && (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
         <div className="w-full max-w-sm rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary p-5 shadow-xl">
@@ -2338,28 +2272,6 @@ function SinglePrinterCockpit({
         amsLabel={amsHistoryModal.amsLabel}
         initialMode={amsHistoryModal.mode}
         thresholds={amsThresholds}
-      />
-    )}
-    {linkSpoolModal && (
-      <LinkSpoolModal
-        isOpen
-        onClose={() => setLinkSpoolModal(null)}
-        tagUid={linkSpoolModal.tagUid}
-        trayUuid={linkSpoolModal.trayUuid}
-        printerId={linkSpoolModal.printerId}
-        amsId={linkSpoolModal.amsId}
-        trayId={linkSpoolModal.trayId}
-      />
-    )}
-    {assignSpoolModal && (
-      <AssignSpoolModal
-        isOpen
-        onClose={() => setAssignSpoolModal(null)}
-        printerId={assignSpoolModal.printerId}
-        amsId={assignSpoolModal.amsId}
-        trayId={assignSpoolModal.trayId}
-        trayInfo={assignSpoolModal.trayInfo}
-        spoolmanEnabled={spoolmanEnabled}
       />
     )}
     <AmsDryingPopover controller={dryingControls} />
@@ -2469,31 +2381,6 @@ function PrinterCard({
     amsId: number;
     amsLabel: string;
     mode: 'humidity' | 'temperature';
-  } | null>(null);
-  const [linkSpoolModal, setLinkSpoolModal] = useState<{
-    tagUid: string;
-    trayUuid: string;
-    printerId: number;
-    amsId: number;
-    trayId: number;
-  } | null>(null);
-  const [assignSpoolModal, setAssignSpoolModal] = useState<{
-    printerId: number;
-    amsId: number;
-    trayId: number;
-    trayInfo: { type: string; color: string; location: string; material?: string; profile?: string };
-  } | null>(null);
-  const [configureSlotModal, setConfigureSlotModal] = useState<{
-    amsId: number;
-    trayId: number;
-    trayCount: number;
-    trayType?: string;
-    trayColor?: string;
-    traySubBrands?: string;
-    trayInfoIdx?: string;
-    extruderId?: number;
-    caliIdx?: number | null;
-    savedPresetId?: string;
   } | null>(null);
   const [showFirmwareModal, setShowFirmwareModal] = useState(false);
   const [plateCheckResult, setPlateCheckResult] = useState<{
@@ -3007,6 +2894,19 @@ function PrinterCard({
     onError: (error: Error) => {
       showToast(error.message || t('spoolman.unlinkFailed'), 'error');
     },
+  });
+  const amsSlotController = useAmsSlotController({
+    printerId: printer.id,
+    printerModel: mapModelCode(printer.model) || undefined,
+    spoolmanEnabled: !!spoolmanEnabled,
+    spoolmanUrl,
+    spoolmanSyncMode,
+    canConfigure: hasPermission('printers:control'),
+    isDualNozzle: printer.nozzle_count === 2 || status?.temperatures?.nozzle_2 !== undefined,
+    amsExtruderMap,
+    onUnlinkSpool: spoolId => unlinkSpoolMutation.mutate(spoolId),
+    onUnassignSpoolmanSpool,
+    onUnassignInventorySpool: (amsId, trayId) => onUnassignSpool?.(printer.id, amsId, trayId),
   });
 
   // AMS Filament Backup toggle (auto-switch to a backup spool when one runs out).
@@ -4596,13 +4496,7 @@ function PrinterCard({
                                   spoolmanSlotAssignments,
                                   inventoryAssignment,
                                 });
-                                const {
-                                  trayTag,
-                                  linkedSpool,
-                                  spoolmanAssignment: slotAssignmentForFill,
-                                  fillLevel: effectiveFill,
-                                  filamentData,
-                                } = slotModel;
+                                const { fillLevel: effectiveFill } = slotModel;
 
                                 // Check if this specific slot is being refreshed
                                 const isRefreshing = refreshingSlot?.amsId === ams.id &&
@@ -4662,109 +4556,27 @@ function PrinterCard({
                                         <RefreshCw className="w-4 h-4 text-bambu-green animate-spin" />
                                       </div>
                                     )}
-                                    {/* Hover card wraps only the visual content */}
-                                    {filamentData ? (
-                                      <AmsSlotControl
-                                        filament={filamentData}
-                                        actions={renderAmsSlotActions({
-                                          amsId: ams.id,
-                                          slotId: slotIdx,
-                                          loadTrayId: ams.id * 4 + slotIdx,
-                                          isRefreshing,
-                                        })}
-                                        spoolman={{
-                                          enabled: spoolmanEnabled,
-                                          // #1457: slot assignment is the user's most explicit action — it must
-                                          // outrank the tag-link, which can be stale when a non-RFID slot's
-                                          // fallback tag is still attached to a previous spool in Spoolman.
-                                          linkedSpoolId: slotAssignmentForFill?.spoolman_spool_id
-                                            ?? (trayTag ? linkedSpools?.[trayTag]?.id : undefined),
-                                          spoolmanUrl,
-                                          syncMode: spoolmanSyncMode,
-                                          // Suppress Link button when slot is already occupied by ANY assignment
-                                          // (Spoolman SlotAssignment OR local SpoolAssignment). Phase 9 only
-                                          // suppressed for Spoolman; the maintainer screenshot shows the badge
-                                          // still appearing on slots with a local Devil Design PLA assigned.
-                                          onLinkSpool: slotModel.canLinkSpool ? () => {
-                                            const linkTag = (filamentData.trayUuid || filamentData.tagUid || getFallbackSpoolTag(printer.serial_number, ams.id, slotIdx)).toUpperCase();
-                                            setLinkSpoolModal({
-                                              tagUid: filamentData.tagUid || linkTag,
-                                              trayUuid: filamentData.trayUuid || '',
-                                              printerId: printer.id,
-                                              amsId: ams.id,
-                                              trayId: slotIdx,
-                                            });
-                                          } : undefined,
-                                          onUnlinkSpool: linkedSpool?.id ? () => unlinkSpoolMutation.mutate(linkedSpool.id) : undefined,
-                                        }}
-                                        inventory={buildAmsInventoryConfig(slotModel, {
-                                          onAssignSpool: () => setAssignSpoolModal({
-                                            printerId: printer.id,
-                                            amsId: ams.id,
-                                            trayId: slotIdx,
-                                            trayInfo: {
-                                              type: tray?.tray_type || filamentData.profile,
-                                              material: tray?.tray_type ?? undefined,
-                                              profile: filamentData.profile,
-                                              color: filamentData.colorHex || '',
-                                              location: `${getAmsLabel(ams.id, ams.tray.length)} Slot ${slotIdx + 1}`,
-                                            },
-                                          }),
-                                          onUnassignSpoolmanSpool,
-                                          onUnassignInventorySpool: () => onUnassignSpool?.(printer.id, ams.id, slotIdx),
-                                        })}
-                                        configureSlot={{
-                                          enabled: hasPermission('printers:control'),
-                                          onConfigure: () => setConfigureSlotModal({
-                                            amsId: ams.id,
-                                            trayId: slotIdx,
-                                            trayCount: ams.tray.length,
-                                            trayType: tray?.tray_type || undefined,
-                                            trayColor: tray?.tray_color || undefined,
-                                            traySubBrands: tray?.tray_sub_brands || undefined,
-                                            trayInfoIdx: tray?.tray_info_idx || undefined,
-                                            extruderId: mappedExtruderId,
-                                            caliIdx: tray?.cali_idx,
-                                            savedPresetId: slotPreset?.preset_id,
-                                          }),
-                                        }}
-                                      >
-                                        {slotVisual}
-                                      </AmsSlotControl>
-                                    ) : (
-                                      <AmsSlotControl
-                                        emptyKind={emptyKind}
-                                        actions={renderAmsSlotActions({
-                                          amsId: ams.id,
-                                          slotId: slotIdx,
-                                          loadTrayId: ams.id * 4 + slotIdx,
-                                          isRefreshing,
-                                        })}
-                                        configureSlot={{
-                                          enabled: hasPermission('printers:control'),
-                                          onConfigure: () => setConfigureSlotModal({
-                                            amsId: ams.id,
-                                            trayId: slotIdx,
-                                            trayCount: ams.tray.length,
-                                            extruderId: mappedExtruderId,
-                                          }),
-                                        }}
-                                        onAssignSpool={() => setAssignSpoolModal({
-                                          printerId: printer.id,
-                                          amsId: ams.id,
-                                          trayId: slotIdx,
-                                          trayInfo: {
-                                            type: '',
-                                            material: undefined,
-                                            profile: '',
-                                            color: '',
-                                            location: `${getAmsLabel(ams.id, ams.tray.length)} Slot ${slotIdx + 1}`,
-                                          },
-                                        })}
-                                      >
-                                        {slotVisual}
-                                      </AmsSlotControl>
-                                    )}
+                                    <AmsSlot
+                                      controller={amsSlotController}
+                                      slot={{
+                                        amsId: ams.id,
+                                        trayId: slotIdx,
+                                        trayCount: ams.tray.length,
+                                        tray,
+                                        slotPreset,
+                                        location: `${getAmsLabel(ams.id, ams.tray.length)} Slot ${slotIdx + 1}`,
+                                        model: slotModel,
+                                      }}
+                                      emptyKind={emptyKind}
+                                      actions={renderAmsSlotActions({
+                                        amsId: ams.id,
+                                        slotId: slotIdx,
+                                        loadTrayId: ams.id * 4 + slotIdx,
+                                        isRefreshing,
+                                      })}
+                                    >
+                                      {slotVisual}
+                                    </AmsSlot>
                                   </div>
                                 );
                               }} />
@@ -4806,13 +4618,7 @@ function PrinterCard({
                           spoolmanSlotAssignments,
                           inventoryAssignment: htInventoryAssignment,
                         });
-                        const {
-                          trayTag: htTrayTag,
-                          linkedSpool: htLinkedSpool,
-                          spoolmanAssignment: htSlotAssignmentForFill,
-                          fillLevel: htEffectiveFill,
-                          filamentData,
-                        } = htSlotModel;
+                        const { fillLevel: htEffectiveFill } = htSlotModel;
 
                         // Check if this specific slot is being refreshed
                         const isHtRefreshing = refreshingSlot?.amsId === ams.id &&
@@ -4898,104 +4704,27 @@ function PrinterCard({
                                     <RefreshCw className="w-4 h-4 text-bambu-green animate-spin" />
                                   </div>
                                 )}
-                                {/* Hover card wraps only the visual content */}
-                                {filamentData ? (
-                                  <AmsSlotControl
-                                    filament={filamentData}
-                                    actions={renderAmsSlotActions({
-                                      amsId: ams.id,
-                                      slotId: htSlotId,
-                                      loadTrayId: ams.id * 4 + htSlotId,
-                                      isRefreshing: isHtRefreshing,
-                                    })}
-                                    spoolman={{
-                                      enabled: spoolmanEnabled,
-                                      // #1457: slot assignment outranks tag-link (see top-level slot block).
-                                      linkedSpoolId: htSlotAssignmentForFill?.spoolman_spool_id
-                                        ?? (htTrayTag ? linkedSpools?.[htTrayTag]?.id : undefined),
-                                      spoolmanUrl,
-                                      syncMode: spoolmanSyncMode,
-                                      // Suppress Link button when slot is occupied by ANY assignment (Phase 13 P13-6d)
-                                      onLinkSpool: htSlotModel.canLinkSpool ? () => {
-                                        const linkTag = (filamentData.trayUuid || filamentData.tagUid || getFallbackSpoolTag(printer.serial_number, ams.id, htSlotId)).toUpperCase();
-                                        setLinkSpoolModal({
-                                          tagUid: filamentData.tagUid || linkTag,
-                                          trayUuid: filamentData.trayUuid || '',
-                                          printerId: printer.id,
-                                          amsId: ams.id,
-                                          trayId: htSlotId,
-                                        });
-                                      } : undefined,
-                                      onUnlinkSpool: htLinkedSpool?.id ? () => unlinkSpoolMutation.mutate(htLinkedSpool.id) : undefined,
-                                    }}
-                                    inventory={buildAmsInventoryConfig(htSlotModel, {
-                                      onAssignSpool: () => setAssignSpoolModal({
-                                        printerId: printer.id,
-                                        amsId: ams.id,
-                                        trayId: htSlotId,
-                                        trayInfo: {
-                                          type: tray?.tray_type || filamentData.profile,
-                                          material: tray?.tray_type ?? undefined,
-                                          profile: filamentData.profile,
-                                          color: filamentData.colorHex || '',
-                                          location: getAmsLabel(ams.id, ams.tray.length),
-                                        },
-                                      }),
-                                      onUnassignSpoolmanSpool,
-                                      onUnassignInventorySpool: () => onUnassignSpool?.(printer.id, ams.id, htSlotId),
-                                    })}
-                                    configureSlot={{
-                                      enabled: hasPermission('printers:control'),
-                                      onConfigure: () => setConfigureSlotModal({
-                                        amsId: ams.id,
-                                        trayId: htSlotId,
-                                        trayCount: ams.tray.length,
-                                        trayType: tray?.tray_type || undefined,
-                                        trayColor: tray?.tray_color || undefined,
-                                        traySubBrands: tray?.tray_sub_brands || undefined,
-                                        trayInfoIdx: tray?.tray_info_idx || undefined,
-                                        extruderId: mappedExtruderId,
-                                        caliIdx: tray?.cali_idx,
-                                        savedPresetId: slotPreset?.preset_id,
-                                      }),
-                                    }}
-                                  >
-                                    {slotVisual}
-                                  </AmsSlotControl>
-                                ) : (
-                                  <AmsSlotControl
-                                    emptyKind={emptyKind}
-                                    actions={renderAmsSlotActions({
-                                      amsId: ams.id,
-                                      slotId: htSlotId,
-                                      loadTrayId: ams.id * 4 + htSlotId,
-                                      isRefreshing: isHtRefreshing,
-                                    })}
-                                    configureSlot={{
-                                      enabled: hasPermission('printers:control'),
-                                      onConfigure: () => setConfigureSlotModal({
-                                        amsId: ams.id,
-                                        trayId: htSlotId,
-                                        trayCount: ams.tray.length,
-                                        extruderId: mappedExtruderId,
-                                      }),
-                                    }}
-                                    onAssignSpool={() => setAssignSpoolModal({
-                                      printerId: printer.id,
-                                      amsId: ams.id,
-                                      trayId: htSlotId,
-                                      trayInfo: {
-                                        type: '',
-                                        material: undefined,
-                                        profile: '',
-                                        color: '',
-                                        location: getAmsLabel(ams.id, ams.tray.length),
-                                      },
-                                    })}
-                                  >
-                                    {slotVisual}
-                                  </AmsSlotControl>
-                                )}
+                                <AmsSlot
+                                  controller={amsSlotController}
+                                  slot={{
+                                    amsId: ams.id,
+                                    trayId: htSlotId,
+                                    trayCount: ams.tray.length,
+                                    tray,
+                                    slotPreset,
+                                    location: getAmsLabel(ams.id, ams.tray.length),
+                                    model: htSlotModel,
+                                  }}
+                                  emptyKind={emptyKind}
+                                  actions={renderAmsSlotActions({
+                                    amsId: ams.id,
+                                    slotId: htSlotId,
+                                    loadTrayId: ams.id * 4 + htSlotId,
+                                    isRefreshing: isHtRefreshing,
+                                  })}
+                                >
+                                  {slotVisual}
+                                </AmsSlot>
                               </div>
                               <AmsEnvironmentIndicators
                                 ams={ams}
@@ -5047,13 +4776,7 @@ function PrinterCard({
                                 spoolmanSlotAssignments,
                                 inventoryAssignment: extInventoryAssignment,
                               });
-                              const {
-                                trayTag: extTrayTag,
-                                linkedSpool: extLinkedSpool,
-                                spoolmanAssignment: extSlotAssignmentForFill,
-                                fillLevel: extEffectiveFill,
-                                filamentData: extFilamentData,
-                              } = extSlotModel;
+                              const { fillLevel: extEffectiveFill } = extSlotModel;
 
                               const isEmpty = !extTray.tray_type;
                               const emptyKind = getEmptySlotKind(extTray);
@@ -5088,103 +4811,28 @@ function PrinterCard({
 
                               return (
                                 <div key={extTrayId} className={`relative group w-full ${filamentSlotClass}`}>
-                                  {extFilamentData ? (
-                                    <AmsSlotControl
-                                      filament={extFilamentData}
-                                      actions={renderAmsSlotActions({
-                                        amsId: 255,
-                                        slotId: slotTrayId,
-                                        loadTrayId: extTrayId,
-                                        includeRfid: false,
-                                      })}
-                                      spoolman={{
-                                        enabled: spoolmanEnabled,
-                                        // #1457: slot assignment outranks tag-link (see top-level slot block).
-                                        linkedSpoolId: extSlotAssignmentForFill?.spoolman_spool_id
-                                          ?? (extTrayTag ? linkedSpools?.[extTrayTag]?.id : undefined),
-                                        spoolmanUrl,
-                                        syncMode: spoolmanSyncMode,
-                                        // Suppress Link button when slot is occupied by ANY assignment (Phase 13 P13-6d)
-                                        onLinkSpool: extSlotModel.canLinkSpool ? () => {
-                                          const linkTag = (extFilamentData.trayUuid || extFilamentData.tagUid || getFallbackSpoolTag(printer.serial_number, 255, slotTrayId)).toUpperCase();
-                                          setLinkSpoolModal({
-                                            tagUid: extFilamentData.tagUid || linkTag,
-                                            trayUuid: extFilamentData.trayUuid || '',
-                                            printerId: printer.id,
-                                            amsId: 255,
-                                            trayId: slotTrayId,
-                                          });
-                                        } : undefined,
-                                        onUnlinkSpool: extLinkedSpool?.id ? () => unlinkSpoolMutation.mutate(extLinkedSpool.id) : undefined,
-                                      }}
-                                      inventory={buildAmsInventoryConfig(extSlotModel, {
-                                        onAssignSpool: () => setAssignSpoolModal({
-                                          printerId: printer.id,
-                                          amsId: 255,
-                                          trayId: slotTrayId,
-                                          trayInfo: {
-                                            type: extTray.tray_type || extFilamentData.profile,
-                                            material: extTray.tray_type ?? undefined,
-                                            profile: extFilamentData.profile,
-                                            color: extFilamentData.colorHex || '',
-                                            location: extLabel || t('printers.external'),
-                                          },
-                                        }),
-                                        onUnassignSpoolmanSpool,
-                                        onUnassignInventorySpool: () => onUnassignSpool?.(printer.id, 255, slotTrayId),
-                                      })}
-                                      configureSlot={{
-                                        enabled: hasPermission('printers:control'),
-                                        onConfigure: () => setConfigureSlotModal({
-                                          amsId: 255,
-                                          trayId: slotTrayId,
-                                          trayCount: 1,
-                                          trayType: extTray.tray_type || undefined,
-                                          trayColor: extTray.tray_color || undefined,
-                                          traySubBrands: extTray.tray_sub_brands || undefined,
-                                          trayInfoIdx: extTray.tray_info_idx || undefined,
-                                          extruderId: isDualNozzle ? (extTrayId === 254 ? 1 : 0) : undefined,
-                                          caliIdx: extTray.cali_idx,
-                                          savedPresetId: extSlotPreset?.preset_id,
-                                        }),
-                                      }}
-                                    >
-                                      {extSlotContent}
-                                    </AmsSlotControl>
-                                  ) : (
-                                    <AmsSlotControl
-                                      emptyKind={emptyKind}
-                                      actions={renderAmsSlotActions({
-                                        amsId: 255,
-                                        slotId: slotTrayId,
-                                        loadTrayId: extTrayId,
-                                        includeRfid: false,
-                                      })}
-                                      configureSlot={{
-                                        enabled: hasPermission('printers:control'),
-                                        onConfigure: () => setConfigureSlotModal({
-                                          amsId: 255,
-                                          trayId: slotTrayId,
-                                          trayCount: 1,
-                                          extruderId: isDualNozzle ? (extTrayId === 254 ? 1 : 0) : undefined,
-                                        }),
-                                      }}
-                                      onAssignSpool={() => setAssignSpoolModal({
-                                        printerId: printer.id,
-                                        amsId: 255,
-                                        trayId: slotTrayId,
-                                        trayInfo: {
-                                          type: '',
-                                          material: undefined,
-                                          profile: '',
-                                          color: '',
-                                          location: `External Slot ${slotTrayId + 1}`,
-                                        },
-                                      })}
-                                    >
-                                      {extSlotContent}
-                                    </AmsSlotControl>
-                                  )}
+                                  <AmsSlot
+                                    controller={amsSlotController}
+                                    slot={{
+                                      amsId: 255,
+                                      trayId: slotTrayId,
+                                      trayCount: 1,
+                                      tray: extTray,
+                                      slotPreset: extSlotPreset,
+                                      location: extLabel || t('printers.external'),
+                                      emptyLocation: `External Slot ${slotTrayId + 1}`,
+                                      model: extSlotModel,
+                                    }}
+                                    emptyKind={emptyKind}
+                                    actions={renderAmsSlotActions({
+                                      amsId: 255,
+                                      slotId: slotTrayId,
+                                      loadTrayId: extTrayId,
+                                      includeRfid: false,
+                                    })}
+                                  >
+                                    {extSlotContent}
+                                  </AmsSlot>
                                 </div>
                               );
                             })}
@@ -5777,48 +5425,7 @@ function PrinterCard({
         />
       )}
 
-      {/* Link Spool Modal */}
-      {linkSpoolModal && (
-        <LinkSpoolModal
-          isOpen={!!linkSpoolModal}
-          onClose={() => setLinkSpoolModal(null)}
-          tagUid={linkSpoolModal.tagUid}
-          trayUuid={linkSpoolModal.trayUuid}
-          printerId={linkSpoolModal.printerId}
-          amsId={linkSpoolModal.amsId}
-          trayId={linkSpoolModal.trayId}
-        />
-      )}
-
-      {/* Assign Spool Modal */}
-      {assignSpoolModal && (
-        <AssignSpoolModal
-          isOpen={!!assignSpoolModal}
-          onClose={() => setAssignSpoolModal(null)}
-          printerId={assignSpoolModal.printerId}
-          amsId={assignSpoolModal.amsId}
-          trayId={assignSpoolModal.trayId}
-          trayInfo={assignSpoolModal.trayInfo}
-          spoolmanEnabled={!!spoolmanEnabled}
-        />
-      )}
-
-      {/* Configure AMS Slot Modal */}
-      {configureSlotModal && (
-        <ConfigureAmsSlotModal
-          isOpen={!!configureSlotModal}
-          onClose={() => setConfigureSlotModal(null)}
-          printerId={printer.id}
-          slotInfo={configureSlotModal}
-          printerModel={mapModelCode(printer.model) || undefined}
-          onSuccess={() => {
-            // Refresh slot presets to show updated profile name
-            queryClient.invalidateQueries({ queryKey: ['slotPresets', printer.id] });
-            // Printer status will update automatically via WebSocket when AMS data changes
-            queryClient.invalidateQueries({ queryKey: ['printerStatus', printer.id] });
-          }}
-        />
-      )}
+      <AmsSlotControllerModals controller={amsSlotController} />
 
       {/* Edit Printer Modal */}
       {showEditModal && (
