@@ -1,5 +1,7 @@
 """Integration tests for Print Queue API endpoints."""
 
+import json
+
 import pytest
 from httpx import AsyncClient
 
@@ -124,6 +126,41 @@ class TestPrintQueueAPI:
         assert result["archive_id"] == archive.id
         assert result["status"] == "pending"
         assert result["manual_start"] is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_printer_targeted_job_persists_force_color_match(
+        self, async_client: AsyncClient, printer_factory, archive_factory, db_session
+    ):
+        """Exact-colour requirements must survive printer-targeted queue creation."""
+        from backend.app.models.print_queue import PrintQueueItem
+
+        printer = await printer_factory()
+        archive = await archive_factory()
+        overrides = [
+            {
+                "slot_id": 1,
+                "type": "PLA",
+                "color": "#FF0000",
+                "color_name": "Red",
+                "force_color_match": True,
+            }
+        ]
+
+        response = await async_client.post(
+            "/api/v1/queue/",
+            json={"printer_id": printer.id, "archive_id": archive.id, "filament_overrides": overrides},
+        )
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result["target_model"] is None
+        assert result["filament_overrides"] == overrides
+
+        db_session.expire_all()
+        stored = await db_session.get(PrintQueueItem, result["id"], populate_existing=True)
+        assert stored is not None
+        assert json.loads(stored.filament_overrides) == overrides
 
     @pytest.mark.asyncio
     @pytest.mark.integration

@@ -300,9 +300,41 @@ class PrintScheduler:
                             )
                             continue
 
+                    # Printer-targeted jobs must honour the same exact-colour
+                    # contract as model-assigned jobs. Without this gate the
+                    # normal AMS mapper can fall back to a same-material,
+                    # different-colour tray and silently print the wrong colour.
+                    force_overrides = self._get_force_color_overrides(item)
+                    if force_overrides:
+                        missing_colors = self._get_missing_force_color_slots(item.printer_id, force_overrides)
+                        if missing_colors:
+                            waiting_reason = self._force_color_waiting_reason(missing_colors)
+                            if item.waiting_reason != waiting_reason:
+                                item.waiting_reason = waiting_reason
+                                await db.commit()
+                            logger.info(
+                                "Queue item %s blocked on printer %s by force-colour mismatch: %s",
+                                item.id,
+                                item.printer_id,
+                                missing_colors,
+                            )
+                            continue
+                        if item.waiting_reason:
+                            item.waiting_reason = None
+                            await db.commit()
+
                     # Compute AMS mapping if not already set
-                    if not item.ams_mapping:
+                    # Recompute forced jobs even when an older/manual mapping
+                    # exists so the selected tray also uses the required colour.
+                    if force_overrides or not item.ams_mapping:
                         computed_mapping = await self._compute_ams_mapping_for_printer(db, item.printer_id, item)
+                        missing_mapping_colors = self._get_missing_force_mapping_slots(
+                            computed_mapping, force_overrides
+                        )
+                        if missing_mapping_colors:
+                            item.waiting_reason = self._force_color_waiting_reason(missing_mapping_colors)
+                            await db.commit()
+                            continue
                         if computed_mapping:
                             item.ams_mapping = json.dumps(computed_mapping)
                             logger.info(
@@ -355,6 +387,11 @@ class PrintScheduler:
                             filament_overrides = json.loads(item.filament_overrides)
                         except json.JSONDecodeError:
                             pass
+                    force_overrides = [
+                        override
+                        for override in (filament_overrides or [])
+                        if isinstance(override, dict) and override.get("force_color_match")
+                    ]
 
                     # If overrides exist, use override types for validation instead
                     effective_types = required_types
@@ -431,8 +468,15 @@ class PrintScheduler:
 
                         # Compute AMS mapping for the assigned printer if not already set
                         # This is critical for model-based jobs where mapping wasn't computed upfront
-                        if not item.ams_mapping:
+                        if force_overrides or not item.ams_mapping:
                             computed_mapping = await self._compute_ams_mapping_for_printer(db, printer_id, item)
+                            missing_mapping_colors = self._get_missing_force_mapping_slots(
+                                computed_mapping, force_overrides or []
+                            )
+                            if missing_mapping_colors:
+                                item.waiting_reason = self._force_color_waiting_reason(missing_mapping_colors)
+                                await db.commit()
+                                continue
                             if computed_mapping:
                                 item.ams_mapping = json.dumps(computed_mapping)
                                 logger.info(
@@ -715,6 +759,39 @@ class PrintScheduler:
                 missing.append(f"{o_type} ({color_label})")
         return missing
 
+    @staticmethod
+    def _get_force_color_overrides(item: PrintQueueItem) -> list[dict]:
+        """Parse the exact-colour requirements persisted on a queue item."""
+        if not item.filament_overrides:
+            return []
+        try:
+            overrides = json.loads(item.filament_overrides)
+        except (json.JSONDecodeError, TypeError):
+            return []
+        if not isinstance(overrides, list):
+            return []
+        return [override for override in overrides if isinstance(override, dict) and override.get("force_color_match")]
+
+    @staticmethod
+    def _get_missing_force_mapping_slots(mapping: list[int] | None, force_overrides: list[dict]) -> list[str]:
+        """Return forced slots that did not receive an exact-colour AMS mapping."""
+        missing = []
+        for override in force_overrides:
+            slot_id = override.get("slot_id")
+            mapped_tray = (
+                mapping[slot_id - 1] if isinstance(slot_id, int) and mapping and slot_id <= len(mapping) else -1
+            )
+            if mapped_tray < 0:
+                missing.append(
+                    f"{_canonical_filament_type(override.get('type') or '')} "
+                    f"({override.get('color_name') or override.get('color', '?')})"
+                )
+        return missing
+
+    @staticmethod
+    def _force_color_waiting_reason(missing_colors: list[str]) -> str:
+        return f"No matching material/color. Waiting on {', '.join(sorted(set(missing_colors)))}"
+
     def _get_missing_filament_types(self, printer_id: int, required_types: list[str]) -> list[str]:
         """Get the list of required filament types that are not loaded on the printer.
 
@@ -832,7 +909,9 @@ class PrintScheduler:
             logger.debug("No filament requirements found for queue item %s", item.id)
             return None
 
-        # Apply filament overrides if present
+        # Apply filament overrides if present. Forced slots are passed into the
+        # matcher so they cannot degrade to similar-colour or type-only trays.
+        force_color_slot_ids: set[int] = set()
         if item.filament_overrides:
             try:
                 overrides = json.loads(item.filament_overrides)
@@ -842,6 +921,8 @@ class PrintScheduler:
                         override = override_map[req["slot_id"]]
                         req["type"] = override["type"]
                         req["color"] = override["color"]
+                        if override.get("force_color_match"):
+                            force_color_slot_ids.add(req["slot_id"])
                         # Clear tray_info_idx so matching uses type+color instead of
                         # the original 3MF's tray_info_idx (which would match the old filament)
                         req["tray_info_idx"] = ""
@@ -883,8 +964,13 @@ class PrintScheduler:
             inventory_remain_overrides = await self._build_inventory_remain_overrides(db, printer_id, loaded_filaments)
 
         # Compute mapping: match required filaments to available slots
+        match_kwargs = {"strict_color_slot_ids": force_color_slot_ids} if force_color_slot_ids else {}
         return self._match_filaments_to_slots(
-            filament_reqs, loaded_filaments, prefer_lowest, inventory_remain_overrides
+            filament_reqs,
+            loaded_filaments,
+            prefer_lowest,
+            inventory_remain_overrides,
+            **match_kwargs,
         )
 
     def _build_override_direct_mapping(self, force_overrides: list[dict], status) -> list[int] | None:
@@ -912,7 +998,11 @@ class PrintScheduler:
             }
             for o in force_overrides
         ]
-        return self._match_filaments_to_slots(reqs, loaded)
+        return self._match_filaments_to_slots(
+            reqs,
+            loaded,
+            strict_color_slot_ids={o["slot_id"] for o in force_overrides if isinstance(o.get("slot_id"), int)},
+        )
 
     async def _get_filament_requirements(self, db: AsyncSession, item: PrintQueueItem) -> list[dict] | None:
         """Resolve the queue item's source 3MF and parse the per-slot
@@ -1194,6 +1284,7 @@ class PrintScheduler:
         loaded: list[dict],
         prefer_lowest: bool = False,
         inventory_remain_overrides: dict[int, float] | None = None,
+        strict_color_slot_ids: set[int] | None = None,
     ) -> list[int] | None:
         """Match required filaments to loaded filaments and build AMS mapping.
 
@@ -1323,7 +1414,10 @@ class PrintScheduler:
                     elif not type_only_match:
                         type_only_match = f
 
-            match = idx_match or exact_match or similar_match or type_only_match
+            # Forced slots are exact by definition: never degrade to a similar
+            # or type-only colour, even when the material itself matches.
+            strict_color = req.get("slot_id") in (strict_color_slot_ids or set())
+            match = exact_match if strict_color else idx_match or exact_match or similar_match or type_only_match
             if match:
                 used_tray_ids.add(match["global_tray_id"])
                 comparisons.append({"slot_id": req.get("slot_id", 0), "global_tray_id": match["global_tray_id"]})

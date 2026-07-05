@@ -465,10 +465,13 @@ async def add_to_queue(
                 required_filament_types = json.dumps(filament_types)
                 logger.info("Extracted filament types for model-based queue: %s", filament_types)
 
-    # If filament overrides are provided, update required_filament_types to match override types
-    filament_overrides_json = None
+    # Persist overrides for both model-based and printer-targeted jobs. The
+    # assigned-printer dispatcher also enforces force_color_match before start.
+    filament_overrides_json = json.dumps(data.filament_overrides) if data.filament_overrides else None
+
+    # Model-based assignment additionally uses override types while selecting
+    # a compatible printer.
     if data.filament_overrides and target_model_norm:
-        filament_overrides_json = json.dumps(data.filament_overrides)
         # Update required_filament_types from overrides so scheduler validates against overridden types
         override_types = sorted({o["type"] for o in data.filament_overrides if "type" in o})
         if override_types:
