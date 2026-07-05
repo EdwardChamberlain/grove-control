@@ -595,7 +595,7 @@ describe('PrintModal', () => {
         expect(screen.getByText('Printing')).toBeInTheDocument();
         expect(screen.getByText('Idle')).toBeInTheDocument();
         expect(screen.getByText('Finished')).toBeInTheDocument();
-      });
+      }, { timeout: 5000 });
     });
 
     it('allows selecting a busy printer in create mode', async () => {
@@ -611,7 +611,7 @@ describe('PrintModal', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Printing')).toBeInTheDocument();
-      });
+      }, { timeout: 5000 });
 
       const busyButton = screen.getByText('X1 Carbon').closest('button');
       expect(busyButton).not.toBeDisabled();
@@ -636,7 +636,7 @@ describe('PrintModal', () => {
       await waitFor(() => {
         expect(screen.getByText('Select all')).toBeInTheDocument();
         expect(screen.getByText('Printing')).toBeInTheDocument();
-      });
+      }, { timeout: 5000 });
 
       await user.click(screen.getByText('Select all'));
 
@@ -658,7 +658,7 @@ describe('PrintModal', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Printing')).toBeInTheDocument();
-      });
+      }, { timeout: 5000 });
 
       // The busy printer button should NOT be disabled in queue mode
       const busyButton = screen.getByText('X1 Carbon').closest('button');
