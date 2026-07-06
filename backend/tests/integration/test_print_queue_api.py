@@ -141,13 +141,15 @@ class TestPrintQueueAPI:
     @pytest.mark.asyncio
     @pytest.mark.integration
     async def test_printer_targeted_job_persists_force_color_match(
-        self, async_client: AsyncClient, printer_factory, archive_factory, db_session
+        self, async_client: AsyncClient, printer_factory, archive_factory, db_session, tmp_path
     ):
         """Exact-colour requirements must survive printer-targeted queue creation."""
         from backend.app.models.print_queue import PrintQueueItem
 
         printer = await printer_factory()
-        archive = await archive_factory()
+        source = tmp_path / "explicit-force.3mf"
+        _write_queue_3mf(source)
+        archive = await archive_factory(file_path=str(source))
         overrides = [
             {
                 "slot_id": 1,
@@ -166,12 +168,56 @@ class TestPrintQueueAPI:
         assert response.status_code == 200
         result = response.json()
         assert result["target_model"] is None
+        assert result["force_color_match"] is True
         assert result["filament_overrides"] == overrides
 
         db_session.expire_all()
         stored = await db_session.get(PrintQueueItem, result["id"], populate_existing=True)
         assert stored is not None
+        assert stored.force_color_match is True
         assert json.loads(stored.filament_overrides) == overrides
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_printer_targeted_job_rejects_cross_material_override(
+        self, async_client: AsyncClient, printer_factory, archive_factory, tmp_path
+    ):
+        printer = await printer_factory()
+        source = tmp_path / "cross-material.3mf"
+        _write_queue_3mf(source)
+        archive = await archive_factory(file_path=str(source))
+
+        response = await async_client.post(
+            "/api/v1/queue/",
+            json={
+                "printer_id": printer.id,
+                "archive_id": archive.id,
+                "filament_overrides": [{"slot_id": 1, "type": "ABS", "color": "#FFFFFF"}],
+            },
+        )
+
+        assert response.status_code == 400
+        assert "cannot change material family from PLA to ABS" in response.json()["detail"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_printer_targeted_job_rejects_override_without_sliced_metadata(
+        self, async_client: AsyncClient, printer_factory, archive_factory
+    ):
+        printer = await printer_factory()
+        archive = await archive_factory()
+
+        response = await async_client.post(
+            "/api/v1/queue/",
+            json={
+                "printer_id": printer.id,
+                "archive_id": archive.id,
+                "filament_overrides": [{"slot_id": 1, "type": "PLA", "color": "#FFFFFF"}],
+            },
+        )
+
+        assert response.status_code == 400
+        assert "without sliced material metadata" in response.json()["detail"]
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -190,6 +236,7 @@ class TestPrintQueueAPI:
         )
 
         assert response.status_code == 200
+        assert response.json()["force_color_match"] is True
         assert response.json()["filament_overrides"] == [
             {"slot_id": 1, "type": "PLA", "color": "#FF0000", "force_color_match": True}
         ]
@@ -210,7 +257,10 @@ class TestPrintQueueAPI:
         )
 
         assert response.status_code == 200
-        assert response.json()["filament_overrides"] is None
+        assert response.json()["force_color_match"] is False
+        assert response.json()["filament_overrides"] == [
+            {"slot_id": 1, "type": "PLA", "color": "#FF0000", "force_color_match": False}
+        ]
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -445,6 +495,54 @@ class TestPrintQueueAPI:
         assert response.status_code == 200
         result = response.json()
         assert result["auto_off_after"] is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_update_queue_item_persists_explicit_match_opt_out(
+        self, async_client: AsyncClient, printer_factory, archive_factory, tmp_path
+    ):
+        printer = await printer_factory()
+        source = tmp_path / "update-opt-out.3mf"
+        _write_queue_3mf(source)
+        archive = await archive_factory(file_path=str(source))
+        create_response = await async_client.post(
+            "/api/v1/queue/",
+            json={"printer_id": printer.id, "archive_id": archive.id},
+        )
+        item_id = create_response.json()["id"]
+        response = await async_client.patch(
+            f"/api/v1/queue/{item_id}",
+            json={"force_color_match": False},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["force_color_match"] is False
+        assert response.json()["filament_overrides"] == [
+            {"slot_id": 1, "type": "PLA", "color": "#FF0000", "force_color_match": False}
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_update_queue_item_rejects_cross_material_override(
+        self, async_client: AsyncClient, printer_factory, archive_factory, tmp_path
+    ):
+        printer = await printer_factory()
+        source = tmp_path / "update-cross-material.3mf"
+        _write_queue_3mf(source)
+        archive = await archive_factory(file_path=str(source))
+        create_response = await async_client.post(
+            "/api/v1/queue/",
+            json={"printer_id": printer.id, "archive_id": archive.id},
+        )
+        item_id = create_response.json()["id"]
+
+        response = await async_client.patch(
+            f"/api/v1/queue/{item_id}",
+            json={"filament_overrides": [{"slot_id": 1, "type": "ABS", "color": "#FFFFFF"}]},
+        )
+
+        assert response.status_code == 400
+        assert "cannot change material family from PLA to ABS" in response.json()["detail"]
 
     @pytest.mark.asyncio
     @pytest.mark.integration

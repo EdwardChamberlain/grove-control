@@ -4328,7 +4328,7 @@ export default {
     insufficientFilamentMessage: 'Einige zugewiesene Spulen haben weniger Filament als dieser Druck benötigt:',
     insufficientFilamentLine: '{{printer}} - {{slot}}: benötigt {{required}}g, verbleibend {{remaining}}g',
     printAnyway: 'Trotzdem drucken',
-    forceColorMatch: 'Farbe erzwingen',
+    forceColorMatch: 'Farbe und Material abgleichen',
     staggerPrinterStarts: 'Druckerstarts staffeln',
     staggerGroupSize: 'Gruppengröße',
     staggerInterval: 'Intervall (Min.)',
@@ -4789,8 +4789,8 @@ export default {
       description: 'Drucke automatisch starten, wenn sie zur Warteschlange hinzugefügt werden. Wenn deaktiviert, warten Drucke auf manuellen Start.',
     },
     queueForceColorMatch: {
-      title: 'Farbabgleich erzwingen',
-      description: 'Druckaufträge nur an Drucker senden, bei denen der genaue Filament-Typ und die genaue Farbe geladen sind. Standardmäßig deaktiviert — ohne diese Option verwendet die Warteschlange nur den Drucker-Modell-Abgleich und wählt möglicherweise einen Drucker mit der falschen Farbe.',
+      title: 'Farbe und Material abgleichen',
+      description: 'Nur an Drucker senden, auf denen das ausgewählte Material und die exakte Farbe geladen sind. Standardmäßig aktiviert; deaktivieren, um die ähnlichste Farbe desselben Materials zuzulassen.',
     },
     gcodeInjection: {
       title: 'G-code-Injektion',

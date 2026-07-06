@@ -160,7 +160,7 @@ describe('VirtualPrinterCard - force color match toggle (#1188)', () => {
     render(<VirtualPrinterCard printer={printer} models={models} />);
 
     await waitFor(() => {
-      expect(screen.getByText('Force color match')).toBeInTheDocument();
+      expect(screen.getByText('Match Colour and Material')).toBeInTheDocument();
     });
   });
 
@@ -171,7 +171,7 @@ describe('VirtualPrinterCard - force color match toggle (#1188)', () => {
     await waitFor(() => {
       expect(screen.getByText('Test VP')).toBeInTheDocument();
     });
-    expect(screen.queryByText('Force color match')).not.toBeInTheDocument();
+    expect(screen.queryByText('Match Colour and Material')).not.toBeInTheDocument();
   });
 
   it('does not render force-color-match toggle when mode is proxy', async () => {
@@ -181,7 +181,7 @@ describe('VirtualPrinterCard - force color match toggle (#1188)', () => {
     await waitFor(() => {
       expect(screen.getByText('Test VP')).toBeInTheDocument();
     });
-    expect(screen.queryByText('Force color match')).not.toBeInTheDocument();
+    expect(screen.queryByText('Match Colour and Material')).not.toBeInTheDocument();
   });
 
   it('force-color-match toggle renders disabled when explicitly turned off', async () => {
@@ -189,10 +189,10 @@ describe('VirtualPrinterCard - force color match toggle (#1188)', () => {
     render(<VirtualPrinterCard printer={printer} models={models} />);
 
     await waitFor(() => {
-      expect(screen.getByText('Force color match')).toBeInTheDocument();
+      expect(screen.getByText('Match Colour and Material')).toBeInTheDocument();
     });
 
-    const title = screen.getByText('Force color match');
+    const title = screen.getByText('Match Colour and Material');
     const section = title.closest('.flex.items-center.justify-between');
     expect(section).toBeTruthy();
     const toggleButton = section!.querySelector('button');
@@ -205,10 +205,10 @@ describe('VirtualPrinterCard - force color match toggle (#1188)', () => {
     render(<VirtualPrinterCard printer={printer} models={models} />);
 
     await waitFor(() => {
-      expect(screen.getByText('Force color match')).toBeInTheDocument();
+      expect(screen.getByText('Match Colour and Material')).toBeInTheDocument();
     });
 
-    const title = screen.getByText('Force color match');
+    const title = screen.getByText('Match Colour and Material');
     const section = title.closest('.flex.items-center.justify-between');
     const toggleButton = section!.querySelector('button');
     expect(toggleButton!.className).toContain('bg-bambu-green');
@@ -224,10 +224,10 @@ describe('VirtualPrinterCard - force color match toggle (#1188)', () => {
     render(<VirtualPrinterCard printer={printer} models={models} />);
 
     await waitFor(() => {
-      expect(screen.getByText('Force color match')).toBeInTheDocument();
+      expect(screen.getByText('Match Colour and Material')).toBeInTheDocument();
     });
 
-    const title = screen.getByText('Force color match');
+    const title = screen.getByText('Match Colour and Material');
     const section = title.closest('.flex.items-center.justify-between');
     const toggleButton = section!.querySelector('button');
 

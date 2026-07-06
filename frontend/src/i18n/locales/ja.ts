@@ -4328,7 +4328,7 @@ export default {
     insufficientFilamentMessage: '割り当てられたスプールの一部は、この印刷に必要な量より残量が少ないです:',
     insufficientFilamentLine: '{{printer}} - {{slot}}: 必要 {{required}}g、残り {{remaining}}g',
     printAnyway: 'それでも印刷',
-    forceColorMatch: 'カラーマッチを強制',
+    forceColorMatch: '色と素材を一致',
     staggerPrinterStarts: 'プリンター開始を段階的に',
     staggerGroupSize: 'グループサイズ',
     staggerInterval: '間隔（分）',
@@ -4790,8 +4790,8 @@ export default {
       description: 'キューに追加されたときに自動的に印刷を開始します。オフの場合、手動ディスパッチを待ちます。',
     },
     queueForceColorMatch: {
-      title: '色の一致を強制',
-      description: '正確なフィラメントタイプと色がロードされていないプリンターへの送信を拒否します。デフォルトはオフ — これがないと、キューはモデルのみのマッチングを使用し、間違った色がロードされたプリンターを選ぶ可能性があります。',
+      title: '色と素材を一致',
+      description: '選択した素材と正確な色がロードされたプリンターにのみ送信します。デフォルトで有効です。無効にすると、同じ素材内で最も近い色を使用できます。',
     },
     gcodeInjection: {
       title: 'G-codeインジェクション',

@@ -833,10 +833,10 @@ class VirtualPrinterInstance:
                     # the `extract_filament_requirements(path, plate_id)` filter
                     # returns just the plate's filaments. required_filament_types
                     # is populated unconditionally — it's cheap, lets the
-                    # scheduler reject obvious mis-matches even without
-                    # force_color_match. filament_overrides only carries
-                    # force_color_match=True when the per-VP setting is on, so
-                    # upgraders keep the old behaviour by default.
+                    # scheduler reject material mismatches even when exact
+                    # colour matching is disabled. filament_overrides always
+                    # carries requirements; its per-slot flag controls whether
+                    # colour is mandatory or only preferred.
                     queue_item_ids: list[int] = []
                     for offset, plate_id in enumerate(plate_ids, start=1):
                         required_filament_types_json: str | None = None
@@ -863,6 +863,7 @@ class VirtualPrinterInstance:
                             manual_start=not self.auto_dispatch,
                             required_filament_types=required_filament_types_json,
                             filament_overrides=filament_overrides_json,
+                            force_color_match=self.queue_force_color_match,
                             bed_levelling=bed_levelling,
                             flow_cali=flow_cali,
                             vibration_cali=vibration_cali,

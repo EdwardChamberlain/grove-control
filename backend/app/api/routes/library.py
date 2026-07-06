@@ -2582,6 +2582,7 @@ async def add_files_to_queue(
                 position=max_position,
                 status="pending",
                 filament_overrides=json.dumps(overrides) if overrides else None,
+                force_color_match=request.force_color_match,
             )
             db.add(queue_item)
 

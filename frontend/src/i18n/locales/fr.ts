@@ -4317,7 +4317,7 @@ export default {
     insufficientFilamentMessage: 'Certaines bobines assignées ont moins de filament restant que nécessaire pour cette impression :',
     insufficientFilamentLine: '{{printer}} - {{slot}} : nécessite {{required}}g, restant {{remaining}}g',
     printAnyway: 'Imprimer quand même',
-    forceColorMatch: 'Forcer correspondance des couleurs',
+    forceColorMatch: 'Faire correspondre couleur et matériau',
     staggerPrinterStarts: 'Échelonner démarrages',
     staggerGroupSize: 'Taille du groupe',
     staggerInterval: 'Intervalle (min)',
@@ -4779,8 +4779,8 @@ export default {
       description: 'Lancer automatiquement les impressions ajoutées à la file. Désactivé, les impressions attendent un lancement manuel.',
     },
     queueForceColorMatch: {
-      title: 'Forcer la correspondance des couleurs',
-      description: 'Refuser l\'envoi vers une imprimante qui n\'a pas exactement le type de filament et la couleur chargés. Désactivé par défaut — sans cela, la file d\'attente utilise uniquement la correspondance par modèle et peut choisir une imprimante avec la mauvaise couleur.',
+      title: 'Faire correspondre couleur et matériau',
+      description: 'Envoyer uniquement vers une imprimante avec le matériau sélectionné et la couleur exacte. Activé par défaut ; désactivez-le pour autoriser la couleur la plus proche du même matériau.',
     },
     gcodeInjection: {
       title: 'Injection G-code',

@@ -4306,7 +4306,7 @@ export default {
     insufficientFilamentMessage: 'Bazı atanmış makaralarda bu baskının ihtiyaç duyduğundan daha az filament kaldı:',
     insufficientFilamentLine: '{{printer}} - {{slot}}: {{required}}g gerekli, {{remaining}}g kaldı',
     printAnyway: 'Yine de yazdır',
-    forceColorMatch: 'Renk eşleşmesini zorla',
+    forceColorMatch: 'Renk ve malzemeyi eşleştir',
     staggerPrinterStarts: 'Yazıcı başlangıçlarını kademelendir',
     staggerGroupSize: 'Grup boyutu',
     staggerInterval: 'Aralık (dk)',
@@ -4754,8 +4754,8 @@ export default {
       description: 'Kuyruğa eklendiğinde baskıları otomatik olarak başlat. Kapalıyken, baskılar manuel sevki bekler.',
     },
     queueForceColorMatch: {
-      title: 'Renk eşleşmesini zorla',
-      description: 'Tam olarak doğru filament türü ve rengi yüklü olmayan bir yazıcıya sevk etmeyi reddet. Varsayılan olarak kapalı — bu olmadan kuyruk yalnızca model eşleşmesi kullanır ve yanlış renk yüklü bir yazıcı seçebilir.',
+      title: 'Renk ve malzemeyi eşleştir',
+      description: 'Yalnızca seçilen malzeme ve tam renk yüklü bir yazıcıya gönderir. Varsayılan olarak etkindir; aynı malzemedeki en yakın renge izin vermek için devre dışı bırakın.',
     },
     gcodeInjection: {
       title: 'G-code enjeksiyonu',

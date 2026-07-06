@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Circle, Check, AlertTriangle, RefreshCw, ChevronDown, ChevronUp, Palette } from 'lucide-react';
 import { api } from '../../api/client';
 import { useFilamentMapping } from '../../hooks/useFilamentMapping';
-import { getGlobalTrayId, effectivePreferLowest } from '../../utils/amsHelpers';
+import { canonicalFilamentType, getGlobalTrayId, effectivePreferLowest } from '../../utils/amsHelpers';
 import { getColorName } from '../../utils/colors';
 import { useFilamentLabels } from './useFilamentLabels';
 import type { FilamentMappingProps } from './types';
@@ -232,6 +232,9 @@ export function FilamentMapping({
             // array shape; defensive fallback covers the empty-reqs render
             // path that shouldn't reach here anyway.
             const { resolvedName, colorLabel } = filamentLabels[idx] ?? { resolvedName: item.type, colorLabel: getColorName(item.color) };
+            const compatibleLoadedFilaments = loadedFilaments.filter(
+              (filament) => canonicalFilamentType(filament.type) === canonicalFilamentType(item.type),
+            );
             return (
             <div key={idx} className="space-y-1">
               <div
@@ -272,20 +275,9 @@ export function FilamentMapping({
                   <option value="" className="bg-bambu-dark text-bambu-gray">
                     -- Select slot --
                   </option>
-                  {/*
-                    #1722: every loaded slot is offered for every filament row,
-                    regardless of which extruder the slot is wired to. Before this
-                    change a slot was only listed when its extruder matched the
-                    filament's slicer-assigned nozzle (item.nozzle_id), which
-                    locked users out of cross-extruder picks even when they'd
-                    intentionally loaded the required filament into the "other"
-                    AMS. The L/R badge on the filament row still tells the user
-                    what the slicer planned; the dropdown now trusts the user to
-                    pick based on their physical setup. Printer firmware accepts
-                    or rejects the ams_mapping at start-print — failure is loud,
-                    not silent.
-                  */}
-                  {loadedFilaments.map((f) => {
+                  {/* Same-material slots remain available across extruders;
+                      unrelated materials are never offered as overrides. */}
+                  {compatibleLoadedFilaments.map((f) => {
                       const remainingWeight = trayRemainingWeightMap.get(f.globalTrayId);
                       const remainingLabel = remainingWeight != null
                         ? t('printModal.slotRemainingShort', {

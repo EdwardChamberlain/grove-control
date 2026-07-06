@@ -66,6 +66,7 @@ async def test_webhook_queue_defaults_force_color_match(async_client: AsyncClien
     assert response.status_code == 200, response.text
     item = await db_session.get(PrintQueueItem, response.json()["id"], populate_existing=True)
     assert item is not None
+    assert item.force_color_match is True
     assert json.loads(item.filament_overrides) == [
         {"slot_id": 1, "type": "PLA", "color": "#00FF00", "force_color_match": True}
     ]
@@ -86,4 +87,25 @@ async def test_webhook_queue_allows_explicit_color_opt_out(async_client: AsyncCl
     assert response.status_code == 200, response.text
     item = await db_session.get(PrintQueueItem, response.json()["id"], populate_existing=True)
     assert item is not None
-    assert item.filament_overrides is None
+    assert item.force_color_match is False
+    assert json.loads(item.filament_overrides) == [
+        {"slot_id": 1, "type": "PLA", "color": "#00FF00", "force_color_match": False}
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_webhook_queue_rejects_cross_material_override(async_client: AsyncClient, webhook_queue_setup):
+    api_key, printer, archive = webhook_queue_setup
+    response = await async_client.post(
+        "/api/v1/webhook/queue/add",
+        headers={"X-API-Key": api_key},
+        json={
+            "printer_id": printer.id,
+            "archive_id": archive.id,
+            "filament_overrides": [{"slot_id": 1, "type": "ABS", "color": "#FFFFFF"}],
+        },
+    )
+
+    assert response.status_code == 400
+    assert "cannot change material family from PLA to ABS" in response.json()["detail"]

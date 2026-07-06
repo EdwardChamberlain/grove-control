@@ -120,11 +120,14 @@ async def webhook_add_to_queue(
         archive_path if archive_path.is_absolute() else settings.base_dir / archive_path
     )  # SEC-PATH-OK: archive.file_path is DB-stored and internally generated; legacy rows may be absolute
     requirements = extract_filament_requirements(source_path) if source_path.exists() else []
-    overrides = build_queue_filament_overrides(
-        requirements,
-        data.filament_overrides,
-        force_color_match=data.force_color_match,
-    )
+    try:
+        overrides = build_queue_filament_overrides(
+            requirements,
+            data.filament_overrides,
+            force_color_match=data.force_color_match,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     # Create queue item
     queue_item = PrintQueueItem(
@@ -136,6 +139,7 @@ async def webhook_add_to_queue(
         require_previous_success=data.require_previous_success,
         auto_off_after=data.auto_off_after,
         filament_overrides=json.dumps(overrides) if overrides else None,
+        force_color_match=data.force_color_match,
     )
     db.add(queue_item)
     await db.commit()

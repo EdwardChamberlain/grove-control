@@ -31,6 +31,7 @@ const createMockQueueItem = (overrides: Partial<PrintQueueItem> = {}): PrintQueu
   auto_off_after: false,
   gcode_injection: false,
   manual_start: false,
+  force_color_match: true,
   ams_mapping: null,
   plate_id: null,
   bed_levelling: true,
@@ -258,13 +259,14 @@ describe('PrintModal', () => {
         />
       );
 
-      const forceMatch = await screen.findByLabelText(/Force color match/i) as HTMLInputElement;
+      const forceMatch = await screen.findByLabelText(/Match Colour and Material/i) as HTMLInputElement;
       expect(forceMatch).toBeChecked();
 
       await user.click(screen.getByRole('button', { name: /^print$/i }));
 
       await waitFor(() => expect(capturedBody).not.toBeNull());
       expect(capturedBody?.printer_id).toBe(1);
+      expect(capturedBody?.force_color_match).toBe(true);
       expect(capturedBody?.filament_overrides).toEqual([
         expect.objectContaining({
           slot_id: 1,
@@ -303,15 +305,82 @@ describe('PrintModal', () => {
         />
       );
 
-      const forceMatch = await screen.findByLabelText(/Force color match/i) as HTMLInputElement;
+      const forceMatch = await screen.findByLabelText(/Match Colour and Material/i) as HTMLInputElement;
       await user.click(forceMatch);
       expect(forceMatch).not.toBeChecked();
       await user.click(screen.getByRole('button', { name: /^print$/i }));
 
       await waitFor(() => expect(capturedBody).not.toBeNull());
+      expect(capturedBody?.force_color_match).toBe(false);
       expect(capturedBody?.filament_overrides).toEqual([
         expect.objectContaining({ slot_id: 1, force_color_match: false }),
       ]);
+    });
+
+    it('persists a manually selected printer filament as the enforced profile', async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      server.use(
+        http.get('/api/v1/archives/:id/filament-requirements', () =>
+          HttpResponse.json({
+            filaments: [
+              { slot_id: 1, type: 'PLA', color: '#000000', used_grams: 10, used_meters: 3 },
+            ],
+          }),
+        ),
+        http.get('/api/v1/printers/:id/status', () =>
+          HttpResponse.json({
+            connected: true,
+            state: 'IDLE',
+            ams: [
+              {
+                id: 0,
+                tray: [
+                  { id: 0, tray_type: 'PLA', tray_color: '000000FF', tray_sub_brands: 'PLA Basic' },
+                  { id: 1, tray_type: 'PLA', tray_color: 'FFFFFFFF', tray_sub_brands: 'PLA Matte' },
+                ],
+              },
+            ],
+            vt_tray: [],
+          }),
+        ),
+        http.post('/api/v1/queue/', async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json({ id: 1, status: 'pending' });
+        }),
+      );
+      const user = userEvent.setup();
+
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Benchy"
+          initialSelectedPrinterIds={[1]}
+          onClose={mockOnClose}
+          onSuccess={mockOnSuccess}
+        />
+      );
+
+      const mappingSelect = await waitFor(() => {
+        const select = screen
+          .getAllByRole('combobox')
+          .find((candidate) => candidate.querySelector('option[value="1"]'));
+        expect(select).toBeDefined();
+        return select!;
+      });
+      await user.selectOptions(mappingSelect, '1');
+      await user.click(screen.getByRole('button', { name: /^print$/i }));
+
+      await waitFor(() => expect(capturedBody).not.toBeNull());
+      expect(capturedBody?.filament_overrides).toEqual([
+        expect.objectContaining({
+          slot_id: 1,
+          type: 'PLA',
+          color: '#FFFFFF',
+          force_color_match: true,
+        }),
+      ]);
+      expect(capturedBody?.ams_mapping).toEqual([1]);
     });
   });
 
@@ -635,6 +704,82 @@ describe('PrintModal', () => {
       await waitFor(() => {
         expect(screen.getByRole('button', { name: /^print$/i })).toBeInTheDocument();
       });
+    });
+
+    it('persists each custom mapping as that printer job profile and hides other materials', async () => {
+      const capturedBodies: Array<Record<string, unknown>> = [];
+      server.use(
+        http.get('/api/v1/archives/:id/filament-requirements', () =>
+          HttpResponse.json({
+            filaments: [
+              { slot_id: 1, type: 'PLA', color: '#000000', used_grams: 10, used_meters: 3 },
+            ],
+          }),
+        ),
+        http.get('/api/v1/printers/:id/status', ({ params }) => {
+          const printerId = Number(params.id);
+          return HttpResponse.json({
+            connected: true,
+            state: 'IDLE',
+            ams: [
+              {
+                id: 0,
+                tray: printerId === 1
+                  ? [
+                      { id: 0, tray_type: 'PLA', tray_color: '000000FF', tray_sub_brands: 'PLA Basic' },
+                      { id: 1, tray_type: 'PLA', tray_color: 'FFFFFFFF', tray_sub_brands: 'PLA Matte' },
+                      { id: 2, tray_type: 'ABS', tray_color: 'FF0000FF', tray_sub_brands: 'ABS' },
+                    ]
+                  : [
+                      { id: 0, tray_type: 'PLA', tray_color: '000000FF', tray_sub_brands: 'PLA Basic' },
+                    ],
+              },
+            ],
+            vt_tray: [],
+          });
+        }),
+        http.post('/api/v1/queue/', async ({ request }) => {
+          capturedBodies.push((await request.json()) as Record<string, unknown>);
+          return HttpResponse.json({ id: capturedBodies.length, status: 'pending' });
+        }),
+      );
+      const user = userEvent.setup();
+
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Benchy"
+          onClose={mockOnClose}
+          onSuccess={mockOnSuccess}
+        />
+      );
+
+      await user.click((await screen.findByText('X1 Carbon')).closest('button')!);
+      await user.click((await screen.findByText('P1S')).closest('button')!);
+      const customMapping = await screen.findAllByLabelText('Custom mapping');
+      await user.click(customMapping[0]);
+      const mappingSelect = await waitFor(() => {
+        const select = screen
+          .getAllByRole('combobox')
+          .find((candidate) => candidate.querySelector('option[value="1"]'));
+        expect(select).toBeDefined();
+        return select!;
+      });
+      expect(mappingSelect.querySelector('option[value="2"]')).not.toBeInTheDocument();
+      await user.selectOptions(mappingSelect, '1');
+      await user.click(screen.getByRole('button', { name: /^print$/i }));
+
+      await waitFor(() => expect(capturedBodies).toHaveLength(2));
+      const printerOne = capturedBodies.find((body) => body.printer_id === 1);
+      const printerTwo = capturedBodies.find((body) => body.printer_id === 2);
+      expect(printerOne?.filament_overrides).toEqual([
+        expect.objectContaining({ type: 'PLA', color: '#FFFFFF', force_color_match: true }),
+      ]);
+      expect(printerOne?.ams_mapping).toEqual([1]);
+      expect(printerTwo?.filament_overrides).toEqual([
+        expect.objectContaining({ type: 'PLA', color: '#000000', force_color_match: true }),
+      ]);
     });
   });
 

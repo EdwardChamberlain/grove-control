@@ -109,6 +109,7 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
         "target_location": item.target_location,
         "required_filament_types": required_filament_types_parsed,
         "filament_overrides": filament_overrides_parsed,
+        "force_color_match": bool(item.force_color_match),
         "waiting_reason": item.waiting_reason,
         "archive_id": item.archive_id,
         "library_file_id": item.library_file_id,
@@ -413,11 +414,14 @@ async def add_to_queue(
             required_filament_types = json.dumps(filament_types)
             logger.info("Extracted filament types for model-based queue: %s", filament_types)
 
-    resolved_overrides = build_queue_filament_overrides(
-        requirements,
-        data.filament_overrides,
-        force_color_match=data.force_color_match,
-    )
+    try:
+        resolved_overrides = build_queue_filament_overrides(
+            requirements,
+            data.filament_overrides,
+            force_color_match=data.force_color_match,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     filament_overrides_json = json.dumps(resolved_overrides) if resolved_overrides else None
 
     # Model-based assignment additionally uses override types while selecting
@@ -572,6 +576,7 @@ async def add_to_queue(
             target_location=data.target_location,
             required_filament_types=required_filament_types,
             filament_overrides=filament_overrides_json,
+            force_color_match=data.force_color_match,
             archive_id=data.archive_id,
             library_file_id=data.library_file_id,
             scheduled_time=data.scheduled_time,
@@ -1035,11 +1040,59 @@ async def update_queue_item(
     if "ams_mapping" in update_data:
         update_data["ams_mapping"] = json.dumps(update_data["ams_mapping"]) if update_data["ams_mapping"] else None
 
+    # A queue-level toggle is an explicit all-slot preference. Keep the
+    # persisted per-slot flags in sync even when the client omits the mapping
+    # payload (for example a direct PATCH from an API client).
+    if "force_color_match" in update_data and "filament_overrides" not in update_data and item.filament_overrides:
+        try:
+            current_overrides = json.loads(item.filament_overrides)
+        except (json.JSONDecodeError, TypeError) as e:
+            raise HTTPException(status_code=400, detail="Existing filament metadata is invalid") from e
+        if not isinstance(current_overrides, list):
+            raise HTTPException(status_code=400, detail="Existing filament metadata is invalid")
+        update_data["filament_overrides"] = [
+            {**override, "force_color_match": update_data["force_color_match"]}
+            for override in current_overrides
+            if isinstance(override, dict)
+        ]
+
     # Serialize filament_overrides to JSON for TEXT column storage
     if "filament_overrides" in update_data:
-        update_data["filament_overrides"] = (
-            json.dumps(update_data["filament_overrides"]) if update_data["filament_overrides"] else None
-        )
+        provided_overrides = update_data["filament_overrides"]
+        if provided_overrides:
+            source_path = None
+            if item.archive_id:
+                archive_result = await db.execute(select(PrintArchive).where(PrintArchive.id == item.archive_id))
+                archive = archive_result.scalar_one_or_none()
+                if archive:
+                    archive_path = Path(archive.file_path)
+                    source_path = (
+                        archive_path if archive_path.is_absolute() else settings.base_dir / archive_path
+                    )  # SEC-PATH-OK: archive.file_path is DB-stored and internally generated; legacy rows may be absolute
+            elif item.library_file_id:
+                library_result = await db.execute(select(LibraryFile).where(LibraryFile.id == item.library_file_id))
+                library_file = library_result.scalar_one_or_none()
+                if library_file:
+                    library_path = Path(library_file.file_path)
+                    source_path = (
+                        library_path if library_path.is_absolute() else settings.base_dir / library_path
+                    )  # SEC-PATH-OK: library_file.file_path is DB-stored and may refer to configured external libraries
+
+            plate_id = update_data.get("plate_id", item.plate_id)
+            requirements = (
+                extract_filament_requirements(source_path, plate_id) if source_path and source_path.exists() else []
+            )
+            try:
+                resolved_overrides = build_queue_filament_overrides(
+                    requirements,
+                    provided_overrides,
+                    force_color_match=update_data.get("force_color_match", item.force_color_match),
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e)) from e
+            update_data["filament_overrides"] = json.dumps(resolved_overrides) if resolved_overrides else None
+        else:
+            update_data["filament_overrides"] = None
 
     # Serialize H2C rack-swap nozzle pick (#1780) to JSON for TEXT column
     # storage; same Text-as-opaque-blob convention as ams_mapping above.

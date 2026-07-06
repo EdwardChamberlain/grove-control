@@ -51,7 +51,7 @@ export function FilamentOverride({
   }, [availableFilaments]);
 
   const filaments = filamentReqs?.filaments;
-  if (!filaments || filaments.length === 0 || availableFilaments.length === 0) {
+  if (!filaments || filaments.length === 0) {
     return null;
   }
 

@@ -19,6 +19,7 @@ import {
   autoMatchFilament,
   filterFilamentsByNozzle,
   effectivePreferLowest,
+  canonicalFilamentType,
 } from '../../utils/amsHelpers';
 import type { PrinterSelectorProps, AssignmentMode } from './types';
 import type { PrinterMappingResult, PerPrinterConfig } from '../../hooks/useMultiPrinterFilamentMapping';
@@ -180,6 +181,9 @@ function InlineMappingEditor({
               -- Select slot --
             </option>
             {filterFilamentsByNozzle(printerResult.loadedFilaments, req.nozzle_id)
+              .filter((filament) =>
+                canonicalFilamentType(filament.type) === canonicalFilamentType(req.type)
+              )
               .map((f) => (
               <option key={f.globalTrayId} value={f.globalTrayId} className="bg-bambu-dark text-white">
                 {f.label}: {f.traySubBrands || f.type} ({f.colorName})

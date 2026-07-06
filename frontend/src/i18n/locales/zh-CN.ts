@@ -4316,7 +4316,7 @@ export default {
     insufficientFilamentMessage: '部分已分配线轴的剩余耗材少于本次打印所需：',
     insufficientFilamentLine: '{{printer}} - {{slot}}：需要 {{required}}g，剩余 {{remaining}}g',
     printAnyway: '仍然打印',
-    forceColorMatch: '强制颜色匹配',
+    forceColorMatch: '匹配颜色和材料',
     staggerPrinterStarts: '错峰启动打印机',
     staggerGroupSize: '组大小',
     staggerInterval: '间隔（分钟）',
@@ -4778,8 +4778,8 @@ export default {
       description: '添加到队列时自动开始打印。关闭后，打印任务等待手动派发。',
     },
     queueForceColorMatch: {
-      title: '强制颜色匹配',
-      description: '拒绝派发到没有完全相同耗材类型和颜色的打印机。默认关闭 — 不启用时，队列仅按型号匹配，可能选到颜色错误的打印机。',
+      title: '匹配颜色和材料',
+      description: '仅派发到装有选定材料和完全相同颜色的打印机。默认启用；关闭后可在相同材料中使用最接近的颜色。',
     },
     gcodeInjection: {
       title: 'G-code 注入',

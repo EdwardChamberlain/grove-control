@@ -17,6 +17,7 @@ def _queue_item(*, force_color_match: bool = True):
         library_file_id=None,
         scheduled_time=None,
         manual_start=False,
+        force_color_match=force_color_match,
         require_previous_success=False,
         ams_mapping=None,
         filament_overrides=(
@@ -53,6 +54,137 @@ def test_strict_colour_mapping_never_falls_back_across_nozzles(scheduler):
     assert mapping == [-1]
 
 
+def test_strict_colour_mapping_rejects_different_material_variant(scheduler):
+    required = [{"slot_id": 1, "type": "PAHT-CF", "color": "#000000"}]
+    loaded = [
+        {"global_tray_id": 0, "type": "PA12-CF", "color": "#000000", "tray_info_idx": ""},
+    ]
+
+    mapping = scheduler._match_filaments_to_slots(required, loaded, strict_color_slot_ids={1})
+
+    assert mapping == [-1]
+
+
+def test_unforced_mapping_never_crosses_material_family(scheduler):
+    required = [{"slot_id": 1, "type": "PLA", "color": "#FF0000", "tray_info_idx": "shared"}]
+    loaded = [
+        {"global_tray_id": 0, "type": "ABS", "color": "#FF0000", "tray_info_idx": "shared"},
+    ]
+
+    mapping = scheduler._match_filaments_to_slots(required, loaded)
+
+    assert mapping == [-1]
+
+
+def test_missing_per_slot_flag_inherits_safe_queue_default(scheduler):
+    item = _queue_item()
+    item.filament_overrides = '[{"slot_id": 1, "type": "PLA", "color": "#FF0000"}]'
+
+    assert scheduler._get_force_color_overrides(item) == [
+        {"slot_id": 1, "type": "PLA", "color": "#FF0000", "force_color_match": True}
+    ]
+
+
+@pytest.mark.asyncio
+@patch("backend.app.services.print_scheduler.printer_manager")
+async def test_model_unforced_job_accepts_same_material_without_exact_colour(mock_pm, scheduler):
+    printer = SimpleNamespace(id=3, name="P1S")
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = [printer]
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=result)
+    mock_pm.is_connected.return_value = True
+
+    with (
+        patch.object(scheduler, "_is_printer_idle", return_value=True),
+        patch.object(scheduler, "_get_missing_filament_types", return_value=[]),
+        patch.object(scheduler, "_count_override_color_matches", return_value=0),
+    ):
+        printer_id, waiting_reason = await scheduler._find_idle_printer_for_model(
+            db,
+            "P1S",
+            set(),
+            ["PLA"],
+            filament_overrides=[{"slot_id": 1, "type": "PLA", "color": "#FFFFFF", "force_color_match": False}],
+        )
+
+    assert printer_id == 3
+    assert waiting_reason is None
+
+
+@pytest.mark.asyncio
+@patch("backend.app.services.print_scheduler.printer_manager")
+async def test_forced_job_waits_when_material_metadata_is_missing(mock_pm, scheduler):
+    item = _queue_item()
+    item.filament_overrides = None
+    items_result, busy_result = _queue_results(item)
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[items_result, busy_result])
+    mock_pm.is_connected.return_value = True
+
+    with (
+        patch("backend.app.services.print_scheduler.async_session") as session_ctx,
+        patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
+        patch.object(scheduler, "_start_print", new=AsyncMock()) as start_print,
+        patch.object(scheduler, "_check_auto_drying", new=AsyncMock()),
+    ):
+        session_ctx.return_value.__aenter__ = AsyncMock(return_value=db)
+        session_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
+        await scheduler.check_queue()
+
+    start_print.assert_not_awaited()
+    assert item.waiting_reason == "Material/colour metadata unavailable; cannot verify a safe filament match"
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch("backend.app.services.print_scheduler.printer_manager")
+async def test_unforced_job_waits_when_material_metadata_is_missing(mock_pm, scheduler):
+    item = _queue_item(force_color_match=False)
+    item.filament_overrides = None
+    items_result, busy_result = _queue_results(item)
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[items_result, busy_result])
+    mock_pm.is_connected.return_value = True
+
+    with (
+        patch("backend.app.services.print_scheduler.async_session") as session_ctx,
+        patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
+        patch.object(scheduler, "_start_print", new=AsyncMock()) as start_print,
+        patch.object(scheduler, "_check_auto_drying", new=AsyncMock()),
+    ):
+        session_ctx.return_value.__aenter__ = AsyncMock(return_value=db)
+        session_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
+        await scheduler.check_queue()
+
+    start_print.assert_not_awaited()
+    assert item.waiting_reason == "Material/colour metadata unavailable; cannot verify a safe filament match"
+
+
+@pytest.mark.asyncio
+@patch("backend.app.services.print_scheduler.printer_manager")
+async def test_forced_job_waits_when_material_metadata_is_malformed(mock_pm, scheduler):
+    item = _queue_item()
+    item.filament_overrides = "not-json"
+    items_result, busy_result = _queue_results(item)
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[items_result, busy_result])
+    mock_pm.is_connected.return_value = True
+
+    with (
+        patch("backend.app.services.print_scheduler.async_session") as session_ctx,
+        patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
+        patch.object(scheduler, "_start_print", new=AsyncMock()) as start_print,
+        patch.object(scheduler, "_check_auto_drying", new=AsyncMock()),
+    ):
+        session_ctx.return_value.__aenter__ = AsyncMock(return_value=db)
+        session_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
+        await scheduler.check_queue()
+
+    start_print.assert_not_awaited()
+    assert item.waiting_reason == "Material/colour metadata unavailable; cannot verify a safe filament match"
+
+
 @pytest.mark.asyncio
 @patch("backend.app.services.print_scheduler.printer_manager")
 async def test_assigned_job_waits_when_forced_colour_is_missing(mock_pm, scheduler):
@@ -66,6 +198,7 @@ async def test_assigned_job_waits_when_forced_colour_is_missing(mock_pm, schedul
         patch("backend.app.services.print_scheduler.async_session") as session_ctx,
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
         patch.object(scheduler, "_is_printer_idle", return_value=True),
+        patch.object(scheduler, "_get_missing_filament_types", return_value=[]),
         patch.object(scheduler, "_get_missing_force_color_slots", return_value=["PLA (Red)"]),
         patch.object(scheduler, "_compute_ams_mapping_for_printer", new=AsyncMock()) as compute_mapping,
         patch.object(scheduler, "_start_print", new=AsyncMock()) as start_print,
@@ -77,7 +210,7 @@ async def test_assigned_job_waits_when_forced_colour_is_missing(mock_pm, schedul
 
     start_print.assert_not_awaited()
     compute_mapping.assert_not_awaited()
-    assert item.waiting_reason == "No matching material/color. Waiting on PLA (Red)"
+    assert item.waiting_reason == "No matching material/colour. Waiting on PLA (Red)"
 
 
 @pytest.mark.asyncio
@@ -94,6 +227,7 @@ async def test_assigned_job_recomputes_mapping_and_starts_on_exact_colour(mock_p
         patch("backend.app.services.print_scheduler.async_session") as session_ctx,
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
         patch.object(scheduler, "_is_printer_idle", return_value=True),
+        patch.object(scheduler, "_get_missing_filament_types", return_value=[]),
         patch.object(scheduler, "_get_missing_force_color_slots", return_value=[]),
         patch.object(scheduler, "_compute_ams_mapping_for_printer", new=AsyncMock(return_value=[2])),
         patch.object(scheduler, "_block_on_filament_deficit", new=AsyncMock(return_value=False)),
@@ -122,6 +256,8 @@ async def test_assigned_job_allows_different_colour_when_force_is_disabled(mock_
         patch("backend.app.services.print_scheduler.async_session") as session_ctx,
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
         patch.object(scheduler, "_is_printer_idle", return_value=True),
+        patch.object(scheduler, "_get_missing_filament_types", return_value=[]),
+        patch.object(scheduler, "_ams_mapping_uses_compatible_materials", return_value=True),
         patch.object(scheduler, "_get_missing_force_color_slots") as missing_colors,
         patch.object(scheduler, "_block_on_filament_deficit", new=AsyncMock(return_value=False)),
         patch.object(scheduler, "_start_print", new=AsyncMock()) as start_print,
@@ -133,3 +269,28 @@ async def test_assigned_job_allows_different_colour_when_force_is_disabled(mock_
 
     missing_colors.assert_not_called()
     start_print.assert_awaited_once_with(db, item)
+
+
+@pytest.mark.asyncio
+@patch("backend.app.services.print_scheduler.printer_manager")
+async def test_assigned_unforced_job_waits_when_material_is_missing(mock_pm, scheduler):
+    item = _queue_item(force_color_match=False)
+    items_result, busy_result = _queue_results(item)
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[items_result, busy_result])
+    mock_pm.is_connected.return_value = True
+
+    with (
+        patch("backend.app.services.print_scheduler.async_session") as session_ctx,
+        patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
+        patch.object(scheduler, "_is_printer_idle", return_value=True),
+        patch.object(scheduler, "_get_missing_filament_types", return_value=["PLA"]),
+        patch.object(scheduler, "_start_print", new=AsyncMock()) as start_print,
+        patch.object(scheduler, "_check_auto_drying", new=AsyncMock()),
+    ):
+        session_ctx.return_value.__aenter__ = AsyncMock(return_value=db)
+        session_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
+        await scheduler.check_queue()
+
+    start_print.assert_not_awaited()
+    assert item.waiting_reason == "No matching material. Waiting on PLA"

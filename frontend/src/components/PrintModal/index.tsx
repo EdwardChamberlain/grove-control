@@ -196,7 +196,7 @@ export function PrintModal({
     if (mode === 'edit-queue-item' && queueItem?.filament_overrides) {
       const flags: Record<number, boolean> = {};
       for (const o of queueItem.filament_overrides) {
-        flags[o.slot_id] = o.force_color_match === true;
+        flags[o.slot_id] = o.force_color_match ?? queueItem.force_color_match ?? true;
       }
       return flags;
     }
@@ -411,6 +411,34 @@ export function PrintModal({
     singlePrinterPreferLowest,
     effectivePrinterId ? inventoryByTrayIdPerPrinter.get(effectivePrinterId) : undefined,
   );
+
+  const handleManualMappingChange = (nextMappings: Record<number, number>) => {
+    const loaded = buildLoadedFilaments(printerStatus);
+    const changedSlotIds = new Set(
+      [...Object.keys(manualMappings), ...Object.keys(nextMappings)]
+        .map(Number)
+        .filter((slotId) => manualMappings[slotId] !== nextMappings[slotId]),
+    );
+
+    setManualMappings(nextMappings);
+    if (changedSlotIds.size === 0) return;
+
+    setFilamentOverrides((current) => {
+      const next = { ...current };
+      for (const slotId of changedSlotIds) {
+        const globalTrayId = nextMappings[slotId];
+        if (globalTrayId == null) {
+          delete next[slotId];
+          continue;
+        }
+        const selected = loaded.find((filament) => filament.globalTrayId === globalTrayId);
+        if (selected) {
+          next[slotId] = { type: selected.type, color: selected.color };
+        }
+      }
+      return next;
+    });
+  };
 
   // Multi-printer filament mapping (for per-printer configuration)
   const multiPrinterMapping = useMultiPrinterFilamentMapping(
@@ -701,6 +729,34 @@ export function PrintModal({
 
     const filamentOverridesArray = buildFilamentOverridesArray();
 
+    const getFilamentOverridesForPrinter = (printerId: number | null) => {
+      if (!filamentOverridesArray || printerId == null || selectedPrinters.length <= 1) {
+        return filamentOverridesArray;
+      }
+
+      const config = perPrinterConfigs[printerId];
+      const result = multiPrinterMapping.printerResults.find((entry) => entry.printerId === printerId);
+      if (!config || config.useDefault || !result) {
+        return filamentOverridesArray;
+      }
+
+      return filamentOverridesArray.map((override) => {
+        const selectedTrayId = config.manualMappings[override.slot_id];
+        if (selectedTrayId == null) return override;
+        const selected = result.loadedFilaments.find((filament) => filament.globalTrayId === selectedTrayId);
+        if (!selected) return override;
+        return {
+          ...override,
+          type: selected.type,
+          color: selected.color,
+          color_name: selected.colorName,
+        };
+      });
+    };
+
+    const forceMatchFor = (overrides: typeof filamentOverridesArray) =>
+      overrides?.some((override) => override.force_color_match) ?? true;
+
     // Multi-plate auto-batch: when the user adds 2+ plates from one source in
     // a single create submission, pre-create a PrintBatch and pass its
     // id to each subsequent addToQueue call so the queue UI groups them as a
@@ -742,35 +798,39 @@ export function PrintModal({
     };
 
     // Common queue data for create and edit modes
-    const getQueueData = (printerId: number | null, plateOverride?: number | null): PrintQueueItemCreate => ({
-      printer_id: assignmentMode === 'printer' ? printerId : null,
-      target_model: assignmentMode === 'model' ? targetModel : null,
-      target_location: assignmentMode === 'model' ? targetLocation : null,
-      // Persist colour requirements for both model-based and explicitly
-      // assigned printers. The dispatcher enforces force_color_match before
-      // starting either kind of queued job.
-      filament_overrides: filamentOverridesArray,
-      // Use library_file_id for library files, archive_id for archives
-      archive_id: isLibraryFile ? undefined : archiveId,
-      library_file_id: isLibraryFile ? libraryFileId : undefined,
-      require_previous_success: scheduleOptions.requirePreviousSuccess,
-      auto_off_after: scheduleOptions.autoOffAfter,
-      gcode_injection: scheduleOptions.gcodeInjection,
-      manual_start: scheduleOptions.scheduleType === 'queue' && scheduleOptions.requireManualStart,
-      // When the user clicks "Print Anyway" on the frontend deficit warning,
-      // persist that acknowledgement so the scheduler doesn't immediately
-      // re-flag the item on its first dispatch tick (#1698-followup).
-      skip_filament_check: options?.skipFilamentCheck === true ? true : undefined,
-      ams_mapping: printerId ? getMappingForPrinter(printerId) : undefined,
-      plate_id: plateOverride !== undefined ? plateOverride : selectedPlate,
-      scheduled_time: scheduleOptions.scheduleType === 'scheduled' && scheduleOptions.scheduledTime
-        ? new Date(scheduleOptions.scheduledTime).toISOString()
-        : undefined,
-      ...printOptions,
-      project_id: projectId ?? undefined,
-      batch_id: autoBatchId ?? undefined,
-      cleanup_library_after_dispatch: cleanupLibraryAfterDispatch,
-    });
+    const getQueueData = (printerId: number | null, plateOverride?: number | null): PrintQueueItemCreate => {
+      const printerOverrides = getFilamentOverridesForPrinter(printerId);
+      return {
+        printer_id: assignmentMode === 'printer' ? printerId : null,
+        target_model: assignmentMode === 'model' ? targetModel : null,
+        target_location: assignmentMode === 'model' ? targetLocation : null,
+        // Persist colour requirements for both model-based and explicitly
+        // assigned printers. Multi-printer manual mappings become each job's
+        // enforced profile rather than only an AMS slot hint.
+        filament_overrides: printerOverrides,
+        force_color_match: forceMatchFor(printerOverrides),
+        // Use library_file_id for library files, archive_id for archives
+        archive_id: isLibraryFile ? undefined : archiveId,
+        library_file_id: isLibraryFile ? libraryFileId : undefined,
+        require_previous_success: scheduleOptions.requirePreviousSuccess,
+        auto_off_after: scheduleOptions.autoOffAfter,
+        gcode_injection: scheduleOptions.gcodeInjection,
+        manual_start: scheduleOptions.scheduleType === 'queue' && scheduleOptions.requireManualStart,
+        // When the user clicks "Print Anyway" on the frontend deficit warning,
+        // persist that acknowledgement so the scheduler doesn't immediately
+        // re-flag the item on its first dispatch tick (#1698-followup).
+        skip_filament_check: options?.skipFilamentCheck === true ? true : undefined,
+        ams_mapping: printerId ? getMappingForPrinter(printerId) : undefined,
+        plate_id: plateOverride !== undefined ? plateOverride : selectedPlate,
+        scheduled_time: scheduleOptions.scheduleType === 'scheduled' && scheduleOptions.scheduledTime
+          ? new Date(scheduleOptions.scheduledTime).toISOString()
+          : undefined,
+        ...printOptions,
+        project_id: projectId ?? undefined,
+        batch_id: autoBatchId ?? undefined,
+        cleanup_library_after_dispatch: cleanupLibraryAfterDispatch,
+      };
+    };
 
     // Model-based assignment
     if (assignmentMode === 'model') {
@@ -788,6 +848,7 @@ export function PrintModal({
               target_model: targetModel,
               target_location: targetLocation,
               filament_overrides: filamentOverridesArray || null,
+              force_color_match: filamentOverridesArray?.some((override) => override.force_color_match) ?? true,
               require_previous_success: scheduleOptions.requirePreviousSuccess,
               auto_off_after: scheduleOptions.autoOffAfter,
               gcode_injection: scheduleOptions.gcodeInjection,
@@ -839,11 +900,13 @@ export function PrintModal({
             if (isEditing && progressCounter === 1) {
               // Edit mode - update the original queue item for the first entry
               const printerMapping = getMappingForPrinter(printerId);
+              const printerOverrides = getFilamentOverridesForPrinter(printerId);
               const updateData: PrintQueueItemUpdate = {
                 printer_id: printerId,
                 target_model: null,
                 target_location: null,
-                filament_overrides: filamentOverridesArray || null,
+                filament_overrides: printerOverrides || null,
+                force_color_match: forceMatchFor(printerOverrides),
                 require_previous_success: scheduleOptions.requirePreviousSuccess,
                 auto_off_after: scheduleOptions.autoOffAfter,
                 gcode_injection: scheduleOptions.gcodeInjection,
@@ -1108,10 +1171,10 @@ export function PrintModal({
             )}
 
             {/* Filament override - shown in model mode when filament requirements are available */}
-            {assignmentMode === 'model' && targetModel && effectiveFilamentReqs && availableFilaments && availableFilaments.length > 0 && (
+            {assignmentMode === 'model' && targetModel && effectiveFilamentReqs && (
               <FilamentOverride
                 filamentReqs={effectiveFilamentReqs}
-                availableFilaments={availableFilaments}
+                availableFilaments={availableFilaments ?? []}
                 overrides={filamentOverrides}
                 onChange={setFilamentOverrides}
                 forceColorMatch={forceColorMatch}
@@ -1153,7 +1216,7 @@ export function PrintModal({
                 printerId={effectivePrinterId!}
                 filamentReqs={effectiveFilamentReqs}
                 manualMappings={manualMappings}
-                onManualMappingChange={setManualMappings}
+                onManualMappingChange={handleManualMappingChange}
                 defaultExpanded={!!initialSelectedPrinterIds?.length || (settings?.per_printer_mapping_expanded ?? false)}
                 currencySymbol={currencySymbol}
                 defaultCostPerKg={defaultCostPerKg}

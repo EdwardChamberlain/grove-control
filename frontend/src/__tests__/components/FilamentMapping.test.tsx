@@ -60,7 +60,7 @@ describe('FilamentMapping — FTS routing', () => {
     );
   });
 
-  it('shows all loaded slots in the dropdown when FTS is installed', async () => {
+  it('shows same-material slots across FTS routes', async () => {
     server.use(
       http.get(
         '/api/v1/printers/:id/status',
@@ -91,13 +91,12 @@ describe('FilamentMapping — FTS routing', () => {
       />,
     );
 
-    // Both PLA and PETG slots must appear in the dropdown despite ams_extruder_map
-    // being empty and the requirement asking for nozzle 1. Without the FTS guard
-    // the dropdown would render only the "-- Select slot --" placeholder.
+    // PETG remains available despite the route, while unrelated PLA must not
+    // be offered as an unsafe manual override.
     await waitFor(() => {
-      expect(screen.getByText(/Bambu PLA/)).toBeInTheDocument();
+      expect(screen.getByText(/Bambu PETG/)).toBeInTheDocument();
     });
-    expect(screen.getByText(/Bambu PETG/)).toBeInTheDocument();
+    expect(screen.queryByText(/Bambu PLA/)).not.toBeInTheDocument();
 
     // The slot currently fed into a track gets an [L]/[R] badge. AMS-0 slot 1
     // (global tray ID 1) is in fila_switch.in_slots[1], whose track terminates
@@ -107,8 +106,6 @@ describe('FilamentMapping — FTS routing', () => {
 
     // AMS-0 slot 0 (global tray ID 0) is NOT currently fed into any track —
     // FTS routes it on demand, so no badge.
-    const plaOption = screen.getByText(/Bambu PLA/);
-    expect(plaOption.textContent).not.toMatch(/\[[LR]\]/);
   });
 
   it('renders the per-slot force-color-match checkbox in printer mode (#1717)', async () => {
@@ -144,7 +141,7 @@ describe('FilamentMapping — FTS routing', () => {
     );
 
     const checkbox = await waitFor(() => {
-      const cb = screen.getByLabelText(/Force color match/i) as HTMLInputElement;
+      const cb = screen.getByLabelText(/Match Colour and Material/i) as HTMLInputElement;
       expect(cb).toBeInTheDocument();
       return cb;
     });
@@ -190,7 +187,7 @@ describe('FilamentMapping — FTS routing', () => {
     await waitFor(() => {
       expect(screen.getByText(/Re-read/i)).toBeInTheDocument();
     });
-    expect(screen.queryByLabelText(/Force color match/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Match Colour and Material/i)).not.toBeInTheDocument();
   });
 
   it('offers cross-extruder slots in the dropdown without FTS (#1722)', async () => {
@@ -228,12 +225,12 @@ describe('FilamentMapping — FTS routing', () => {
     );
 
     // Required nozzle is 1 (LEFT) and AMS 0 is wired to extruder 0 (RIGHT).
-    // Both slots must STILL appear so the user can pick them — explicitly the
-    // cross-extruder scenario the #1722 fix unblocks.
+    // The same-material PETG slot must still appear across extruders; the PLA
+    // slot remains excluded because manual mapping cannot cross materials.
     await waitFor(() => {
-      expect(screen.getByText(/Bambu PLA/)).toBeInTheDocument();
+      expect(screen.getByText(/Bambu PETG/)).toBeInTheDocument();
     });
-    expect(screen.getByText(/Bambu PETG/)).toBeInTheDocument();
+    expect(screen.queryByText(/Bambu PLA/)).not.toBeInTheDocument();
   });
 
   it('renders sub-brand + material-disambiguated colour on the required side (#1718)', async () => {

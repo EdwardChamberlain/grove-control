@@ -27,6 +27,7 @@ export function getWifiStrength(rssi: number): { labelKey: string; color: string
 }
 
 import type { PrintQueueItem } from '../api/client';
+import { canonicalFilamentType } from './amsHelpers';
 
 /**
  * Filters queue items based on printer compatibility (filament types and colors).
@@ -53,8 +54,15 @@ export function filterCompatibleQueueItems(
     // Only apply when loadedFilaments is provided (not undefined).
     // An empty Set means no filaments are loaded — force-matched slots cannot match.
     if (item.filament_overrides && item.filament_overrides.length > 0 && loadedFilaments !== undefined) {
+      const loadedOverrideTypes = new Set(
+        Array.from(loadedFilaments, (filament) => canonicalFilamentType(filament.split(':', 1)[0])),
+      );
+      const materialsAvailable = item.filament_overrides.every((override) =>
+        loadedOverrideTypes.has(canonicalFilamentType(override.type)),
+      );
+      if (!materialsAvailable) return false;
+
       const forceOverrides = item.filament_overrides.filter(o => o.force_color_match === true);
-      const prefOverrides = item.filament_overrides.filter(o => o.force_color_match !== true);
 
       // All force-matched slots must have exact type+color on this printer
       if (forceOverrides.length > 0) {
@@ -66,15 +74,9 @@ export function filterCompatibleQueueItems(
         if (!allForceMatch) return false;
       }
 
-      // Preference-only overrides: at least one color must match (existing behaviour)
-      if (prefOverrides.length > 0 && forceOverrides.length === 0) {
-        const hasColorMatch = prefOverrides.some(o => {
-          const oType = (o.type || '').toUpperCase();
-          const oColor = (o.color || '').replace('#', '').toLowerCase().slice(0, 6);
-          return loadedFilaments.has(`${oType}:${oColor}`);
-        });
-        if (!hasColorMatch) return false;
-      }
+      // Preference-only overrides do not filter by colour. The material type
+      // check above remains mandatory; dispatch chooses the closest available
+      // colour within that material family.
     }
 
     return true;

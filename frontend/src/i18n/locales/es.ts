@@ -4336,7 +4336,7 @@ export default {
     insufficientFilamentMessage: 'Algunas bobinas asignadas tienen menos filamento restante del que necesita esta impresión:',
     insufficientFilamentLine: '{{printer}} - {{slot}}: necesita {{required}} g, restante {{remaining}} g',
     printAnyway: 'Imprimir de todos modos',
-    forceColorMatch: 'Forzar la coincidencia de color',
+    forceColorMatch: 'Coincidir color y material',
     staggerPrinterStarts: 'Escalonar los inicios de las impresoras',
     staggerGroupSize: 'Tamaño de grupo',
     staggerInterval: 'Intervalo (min)',
@@ -4798,8 +4798,8 @@ export default {
       description: 'Iniciar automáticamente las impresiones al añadirlas a la cola. Cuando está desactivado, las impresiones esperan al envío manual.',
     },
     queueForceColorMatch: {
-      title: 'Forzar la coincidencia de color',
-      description: 'Negarse a enviar a una impresora que no tiene cargados el tipo y el color exactos de filamento. Desactivado de forma predeterminada — sin esto, la cola usa la coincidencia solo por modelo y puede elegir una impresora con el color equivocado cargado.',
+      title: 'Coincidir color y material',
+      description: 'Enviar solo a una impresora con el material seleccionado y el color exacto cargados. Activado de forma predeterminada; desactívelo para permitir el color más cercano del mismo material.',
     },
     gcodeInjection: {
       title: 'Inyección de G-code',

@@ -4316,7 +4316,7 @@ export default {
     insufficientFilamentMessage: 'Alcune bobine assegnate hanno meno filamento rimanente di quanto necessario per questa stampa:',
     insufficientFilamentLine: '{{printer}} - {{slot}}: necessita di {{required}}g, rimanenti {{remaining}}g',
     printAnyway: 'Stampa comunque',
-    forceColorMatch: 'Forza corrispondenza colore',
+    forceColorMatch: 'Abbina colore e materiale',
     staggerPrinterStarts: 'Scaglionare avvii',
     staggerGroupSize: 'Dimensione gruppo',
     staggerInterval: 'Intervallo (min)',
@@ -4778,8 +4778,8 @@ export default {
       description: 'Avvia automaticamente le stampe aggiunte alla coda. Se disattivato, le stampe attendono l\'avvio manuale.',
     },
     queueForceColorMatch: {
-      title: 'Forza corrispondenza colori',
-      description: 'Rifiuta di inviare a una stampante che non ha esattamente il tipo di filamento e il colore caricato. Disattivato per impostazione predefinita — senza questo, la coda usa solo la corrispondenza per modello e potrebbe scegliere una stampante con il colore sbagliato.',
+      title: 'Abbina colore e materiale',
+      description: 'Invia solo a una stampante con il materiale selezionato e il colore esatto caricati. Attivato per impostazione predefinita; disattivalo per consentire il colore più vicino dello stesso materiale.',
     },
     gcodeInjection: {
       title: 'Iniezione G-code',

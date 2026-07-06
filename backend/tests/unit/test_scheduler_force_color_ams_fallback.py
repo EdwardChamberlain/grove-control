@@ -1,9 +1,9 @@
-"""Tests for force-color-override AMS mapping fallback in the print scheduler.
+"""Tests for persisted-override AMS mapping fallback in the print scheduler.
 
 Covers the code path in ``_compute_ams_mapping_for_printer`` that kicks in
 when the 3MF's filament requirements cannot be read (e.g. ``plate_id=None``
 with a modern BambuStudio 3MF whose slice_info was missing or unreadable)
-but ``force_color_match`` overrides are present.
+but persisted filament overrides are present.
 
 Related issue: #1436
 """
@@ -172,17 +172,19 @@ class TestComputeAmsMappingFallback:
 
     @pytest.mark.asyncio
     @patch("backend.app.services.print_scheduler.printer_manager")
-    async def test_fallback_not_used_when_no_force_color(self, mock_pm, scheduler):
-        """When overrides have no force_color_match, the fallback is not triggered."""
+    async def test_unforced_fallback_keeps_material_and_allows_different_colour(self, mock_pm, scheduler):
+        """Preference-only overrides still map within the required material."""
         mock_pm.get_status.return_value = self._make_status()
 
-        item = self._make_item(filament_overrides_json='[{"slot_id": 1, "type": "PLA", "color": "#CBC6B8"}]')
+        item = self._make_item(
+            filament_overrides_json='[{"slot_id": 1, "type": "PLA", "color": "#000000", "force_color_match": false}]'
+        )
         db = AsyncMock()
 
         with patch.object(scheduler, "_get_filament_requirements", return_value=None):
             result = await scheduler._compute_ams_mapping_for_printer(db, 5, item)
 
-        assert result is None
+        assert result == [0]
 
     @pytest.mark.asyncio
     @patch("backend.app.services.print_scheduler.printer_manager")

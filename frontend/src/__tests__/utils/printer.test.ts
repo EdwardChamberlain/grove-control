@@ -8,7 +8,37 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { getPrinterImage } from '../../utils/printer';
+import { filterCompatibleQueueItems, getPrinterImage } from '../../utils/printer';
+import type { PrintQueueItem } from '../../api/client';
+
+const preferenceOnlyJob = {
+  required_filament_types: [],
+  filament_overrides: [
+    { slot_id: 1, type: 'PLA', color: '#000000', force_color_match: false },
+  ],
+} as unknown as PrintQueueItem;
+
+describe('filterCompatibleQueueItems', () => {
+  it('allows a different colour when matching is disabled', () => {
+    const result = filterCompatibleQueueItems(
+      [preferenceOnlyJob],
+      new Set(['PLA']),
+      new Set(['PLA:ffffff']),
+    );
+
+    expect(result).toEqual([preferenceOnlyJob]);
+  });
+
+  it('never allows a different material when matching is disabled', () => {
+    const result = filterCompatibleQueueItems(
+      [preferenceOnlyJob],
+      new Set(['ABS']),
+      new Set(['ABS:000000']),
+    );
+
+    expect(result).toEqual([]);
+  });
+});
 
 describe('getPrinterImage', () => {
   describe('X2D (#988)', () => {

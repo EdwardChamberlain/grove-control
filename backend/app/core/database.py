@@ -3242,6 +3242,14 @@ async def run_migrations(conn):
     else:
         await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN gate_acknowledged BOOLEAN DEFAULT false")
 
+    # Queue-level fail-closed colour/material preference. Existing rows also
+    # take the safe default: unverifiable jobs wait rather than dispatching with
+    # an unknown material or colour.
+    if is_sqlite():
+        await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN force_color_match BOOLEAN DEFAULT 1")
+    else:
+        await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN force_color_match BOOLEAN DEFAULT true")
+
     # Migration: Add is_autologin column to oidc_providers (#1589). Postgres
     # rejects ``DEFAULT 0`` for BOOLEAN columns.
     if is_sqlite():

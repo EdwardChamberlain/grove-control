@@ -25,7 +25,7 @@ class TestIsBusyOnly:
         assert PrintScheduler._is_busy_only("Waiting for filament: Printer1 (needs PLA)") is False
 
     def test_no_matching_color(self):
-        assert PrintScheduler._is_busy_only("No matching material/color. Waiting on PLA (Blue)") is False
+        assert PrintScheduler._is_busy_only("No matching material/colour. Waiting on PLA (Blue)") is False
 
     def test_no_available_printers(self):
         assert PrintScheduler._is_busy_only("No available P1S printers configured") is False

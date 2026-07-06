@@ -4352,7 +4352,7 @@ export default {
     insufficientFilamentMessage: 'Some assigned spools have less filament remaining than this print needs:',
     insufficientFilamentLine: '{{printer}} - {{slot}}: needs {{required}}g, remaining {{remaining}}g',
     printAnyway: 'Print anyway',
-    forceColorMatch: 'Force color match',
+    forceColorMatch: 'Match Colour and Material',
     staggerPrinterStarts: 'Stagger printer starts',
     staggerGroupSize: 'Group size',
     staggerInterval: 'Interval (min)',
@@ -4814,8 +4814,8 @@ export default {
       description: 'Automatically start prints when added to queue. When off, prints wait for manual dispatch.',
     },
     queueForceColorMatch: {
-      title: 'Force color match',
-      description: 'Refuse to dispatch onto a printer that does not have the exact filament type and color loaded. Off by default — without this, the queue uses model-only matching and may pick a printer with the wrong color loaded.',
+      title: 'Match Colour and Material',
+      description: 'Only dispatch to a printer with the selected material and exact colour loaded. Enabled by default; disable it to allow the closest colour within the same material.',
     },
     gcodeInjection: {
       title: 'G-code injection',

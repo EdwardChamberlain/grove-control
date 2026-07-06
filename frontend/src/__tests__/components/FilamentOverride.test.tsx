@@ -60,7 +60,7 @@ describe('FilamentOverride', () => {
       expect(screen.queryByText('Filament Override')).not.toBeInTheDocument();
     });
 
-    it('returns null when availableFilaments is empty', () => {
+    it('shows the sliced profile as the default when no alternatives are available', () => {
       render(
         <FilamentOverride
           filamentReqs={defaultFilamentReqs}
@@ -70,7 +70,10 @@ describe('FilamentOverride', () => {
         />
       );
 
-      expect(screen.queryByText('Filament Override')).not.toBeInTheDocument();
+      expect(screen.getByText('Filament Override')).toBeInTheDocument();
+      const select = screen.getByRole('combobox');
+      expect(select).toBeDisabled();
+      expect(select.querySelector('option[value=""]')?.textContent).toMatch(/Original: PLA/);
     });
 
     it('renders filament slot with type and grams', () => {

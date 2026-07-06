@@ -739,6 +739,7 @@ class TestLibraryAddToQueueAPI:
         queue_item_id = response.json()["added"][0]["queue_item_id"]
         item = await db_session.get(PrintQueueItem, queue_item_id, populate_existing=True)
         assert item is not None
+        assert item.force_color_match is True
         assert json.loads(item.filament_overrides) == [
             {"slot_id": 1, "type": "PETG", "color": "#0000FF", "force_color_match": True}
         ]
@@ -767,7 +768,10 @@ class TestLibraryAddToQueueAPI:
         queue_item_id = response.json()["added"][0]["queue_item_id"]
         item = await db_session.get(PrintQueueItem, queue_item_id, populate_existing=True)
         assert item is not None
-        assert item.filament_overrides is None
+        assert item.force_color_match is False
+        assert json.loads(item.filament_overrides) == [
+            {"slot_id": 1, "type": "PETG", "color": "#0000FF", "force_color_match": False}
+        ]
 
 
 class TestLibraryZipExtractAPI:

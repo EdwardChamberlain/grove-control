@@ -8,6 +8,7 @@ import {
   getGlobalTrayId,
   preferLowestSortKey,
   compareSortKeys,
+  canonicalFilamentType,
 } from '../utils/amsHelpers';
 import type { PrinterStatus } from '../api/client';
 
@@ -131,6 +132,13 @@ export function computeAmsMapping(
     if (req.nozzle_id != null && !ftsActive) {
       available = available.filter((f) => f.extruderId === req.nozzle_id);
     }
+
+    // Material is a hard boundary even when colour matching is disabled.
+    // Keep compatible subtypes in the same canonical family, but never let
+    // tray_info_idx or manual fallback map PLA to ABS (etc.).
+    available = available.filter(
+      (f) => canonicalFilamentType(f.type) === canonicalFilamentType(req.type),
+    );
 
     // Sort lowest-first when the preference is on. Inventory-tracked spools
     // sort before MQTT-only ones; see preferLowestSortKey for the rationale.

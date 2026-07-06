@@ -4316,7 +4316,7 @@ export default {
     insufficientFilamentMessage: 'Alguns dos carretéis atribuídos têm menos filamento restante do que o necessário para esta impressão:',
     insufficientFilamentLine: '{{printer}} - {{slot}}: necessário {{required}}g, restante {{remaining}}g',
     printAnyway: 'Imprimir mesmo assim',
-    forceColorMatch: 'Forçar correspondência de cor',
+    forceColorMatch: 'Corresponder cor e material',
     staggerPrinterStarts: 'Escalonar inícios',
     staggerGroupSize: 'Tamanho do grupo',
     staggerInterval: 'Intervalo (min)',
@@ -4778,8 +4778,8 @@ export default {
       description: 'Iniciar impressões automaticamente quando adicionadas à fila. Quando desativado, as impressões aguardam envio manual.',
     },
     queueForceColorMatch: {
-      title: 'Forçar correspondência de cor',
-      description: 'Recusa enviar para uma impressora que não tenha exatamente o tipo e cor de filamento carregados. Desativado por padrão — sem isto, a fila usa apenas correspondência por modelo e pode escolher uma impressora com a cor errada carregada.',
+      title: 'Corresponder cor e material',
+      description: 'Envia apenas para uma impressora com o material selecionado e a cor exata carregados. Ativado por padrão; desative para permitir a cor mais próxima do mesmo material.',
     },
     gcodeInjection: {
       title: 'Injeção de G-code',
