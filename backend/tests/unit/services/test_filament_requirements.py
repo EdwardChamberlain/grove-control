@@ -222,6 +222,20 @@ class TestBuildQueueFilamentOverrides:
             {"slot_id": 2, "type": "PETG", "color": "#000000", "force_color_match": True},
         ]
 
+    @pytest.mark.parametrize("invalid_value", [None, 0, 1, "false", "true", "", []])
+    def test_rejects_non_boolean_per_slot_preference(self, invalid_value):
+        overrides = [
+            {
+                "slot_id": 1,
+                "type": "PLA",
+                "color": "#00FF00",
+                "force_color_match": invalid_value,
+            }
+        ]
+
+        with pytest.raises(ValueError, match="force_color_match must be a boolean"):
+            build_queue_filament_overrides(self.requirements, overrides)
+
     def test_rejects_cross_material_override(self):
         overrides = [{"slot_id": 1, "type": "ABS", "color": "#FFFFFF"}]
 

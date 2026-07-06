@@ -1,5 +1,6 @@
 """Force-colour enforcement for queue items assigned to a specific printer."""
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -81,6 +82,18 @@ def test_unforced_mapping_never_crosses_material_family(scheduler):
 def test_missing_per_slot_flag_inherits_safe_queue_default(scheduler):
     item = _queue_item()
     item.filament_overrides = '[{"slot_id": 1, "type": "PLA", "color": "#FF0000"}]'
+
+    assert scheduler._get_force_color_overrides(item) == [
+        {"slot_id": 1, "type": "PLA", "color": "#FF0000", "force_color_match": True}
+    ]
+
+
+@pytest.mark.parametrize("invalid_value", [None, 0, 1, "false", "true", ""])
+def test_malformed_persisted_slot_flag_inherits_safe_queue_default(scheduler, invalid_value):
+    item = _queue_item()
+    item.filament_overrides = (
+        f'[{{"slot_id": 1, "type": "PLA", "color": "#FF0000", "force_color_match": {json.dumps(invalid_value)}}}]'
+    )
 
     assert scheduler._get_force_color_overrides(item) == [
         {"slot_id": 1, "type": "PLA", "color": "#FF0000", "force_color_match": True}

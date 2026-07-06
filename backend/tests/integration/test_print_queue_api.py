@@ -264,6 +264,36 @@ class TestPrintQueueAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    @pytest.mark.parametrize("invalid_value", [None, 0, "false"])
+    async def test_printer_targeted_job_rejects_non_boolean_slot_preference(
+        self, invalid_value, async_client: AsyncClient, printer_factory, archive_factory, tmp_path
+    ):
+        printer = await printer_factory()
+        source = tmp_path / "invalid-slot-preference.3mf"
+        _write_queue_3mf(source)
+        archive = await archive_factory(file_path=str(source))
+
+        response = await async_client.post(
+            "/api/v1/queue/",
+            json={
+                "printer_id": printer.id,
+                "archive_id": archive.id,
+                "filament_overrides": [
+                    {
+                        "slot_id": 1,
+                        "type": "PLA",
+                        "color": "#00FF00",
+                        "force_color_match": invalid_value,
+                    }
+                ],
+            },
+        )
+
+        assert response.status_code == 400
+        assert "force_color_match must be a boolean" in response.json()["detail"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_add_to_queue_with_manual_start(
         self, async_client: AsyncClient, printer_factory, archive_factory, db_session
     ):

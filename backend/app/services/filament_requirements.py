@@ -161,11 +161,15 @@ def build_queue_filament_overrides(
                 f"{sliced_type or 'unknown'} to {filament_type}"
             )
 
+        provided_force_color_match = provided.get("force_color_match", force_color_match)
+        if type(provided_force_color_match) is not bool:
+            raise ValueError(f"Filament slot {slot_id} force_color_match must be a boolean")
+
         entry = {
             "slot_id": slot_id,
             "type": filament_type,
             "color": color,
-            "force_color_match": provided.get("force_color_match", force_color_match),
+            "force_color_match": provided_force_color_match,
         }
         if provided.get("color_name"):
             entry["color_name"] = provided["color_name"]

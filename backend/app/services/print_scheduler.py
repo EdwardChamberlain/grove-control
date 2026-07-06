@@ -806,11 +806,18 @@ class PrintScheduler:
         if not isinstance(overrides, list):
             return []
         queue_default = getattr(item, "force_color_match", True) is not False
-        return [
-            {**override, "force_color_match": override.get("force_color_match", queue_default)}
-            for override in overrides
-            if isinstance(override, dict)
-        ]
+        normalized = []
+        for override in overrides:
+            if not isinstance(override, dict):
+                continue
+            slot_preference = override.get("force_color_match", queue_default)
+            # Legacy or externally-written rows may contain null/string/int
+            # values. Only a literal boolean is authoritative; malformed
+            # values inherit the queue-level safe default.
+            if type(slot_preference) is not bool:
+                slot_preference = queue_default
+            normalized.append({**override, "force_color_match": slot_preference})
+        return normalized
 
     @classmethod
     def _get_force_color_overrides(cls, item: PrintQueueItem) -> list[dict]:
