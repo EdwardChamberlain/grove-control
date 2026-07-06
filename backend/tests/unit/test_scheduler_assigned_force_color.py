@@ -13,6 +13,8 @@ def _queue_item(*, force_color_match: bool = True):
         id=17,
         printer_id=3,
         target_model=None,
+        target_location=None,
+        required_filament_types='["PLA"]',
         archive_id=11,
         library_file_id=None,
         scheduled_time=None,
@@ -110,6 +112,60 @@ async def test_model_unforced_job_accepts_same_material_without_exact_colour(moc
 
     assert printer_id == 3
     assert waiting_reason is None
+
+
+@pytest.mark.asyncio
+@patch("backend.app.services.print_scheduler.printer_manager")
+async def test_model_unforced_job_recomputes_cross_material_mapping(mock_pm, scheduler):
+    item = _queue_item(force_color_match=False)
+    item.printer_id = None
+    item.target_model = "P1S"
+    item.ams_mapping = "[2]"  # Client supplied a tray that contains ABS on the selected printer.
+    items_result, busy_result = _queue_results(item)
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[items_result, busy_result])
+    printer = SimpleNamespace(id=3, name="P1S")
+
+    with (
+        patch("backend.app.services.print_scheduler.async_session") as session_ctx,
+        patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
+        patch.object(scheduler, "_find_idle_printer_for_model", new=AsyncMock(return_value=(3, None))),
+        patch.object(scheduler, "_get_job_name", new=AsyncMock(return_value="Benchy")),
+        patch.object(scheduler, "_get_printer", new=AsyncMock(return_value=printer)),
+        patch.object(
+            scheduler,
+            "_ams_mapping_uses_compatible_materials",
+            return_value=False,
+        ) as mapping_is_safe,
+        patch.object(scheduler, "_compute_ams_mapping_for_printer", new=AsyncMock(return_value=[0])) as compute,
+        patch.object(scheduler, "_block_on_filament_deficit", new=AsyncMock(return_value=False)),
+        patch.object(scheduler, "_start_print", new=AsyncMock()) as start_print,
+        patch.object(scheduler, "_check_auto_drying", new=AsyncMock()),
+        patch(
+            "backend.app.services.print_scheduler.notification_service.on_queue_job_assigned",
+            new=AsyncMock(),
+        ),
+    ):
+        session_ctx.return_value.__aenter__ = AsyncMock(return_value=db)
+        session_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
+        await scheduler.check_queue()
+
+    mapping_is_safe.assert_called_once_with(
+        3,
+        "[2]",
+        [
+            {
+                "slot_id": 1,
+                "type": "PLA",
+                "color": "#FF0000",
+                "color_name": "Red",
+                "force_color_match": False,
+            }
+        ],
+    )
+    compute.assert_awaited_once_with(db, 3, item)
+    assert item.ams_mapping == "[0]"
+    start_print.assert_awaited_once_with(db, item)
 
 
 @pytest.mark.asyncio

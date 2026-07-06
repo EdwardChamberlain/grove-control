@@ -1,12 +1,12 @@
 import { useState, useMemo } from 'react';
 import { useQueryClient, useQueries } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import {
   Printer as PrinterIcon,
   Loader2,
   AlertCircle,
   AlertTriangle,
   Check,
-  Circle,
   RefreshCw,
   Wand2,
   Users,
@@ -24,6 +24,7 @@ import {
 import type { PrinterSelectorProps, AssignmentMode } from './types';
 import type { PrinterMappingResult, PerPrinterConfig } from '../../hooks/useMultiPrinterFilamentMapping';
 import type { FilamentRequirement, LoadedFilament } from '../../hooks/useFilamentMapping';
+import { FilamentProfileRow } from './FilamentProfileRow';
 
 interface PrinterSelectorWithMappingProps extends PrinterSelectorProps {
   /** Per-printer mapping results (only used when multiple printers selected) */
@@ -65,6 +66,7 @@ function InlineMappingEditor({
   filamentReqs: FilamentRequirement[];
   onUpdateConfig: (config: Partial<PerPrinterConfig>) => void;
 }) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -140,7 +142,7 @@ function InlineMappingEditor({
   return (
     <div className="mt-2 bg-bambu-dark rounded-lg p-3 space-y-2">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs text-bambu-gray">Custom slot mapping</span>
+        <span className="text-xs text-bambu-gray">{t('printModal.customPrinterMapping')}</span>
         <button
           type="button"
           onClick={handleRefresh}
@@ -153,55 +155,27 @@ function InlineMappingEditor({
       </div>
 
       {slotAssignments.map(({ req, loaded, status, isManual }, idx) => (
-        <div
-          key={idx}
-          className="grid items-center gap-2 text-xs"
-          style={{ gridTemplateColumns: '16px minmax(70px, 1fr) auto 2fr 16px' }}
-        >
-          <span title={`Required: ${req.type} - ${getColorName(req.color)}`}>
-            <Circle className="w-3 h-3" fill={req.color} stroke={req.color} />
-          </span>
-          <span className="text-white truncate">
-            {req.type} <span className="text-bambu-gray">({req.used_grams}g)</span>
-          </span>
-          <span className="text-bambu-gray">→</span>
-          <select
-            value={loaded?.globalTrayId ?? ''}
-            onChange={(e) => handleSlotChange(req.slot_id || 0, e.target.value)}
-            className={`flex-1 px-2 py-1 rounded border text-xs bg-bambu-dark-secondary focus:outline-none focus:ring-1 focus:ring-bambu-green ${
-              status === 'match'
-                ? 'border-bambu-green/50 text-bambu-green'
-                : status === 'type_only'
-                ? 'border-yellow-400/50 text-yellow-400'
-                : 'border-orange-400/50 text-orange-400'
-            } ${isManual ? 'ring-1 ring-blue-400/50' : ''}`}
-            title={isManual ? 'Manually selected' : 'Auto-matched'}
-          >
-            <option value="" className="bg-bambu-dark text-bambu-gray">
-              -- Select slot --
-            </option>
-            {filterFilamentsByNozzle(printerResult.loadedFilaments, req.nozzle_id)
-              .filter((filament) =>
-                canonicalFilamentType(filament.type) === canonicalFilamentType(req.type)
-              )
-              .map((f) => (
-              <option key={f.globalTrayId} value={f.globalTrayId} className="bg-bambu-dark text-white">
-                {f.label}: {f.traySubBrands || f.type} ({f.colorName})
-              </option>
-            ))}
-          </select>
-          {status === 'match' ? (
-            <Check className="w-3 h-3 text-bambu-green" />
-          ) : status === 'type_only' ? (
-            <span title="Same type, different color">
-              <AlertTriangle className="w-3 h-3 text-yellow-400" />
-            </span>
-          ) : (
-            <span title="Filament type not loaded">
-              <AlertTriangle className="w-3 h-3 text-orange-400" />
-            </span>
-          )}
-        </div>
+        <FilamentProfileRow
+          key={req.slot_id || idx}
+          requiredColor={req.color}
+          requiredLabel={req.type}
+          usedGrams={req.used_grams}
+          requiredTitle={`${req.type} - ${getColorName(req.color)}`}
+          value={loaded ? String(loaded.globalTrayId) : ''}
+          emptyLabel={t('printModal.selectFilamentSlot')}
+          options={filterFilamentsByNozzle(printerResult.loadedFilaments, req.nozzle_id)
+            .filter((filament) =>
+              canonicalFilamentType(filament.type) === canonicalFilamentType(req.type)
+            )
+            .map((filament) => ({
+              value: String(filament.globalTrayId),
+              label: `${filament.label}: ${filament.traySubBrands || filament.type} (${filament.colorName})`,
+            }))}
+          onChange={(value) => handleSlotChange(req.slot_id || 0, value)}
+          status={status}
+          isManual={isManual}
+          selectTitle={isManual ? t('printModal.manuallySelected') : t('printModal.automaticallyMatched')}
+        />
       ))}
     </div>
   );
@@ -232,6 +206,7 @@ export function PrinterSelector({
   onTargetLocationChange,
   slicedForModel,
 }: PrinterSelectorWithMappingProps) {
+  const { t } = useTranslation();
   // State for showing all printers vs only matching model
   const [showAllPrinters, setShowAllPrinters] = useState(false);
 
@@ -602,7 +577,7 @@ export function PrinterSelector({
                       onChange={(e) => handleOverrideToggle(printer.id, e.target.checked, e as unknown as React.MouseEvent)}
                       className="w-3.5 h-3.5 rounded border-bambu-gray/30 bg-bambu-dark-secondary text-bambu-green focus:ring-bambu-green focus:ring-offset-0"
                     />
-                    <span className="text-xs text-bambu-gray">Custom mapping</span>
+                    <span className="text-xs text-bambu-gray">{t('printModal.customPrinterMapping')}</span>
                   </label>
 
                   {/* Match status indicator */}

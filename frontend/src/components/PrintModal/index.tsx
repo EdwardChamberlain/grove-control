@@ -1,5 +1,5 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, AlertTriangle, Loader2, Pencil, Printer, X } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Loader2, Palette, Pencil, Printer, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { PrinterStatus, PrintQueueItemCreate, PrintQueueItemUpdate, SpoolAssignment } from '../../api/client';
@@ -190,17 +190,13 @@ export function PrintModal({
     return {};
   });
 
-  // Per-slot force color match flags. Missing values default to true so newly
-  // queued jobs cannot silently dispatch with the wrong colour.
-  const [forceColorMatch, setForceColorMatch] = useState<Record<number, boolean>>(() => {
-    if (mode === 'edit-queue-item' && queueItem?.filament_overrides) {
-      const flags: Record<number, boolean> = {};
-      for (const o of queueItem.filament_overrides) {
-        flags[o.slot_id] = o.force_color_match ?? queueItem.force_color_match ?? true;
-      }
-      return flags;
-    }
-    return {};
+  // Matching is a job-level choice. The API persists it per slot as well for
+  // backwards compatibility, but users should not have to manage repeated
+  // checkboxes for what is conceptually one dispatch policy.
+  const [forceColorMatch, setForceColorMatch] = useState(() => {
+    if (mode !== 'edit-queue-item' || !queueItem) return true;
+    if (typeof queueItem.force_color_match === 'boolean') return queueItem.force_color_match;
+    return queueItem.filament_overrides?.some((override) => override.force_color_match !== false) ?? true;
   });
 
   // Track initial values for clearing mappings on change (edit mode only)
@@ -496,7 +492,6 @@ export function PrintModal({
       // Don't clear on initial render in edit mode (values are initialized from queueItem)
       if (mode !== 'edit-queue-item' || prevTargetModel !== null) {
         setFilamentOverrides({});
-        setForceColorMatch({});
       }
     }
   }, [targetModel, selectedPlate, prevTargetModel, prevPlateForOverrides, mode]);
@@ -707,20 +702,18 @@ export function PrintModal({
       if (effectiveFilamentReqs?.filaments) {
         for (const req of effectiveFilamentReqs.filaments) {
           const userOverride = filamentOverrides[req.slot_id];
-          const isForceColor = forceColorMatch[req.slot_id] ?? true;
           const effectiveType = userOverride?.type ?? req.type;
           const effectiveColor = userOverride?.color ?? req.color;
 
-          // Include every known slot so an explicit unchecked value survives
-          // the API's safe force_color_match=true default.
-          entries.push({ slot_id: req.slot_id, type: effectiveType, color: effectiveColor, color_name: getColorName(effectiveColor), force_color_match: isForceColor });
+          // Include every known slot so the job-level policy is explicit and
+          // survives clients or API versions with different defaults.
+          entries.push({ slot_id: req.slot_id, type: effectiveType, color: effectiveColor, color_name: getColorName(effectiveColor), force_color_match: forceColorMatch });
         }
       } else {
         // Fallback: no filament requirements data — only include explicit user overrides
         for (const [slotId, { type, color }] of Object.entries(filamentOverrides)) {
           const id = parseInt(slotId, 10);
-          const isForceColor = forceColorMatch[id] ?? true;
-          entries.push({ slot_id: id, type, color, color_name: getColorName(color), force_color_match: isForceColor });
+          entries.push({ slot_id: id, type, color, color_name: getColorName(color), force_color_match: forceColorMatch });
         }
       }
 
@@ -753,9 +746,6 @@ export function PrintModal({
         };
       });
     };
-
-    const forceMatchFor = (overrides: typeof filamentOverridesArray) =>
-      overrides?.some((override) => override.force_color_match) ?? true;
 
     // Multi-plate auto-batch: when the user adds 2+ plates from one source in
     // a single create submission, pre-create a PrintBatch and pass its
@@ -808,7 +798,7 @@ export function PrintModal({
         // assigned printers. Multi-printer manual mappings become each job's
         // enforced profile rather than only an AMS slot hint.
         filament_overrides: printerOverrides,
-        force_color_match: forceMatchFor(printerOverrides),
+        force_color_match: forceColorMatch,
         // Use library_file_id for library files, archive_id for archives
         archive_id: isLibraryFile ? undefined : archiveId,
         library_file_id: isLibraryFile ? libraryFileId : undefined,
@@ -848,7 +838,7 @@ export function PrintModal({
               target_model: targetModel,
               target_location: targetLocation,
               filament_overrides: filamentOverridesArray || null,
-              force_color_match: filamentOverridesArray?.some((override) => override.force_color_match) ?? true,
+              force_color_match: forceColorMatch,
               require_previous_success: scheduleOptions.requirePreviousSuccess,
               auto_off_after: scheduleOptions.autoOffAfter,
               gcode_injection: scheduleOptions.gcodeInjection,
@@ -906,7 +896,7 @@ export function PrintModal({
                 target_model: null,
                 target_location: null,
                 filament_overrides: printerOverrides || null,
-                force_color_match: forceMatchFor(printerOverrides),
+                force_color_match: forceColorMatch,
                 require_previous_success: scheduleOptions.requirePreviousSuccess,
                 auto_off_after: scheduleOptions.autoOffAfter,
                 gcode_injection: scheduleOptions.gcodeInjection,
@@ -1146,6 +1136,27 @@ export function PrintModal({
               multiSelect={!isEditing}
             />
 
+            {/* One dispatch policy for the whole job. Filament rows select the
+                required profile; this control decides whether its colour must
+                match exactly. Material family is always enforced. */}
+            {!!effectiveFilamentReqs?.filaments?.length && !archiveDataMissing && (
+              <label className="flex items-start gap-3 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark p-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={forceColorMatch}
+                  onChange={(event) => setForceColorMatch(event.target.checked)}
+                  className="accent-bambu-green w-4 h-4 mt-0.5"
+                />
+                <Palette className="w-4 h-4 mt-0.5 text-bambu-gray flex-shrink-0" />
+                <span className="min-w-0">
+                  <span className="block text-sm text-white">{t('printModal.forceColorMatch')}</span>
+                  <span className="block text-xs text-bambu-gray mt-0.5">
+                    {t('printModal.forceColorMatchHint')}
+                  </span>
+                </span>
+              </label>
+            )}
+
             {/* Printer selection with per-printer mapping — hidden when printer is pre-selected via props */}
             {!initialSelectedPrinterIds?.length && (
               <PrinterSelector
@@ -1177,10 +1188,6 @@ export function PrintModal({
                 availableFilaments={availableFilaments ?? []}
                 overrides={filamentOverrides}
                 onChange={setFilamentOverrides}
-                forceColorMatch={forceColorMatch}
-                onForceColorMatchChange={(slotId, value) =>
-                  setForceColorMatch((prev) => ({ ...prev, [slotId]: value }))
-                }
               />
             )}
 
@@ -1220,10 +1227,6 @@ export function PrintModal({
                 defaultExpanded={!!initialSelectedPrinterIds?.length || (settings?.per_printer_mapping_expanded ?? false)}
                 currencySymbol={currencySymbol}
                 defaultCostPerKg={defaultCostPerKg}
-                forceColorMatch={forceColorMatch}
-                onForceColorMatchChange={(slotId, value) =>
-                  setForceColorMatch((prev) => ({ ...prev, [slotId]: value }))
-                }
               />
             )}
 

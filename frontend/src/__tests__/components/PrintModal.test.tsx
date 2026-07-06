@@ -706,7 +706,7 @@ describe('PrintModal', () => {
       });
     });
 
-    it('persists each custom mapping as that printer job profile and hides other materials', async () => {
+    it('persists each custom mapping and exposes one match policy for all selected printers', async () => {
       const capturedBodies: Array<Record<string, unknown>> = [];
       server.use(
         http.get('/api/v1/archives/:id/filament-requirements', () =>
@@ -757,7 +757,7 @@ describe('PrintModal', () => {
 
       await user.click((await screen.findByText('X1 Carbon')).closest('button')!);
       await user.click((await screen.findByText('P1S')).closest('button')!);
-      const customMapping = await screen.findAllByLabelText('Custom mapping');
+      const customMapping = await screen.findAllByLabelText('Customise this printer');
       await user.click(customMapping[0]);
       const mappingSelect = await waitFor(() => {
         const select = screen
@@ -768,18 +768,23 @@ describe('PrintModal', () => {
       });
       expect(mappingSelect.querySelector('option[value="2"]')).not.toBeInTheDocument();
       await user.selectOptions(mappingSelect, '1');
+      const matchPolicy = screen.getByLabelText(/Match Colour and Material/i);
+      expect(matchPolicy).toBeChecked();
+      await user.click(matchPolicy);
       await user.click(screen.getByRole('button', { name: /^print$/i }));
 
       await waitFor(() => expect(capturedBodies).toHaveLength(2));
       const printerOne = capturedBodies.find((body) => body.printer_id === 1);
       const printerTwo = capturedBodies.find((body) => body.printer_id === 2);
       expect(printerOne?.filament_overrides).toEqual([
-        expect.objectContaining({ type: 'PLA', color: '#FFFFFF', force_color_match: true }),
+        expect.objectContaining({ type: 'PLA', color: '#FFFFFF', force_color_match: false }),
       ]);
+      expect(printerOne?.force_color_match).toBe(false);
       expect(printerOne?.ams_mapping).toEqual([1]);
       expect(printerTwo?.filament_overrides).toEqual([
-        expect.objectContaining({ type: 'PLA', color: '#000000', force_color_match: true }),
+        expect.objectContaining({ type: 'PLA', color: '#000000', force_color_match: false }),
       ]);
+      expect(printerTwo?.force_color_match).toBe(false);
     });
   });
 

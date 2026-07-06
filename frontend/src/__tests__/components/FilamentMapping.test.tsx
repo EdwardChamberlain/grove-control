@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { screen, waitFor, cleanup, fireEvent } from '@testing-library/react';
+import { screen, waitFor, cleanup } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { render } from '../utils';
 import { server } from '../mocks/server';
@@ -106,88 +106,6 @@ describe('FilamentMapping — FTS routing', () => {
 
     // AMS-0 slot 0 (global tray ID 0) is NOT currently fed into any track —
     // FTS routes it on demand, so no badge.
-  });
-
-  it('renders the per-slot force-color-match checkbox in printer mode (#1717)', async () => {
-    // Specific-printer assignment used to render FilamentMapping with no
-    // force-color-match UI even though the dispatcher honours the flag. Pin
-    // that the checkbox is now mounted and bubbles toggle events up.
-    server.use(
-      http.get(
-        '/api/v1/printers/:id/status',
-        () =>
-          HttpResponse.json(
-            createStatus({
-              fila_switch: null,
-              ams_extruder_map: { '0': 1 },  // AMS 0 → left nozzle, matching the requirement
-            }),
-          ),
-      ),
-    );
-
-    const onForceColorMatchChange = vi.fn();
-    render(
-      <FilamentMapping
-        printerId={1}
-        filamentReqs={mockFilamentReqs}
-        manualMappings={{}}
-        onManualMappingChange={() => {}}
-        currencySymbol="$"
-        defaultCostPerKg={0}
-        defaultExpanded
-        forceColorMatch={{}}
-        onForceColorMatchChange={onForceColorMatchChange}
-      />,
-    );
-
-    const checkbox = await waitFor(() => {
-      const cb = screen.getByLabelText(/Match Colour and Material/i) as HTMLInputElement;
-      expect(cb).toBeInTheDocument();
-      return cb;
-    });
-    expect(checkbox.checked).toBe(true);
-
-    fireEvent.click(checkbox);
-    expect(onForceColorMatchChange).toHaveBeenCalledTimes(1);
-    expect(onForceColorMatchChange).toHaveBeenCalledWith(1, false);
-  });
-
-  it('omits the force-color-match checkbox when no handler is provided', async () => {
-    // The checkbox is only meaningful when the caller is wired to persist the
-    // toggle; absent a handler we must not render dead UI.
-    server.use(
-      http.get(
-        '/api/v1/printers/:id/status',
-        () =>
-          HttpResponse.json(
-            createStatus({
-              fila_switch: null,
-              ams_extruder_map: { '0': 1 },
-            }),
-          ),
-      ),
-    );
-
-    render(
-      <FilamentMapping
-        printerId={1}
-        filamentReqs={mockFilamentReqs}
-        manualMappings={{}}
-        onManualMappingChange={() => {}}
-        currencySymbol="$"
-        defaultCostPerKg={0}
-        defaultExpanded
-      />,
-    );
-
-    // Wait for the panel to finish mounting (Re-read button only renders once
-    // printer status has loaded and the expanded view is open) before asserting
-    // the checkbox is absent — otherwise the queryByLabelText would pass
-    // trivially during the loading window.
-    await waitFor(() => {
-      expect(screen.getByText(/Re-read/i)).toBeInTheDocument();
-    });
-    expect(screen.queryByLabelText(/Match Colour and Material/i)).not.toBeInTheDocument();
   });
 
   it('offers cross-extruder slots in the dropdown without FTS (#1722)', async () => {

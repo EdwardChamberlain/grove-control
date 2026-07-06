@@ -44,7 +44,7 @@ describe('FilamentOverride', () => {
         />
       );
 
-      expect(screen.queryByText('Filament Override')).not.toBeInTheDocument();
+      expect(screen.queryByText('Filament Requirements')).not.toBeInTheDocument();
     });
 
     it('returns null when filaments array is empty', () => {
@@ -57,7 +57,7 @@ describe('FilamentOverride', () => {
         />
       );
 
-      expect(screen.queryByText('Filament Override')).not.toBeInTheDocument();
+      expect(screen.queryByText('Filament Requirements')).not.toBeInTheDocument();
     });
 
     it('shows the sliced profile as the default when no alternatives are available', () => {
@@ -70,7 +70,7 @@ describe('FilamentOverride', () => {
         />
       );
 
-      expect(screen.getByText('Filament Override')).toBeInTheDocument();
+      expect(screen.getByText('Filament Requirements')).toBeInTheDocument();
       const select = screen.getByRole('combobox');
       expect(select).toBeDisabled();
       expect(select.querySelector('option[value=""]')?.textContent).toMatch(/Original: PLA/);
@@ -88,8 +88,8 @@ describe('FilamentOverride', () => {
 
       // The grams text "(25g)" is in a nested span within the type label
       expect(screen.getByText('(25g)')).toBeInTheDocument();
-      // "Filament Override" heading confirms the section renders
-      expect(screen.getByText('Filament Override')).toBeInTheDocument();
+      // The requirements heading confirms the section renders
+      expect(screen.getByText('Filament Requirements')).toBeInTheDocument();
     });
 
     it('renders override dropdown for each slot', () => {

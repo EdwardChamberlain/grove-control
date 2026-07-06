@@ -474,9 +474,17 @@ class PrintScheduler:
                             db=db,
                         )
 
-                        # Compute AMS mapping for the assigned printer if not already set
-                        # This is critical for model-based jobs where mapping wasn't computed upfront
-                        if force_overrides or not item.ams_mapping:
+                        # A model-targeted item can carry an AMS mapping supplied before
+                        # its eventual printer is known. Validate that mapping against the
+                        # selected printer just as we do for printer-targeted jobs: opting
+                        # out of exact colour matching must never permit a different
+                        # material family.
+                        mapping_is_material_safe = self._ams_mapping_uses_compatible_materials(
+                            printer_id,
+                            item.ams_mapping,
+                            filament_overrides or [],
+                        )
+                        if force_overrides or not item.ams_mapping or not mapping_is_material_safe:
                             computed_mapping = await self._compute_ams_mapping_for_printer(db, printer_id, item)
                             missing_mapping_colors = self._get_missing_force_mapping_slots(
                                 computed_mapping, force_overrides or []
