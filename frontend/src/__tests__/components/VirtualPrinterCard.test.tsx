@@ -53,7 +53,7 @@ const createMockPrinter = (overrides: Partial<VirtualPrinterConfig> = {}): Virtu
   serial: '00M00A391800001',
   target_printer_id: null,
   auto_dispatch: true,
-  queue_force_color_match: false,
+  queue_force_color_match: true,
   bind_ip: null,
   remote_interface_ip: null,
   position: 0,
@@ -147,7 +147,7 @@ describe('VirtualPrinterCard - auto-dispatch toggle', () => {
 // #1188 — VP queue mode now pins per-slot type+color so the scheduler refuses
 // to dispatch onto a printer with the wrong filament loaded. The toggle is
 // mode-gated to print_queue (mirroring the auto-dispatch toggle), defaults
-// off (preserves pre-fix behaviour for upgraders), and the click both flips
+// on for safe dispatch, and the click both flips
 // the local state and POSTs the new value to the backend.
 describe('VirtualPrinterCard - force color match toggle (#1188)', () => {
   beforeEach(() => {
@@ -160,7 +160,7 @@ describe('VirtualPrinterCard - force color match toggle (#1188)', () => {
     render(<VirtualPrinterCard printer={printer} models={models} />);
 
     await waitFor(() => {
-      expect(screen.getByText('Force color match')).toBeInTheDocument();
+      expect(screen.getByText('Match Colour and Material')).toBeInTheDocument();
     });
   });
 
@@ -171,7 +171,7 @@ describe('VirtualPrinterCard - force color match toggle (#1188)', () => {
     await waitFor(() => {
       expect(screen.getByText('Test VP')).toBeInTheDocument();
     });
-    expect(screen.queryByText('Force color match')).not.toBeInTheDocument();
+    expect(screen.queryByText('Match Colour and Material')).not.toBeInTheDocument();
   });
 
   it('does not render force-color-match toggle when mode is proxy', async () => {
@@ -181,18 +181,18 @@ describe('VirtualPrinterCard - force color match toggle (#1188)', () => {
     await waitFor(() => {
       expect(screen.getByText('Test VP')).toBeInTheDocument();
     });
-    expect(screen.queryByText('Force color match')).not.toBeInTheDocument();
+    expect(screen.queryByText('Match Colour and Material')).not.toBeInTheDocument();
   });
 
-  it('force-color-match toggle defaults off (not green) — preserves pre-fix behaviour', async () => {
+  it('force-color-match toggle renders disabled when explicitly turned off', async () => {
     const printer = createMockPrinter({ mode: 'queue', queue_force_color_match: false });
     render(<VirtualPrinterCard printer={printer} models={models} />);
 
     await waitFor(() => {
-      expect(screen.getByText('Force color match')).toBeInTheDocument();
+      expect(screen.getByText('Match Colour and Material')).toBeInTheDocument();
     });
 
-    const title = screen.getByText('Force color match');
+    const title = screen.getByText('Match Colour and Material');
     const section = title.closest('.flex.items-center.justify-between');
     expect(section).toBeTruthy();
     const toggleButton = section!.querySelector('button');
@@ -205,10 +205,10 @@ describe('VirtualPrinterCard - force color match toggle (#1188)', () => {
     render(<VirtualPrinterCard printer={printer} models={models} />);
 
     await waitFor(() => {
-      expect(screen.getByText('Force color match')).toBeInTheDocument();
+      expect(screen.getByText('Match Colour and Material')).toBeInTheDocument();
     });
 
-    const title = screen.getByText('Force color match');
+    const title = screen.getByText('Match Colour and Material');
     const section = title.closest('.flex.items-center.justify-between');
     const toggleButton = section!.querySelector('button');
     expect(toggleButton!.className).toContain('bg-bambu-green');
@@ -224,10 +224,10 @@ describe('VirtualPrinterCard - force color match toggle (#1188)', () => {
     render(<VirtualPrinterCard printer={printer} models={models} />);
 
     await waitFor(() => {
-      expect(screen.getByText('Force color match')).toBeInTheDocument();
+      expect(screen.getByText('Match Colour and Material')).toBeInTheDocument();
     });
 
-    const title = screen.getByText('Force color match');
+    const title = screen.getByText('Match Colour and Material');
     const section = title.closest('.flex.items-center.justify-between');
     const toggleButton = section!.querySelector('button');
 

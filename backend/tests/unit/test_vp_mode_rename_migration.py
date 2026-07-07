@@ -149,3 +149,38 @@ async def test_migration_is_idempotent(engine):
     async with engine.connect() as conn:
         result = await conn.execute(text("SELECT mode FROM virtual_printers WHERE id = 1"))
         assert result.scalar() == "archive"
+
+
+@pytest.mark.asyncio
+async def test_force_colour_default_backfills_existing_vps_once(engine):
+    """Legacy false values become safe on upgrade, while a subsequent user
+    opt-out survives later startup migration passes."""
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO virtual_printers "
+                "(id, name, enabled, mode, serial_suffix, position, queue_force_color_match) "
+                "VALUES (1, 'Legacy', 0, 'queue', '391800001', 1, 0)"
+            )
+        )
+
+    async with engine.begin() as conn:
+        await run_migrations(conn)
+
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            text(
+                "SELECT queue_force_color_match, queue_force_color_match_safe_default_migrated "
+                "FROM virtual_printers WHERE id = 1"
+            )
+        )
+        assert tuple(result.one()) == (1, 1)
+
+    # This is now an explicit post-upgrade opt-out and must not be reset.
+    async with engine.begin() as conn:
+        await conn.execute(text("UPDATE virtual_printers SET queue_force_color_match = 0 WHERE id = 1"))
+        await run_migrations(conn)
+
+    async with engine.connect() as conn:
+        result = await conn.execute(text("SELECT queue_force_color_match FROM virtual_printers WHERE id = 1"))
+        assert result.scalar() == 0

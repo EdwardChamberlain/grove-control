@@ -314,6 +314,7 @@ class AddToQueueRequest(BaseModel):
     """Schema for adding library files to the print queue."""
 
     file_ids: list[int] = Field(..., min_length=1)
+    force_color_match: bool = True
 
 
 class AddToQueueResult(BaseModel):

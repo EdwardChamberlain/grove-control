@@ -30,6 +30,7 @@ from backend.app.services.bambu_ftp import (
     with_ftp_retry,
 )
 from backend.app.services.filament_deficit import compute_deficit_for_queue_item
+from backend.app.services.filament_requirements import canonical_filament_type
 from backend.app.services.notification_service import notification_service
 from backend.app.services.printer_manager import (
     printer_manager,
@@ -50,23 +51,6 @@ logger = logging.getLogger(__name__)
 # state value did change. SLICING is included because some firmwares park
 # briefly in SLICING between PREPARE and RUNNING while parsing the g-code.
 _ACTIVE_PRINT_STATES: frozenset[str] = frozenset({"PREPARE", "SLICING", "RUNNING", "PAUSE"})
-
-# Filament type equivalence groups — types within the same group are
-# interchangeable on the printer side (Bambu Lab firmware treats them as compatible).
-_FILAMENT_TYPE_GROUPS: list[list[str]] = [
-    ["PA-CF", "PA12-CF", "PAHT-CF"],
-]
-_FILAMENT_EQUIV_MAP: dict[str, str] = {}
-for _group in _FILAMENT_TYPE_GROUPS:
-    _canonical = _group[0].upper()
-    for _t in _group:
-        _FILAMENT_EQUIV_MAP[_t.upper()] = _canonical
-
-
-def _canonical_filament_type(ftype: str) -> str:
-    """Return canonical type for equivalence matching."""
-    upper = ftype.upper()
-    return _FILAMENT_EQUIV_MAP.get(upper, upper)
 
 
 class PrintScheduler:
@@ -219,6 +203,17 @@ class PrintScheduler:
                     skip_reasons["manual_start"] = skip_reasons.get("manual_start", 0) + 1
                     continue
 
+                # A safe-default job without readable per-slot metadata cannot
+                # prove material/colour compatibility. Keep it pending rather
+                # than silently degrading to the legacy type-only mapper.
+                match_preference = getattr(item, "force_color_match", None)
+                if type(match_preference) is bool and not self._has_verifiable_filament_metadata(item):
+                    waiting_reason = "Material/colour metadata unavailable; cannot verify a safe filament match"
+                    if item.waiting_reason != waiting_reason:
+                        item.waiting_reason = waiting_reason
+                        await db.commit()
+                    continue
+
                 if item.printer_id:
                     # Specific printer assignment (existing behavior)
                     if item.printer_id in busy_printers:
@@ -300,9 +295,59 @@ class PrintScheduler:
                             )
                             continue
 
+                    # Printer-targeted jobs must honour the same exact-colour
+                    # contract as model-assigned jobs. Without this gate the
+                    # normal AMS mapper can fall back to a same-material,
+                    # different-colour tray and silently print the wrong colour.
+                    filament_overrides = self._get_filament_overrides(item)
+                    required_materials = sorted(
+                        {override["type"] for override in filament_overrides if override.get("type")}
+                    )
+                    if required_materials:
+                        missing_materials = self._get_missing_filament_types(item.printer_id, required_materials)
+                        if missing_materials:
+                            waiting_reason = f"No matching material. Waiting on {', '.join(missing_materials)}"
+                            if item.waiting_reason != waiting_reason:
+                                item.waiting_reason = waiting_reason
+                                await db.commit()
+                            continue
+
+                    force_overrides = [override for override in filament_overrides if override.get("force_color_match")]
+                    if force_overrides:
+                        missing_colors = self._get_missing_force_color_slots(item.printer_id, force_overrides)
+                        if missing_colors:
+                            waiting_reason = self._force_color_waiting_reason(missing_colors)
+                            if item.waiting_reason != waiting_reason:
+                                item.waiting_reason = waiting_reason
+                                await db.commit()
+                            logger.info(
+                                "Queue item %s blocked on printer %s by force-colour mismatch: %s",
+                                item.id,
+                                item.printer_id,
+                                missing_colors,
+                            )
+                            continue
+                        if item.waiting_reason:
+                            item.waiting_reason = None
+                            await db.commit()
+
                     # Compute AMS mapping if not already set
-                    if not item.ams_mapping:
+                    # Recompute forced jobs even when an older/manual mapping
+                    # exists so the selected tray also uses the required colour.
+                    mapping_is_material_safe = self._ams_mapping_uses_compatible_materials(
+                        item.printer_id,
+                        item.ams_mapping,
+                        filament_overrides,
+                    )
+                    if force_overrides or not item.ams_mapping or not mapping_is_material_safe:
                         computed_mapping = await self._compute_ams_mapping_for_printer(db, item.printer_id, item)
+                        missing_mapping_colors = self._get_missing_force_mapping_slots(
+                            computed_mapping, force_overrides
+                        )
+                        if missing_mapping_colors:
+                            item.waiting_reason = self._force_color_waiting_reason(missing_mapping_colors)
+                            await db.commit()
+                            continue
                         if computed_mapping:
                             item.ams_mapping = json.dumps(computed_mapping)
                             logger.info(
@@ -349,12 +394,12 @@ class PrintScheduler:
                             pass  # Ignore malformed filament types; treat as no constraint
 
                     # Parse filament overrides if present
-                    filament_overrides = None
-                    if item.filament_overrides:
-                        try:
-                            filament_overrides = json.loads(item.filament_overrides)
-                        except json.JSONDecodeError:
-                            pass
+                    filament_overrides = self._get_filament_overrides(item) or None
+                    force_overrides = [
+                        override
+                        for override in (filament_overrides or [])
+                        if isinstance(override, dict) and override.get("force_color_match")
+                    ]
 
                     # If overrides exist, use override types for validation instead
                     effective_types = required_types
@@ -429,10 +474,25 @@ class PrintScheduler:
                             db=db,
                         )
 
-                        # Compute AMS mapping for the assigned printer if not already set
-                        # This is critical for model-based jobs where mapping wasn't computed upfront
-                        if not item.ams_mapping:
+                        # A model-targeted item can carry an AMS mapping supplied before
+                        # its eventual printer is known. Validate that mapping against the
+                        # selected printer just as we do for printer-targeted jobs: opting
+                        # out of exact colour matching must never permit a different
+                        # material family.
+                        mapping_is_material_safe = self._ams_mapping_uses_compatible_materials(
+                            printer_id,
+                            item.ams_mapping,
+                            filament_overrides or [],
+                        )
+                        if force_overrides or not item.ams_mapping or not mapping_is_material_safe:
                             computed_mapping = await self._compute_ams_mapping_for_printer(db, printer_id, item)
+                            missing_mapping_colors = self._get_missing_force_mapping_slots(
+                                computed_mapping, force_overrides or []
+                            )
+                            if missing_mapping_colors:
+                                item.waiting_reason = self._force_color_waiting_reason(missing_mapping_colors)
+                                await db.commit()
+                                continue
                             if computed_mapping:
                                 item.ams_mapping = json.dumps(computed_mapping)
                                 logger.info(
@@ -622,13 +682,11 @@ class PrintScheduler:
             # If preference-only overrides exist, rank by color matches (existing behaviour)
             if pref_overrides:
                 color_matches = self._count_override_color_matches(printer.id, pref_overrides)
-                if color_matches > 0:
-                    candidates.append((printer.id, color_matches))
-                else:
-                    override_colors = [f"{o.get('type', '?')} ({o.get('color', '?')})" for o in pref_overrides]
-                    printers_missing_filament.append((printer.name, override_colors))
-                    logger.debug("Skipping printer %s (%s) - no matching override colors", printer.id, printer.name)
-                    continue
+                # An unchecked match option makes colour a preference, not a
+                # dispatch requirement. Material compatibility was validated
+                # above; keep every eligible printer and rank exact colours
+                # ahead of other same-material shades.
+                candidates.append((printer.id, color_matches))
             elif force_overrides:
                 # Passed all force checks — immediately eligible (no preference ordering needed)
                 return printer.id, None
@@ -652,7 +710,7 @@ class PrintScheduler:
                 # the user knows the job will start automatically once that printer is free.
                 if not printers_busy:
                     all_missing = sorted({c for _, cols in printers_missing_filament for c in cols})
-                    return None, f"No matching material/color. Waiting on {', '.join(all_missing)}"
+                    return None, f"No matching material/colour. Waiting on {', '.join(all_missing)}"
                 # else: fall through — printers_busy will be appended below
             else:
                 names_and_missing = [
@@ -699,21 +757,126 @@ class PrintScheduler:
                 tray_color = tray.get("tray_color", "")
                 if tray_type:
                     color_norm = tray_color.replace("#", "").lower()[:6]
-                    loaded.add((_canonical_filament_type(tray_type), color_norm))
+                    loaded.add((tray_type.strip().upper(), color_norm))
         for vt in status.raw_data.get("vt_tray") or []:
             vt_type = vt.get("tray_type")
             if vt_type:
                 color_norm = (vt.get("tray_color", "") or "").replace("#", "").lower()[:6]
-                loaded.add((_canonical_filament_type(vt_type), color_norm))
+                loaded.add((vt_type.strip().upper(), color_norm))
 
         missing = []
         for o in force_overrides:
-            o_type = _canonical_filament_type(o.get("type") or "")
+            o_type = (o.get("type") or "").strip().upper()
             o_color = (o.get("color") or "").replace("#", "").lower()[:6]
             if (o_type, o_color) not in loaded:
                 color_label = o.get("color_name") or o.get("color", "?")
                 missing.append(f"{o_type} ({color_label})")
         return missing
+
+    @staticmethod
+    def _has_verifiable_filament_metadata(item: PrintQueueItem) -> bool:
+        """Return whether a safe-default job has usable per-slot requirements."""
+        if not item.filament_overrides:
+            return False
+        try:
+            overrides = json.loads(item.filament_overrides)
+        except (json.JSONDecodeError, TypeError):
+            return False
+        return (
+            bool(overrides)
+            and isinstance(overrides, list)
+            and all(
+                isinstance(override, dict)
+                and isinstance(override.get("slot_id"), int)
+                and bool(override.get("type"))
+                and bool(override.get("color"))
+                for override in overrides
+            )
+        )
+
+    @staticmethod
+    def _get_filament_overrides(item: PrintQueueItem) -> list[dict]:
+        """Parse valid per-slot filament requirements persisted on a queue item."""
+        if not item.filament_overrides:
+            return []
+        try:
+            overrides = json.loads(item.filament_overrides)
+        except (json.JSONDecodeError, TypeError):
+            return []
+        if not isinstance(overrides, list):
+            return []
+        queue_default = getattr(item, "force_color_match", True) is not False
+        normalized = []
+        for override in overrides:
+            if not isinstance(override, dict):
+                continue
+            slot_preference = override.get("force_color_match", queue_default)
+            # Legacy or externally-written rows may contain null/string/int
+            # values. Only a literal boolean is authoritative; malformed
+            # values inherit the queue-level safe default.
+            if type(slot_preference) is not bool:
+                slot_preference = queue_default
+            normalized.append({**override, "force_color_match": slot_preference})
+        return normalized
+
+    @classmethod
+    def _get_force_color_overrides(cls, item: PrintQueueItem) -> list[dict]:
+        """Parse the exact-colour requirements persisted on a queue item."""
+        return [override for override in cls._get_filament_overrides(item) if override.get("force_color_match")]
+
+    def _ams_mapping_uses_compatible_materials(
+        self,
+        printer_id: int,
+        raw_mapping: str | None,
+        overrides: list[dict],
+    ) -> bool:
+        """Validate a client-supplied AMS mapping against required material families."""
+        if not overrides:
+            return True
+        try:
+            mapping = json.loads(raw_mapping) if raw_mapping else None
+        except (json.JSONDecodeError, TypeError):
+            return False
+        if not isinstance(mapping, list):
+            return False
+
+        status = printer_manager.get_status(printer_id)
+        if not status:
+            return False
+        loaded_by_id = {
+            filament.get("global_tray_id"): filament.get("type", "")
+            for filament in self._build_loaded_filaments(status)
+        }
+        for override in overrides:
+            slot_id = override.get("slot_id")
+            if not isinstance(slot_id, int) or slot_id <= 0 or slot_id > len(mapping):
+                return False
+            loaded_type = loaded_by_id.get(mapping[slot_id - 1])
+            if not loaded_type or canonical_filament_type(loaded_type) != canonical_filament_type(
+                override.get("type") or ""
+            ):
+                return False
+        return True
+
+    @staticmethod
+    def _get_missing_force_mapping_slots(mapping: list[int] | None, force_overrides: list[dict]) -> list[str]:
+        """Return forced slots that did not receive an exact-colour AMS mapping."""
+        missing = []
+        for override in force_overrides:
+            slot_id = override.get("slot_id")
+            mapped_tray = (
+                mapping[slot_id - 1] if isinstance(slot_id, int) and mapping and slot_id <= len(mapping) else -1
+            )
+            if mapped_tray < 0:
+                missing.append(
+                    f"{(override.get('type') or '').strip().upper()} "
+                    f"({override.get('color_name') or override.get('color', '?')})"
+                )
+        return missing
+
+    @staticmethod
+    def _force_color_waiting_reason(missing_colors: list[str]) -> str:
+        return f"No matching material/colour. Waiting on {', '.join(sorted(set(missing_colors)))}"
 
     def _get_missing_filament_types(self, printer_id: int, required_types: list[str]) -> list[str]:
         """Get the list of required filament types that are not loaded on the printer.
@@ -740,18 +903,18 @@ class PrintScheduler:
                 for tray in ams_unit.get("tray", []):
                     tray_type = tray.get("tray_type")
                     if tray_type:
-                        loaded_types.add(_canonical_filament_type(tray_type))
+                        loaded_types.add(canonical_filament_type(tray_type))
 
         # Check external spool(s) (virtual tray, stored in raw_data["vt_tray"] as list)
         for vt in status.raw_data.get("vt_tray") or []:
             vt_type = vt.get("tray_type")
             if vt_type:
-                loaded_types.add(_canonical_filament_type(vt_type))
+                loaded_types.add(canonical_filament_type(vt_type))
 
         # Find which required types are missing (using canonical type for equivalence)
         missing = []
         for req_type in required_types:
-            if _canonical_filament_type(req_type) not in loaded_types:
+            if canonical_filament_type(req_type) not in loaded_types:
                 missing.append(req_type)
 
         return missing
@@ -813,35 +976,39 @@ class PrintScheduler:
         # Get filament requirements from source file
         filament_reqs = await self._get_filament_requirements(db, item)
         if not filament_reqs:
-            # When the 3MF can't be read but force-color overrides are present, build a
-            # direct mapping from the overrides so the printer uses the correct AMS slot.
+            # When the 3MF can't be read but persisted overrides are present,
+            # build a direct mapping from them. Exact-colour flags stay strict;
+            # preference-only entries still enforce the material family.
             if item.filament_overrides:
                 try:
-                    overrides = json.loads(item.filament_overrides)
-                    force_overrides = [o for o in overrides if o.get("force_color_match")]
-                    if force_overrides:
+                    overrides = self._get_filament_overrides(item)
+                    if overrides:
                         logger.info(
                             "Queue item %s: No filament reqs from 3MF; building AMS mapping from %d "
-                            "force-color override(s)",
+                            "persisted override(s)",
                             item.id,
-                            len(force_overrides),
+                            len(overrides),
                         )
-                        return self._build_override_direct_mapping(force_overrides, status)
+                        return self._build_override_direct_mapping(overrides, status)
                 except (json.JSONDecodeError, KeyError, TypeError) as e:
-                    logger.warning("Queue item %s: Force-color fallback mapping failed: %s", item.id, e)
+                    logger.warning("Queue item %s: Override fallback mapping failed: %s", item.id, e)
             logger.debug("No filament requirements found for queue item %s", item.id)
             return None
 
-        # Apply filament overrides if present
+        # Apply filament overrides if present. Forced slots are passed into the
+        # matcher so they cannot degrade to similar-colour or type-only trays.
+        force_color_slot_ids: set[int] = set()
         if item.filament_overrides:
             try:
-                overrides = json.loads(item.filament_overrides)
+                overrides = self._get_filament_overrides(item)
                 override_map = {o["slot_id"]: o for o in overrides}
                 for req in filament_reqs:
                     if req["slot_id"] in override_map:
                         override = override_map[req["slot_id"]]
                         req["type"] = override["type"]
                         req["color"] = override["color"]
+                        if override.get("force_color_match"):
+                            force_color_slot_ids.add(req["slot_id"])
                         # Clear tray_info_idx so matching uses type+color instead of
                         # the original 3MF's tray_info_idx (which would match the old filament)
                         req["tray_info_idx"] = ""
@@ -883,18 +1050,22 @@ class PrintScheduler:
             inventory_remain_overrides = await self._build_inventory_remain_overrides(db, printer_id, loaded_filaments)
 
         # Compute mapping: match required filaments to available slots
+        match_kwargs = {"strict_color_slot_ids": force_color_slot_ids} if force_color_slot_ids else {}
         return self._match_filaments_to_slots(
-            filament_reqs, loaded_filaments, prefer_lowest, inventory_remain_overrides
+            filament_reqs,
+            loaded_filaments,
+            prefer_lowest,
+            inventory_remain_overrides,
+            **match_kwargs,
         )
 
-    def _build_override_direct_mapping(self, force_overrides: list[dict], status) -> list[int] | None:
-        """Build an AMS mapping directly from force-color overrides without a 3MF.
+    def _build_override_direct_mapping(self, overrides: list[dict], status) -> list[int] | None:
+        """Build an AMS mapping directly from persisted overrides without a 3MF.
 
         Used when ``_get_filament_requirements`` returns nothing (e.g. the 3MF's
-        slice_info is missing or unreadable) but ``force_color_match`` overrides
-        are present. Each override's ``slot_id``, ``type``, and ``color`` are
-        treated as the filament requirement for that slot and matched against the
-        current AMS state of the printer.
+        slice_info is missing or unreadable) but overrides are present. Each
+        override's ``slot_id``, ``type``, and ``color`` is treated as the
+        filament requirement for that slot.
 
         Returns the same format as ``_match_filaments_to_slots``, or None when
         the AMS has no loaded filaments.
@@ -910,9 +1081,15 @@ class PrintScheduler:
                 "color": o.get("color", ""),
                 "tray_info_idx": "",
             }
-            for o in force_overrides
+            for o in overrides
         ]
-        return self._match_filaments_to_slots(reqs, loaded)
+        return self._match_filaments_to_slots(
+            reqs,
+            loaded,
+            strict_color_slot_ids={
+                o["slot_id"] for o in overrides if o.get("force_color_match") and isinstance(o.get("slot_id"), int)
+            },
+        )
 
     async def _get_filament_requirements(self, db: AsyncSession, item: PrintQueueItem) -> list[dict] | None:
         """Resolve the queue item's source 3MF and parse the per-slot
@@ -1194,6 +1371,7 @@ class PrintScheduler:
         loaded: list[dict],
         prefer_lowest: bool = False,
         inventory_remain_overrides: dict[int, float] | None = None,
+        strict_color_slot_ids: set[int] | None = None,
     ) -> list[int] | None:
         """Match required filaments to loaded filaments and build AMS mapping.
 
@@ -1223,6 +1401,7 @@ class PrintScheduler:
             req_type = (req.get("type") or "").upper()
             req_color = req.get("color", "")
             req_tray_info_idx = req.get("tray_info_idx", "")
+            strict_color = req.get("slot_id") in (strict_color_slot_ids or set())
 
             # Find best match: unique tray_info_idx > exact color > similar color > type-only
             idx_match = None
@@ -1239,6 +1418,20 @@ class PrintScheduler:
             req_nozzle_id = req.get("nozzle_id")
             if req_nozzle_id is not None:
                 available = [f for f in available if f.get("extruder_id") == req_nozzle_id]
+
+            # Material is always a hard boundary. Disabling colour matching may
+            # select a different shade or compatible subtype, but must never
+            # map PLA to ABS (or any other unrelated material). Forced slots
+            # additionally require the exact material type string.
+            available = [
+                f
+                for f in available
+                if (
+                    (f.get("type") or "").upper() == req_type
+                    if strict_color
+                    else canonical_filament_type(f.get("type") or "") == canonical_filament_type(req_type)
+                )
+            ]
 
             # Sort by remaining filament (ascending) so lowest-remain spool wins .find().
             # Inventory-tracked spools sort before MQTT-only ones (#1508); see
@@ -1276,7 +1469,7 @@ class PrintScheduler:
                 )
 
             # Check if tray_info_idx is unique among available trays
-            if req_tray_info_idx:
+            if req_tray_info_idx and not strict_color:
                 idx_matches = [f for f in available if f.get("tray_info_idx") == req_tray_info_idx]
                 if len(idx_matches) == 1:
                     # Unique tray_info_idx - use it as definitive match
@@ -1308,10 +1501,6 @@ class PrintScheduler:
             # If no idx_match yet, do standard type/color matching on all available trays
             if not idx_match and not exact_match and not similar_match and not type_only_match:
                 for f in available:
-                    f_type = (f.get("type") or "").upper()
-                    if _canonical_filament_type(f_type) != _canonical_filament_type(req_type):
-                        continue
-
                     # Type matches - check color
                     f_color = f.get("color", "")
                     if self._normalize_color_for_compare(f_color) == self._normalize_color_for_compare(req_color):
@@ -1323,7 +1512,9 @@ class PrintScheduler:
                     elif not type_only_match:
                         type_only_match = f
 
-            match = idx_match or exact_match or similar_match or type_only_match
+            # Forced slots are exact by definition: never degrade to a similar
+            # or type-only colour, even when the material itself matches.
+            match = exact_match if strict_color else idx_match or exact_match or similar_match or type_only_match
             if match:
                 used_tray_ids.add(match["global_tray_id"])
                 comparisons.append({"slot_id": req.get("slot_id", 0), "global_tray_id": match["global_tray_id"]})

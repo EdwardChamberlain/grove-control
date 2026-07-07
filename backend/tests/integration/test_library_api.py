@@ -1,6 +1,7 @@
 """Integration tests for Library API endpoints."""
 
 import io
+import json
 import tempfile
 import zipfile
 from pathlib import Path
@@ -713,6 +714,64 @@ class TestLibraryAddToQueueAPI:
         assert len(result["added"]) == 0
         assert len(result["errors"]) == 1
         assert "sliced" in result["errors"][0]["error"].lower()
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_bulk_queue_defaults_force_color_match(
+        self, async_client: AsyncClient, db_session, library_file_factory, tmp_path
+    ):
+        from backend.app.models.print_queue import PrintQueueItem
+
+        source = tmp_path / "bulk-default.gcode.3mf"
+        with zipfile.ZipFile(source, "w") as zf:
+            zf.writestr(
+                "Metadata/slice_info.config",
+                '<config><plate><filament id="1" type="PETG" color="#0000FF" used_g="5"/></plate></config>',
+            )
+        library_file = await library_file_factory(filename=source.name, file_path=str(source))
+
+        response = await async_client.post(
+            "/api/v1/library/files/add-to-queue",
+            json={"file_ids": [library_file.id]},
+        )
+
+        assert response.status_code == 200
+        queue_item_id = response.json()["added"][0]["queue_item_id"]
+        item = await db_session.get(PrintQueueItem, queue_item_id, populate_existing=True)
+        assert item is not None
+        assert item.force_color_match is True
+        assert json.loads(item.filament_overrides) == [
+            {"slot_id": 1, "type": "PETG", "color": "#0000FF", "force_color_match": True}
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_bulk_queue_allows_explicit_color_opt_out(
+        self, async_client: AsyncClient, db_session, library_file_factory, tmp_path
+    ):
+        from backend.app.models.print_queue import PrintQueueItem
+
+        source = tmp_path / "bulk-opt-out.gcode.3mf"
+        with zipfile.ZipFile(source, "w") as zf:
+            zf.writestr(
+                "Metadata/slice_info.config",
+                '<config><plate><filament id="1" type="PETG" color="#0000FF" used_g="5"/></plate></config>',
+            )
+        library_file = await library_file_factory(filename=source.name, file_path=str(source))
+
+        response = await async_client.post(
+            "/api/v1/library/files/add-to-queue",
+            json={"file_ids": [library_file.id], "force_color_match": False},
+        )
+
+        assert response.status_code == 200
+        queue_item_id = response.json()["added"][0]["queue_item_id"]
+        item = await db_session.get(PrintQueueItem, queue_item_id, populate_existing=True)
+        assert item is not None
+        assert item.force_color_match is False
+        assert json.loads(item.filament_overrides) == [
+            {"slot_id": 1, "type": "PETG", "color": "#0000FF", "force_color_match": False}
+        ]
 
 
 class TestLibraryZipExtractAPI:

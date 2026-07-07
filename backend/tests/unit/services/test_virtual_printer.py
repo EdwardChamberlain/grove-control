@@ -66,6 +66,13 @@ class TestVirtualPrinterInstance:
         assert instance.model == "C11"
         assert instance.access_code == "12345678"
         assert instance.serial_suffix == "391800001"
+        assert instance.queue_force_color_match is True
+
+    def test_create_request_defaults_force_color_match_on(self):
+        """New virtual printers should protect queued jobs by default."""
+        from backend.app.api.routes.virtual_printers import VirtualPrinterCreate
+
+        assert VirtualPrinterCreate().queue_force_color_match is True
 
     def test_instance_serial_property(self, instance):
         """Verify serial is generated from model prefix + suffix."""
@@ -970,9 +977,8 @@ class TestVirtualPrinterInstance:
         """#1188: VP queue-mode used to create PrintQueueItems with no
         filament fields, so the scheduler fell through to model-only matching
         and dispatched onto whatever printer was free regardless of loaded
-        colour. ``required_filament_types`` is populated unconditionally
-        (cheap, helps the scheduler validate type even without
-        ``force_color_match``) — pin that contract here."""
+        colour. Material metadata remains populated even when exact colour
+        matching is disabled so dispatch can never cross material families."""
         from backend.app.services.virtual_printer.manager import VirtualPrinterInstance
 
         added_items = []
@@ -993,7 +999,7 @@ class TestVirtualPrinterInstance:
             access_code="12345678",
             serial_suffix="391800021",
             auto_dispatch=True,
-            queue_force_color_match=False,  # off → only required_filament_types
+            queue_force_color_match=False,
             base_dir=tmp_path,
             session_factory=mock_session_factory,
         )
@@ -1033,8 +1039,12 @@ class TestVirtualPrinterInstance:
         # Type-only fallback always populated. Sorted, deduped, no zero-use ABS.
         assert queue_item.required_filament_types is not None
         assert json.loads(queue_item.required_filament_types) == ["PETG", "PLA"]
-        # Setting off → no force_color_match overrides leaked.
-        assert queue_item.filament_overrides is None
+        # Setting off keeps the material/colour metadata but marks colour as
+        # a preference rather than an exact dispatch requirement.
+        assert json.loads(queue_item.filament_overrides) == [
+            {"slot_id": 1, "type": "PLA", "color": "#FFFFFF", "force_color_match": False},
+            {"slot_id": 2, "type": "PETG", "color": "#000000", "force_color_match": False},
+        ]
 
     @pytest.mark.asyncio
     async def test_add_to_print_queue_force_color_match_writes_overrides(self, tmp_path):
@@ -1111,8 +1121,8 @@ class TestVirtualPrinterInstance:
     async def test_add_to_print_queue_force_color_match_skips_when_3mf_unparseable(self, tmp_path):
         """A malformed or fake-bytes 3MF must not crash the upload path —
         we just write the queue item with no filament fields and let the
-        scheduler fall back to model-only matching (the pre-#1188 default).
-        Regression guard for the existing fake-bytes happy-path tests."""
+        scheduler keep the safe-default job pending until its material can be
+        verified. Regression guard for the existing fake-bytes upload path."""
         from backend.app.services.virtual_printer.manager import VirtualPrinterInstance
 
         added_items = []
@@ -1161,10 +1171,11 @@ class TestVirtualPrinterInstance:
 
         assert len(added_items) == 1
         queue_item = added_items[0]
-        # No filament data extractable → both fields stay None (graceful
-        # fallback to model-only scheduling).
+        # No filament data extractable → both fields stay None; the persisted
+        # queue-level flag makes the scheduler fail closed.
         assert queue_item.required_filament_types is None
         assert queue_item.filament_overrides is None
+        assert queue_item.force_color_match is True
 
     # ========================================================================
     # Tests for archive_name_source setting (#1152)
@@ -2224,7 +2235,7 @@ class TestVirtualPrinterManager:
             "target_printer_id": None,
             "auto_dispatch": True,
             "tailscale_disabled": True,  # Opt-in default (#1070 UX fix)
-            "queue_force_color_match": False,  # default — must be explicit so MagicMock truthiness doesn't trip the change detector
+            "queue_force_color_match": True,  # safe default — explicit so MagicMock truthiness doesn't trip change detection
             "gcode_injection": False,  # same reason as above
             "position": 0,
         }

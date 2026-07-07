@@ -64,6 +64,10 @@ from backend.app.schemas.library import (
 )
 from backend.app.schemas.slicer import SliceRequest, SliceResponse
 from backend.app.services.archive import ThreeMFParser
+from backend.app.services.filament_requirements import (
+    build_queue_filament_overrides,
+    extract_filament_requirements,
+)
 from backend.app.services.plate_thumbnail import inject_plate_thumbnails_if_missing
 from backend.app.services.stl_thumbnail import MIN_USABLE_STL_BYTES, generate_stl_thumbnail
 from backend.app.utils.filename import InvalidFilenameError, validate_print_filename
@@ -2566,12 +2570,19 @@ async def add_files_to_queue(
                 continue
 
             # Create queue item referencing library file (archive created at print start)
+            requirements = extract_filament_requirements(file_path)
+            overrides = build_queue_filament_overrides(
+                requirements,
+                force_color_match=request.force_color_match,
+            )
             max_position += 1
             queue_item = PrintQueueItem(
                 printer_id=None,  # Unassigned
                 library_file_id=file_id,
                 position=max_position,
                 status="pending",
+                filament_overrides=json.dumps(overrides) if overrides else None,
+                force_color_match=request.force_color_match,
             )
             db.add(queue_item)
 

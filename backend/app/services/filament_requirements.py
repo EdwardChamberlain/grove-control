@@ -24,6 +24,17 @@ from backend.app.utils.threemf_tools import extract_nozzle_mapping_from_3mf
 
 logger = logging.getLogger(__name__)
 
+_FILAMENT_TYPE_GROUPS: tuple[tuple[str, ...], ...] = (("PA-CF", "PA12-CF", "PAHT-CF"),)
+_FILAMENT_EQUIV_MAP = {
+    filament_type.upper(): group[0].upper() for group in _FILAMENT_TYPE_GROUPS for filament_type in group
+}
+
+
+def canonical_filament_type(filament_type: str) -> str:
+    """Return the material-family identifier used for safe substitutions."""
+    upper = filament_type.strip().upper()
+    return _FILAMENT_EQUIV_MAP.get(upper, upper)
+
 
 def extract_filament_requirements(file_path: Path, plate_id: int | None = None) -> list[dict]:
     """Parse `[{slot_id, type, color, tray_info_idx, used_grams, nozzle_id?}]` from a 3MF.
@@ -100,6 +111,71 @@ def extract_filament_requirements(file_path: Path, plate_id: int | None = None) 
         return []
 
     return filaments
+
+
+def build_queue_filament_overrides(
+    requirements: list[dict],
+    provided_overrides: list[dict] | None = None,
+    *,
+    force_color_match: bool = True,
+) -> list[dict]:
+    """Merge source requirements with client overrides for queue persistence.
+
+    Exact colour matching is the safe default. Clients may opt out globally
+    with ``force_color_match=False`` or per slot by explicitly providing
+    ``force_color_match: false``. Explicit per-slot values always win.
+    """
+    provided_by_slot = {
+        override.get("slot_id"): override
+        for override in (provided_overrides or [])
+        if isinstance(override, dict) and isinstance(override.get("slot_id"), int)
+    }
+    requirement_by_slot = {
+        requirement.get("slot_id"): requirement
+        for requirement in requirements
+        if isinstance(requirement, dict) and isinstance(requirement.get("slot_id"), int)
+    }
+
+    if provided_by_slot and not requirement_by_slot:
+        raise ValueError("Cannot override filament mapping without sliced material metadata")
+
+    unknown_slots = sorted(set(provided_by_slot) - set(requirement_by_slot))
+    if unknown_slots:
+        raise ValueError(f"Cannot override unknown sliced filament slot(s): {', '.join(map(str, unknown_slots))}")
+
+    resolved: list[dict] = []
+    for slot_id in sorted(set(requirement_by_slot) | set(provided_by_slot)):
+        requirement = requirement_by_slot.get(slot_id, {})
+        provided = provided_by_slot.get(slot_id, {})
+        filament_type = provided.get("type", requirement.get("type", ""))
+        color = provided.get("color", requirement.get("color", ""))
+        if not filament_type or not color:
+            continue
+
+        sliced_type = requirement.get("type", "")
+        if provided and (
+            not sliced_type or canonical_filament_type(filament_type) != canonical_filament_type(sliced_type)
+        ):
+            raise ValueError(
+                f"Filament slot {slot_id} cannot change material family from "
+                f"{sliced_type or 'unknown'} to {filament_type}"
+            )
+
+        provided_force_color_match = provided.get("force_color_match", force_color_match)
+        if type(provided_force_color_match) is not bool:
+            raise ValueError(f"Filament slot {slot_id} force_color_match must be a boolean")
+
+        entry = {
+            "slot_id": slot_id,
+            "type": filament_type,
+            "color": color,
+            "force_color_match": provided_force_color_match,
+        }
+        if provided.get("color_name"):
+            entry["color_name"] = provided["color_name"]
+        resolved.append(entry)
+
+    return resolved
 
 
 def _collect_filaments(parent: ET.Element, into: list[dict]) -> None:

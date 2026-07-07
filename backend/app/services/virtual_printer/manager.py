@@ -155,7 +155,7 @@ class VirtualPrinterInstance:
         target_printer_serial: str = "",
         target_printer_id: int | None = None,
         auto_dispatch: bool = True,
-        queue_force_color_match: bool = False,
+        queue_force_color_match: bool = True,
         gcode_injection: bool = False,
         bind_ip: str = "",
         remote_interface_ip: str = "",
@@ -699,7 +699,10 @@ class VirtualPrinterInstance:
             from backend.app.api.routes.settings import get_setting
             from backend.app.models.print_queue import PrintQueueItem
             from backend.app.services.archive import ArchiveService
-            from backend.app.services.filament_requirements import extract_filament_requirements
+            from backend.app.services.filament_requirements import (
+                build_queue_filament_overrides,
+                extract_filament_requirements,
+            )
 
             async with self._session_factory() as db:
                 name_source = await get_setting(db, "virtual_printer_archive_name_source")
@@ -830,10 +833,10 @@ class VirtualPrinterInstance:
                     # the `extract_filament_requirements(path, plate_id)` filter
                     # returns just the plate's filaments. required_filament_types
                     # is populated unconditionally — it's cheap, lets the
-                    # scheduler reject obvious mis-matches even without
-                    # force_color_match. filament_overrides only carries
-                    # force_color_match=True when the per-VP setting is on, so
-                    # upgraders keep the old behaviour by default.
+                    # scheduler reject material mismatches even when exact
+                    # colour matching is disabled. filament_overrides always
+                    # carries requirements; its per-slot flag controls whether
+                    # colour is mandatory or only preferred.
                     queue_item_ids: list[int] = []
                     for offset, plate_id in enumerate(plate_ids, start=1):
                         required_filament_types_json: str | None = None
@@ -843,19 +846,12 @@ class VirtualPrinterInstance:
                             types = sorted({r["type"] for r in requirements if r.get("type")})
                             if types:
                                 required_filament_types_json = json.dumps(types)
-                            if self.queue_force_color_match:
-                                overrides = [
-                                    {
-                                        "slot_id": r["slot_id"],
-                                        "type": r.get("type", ""),
-                                        "color": r.get("color", ""),
-                                        "force_color_match": True,
-                                    }
-                                    for r in requirements
-                                    if r.get("type") and r.get("color")
-                                ]
-                                if overrides:
-                                    filament_overrides_json = json.dumps(overrides)
+                            overrides = build_queue_filament_overrides(
+                                requirements,
+                                force_color_match=self.queue_force_color_match,
+                            )
+                            if overrides:
+                                filament_overrides_json = json.dumps(overrides)
 
                         queue_item = PrintQueueItem(
                             printer_id=self.target_printer_id,
@@ -867,6 +863,7 @@ class VirtualPrinterInstance:
                             manual_start=not self.auto_dispatch,
                             required_filament_types=required_filament_types_json,
                             filament_overrides=filament_overrides_json,
+                            force_color_match=self.queue_force_color_match,
                             bed_levelling=bed_levelling,
                             flow_cali=flow_cali,
                             vibration_cali=vibration_cali,

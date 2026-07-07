@@ -426,6 +426,25 @@ async def _api_keys_column_exists(conn, column_name: str) -> bool:
     return result.scalar_one_or_none() is not None
 
 
+async def _virtual_printers_column_exists(conn, column_name: str) -> bool:
+    """Return whether ``virtual_printers`` contains ``column_name``.
+
+    The safe colour-default migration uses a marker column so its data
+    backfill runs exactly once. Re-running that UPDATE on every startup would
+    overwrite users who explicitly disable matching after upgrading.
+    """
+    from sqlalchemy import text
+
+    if is_sqlite():
+        result = await conn.execute(text("PRAGMA table_info(virtual_printers)"))
+        return any(row[1] == column_name for row in result)
+    result = await conn.execute(
+        text("SELECT 1 FROM information_schema.columns WHERE table_name = 'virtual_printers' AND column_name = :col"),
+        {"col": column_name},
+    )
+    return result.scalar_one_or_none() is not None
+
+
 async def _migrate_normalize_printer_ids(conn) -> None:
     from sqlalchemy import text
 
@@ -968,15 +987,49 @@ async def run_migrations(conn):
         )
 
     # Migration: Add queue_force_color_match column to virtual_printers (#1188).
-    # Opt-in flag: when true, VP queue-mode uploads pin the per-slot type+color
+    # When true, VP queue-mode uploads pin the per-slot type+color
     # from the 3MF onto the queue item's filament_overrides so the scheduler
     # refuses to dispatch onto a printer with the wrong filament loaded.
-    # Default false to preserve current behaviour for upgraders.
+    # Default true so newly-created configurations are safe by default; users
+    # can still explicitly disable the setting.
     if is_sqlite():
-        await _safe_execute(conn, "ALTER TABLE virtual_printers ADD COLUMN queue_force_color_match BOOLEAN DEFAULT 0")
+        await _safe_execute(conn, "ALTER TABLE virtual_printers ADD COLUMN queue_force_color_match BOOLEAN DEFAULT 1")
     else:
         await _safe_execute(
-            conn, "ALTER TABLE virtual_printers ADD COLUMN queue_force_color_match BOOLEAN DEFAULT FALSE"
+            conn, "ALTER TABLE virtual_printers ADD COLUMN queue_force_color_match BOOLEAN DEFAULT TRUE"
+        )
+
+    # Forward migration for installations that already ran the original
+    # DEFAULT FALSE migration. A marker column gates the backfill so a later,
+    # explicit user opt-out is not reset on every application startup.
+    safe_default_marker = "queue_force_color_match_safe_default_migrated"
+    safe_default_already_migrated = await _virtual_printers_column_exists(conn, safe_default_marker)
+    if not safe_default_already_migrated:
+        if is_sqlite():
+            await _safe_execute(
+                conn,
+                f"ALTER TABLE virtual_printers ADD COLUMN {safe_default_marker} BOOLEAN DEFAULT 0",
+            )
+            async with conn.begin_nested():
+                await conn.execute(
+                    text(f"UPDATE virtual_printers SET queue_force_color_match = 1, {safe_default_marker} = 1")
+                )
+        else:
+            await _safe_execute(
+                conn,
+                f"ALTER TABLE virtual_printers ADD COLUMN {safe_default_marker} BOOLEAN DEFAULT FALSE",
+            )
+            async with conn.begin_nested():
+                await conn.execute(
+                    text(f"UPDATE virtual_printers SET queue_force_color_match = TRUE, {safe_default_marker} = TRUE")
+                )
+
+    # PostgreSQL can update the existing column default in place. SQLite
+    # cannot, so the ORM's Python default covers future inserts there.
+    if not is_sqlite():
+        await _safe_execute(
+            conn,
+            "ALTER TABLE virtual_printers ALTER COLUMN queue_force_color_match SET DEFAULT TRUE",
         )
 
     # Per-VP opt-in for auto-print G-code injection (#1516). Default false so
@@ -3240,6 +3293,14 @@ async def run_migrations(conn):
         await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN gate_acknowledged BOOLEAN DEFAULT 0")
     else:
         await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN gate_acknowledged BOOLEAN DEFAULT false")
+
+    # Queue-level fail-closed colour/material preference. Existing rows also
+    # take the safe default: unverifiable jobs wait rather than dispatching with
+    # an unknown material or colour.
+    if is_sqlite():
+        await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN force_color_match BOOLEAN DEFAULT 1")
+    else:
+        await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN force_color_match BOOLEAN DEFAULT true")
 
     # Migration: Add is_autologin column to oidc_providers (#1589). Postgres
     # rejects ``DEFAULT 0`` for BOOLEAN columns.

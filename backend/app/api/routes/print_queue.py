@@ -2,11 +2,9 @@
 
 import json
 import logging
-import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-import defusedxml.ElementTree as ET
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +34,10 @@ from backend.app.schemas.print_queue import (
     PrintQueueReorder,
 )
 from backend.app.services.filament_deficit import compute_deficit_for_queue_item
+from backend.app.services.filament_requirements import (
+    build_queue_filament_overrides,
+    extract_filament_requirements,
+)
 from backend.app.services.notification_service import notification_service
 from backend.app.utils.printer_models import normalize_printer_model, normalize_printer_model_id
 from backend.app.utils.threemf_tools import (
@@ -47,67 +49,6 @@ from backend.app.utils.threemf_tools import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/queue", tags=["queue"])
-
-
-def _extract_filament_types_from_3mf(file_path: Path, plate_id: int | None = None) -> list[str]:
-    """Extract unique filament types from a 3MF file.
-
-    Args:
-        file_path: Path to the 3MF file
-        plate_id: Optional plate index to filter for (for multi-plate files)
-
-    Returns:
-        List of unique filament types (e.g., ["PLA", "PETG"])
-    """
-    types: set[str] = set()
-
-    try:
-        with zipfile.ZipFile(file_path, "r") as zf:
-            if "Metadata/slice_info.config" not in zf.namelist():
-                return []
-
-            content = zf.read("Metadata/slice_info.config").decode()
-            root = ET.fromstring(content)
-
-            if plate_id is not None:
-                # Find the plate element with matching index
-                for plate_elem in root.findall(".//plate"):
-                    plate_index = None
-                    for meta in plate_elem.findall("metadata"):
-                        if meta.get("key") == "index":
-                            try:
-                                plate_index = int(meta.get("value", "0"))
-                            except ValueError:
-                                pass  # Skip plate with unparseable index
-                            break
-
-                    if plate_index == plate_id:
-                        for filament_elem in plate_elem.findall("filament"):
-                            filament_type = filament_elem.get("type", "")
-                            used_g = filament_elem.get("used_g", "0")
-                            try:
-                                used_grams = float(used_g)
-                            except (ValueError, TypeError):
-                                used_grams = 0
-                            if used_grams > 0 and filament_type:
-                                types.add(filament_type)
-                        break
-            else:
-                # No plate_id specified - extract all filaments with used_g > 0
-                for filament_elem in root.findall(".//filament"):
-                    filament_type = filament_elem.get("type", "")
-                    used_g = filament_elem.get("used_g", "0")
-                    try:
-                        used_grams = float(used_g)
-                    except (ValueError, TypeError):
-                        used_grams = 0
-                    if used_grams > 0 and filament_type:
-                        types.add(filament_type)
-
-    except Exception as e:
-        logger.warning("Failed to extract filament types from %s: %s", file_path, e)
-
-    return sorted(types)
 
 
 # Local alias kept so existing call sites stay compact; the implementation lives
@@ -168,6 +109,7 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
         "target_location": item.target_location,
         "required_filament_types": required_filament_types_parsed,
         "filament_overrides": filament_overrides_parsed,
+        "force_color_match": bool(item.force_color_match),
         "waiting_reason": item.waiting_reason,
         "archive_id": item.archive_id,
         "library_file_id": item.library_file_id,
@@ -448,29 +390,45 @@ async def add_to_queue(
         except InvalidFilenameError as e:
             raise HTTPException(400, str(e)) from e
 
+    # Resolve the source once for both default force-colour overrides and
+    # model-based material validation.
+    file_path = None
+    if archive:
+        archive_path = Path(archive.file_path)
+        file_path = (
+            archive_path if archive_path.is_absolute() else settings.base_dir / archive_path
+        )  # SEC-PATH-OK: archive.file_path is DB-stored and internally generated; legacy rows may be absolute
+    elif library_file:
+        library_path = Path(library_file.file_path)
+        file_path = (
+            library_path if library_path.is_absolute() else settings.base_dir / library_path
+        )  # SEC-PATH-OK: library_file.file_path is DB-stored and internally generated; external-library rows may be absolute
+
+    requirements = extract_filament_requirements(file_path, data.plate_id) if file_path and file_path.exists() else []
+
     # Extract filament types for model-based assignment (used by scheduler for validation)
     required_filament_types = None
     if target_model_norm:
-        # Get file path from archive or library file
-        file_path = None
-        if archive:
-            file_path = settings.base_dir / archive.file_path
-        elif library_file:
-            lib_path = Path(library_file.file_path)
-            file_path = lib_path if lib_path.is_absolute() else settings.base_dir / library_file.file_path
+        filament_types = sorted({requirement["type"] for requirement in requirements if requirement.get("type")})
+        if filament_types:
+            required_filament_types = json.dumps(filament_types)
+            logger.info("Extracted filament types for model-based queue: %s", filament_types)
 
-        if file_path and file_path.exists():
-            filament_types = _extract_filament_types_from_3mf(file_path, data.plate_id)
-            if filament_types:
-                required_filament_types = json.dumps(filament_types)
-                logger.info("Extracted filament types for model-based queue: %s", filament_types)
+    try:
+        resolved_overrides = build_queue_filament_overrides(
+            requirements,
+            data.filament_overrides,
+            force_color_match=data.force_color_match,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    filament_overrides_json = json.dumps(resolved_overrides) if resolved_overrides else None
 
-    # If filament overrides are provided, update required_filament_types to match override types
-    filament_overrides_json = None
-    if data.filament_overrides and target_model_norm:
-        filament_overrides_json = json.dumps(data.filament_overrides)
+    # Model-based assignment additionally uses override types while selecting
+    # a compatible printer.
+    if resolved_overrides and target_model_norm:
         # Update required_filament_types from overrides so scheduler validates against overridden types
-        override_types = sorted({o["type"] for o in data.filament_overrides if "type" in o})
+        override_types = sorted({o["type"] for o in resolved_overrides if "type" in o})
         if override_types:
             # Merge with existing types (overrides may only cover some slots)
             existing_types = set(json.loads(required_filament_types)) if required_filament_types else set()
@@ -618,6 +576,7 @@ async def add_to_queue(
             target_location=data.target_location,
             required_filament_types=required_filament_types,
             filament_overrides=filament_overrides_json,
+            force_color_match=data.force_color_match,
             archive_id=data.archive_id,
             library_file_id=data.library_file_id,
             scheduled_time=data.scheduled_time,
@@ -1081,11 +1040,76 @@ async def update_queue_item(
     if "ams_mapping" in update_data:
         update_data["ams_mapping"] = json.dumps(update_data["ams_mapping"]) if update_data["ams_mapping"] else None
 
+    async def _queue_source_path() -> Path | None:
+        if item.archive_id:
+            archive_result = await db.execute(select(PrintArchive).where(PrintArchive.id == item.archive_id))
+            archive = archive_result.scalar_one_or_none()
+            if archive:
+                archive_path = Path(archive.file_path)
+                return (
+                    archive_path if archive_path.is_absolute() else settings.base_dir / archive_path
+                )  # SEC-PATH-OK: archive.file_path is DB-stored and internally generated; legacy rows may be absolute
+        elif item.library_file_id:
+            library_result = await db.execute(select(LibraryFile).where(LibraryFile.id == item.library_file_id))
+            library_file = library_result.scalar_one_or_none()
+            if library_file:
+                library_path = Path(library_file.file_path)
+                return (
+                    library_path if library_path.is_absolute() else settings.base_dir / library_path
+                )  # SEC-PATH-OK: library_file.file_path is DB-stored and may refer to configured external libraries
+        return None
+
+    async def _resolved_filament_overrides(provided_overrides: list[dict] | None) -> list[dict]:
+        source_path = await _queue_source_path()
+        plate_id = update_data.get("plate_id", item.plate_id)
+        requirements = (
+            extract_filament_requirements(source_path, plate_id) if source_path and source_path.exists() else []
+        )
+        return build_queue_filament_overrides(
+            requirements,
+            provided_overrides,
+            force_color_match=update_data.get("force_color_match", item.force_color_match),
+        )
+
+    # A plate change points at a different sliced filament set. If the client
+    # did not provide explicit overrides, rebuild them from the new plate so the
+    # scheduler does not enforce the previous plate's colour requirements.
+    if "plate_id" in update_data and "filament_overrides" not in update_data:
+        try:
+            resolved_overrides = await _resolved_filament_overrides(None)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        update_data["filament_overrides"] = json.dumps(resolved_overrides) if resolved_overrides else None
+
+    # A queue-level toggle is an explicit all-slot preference. Keep the
+    # persisted per-slot flags in sync even when the client omits the mapping
+    # payload (for example a direct PATCH from an API client).
+    if "force_color_match" in update_data and "filament_overrides" not in update_data and item.filament_overrides:
+        try:
+            current_overrides = json.loads(item.filament_overrides)
+        except (json.JSONDecodeError, TypeError) as e:
+            raise HTTPException(status_code=400, detail="Existing filament metadata is invalid") from e
+        if not isinstance(current_overrides, list):
+            raise HTTPException(status_code=400, detail="Existing filament metadata is invalid")
+        update_data["filament_overrides"] = [
+            {**override, "force_color_match": update_data["force_color_match"]}
+            for override in current_overrides
+            if isinstance(override, dict)
+        ]
+
     # Serialize filament_overrides to JSON for TEXT column storage
     if "filament_overrides" in update_data:
-        update_data["filament_overrides"] = (
-            json.dumps(update_data["filament_overrides"]) if update_data["filament_overrides"] else None
-        )
+        provided_overrides = update_data["filament_overrides"]
+        if isinstance(provided_overrides, str):
+            pass
+        elif provided_overrides:
+            try:
+                resolved_overrides = await _resolved_filament_overrides(provided_overrides)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e)) from e
+            update_data["filament_overrides"] = json.dumps(resolved_overrides) if resolved_overrides else None
+        else:
+            update_data["filament_overrides"] = None
 
     # Serialize H2C rack-swap nozzle pick (#1780) to JSON for TEXT column
     # storage; same Text-as-opaque-blob convention as ams_mapping above.

@@ -202,12 +202,6 @@ export interface FilamentMappingProps {
   onManualMappingChange: (mappings: Record<number, number>) => void;
   currencySymbol: string;
   defaultCostPerKg: number;
-  /** Per-slot force-color-match flags. The scheduler honors this flag in both
-   *  model-mode and printer-mode dispatch, but the checkbox was previously only
-   *  surfaced in FilamentOverride (model mode). #1717. */
-  forceColorMatch?: Record<number, boolean>;
-  /** Called when a slot's force-color-match checkbox is toggled. */
-  onForceColorMatchChange?: (slotId: number, value: boolean) => void;
 }
 
 /**

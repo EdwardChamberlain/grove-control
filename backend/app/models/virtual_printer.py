@@ -45,7 +45,7 @@ class VirtualPrinter(Base):
     mode: Mapped[str] = mapped_column(String(20), default=VP_MODE_ARCHIVE)  # archive|review|queue|proxy
     auto_dispatch: Mapped[bool] = mapped_column(Boolean, server_default="true")  # queue mode: auto-start or manual
     queue_force_color_match: Mapped[bool] = mapped_column(
-        Boolean, server_default="false"
+        Boolean, default=True, server_default="true"
     )  # queue mode: pin per-slot type+color from the 3MF onto the queue
     # item so the scheduler refuses to dispatch onto a printer with the wrong
     # filament loaded (#1188).

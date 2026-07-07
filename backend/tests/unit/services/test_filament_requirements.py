@@ -10,7 +10,12 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
-from backend.app.services.filament_requirements import extract_filament_requirements
+import pytest
+
+from backend.app.services.filament_requirements import (
+    build_queue_filament_overrides,
+    extract_filament_requirements,
+)
 
 
 def _make_3mf(
@@ -190,3 +195,63 @@ class TestExtractFilamentRequirements:
         )
         out = extract_filament_requirements(f, plate_id=1)
         assert [r["slot_id"] for r in out] == [1, 2, 3]
+
+
+class TestBuildQueueFilamentOverrides:
+    requirements = [
+        {"slot_id": 1, "type": "PLA", "color": "#FF0000"},
+        {"slot_id": 2, "type": "PETG", "color": "#000000"},
+    ]
+
+    def test_defaults_every_source_slot_to_force_colour(self):
+        assert build_queue_filament_overrides(self.requirements) == [
+            {"slot_id": 1, "type": "PLA", "color": "#FF0000", "force_color_match": True},
+            {"slot_id": 2, "type": "PETG", "color": "#000000", "force_color_match": True},
+        ]
+
+    def test_global_false_is_explicit_opt_out(self):
+        assert build_queue_filament_overrides(self.requirements, force_color_match=False) == [
+            {"slot_id": 1, "type": "PLA", "color": "#FF0000", "force_color_match": False},
+            {"slot_id": 2, "type": "PETG", "color": "#000000", "force_color_match": False},
+        ]
+
+    def test_explicit_per_slot_false_wins_over_safe_default(self):
+        overrides = [{"slot_id": 1, "type": "PLA", "color": "#00FF00", "force_color_match": False}]
+        assert build_queue_filament_overrides(self.requirements, overrides) == [
+            {"slot_id": 1, "type": "PLA", "color": "#00FF00", "force_color_match": False},
+            {"slot_id": 2, "type": "PETG", "color": "#000000", "force_color_match": True},
+        ]
+
+    @pytest.mark.parametrize("invalid_value", [None, 0, 1, "false", "true", "", []])
+    def test_rejects_non_boolean_per_slot_preference(self, invalid_value):
+        overrides = [
+            {
+                "slot_id": 1,
+                "type": "PLA",
+                "color": "#00FF00",
+                "force_color_match": invalid_value,
+            }
+        ]
+
+        with pytest.raises(ValueError, match="force_color_match must be a boolean"):
+            build_queue_filament_overrides(self.requirements, overrides)
+
+    def test_rejects_cross_material_override(self):
+        overrides = [{"slot_id": 1, "type": "ABS", "color": "#FFFFFF"}]
+
+        with pytest.raises(ValueError, match="cannot change material family from PLA to ABS"):
+            build_queue_filament_overrides(self.requirements, overrides)
+
+    def test_rejects_override_without_sliced_metadata(self):
+        overrides = [{"slot_id": 1, "type": "PLA", "color": "#FFFFFF"}]
+
+        with pytest.raises(ValueError, match="without sliced material metadata"):
+            build_queue_filament_overrides([], overrides)
+
+    def test_allows_override_within_compatible_material_family(self):
+        requirements = [{"slot_id": 1, "type": "PAHT-CF", "color": "#000000"}]
+        overrides = [{"slot_id": 1, "type": "PA12-CF", "color": "#333333"}]
+
+        assert build_queue_filament_overrides(requirements, overrides) == [
+            {"slot_id": 1, "type": "PA12-CF", "color": "#333333", "force_color_match": True}
+        ]

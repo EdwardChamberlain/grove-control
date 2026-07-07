@@ -50,10 +50,13 @@ class PrintQueueItem(Base):
     # Format: "[5, -1, 2, -1]" where position = slot_id-1, value = global tray ID (-1 = unused)
     ams_mapping: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Filament overrides for model-based assignment: JSON array of override objects
+    # Per-slot filament requirements and force-colour preferences: JSON array of override objects
     # Format: '[{"slot_id": 1, "type": "PLA", "color": "#FFFFFF"}]'
     # Only slots with overrides are included (sparse). null = use original 3MF values.
     filament_overrides: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Queue-level fail-closed preference. Every creation path defaults true;
+    # false is only persisted for an explicit user opt-out.
+    force_color_match: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
     # Plate ID for multi-plate 3MF files (1-indexed, None = auto-detect/plate 1)
     plate_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
