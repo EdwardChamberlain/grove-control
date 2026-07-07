@@ -4191,6 +4191,8 @@ export default {
       title: 'Spulen-Etiketten drucken',
       selectedCount: '{{count}} ausgewählt',
       pickSpools: 'Wählen Sie, für welche Spulen Etiketten gedruckt werden sollen:',
+      monochrome: 'Monochrom (Schwarz-Weiß-Drucker)',
+      monochromeHint: 'Entfernt das Farbfeld und verbreitert den Text',
       searchPlaceholder: 'Name, Marke oder #ID suchen',
       filterByMaterial: 'Material:',
       allMaterials: 'Alle',

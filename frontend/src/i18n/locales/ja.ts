@@ -4191,6 +4191,8 @@ export default {
       title: 'スプールラベルを印刷',
       selectedCount: '{{count}}件選択中',
       pickSpools: 'ラベルを印刷するスプールを選択:',
+      monochrome: 'モノクロ（白黒プリンター）',
+      monochromeHint: 'カラースウォッチを削除してテキストを広げます',
       searchPlaceholder: '名前、ブランド、#IDで検索',
       filterByMaterial: '素材:',
       allMaterials: 'すべて',
