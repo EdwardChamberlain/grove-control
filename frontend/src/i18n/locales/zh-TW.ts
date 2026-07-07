@@ -2743,6 +2743,7 @@ export default {
     title: '錯誤 - {{name}}',
     noErrors: '無錯誤',
     viewOnWiki: '在拓竹 Wiki 上檢視',
+    unknownCode: '未知 HMS 代碼 — 詳情請參閱拓竹 Wiki。',
     clearInstructions: '在印表機上清除錯誤以在此處消除它們。',
     clearErrors: '清除錯誤',
     clearSuccess: 'HMS 錯誤已清除',

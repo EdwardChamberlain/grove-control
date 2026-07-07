@@ -2755,6 +2755,7 @@ export default {
     title: 'Fehler - {{name}}',
     noErrors: 'Keine Fehler',
     viewOnWiki: 'Im Bambu Lab Wiki ansehen',
+    unknownCode: 'Unbekannter HMS-Code — Details siehe Bambu Lab Wiki.',
     clearInstructions: 'Löschen Sie die Fehler am Drucker, um sie hier zu entfernen.',
     clearErrors: 'Fehler löschen',
     clearSuccess: 'HMS-Fehler gelöscht',

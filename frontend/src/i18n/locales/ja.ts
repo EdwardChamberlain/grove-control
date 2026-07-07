@@ -2755,6 +2755,7 @@ export default {
     title: 'エラー - {{name}}',
     noErrors: 'エラーなし',
     viewOnWiki: 'Bambu Lab Wikiで表示',
+    unknownCode: '不明なHMSコード — 詳細はBambu Lab Wikiを参照してください。',
     clearInstructions: 'プリンターでエラーをクリアするとここからも消えます。',
     clearErrors: 'エラーをクリア',
     clearSuccess: 'HMSエラーをクリアしました',

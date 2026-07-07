@@ -896,12 +896,20 @@ function getShortCode(attr: number, code: number): string {
   return `${module.toString(16).padStart(4, '0').toUpperCase()}_${codeNum.toString(16).padStart(4, '0').toUpperCase()}`;
 }
 
-// Helper to filter only known HMS errors (exported for use in badge counts)
+// Helper to filter HMS errors the UI should surface (exported for use in badge counts).
+// Keeps an error if EITHER:
+//   - it's in the bundled ERROR_DESCRIPTIONS catalog (known, has a description), OR
+//   - it carries firmware actions (uncataloged but user-actionable — e.g. H2C 0500_809C
+//     with IGNORE_RESUME/PROBLEM_SOLVED_RESUME — must surface so the button can render).
+// Drops uncataloged errors WITHOUT actions: those are transient junk like the post-cancel
+// 0C00_001B echo that re-introduces the FAILED-after-cancel "1 problem forever"
+// regression — see PrintersPageBucketing.test.ts.
 export function filterKnownHMSErrors(errors: HMSError[]): HMSError[] {
   return errors.filter((error) => {
     const codeNum = parseInt(error.code.replace('0x', ''), 16) || 0;
     const shortCode = getShortCode(error.attr, codeNum);
-    return ERROR_DESCRIPTIONS[shortCode] !== undefined;
+    if (ERROR_DESCRIPTIONS[shortCode] !== undefined) return true;
+    return (error.actions?.length ?? 0) > 0;
   });
 }
 
@@ -925,12 +933,9 @@ export function HMSErrorModal({ printerName, errors, onClose, printerId, hasPerm
     },
   });
 
-  // Filter to only show errors we have descriptions for (skip unknown codes)
-  const knownErrors = errors.filter((error) => {
-    const codeNum = parseInt(error.code.replace('0x', ''), 16) || 0;
-    const shortCode = getShortCode(error.attr, codeNum);
-    return ERROR_DESCRIPTIONS[shortCode] !== undefined;
-  });
+  // Surface cataloged errors and uncataloged-but-actionable errors. Mirrors
+  // filterKnownHMSErrors so the modal and the badge counts agree.
+  const knownErrors = filterKnownHMSErrors(errors);
 
   // Close on Escape key
   useEffect(() => {
@@ -998,7 +1003,7 @@ export function HMSErrorModal({ printerName, errors, onClose, printerId, hasPerm
                 const { label, color, bgColor, buttonHoverColor, Icon } = getSeverityInfo(error.severity);
                 const codeNum = parseInt(error.code.replace('0x', ''), 16) || 0;
                 const shortCode = getShortCode(error.attr, codeNum);
-                const description = ERROR_DESCRIPTIONS[shortCode];
+                const description = ERROR_DESCRIPTIONS[shortCode] ?? t('hmsErrors.unknownCode');
                 const hmsHomeUrl = getHMSHomeUrl();
                 const displayCode = shortCode.replace('_', '-');
 

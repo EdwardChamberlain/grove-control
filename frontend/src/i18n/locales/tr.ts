@@ -2759,6 +2759,7 @@ export default {
     title: 'Hatalar - {{name}}',
     noErrors: 'Hata yok',
     viewOnWiki: 'Bambu Lab Wiki\'de görüntüle',
+    unknownCode: 'Bilinmeyen HMS kodu — ayrıntılar için Bambu Lab wiki sayfasına bakın.',
     clearInstructions: 'Buradan kapatmak için yazıcıdaki hataları temizleyin.',
     clearErrors: 'Hataları Temizle',
     clearSuccess: 'HMS hataları temizlendi',
