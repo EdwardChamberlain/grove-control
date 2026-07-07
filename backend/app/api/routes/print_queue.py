@@ -1040,6 +1040,47 @@ async def update_queue_item(
     if "ams_mapping" in update_data:
         update_data["ams_mapping"] = json.dumps(update_data["ams_mapping"]) if update_data["ams_mapping"] else None
 
+    async def _queue_source_path() -> Path | None:
+        if item.archive_id:
+            archive_result = await db.execute(select(PrintArchive).where(PrintArchive.id == item.archive_id))
+            archive = archive_result.scalar_one_or_none()
+            if archive:
+                archive_path = Path(archive.file_path)
+                return (
+                    archive_path if archive_path.is_absolute() else settings.base_dir / archive_path
+                )  # SEC-PATH-OK: archive.file_path is DB-stored and internally generated; legacy rows may be absolute
+        elif item.library_file_id:
+            library_result = await db.execute(select(LibraryFile).where(LibraryFile.id == item.library_file_id))
+            library_file = library_result.scalar_one_or_none()
+            if library_file:
+                library_path = Path(library_file.file_path)
+                return (
+                    library_path if library_path.is_absolute() else settings.base_dir / library_path
+                )  # SEC-PATH-OK: library_file.file_path is DB-stored and may refer to configured external libraries
+        return None
+
+    async def _resolved_filament_overrides(provided_overrides: list[dict] | None) -> list[dict]:
+        source_path = await _queue_source_path()
+        plate_id = update_data.get("plate_id", item.plate_id)
+        requirements = (
+            extract_filament_requirements(source_path, plate_id) if source_path and source_path.exists() else []
+        )
+        return build_queue_filament_overrides(
+            requirements,
+            provided_overrides,
+            force_color_match=update_data.get("force_color_match", item.force_color_match),
+        )
+
+    # A plate change points at a different sliced filament set. If the client
+    # did not provide explicit overrides, rebuild them from the new plate so the
+    # scheduler does not enforce the previous plate's colour requirements.
+    if "plate_id" in update_data and "filament_overrides" not in update_data:
+        try:
+            resolved_overrides = await _resolved_filament_overrides(None)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        update_data["filament_overrides"] = json.dumps(resolved_overrides) if resolved_overrides else None
+
     # A queue-level toggle is an explicit all-slot preference. Keep the
     # persisted per-slot flags in sync even when the client omits the mapping
     # payload (for example a direct PATCH from an API client).
@@ -1059,35 +1100,11 @@ async def update_queue_item(
     # Serialize filament_overrides to JSON for TEXT column storage
     if "filament_overrides" in update_data:
         provided_overrides = update_data["filament_overrides"]
-        if provided_overrides:
-            source_path = None
-            if item.archive_id:
-                archive_result = await db.execute(select(PrintArchive).where(PrintArchive.id == item.archive_id))
-                archive = archive_result.scalar_one_or_none()
-                if archive:
-                    archive_path = Path(archive.file_path)
-                    source_path = (
-                        archive_path if archive_path.is_absolute() else settings.base_dir / archive_path
-                    )  # SEC-PATH-OK: archive.file_path is DB-stored and internally generated; legacy rows may be absolute
-            elif item.library_file_id:
-                library_result = await db.execute(select(LibraryFile).where(LibraryFile.id == item.library_file_id))
-                library_file = library_result.scalar_one_or_none()
-                if library_file:
-                    library_path = Path(library_file.file_path)
-                    source_path = (
-                        library_path if library_path.is_absolute() else settings.base_dir / library_path
-                    )  # SEC-PATH-OK: library_file.file_path is DB-stored and may refer to configured external libraries
-
-            plate_id = update_data.get("plate_id", item.plate_id)
-            requirements = (
-                extract_filament_requirements(source_path, plate_id) if source_path and source_path.exists() else []
-            )
+        if isinstance(provided_overrides, str):
+            pass
+        elif provided_overrides:
             try:
-                resolved_overrides = build_queue_filament_overrides(
-                    requirements,
-                    provided_overrides,
-                    force_color_match=update_data.get("force_color_match", item.force_color_match),
-                )
+                resolved_overrides = await _resolved_filament_overrides(provided_overrides)
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=str(e)) from e
             update_data["filament_overrides"] = json.dumps(resolved_overrides) if resolved_overrides else None

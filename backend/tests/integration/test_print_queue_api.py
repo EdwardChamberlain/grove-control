@@ -17,6 +17,19 @@ def _write_queue_3mf(path, *, color: str = "#FF0000") -> None:
         )
 
 
+def _write_queue_multiplate_3mf(path) -> None:
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr(
+            "Metadata/slice_info.config",
+            '<config><plate><metadata key="index" value="1"/>'
+            '<filament id="1" type="PLA" color="#FF0000" used_g="5"/>'
+            "</plate>"
+            '<plate><metadata key="index" value="2"/>'
+            '<filament id="1" type="PLA" color="#00FF00" used_g="5"/>'
+            "</plate></config>",
+        )
+
+
 class TestPrintQueueAPI:
     """Integration tests for /api/v1/queue endpoints."""
 
@@ -549,6 +562,36 @@ class TestPrintQueueAPI:
         assert response.json()["force_color_match"] is False
         assert response.json()["filament_overrides"] == [
             {"slot_id": 1, "type": "PLA", "color": "#FF0000", "force_color_match": False}
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_update_queue_item_plate_id_rebuilds_filament_overrides(
+        self, async_client: AsyncClient, printer_factory, archive_factory, tmp_path
+    ):
+        printer = await printer_factory()
+        source = tmp_path / "update-plate-colour.3mf"
+        _write_queue_multiplate_3mf(source)
+        archive = await archive_factory(file_path=str(source))
+        create_response = await async_client.post(
+            "/api/v1/queue/",
+            json={"printer_id": printer.id, "archive_id": archive.id, "plate_id": 1},
+        )
+        item_id = create_response.json()["id"]
+        assert create_response.json()["filament_overrides"] == [
+            {"slot_id": 1, "type": "PLA", "color": "#FF0000", "force_color_match": True}
+        ]
+
+        response = await async_client.patch(
+            f"/api/v1/queue/{item_id}",
+            json={"plate_id": 2},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["plate_id"] == 2
+        assert response.json()["force_color_match"] is True
+        assert response.json()["filament_overrides"] == [
+            {"slot_id": 1, "type": "PLA", "color": "#00FF00", "force_color_match": True}
         ]
 
     @pytest.mark.asyncio
