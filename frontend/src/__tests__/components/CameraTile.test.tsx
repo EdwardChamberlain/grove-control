@@ -194,6 +194,7 @@ describe('CameraTile', () => {
         connected
         printerState="RUNNING"
         progress={64}
+        etaLabel="1h 30m - 13:30"
       />,
     );
     await flushMicrotasks();
@@ -201,6 +202,26 @@ describe('CameraTile', () => {
     const progressbar = screen.getByRole('progressbar', { name: 'Print progress' });
     expect(progressbar).toHaveAttribute('aria-valuenow', '64');
     expect(progressbar.firstElementChild).toHaveStyle({ width: '64%' });
+    expect(screen.getByText('64% - 1h 30m - 13:30')).toBeInTheDocument();
+  });
+
+  it('hides printer progress details when the printer is not printing or paused', async () => {
+    render(
+      <CameraTile
+        printerId={7}
+        printerName="P1S-Failed"
+        mode="live"
+        snapshotIntervalMs={5000}
+        connected
+        printerState="FAILED"
+        progress={64}
+        etaLabel="1h 30m - 13:30"
+      />,
+    );
+    await flushMicrotasks();
+
+    expect(screen.queryByText(/64%/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/1h 30m/)).not.toBeInTheDocument();
   });
 
   it('POSTs /camera/stop when leaving live mode', async () => {

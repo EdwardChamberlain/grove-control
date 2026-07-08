@@ -967,9 +967,10 @@ function PrinterListRow({
   const activePrintName = status?.current_print && isPrintingOrPaused
     ? formatPrintName(status.subtask_name || status.current_print || null, status.gcode_file, t)
     : null;
-  const etaLabel = status?.remaining_time != null && status.remaining_time > 0
+  const showPrintProgress = isPrintingOrPaused;
+  const etaLabel = showPrintProgress && status?.remaining_time != null && status.remaining_time > 0
     ? `${formatDuration(status.remaining_time * 60)} - ${formatETA(status.remaining_time, timeFormat, t)}`
-    : '--:--';
+    : null;
   const location = printer.location || t('printers.location.unassigned', 'Ungrouped');
   const printStatusClass = !status?.connected || knownHmsErrors.length > 0 || status?.state === 'FAILED'
     ? 'bg-status-error'
@@ -1041,7 +1042,9 @@ function PrinterListRow({
             title={printStatusTitle}
             aria-label={printStatusTitle}
           />
-          <span className="min-w-12 shrink-0 text-right text-xs font-medium tabular-nums text-white">{etaLabel}</span>
+          {etaLabel && (
+            <span className="min-w-12 shrink-0 text-right text-xs font-medium tabular-nums text-white">{etaLabel}</span>
+          )}
           <PrinterHealthMenu
             printer={printer}
             status={status}
@@ -1103,15 +1106,17 @@ function PrinterListRow({
         <div className="truncate text-bambu-gray">{location}</div>
         <div className="min-w-0">
           <div className="truncate text-white">{activePrintName || jobStatusLabel}</div>
-          <div className="mt-1 flex items-center gap-2">
-            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-bambu-dark-tertiary">
-              <div className="h-full rounded-full bg-bambu-green transition-all" style={{ width: `${isPrintingOrPaused ? progress : 0}%` }} />
+          {showPrintProgress && (
+            <div className="mt-1 flex items-center gap-2">
+              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-bambu-dark-tertiary">
+                <div className="h-full rounded-full bg-bambu-green transition-all" style={{ width: `${progress}%` }} />
+              </div>
+              <span className="w-9 shrink-0 text-right text-xs tabular-nums text-bambu-gray">{`${Math.round(progress)}%`}</span>
             </div>
-            <span className="w-9 shrink-0 text-right text-xs tabular-nums text-bambu-gray">{isPrintingOrPaused ? `${Math.round(progress)}%` : '---'}</span>
-          </div>
+          )}
         </div>
         <div className="min-w-0 text-right">
-          <div className="truncate text-white">{etaLabel}</div>
+          {etaLabel && <div className="truncate text-white">{etaLabel}</div>}
         </div>
       </div>
     </div>
@@ -3910,15 +3915,17 @@ function PrinterCard({
                           <p className={`min-h-[18px] truncate pr-8 text-sm ${printName ? 'text-white' : 'text-bambu-gray/70'}`}>
                             {printName || t('printers.noActiveJob', 'No active job')}
                           </p>
-                          <div className="flex h-3 items-center gap-2 text-sm">
-                            <div className="h-1.5 min-w-0 flex-1 rounded-full bg-bambu-dark-tertiary">
-                              <div
-                                className={`${isActivePrint ? (status.state === 'PAUSE' ? 'bg-status-warning' : 'bg-bambu-green') : showRetainedPrint ? 'bg-bambu-green' : 'bg-bambu-dark-tertiary'} h-1.5 rounded-full transition-all`}
-                                style={{ width: `${progress}%` }}
-                              />
+                          {isActivePrint && (
+                            <div className="flex h-3 items-center gap-2 text-sm">
+                              <div className="h-1.5 min-w-0 flex-1 rounded-full bg-bambu-dark-tertiary">
+                                <div
+                                  className={`${status.state === 'PAUSE' ? 'bg-status-warning' : 'bg-bambu-green'} h-1.5 rounded-full transition-all`}
+                                  style={{ width: `${progress}%` }}
+                                />
+                              </div>
+                              <span className="w-9 shrink-0 pr-1 text-right text-[11px] leading-none text-white">{Math.round(progress)}%</span>
                             </div>
-                            <span className={`w-9 shrink-0 pr-1 text-right text-[11px] leading-none ${isActivePrint || showRetainedPrint ? 'text-white' : 'text-bambu-gray'}`}>{isActivePrint || showRetainedPrint ? `${Math.round(progress)}%` : '---%'}</span>
-                          </div>
+                          )}
                           <div className="flex min-h-[16px] items-center gap-2 text-xs text-bambu-gray">
                             {isActivePrint ? (
                               <>
@@ -7310,6 +7317,7 @@ export function PrintersPage() {
           requirePlateClear={settings?.require_plate_clear === true}
           maxLive={camWallMaxLive}
           snapshotIntervalSec={camWallSnapshotSec}
+          timeFormat={settings?.time_format || 'system'}
           onTileClick={(id) => openSinglePrinter(id)}
           onOpenFullscreen={(id, name) => {
             const cameraMode = settings?.camera_view_mode || 'window';

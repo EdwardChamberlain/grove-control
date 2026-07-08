@@ -450,6 +450,25 @@ describe('PrintersPage', () => {
       expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
     });
 
+    it('hides progress and ETA in list view for failed jobs with stale timing data', async () => {
+      localStorage.setItem('printerViewMode', 'list');
+      server.use(
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+          ...mockPrinterStatus,
+          state: 'FAILED',
+          current_print: 'failed-widget.3mf',
+          progress: 42,
+          remaining_time: 90,
+        })),
+      );
+
+      render(<PrintersPage />);
+
+      await screen.findByText('X1 Carbon');
+      expect(screen.queryByText('42%')).not.toBeInTheDocument();
+      expect(screen.queryByText(/1h 30m/)).not.toBeInTheDocument();
+    });
+
     it('shows an icon-only plate-clear action in the list printer-name field when needed', async () => {
       let awaitingPlateClear = true;
       server.use(
