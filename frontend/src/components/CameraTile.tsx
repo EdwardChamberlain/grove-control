@@ -19,6 +19,7 @@ interface CameraTileProps {
   onOpenFullscreen?: () => void;
   printerState?: string | null;
   progress?: number | null;
+  etaLabel?: string | null;
   showClearPlate?: boolean;
   clearPlatePending?: boolean;
   clearPlateDisabled?: boolean;
@@ -58,6 +59,7 @@ export function CameraTile({
   onOpenFullscreen,
   printerState = null,
   progress = null,
+  etaLabel = null,
   showClearPlate = false,
   clearPlatePending = false,
   clearPlateDisabled = false,
@@ -203,8 +205,13 @@ export function CameraTile({
       )}
 
       {/* Printer name */}
-      <div className={`pointer-events-none absolute inset-x-0 bottom-1.5 z-20 px-2 pb-1.5 pt-3 text-white ${showClearPlate ? 'pr-12' : ''}`}>
-        <span className="block truncate text-xs font-medium">{printerName}</span>
+      <div className={`pointer-events-none absolute inset-x-0 bottom-1.5 z-20 flex items-end justify-between gap-2 px-2 pb-1.5 pt-3 text-white ${showClearPlate ? 'pr-12' : ''}`}>
+        <span className="block min-w-0 truncate text-xs font-medium">{printerName}</span>
+        {isPrintingOrPaused && (
+          <span className="shrink-0 text-right text-[11px] font-semibold tabular-nums text-white">
+            {displayedProgress}%{etaLabel ? ` - ${etaLabel}` : ''}
+          </span>
+        )}
       </div>
 
       <div

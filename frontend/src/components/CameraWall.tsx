@@ -6,6 +6,7 @@ import { CameraTile, type CameraTileMode } from './CameraTile';
 import { api, type Printer, type PrinterStatus } from '../api/client';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
+import { formatDuration, formatETA, type TimeFormat } from '../utils/date';
 
 interface CameraWallProps {
   printers: Printer[];
@@ -16,6 +17,7 @@ interface CameraWallProps {
   onOpenFullscreen: (printerId: number, printerName: string) => void;
   onChangeMaxLive: (next: number) => void;
   onChangeSnapshotIntervalSec: (next: number) => void;
+  timeFormat?: TimeFormat;
 }
 
 const MIN_MAX_LIVE = 1;
@@ -32,6 +34,7 @@ export function CameraWall({
   onOpenFullscreen,
   onChangeMaxLive,
   onChangeSnapshotIntervalSec,
+  timeFormat = 'system',
 }: CameraWallProps) {
   const { t } = useTranslation();
   const { showToast } = useToast();
@@ -216,6 +219,9 @@ export function CameraWall({
           const mode = modeByPrinter.get(p.id) ?? 'paused';
           const status = statusByPrinter.get(p.id);
           const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
+          const etaLabel = isPrintingOrPaused && status?.remaining_time != null && status.remaining_time > 0
+            ? `${formatDuration(status.remaining_time * 60)} - ${formatETA(status.remaining_time, timeFormat, t)}`
+            : null;
           const needsPlateClear = requirePlateClear && status?.connected === true
             && status.awaiting_plate_clear === true && !isPrintingOrPaused;
           return (
@@ -236,6 +242,7 @@ export function CameraWall({
                 connected={statusByPrinter.get(p.id)?.connected ?? false}
                 printerState={statusByPrinter.get(p.id)?.state ?? null}
                 progress={statusByPrinter.get(p.id)?.progress ?? null}
+                etaLabel={etaLabel}
                 showClearPlate={needsPlateClear}
                 clearPlatePending={clearPlateMutation.isPending && clearPlateMutation.variables === p.id}
                 clearPlateDisabled={!hasPermission('printers:clear_plate')}
