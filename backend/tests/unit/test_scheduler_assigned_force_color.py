@@ -68,7 +68,7 @@ def test_strict_colour_mapping_rejects_different_material_variant(scheduler):
     assert mapping == [-1]
 
 
-def test_strict_colour_mapping_rejects_basic_white_for_matte_white(scheduler):
+def test_strict_colour_mapping_accepts_compatible_basic_white_for_matte_white(scheduler):
     required = [{"slot_id": 1, "type": "PLA", "color": "#FFFFFF", "tray_info_idx": "GFA01"}]
     loaded = [
         {"global_tray_id": 0, "type": "PLA", "color": "#FFFFFF", "tray_info_idx": "GFA00"},
@@ -76,7 +76,7 @@ def test_strict_colour_mapping_rejects_basic_white_for_matte_white(scheduler):
 
     mapping = scheduler._match_filaments_to_slots(required, loaded, strict_color_slot_ids={1})
 
-    assert mapping == [-1]
+    assert mapping == [0]
 
 
 def test_strict_colour_mapping_accepts_matte_white_for_matte_white(scheduler):

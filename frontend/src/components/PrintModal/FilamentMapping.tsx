@@ -3,11 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Circle, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
 import { api } from '../../api/client';
-import { useFilamentMapping } from '../../hooks/useFilamentMapping';
-import { getGlobalTrayId, effectivePreferLowest } from '../../utils/amsHelpers';
-import { FilamentMaterial } from '../../utils/filamentMaterial';
+import { formatSlotLabel, getGlobalTrayId } from '../../utils/amsHelpers';
 import { FilamentProfileRow } from './FilamentProfileRow';
-import { useFilamentLabels } from './useFilamentLabels';
 import type { FilamentMappingProps } from './types';
 
 /**
@@ -41,42 +38,38 @@ export function FilamentMapping({
     enabled: !!printerId,
   });
 
-  // Settings + inventory map drive the same prefer-lowest + AMS-backup gate
-  // the dispatcher uses (#1766). Without this, the per-slot dropdown's
-  // auto-suggestion could disagree with what actually gets dispatched.
-  const { data: settings } = useQuery({
-    queryKey: ['settings'],
-    queryFn: api.getSettings,
+  const { data: mappingPreview } = useQuery({
+    queryKey: ['filament-mapping-preview', printerId, filamentReqs?.filaments, manualMappings],
+    queryFn: () => api.previewFilamentMapping(printerId, {
+      filaments: filamentReqs?.filaments ?? [],
+      manual_mappings: manualMappings,
+    }),
+    enabled: !!printerId && !!filamentReqs?.filaments?.length,
+    staleTime: 5000,
   });
-  const { data: inventoryRemain } = useQuery({
-    queryKey: ['printer-inventory-remain', printerId],
-    queryFn: () => api.getInventoryRemain(printerId),
-    enabled: !!printerId,
-    staleTime: 30 * 1000,
-  });
-  const inventoryByTrayId = useMemo(() => {
-    if (!inventoryRemain?.inventory_remain_g) return undefined;
-    const map = new Map<number, number>();
-    Object.entries(inventoryRemain.inventory_remain_g).forEach(([key, grams]) => {
-      const gtid = Number(key);
-      if (!Number.isNaN(gtid)) map.set(gtid, grams);
-    });
-    return map;
-  }, [inventoryRemain]);
-  const gatedPreferLowest = effectivePreferLowest(
-    settings?.prefer_lowest_filament,
-    printerStatus?.ams_filament_backup,
+
+  const loadedFilaments = mappingPreview?.loaded_filaments ?? [];
+  const loadedById = useMemo(
+    () => new Map(loadedFilaments.map((filament) => [filament.global_tray_id, filament])),
+    [loadedFilaments],
   );
-
-  const { loadedFilaments, filamentComparison, hasTypeMismatch, hasColorMismatch } =
-    useFilamentMapping(filamentReqs, printerStatus, manualMappings, gatedPreferLowest, inventoryByTrayId);
-
-  // Per-slot sub-brand + material-disambiguated colour labels (#1718). Same
-  // shared hook the model-mode FilamentOverride uses so both panels render
-  // the same sliced-3MF identity. Falls back to the raw type / generic
-  // colour bucket when the SKU is unknown or the by-material lookup hasn't
-  // resolved — never blanks out the required row.
-  const filamentLabels = useFilamentLabels(filamentReqs?.filaments);
+  const filamentComparison = (filamentReqs?.filaments ?? []).map((requirement) => {
+    const comparison = mappingPreview?.comparisons.find((item) => item.slot_id === requirement.slot_id);
+    const status: 'match' | 'type_only' | 'mismatch' = comparison?.status === 'match' || comparison?.status === 'similar_colour'
+      ? 'match'
+      : comparison?.status === 'material_only'
+        ? 'type_only'
+        : 'mismatch';
+    return {
+      ...requirement,
+      comparison,
+      loaded: comparison ? loadedById.get(comparison.mapped_tray_id) : undefined,
+      status,
+      isManual: manualMappings[requirement.slot_id] !== undefined,
+    };
+  });
+  const hasTypeMismatch = mappingPreview?.comparisons.some((item) => item.status === 'missing') ?? false;
+  const hasColorMismatch = mappingPreview?.comparisons.some((item) => item.status === 'material_only') ?? false;
 
   const trayCostMap = useMemo(() => {
     const map = new Map<number, number | null>();
@@ -106,7 +99,7 @@ export function FilamentMapping({
   const totalCost = useMemo(() => {
     let total = 0;
     for (const item of filamentComparison) {
-      const trayId = item.loaded?.globalTrayId;
+      const trayId = item.loaded?.global_tray_id;
       if (trayId == null) continue;
       const assignedCost = trayCostMap.get(trayId) ?? null;
       const costPerKg = assignedCost ?? defaultCostPerKg;
@@ -178,6 +171,7 @@ export function FilamentMapping({
       // Wait a moment for printer to respond, then refetch
       await new Promise((r) => setTimeout(r, 500));
       await queryClient.refetchQueries({ queryKey: ['printer-status', printerId] });
+      await queryClient.refetchQueries({ queryKey: ['filament-mapping-preview', printerId] });
     } finally {
       setIsRefreshing(false);
     }
@@ -222,29 +216,23 @@ export function FilamentMapping({
           </div>
           {filamentComparison.map((item, idx) => {
             const slotId = item.slot_id ?? 0;
-            const itemMaterial = FilamentMaterial.fromRequirement(item);
-            const { resolvedName, colorLabel } = filamentLabels[idx] ?? {
-              resolvedName: itemMaterial.materialLabel || item.type,
-              colorLabel: itemMaterial.genericColorName,
-            };
-            const compatibleLoadedFilaments = loadedFilaments.filter(
-              (filament) => itemMaterial.isMaterialMatch(filament.material),
-            );
-            const options = compatibleLoadedFilaments.map((filament) => {
-              const remainingWeight = trayRemainingWeightMap.get(filament.globalTrayId);
+            const requiredMaterial = item.comparison?.material;
+            const candidateTrayIds = new Set(item.comparison?.candidate_tray_ids ?? []);
+            const options = loadedFilaments.filter((filament) => candidateTrayIds.has(filament.global_tray_id)).map((filament) => {
+              const remainingWeight = trayRemainingWeightMap.get(filament.global_tray_id);
               const remainingLabel = remainingWeight != null
                 ? t('printModal.slotRemainingShort', {
                     grams: remainingWeight,
                     defaultValue: ` - ${remainingWeight}g left`,
                   })
                 : '';
-              const ftsTargetExtruder = ftsInstalled ? ftsExtruderForSlot(filament.globalTrayId) : null;
+              const ftsTargetExtruder = ftsInstalled ? ftsExtruderForSlot(filament.global_tray_id) : null;
               const ftsBadge = ftsTargetExtruder == null
                 ? ''
                 : ` [${ftsTargetExtruder === 1 ? t('printModal.leftNozzle') : t('printModal.rightNozzle')}]`;
               return {
-                value: String(filament.globalTrayId),
-                label: `${filament.label}: ${filament.material.displayName}${remainingLabel}${ftsBadge}`,
+                value: String(filament.global_tray_id),
+                label: `${filament.is_external ? 'External' : formatSlotLabel(filament.ams_id, filament.tray_id, filament.is_ht, false)}: ${filament.material.display_name}${remainingLabel}${ftsBadge}`,
               };
             });
             const nozzleBadge = isDualNozzle && item.nozzle_id != null ? (
@@ -259,11 +247,11 @@ export function FilamentMapping({
               <FilamentProfileRow
                 key={slotId || idx}
                 requiredColor={item.color}
-                requiredLabel={resolvedName}
+                requiredLabel={requiredMaterial?.material_label || item.type}
                 usedGrams={item.used_grams}
                 leadingBadge={nozzleBadge}
-                requiredTitle={`Required: ${resolvedName} - ${colorLabel}`}
-                value={item.loaded ? String(item.loaded.globalTrayId) : ''}
+                requiredTitle={requiredMaterial?.display_name || item.type}
+                value={item.loaded ? String(item.loaded.global_tray_id) : ''}
                 emptyLabel={t('printModal.selectFilamentSlot')}
                 options={options}
                 onChange={(value) => handleSlotChange(slotId, value)}

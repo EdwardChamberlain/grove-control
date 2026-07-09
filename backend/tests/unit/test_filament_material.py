@@ -1,7 +1,10 @@
 import json
+from pathlib import Path
 
 from backend.app.core.database import _canonicalize_queue_filament_overrides_payload
 from backend.app.services.filament_material import FilamentMaterial, normalize_color_hex, parse_material_label
+
+_CONTRACT = json.loads((Path(__file__).parents[3] / "shared" / "filament-material-contract.json").read_text())
 
 
 def test_normalize_color_hex_adds_opaque_alpha():
@@ -23,6 +26,31 @@ def test_profile_id_derives_bambu_subtype_from_plain_3mf_requirement():
     assert basic.material_label == "PLA Basic"
     assert matte.is_family_match(basic)
     assert not matte.is_material_match(basic)
+    assert matte.is_dispatch_compatible(basic)
+    assert not basic.is_dispatch_compatible(
+        FilamentMaterial.from_parts(family="PLA", subtype="Silk", color_hex="#FFFFFF")
+    )
+
+
+def test_profile_id_derives_extended_bambu_subtype():
+    glow = FilamentMaterial.from_3mf_requirement({"type": "PLA", "color": "#FFFFFF", "tray_info_idx": "GFA12"})
+
+    assert glow.material_label == "PLA Glow"
+
+
+def test_profile_fallbacks_match_the_cross_runtime_contract():
+    for profile in _CONTRACT["profiles"]:
+        material = FilamentMaterial.from_3mf_requirement(
+            {"type": profile["family"], "color": "#FFFFFF", "tray_info_idx": profile["id"]}
+        )
+        assert (material.family, material.subtype) == (profile["family"], profile["subtype"])
+
+
+def test_dispatch_compatibility_matches_the_cross_runtime_contract():
+    for case in _CONTRACT["dispatch_compatibility"]:
+        left = FilamentMaterial.from_parts(color_hex="#FFFFFF", **case["left"])
+        right = FilamentMaterial.from_parts(color_hex="#FFFFFF", **case["right"])
+        assert left.is_dispatch_compatible(right) is case["compatible"]
 
 
 def test_parse_material_label_handles_brand_prefixes_and_hf():

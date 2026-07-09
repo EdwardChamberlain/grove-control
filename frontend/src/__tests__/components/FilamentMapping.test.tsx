@@ -57,6 +57,53 @@ describe('FilamentMapping — FTS routing', () => {
   beforeEach(() => {
     server.use(
       http.get('/api/v1/printers/:id/spool-assignments', () => HttpResponse.json([])),
+      http.post('/api/v1/printers/:id/filament-mapping-preview', async ({ request }) => {
+        const body = await request.json() as {
+          filaments?: Array<{ slot_id: number; type: string; color: string; tray_info_idx?: string }>;
+        };
+        const filaments = body.filaments ?? [];
+        const loadedFilaments = [
+          {
+            global_tray_id: 0, ams_id: 0, tray_id: 0, is_ht: false, is_external: false, extruder_id: 0, remain: 100,
+            material: {
+              family: 'PLA', subtype: 'Basic', color_hex: '#FF0000FF', profile_id: 'GFA00', setting_id: 'GFSA00',
+              material_label: 'PLA Basic', display_name: 'PLA Basic - Red', generic_color_name: 'Red',
+            },
+          },
+          {
+            global_tray_id: 1, ams_id: 0, tray_id: 1, is_ht: false, is_external: false, extruder_id: 0, remain: 100,
+            material: {
+              family: 'PETG', subtype: 'Basic', color_hex: '#00FF00FF', profile_id: 'GFG00', setting_id: 'GFSG00',
+              material_label: 'PETG Basic', display_name: 'PETG Basic - Green', generic_color_name: 'Green',
+            },
+          },
+        ];
+        return HttpResponse.json({
+          auto_mapping: filaments.map((filament) => filament.type === 'PETG' ? 1 : -1),
+          mapping: filaments.map((filament) => filament.type === 'PETG' ? 1 : -1),
+          loaded_filaments: loadedFilaments,
+          comparisons: filaments.map((filament) => {
+            const matte = filament.tray_info_idx === 'GFA01';
+            const material = {
+              family: filament.type,
+              subtype: matte ? 'Matte' : 'Basic',
+              color_hex: `${filament.color}FF`.replace('#', '#'),
+              profile_id: filament.tray_info_idx || (filament.type === 'PETG' ? 'GFG00' : 'GFA00'),
+              setting_id: matte ? 'GFSA01' : filament.type === 'PETG' ? 'GFSG00' : 'GFSA00',
+              material_label: `${filament.type} ${matte ? 'Matte' : 'Basic'}`,
+              display_name: `${filament.type} ${matte ? 'Matte' : 'Basic'} - ${matte ? 'Black' : filament.type === 'PETG' ? 'Green' : 'Red'}`,
+              generic_color_name: matte ? 'Black' : filament.type === 'PETG' ? 'Green' : 'Red',
+            };
+            return {
+              slot_id: filament.slot_id,
+              material,
+              status: filament.type === 'PETG' ? 'match' : 'missing',
+              mapped_tray_id: filament.type === 'PETG' ? 1 : -1,
+              candidate_tray_ids: filament.type === 'PETG' ? [1] : [],
+            };
+          }),
+        });
+      }),
     );
   });
 
@@ -191,7 +238,7 @@ describe('FilamentMapping — FTS routing', () => {
     });
     // The swatch tooltip carries the canonical generated label.
     await waitFor(() => {
-      const swatch = screen.getByTitle(/Required: PLA Matte - Black/);
+      const swatch = screen.getByTitle('PLA Matte - Black');
       expect(swatch).toBeInTheDocument();
     });
   });

@@ -19,6 +19,13 @@ _FILAMENT_EQUIV_MAP = {
     filament_type.upper(): group[0].upper() for group in _FILAMENT_TYPE_GROUPS for filament_type in group
 }
 
+# Profile variants that are interchangeable for dispatch. Keep this narrow:
+# a material family alone is not permission to substitute every specialty
+# profile (for example, PLA-S or PLA Silk for PLA Basic).
+_DISPATCH_COMPATIBLE_SUBTYPES: dict[str, frozenset[str]] = {
+    "PLA": frozenset({"BASIC", "MATTE"}),
+}
+
 _KNOWN_FAMILIES: tuple[str, ...] = tuple(
     sorted(
         {
@@ -446,9 +453,27 @@ class FilamentMaterial:
         return bool(self.compatible_family_key and self.compatible_family_key == other.compatible_family_key)
 
     def is_material_match(self, other: FilamentMaterial) -> bool:
+        """Return whether two materials have the same family and subtype identity."""
         if not self.is_family_match(other):
             return False
         return not self.subtype_key or not other.subtype_key or self.subtype_key == other.subtype_key
+
+    def is_dispatch_compatible(self, other: FilamentMaterial) -> bool:
+        """Return whether a loaded material can satisfy this job's material family.
+
+        Subtypes identify the profile and drive preference/display. A small,
+        explicit compatibility matrix permits safe substitutions such as PLA
+        Basic and PLA Matte without allowing every profile in the family.
+        Colour policy is evaluated separately by the caller.
+        """
+        if not self.is_family_match(other):
+            return False
+        if not self.subtype_key or not other.subtype_key or self.subtype_key == other.subtype_key:
+            return True
+        compatible_subtypes = _DISPATCH_COMPATIBLE_SUBTYPES.get(self.compatible_family_key)
+        return bool(
+            compatible_subtypes and self.subtype_key in compatible_subtypes and other.subtype_key in compatible_subtypes
+        )
 
     def is_color_match(self, other: FilamentMaterial) -> bool:
         return self.rgb_hex.upper() == other.rgb_hex.upper() and self.color_hex[7:9] == other.color_hex[7:9]

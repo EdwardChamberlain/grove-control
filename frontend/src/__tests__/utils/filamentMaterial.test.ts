@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   FilamentMaterial,
-  FilamentMatchScore,
   normalizeColorHex,
   parseMaterialLabel,
 } from '../../utils/filamentMaterial';
@@ -29,8 +28,12 @@ describe('FilamentMaterial', () => {
 
     expect(matte.materialLabel).toBe('PLA Matte');
     expect(basic.materialLabel).toBe('PLA Basic');
-    expect(matte.isFamilyMatch(basic)).toBe(true);
-    expect(matte.isMaterialMatch(basic)).toBe(false);
+  });
+
+  it('derives extended Bambu profiles used by the backend fallback', () => {
+    const glow = FilamentMaterial.fromRequirement({ type: 'PLA', color: '#FFFFFF', tray_info_idx: 'GFA12' });
+
+    expect(glow.materialLabel).toBe('PLA Glow');
   });
 
   it('serializes to queue, legacy, and MQTT boundary shapes', () => {
@@ -55,16 +58,6 @@ describe('FilamentMaterial', () => {
       tray_info_idx: 'GFA01',
       setting_id: '',
     });
-  });
-
-  it('scores exact material and family fallback matches', () => {
-    const required = FilamentMaterial.fromRequirement({ type: 'PLA', color: '#FFFFFF', tray_info_idx: 'GFA01' });
-    const matte = FilamentMaterial.fromAmsTray({ tray_type: 'PLA', tray_sub_brands: 'PLA Matte', tray_color: '#FFFFFF' });
-    const basic = FilamentMaterial.fromAmsTray({ tray_type: 'PLA', tray_sub_brands: 'PLA Basic', tray_color: '#FFFFFF' });
-
-    expect(required.compatibilityScore(matte)).toBe(FilamentMatchScore.MaterialColor);
-    expect(required.compatibilityScore(basic)).toBe(FilamentMatchScore.NoMatch);
-    expect(required.compatibilityScore(basic, { allowFamilyFallback: true })).toBe(FilamentMatchScore.Family);
   });
 
   it('parses known material label shapes', () => {

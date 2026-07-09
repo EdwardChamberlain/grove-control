@@ -177,14 +177,6 @@ export function filamentMaterialIdentityKey(input: FilamentMaterial | FilamentMa
   ].join('|');
 }
 
-export const FilamentMatchScore = {
-  NoMatch: 0,
-  Family: 100,
-  MaterialSimilarColor: 200,
-  MaterialColor: 300,
-  Profile: 400,
-} as const;
-
 function profileMaterial(profileId?: string | null): { family: string; subtype: string | null } {
   const label = PROFILE_LABELS[(profileId || '').split('_')[0]];
   return label ? parseMaterialLabel(label) : { family: '', subtype: null };
@@ -340,42 +332,4 @@ export class FilamentMaterial {
     };
   }
 
-  isFamilyMatch(other: FilamentMaterial): boolean {
-    return !!this.compatibleFamilyKey && this.compatibleFamilyKey === other.compatibleFamilyKey;
-  }
-
-  isMaterialMatch(other: FilamentMaterial): boolean {
-    if (!this.isFamilyMatch(other)) return false;
-    return !this.subtypeKey || !other.subtypeKey || this.subtypeKey === other.subtypeKey;
-  }
-
-  isColorMatch(other: FilamentMaterial): boolean {
-    return this.rgbHex.toUpperCase() === other.rgbHex.toUpperCase() && this.colorHex.slice(7, 9) === other.colorHex.slice(7, 9);
-  }
-
-  isSimilarColor(other: FilamentMaterial): boolean {
-    return colorsAreSimilar(this.colorHex, other.colorHex);
-  }
-
-  isProfileMatch(other: FilamentMaterial): boolean {
-    return !!this.profileId && !!other.profileId && this.profileId === other.profileId;
-  }
-
-  isExactMatch(other: FilamentMaterial): boolean {
-    if (this.profileId && other.profileId) {
-      return this.isProfileMatch(other);
-    }
-    return this.isMaterialMatch(other) && this.isColorMatch(other);
-  }
-
-  compatibilityScore(
-    other: FilamentMaterial,
-    policy: { allowFamilyFallback?: boolean } = {},
-  ): (typeof FilamentMatchScore)[keyof typeof FilamentMatchScore] {
-    if (this.isProfileMatch(other)) return FilamentMatchScore.Profile;
-    if (this.isMaterialMatch(other) && this.isColorMatch(other)) return FilamentMatchScore.MaterialColor;
-    if (this.isMaterialMatch(other) && this.isSimilarColor(other)) return FilamentMatchScore.MaterialSimilarColor;
-    if (policy.allowFamilyFallback && this.isFamilyMatch(other)) return FilamentMatchScore.Family;
-    return FilamentMatchScore.NoMatch;
-  }
 }

@@ -355,6 +355,7 @@ export interface AMSTray {
   tray_sub_brands: string | null;  // Full name like "PLA Basic", "PETG HF"
   tray_id_name: string | null;  // Bambu filament ID like "A00-Y2" (can decode to color)
   tray_info_idx: string | null;  // Filament preset ID like "GFA00" - maps to cloud setting_id
+  material?: FilamentMaterialPayload | null;  // Backend-canonical material; do not reparse tray fields for print policy
   remain: number;
   k: number | null;  // Pressure advance value (from tray or K-profile lookup)
   cali_idx: number | null;  // Calibration index for K-profile lookup
@@ -1913,6 +1914,42 @@ export interface FilamentMaterialPayload {
   color_hex: string;
   profile_id?: string | null;
   setting_id?: string | null;
+}
+
+export interface FilamentMaterialView extends FilamentMaterialPayload {
+  material_label: string;
+  display_name: string;
+  generic_color_name: string;
+}
+
+export interface FilamentMappingPreview {
+  auto_mapping: number[] | null;
+  mapping: number[] | null;
+  loaded_filaments: Array<{
+    global_tray_id: number;
+    ams_id: number;
+    tray_id: number;
+    is_ht: boolean;
+    is_external: boolean;
+    extruder_id: number | null;
+    remain: number;
+    material: FilamentMaterialView;
+  }>;
+  comparisons: Array<{
+    slot_id: number;
+    material: FilamentMaterialView;
+    status: 'match' | 'similar_colour' | 'material_only' | 'missing';
+    mapped_tray_id: number;
+    candidate_tray_ids: number[];
+  }>;
+}
+
+export interface ModelFilamentOptions {
+  slots: Array<{
+    slot_id: number;
+    material: FilamentMaterialView;
+    options: Array<{ material: FilamentMaterialView }>;
+  }>;
 }
 
 export interface QueueFilamentOverridePayload {
@@ -3578,8 +3615,24 @@ export const api = {
     if (location) params.set('location', location);
     return request<Array<{ type: string; color: string; tray_info_idx: string; tray_sub_brands: string; extruder_id: number | null }>>(`/printers/available-filaments?${params}`);
   },
+  getAvailableFilamentOptions: (
+    model: string,
+    location: string | undefined,
+    filaments: Array<object>,
+  ) => request<ModelFilamentOptions>('/printers/available-filament-options', {
+    method: 'POST',
+    body: JSON.stringify({ model, location, filaments }),
+  }),
   getPrinterStatus: (id: number) =>
     request<PrinterStatus>(`/printers/${id}/status`),
+  previewFilamentMapping: (
+    id: number,
+    data: { filaments: Array<object>; manual_mappings?: Record<number, number> },
+  ) =>
+    request<FilamentMappingPreview>(`/printers/${id}/filament-mapping-preview`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   refreshPrinterStatus: (id: number) =>
     request<{ status: string }>(`/printers/${id}/refresh-status`, {
       method: 'POST',

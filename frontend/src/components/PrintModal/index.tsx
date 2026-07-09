@@ -1,4 +1,4 @@
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, AlertTriangle, Loader2, Palette, Pencil, Printer, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -9,13 +9,12 @@ import { Card, CardContent } from '../Card';
 import { Button } from '../Button';
 import { ConfirmModal } from '../ConfirmModal';
 import { useToast } from '../../contexts/ToastContext';
-import { buildLoadedFilaments, useFilamentMapping } from '../../hooks/useFilamentMapping';
 import { useMultiPrinterFilamentMapping, type PerPrinterConfig } from '../../hooks/useMultiPrinterFilamentMapping';
 import { FilamentMaterial, type FilamentMaterialJson } from '../../utils/filamentMaterial';
 import { getCurrencySymbol } from '../../utils/currency';
 import { getBedTypeInfo } from '../../utils/bedType';
 import { toDateTimeLocalValue, parseUTCDate } from '../../utils/date';
-import { getGlobalTrayId, isPlaceholderDate, effectivePreferLowest } from '../../utils/amsHelpers';
+import { getGlobalTrayId, isPlaceholderDate } from '../../utils/amsHelpers';
 import { FilamentMapping } from './FilamentMapping';
 import { FilamentOverride, type FilamentOverrideSelection } from './FilamentOverride';
 import { PlateSelector } from './PlateSelector';
@@ -280,34 +279,6 @@ export function PrintModal({
     enabled: !isEditing && assignmentMode === 'printer',
   });
 
-  // Fetch per-printer Map<globalTrayId, gramsRemaining> via the dedicated
-  // backend endpoint (#1766). Server-side mirrors `_build_inventory_remain_overrides`
-  // so internal and Spoolman modes both work uniformly, VT/external slots are
-  // excluded, and negative grams are clamped — single source of truth between
-  // the client-side preview and dispatch-time picks.
-  const inventoryRemainQueries = useQueries({
-    queries: selectedPrinters.map((printerId) => ({
-      queryKey: ['printer-inventory-remain', printerId],
-      queryFn: () => api.getInventoryRemain(printerId),
-      staleTime: 30 * 1000,
-      enabled: selectedPrinters.length > 0,
-    })),
-  });
-  const inventoryByTrayIdPerPrinter = useMemo(() => {
-    const result = new Map<number, Map<number, number>>();
-    selectedPrinters.forEach((printerId, idx) => {
-      const data = inventoryRemainQueries[idx]?.data?.inventory_remain_g;
-      if (!data) return;
-      const printerMap = new Map<number, number>();
-      Object.entries(data).forEach(([key, grams]) => {
-        const gtid = Number(key);
-        if (!Number.isNaN(gtid)) printerMap.set(gtid, grams);
-      });
-      result.set(printerId, printerMap);
-    });
-    return result;
-  }, [selectedPrinters, inventoryRemainQueries]);
-
   // Fetch archive details to get sliced_for_model
   const { data: archiveDetails } = useQuery({
     queryKey: ['archive', archiveId],
@@ -365,26 +336,25 @@ export function PrintModal({
   const effectiveFilamentReqs = isLibraryFile ? libraryFilamentReqs : archiveFilamentReqs;
 
   // Fetch available filaments for model-based assignment (for filament override UI)
-  const { data: availableFilaments } = useQuery({
-    queryKey: ['available-filaments', targetModel, targetLocation],
-    queryFn: () => api.getAvailableFilaments(targetModel!, targetLocation ?? undefined),
-    enabled: assignmentMode === 'model' && !!targetModel,
+  const { data: availableFilamentOptions } = useQuery({
+    queryKey: ['available-filament-options', targetModel, targetLocation, effectiveFilamentReqs?.filaments],
+    queryFn: () => api.getAvailableFilamentOptions(
+      targetModel!,
+      targetLocation ?? undefined,
+      effectiveFilamentReqs?.filaments ?? [],
+    ),
+    enabled: assignmentMode === 'model' && !!targetModel && !!effectiveFilamentReqs?.filaments?.length,
   });
 
-  // Only fetch printer status when single printer selected (for filament mapping)
-  const { data: printerStatus } = useQuery({
-    queryKey: ['printer-status', effectivePrinterId],
-    queryFn: () => api.getPrinterStatus(effectivePrinterId!),
-    enabled: !!effectivePrinterId,
+  const { data: singleMappingPreview } = useQuery({
+    queryKey: ['filament-mapping-preview', effectivePrinterId, effectiveFilamentReqs?.filaments, manualMappings],
+    queryFn: () => api.previewFilamentMapping(effectivePrinterId!, {
+      filaments: effectiveFilamentReqs?.filaments ?? [],
+      manual_mappings: manualMappings,
+    }),
+    enabled: !!effectivePrinterId && !!effectiveFilamentReqs?.filaments?.length,
+    staleTime: 5000,
   });
-
-  // Single-printer flow: gate prefer_lowest on this printer's backup state.
-  // Multi-printer flow gates per-printer inside the hook (different printers
-  // may have different backup states), so we pass the raw setting down.
-  const singlePrinterPreferLowest = effectivePreferLowest(
-    settings?.prefer_lowest_filament,
-    printerStatus?.ams_filament_backup,
-  );
 
   const isPrinterCurrentlyDispatchable = (status: PrinterStatus | undefined): boolean => {
     if (!status?.connected) return false;
@@ -413,17 +383,11 @@ export function PrintModal({
     }
   };
 
-  // Get AMS mapping from hook (only when single printer selected)
-  const { amsMapping } = useFilamentMapping(
-    effectiveFilamentReqs,
-    printerStatus,
-    manualMappings,
-    singlePrinterPreferLowest,
-    effectivePrinterId ? inventoryByTrayIdPerPrinter.get(effectivePrinterId) : undefined,
-  );
+  // The server owns matching policy; the modal submits its returned mapping.
+  const amsMapping = singleMappingPreview?.mapping ?? undefined;
 
   const handleManualMappingChange = (nextMappings: Record<number, number>) => {
-    const loaded = buildLoadedFilaments(printerStatus);
+    const loaded = singleMappingPreview?.loaded_filaments ?? [];
     const changedSlotIds = new Set(
       [...Object.keys(manualMappings), ...Object.keys(nextMappings)]
         .map(Number)
@@ -441,12 +405,12 @@ export function PrintModal({
           delete next[slotId];
           continue;
         }
-        const selected = loaded.find((filament) => filament.globalTrayId === globalTrayId);
+        const selected = loaded.find((filament) => filament.global_tray_id === globalTrayId);
         if (selected) {
           next[slotId] = {
             type: selected.material.family,
-            color: selected.material.rgbHex,
-            material: selected.material.toQueueJson(),
+            color: selected.material.color_hex.slice(0, 7),
+            material: selected.material,
           };
         }
       }
@@ -462,8 +426,6 @@ export function PrintModal({
     manualMappings,
     perPrinterConfigs,
     setPerPrinterConfigs,
-    settings?.prefer_lowest_filament,
-    inventoryByTrayIdPerPrinter,
   );
 
   // Auto-select first plate when plates load (single or multi-plate)
@@ -632,12 +594,13 @@ export function PrintModal({
             : amsMapping;
           if (!printerMapping) continue;
 
-          const printerStatusForWarning = selectedPrinters.length > 1
-            ? multiPrinterMapping.printerResults.find((result) => result.printerId === printerId)?.status
-            : printerStatus;
-
-          const loadedFilaments = buildLoadedFilaments(printerStatusForWarning);
-          const slotLabelByTray = new Map(loadedFilaments.map((f) => [f.globalTrayId, f.label]));
+          const mappingResult = multiPrinterMapping.printerResults.find((result) => result.printerId === printerId);
+          const slotLabelByTray = selectedPrinters.length > 1
+            ? new Map(mappingResult?.loadedFilaments.map((filament) => [filament.globalTrayId, filament.label]))
+            : new Map(singleMappingPreview?.loaded_filaments.map((filament) => [
+                filament.global_tray_id,
+                filament.is_external ? 'External' : `AMS ${filament.ams_id + 1} Slot ${filament.tray_id + 1}`,
+              ]));
           const assignments = spoolAssignmentsByPrinter.get(printerId);
           const printerName = printers?.find((p) => p.id === printerId)?.name ?? `Printer ${printerId}`;
 
@@ -769,10 +732,10 @@ export function PrintModal({
         if (!selected) return override;
         return {
           ...override,
-          material: selected.material.toQueueJson(),
+          material: selected.material,
           type: selected.material.family,
-          color: selected.material.rgbHex,
-          tray_info_idx: selected.material.profileId || '',
+          color: selected.material.color_hex.slice(0, 7),
+          tray_info_idx: selected.material.profile_id || '',
         };
       });
     };
@@ -1194,7 +1157,7 @@ export function PrintModal({
             {assignmentMode === 'model' && targetModel && effectiveFilamentReqs && (
               <FilamentOverride
                 filamentReqs={effectiveFilamentReqs}
-                availableFilaments={availableFilaments ?? []}
+                availableOptions={availableFilamentOptions}
                 overrides={filamentOverrides}
                 onChange={setFilamentOverrides}
               />

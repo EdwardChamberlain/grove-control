@@ -171,6 +171,7 @@ class AMSTray(BaseModel):
     tray_sub_brands: str | None = None  # Full name like "PLA Basic", "PETG HF"
     tray_id_name: str | None = None  # Bambu filament ID like "A00-Y2" (can decode to color)
     tray_info_idx: str | None = None  # Filament preset ID like "GFA00"
+    material: dict[str, str | None] | None = None  # Canonical material for API consumers
     remain: int = 0
     k: float | None = None  # Pressure advance value (from tray or K-profile lookup)
     cali_idx: int | None = None  # Calibration index for K-profile lookup

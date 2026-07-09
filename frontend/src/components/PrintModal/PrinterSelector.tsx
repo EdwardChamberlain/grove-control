@@ -12,15 +12,9 @@ import {
   Users,
 } from 'lucide-react';
 import { api, type PrinterStatus } from '../../api/client';
-import { FilamentMaterial } from '../../utils/filamentMaterial';
-import {
-  autoMatchFilament,
-  filterFilamentsByNozzle,
-  effectivePreferLowest,
-} from '../../utils/amsHelpers';
 import type { PrinterSelectorProps, AssignmentMode } from './types';
 import type { PrinterMappingResult, PerPrinterConfig } from '../../hooks/useMultiPrinterFilamentMapping';
-import type { FilamentRequirement, LoadedFilament } from '../../hooks/useFilamentMapping';
+import type { FilamentRequirement } from '../../hooks/useFilamentMapping';
 import { FilamentProfileRow } from './FilamentProfileRow';
 
 interface PrinterSelectorWithMappingProps extends PrinterSelectorProps {
@@ -95,46 +89,25 @@ function InlineMappingEditor({
     }
   };
 
-  // Compute current slot assignments
+  // The backend owns candidate selection and compatibility status. This
+  // component only renders its current decision and records user choices.
   const slotAssignments = filamentReqs.map((req) => {
     const slotId = req.slot_id || 0;
-    const currentMapping = printerResult.config.manualMappings[slotId];
-
-    let loaded: LoadedFilament | undefined;
-    let isManual = false;
-
-    if (currentMapping !== undefined) {
-      loaded = printerResult.loadedFilaments.find((f) => f.globalTrayId === currentMapping);
-      isManual = true;
-    } else {
-      const usedTrayIds = new Set<number>(Object.values(printerResult.config.manualMappings));
-      const cachedSettings = queryClient.getQueryData<{ prefer_lowest_filament?: boolean }>(['settings']);
-      loaded = autoMatchFilament(
-        req,
-        printerResult.loadedFilaments,
-        usedTrayIds,
-        effectivePreferLowest(cachedSettings?.prefer_lowest_filament, printerResult.status?.ams_filament_backup),
-        printerResult.inventoryByTrayId,
-      ) as LoadedFilament | undefined;
-    }
-
-    // Determine status
-    let status: 'match' | 'type_only' | 'mismatch' = 'mismatch';
-    if (loaded) {
-      const reqMaterial = FilamentMaterial.fromRequirement(req);
-      const typeMatch = reqMaterial.isMaterialMatch(loaded.material);
-      const colorMatch =
-        reqMaterial.isMaterialMatch(loaded.material) &&
-        (reqMaterial.isColorMatch(loaded.material) || reqMaterial.isSimilarColor(loaded.material));
-
-      if (typeMatch && colorMatch) {
-        status = 'match';
-      } else if (typeMatch) {
-        status = 'type_only';
-      }
-    }
-
-    return { req, loaded, status, isManual };
+    const comparison = printerResult.comparisons.find((item) => item.slot_id === slotId);
+    const mappedTrayId = comparison?.mapped_tray_id ?? -1;
+    const loaded = printerResult.loadedFilaments.find((item) => item.globalTrayId === mappedTrayId);
+    const status: 'match' | 'type_only' | 'mismatch' = comparison?.status === 'match' || comparison?.status === 'similar_colour'
+      ? 'match'
+      : comparison?.status === 'material_only'
+        ? 'type_only'
+        : 'mismatch';
+    return {
+      req,
+      loaded,
+      status,
+      isManual: printerResult.config.manualMappings[slotId] !== undefined,
+      comparison,
+    };
   });
 
   return (
@@ -152,22 +125,23 @@ function InlineMappingEditor({
         </button>
       </div>
 
-      {slotAssignments.map(({ req, loaded, status, isManual }, idx) => {
-        const reqMaterial = FilamentMaterial.fromRequirement(req);
+      {slotAssignments.map(({ req, loaded, status, isManual, comparison }, idx) => {
+        const requiredMaterial = comparison?.material;
+        const candidates = new Set(comparison?.candidate_tray_ids ?? []);
         return (
           <FilamentProfileRow
             key={req.slot_id || idx}
             requiredColor={req.color}
-            requiredLabel={reqMaterial.materialLabel || req.type}
+            requiredLabel={requiredMaterial?.material_label || req.type}
             usedGrams={req.used_grams}
-            requiredTitle={reqMaterial.displayName}
+            requiredTitle={requiredMaterial?.display_name || req.type}
             value={loaded ? String(loaded.globalTrayId) : ''}
             emptyLabel={t('printModal.selectFilamentSlot')}
-            options={filterFilamentsByNozzle(printerResult.loadedFilaments, req.nozzle_id)
-              .filter((filament) => reqMaterial.isMaterialMatch(filament.material))
+            options={printerResult.loadedFilaments
+              .filter((filament) => candidates.has(filament.globalTrayId))
               .map((filament) => ({
                 value: String(filament.globalTrayId),
-                label: `${filament.label}: ${filament.material.displayName}`,
+                label: `${filament.label}: ${filament.material.display_name}`,
               }))}
             onChange={(value) => handleSlotChange(req.slot_id || 0, value)}
             status={status}

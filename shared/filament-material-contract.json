@@ -1,0 +1,40 @@
+{
+  "profiles": [
+    { "id": "GFA00", "family": "PLA", "subtype": "Basic" },
+    { "id": "GFA01", "family": "PLA", "subtype": "Matte" },
+    { "id": "GFA02", "family": "PLA", "subtype": "Metal" },
+    { "id": "GFA05", "family": "PLA", "subtype": "Silk" },
+    { "id": "GFA06", "family": "PLA", "subtype": "Silk+" },
+    { "id": "GFA07", "family": "PLA", "subtype": "Marble" },
+    { "id": "GFA08", "family": "PLA", "subtype": "Sparkle" },
+    { "id": "GFA09", "family": "PLA", "subtype": "Tough" },
+    { "id": "GFA11", "family": "PLA", "subtype": "Aero" },
+    { "id": "GFA12", "family": "PLA", "subtype": "Glow" },
+    { "id": "GFA13", "family": "PLA", "subtype": "Dynamic" },
+    { "id": "GFA15", "family": "PLA", "subtype": "Galaxy" },
+    { "id": "GFA16", "family": "PLA", "subtype": "Wood" },
+    { "id": "GFG00", "family": "PETG", "subtype": "Basic" },
+    { "id": "GFG01", "family": "PETG", "subtype": "Translucent" },
+    { "id": "GFG02", "family": "PETG", "subtype": "HF" },
+    { "id": "GFU00", "family": "TPU", "subtype": "95A HF" },
+    { "id": "GFU01", "family": "TPU", "subtype": "95A" },
+    { "id": "GFU02", "family": "TPU", "subtype": "for AMS" }
+  ],
+  "dispatch_compatibility": [
+    {
+      "left": { "family": "PLA", "subtype": "Basic" },
+      "right": { "family": "PLA", "subtype": "Matte" },
+      "compatible": true
+    },
+    {
+      "left": { "family": "PLA", "subtype": "Basic" },
+      "right": { "family": "PLA", "subtype": "Silk" },
+      "compatible": false
+    },
+    {
+      "left": { "family": "PLA", "subtype": "Basic" },
+      "right": { "family": "PLA", "subtype": "S" },
+      "compatible": false
+    }
+  ]
+}

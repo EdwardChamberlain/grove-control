@@ -755,7 +755,8 @@ class PrintScheduler:
         for o in force_overrides:
             required = FilamentMaterial.from_queue_override(o)
             if not any(
-                required.is_material_match(candidate) and required.is_color_match(candidate) for candidate in loaded
+                required.is_dispatch_compatible(candidate) and required.is_color_match(candidate)
+                for candidate in loaded
             ):
                 missing.append(required.display_name)
         return missing
@@ -854,7 +855,7 @@ class PrintScheduler:
                 return False
             loaded_material = loaded_by_id.get(mapping[slot_id - 1])
             required_material = FilamentMaterial.from_queue_override(override)
-            if not loaded_material or not required_material.is_material_match(loaded_material):
+            if not loaded_material or not required_material.is_dispatch_compatible(loaded_material):
                 return False
         return True
 
@@ -942,7 +943,7 @@ class PrintScheduler:
         return [
             material.display_name
             for material in requirements
-            if not any(material.is_material_match(candidate) for candidate in loaded)
+            if not any(material.is_dispatch_compatible(candidate) for candidate in loaded)
         ]
 
     def _count_override_color_matches(self, printer_id: int, overrides: list[dict]) -> int:
@@ -967,7 +968,8 @@ class PrintScheduler:
         for o in overrides:
             required = FilamentMaterial.from_queue_override(o)
             if any(
-                required.is_material_match(candidate) and required.is_color_match(candidate) for candidate in loaded
+                required.is_dispatch_compatible(candidate) and required.is_color_match(candidate)
+                for candidate in loaded
             ):
                 matches += 1
         return matches
@@ -1423,16 +1425,17 @@ class PrintScheduler:
                 available = [f for f in available if f.get("extruder_id") == req_nozzle_id]
 
             # Material is always a hard boundary. Disabling colour matching may
-            # select a different shade, but a known subtype must still match.
-            # Legacy requirements without a subtype remain compatible with
-            # every subtype in the same material family.
+            # select a different shade; profile variants are only substituted
+            # when explicitly listed in FilamentMaterial's dispatch matrix.
             available = [
                 f
                 for f in available
                 if (
                     (f.get("material") or FilamentMaterial.from_queue_override(f)).family_key == req_material.family_key
                     if strict_color
-                    else req_material.is_material_match(f.get("material") or FilamentMaterial.from_queue_override(f))
+                    else req_material.is_dispatch_compatible(
+                        f.get("material") or FilamentMaterial.from_queue_override(f)
+                    )
                 )
             ]
 
@@ -1493,13 +1496,17 @@ class PrintScheduler:
                     # Use color matching within this subset
                     for f in idx_matches:
                         f_material = f.get("material") or FilamentMaterial.from_queue_override(f)
-                        if req_material.is_material_match(f_material) and req_material.is_color_match(f_material):
+                        if req_material.is_dispatch_compatible(f_material) and req_material.is_color_match(f_material):
                             if not exact_match:
                                 exact_match = f
-                        elif req_material.is_material_match(f_material) and req_material.is_similar_color(f_material):
+                        elif req_material.is_dispatch_compatible(f_material) and req_material.is_similar_color(
+                            f_material
+                        ):
                             if not similar_match:
                                 similar_match = f
-                        elif not strict_color and not type_only_match and req_material.is_material_match(f_material):
+                        elif (
+                            not strict_color and not type_only_match and req_material.is_dispatch_compatible(f_material)
+                        ):
                             type_only_match = f
 
             # If no idx_match yet, do standard type/color matching on all available trays
@@ -1507,13 +1514,13 @@ class PrintScheduler:
                 for f in available:
                     # Type matches - check color
                     f_material = f.get("material") or FilamentMaterial.from_queue_override(f)
-                    if req_material.is_material_match(f_material) and req_material.is_color_match(f_material):
+                    if req_material.is_dispatch_compatible(f_material) and req_material.is_color_match(f_material):
                         if not exact_match:
                             exact_match = f
-                    elif req_material.is_material_match(f_material) and req_material.is_similar_color(f_material):
+                    elif req_material.is_dispatch_compatible(f_material) and req_material.is_similar_color(f_material):
                         if not similar_match:
                             similar_match = f
-                    elif not strict_color and not type_only_match and req_material.is_material_match(f_material):
+                    elif not strict_color and not type_only_match and req_material.is_dispatch_compatible(f_material):
                         type_only_match = f
 
             # Forced slots are exact by definition: never degrade to a similar

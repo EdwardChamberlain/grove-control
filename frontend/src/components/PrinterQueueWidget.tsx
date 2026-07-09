@@ -4,17 +4,14 @@ import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
 import { formatRelativeTime } from '../utils/date';
-import { filterCompatibleQueueItems } from '../utils/printer';
 
 interface PrinterQueueWidgetProps {
   printerId: number;
   printerModel?: string | null;
-  loadedFilamentTypes?: Set<string>;
-  loadedFilaments?: Set<string>;  // Canonical material keys for filament override colour matching
   variant?: 'card' | 'panelExtension';
 }
 
-export function PrinterQueueWidget({ printerId, printerModel, loadedFilamentTypes, loadedFilaments, variant = 'card' }: PrinterQueueWidgetProps) {
+export function PrinterQueueWidget({ printerId, printerModel, variant = 'card' }: PrinterQueueWidgetProps) {
   const { t } = useTranslation();
   const { data: queue } = useQuery({
     queryKey: ['queue', printerId, 'pending', printerModel],
@@ -22,15 +19,13 @@ export function PrinterQueueWidget({ printerId, printerModel, loadedFilamentType
     refetchInterval: 30000,
   });
 
-  // Filter queue to items this printer can actually print (filament type + color check)
-  const compatibleQueue = queue ? filterCompatibleQueueItems(queue, loadedFilamentTypes, loadedFilaments) : undefined;
-  const totalPending = compatibleQueue?.length || 0;
+  const totalPending = queue?.length || 0;
 
   if (totalPending === 0) {
     return null;
   }
 
-  const nextItem = compatibleQueue?.[0];
+  const nextItem = queue?.[0];
 
   // Passive next-in-queue preview. Plate-clear acknowledgment is handled by the
   // card-level "Mark plate as cleared" button (PrintersPage.tsx). Having a

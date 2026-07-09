@@ -4,6 +4,7 @@ Tests that the endpoint returns deduplicated filaments with tray_sub_brands,
 correctly distinguishing subtypes like "PLA Basic" vs "PLA Matte".
 """
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -102,6 +103,83 @@ class TestAvailableFilaments:
         assert len(data) == 2
         sub_brands = {d["tray_sub_brands"] for d in data}
         assert sub_brands == {"PLA Basic", "PLA Matte"}
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_mapping_preview_is_backend_authoritative_for_compatible_subtypes(
+        self, async_client: AsyncClient, printer_factory
+    ):
+        """PLA Basic and Matte are offered by the server, never matched by the UI."""
+        printer = await printer_factory(name="Test Printer", model="X1C")
+        status = SimpleNamespace(
+            raw_data={
+                "ams": [
+                    {
+                        "id": 0,
+                        "tray": [
+                            {
+                                "id": 0,
+                                "tray_type": "PLA",
+                                "tray_sub_brands": "PLA Basic",
+                                "tray_color": "FFFFFFFF",
+                                "tray_info_idx": "GFA00",
+                            },
+                            {
+                                "id": 1,
+                                "tray_type": "PLA",
+                                "tray_sub_brands": "PLA Matte",
+                                "tray_color": "FFFFFFFF",
+                                "tray_info_idx": "GFA01",
+                            },
+                        ],
+                    }
+                ],
+                "vt_tray": [],
+                "ams_extruder_map": {},
+            },
+            fila_switch=None,
+            ams_filament_backup=True,
+        )
+
+        with patch("backend.app.api.routes.printers.printer_manager") as mock_pm:
+            mock_pm.get_status.return_value = status
+            response = await async_client.post(
+                f"/api/v1/printers/{printer.id}/filament-mapping-preview",
+                json={
+                    "filaments": [
+                        {
+                            "slot_id": 1,
+                            "type": "PLA",
+                            "color": "#FFFFFFFF",
+                            "tray_info_idx": "GFA00",
+                        }
+                    ],
+                    "manual_mappings": {"1": 1},
+                },
+            )
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result["auto_mapping"] == [0]
+        assert result["mapping"] == [1]
+        assert result["comparisons"] == [
+            {
+                "slot_id": 1,
+                "material": {
+                    "family": "PLA",
+                    "subtype": "Basic",
+                    "color_hex": "#FFFFFFFF",
+                    "profile_id": "GFA00",
+                    "setting_id": "GFSA00",
+                    "material_label": "PLA Basic",
+                    "display_name": "PLA Basic - White",
+                    "generic_color_name": "White",
+                },
+                "status": "match",
+                "mapped_tray_id": 1,
+                "candidate_tray_ids": [0, 1],
+            }
+        ]
 
     @pytest.mark.asyncio
     @pytest.mark.integration

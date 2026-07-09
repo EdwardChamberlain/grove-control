@@ -123,8 +123,7 @@ import { DRYING_PRESETS, useAmsDryingControls } from '../hooks/useAmsDryingContr
 import type { DryingPresets } from '../hooks/useAmsDryingControls';
 import { PrinterInfoModal } from '../components/PrinterInfoModal';
 import { getAmsLabel, getGlobalTrayId, getSlotPresetKey, getFillBarColor } from '../utils/amsHelpers';
-import { getPrinterImage, getWifiStrength, filterCompatibleQueueItems } from '../utils/printer';
-import { FilamentMaterial, filamentMaterialIdentityKey } from '../utils/filamentMaterial';
+import { getPrinterImage, getWifiStrength } from '../utils/printer';
 import { FilamentSlotCircle } from '../components/FilamentSlotCircle';
 import { Collapsible } from '../components/Collapsible';
 import { ConnectionDiagnosticModal, DiagnosticChecklist } from '../components/ConnectionDiagnostic';
@@ -2447,43 +2446,6 @@ function PrinterCard({
     return Array.from(ids);
   }, [status?.ams, status?.vt_tray, status?.nozzle_rack]);
 
-  // Collect loaded filament types for queue widget filtering
-  const loadedFilamentTypes = useMemo(() => {
-    const types = new Set<string>();
-    if (status?.ams) {
-      for (const ams of status.ams) {
-        for (const tray of ams.tray || []) {
-          if (tray.tray_type) types.add(FilamentMaterial.fromAmsTray(tray).compatibleFamilyKey);
-        }
-      }
-    }
-    for (const vt of status?.vt_tray ?? []) {
-      if (vt.tray_type) types.add(FilamentMaterial.fromAmsTray(vt).compatibleFamilyKey);
-    }
-    return types;
-  }, [status?.ams, status?.vt_tray]);
-
-  // Collect loaded canonical material keys for queue widget override matching.
-  // This preserves subtype, so PLA Basic White and PLA Matte White do not collapse.
-  const loadedFilaments = useMemo(() => {
-    const filaments = new Set<string>();
-    if (status?.ams) {
-      for (const ams of status.ams) {
-        for (const tray of ams.tray || []) {
-          if (tray.tray_type && tray.tray_color) {
-            filaments.add(filamentMaterialIdentityKey(FilamentMaterial.fromAmsTray(tray)));
-          }
-        }
-      }
-    }
-    for (const vt of status?.vt_tray ?? []) {
-      if (vt.tray_type && vt.tray_color) {
-        filaments.add(filamentMaterialIdentityKey(FilamentMaterial.fromAmsTray(vt)));
-      }
-    }
-    return filaments;
-  }, [status?.ams, status?.vt_tray]);
-
   // Fetch cloud filament info for tooltips (name includes color, also has K value)
   const { data: filamentInfo } = useQuery({
     queryKey: ['filamentInfo', trayInfoIds],
@@ -2586,13 +2548,9 @@ function PrinterCard({
     queryKey: ['queue', printer.id, 'pending'],
     queryFn: () => api.getQueue(printer.id, 'pending'),
   });
-  // Filter queue items by filament compatibility (same logic as PrinterQueueWidget)
-  // so the badge only shows on printers that can actually run the queued jobs.
-  // An empty Set means no filaments are loaded — jobs requiring specific types are incompatible.
   const queueCount = useMemo(() => {
-    if (!queueItems?.length) return 0;
-    return filterCompatibleQueueItems(queueItems, loadedFilamentTypes, loadedFilaments).length;
-  }, [queueItems, loadedFilamentTypes, loadedFilaments]);
+    return queueItems?.length ?? 0;
+  }, [queueItems]);
 
   // Fetch currently printing queue item to show who started it (Issue #206)
   const { data: printingQueueItems } = useQuery({
@@ -3970,8 +3928,6 @@ function PrinterCard({
                       <PrinterQueueWidget
                         printerId={printer.id}
                         printerModel={printer.model}
-                        loadedFilamentTypes={loadedFilamentTypes}
-                        loadedFilaments={loadedFilaments}
                         variant="panelExtension"
                       />
                     </div>
