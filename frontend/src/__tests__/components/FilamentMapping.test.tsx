@@ -94,14 +94,14 @@ describe('FilamentMapping — FTS routing', () => {
     // PETG remains available despite the route, while unrelated PLA must not
     // be offered as an unsafe manual override.
     await waitFor(() => {
-      expect(screen.getByText(/Bambu PETG/)).toBeInTheDocument();
+      expect(screen.getByText(/PETG - Green/)).toBeInTheDocument();
     });
-    expect(screen.queryByText(/Bambu PLA/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/PLA - Red/)).not.toBeInTheDocument();
 
     // The slot currently fed into a track gets an [L]/[R] badge. AMS-0 slot 1
     // (global tray ID 1) is in fila_switch.in_slots[1], whose track terminates
     // at extruder 1 → the LEFT-nozzle short label appears in that option.
-    const petgOption = screen.getByText(/Bambu PETG/);
+    const petgOption = screen.getByText(/PETG - Green/);
     expect(petgOption.textContent).toMatch(/\[L\]/);
 
     // AMS-0 slot 0 (global tray ID 0) is NOT currently fed into any track —
@@ -146,18 +146,14 @@ describe('FilamentMapping — FTS routing', () => {
     // The same-material PETG slot must still appear across extruders; the PLA
     // slot remains excluded because manual mapping cannot cross materials.
     await waitFor(() => {
-      expect(screen.getByText(/Bambu PETG/)).toBeInTheDocument();
+      expect(screen.getByText(/PETG - Green/)).toBeInTheDocument();
     });
-    expect(screen.queryByText(/Bambu PLA/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/PLA - Red/)).not.toBeInTheDocument();
   });
 
-  it('renders sub-brand + material-disambiguated colour on the required side (#1718)', async () => {
-    // Same fix as FilamentOverride: required-side label was rendering the
-    // raw 3MF type ("PLA") and the generic getColorName bucket ("Black").
-    // After the shared useFilamentLabels hook it must now resolve
-    // tray_info_idx → "Bambu PLA Matte" and the material-disambiguated
-    // colour catalogue → "Charcoal" — the Specific-Printer panel matched
-    // the Any-Model panel that was already correct.
+  it('renders canonical material and generated colour on the required side', async () => {
+    // Profile id GFA01 carries the material subtype, while the display colour
+    // comes from the generic colour helper rather than catalogue names.
     server.use(
       http.get(
         '/api/v1/printers/:id/status',
@@ -169,17 +165,6 @@ describe('FilamentMapping — FTS routing', () => {
             }),
           ),
       ),
-      http.get('/api/v1/cloud/builtin-filaments', () =>
-        HttpResponse.json([{ filament_id: 'GFA01', name: 'Bambu PLA Matte' }]),
-      ),
-      http.get('/api/v1/cloud/filament-id-map', () => HttpResponse.json({})),
-      http.get('/api/v1/inventory/colors/by-material', ({ request }) => {
-        const url = new URL(request.url);
-        if (url.searchParams.get('hex') === '#000000' && url.searchParams.get('material') === 'PLA Matte') {
-          return HttpResponse.json({ color_name: 'Charcoal' });
-        }
-        return HttpResponse.json({ color_name: null });
-      }),
     );
 
     const charcoalReqs = {
@@ -200,15 +185,13 @@ describe('FilamentMapping — FTS routing', () => {
       />,
     );
 
-    // Required-side type text picks up the resolved sub-brand.
+    // Required-side type text picks up the resolved subtype.
     await waitFor(() => {
-      expect(screen.getByText(/Bambu PLA Matte/)).toBeInTheDocument();
+      expect(screen.getByText(/PLA Matte/)).toBeInTheDocument();
     });
-    // The swatch tooltip carries the disambiguated "Charcoal" instead of
-    // the generic "Black" bucket; check the title attr on the colour
-    // circle's parent span.
+    // The swatch tooltip carries the canonical generated label.
     await waitFor(() => {
-      const swatch = screen.getByTitle(/Required: Bambu PLA Matte - Charcoal/);
+      const swatch = screen.getByTitle(/Required: PLA Matte - Black/);
       expect(swatch).toBeInTheDocument();
     });
   });

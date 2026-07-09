@@ -4357,7 +4357,7 @@ export default {
     insufficientFilamentMessage: 'Some assigned spools have less filament remaining than this print needs:',
     insufficientFilamentLine: '{{printer}} - {{slot}}: needs {{required}}g, remaining {{remaining}}g',
     printAnyway: 'Print anyway',
-    forceColorMatch: 'Match Colour and Material',
+    forceColorMatch: 'Match Colour',
     forceColorMatchHint: 'Require the selected colour. Turn this off to use any colour in the same material family.',
     staggerPrinterStarts: 'Stagger printer starts',
     staggerGroupSize: 'Group size',

@@ -25,6 +25,7 @@ interface SkuGroup {
   subtype: string | null;
   brand: string | null;
   colorName: string | null;
+  colorIdentity: string | null;
   spools: InventorySpool[];
 }
 
@@ -60,8 +61,12 @@ const CHART_COLORS = ['#1DB954', '#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6'];
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
-function skuKey(material: string, subtype: string | null, brand: string | null, colorName: string | null) {
-  return `${material}||${subtype ?? ''}||${brand ?? ''}||${colorName ?? ''}`;
+function skuKey(material: string, subtype: string | null, brand: string | null, colorIdentity: string | null) {
+  return `${material}||${subtype ?? ''}||${brand ?? ''}||${colorIdentity ?? ''}`;
+}
+
+function spoolColorIdentity(spool: { rgba?: string | null; color_name?: string | null }) {
+  return spool.rgba || spool.color_name || null;
 }
 
 function addDays(date: Date, days: number): Date {
@@ -226,8 +231,16 @@ export function ForecastPanel({ spools }: { spools: InventorySpool[] }) {
     const map = new Map<string, SkuGroup>();
     for (const spool of spools) {
       if (spool.archived_at) continue;
-      const key = skuKey(spool.material, spool.subtype, spool.brand, spool.color_name);
-      const g = map.get(key) ?? { key, material: spool.material, subtype: spool.subtype, brand: spool.brand, colorName: spool.color_name, spools: [] };
+      const key = skuKey(spool.material, spool.subtype, spool.brand, spoolColorIdentity(spool));
+      const g = map.get(key) ?? {
+        key,
+        material: spool.material,
+        subtype: spool.subtype,
+        brand: spool.brand,
+        colorName: spool.color_name,
+        colorIdentity: spoolColorIdentity(spool),
+        spools: [],
+      };
       g.spools.push(spool);
       map.set(key, g);
     }
@@ -243,6 +256,9 @@ export function ForecastPanel({ spools }: { spools: InventorySpool[] }) {
       // color_name column is added (#forecast-color-grouping migration).
       const skuSettings =
         settingsMap.get(group.key) ??
+        (group.colorName !== group.colorIdentity
+          ? settingsMap.get(skuKey(group.material, group.subtype, group.brand, group.colorName)) ?? null
+          : null) ??
         (group.colorName !== null ? settingsMap.get(skuKey(group.material, group.subtype, group.brand, null)) ?? null : null);
       const skuLeadTime = skuSettings?.lead_time_days ?? 0;
       const effectiveLeadTimeDays = Math.max(globalLeadTime, skuLeadTime);
@@ -882,7 +898,7 @@ function ForecastRow({
     : 'text-green-400';
 
   function upsert(lead: number, marginVal: number, marginUnitArg: 'days' | 'g', alertsSnoozed = snoozed) {
-    upsertMutation.mutate({ material: f.group.material, subtype: f.group.subtype, brand: f.group.brand, color_name: f.group.colorName, lead_time_days: lead, safety_margin_value: marginVal, safety_margin_unit: marginUnitArg, alerts_snoozed: alertsSnoozed });
+    upsertMutation.mutate({ material: f.group.material, subtype: f.group.subtype, brand: f.group.brand, color_name: f.group.colorIdentity, lead_time_days: lead, safety_margin_value: marginVal, safety_margin_unit: marginUnitArg, alerts_snoozed: alertsSnoozed });
   }
 
   function toggleSnooze(e: React.MouseEvent) {
@@ -1295,7 +1311,10 @@ function ShoppingListPanel({
   // Build a forecast lookup keyed by (material||subtype||brand)
   const forecastMap = useMemo(() => {
     const m = new Map<string, SkuForecast>();
-    for (const f of forecasts) m.set(f.group.key, f);
+    for (const f of forecasts) {
+      m.set(f.group.key, f);
+      m.set(skuKey(f.group.material, f.group.subtype, f.group.brand, f.group.colorName), f);
+    }
     return m;
   }, [forecasts]);
 

@@ -7,11 +7,10 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
-import { http, HttpResponse } from 'msw';
 import { render } from '../utils';
-import { server } from '../mocks/server';
 import { FilamentOverride } from '../../components/PrintModal/FilamentOverride';
 import type { FilamentReqsData } from '../../components/PrintModal/types';
+import { FilamentMaterial } from '../../utils/filamentMaterial';
 
 const defaultFilamentReqs: FilamentReqsData = {
   filaments: [
@@ -26,6 +25,20 @@ const defaultAvailable = [
 ];
 
 const mockOnChange = vi.fn();
+
+function selection(type: string, color: string, trayInfoIdx = '', traySubBrands = type) {
+  const material = FilamentMaterial.fromAmsTray({
+    tray_type: type,
+    tray_color: color,
+    tray_info_idx: trayInfoIdx,
+    tray_sub_brands: traySubBrands,
+  });
+  return {
+    type: material.family,
+    color: material.rgbHex,
+    material: material.toQueueJson(),
+  };
+}
 
 afterEach(() => {
   cleanup();
@@ -133,7 +146,7 @@ describe('FilamentOverride', () => {
 
       // Verify no PETG option values exist
       const optionValues = Array.from(options).map((o) => o.getAttribute('value'));
-      expect(optionValues).not.toContain('PETG|#0000FF');
+      expect(optionValues.some((v) => v?.startsWith('PETG|'))).toBe(false);
     });
 
     it('shows all same-type options regardless of color', () => {
@@ -183,6 +196,32 @@ describe('FilamentOverride', () => {
       // Should show "PLA Basic" and "PLA Matte", not just "PLA"
       expect(optionTexts.some((t) => t?.includes('PLA Basic'))).toBe(true);
       expect(optionTexts.some((t) => t?.includes('PLA Matte'))).toBe(true);
+    });
+
+    it('keeps same-hex material variants distinct in option values', () => {
+      const subtypeAvailable = [
+        { type: 'PLA', color: '#FFFFFF', tray_info_idx: 'GFA00', tray_sub_brands: 'PLA Basic', extruder_id: null },
+        { type: 'PLA', color: '#FFFFFF', tray_info_idx: 'GFA01', tray_sub_brands: 'PLA Matte', extruder_id: null },
+      ];
+
+      render(
+        <FilamentOverride
+          filamentReqs={defaultFilamentReqs}
+          availableFilaments={subtypeAvailable}
+          overrides={{}}
+          onChange={mockOnChange}
+        />
+      );
+
+      const select = screen.getByRole('combobox');
+      const nonDefaultValues = Array.from(select.querySelectorAll('option'))
+        .filter((option) => option.value)
+        .map((option) => option.value);
+
+      expect(nonDefaultValues).toHaveLength(2);
+      expect(new Set(nonDefaultValues).size).toBe(2);
+      expect(nonDefaultValues.some((value) => value.includes('|BASIC|'))).toBe(true);
+      expect(nonDefaultValues.some((value) => value.includes('|MATTE|'))).toBe(true);
     });
 
     it('falls back to type when tray_sub_brands is empty', () => {
@@ -236,8 +275,8 @@ describe('FilamentOverride', () => {
       expect(options).toHaveLength(2);
 
       const optionValues = Array.from(options).map((o) => o.getAttribute('value'));
-      expect(optionValues).toContain('PLA|#FF0000');
-      expect(optionValues).not.toContain('PLA|#00FF00');
+      expect(optionValues.some((v) => v?.includes('#FF0000FF'))).toBe(true);
+      expect(optionValues.some((v) => v?.includes('#00FF00FF'))).toBe(false);
     });
 
     it('shows all filaments when nozzle_id is undefined', () => {
@@ -297,9 +336,9 @@ describe('FilamentOverride', () => {
       expect(options).toHaveLength(3);
 
       const optionValues = Array.from(options).map((o) => o.getAttribute('value'));
-      expect(optionValues).toContain('PLA|#FF0000');
-      expect(optionValues).toContain('PLA|#00FF00');
-      expect(optionValues).not.toContain('PLA|#FFFFFF');
+      expect(optionValues.some((v) => v?.includes('#FF0000FF'))).toBe(true);
+      expect(optionValues.some((v) => v?.includes('#00FF00FF'))).toBe(true);
+      expect(optionValues.some((v) => v?.includes('#FFFFFFFF'))).toBe(false);
     });
   });
 
@@ -315,16 +354,20 @@ describe('FilamentOverride', () => {
       );
 
       const select = screen.getByRole('combobox');
-      fireEvent.change(select, { target: { value: 'PLA|#00FF00' } });
+      const selectedValue = Array.from(select.querySelectorAll('option'))
+        .find((option) => option.textContent?.includes('Green'))
+        ?.getAttribute('value');
+      expect(selectedValue).toBeTruthy();
+      fireEvent.change(select, { target: { value: selectedValue } });
 
       expect(mockOnChange).toHaveBeenCalledWith({
-        1: { type: 'PLA', color: '#00FF00' },
+        1: selection('PLA', '#00FF00', 'GFA01', 'PLA Basic'),
       });
     });
 
     it('calls onChange to remove override when selecting original', () => {
       const activeOverrides = {
-        1: { type: 'PLA', color: '#00FF00' },
+        1: selection('PLA', '#00FF00', 'GFA01', 'PLA Basic'),
       };
 
       render(
@@ -343,18 +386,8 @@ describe('FilamentOverride', () => {
     });
   });
 
-  describe('original-label SKU resolution (#1718)', () => {
-    it('uses the builtin filament name when tray_info_idx maps to a known SKU', async () => {
-      // Stamped by Bambu Studio when slicing with PLA Matte Charcoal: 3MF
-      // carries type=PLA + the GFA01 SKU. Without resolution the label
-      // collapses to "PLA (Black)" which was Sam's bug.
-      server.use(
-        http.get('/api/v1/cloud/builtin-filaments', () =>
-          HttpResponse.json([{ filament_id: 'GFA01', name: 'Bambu PLA Matte' }]),
-        ),
-        http.get('/api/v1/cloud/filament-id-map', () => HttpResponse.json({})),
-      );
-
+  describe('canonical original-label resolution', () => {
+    it('uses known profile ids to derive the material subtype', async () => {
       const reqs: FilamentReqsData = {
         filaments: [
           { slot_id: 1, type: 'PLA', color: '#1A1A1A', used_grams: 25, used_meters: 8.5, tray_info_idx: 'GFA01' },
@@ -370,29 +403,16 @@ describe('FilamentOverride', () => {
         />,
       );
 
-      // Wait for the queries to resolve and the resolved label to land in
-      // the dropdown's "original" placeholder option. The tooltip on the
-      // color swatch carries the same text, so we scope to the option to
-      // avoid the multi-match.
+      // Scope to the dropdown's placeholder option; the tooltip on the color
+      // swatch carries the same text.
       await waitFor(() => {
         const select = screen.getByRole('combobox');
         const placeholder = select.querySelector('option[value=""]');
-        expect(placeholder?.textContent).toMatch(/Bambu PLA Matte/);
+        expect(placeholder?.textContent).toMatch(/PLA Matte/);
       });
     });
 
-    it('prefers the cloud user-preset name over the builtin entry for the same id', async () => {
-      // Cloud user-preset names are more specific than the builtin fallback —
-      // e.g. a user has renamed GFA00 to "My House PLA".
-      server.use(
-        http.get('/api/v1/cloud/builtin-filaments', () =>
-          HttpResponse.json([{ filament_id: 'GFA00', name: 'Bambu PLA Basic' }]),
-        ),
-        http.get('/api/v1/cloud/filament-id-map', () =>
-          HttpResponse.json({ GFA00: 'My House PLA' }),
-        ),
-      );
-
+    it('ignores vendor and user-preset names for active print labels', async () => {
       const reqs: FilamentReqsData = {
         filaments: [
           { slot_id: 1, type: 'PLA', color: '#FF0000', used_grams: 25, used_meters: 8.5, tray_info_idx: 'GFA00' },
@@ -411,35 +431,13 @@ describe('FilamentOverride', () => {
       await waitFor(() => {
         const select = screen.getByRole('combobox');
         const placeholder = select.querySelector('option[value=""]');
-        expect(placeholder?.textContent).toMatch(/My House PLA/);
+        expect(placeholder?.textContent).toMatch(/PLA Basic \(Red\)/);
       });
-      // The builtin fallback must NOT bleed through anywhere — neither the
-      // placeholder option nor the tooltip.
       expect(screen.queryByText(/Bambu PLA Basic/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/My House PLA/)).not.toBeInTheDocument();
     });
 
-    it('uses the material-disambiguated catalogue color name (PLA Matte Charcoal — #1718 round 2)', async () => {
-      // Sam's exact case: 3MF carries hex #000000 + tray_info_idx GFA01.
-      // Without material context, /colors/map collapses #000000 to "Black"
-      // (PLA Basic wins the priority race). The override panel must pass
-      // the derived material hint "PLA Matte" through to /colors/by-material
-      // so the user sees "Charcoal" — the actually-sliced color.
-      server.use(
-        http.get('/api/v1/cloud/builtin-filaments', () =>
-          HttpResponse.json([{ filament_id: 'GFA01', name: 'Bambu PLA Matte' }]),
-        ),
-        http.get('/api/v1/cloud/filament-id-map', () => HttpResponse.json({})),
-        http.get('/api/v1/inventory/colors/by-material', ({ request }) => {
-          const url = new URL(request.url);
-          const hex = url.searchParams.get('hex');
-          const material = url.searchParams.get('material');
-          if (hex === '#000000' && material === 'PLA Matte') {
-            return HttpResponse.json({ color_name: 'Charcoal' });
-          }
-          return HttpResponse.json({ color_name: null });
-        }),
-      );
-
+    it('uses generic colour names instead of catalogue colour names', async () => {
       const reqs: FilamentReqsData = {
         filaments: [
           { slot_id: 1, type: 'PLA', color: '#000000', used_grams: 25, used_meters: 8.5, tray_info_idx: 'GFA01' },
@@ -458,31 +456,11 @@ describe('FilamentOverride', () => {
       await waitFor(() => {
         const select = screen.getByRole('combobox');
         const placeholder = select.querySelector('option[value=""]');
-        expect(placeholder?.textContent).toMatch(/Bambu PLA Matte \(Charcoal\)/);
+        expect(placeholder?.textContent).toMatch(/PLA Matte \(Black\)/);
       });
     });
 
     it('disambiguates per slot when two slots share a hex but differ in material', async () => {
-      // Regression guard: the per-slot useQueries dispatch must key on
-      // (hex, material) so a "PLA Matte Charcoal" slot does not adopt the
-      // "PLA Basic Black" slot's answer.
-      server.use(
-        http.get('/api/v1/cloud/builtin-filaments', () =>
-          HttpResponse.json([
-            { filament_id: 'GFA00', name: 'Bambu PLA Basic' },
-            { filament_id: 'GFA01', name: 'Bambu PLA Matte' },
-          ]),
-        ),
-        http.get('/api/v1/cloud/filament-id-map', () => HttpResponse.json({})),
-        http.get('/api/v1/inventory/colors/by-material', ({ request }) => {
-          const url = new URL(request.url);
-          const material = url.searchParams.get('material');
-          if (material === 'PLA Matte') return HttpResponse.json({ color_name: 'Charcoal' });
-          if (material === 'PLA Basic') return HttpResponse.json({ color_name: 'Black' });
-          return HttpResponse.json({ color_name: null });
-        }),
-      );
-
       const reqs: FilamentReqsData = {
         filaments: [
           { slot_id: 1, type: 'PLA', color: '#000000', used_grams: 25, used_meters: 8.5, tray_info_idx: 'GFA01' },
@@ -502,25 +480,12 @@ describe('FilamentOverride', () => {
       await waitFor(() => {
         const selects = screen.getAllByRole('combobox');
         expect(selects).toHaveLength(2);
-        expect(selects[0].querySelector('option[value=""]')?.textContent).toMatch(/Bambu PLA Matte \(Charcoal\)/);
-        expect(selects[1].querySelector('option[value=""]')?.textContent).toMatch(/Bambu PLA Basic \(Black\)/);
+        expect(selects[0].querySelector('option[value=""]')?.textContent).toMatch(/PLA Matte \(Black\)/);
+        expect(selects[1].querySelector('option[value=""]')?.textContent).toMatch(/PLA Basic \(Black\)/);
       });
     });
 
-    it('falls back to getColorName(hex) when the by-material lookup returns null', async () => {
-      // Any time the catalogue has no entry for the hex (or the endpoint is
-      // unreachable), the placeholder must still render — the HSL-bucket
-      // fallback is strictly better than a blank.
-      server.use(
-        http.get('/api/v1/cloud/builtin-filaments', () =>
-          HttpResponse.json([{ filament_id: 'GFA01', name: 'Bambu PLA Matte' }]),
-        ),
-        http.get('/api/v1/cloud/filament-id-map', () => HttpResponse.json({})),
-        http.get('/api/v1/inventory/colors/by-material', () =>
-          HttpResponse.json({ color_name: null }),
-        ),
-      );
-
+    it('falls back to generated generic colour names', async () => {
       const reqs: FilamentReqsData = {
         filaments: [
           { slot_id: 1, type: 'PLA', color: '#FF0000', used_grams: 25, used_meters: 8.5, tray_info_idx: 'GFA01' },
@@ -536,12 +501,11 @@ describe('FilamentOverride', () => {
         />,
       );
 
-      // Wait for the builtin lookup to land so we know the row mounted; the
-      // colour fallback to getColorName for #FF0000 produces "Red"-shaped text.
+      // The generated colour helper should keep the placeholder non-empty.
       await waitFor(() => {
         const select = screen.getByRole('combobox');
         const placeholder = select.querySelector('option[value=""]');
-        expect(placeholder?.textContent).toMatch(/Bambu PLA Matte/);
+        expect(placeholder?.textContent).toMatch(/PLA Matte \(Red\)/);
         expect(placeholder?.textContent).not.toMatch(/null/);
       });
     });
@@ -549,11 +513,6 @@ describe('FilamentOverride', () => {
     it('falls back to the raw type when the SKU is unknown to both maps', async () => {
       // Unknown ids must not break rendering — the original "PLA" label is
       // still better than a blank.
-      server.use(
-        http.get('/api/v1/cloud/builtin-filaments', () => HttpResponse.json([])),
-        http.get('/api/v1/cloud/filament-id-map', () => HttpResponse.json({})),
-      );
-
       const reqs: FilamentReqsData = {
         filaments: [
           { slot_id: 1, type: 'PLA', color: '#FF0000', used_grams: 25, used_meters: 8.5, tray_info_idx: 'GFXXX' },

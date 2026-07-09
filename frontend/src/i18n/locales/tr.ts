@@ -4311,7 +4311,7 @@ export default {
     insufficientFilamentMessage: 'Bazı atanmış makaralarda bu baskının ihtiyaç duyduğundan daha az filament kaldı:',
     insufficientFilamentLine: '{{printer}} - {{slot}}: {{required}}g gerekli, {{remaining}}g kaldı',
     printAnyway: 'Yine de yazdır',
-    forceColorMatch: 'Renk ve malzemeyi eşleştir',
+    forceColorMatch: 'Rengi eşleştir',
     forceColorMatchHint: 'Seçilen rengi zorunlu kılar. Aynı malzeme ailesindeki herhangi bir rengi kullanmak için kapatın.',
     staggerPrinterStarts: 'Yazıcı başlangıçlarını kademelendir',
     staggerGroupSize: 'Grup boyutu',

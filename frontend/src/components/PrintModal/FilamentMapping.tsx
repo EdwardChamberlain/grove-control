@@ -4,8 +4,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Circle, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
 import { api } from '../../api/client';
 import { useFilamentMapping } from '../../hooks/useFilamentMapping';
-import { canonicalFilamentType, getGlobalTrayId, effectivePreferLowest } from '../../utils/amsHelpers';
-import { getColorName } from '../../utils/colors';
+import { getGlobalTrayId, effectivePreferLowest } from '../../utils/amsHelpers';
+import { FilamentMaterial } from '../../utils/filamentMaterial';
 import { FilamentProfileRow } from './FilamentProfileRow';
 import { useFilamentLabels } from './useFilamentLabels';
 import type { FilamentMappingProps } from './types';
@@ -222,13 +222,13 @@ export function FilamentMapping({
           </div>
           {filamentComparison.map((item, idx) => {
             const slotId = item.slot_id ?? 0;
-            // #1718: same sub-brand + colour resolution as FilamentOverride.
-            // Indexing is safe because ``useFilamentLabels`` mirrors the input
-            // array shape; defensive fallback covers the empty-reqs render
-            // path that shouldn't reach here anyway.
-            const { resolvedName, colorLabel } = filamentLabels[idx] ?? { resolvedName: item.type, colorLabel: getColorName(item.color) };
+            const itemMaterial = FilamentMaterial.fromRequirement(item);
+            const { resolvedName, colorLabel } = filamentLabels[idx] ?? {
+              resolvedName: itemMaterial.materialLabel || item.type,
+              colorLabel: itemMaterial.genericColorName,
+            };
             const compatibleLoadedFilaments = loadedFilaments.filter(
-              (filament) => canonicalFilamentType(filament.type) === canonicalFilamentType(item.type),
+              (filament) => itemMaterial.isFamilyMatch(filament.material),
             );
             const options = compatibleLoadedFilaments.map((filament) => {
               const remainingWeight = trayRemainingWeightMap.get(filament.globalTrayId);
@@ -244,7 +244,7 @@ export function FilamentMapping({
                 : ` [${ftsTargetExtruder === 1 ? t('printModal.leftNozzle') : t('printModal.rightNozzle')}]`;
               return {
                 value: String(filament.globalTrayId),
-                label: `${filament.label}: ${filament.traySubBrands || filament.type} (${filament.colorName})${remainingLabel}${ftsBadge}`,
+                label: `${filament.label}: ${filament.material.displayName}${remainingLabel}${ftsBadge}`,
               };
             });
             const nozzleBadge = isDualNozzle && item.nozzle_id != null ? (

@@ -4333,7 +4333,7 @@ export default {
     insufficientFilamentMessage: '割り当てられたスプールの一部は、この印刷に必要な量より残量が少ないです:',
     insufficientFilamentLine: '{{printer}} - {{slot}}: 必要 {{required}}g、残り {{remaining}}g',
     printAnyway: 'それでも印刷',
-    forceColorMatch: '色と素材を一致',
+    forceColorMatch: '色を一致',
     forceColorMatchHint: '選択した色を必須にします。オフにすると、同じ素材系統の任意の色を使用します。',
     staggerPrinterStarts: 'プリンター開始を段階的に',
     staggerGroupSize: 'グループサイズ',

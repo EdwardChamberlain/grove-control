@@ -4110,7 +4110,7 @@ export default {
     insufficientFilamentMessage: '일부 할당된 스풀에 이 인쇄에 필요한 것보다 적은 필라멘트가 남아 있습니다:',
     insufficientFilamentLine: '{{printer}} - {{slot}}: {{required}}g 필요, {{remaining}}g 남음',
     printAnyway: '그래도 인쇄',
-    forceColorMatch: '색상 및 재질 일치',
+    forceColorMatch: '색상 일치',
     forceColorMatchHint: '선택한 색상을 필수로 사용합니다. 끄면 같은 재질 계열의 다른 색상을 사용할 수 있습니다.',
     staggerPrinterStarts: '프린터 시작 분산',
     staggerGroupSize: '그룹 크기',

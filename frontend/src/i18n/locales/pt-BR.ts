@@ -4321,7 +4321,7 @@ export default {
     insufficientFilamentMessage: 'Alguns dos carretéis atribuídos têm menos filamento restante do que o necessário para esta impressão:',
     insufficientFilamentLine: '{{printer}} - {{slot}}: necessário {{required}}g, restante {{remaining}}g',
     printAnyway: 'Imprimir mesmo assim',
-    forceColorMatch: 'Corresponder cor e material',
+    forceColorMatch: 'Corresponder cor',
     forceColorMatchHint: 'Exige a cor selecionada. Desative para usar qualquer cor da mesma família de material.',
     staggerPrinterStarts: 'Escalonar inícios',
     staggerGroupSize: 'Tamanho do grupo',

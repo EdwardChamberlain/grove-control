@@ -4321,7 +4321,7 @@ export default {
     insufficientFilamentMessage: 'Alcune bobine assegnate hanno meno filamento rimanente di quanto necessario per questa stampa:',
     insufficientFilamentLine: '{{printer}} - {{slot}}: necessita di {{required}}g, rimanenti {{remaining}}g',
     printAnyway: 'Stampa comunque',
-    forceColorMatch: 'Abbina colore e materiale',
+    forceColorMatch: 'Abbina colore',
     forceColorMatchHint: 'Richiede il colore selezionato. Disattiva per usare qualsiasi colore della stessa famiglia di materiale.',
     staggerPrinterStarts: 'Scaglionare avvii',
     staggerGroupSize: 'Dimensione gruppo',

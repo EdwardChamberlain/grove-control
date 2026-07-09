@@ -259,7 +259,7 @@ describe('PrintModal', () => {
         />
       );
 
-      const forceMatch = await screen.findByLabelText(/Match Colour and Material/i) as HTMLInputElement;
+      const forceMatch = await screen.findByLabelText(/Match Colour/i) as HTMLInputElement;
       expect(forceMatch).toBeChecked();
 
       await user.click(screen.getByRole('button', { name: /^print$/i }));
@@ -305,7 +305,7 @@ describe('PrintModal', () => {
         />
       );
 
-      const forceMatch = await screen.findByLabelText(/Match Colour and Material/i) as HTMLInputElement;
+      const forceMatch = await screen.findByLabelText(/Match Colour/i) as HTMLInputElement;
       await user.click(forceMatch);
       expect(forceMatch).not.toBeChecked();
       await user.click(screen.getByRole('button', { name: /^print$/i }));
@@ -768,7 +768,7 @@ describe('PrintModal', () => {
       });
       expect(mappingSelect.querySelector('option[value="2"]')).not.toBeInTheDocument();
       await user.selectOptions(mappingSelect, '1');
-      const matchPolicy = screen.getByLabelText(/Match Colour and Material/i);
+      const matchPolicy = screen.getByLabelText(/Match Colour/i);
       expect(matchPolicy).toBeChecked();
       await user.click(matchPolicy);
       await user.click(screen.getByRole('button', { name: /^print$/i }));

@@ -406,6 +406,71 @@ async def _safe_execute(conn, sql):
             raise
 
 
+def _canonicalize_queue_filament_overrides_payload(payload: str | None) -> str | None:
+    """Return canonical filament override JSON, or the original payload if unreadable."""
+    if not payload:
+        return payload
+    import json
+
+    from backend.app.services.filament_material import FilamentMaterial
+
+    try:
+        overrides = json.loads(payload)
+    except (json.JSONDecodeError, TypeError):
+        return payload
+    if not isinstance(overrides, list):
+        return payload
+
+    changed = False
+    normalized: list = []
+    for override in overrides:
+        if not isinstance(override, dict) or not isinstance(override.get("slot_id"), int):
+            normalized.append(override)
+            continue
+        material_payload = override.get("material")
+        has_color_source = bool(override.get("color") or override.get("color_hex")) or (
+            isinstance(material_payload, dict) and bool(material_payload.get("color_hex"))
+        )
+        if not has_color_source:
+            normalized.append(override)
+            continue
+        material = FilamentMaterial.from_queue_override(override)
+        if not material.family:
+            normalized.append(override)
+            continue
+        entry = {
+            k: v for k, v in override.items() if k not in {"material", "type", "color", "tray_info_idx", "color_name"}
+        }
+        entry.update(
+            {
+                "slot_id": override["slot_id"],
+                "material": material.to_queue_json(),
+                **material.to_legacy_type_color(),
+            }
+        )
+        normalized.append(entry)
+        changed = changed or entry != override
+
+    return json.dumps(normalized) if changed else payload
+
+
+async def _migrate_print_queue_filament_materials(conn) -> None:
+    """Backfill legacy queue overrides to canonical material objects."""
+    from sqlalchemy import text
+
+    async with conn.begin_nested():
+        result = await conn.execute(
+            text("SELECT id, filament_overrides FROM print_queue WHERE filament_overrides IS NOT NULL")
+        )
+        for row_id, payload in result.all():
+            normalized = _canonicalize_queue_filament_overrides_payload(payload)
+            if normalized != payload:
+                await conn.execute(
+                    text("UPDATE print_queue SET filament_overrides = :payload WHERE id = :id"),
+                    {"payload": normalized, "id": row_id},
+                )
+
+
 async def _api_keys_column_exists(conn, column_name: str) -> bool:
     """Return True if the named column exists on ``api_keys``.
 
@@ -1031,6 +1096,9 @@ async def run_migrations(conn):
             conn,
             "ALTER TABLE virtual_printers ALTER COLUMN queue_force_color_match SET DEFAULT TRUE",
         )
+
+    # Migration: canonicalize queued filament override JSON to material objects.
+    await _migrate_print_queue_filament_materials(conn)
 
     # Per-VP opt-in for auto-print G-code injection (#1516). Default false so
     # existing gcode_snippets users don't silently start injecting on VP/Studio

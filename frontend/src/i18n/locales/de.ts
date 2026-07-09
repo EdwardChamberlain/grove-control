@@ -4333,7 +4333,7 @@ export default {
     insufficientFilamentMessage: 'Einige zugewiesene Spulen haben weniger Filament als dieser Druck benötigt:',
     insufficientFilamentLine: '{{printer}} - {{slot}}: benötigt {{required}}g, verbleibend {{remaining}}g',
     printAnyway: 'Trotzdem drucken',
-    forceColorMatch: 'Farbe und Material abgleichen',
+    forceColorMatch: 'Farbe abgleichen',
     forceColorMatchHint: 'Die ausgewählte Farbe verlangen. Deaktivieren, um eine beliebige Farbe derselben Materialfamilie zu verwenden.',
     staggerPrinterStarts: 'Druckerstarts staffeln',
     staggerGroupSize: 'Gruppengröße',

@@ -68,6 +68,28 @@ def test_strict_colour_mapping_rejects_different_material_variant(scheduler):
     assert mapping == [-1]
 
 
+def test_strict_colour_mapping_rejects_basic_white_for_matte_white(scheduler):
+    required = [{"slot_id": 1, "type": "PLA", "color": "#FFFFFF", "tray_info_idx": "GFA01"}]
+    loaded = [
+        {"global_tray_id": 0, "type": "PLA", "color": "#FFFFFF", "tray_info_idx": "GFA00"},
+    ]
+
+    mapping = scheduler._match_filaments_to_slots(required, loaded, strict_color_slot_ids={1})
+
+    assert mapping == [-1]
+
+
+def test_strict_colour_mapping_accepts_matte_white_for_matte_white(scheduler):
+    required = [{"slot_id": 1, "type": "PLA", "color": "#FFFFFF", "tray_info_idx": "GFA01"}]
+    loaded = [
+        {"global_tray_id": 0, "type": "PLA", "color": "#FFFFFF", "tray_info_idx": "GFA01"},
+    ]
+
+    mapping = scheduler._match_filaments_to_slots(required, loaded, strict_color_slot_ids={1})
+
+    assert mapping == [0]
+
+
 def test_unforced_mapping_never_crosses_material_family(scheduler):
     required = [{"slot_id": 1, "type": "PLA", "color": "#FF0000", "tray_info_idx": "shared"}]
     loaded = [
@@ -83,9 +105,13 @@ def test_missing_per_slot_flag_inherits_safe_queue_default(scheduler):
     item = _queue_item()
     item.filament_overrides = '[{"slot_id": 1, "type": "PLA", "color": "#FF0000"}]'
 
-    assert scheduler._get_force_color_overrides(item) == [
-        {"slot_id": 1, "type": "PLA", "color": "#FF0000", "force_color_match": True}
-    ]
+    overrides = scheduler._get_force_color_overrides(item)
+    assert len(overrides) == 1
+    assert overrides[0]["slot_id"] == 1
+    assert overrides[0]["type"] == "PLA"
+    assert overrides[0]["color"] == "#FF0000"
+    assert overrides[0]["force_color_match"] is True
+    assert overrides[0]["material"]["color_hex"] == "#FF0000FF"
 
 
 @pytest.mark.parametrize("invalid_value", [None, 0, 1, "false", "true", ""])
@@ -95,9 +121,13 @@ def test_malformed_persisted_slot_flag_inherits_safe_queue_default(scheduler, in
         f'[{{"slot_id": 1, "type": "PLA", "color": "#FF0000", "force_color_match": {json.dumps(invalid_value)}}}]'
     )
 
-    assert scheduler._get_force_color_overrides(item) == [
-        {"slot_id": 1, "type": "PLA", "color": "#FF0000", "force_color_match": True}
-    ]
+    overrides = scheduler._get_force_color_overrides(item)
+    assert len(overrides) == 1
+    assert overrides[0]["slot_id"] == 1
+    assert overrides[0]["type"] == "PLA"
+    assert overrides[0]["color"] == "#FF0000"
+    assert overrides[0]["force_color_match"] is True
+    assert overrides[0]["material"]["color_hex"] == "#FF0000FF"
 
 
 @pytest.mark.asyncio
@@ -163,19 +193,14 @@ async def test_model_unforced_job_recomputes_cross_material_mapping(mock_pm, sch
         session_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
         await scheduler.check_queue()
 
-    mapping_is_safe.assert_called_once_with(
-        3,
-        "[2]",
-        [
-            {
-                "slot_id": 1,
-                "type": "PLA",
-                "color": "#FF0000",
-                "color_name": "Red",
-                "force_color_match": False,
-            }
-        ],
-    )
+    mapping_args = mapping_is_safe.call_args.args
+    assert mapping_args[0] == 3
+    assert mapping_args[1] == "[2]"
+    assert mapping_args[2][0]["slot_id"] == 1
+    assert mapping_args[2][0]["type"] == "PLA"
+    assert mapping_args[2][0]["color"] == "#FF0000"
+    assert mapping_args[2][0]["force_color_match"] is False
+    assert mapping_args[2][0]["material"]["color_hex"] == "#FF0000FF"
     compute.assert_awaited_once_with(db, 3, item)
     assert item.ams_mapping == "[0]"
     start_print.assert_awaited_once_with(db, item)

@@ -4321,7 +4321,7 @@ export default {
     insufficientFilamentMessage: '部分已分配料盤的剩餘耗材少於本次列印所需：',
     insufficientFilamentLine: '{{printer}} - {{slot}}：需要 {{required}}g，剩餘 {{remaining}}g',
     printAnyway: '仍然列印',
-    forceColorMatch: '匹配顏色和材料',
+    forceColorMatch: '匹配顏色',
     forceColorMatchHint: '要求使用所選顏色。關閉後可使用同一材料系列中的任意顏色。',
     staggerPrinterStarts: '錯開印表機啟動',
     staggerGroupSize: '群組大小',

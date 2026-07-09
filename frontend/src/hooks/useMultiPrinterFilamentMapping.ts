@@ -9,12 +9,11 @@ import {
   type FilamentRequirement,
 } from './useFilamentMapping';
 import {
-  normalizeColorForCompare,
-  colorsAreSimilar,
   preferLowestSortKey,
   compareSortKeys,
   effectivePreferLowest,
 } from '../utils/amsHelpers';
+import { FilamentMaterial } from '../utils/filamentMaterial';
 
 /**
  * Match status for a single printer's filament configuration.
@@ -108,6 +107,7 @@ function computeMatchDetails(
 
   for (const req of filamentReqs) {
     const slotId = req.slot_id || 0;
+    const reqMaterial = FilamentMaterial.fromRequirement(req);
 
     // Check manual override first
     if (slotId > 0 && manualMappings[slotId] !== undefined) {
@@ -115,10 +115,10 @@ function computeMatchDetails(
       const manualLoaded = loadedFilaments.find((f) => f.globalTrayId === manualTrayId);
 
       if (manualLoaded) {
-        const typeMatch = manualLoaded.type?.toUpperCase() === req.type?.toUpperCase();
+        const typeMatch = reqMaterial.isFamilyMatch(manualLoaded.material);
         const colorMatch =
-          normalizeColorForCompare(manualLoaded.color) === normalizeColorForCompare(req.color) ||
-          colorsAreSimilar(manualLoaded.color, req.color);
+          reqMaterial.isMaterialMatch(manualLoaded.material) &&
+          (reqMaterial.isColorMatch(manualLoaded.material) || reqMaterial.isSimilarColor(manualLoaded.material));
 
         if (typeMatch && colorMatch) {
           exactMatches++;
@@ -149,24 +149,14 @@ function computeMatchDetails(
       );
     }
 
-    const exactMatch = candidates.find(
-      (f) =>
-        f.type?.toUpperCase() === req.type?.toUpperCase() &&
-        normalizeColorForCompare(f.color) === normalizeColorForCompare(req.color)
-    );
+    const exactMatch = candidates.find((f) => reqMaterial.isMaterialMatch(f.material) && reqMaterial.isColorMatch(f.material));
     const similarMatch = exactMatch
       ? undefined
-      : candidates.find(
-          (f) =>
-            f.type?.toUpperCase() === req.type?.toUpperCase() &&
-            colorsAreSimilar(f.color, req.color)
-        );
+      : candidates.find((f) => reqMaterial.isMaterialMatch(f.material) && reqMaterial.isSimilarColor(f.material));
     const typeOnlyMatch =
       exactMatch || similarMatch
         ? undefined
-        : candidates.find(
-            (f) => f.type?.toUpperCase() === req.type?.toUpperCase()
-          );
+        : candidates.find((f) => reqMaterial.isFamilyMatch(f.material));
     const loaded = exactMatch ?? similarMatch ?? typeOnlyMatch;
 
     if (loaded) {
@@ -213,6 +203,7 @@ function computeMappingWithOverrides(
 
   for (const req of filamentReqs.filaments) {
     const slotId = req.slot_id || 0;
+    const reqMaterial = FilamentMaterial.fromRequirement(req);
 
     // Check manual override first
     if (slotId > 0 && manualMappings[slotId] !== undefined) {
@@ -238,24 +229,14 @@ function computeMappingWithOverrides(
       );
     }
 
-    const exactMatch = candidates.find(
-      (f) =>
-        f.type?.toUpperCase() === req.type?.toUpperCase() &&
-        normalizeColorForCompare(f.color) === normalizeColorForCompare(req.color)
-    );
+    const exactMatch = candidates.find((f) => reqMaterial.isMaterialMatch(f.material) && reqMaterial.isColorMatch(f.material));
     const similarMatch = exactMatch
       ? undefined
-      : candidates.find(
-          (f) =>
-            f.type?.toUpperCase() === req.type?.toUpperCase() &&
-            colorsAreSimilar(f.color, req.color)
-        );
+      : candidates.find((f) => reqMaterial.isMaterialMatch(f.material) && reqMaterial.isSimilarColor(f.material));
     const typeOnlyMatch =
       exactMatch || similarMatch
         ? undefined
-        : candidates.find(
-            (f) => f.type?.toUpperCase() === req.type?.toUpperCase()
-          );
+        : candidates.find((f) => reqMaterial.isFamilyMatch(f.material));
     const loaded = exactMatch ?? similarMatch ?? typeOnlyMatch;
 
     if (loaded) {

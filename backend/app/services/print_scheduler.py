@@ -30,6 +30,7 @@ from backend.app.services.bambu_ftp import (
     with_ftp_retry,
 )
 from backend.app.services.filament_deficit import compute_deficit_for_queue_item
+from backend.app.services.filament_material import FilamentMaterial, colors_are_similar, normalize_color_hex
 from backend.app.services.filament_requirements import canonical_filament_type
 from backend.app.services.notification_service import notification_service
 from backend.app.services.printer_manager import (
@@ -649,17 +650,18 @@ class PrintScheduler:
             if required_filament_types:
                 missing = self._get_missing_filament_types(printer.id, required_filament_types)
                 if missing:
-                    # When force_overrides are present, enrich missing entries with color info
-                    # so the "Waiting on" message includes "TYPE (color)" instead of just "TYPE"
+                    # When force_overrides are present, enrich missing entries with
+                    # the canonical material label instead of just the broad family.
                     if force_overrides:
-                        force_color_map = {
-                            (o.get("type") or "").upper(): o.get("color_name") or o.get("color", "?")
-                            for o in force_overrides
-                        }
-                        missing_enriched = [
-                            f"{t} ({force_color_map[t_upper]})" if (t_upper := t.upper()) in force_color_map else t
-                            for t in missing
-                        ]
+                        force_material_map: dict[str, str] = {}
+                        for override in force_overrides:
+                            material = FilamentMaterial.from_queue_override(override)
+                            if material.family:
+                                force_material_map.setdefault(
+                                    canonical_filament_type(material.family),
+                                    material.display_name,
+                                )
+                        missing_enriched = [force_material_map.get(canonical_filament_type(t), t) for t in missing]
                         printers_missing_filament.append((printer.name, missing_enriched))
                     else:
                         printers_missing_filament.append((printer.name, missing))
@@ -747,30 +749,24 @@ class PrintScheduler:
         """
         status = printer_manager.get_status(printer_id)
         if not status:
-            return [f"{o.get('type', '?')} ({o.get('color_name') or o.get('color', '?')})" for o in force_overrides]
+            return [FilamentMaterial.from_queue_override(o).display_name for o in force_overrides]
 
-        # Build set of loaded type+colour pairs from AMS and external spool
-        loaded: set[tuple[str, str]] = set()
+        loaded: list[FilamentMaterial] = []
         for ams_unit in status.raw_data.get("ams", []):
             for tray in ams_unit.get("tray", []):
-                tray_type = tray.get("tray_type")
-                tray_color = tray.get("tray_color", "")
-                if tray_type:
-                    color_norm = tray_color.replace("#", "").lower()[:6]
-                    loaded.add((tray_type.strip().upper(), color_norm))
+                if tray.get("tray_type"):
+                    loaded.append(FilamentMaterial.from_ams_tray(tray))
         for vt in status.raw_data.get("vt_tray") or []:
-            vt_type = vt.get("tray_type")
-            if vt_type:
-                color_norm = (vt.get("tray_color", "") or "").replace("#", "").lower()[:6]
-                loaded.add((vt_type.strip().upper(), color_norm))
+            if vt.get("tray_type"):
+                loaded.append(FilamentMaterial.from_ams_tray(vt))
 
         missing = []
         for o in force_overrides:
-            o_type = (o.get("type") or "").strip().upper()
-            o_color = (o.get("color") or "").replace("#", "").lower()[:6]
-            if (o_type, o_color) not in loaded:
-                color_label = o.get("color_name") or o.get("color", "?")
-                missing.append(f"{o_type} ({color_label})")
+            required = FilamentMaterial.from_queue_override(o)
+            if not any(
+                required.is_material_match(candidate) and required.is_color_match(candidate) for candidate in loaded
+            ):
+                missing.append(required.display_name)
         return missing
 
     @staticmethod
@@ -788,8 +784,14 @@ class PrintScheduler:
             and all(
                 isinstance(override, dict)
                 and isinstance(override.get("slot_id"), int)
-                and bool(override.get("type"))
-                and bool(override.get("color"))
+                and (
+                    (
+                        isinstance(override.get("material"), dict)
+                        and bool(override["material"].get("family"))
+                        and bool(override["material"].get("color_hex"))
+                    )
+                    or (bool(override.get("type")) and bool(override.get("color")))
+                )
                 for override in overrides
             )
         )
@@ -816,7 +818,15 @@ class PrintScheduler:
             # values inherit the queue-level safe default.
             if type(slot_preference) is not bool:
                 slot_preference = queue_default
-            normalized.append({**override, "force_color_match": slot_preference})
+            material = FilamentMaterial.from_queue_override(override)
+            normalized.append(
+                {
+                    **override,
+                    "material": material.to_queue_json(),
+                    **material.to_legacy_type_color(),
+                    "force_color_match": slot_preference,
+                }
+            )
         return normalized
 
     @classmethod
@@ -844,17 +854,16 @@ class PrintScheduler:
         if not status:
             return False
         loaded_by_id = {
-            filament.get("global_tray_id"): filament.get("type", "")
+            filament.get("global_tray_id"): filament.get("material") or FilamentMaterial.from_queue_override(filament)
             for filament in self._build_loaded_filaments(status)
         }
         for override in overrides:
             slot_id = override.get("slot_id")
             if not isinstance(slot_id, int) or slot_id <= 0 or slot_id > len(mapping):
                 return False
-            loaded_type = loaded_by_id.get(mapping[slot_id - 1])
-            if not loaded_type or canonical_filament_type(loaded_type) != canonical_filament_type(
-                override.get("type") or ""
-            ):
+            loaded_material = loaded_by_id.get(mapping[slot_id - 1])
+            required_material = FilamentMaterial.from_queue_override(override)
+            if not loaded_material or not required_material.is_family_match(loaded_material):
                 return False
         return True
 
@@ -868,10 +877,8 @@ class PrintScheduler:
                 mapping[slot_id - 1] if isinstance(slot_id, int) and mapping and slot_id <= len(mapping) else -1
             )
             if mapped_tray < 0:
-                missing.append(
-                    f"{(override.get('type') or '').strip().upper()} "
-                    f"({override.get('color_name') or override.get('color', '?')})"
-                )
+                material = FilamentMaterial.from_queue_override(override)
+                missing.append(material.display_name)
         return missing
 
     @staticmethod
@@ -928,26 +935,21 @@ class PrintScheduler:
         if not status:
             return 0
 
-        # Collect loaded filaments' type+color pairs
-        loaded: set[tuple[str, str]] = set()
+        loaded: list[FilamentMaterial] = []
         for ams_unit in status.raw_data.get("ams", []):
             for tray in ams_unit.get("tray", []):
-                tray_type = tray.get("tray_type")
-                tray_color = tray.get("tray_color", "")
-                if tray_type:
-                    color_norm = tray_color.replace("#", "").lower()[:6]
-                    loaded.add((tray_type.upper(), color_norm))
+                if tray.get("tray_type"):
+                    loaded.append(FilamentMaterial.from_ams_tray(tray))
         for vt in status.raw_data.get("vt_tray") or []:
-            vt_type = vt.get("tray_type")
-            if vt_type:
-                color_norm = (vt.get("tray_color", "") or "").replace("#", "").lower()[:6]
-                loaded.add((vt_type.upper(), color_norm))
+            if vt.get("tray_type"):
+                loaded.append(FilamentMaterial.from_ams_tray(vt))
 
         matches = 0
         for o in overrides:
-            o_type = (o.get("type") or "").upper()
-            o_color = (o.get("color") or "").replace("#", "").lower()[:6]
-            if (o_type, o_color) in loaded:
+            required = FilamentMaterial.from_queue_override(o)
+            if any(
+                required.is_material_match(candidate) and required.is_color_match(candidate) for candidate in loaded
+            ):
                 matches += 1
         return matches
 
@@ -1005,19 +1007,18 @@ class PrintScheduler:
                 for req in filament_reqs:
                     if req["slot_id"] in override_map:
                         override = override_map[req["slot_id"]]
-                        req["type"] = override["type"]
-                        req["color"] = override["color"]
+                        material = FilamentMaterial.from_queue_override(override)
+                        req["type"] = material.family
+                        req["color"] = material.rgb_hex
+                        req["material"] = material.to_queue_json()
+                        req["tray_info_idx"] = material.profile_id or ""
                         if override.get("force_color_match"):
                             force_color_slot_ids.add(req["slot_id"])
-                        # Clear tray_info_idx so matching uses type+color instead of
-                        # the original 3MF's tray_info_idx (which would match the old filament)
-                        req["tray_info_idx"] = ""
                         logger.debug(
-                            "Queue item %s: Override slot %d -> %s %s",
+                            "Queue item %s: Override slot %d -> %s",
                             item.id,
                             req["slot_id"],
-                            override["type"],
-                            override["color"],
+                            material.display_name,
                         )
             except (json.JSONDecodeError, KeyError, TypeError) as e:
                 logger.warning("Failed to apply filament overrides for queue item %s: %s", item.id, e)
@@ -1077,9 +1078,10 @@ class PrintScheduler:
         reqs = [
             {
                 "slot_id": o["slot_id"],
-                "type": o.get("type", ""),
-                "color": o.get("color", ""),
-                "tray_info_idx": "",
+                "type": FilamentMaterial.from_queue_override(o).family,
+                "color": FilamentMaterial.from_queue_override(o).rgb_hex,
+                "material": FilamentMaterial.from_queue_override(o).to_queue_json(),
+                "tray_info_idx": FilamentMaterial.from_queue_override(o).profile_id or "",
             }
             for o in overrides
         ]
@@ -1144,20 +1146,18 @@ class PrintScheduler:
                 tray_type = tray.get("tray_type")
                 if tray_type:
                     tray_id = int(tray.get("id", 0))
-                    tray_color = tray.get("tray_color", "")
-                    # tray_info_idx identifies the specific spool (e.g., "GFA00", "P4d64437")
-                    tray_info_idx = tray.get("tray_info_idx", "")
-                    # Normalize color: remove alpha, add hash
-                    color = self._normalize_color(tray_color)
+                    material = FilamentMaterial.from_ams_tray(tray)
                     # Calculate global tray ID
                     # AMS-HT units have IDs starting at 128 with a single tray
                     global_tray_id = ams_id if ams_id >= 128 else ams_id * 4 + tray_id
 
                     filaments.append(
                         {
-                            "type": tray_type,
-                            "color": color,
-                            "tray_info_idx": tray_info_idx,
+                            "type": material.family,
+                            "color": material.rgb_hex,
+                            "material": material,
+                            "tray_info_idx": material.profile_id or "",
+                            "tray_sub_brands": material.material_label,
                             "ams_id": ams_id,
                             "tray_id": tray_id,
                             "is_ht": is_ht,
@@ -1171,13 +1171,15 @@ class PrintScheduler:
         # Check external spool(s) (vt_tray is a list)
         for idx, vt in enumerate(status.raw_data.get("vt_tray") or []):
             if vt.get("tray_type"):
-                color = self._normalize_color(vt.get("tray_color", ""))
+                material = FilamentMaterial.from_ams_tray(vt)
                 tray_id = int(vt.get("id", 254))
                 filaments.append(
                     {
-                        "type": vt["tray_type"],
-                        "color": color,
-                        "tray_info_idx": vt.get("tray_info_idx", ""),
+                        "type": material.family,
+                        "color": material.rgb_hex,
+                        "material": material,
+                        "tray_info_idx": material.profile_id or "",
+                        "tray_sub_brands": material.material_label,
                         "ams_id": -1,
                         "tray_id": idx,
                         "is_ht": False,
@@ -1192,34 +1194,15 @@ class PrintScheduler:
 
     def _normalize_color(self, color: str | None) -> str:
         """Normalize color to #RRGGBB format."""
-        if not color:
-            return "#808080"
-        hex_color = color.replace("#", "")[:6]
-        return f"#{hex_color}"
+        return normalize_color_hex(color)[:7]
 
     def _normalize_color_for_compare(self, color: str | None) -> str:
         """Normalize color for comparison (lowercase, no hash)."""
-        if not color:
-            return ""
-        return color.replace("#", "").lower()[:6]
+        return normalize_color_hex(color).replace("#", "").lower()[:6] if color else ""
 
     def _colors_are_similar(self, color1: str | None, color2: str | None, threshold: int = 40) -> bool:
         """Check if two colors are visually similar within a threshold."""
-        hex1 = self._normalize_color_for_compare(color1)
-        hex2 = self._normalize_color_for_compare(color2)
-        if not hex1 or not hex2 or len(hex1) < 6 or len(hex2) < 6:
-            return False
-
-        try:
-            r1 = int(hex1[0:2], 16)
-            g1 = int(hex1[2:4], 16)
-            b1 = int(hex1[4:6], 16)
-            r2 = int(hex2[0:2], 16)
-            g2 = int(hex2[2:4], 16)
-            b2 = int(hex2[4:6], 16)
-            return abs(r1 - r2) <= threshold and abs(g1 - g2) <= threshold and abs(b1 - b2) <= threshold
-        except ValueError:
-            return False
+        return colors_are_similar(color1, color2, threshold)
 
     async def _build_inventory_remain_overrides(
         self, db: AsyncSession, printer_id: int, loaded: list[dict]
@@ -1398,9 +1381,10 @@ class PrintScheduler:
         comparisons = []
 
         for req in required:
-            req_type = (req.get("type") or "").upper()
-            req_color = req.get("color", "")
-            req_tray_info_idx = req.get("tray_info_idx", "")
+            req_material = FilamentMaterial.from_3mf_requirement(req)
+            req_type = req_material.family
+            req_color = req_material.rgb_hex
+            req_tray_info_idx = req_material.profile_id or ""
             strict_color = req.get("slot_id") in (strict_color_slot_ids or set())
 
             # Find best match: unique tray_info_idx > exact color > similar color > type-only
@@ -1427,9 +1411,12 @@ class PrintScheduler:
                 f
                 for f in available
                 if (
-                    (f.get("type") or "").upper() == req_type
+                    (
+                        (f.get("material") or FilamentMaterial.from_queue_override(f)).family_key
+                        == req_material.family_key
+                    )
                     if strict_color
-                    else canonical_filament_type(f.get("type") or "") == canonical_filament_type(req_type)
+                    else req_material.is_family_match(f.get("material") or FilamentMaterial.from_queue_override(f))
                 )
             ]
 
@@ -1457,6 +1444,7 @@ class PrintScheduler:
                             "type": f.get("type"),
                             "color": f.get("color"),
                             "tii": f.get("tray_info_idx"),
+                            "material": ((f.get("material") or FilamentMaterial.from_queue_override(f)).material_label),
                             "remain": f.get("remain"),
                             "inv_g": (
                                 inventory_remain_overrides.get(f.get("global_tray_id"))
@@ -1488,28 +1476,28 @@ class PrintScheduler:
                         idx_matches.sort(key=lambda f: self._prefer_lowest_sort_key(f, inventory_remain_overrides))
                     # Use color matching within this subset
                     for f in idx_matches:
-                        f_color = f.get("color", "")
-                        if self._normalize_color_for_compare(f_color) == self._normalize_color_for_compare(req_color):
+                        f_material = f.get("material") or FilamentMaterial.from_queue_override(f)
+                        if req_material.is_material_match(f_material) and req_material.is_color_match(f_material):
                             if not exact_match:
                                 exact_match = f
-                        elif self._colors_are_similar(f_color, req_color):
+                        elif req_material.is_material_match(f_material) and req_material.is_similar_color(f_material):
                             if not similar_match:
                                 similar_match = f
-                        elif not type_only_match:
+                        elif not strict_color and not type_only_match and req_material.is_family_match(f_material):
                             type_only_match = f
 
             # If no idx_match yet, do standard type/color matching on all available trays
             if not idx_match and not exact_match and not similar_match and not type_only_match:
                 for f in available:
                     # Type matches - check color
-                    f_color = f.get("color", "")
-                    if self._normalize_color_for_compare(f_color) == self._normalize_color_for_compare(req_color):
+                    f_material = f.get("material") or FilamentMaterial.from_queue_override(f)
+                    if req_material.is_material_match(f_material) and req_material.is_color_match(f_material):
                         if not exact_match:
                             exact_match = f
-                    elif self._colors_are_similar(f_color, req_color):
+                    elif req_material.is_material_match(f_material) and req_material.is_similar_color(f_material):
                         if not similar_match:
                             similar_match = f
-                    elif not type_only_match:
+                    elif not strict_color and not type_only_match and req_material.is_family_match(f_material):
                         type_only_match = f
 
             # Forced slots are exact by definition: never degrade to a similar

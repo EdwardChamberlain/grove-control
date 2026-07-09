@@ -10,7 +10,7 @@ interface PrinterQueueWidgetProps {
   printerId: number;
   printerModel?: string | null;
   loadedFilamentTypes?: Set<string>;
-  loadedFilaments?: Set<string>;  // "TYPE:rrggbb" pairs for filament override color matching
+  loadedFilaments?: Set<string>;  // Canonical material keys for filament override colour matching
   variant?: 'card' | 'panelExtension';
 }
 

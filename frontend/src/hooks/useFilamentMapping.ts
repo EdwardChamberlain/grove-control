@@ -1,14 +1,10 @@
 import { useMemo } from 'react';
-import { getColorName } from '../utils/colors';
+import { FilamentMaterial, type FilamentMaterialJson } from '../utils/filamentMaterial';
 import {
-  normalizeColor,
-  normalizeColorForCompare,
-  colorsAreSimilar,
   formatSlotLabel,
   getGlobalTrayId,
   preferLowestSortKey,
   compareSortKeys,
-  canonicalFilamentType,
 } from '../utils/amsHelpers';
 import type { PrinterStatus } from '../api/client';
 
@@ -38,11 +34,17 @@ export function buildLoadedFilaments(printerStatus: PrinterStatus | undefined): 
     const isHt = amsUnit.tray.length === 1; // AMS-HT has single tray
     amsUnit.tray.forEach((tray) => {
       if (tray.tray_type) {
-        const color = normalizeColor(tray.tray_color);
+        const material = FilamentMaterial.fromAmsTray({
+          tray_type: tray.tray_type,
+          tray_sub_brands: tray.tray_sub_brands,
+          tray_color: tray.tray_color,
+          tray_info_idx: tray.tray_info_idx,
+        });
         filaments.push({
-          type: tray.tray_type,
-          color,
-          colorName: getColorName(color),
+          type: material.family,
+          color: material.rgbHex,
+          colorName: material.genericColorName,
+          material,
           amsId: amsUnit.id,
           trayId: tray.id,
           isHt,
@@ -61,13 +63,19 @@ export function buildLoadedFilaments(printerStatus: PrinterStatus | undefined): 
   // Add external spool(s) if loaded
   for (const extTray of printerStatus?.vt_tray ?? []) {
     if (extTray.tray_type) {
-      const color = normalizeColor(extTray.tray_color);
+      const material = FilamentMaterial.fromAmsTray({
+        tray_type: extTray.tray_type,
+        tray_sub_brands: extTray.tray_sub_brands,
+        tray_color: extTray.tray_color,
+        tray_info_idx: extTray.tray_info_idx,
+      });
       const trayId = extTray.id ?? 254;
       const hasDualExternal = (printerStatus?.vt_tray?.length ?? 0) > 1;
       filaments.push({
-        type: extTray.tray_type,
-        color,
-        colorName: getColorName(color),
+        type: material.family,
+        color: material.rgbHex,
+        colorName: material.genericColorName,
+        material,
         amsId: -1,
         trayId: trayId - 254,
         isHt: false,
@@ -120,7 +128,8 @@ export function computeAmsMapping(
   const usedTrayIds = new Set<number>();
 
   const comparisons = filamentReqs.filaments.map((req) => {
-    const reqTrayInfoIdx = req.tray_info_idx || '';
+    const reqMaterial = FilamentMaterial.fromRequirement(req);
+    const reqTrayInfoIdx = reqMaterial.profileId || '';
 
     // Get available trays (not already used)
     let available = loadedFilaments.filter((f) => !usedTrayIds.has(f.globalTrayId));
@@ -136,9 +145,7 @@ export function computeAmsMapping(
     // Material is a hard boundary even when colour matching is disabled.
     // Keep compatible subtypes in the same canonical family, but never let
     // tray_info_idx or manual fallback map PLA to ABS (etc.).
-    available = available.filter(
-      (f) => canonicalFilamentType(f.type) === canonicalFilamentType(req.type),
-    );
+    available = available.filter((f) => reqMaterial.isFamilyMatch(f.material));
 
     // Sort lowest-first when the preference is on. Inventory-tracked spools
     // sort before MQTT-only ones; see preferLowestSortKey for the rationale.
@@ -172,44 +179,24 @@ export function computeAmsMapping(
             ),
           );
         }
-        exactMatch = idxMatches.find(
-          (f) =>
-            f.type?.toUpperCase() === req.type?.toUpperCase() &&
-            normalizeColorForCompare(f.color) === normalizeColorForCompare(req.color)
-        );
+        exactMatch = idxMatches.find((f) => reqMaterial.isMaterialMatch(f.material) && reqMaterial.isColorMatch(f.material));
         if (!exactMatch) {
-          similarMatch = idxMatches.find(
-            (f) =>
-              f.type?.toUpperCase() === req.type?.toUpperCase() &&
-              colorsAreSimilar(f.color, req.color)
-          );
+          similarMatch = idxMatches.find((f) => reqMaterial.isMaterialMatch(f.material) && reqMaterial.isSimilarColor(f.material));
         }
         if (!exactMatch && !similarMatch) {
-          typeOnlyMatch = idxMatches.find(
-            (f) => f.type?.toUpperCase() === req.type?.toUpperCase()
-          );
+          typeOnlyMatch = idxMatches.find((f) => reqMaterial.isFamilyMatch(f.material));
         }
       }
     }
 
     // If no idx match, do standard type/color matching on all available trays
     if (!idxMatch && !exactMatch && !similarMatch && !typeOnlyMatch) {
-      exactMatch = available.find(
-        (f) =>
-          f.type?.toUpperCase() === req.type?.toUpperCase() &&
-          normalizeColorForCompare(f.color) === normalizeColorForCompare(req.color)
-      );
+      exactMatch = available.find((f) => reqMaterial.isMaterialMatch(f.material) && reqMaterial.isColorMatch(f.material));
       if (!exactMatch) {
-        similarMatch = available.find(
-          (f) =>
-            f.type?.toUpperCase() === req.type?.toUpperCase() &&
-            colorsAreSimilar(f.color, req.color)
-        );
+        similarMatch = available.find((f) => reqMaterial.isMaterialMatch(f.material) && reqMaterial.isSimilarColor(f.material));
       }
       if (!exactMatch && !similarMatch) {
-        typeOnlyMatch = available.find(
-          (f) => f.type?.toUpperCase() === req.type?.toUpperCase()
-        );
+        typeOnlyMatch = available.find((f) => reqMaterial.isFamilyMatch(f.material));
       }
     }
 
@@ -250,6 +237,7 @@ export interface LoadedFilament {
   type: string;
   color: string;
   colorName: string;
+  material: FilamentMaterial;
   amsId: number;
   trayId: number;
   isHt: boolean;
@@ -273,6 +261,7 @@ export interface FilamentRequirement {
   slot_id: number;
   type: string;
   color: string;
+  material?: FilamentMaterialJson;
   used_grams: number;
   /** Unique spool identifier from slicing (e.g., "GFA00", "P4d64437") */
   tray_info_idx?: string;
@@ -356,6 +345,7 @@ export function useFilamentMapping(
 
     return filamentReqs.filaments.map((req) => {
       const slotId = req.slot_id || 0;
+      const reqMaterial = FilamentMaterial.fromRequirement(req);
 
       // Check if there's a manual override for this slot
       if (slotId > 0 && manualMappings[slotId] !== undefined) {
@@ -363,10 +353,10 @@ export function useFilamentMapping(
         const manualLoaded = loadedFilaments.find((f) => f.globalTrayId === manualTrayId);
 
         if (manualLoaded) {
-          const typeMatch = manualLoaded.type?.toUpperCase() === req.type?.toUpperCase();
+          const typeMatch = reqMaterial.isFamilyMatch(manualLoaded.material);
           const colorMatch =
-            normalizeColorForCompare(manualLoaded.color) === normalizeColorForCompare(req.color) ||
-            colorsAreSimilar(manualLoaded.color, req.color);
+            reqMaterial.isMaterialMatch(manualLoaded.material) &&
+            (reqMaterial.isColorMatch(manualLoaded.material) || reqMaterial.isSimilarColor(manualLoaded.material));
 
           let status: FilamentStatus;
           if (typeMatch && colorMatch) {
@@ -392,7 +382,7 @@ export function useFilamentMapping(
       // Auto-match: Find a loaded filament
       // Priority: unique tray_info_idx match > exact color match > similar color match > type-only match
       // IMPORTANT: Exclude trays that are already assigned (manually or auto)
-      const reqTrayInfoIdx = req.tray_info_idx || '';
+      const reqTrayInfoIdx = reqMaterial.profileId || '';
 
       // Get available trays (not already used)
       let available = loadedFilaments.filter((f) => !usedTrayIds.has(f.globalTrayId));
@@ -436,44 +426,24 @@ export function useFilamentMapping(
               ),
             );
           }
-          exactMatch = idxMatches.find(
-            (f) =>
-              f.type?.toUpperCase() === req.type?.toUpperCase() &&
-              normalizeColorForCompare(f.color) === normalizeColorForCompare(req.color)
-          );
+          exactMatch = idxMatches.find((f) => reqMaterial.isMaterialMatch(f.material) && reqMaterial.isColorMatch(f.material));
           if (!exactMatch) {
-            similarMatch = idxMatches.find(
-              (f) =>
-                f.type?.toUpperCase() === req.type?.toUpperCase() &&
-                colorsAreSimilar(f.color, req.color)
-            );
+            similarMatch = idxMatches.find((f) => reqMaterial.isMaterialMatch(f.material) && reqMaterial.isSimilarColor(f.material));
           }
           if (!exactMatch && !similarMatch) {
-            typeOnlyMatch = idxMatches.find(
-              (f) => f.type?.toUpperCase() === req.type?.toUpperCase()
-            );
+            typeOnlyMatch = idxMatches.find((f) => reqMaterial.isFamilyMatch(f.material));
           }
         }
       }
 
       // If no idx match, do standard type/color matching on all available trays
       if (!idxMatch && !exactMatch && !similarMatch && !typeOnlyMatch) {
-        exactMatch = available.find(
-          (f) =>
-            f.type?.toUpperCase() === req.type?.toUpperCase() &&
-            normalizeColorForCompare(f.color) === normalizeColorForCompare(req.color)
-        );
+        exactMatch = available.find((f) => reqMaterial.isMaterialMatch(f.material) && reqMaterial.isColorMatch(f.material));
         if (!exactMatch) {
-          similarMatch = available.find(
-            (f) =>
-              f.type?.toUpperCase() === req.type?.toUpperCase() &&
-              colorsAreSimilar(f.color, req.color)
-          );
+          similarMatch = available.find((f) => reqMaterial.isMaterialMatch(f.material) && reqMaterial.isSimilarColor(f.material));
         }
         if (!exactMatch && !similarMatch) {
-          typeOnlyMatch = available.find(
-            (f) => f.type?.toUpperCase() === req.type?.toUpperCase()
-          );
+          typeOnlyMatch = available.find((f) => reqMaterial.isFamilyMatch(f.material));
         }
       }
 

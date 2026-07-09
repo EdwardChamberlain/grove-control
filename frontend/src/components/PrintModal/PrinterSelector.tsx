@@ -12,14 +12,11 @@ import {
   Users,
 } from 'lucide-react';
 import { api, type PrinterStatus } from '../../api/client';
-import { getColorName } from '../../utils/colors';
+import { FilamentMaterial } from '../../utils/filamentMaterial';
 import {
-  normalizeColorForCompare,
-  colorsAreSimilar,
   autoMatchFilament,
   filterFilamentsByNozzle,
   effectivePreferLowest,
-  canonicalFilamentType,
 } from '../../utils/amsHelpers';
 import type { PrinterSelectorProps, AssignmentMode } from './types';
 import type { PrinterMappingResult, PerPrinterConfig } from '../../hooks/useMultiPrinterFilamentMapping';
@@ -124,10 +121,11 @@ function InlineMappingEditor({
     // Determine status
     let status: 'match' | 'type_only' | 'mismatch' = 'mismatch';
     if (loaded) {
-      const typeMatch = loaded.type?.toUpperCase() === req.type?.toUpperCase();
+      const reqMaterial = FilamentMaterial.fromRequirement(req);
+      const typeMatch = reqMaterial.isFamilyMatch(loaded.material);
       const colorMatch =
-        normalizeColorForCompare(loaded.color) === normalizeColorForCompare(req.color) ||
-        colorsAreSimilar(loaded.color, req.color);
+        reqMaterial.isMaterialMatch(loaded.material) &&
+        (reqMaterial.isColorMatch(loaded.material) || reqMaterial.isSimilarColor(loaded.material));
 
       if (typeMatch && colorMatch) {
         status = 'match';
@@ -154,29 +152,30 @@ function InlineMappingEditor({
         </button>
       </div>
 
-      {slotAssignments.map(({ req, loaded, status, isManual }, idx) => (
-        <FilamentProfileRow
-          key={req.slot_id || idx}
-          requiredColor={req.color}
-          requiredLabel={req.type}
-          usedGrams={req.used_grams}
-          requiredTitle={`${req.type} - ${getColorName(req.color)}`}
-          value={loaded ? String(loaded.globalTrayId) : ''}
-          emptyLabel={t('printModal.selectFilamentSlot')}
-          options={filterFilamentsByNozzle(printerResult.loadedFilaments, req.nozzle_id)
-            .filter((filament) =>
-              canonicalFilamentType(filament.type) === canonicalFilamentType(req.type)
-            )
-            .map((filament) => ({
-              value: String(filament.globalTrayId),
-              label: `${filament.label}: ${filament.traySubBrands || filament.type} (${filament.colorName})`,
-            }))}
-          onChange={(value) => handleSlotChange(req.slot_id || 0, value)}
-          status={status}
-          isManual={isManual}
-          selectTitle={isManual ? t('printModal.manuallySelected') : t('printModal.automaticallyMatched')}
-        />
-      ))}
+      {slotAssignments.map(({ req, loaded, status, isManual }, idx) => {
+        const reqMaterial = FilamentMaterial.fromRequirement(req);
+        return (
+          <FilamentProfileRow
+            key={req.slot_id || idx}
+            requiredColor={req.color}
+            requiredLabel={reqMaterial.materialLabel || req.type}
+            usedGrams={req.used_grams}
+            requiredTitle={reqMaterial.displayName}
+            value={loaded ? String(loaded.globalTrayId) : ''}
+            emptyLabel={t('printModal.selectFilamentSlot')}
+            options={filterFilamentsByNozzle(printerResult.loadedFilaments, req.nozzle_id)
+              .filter((filament) => reqMaterial.isFamilyMatch(filament.material))
+              .map((filament) => ({
+                value: String(filament.globalTrayId),
+                label: `${filament.label}: ${filament.material.displayName}`,
+              }))}
+            onChange={(value) => handleSlotChange(req.slot_id || 0, value)}
+            status={status}
+            isManual={isManual}
+            selectTitle={isManual ? t('printModal.manuallySelected') : t('printModal.automaticallyMatched')}
+          />
+        );
+      })}
     </div>
   );
 }

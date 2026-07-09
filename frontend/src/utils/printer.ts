@@ -28,13 +28,34 @@ export function getWifiStrength(rssi: number): { labelKey: string; color: string
 
 import type { PrintQueueItem } from '../api/client';
 import { canonicalFilamentType } from './amsHelpers';
+import {
+  FilamentMaterial,
+  filamentMaterialIdentityKey,
+} from './filamentMaterial';
+
+function parseLoadedFilament(value: string): FilamentMaterial | null {
+  if (value.includes('|')) {
+    const [family, subtype, colorHex] = value.split('|');
+    if (!family || !colorHex) return null;
+    return new FilamentMaterial({
+      family,
+      subtype: subtype || null,
+      colorHex,
+    });
+  }
+
+  const [type, color] = value.split(':');
+  if (!type || !color) return null;
+  return new FilamentMaterial({ family: type, colorHex: color });
+}
 
 /**
  * Filters queue items based on printer compatibility (filament types and colors).
  * Mirrors backend _find_idle_printer_for_model() logic.
  * @param items - Array of queue items to filter
  * @param loadedFilamentTypes - Set of loaded filament types (e.g., "PLA", "PETG")
- * @param loadedFilaments - Set of loaded filament type+color pairs (e.g., "PLA:ffffff", "PETG:ff0000")
+ * @param loadedFilaments - Set of canonical material keys, with legacy
+ * "TYPE:rrggbb" pairs still accepted for older callers/tests.
  * @returns Array of compatible queue items
  */
 export function filterCompatibleQueueItems(
@@ -45,7 +66,7 @@ export function filterCompatibleQueueItems(
   return items.filter(item => {
     // Type check: all required filament types must be loaded
     if (item.required_filament_types && item.required_filament_types.length > 0 && loadedFilamentTypes !== undefined) {
-      if (!item.required_filament_types.every((t: string) => loadedFilamentTypes.has(t.toUpperCase()))) {
+      if (!item.required_filament_types.every((t: string) => loadedFilamentTypes.has(canonicalFilamentType(t)))) {
         return false;
       }
     }
@@ -54,22 +75,22 @@ export function filterCompatibleQueueItems(
     // Only apply when loadedFilaments is provided (not undefined).
     // An empty Set means no filaments are loaded — force-matched slots cannot match.
     if (item.filament_overrides && item.filament_overrides.length > 0 && loadedFilaments !== undefined) {
-      const loadedOverrideTypes = new Set(
-        Array.from(loadedFilaments, (filament) => canonicalFilamentType(filament.split(':', 1)[0])),
-      );
+      const loadedMaterials = Array.from(loadedFilaments, parseLoadedFilament).filter((m): m is FilamentMaterial => !!m);
+      const loadedOverrideTypes = new Set(loadedMaterials.map((filament) => filament.compatibleFamilyKey));
       const materialsAvailable = item.filament_overrides.every((override) =>
-        loadedOverrideTypes.has(canonicalFilamentType(override.type)),
+        loadedOverrideTypes.has(FilamentMaterial.fromQueueOverride(override).compatibleFamilyKey),
       );
       if (!materialsAvailable) return false;
 
       const forceOverrides = item.filament_overrides.filter(o => o.force_color_match === true);
 
-      // All force-matched slots must have exact type+color on this printer
+      // All force-matched slots must have exact material+colour on this printer.
       if (forceOverrides.length > 0) {
         const allForceMatch = forceOverrides.every(o => {
-          const oType = (o.type || '').toUpperCase();
-          const oColor = (o.color || '').replace('#', '').toLowerCase().slice(0, 6);
-          return loadedFilaments.has(`${oType}:${oColor}`);
+          const required = FilamentMaterial.fromQueueOverride(o);
+          return loadedMaterials.some((loaded) =>
+            required.isMaterialMatch(loaded) && required.isColorMatch(loaded),
+          ) || loadedFilaments.has(filamentMaterialIdentityKey(required));
         });
         if (!allForceMatch) return false;
       }

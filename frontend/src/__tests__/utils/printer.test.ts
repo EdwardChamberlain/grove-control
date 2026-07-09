@@ -10,6 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import { filterCompatibleQueueItems, getPrinterImage } from '../../utils/printer';
 import type { PrintQueueItem } from '../../api/client';
+import { FilamentMaterial, filamentMaterialIdentityKey } from '../../utils/filamentMaterial';
 
 const preferenceOnlyJob = {
   required_filament_types: [],
@@ -34,6 +35,41 @@ describe('filterCompatibleQueueItems', () => {
       [preferenceOnlyJob],
       new Set(['ABS']),
       new Set(['ABS:000000']),
+    );
+
+    expect(result).toEqual([]);
+  });
+
+  it('does not collapse force-matched same-hex material subtypes', () => {
+    const plaMatteWhite = new FilamentMaterial({
+      family: 'PLA',
+      subtype: 'Matte',
+      colorHex: '#FFFFFFFF',
+      profileId: 'GFA01',
+    });
+    const plaBasicWhite = new FilamentMaterial({
+      family: 'PLA',
+      subtype: 'Basic',
+      colorHex: '#FFFFFFFF',
+      profileId: 'GFA00',
+    });
+    const matteJob = {
+      required_filament_types: ['PLA'],
+      filament_overrides: [
+        {
+          slot_id: 1,
+          type: 'PLA',
+          color: '#FFFFFF',
+          material: plaMatteWhite.toQueueJson(),
+          force_color_match: true,
+        },
+      ],
+    } as unknown as PrintQueueItem;
+
+    const result = filterCompatibleQueueItems(
+      [matteJob],
+      new Set(['PLA']),
+      new Set([filamentMaterialIdentityKey(plaBasicWhite)]),
     );
 
     expect(result).toEqual([]);

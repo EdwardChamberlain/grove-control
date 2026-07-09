@@ -4,6 +4,13 @@
  * for AMS, AMS-HT, and external spool configurations.
  */
 import { parseUTCDate } from './date';
+import {
+  FilamentMaterial,
+  type FilamentMaterialJson,
+  canonicalFilamentType as canonicalFilamentTypeFromMaterial,
+  colorsAreSimilar as colorsAreSimilarFromMaterial,
+  normalizeColorHex,
+} from './filamentMaterial';
 
 /**
  * Normalize color format from various sources for CSS rendering.
@@ -15,12 +22,8 @@ import { parseUTCDate } from './date';
  * still strips alpha, so type/colour matching is unaffected.
  */
 export function normalizeColor(color: string | null | undefined): string {
-  if (!color) return '#808080';
-  const clean = color.replace('#', '');
-  if (clean.length >= 8 && clean.substring(6, 8).toLowerCase() !== 'ff') {
-    return `#${clean.substring(0, 8)}`;
-  }
-  return `#${clean.substring(0, 6)}`;
+  const normalized = normalizeColorHex(color);
+  return normalized.slice(7, 9).toLowerCase() === 'ff' ? normalized.slice(0, 7) : normalized;
 }
 
 /**
@@ -28,7 +31,7 @@ export function normalizeColor(color: string | null | undefined): string {
  */
 export function normalizeColorForCompare(color: string | undefined): string {
   if (!color) return '';
-  return color.replace('#', '').toLowerCase().substring(0, 6);
+  return normalizeColorHex(color).replace('#', '').toLowerCase().substring(0, 6);
 }
 
 /**
@@ -53,26 +56,12 @@ export function getAmsLabel(amsId: number | string, trayCount: number): string {
  * Types within the same group are interchangeable on the printer side
  * (e.g., Bambu Lab firmware treats PA-CF and PA12-CF as compatible).
  */
-const FILAMENT_TYPE_GROUPS: string[][] = [
-  ['PA-CF', 'PA12-CF', 'PAHT-CF'],
-];
-
-const _equivalenceMap: Record<string, string> = {};
-for (const group of FILAMENT_TYPE_GROUPS) {
-  const canonical = group[0];
-  for (const t of group) {
-    _equivalenceMap[t.toUpperCase()] = canonical.toUpperCase();
-  }
-}
-
 /**
  * Get the canonical filament type for equivalence matching.
  * Types in the same group (e.g., PA-CF / PA12-CF / PAHT-CF) return the same canonical type.
  */
 export function canonicalFilamentType(type: string | undefined): string {
-  if (!type) return '';
-  const upper = type.toUpperCase();
-  return _equivalenceMap[upper] ?? upper;
+  return canonicalFilamentTypeFromMaterial(type);
 }
 
 /**
@@ -94,22 +83,7 @@ export function colorsAreSimilar(
   color2: string | undefined,
   threshold = 40
 ): boolean {
-  const hex1 = normalizeColorForCompare(color1);
-  const hex2 = normalizeColorForCompare(color2);
-  if (!hex1 || !hex2 || hex1.length < 6 || hex2.length < 6) return false;
-
-  const r1 = parseInt(hex1.substring(0, 2), 16);
-  const g1 = parseInt(hex1.substring(2, 4), 16);
-  const b1 = parseInt(hex1.substring(4, 6), 16);
-  const r2 = parseInt(hex2.substring(0, 2), 16);
-  const g2 = parseInt(hex2.substring(2, 4), 16);
-  const b2 = parseInt(hex2.substring(4, 6), 16);
-
-  return (
-    Math.abs(r1 - r2) <= threshold &&
-    Math.abs(g1 - g2) <= threshold &&
-    Math.abs(b1 - b2) <= threshold
-  );
+  return colorsAreSimilarFromMaterial(color1, color2, threshold);
 }
 
 /**
@@ -324,8 +298,8 @@ export function effectivePreferLowest(
  * Used by both single-printer (FilamentMapping) and multi-printer (InlineMappingEditor) paths.
  */
 export function autoMatchFilament(
-  req: { type?: string; color?: string; nozzle_id?: number | null },
-  loadedFilaments: { globalTrayId: number; amsId?: number; trayId?: number; type?: string; color?: string; extruderId?: number; remain?: number }[],
+  req: { type?: string; color?: string; nozzle_id?: number | null; material?: FilamentMaterialJson; tray_info_idx?: string },
+  loadedFilaments: { globalTrayId: number; amsId?: number; trayId?: number; type?: string; color?: string; extruderId?: number; remain?: number; material?: FilamentMaterial; trayInfoIdx?: string }[],
   usedTrayIds: Set<number>,
   preferLowest?: boolean,
   inventoryByTrayId?: Map<number, number>,
@@ -342,24 +316,30 @@ export function autoMatchFilament(
   }
 
   const exactMatch = nozzleFilaments.find(
-    (f) =>
-      !usedTrayIds.has(f.globalTrayId) &&
-      filamentTypesCompatible(f.type, req.type) &&
-      normalizeColorForCompare(f.color) === normalizeColorForCompare(req.color)
+    (f) => {
+      const reqMaterial = FilamentMaterial.fromRequirement(req);
+      const loadedMaterial = f.material ?? FilamentMaterial.fromQueueOverride({ type: f.type, color: f.color, tray_info_idx: f.trayInfoIdx });
+      return !usedTrayIds.has(f.globalTrayId) && reqMaterial.isMaterialMatch(loadedMaterial) && reqMaterial.isColorMatch(loadedMaterial);
+    }
   );
   const similarMatch = exactMatch
     ? undefined
     : nozzleFilaments.find(
-        (f) =>
-          !usedTrayIds.has(f.globalTrayId) &&
-          filamentTypesCompatible(f.type, req.type) &&
-          colorsAreSimilar(f.color, req.color)
+        (f) => {
+          const reqMaterial = FilamentMaterial.fromRequirement(req);
+          const loadedMaterial = f.material ?? FilamentMaterial.fromQueueOverride({ type: f.type, color: f.color, tray_info_idx: f.trayInfoIdx });
+          return !usedTrayIds.has(f.globalTrayId) && reqMaterial.isMaterialMatch(loadedMaterial) && reqMaterial.isSimilarColor(loadedMaterial);
+        }
       );
   const typeOnlyMatch =
     exactMatch || similarMatch
       ? undefined
       : nozzleFilaments.find(
-          (f) => !usedTrayIds.has(f.globalTrayId) && filamentTypesCompatible(f.type, req.type)
+          (f) => {
+            const reqMaterial = FilamentMaterial.fromRequirement(req);
+            const loadedMaterial = f.material ?? FilamentMaterial.fromQueueOverride({ type: f.type, color: f.color, tray_info_idx: f.trayInfoIdx });
+            return !usedTrayIds.has(f.globalTrayId) && reqMaterial.isFamilyMatch(loadedMaterial);
+          }
         );
   return exactMatch ?? similarMatch ?? typeOnlyMatch;
 }

@@ -20,20 +20,10 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
+from backend.app.services.filament_material import FilamentMaterial
 from backend.app.utils.threemf_tools import extract_nozzle_mapping_from_3mf
 
 logger = logging.getLogger(__name__)
-
-_FILAMENT_TYPE_GROUPS: tuple[tuple[str, ...], ...] = (("PA-CF", "PA12-CF", "PAHT-CF"),)
-_FILAMENT_EQUIV_MAP = {
-    filament_type.upper(): group[0].upper() for group in _FILAMENT_TYPE_GROUPS for filament_type in group
-}
-
-
-def canonical_filament_type(filament_type: str) -> str:
-    """Return the material-family identifier used for safe substitutions."""
-    upper = filament_type.strip().upper()
-    return _FILAMENT_EQUIV_MAP.get(upper, upper)
 
 
 def extract_filament_requirements(file_path: Path, plate_id: int | None = None) -> list[dict]:
@@ -147,32 +137,58 @@ def build_queue_filament_overrides(
     for slot_id in sorted(set(requirement_by_slot) | set(provided_by_slot)):
         requirement = requirement_by_slot.get(slot_id, {})
         provided = provided_by_slot.get(slot_id, {})
-        filament_type = provided.get("type", requirement.get("type", ""))
-        color = provided.get("color", requirement.get("color", ""))
-        if not filament_type or not color:
+        requirement_material = FilamentMaterial.from_3mf_requirement(requirement) if requirement else None
+        provided_material_payload = provided.get("material") if isinstance(provided.get("material"), dict) else {}
+        provided_has_color_source = bool(
+            provided.get("color") or provided.get("color_hex") or provided_material_payload.get("color_hex")
+        )
+        provided_material = (
+            FilamentMaterial.from_queue_override(provided) if provided and provided_has_color_source else None
+        )
+        material = provided_material or requirement_material
+        if not material or not material.family or not material.color_hex:
             continue
 
-        sliced_type = requirement.get("type", "")
-        if provided and (
-            not sliced_type or canonical_filament_type(filament_type) != canonical_filament_type(sliced_type)
-        ):
+        if provided_material and requirement_material and not provided_material.is_family_match(requirement_material):
             raise ValueError(
                 f"Filament slot {slot_id} cannot change material family from "
-                f"{sliced_type or 'unknown'} to {filament_type}"
+                f"{requirement_material.family or 'unknown'} to {provided_material.family}"
             )
+        elif provided and requirement_material:
+            provided_family = provided_material_payload.get("family") or provided.get("type") or provided.get("family")
+            if provided_family:
+                provided_family_material = FilamentMaterial.from_parts(
+                    family=provided_family,
+                    color_hex=requirement_material.color_hex,
+                )
+                if not provided_family_material.is_family_match(requirement_material):
+                    raise ValueError(
+                        f"Filament slot {slot_id} cannot change material family from "
+                        f"{requirement_material.family or 'unknown'} to {provided_family_material.family}"
+                    )
 
         provided_force_color_match = provided.get("force_color_match", force_color_match)
         if type(provided_force_color_match) is not bool:
             raise ValueError(f"Filament slot {slot_id} force_color_match must be a boolean")
 
+        # UI clients historically send an override entry for every slot to
+        # persist the force-colour flag. Preserve the sliced profile id when the
+        # provided entry did not actually change the material/colour.
+        if provided_material and requirement_material:
+            same_legacy_values = (
+                provided.get("type", requirement.get("type", "")) == requirement.get("type", "")
+                and provided_material.rgb_hex.upper() == requirement_material.rgb_hex.upper()
+                and not provided_material.subtype
+            )
+            if same_legacy_values:
+                material = requirement_material
+
         entry = {
             "slot_id": slot_id,
-            "type": filament_type,
-            "color": color,
+            "material": material.to_queue_json(),
+            **material.to_legacy_type_color(),
             "force_color_match": provided_force_color_match,
         }
-        if provided.get("color_name"):
-            entry["color_name"] = provided["color_name"]
         resolved.append(entry)
 
     return resolved
@@ -196,11 +212,17 @@ def _collect_filaments(parent: ET.Element, into: list[dict]) -> None:
             slot_id = int(filament_id)
         except (ValueError, TypeError):
             continue
+        material = FilamentMaterial.from_parts(
+            family=filament_elem.get("type", ""),
+            color_hex=filament_elem.get("color", ""),
+            profile_id=filament_elem.get("tray_info_idx", ""),
+        )
         into.append(
             {
                 "slot_id": slot_id,
                 "type": filament_elem.get("type", ""),
-                "color": filament_elem.get("color", ""),
+                "color": material.rgb_hex,
+                "material": material.to_queue_json(),
                 "tray_info_idx": filament_elem.get("tray_info_idx", ""),
                 "used_grams": round(used_grams, 1),
             }

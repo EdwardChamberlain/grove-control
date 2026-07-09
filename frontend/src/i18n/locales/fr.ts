@@ -4322,7 +4322,7 @@ export default {
     insufficientFilamentMessage: 'Certaines bobines assignées ont moins de filament restant que nécessaire pour cette impression :',
     insufficientFilamentLine: '{{printer}} - {{slot}} : nécessite {{required}}g, restant {{remaining}}g',
     printAnyway: 'Imprimer quand même',
-    forceColorMatch: 'Faire correspondre couleur et matériau',
+    forceColorMatch: 'Faire correspondre la couleur',
     forceColorMatchHint: 'Exiger la couleur sélectionnée. Désactivez cette option pour utiliser toute couleur de la même famille de matériau.',
     staggerPrinterStarts: 'Échelonner démarrages',
     staggerGroupSize: 'Taille du groupe',

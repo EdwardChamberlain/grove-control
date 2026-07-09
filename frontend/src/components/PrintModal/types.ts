@@ -1,4 +1,5 @@
 import type { PrintQueueItem, Printer } from '../../api/client';
+import type { FilamentMaterialJson } from '../../utils/filamentMaterial';
 
 /**
  * Mode of operation for the PrintModal.
@@ -181,12 +182,12 @@ export interface FilamentReqsData {
     slot_id: number;
     type: string;
     color: string;
+    material?: FilamentMaterialJson;
     used_grams: number;
     used_meters: number;
     nozzle_id?: number;
-    /** Bambu SKU code from the 3MF (e.g. `GFA01` = Bambu PLA Matte, `P4d64437`
-     *  = user custom). Used to resolve the "original" filament label in
-     *  FilamentOverride against the builtin + cloud user-preset maps. #1718. */
+    /** Bambu/profile code from the 3MF (e.g. `GFA01` = PLA Matte). Used only
+     *  as structured material metadata, not as an official colour name. */
     tray_info_idx?: string;
   }>;
 }

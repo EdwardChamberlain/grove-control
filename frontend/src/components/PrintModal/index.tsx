@@ -11,13 +11,13 @@ import { ConfirmModal } from '../ConfirmModal';
 import { useToast } from '../../contexts/ToastContext';
 import { buildLoadedFilaments, useFilamentMapping } from '../../hooks/useFilamentMapping';
 import { useMultiPrinterFilamentMapping, type PerPrinterConfig } from '../../hooks/useMultiPrinterFilamentMapping';
-import { getColorName } from '../../utils/colors';
+import { FilamentMaterial, type FilamentMaterialJson } from '../../utils/filamentMaterial';
 import { getCurrencySymbol } from '../../utils/currency';
 import { getBedTypeInfo } from '../../utils/bedType';
 import { toDateTimeLocalValue, parseUTCDate } from '../../utils/date';
 import { getGlobalTrayId, isPlaceholderDate, effectivePreferLowest } from '../../utils/amsHelpers';
 import { FilamentMapping } from './FilamentMapping';
-import { FilamentOverride } from './FilamentOverride';
+import { FilamentOverride, type FilamentOverrideSelection } from './FilamentOverride';
 import { PlateSelector } from './PlateSelector';
 import { PrinterSelector } from './PrinterSelector';
 import { PrintOptionsPanel } from './PrintOptions';
@@ -30,6 +30,15 @@ import type {
   ScheduleType,
 } from './types';
 import { DEFAULT_PRINT_OPTIONS, DEFAULT_SCHEDULE_OPTIONS } from './types';
+
+type QueueFilamentOverride = {
+  slot_id: number;
+  material: FilamentMaterialJson;
+  type: string;
+  color: string;
+  tray_info_idx?: string;
+  force_color_match: boolean;
+};
 
 /**
  * Unified PrintModal component that handles queue item creation and editing.
@@ -178,12 +187,17 @@ export function PrintModal({
     return null;
   });
 
-  // Filament overrides for model-based assignment: slot_id -> {type, color}
-  const [filamentOverrides, setFilamentOverrides] = useState<Record<number, { type: string; color: string }>>(() => {
+  // Filament overrides for model-based assignment: slot_id -> canonical selected material.
+  const [filamentOverrides, setFilamentOverrides] = useState<Record<number, FilamentOverrideSelection>>(() => {
     if (mode === 'edit-queue-item' && queueItem?.filament_overrides) {
-      const overrides: Record<number, { type: string; color: string }> = {};
+      const overrides: Record<number, FilamentOverrideSelection> = {};
       for (const o of queueItem.filament_overrides) {
-        overrides[o.slot_id] = { type: o.type, color: o.color };
+        const material = FilamentMaterial.fromQueueOverride(o);
+        overrides[o.slot_id] = {
+          type: material.family,
+          color: material.rgbHex,
+          material: material.toQueueJson(),
+        };
       }
       return overrides;
     }
@@ -429,7 +443,11 @@ export function PrintModal({
         }
         const selected = loaded.find((filament) => filament.globalTrayId === globalTrayId);
         if (selected) {
-          next[slotId] = { type: selected.type, color: selected.color };
+          next[slotId] = {
+            type: selected.material.family,
+            color: selected.material.rgbHex,
+            material: selected.material.toQueueJson(),
+          };
         }
       }
       return next;
@@ -696,24 +714,35 @@ export function PrintModal({
     // Include all slots that either have a user override or have force_color_match enabled
     // (which is the default for model-based assignment).
     const buildFilamentOverridesArray = () => {
-      const entries: Array<{ slot_id: number; type: string; color: string; color_name: string; force_color_match: boolean }> = [];
+      const entries: QueueFilamentOverride[] = [];
+
+      const entryFor = (slotId: number, material: FilamentMaterial): QueueFilamentOverride => ({
+        slot_id: slotId,
+        material: material.toQueueJson(),
+        type: material.family,
+        color: material.rgbHex,
+        tray_info_idx: material.profileId || '',
+        force_color_match: forceColorMatch,
+      });
 
       // Process all slots from filament requirements (to capture force_color_match defaults)
       if (effectiveFilamentReqs?.filaments) {
         for (const req of effectiveFilamentReqs.filaments) {
           const userOverride = filamentOverrides[req.slot_id];
-          const effectiveType = userOverride?.type ?? req.type;
-          const effectiveColor = userOverride?.color ?? req.color;
+          const sourceMaterial = FilamentMaterial.fromRequirement(req);
+          const material = userOverride
+            ? FilamentMaterial.fromQueueOverride(userOverride)
+            : sourceMaterial;
 
           // Include every known slot so the job-level policy is explicit and
           // survives clients or API versions with different defaults.
-          entries.push({ slot_id: req.slot_id, type: effectiveType, color: effectiveColor, color_name: getColorName(effectiveColor), force_color_match: forceColorMatch });
+          entries.push(entryFor(req.slot_id, material));
         }
       } else {
         // Fallback: no filament requirements data — only include explicit user overrides
-        for (const [slotId, { type, color }] of Object.entries(filamentOverrides)) {
+        for (const [slotId, override] of Object.entries(filamentOverrides)) {
           const id = parseInt(slotId, 10);
-          entries.push({ slot_id: id, type, color, color_name: getColorName(color), force_color_match: forceColorMatch });
+          entries.push(entryFor(id, FilamentMaterial.fromQueueOverride(override)));
         }
       }
 
@@ -740,9 +769,10 @@ export function PrintModal({
         if (!selected) return override;
         return {
           ...override,
-          type: selected.type,
-          color: selected.color,
-          color_name: selected.colorName,
+          material: selected.material.toQueueJson(),
+          type: selected.material.family,
+          color: selected.material.rgbHex,
+          tray_info_idx: selected.material.profileId || '',
         };
       });
     };
@@ -1136,27 +1166,6 @@ export function PrintModal({
               multiSelect={!isEditing}
             />
 
-            {/* One dispatch policy for the whole job. Filament rows select the
-                required profile; this control decides whether its colour must
-                match exactly. Material family is always enforced. */}
-            {!!effectiveFilamentReqs?.filaments?.length && !archiveDataMissing && (
-              <label className="flex items-start gap-3 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark p-3 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={forceColorMatch}
-                  onChange={(event) => setForceColorMatch(event.target.checked)}
-                  className="accent-bambu-green w-4 h-4 mt-0.5"
-                />
-                <Palette className="w-4 h-4 mt-0.5 text-bambu-gray flex-shrink-0" />
-                <span className="min-w-0">
-                  <span className="block text-sm text-white">{t('printModal.forceColorMatch')}</span>
-                  <span className="block text-xs text-bambu-gray mt-0.5">
-                    {t('printModal.forceColorMatchHint')}
-                  </span>
-                </span>
-              </label>
-            )}
-
             {/* Printer selection with per-printer mapping — hidden when printer is pre-selected via props */}
             {!initialSelectedPrinterIds?.length && (
               <PrinterSelector
@@ -1228,6 +1237,27 @@ export function PrintModal({
                 currencySymbol={currencySymbol}
                 defaultCostPerKg={defaultCostPerKg}
               />
+            )}
+
+            {/* One dispatch policy for the whole job. Filament rows select the
+                required profile; this control decides whether its colour must
+                match exactly. Material family is always enforced. */}
+            {!!effectiveFilamentReqs?.filaments?.length && !archiveDataMissing && (
+              <label className="flex items-start gap-3 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark p-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={forceColorMatch}
+                  onChange={(event) => setForceColorMatch(event.target.checked)}
+                  className="accent-bambu-green w-4 h-4 mt-0.5"
+                />
+                <Palette className="w-4 h-4 mt-0.5 text-bambu-gray flex-shrink-0" />
+                <span className="min-w-0">
+                  <span className="block text-sm text-white">{t('printModal.forceColorMatch')}</span>
+                  <span className="block text-xs text-bambu-gray mt-0.5">
+                    {t('printModal.forceColorMatchHint')}
+                  </span>
+                </span>
+              </label>
             )}
 
             {/* Print options */}

@@ -18,6 +18,23 @@ from backend.app.services.filament_requirements import (
 )
 
 
+def _material(
+    family: str,
+    color_hex: str,
+    *,
+    subtype: str | None = None,
+    profile_id: str | None = None,
+    setting_id: str | None = None,
+) -> dict:
+    return {
+        "family": family,
+        "subtype": subtype,
+        "color_hex": color_hex,
+        "profile_id": profile_id,
+        "setting_id": setting_id,
+    }
+
+
 def _make_3mf(
     file_path: Path,
     *,
@@ -66,8 +83,22 @@ class TestExtractFilamentRequirements:
         )
         out = extract_filament_requirements(f, plate_id=1)
         assert out == [
-            {"slot_id": 1, "type": "PLA", "color": "#FFFFFF", "tray_info_idx": "", "used_grams": 12.5},
-            {"slot_id": 2, "type": "PETG", "color": "#000000", "tray_info_idx": "", "used_grams": 4.2},
+            {
+                "slot_id": 1,
+                "type": "PLA",
+                "color": "#FFFFFF",
+                "material": _material("PLA", "#FFFFFFFF"),
+                "tray_info_idx": "",
+                "used_grams": 12.5,
+            },
+            {
+                "slot_id": 2,
+                "type": "PETG",
+                "color": "#000000",
+                "material": _material("PETG", "#000000FF"),
+                "tray_info_idx": "",
+                "used_grams": 4.2,
+            },
         ]
 
     def test_skips_zero_use_filaments(self, tmp_path: Path):
@@ -205,21 +236,63 @@ class TestBuildQueueFilamentOverrides:
 
     def test_defaults_every_source_slot_to_force_colour(self):
         assert build_queue_filament_overrides(self.requirements) == [
-            {"slot_id": 1, "type": "PLA", "color": "#FF0000", "force_color_match": True},
-            {"slot_id": 2, "type": "PETG", "color": "#000000", "force_color_match": True},
+            {
+                "slot_id": 1,
+                "material": _material("PLA", "#FF0000FF"),
+                "type": "PLA",
+                "color": "#FF0000",
+                "tray_info_idx": "",
+                "force_color_match": True,
+            },
+            {
+                "slot_id": 2,
+                "material": _material("PETG", "#000000FF"),
+                "type": "PETG",
+                "color": "#000000",
+                "tray_info_idx": "",
+                "force_color_match": True,
+            },
         ]
 
     def test_global_false_is_explicit_opt_out(self):
         assert build_queue_filament_overrides(self.requirements, force_color_match=False) == [
-            {"slot_id": 1, "type": "PLA", "color": "#FF0000", "force_color_match": False},
-            {"slot_id": 2, "type": "PETG", "color": "#000000", "force_color_match": False},
+            {
+                "slot_id": 1,
+                "material": _material("PLA", "#FF0000FF"),
+                "type": "PLA",
+                "color": "#FF0000",
+                "tray_info_idx": "",
+                "force_color_match": False,
+            },
+            {
+                "slot_id": 2,
+                "material": _material("PETG", "#000000FF"),
+                "type": "PETG",
+                "color": "#000000",
+                "tray_info_idx": "",
+                "force_color_match": False,
+            },
         ]
 
     def test_explicit_per_slot_false_wins_over_safe_default(self):
         overrides = [{"slot_id": 1, "type": "PLA", "color": "#00FF00", "force_color_match": False}]
         assert build_queue_filament_overrides(self.requirements, overrides) == [
-            {"slot_id": 1, "type": "PLA", "color": "#00FF00", "force_color_match": False},
-            {"slot_id": 2, "type": "PETG", "color": "#000000", "force_color_match": True},
+            {
+                "slot_id": 1,
+                "material": _material("PLA", "#00FF00FF"),
+                "type": "PLA",
+                "color": "#00FF00",
+                "tray_info_idx": "",
+                "force_color_match": False,
+            },
+            {
+                "slot_id": 2,
+                "material": _material("PETG", "#000000FF"),
+                "type": "PETG",
+                "color": "#000000",
+                "tray_info_idx": "",
+                "force_color_match": True,
+            },
         ]
 
     @pytest.mark.parametrize("invalid_value", [None, 0, 1, "false", "true", "", []])
@@ -242,6 +315,24 @@ class TestBuildQueueFilamentOverrides:
         with pytest.raises(ValueError, match="cannot change material family from PLA to ABS"):
             build_queue_filament_overrides(self.requirements, overrides)
 
+    def test_type_only_override_preserves_sliced_material(self):
+        overrides = [{"slot_id": 1, "type": "PLA", "force_color_match": False}]
+
+        assert build_queue_filament_overrides(self.requirements, overrides)[0] == {
+            "slot_id": 1,
+            "material": _material("PLA", "#FF0000FF"),
+            "type": "PLA",
+            "color": "#FF0000",
+            "tray_info_idx": "",
+            "force_color_match": False,
+        }
+
+    def test_rejects_cross_material_type_only_override(self):
+        overrides = [{"slot_id": 1, "type": "ABS", "force_color_match": False}]
+
+        with pytest.raises(ValueError, match="cannot change material family from PLA to ABS"):
+            build_queue_filament_overrides(self.requirements, overrides)
+
     def test_rejects_override_without_sliced_metadata(self):
         overrides = [{"slot_id": 1, "type": "PLA", "color": "#FFFFFF"}]
 
@@ -253,5 +344,12 @@ class TestBuildQueueFilamentOverrides:
         overrides = [{"slot_id": 1, "type": "PA12-CF", "color": "#333333"}]
 
         assert build_queue_filament_overrides(requirements, overrides) == [
-            {"slot_id": 1, "type": "PA12-CF", "color": "#333333", "force_color_match": True}
+            {
+                "slot_id": 1,
+                "material": _material("PA12-CF", "#333333FF"),
+                "type": "PA12-CF",
+                "color": "#333333",
+                "tray_info_idx": "",
+                "force_color_match": True,
+            }
         ]

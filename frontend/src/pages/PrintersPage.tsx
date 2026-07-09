@@ -124,6 +124,7 @@ import type { DryingPresets } from '../hooks/useAmsDryingControls';
 import { PrinterInfoModal } from '../components/PrinterInfoModal';
 import { getAmsLabel, getGlobalTrayId, getSlotPresetKey, getFillBarColor } from '../utils/amsHelpers';
 import { getPrinterImage, getWifiStrength, filterCompatibleQueueItems } from '../utils/printer';
+import { FilamentMaterial, filamentMaterialIdentityKey } from '../utils/filamentMaterial';
 import { FilamentSlotCircle } from '../components/FilamentSlotCircle';
 import { Collapsible } from '../components/Collapsible';
 import { ConnectionDiagnosticModal, DiagnosticChecklist } from '../components/ConnectionDiagnostic';
@@ -2452,34 +2453,32 @@ function PrinterCard({
     if (status?.ams) {
       for (const ams of status.ams) {
         for (const tray of ams.tray || []) {
-          if (tray.tray_type) types.add(tray.tray_type.toUpperCase());
+          if (tray.tray_type) types.add(FilamentMaterial.fromAmsTray(tray).compatibleFamilyKey);
         }
       }
     }
     for (const vt of status?.vt_tray ?? []) {
-      if (vt.tray_type) types.add(vt.tray_type.toUpperCase());
+      if (vt.tray_type) types.add(FilamentMaterial.fromAmsTray(vt).compatibleFamilyKey);
     }
     return types;
   }, [status?.ams, status?.vt_tray]);
 
-  // Collect loaded filament type+color pairs for queue widget override matching
-  // Format: "TYPE:rrggbb" (e.g., "PETG:ffffff") — mirrors backend _count_override_color_matches()
+  // Collect loaded canonical material keys for queue widget override matching.
+  // This preserves subtype, so PLA Basic White and PLA Matte White do not collapse.
   const loadedFilaments = useMemo(() => {
     const filaments = new Set<string>();
     if (status?.ams) {
       for (const ams of status.ams) {
         for (const tray of ams.tray || []) {
           if (tray.tray_type && tray.tray_color) {
-            const color = tray.tray_color.replace('#', '').toLowerCase().slice(0, 6);
-            filaments.add(`${tray.tray_type.toUpperCase()}:${color}`);
+            filaments.add(filamentMaterialIdentityKey(FilamentMaterial.fromAmsTray(tray)));
           }
         }
       }
     }
     for (const vt of status?.vt_tray ?? []) {
       if (vt.tray_type && vt.tray_color) {
-        const color = vt.tray_color.replace('#', '').toLowerCase().slice(0, 6);
-        filaments.add(`${vt.tray_type.toUpperCase()}:${color}`);
+        filaments.add(filamentMaterialIdentityKey(FilamentMaterial.fromAmsTray(vt)));
       }
     }
     return filaments;

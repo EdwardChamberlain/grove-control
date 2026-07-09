@@ -1907,6 +1907,24 @@ export interface DiscoveredTasmotaDevice {
 }
 
 // Print Queue types
+export interface FilamentMaterialPayload {
+  family: string;
+  subtype?: string | null;
+  color_hex: string;
+  profile_id?: string | null;
+  setting_id?: string | null;
+}
+
+export interface QueueFilamentOverridePayload {
+  slot_id: number;
+  material?: FilamentMaterialPayload;
+  type: string;
+  color: string;
+  tray_info_idx?: string;
+  color_name?: string;
+  force_color_match?: boolean;
+}
+
 export interface PrintQueueItem {
   id: number;
   printer_id: number | null;  // null = unassigned
@@ -1932,7 +1950,7 @@ export interface PrintQueueItem {
   // PrintModal's deficit warning was acknowledged.
   skip_filament_check: boolean;
   ams_mapping: number[] | null;  // AMS slot mapping for multi-color prints
-  filament_overrides: Array<{ slot_id: number; type: string; color: string; color_name?: string; force_color_match?: boolean }> | null;  // Per-slot filament requirements and force-colour preferences
+  filament_overrides: QueueFilamentOverridePayload[] | null;  // Per-slot filament requirements and force-colour preferences
   force_color_match: boolean;  // Queue-level fail-closed preference
   plate_id: number | null;  // Plate ID for multi-plate 3MF files
   // Print options
@@ -1996,7 +2014,7 @@ export interface PrintQueueItemCreate {
   printer_id?: number | null;  // null = unassigned
   target_model?: string | null;  // Target printer model (mutually exclusive with printer_id)
   target_location?: string | null;  // Target location filter (only used with target_model)
-  filament_overrides?: Array<{ slot_id: number; type: string; color: string; color_name?: string; force_color_match?: boolean }> | null;
+  filament_overrides?: QueueFilamentOverridePayload[] | null;
   force_color_match?: boolean;  // Defaults true server-side; false is an explicit global opt-out
   archive_id?: number | null;
   library_file_id?: number | null;
@@ -2045,7 +2063,7 @@ export interface PrintQueueItemUpdate {
   printer_id?: number | null;  // null = unassign
   target_model?: string | null;  // Target printer model (mutually exclusive with printer_id)
   target_location?: string | null;  // Target location filter (only used with target_model)
-  filament_overrides?: Array<{ slot_id: number; type: string; color: string; color_name?: string; force_color_match?: boolean }> | null;
+  filament_overrides?: QueueFilamentOverridePayload[] | null;
   force_color_match?: boolean;
   position?: number;
   scheduled_time?: string | null;
