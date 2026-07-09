@@ -65,6 +65,7 @@ from backend.app.schemas.library import (
 from backend.app.schemas.slicer import SliceRequest, SliceResponse
 from backend.app.services.archive import ThreeMFParser
 from backend.app.services.filament_requirements import (
+    attach_canonical_materials,
     build_queue_filament_overrides,
     extract_filament_requirements,
 )
@@ -3128,6 +3129,8 @@ async def get_library_file_filament_requirements(
 
     except Exception as e:
         logger.warning("Failed to parse filament requirements from library file %s: %s", file_id, e)
+
+    attach_canonical_materials(filaments)
 
     return {
         "file_id": file_id,

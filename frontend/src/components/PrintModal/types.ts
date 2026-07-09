@@ -1,5 +1,4 @@
-import type { PrintQueueItem, Printer } from '../../api/client';
-import type { FilamentMaterialJson } from '../../utils/filamentMaterial';
+import type { FilamentMaterialPayload, PrintQueueItem, Printer } from '../../api/client';
 
 /**
  * Mode of operation for the PrintModal.
@@ -182,7 +181,7 @@ export interface FilamentReqsData {
     slot_id: number;
     type: string;
     color: string;
-    material?: FilamentMaterialJson;
+    material: FilamentMaterialPayload;
     used_grams: number;
     used_meters: number;
     nozzle_id?: number;
@@ -203,6 +202,7 @@ export interface FilamentMappingProps {
   onManualMappingChange: (mappings: Record<number, number>) => void;
   currencySymbol: string;
   defaultCostPerKg: number;
+  forceColorMatch?: boolean;
 }
 
 /**

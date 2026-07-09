@@ -4,11 +4,13 @@
  * for AMS, AMS-HT, and external spool configurations.
  */
 import { parseUTCDate } from './date';
-import {
-  canonicalFilamentType as canonicalFilamentTypeFromMaterial,
-  colorsAreSimilar as colorsAreSimilarFromMaterial,
-  normalizeColorHex,
-} from './filamentMaterial';
+
+function normalizeRgbaHex(value: string | null | undefined): string {
+  let raw = (value || '').trim().replace(/^#/, '');
+  if (!/^[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(raw)) raw = '808080FF';
+  if (raw.length === 6) raw += 'FF';
+  return `#${raw.toUpperCase()}`;
+}
 
 /**
  * Normalize color format from various sources for CSS rendering.
@@ -20,7 +22,7 @@ import {
  * still strips alpha, so type/colour matching is unaffected.
  */
 export function normalizeColor(color: string | null | undefined): string {
-  const normalized = normalizeColorHex(color);
+  const normalized = normalizeRgbaHex(color);
   return normalized.slice(7, 9).toLowerCase() === 'ff' ? normalized.slice(0, 7) : normalized;
 }
 
@@ -29,7 +31,7 @@ export function normalizeColor(color: string | null | undefined): string {
  */
 export function normalizeColorForCompare(color: string | undefined): string {
   if (!color) return '';
-  return normalizeColorHex(color).replace('#', '').toLowerCase().substring(0, 6);
+  return normalizeRgbaHex(color).replace('#', '').toLowerCase().substring(0, 6);
 }
 
 /**
@@ -50,26 +52,6 @@ export function getAmsLabel(amsId: number | string, trayCount: number): string {
 }
 
 /**
- * Filament type equivalence groups.
- * Types within the same group are interchangeable on the printer side
- * (e.g., Bambu Lab firmware treats PA-CF and PA12-CF as compatible).
- */
-/**
- * Get the canonical filament type for equivalence matching.
- * Types in the same group (e.g., PA-CF / PA12-CF / PAHT-CF) return the same canonical type.
- */
-export function canonicalFilamentType(type: string | undefined): string {
-  return canonicalFilamentTypeFromMaterial(type);
-}
-
-/**
- * Check if two filament types are compatible (same type or same equivalence group).
- */
-export function filamentTypesCompatible(a: string | undefined, b: string | undefined): boolean {
-  return canonicalFilamentType(a) === canonicalFilamentType(b);
-}
-
-/**
  * Check if two colors are visually similar within a threshold.
  * Uses RGB component comparison with configurable tolerance.
  * @param color1 - First hex color
@@ -81,7 +63,11 @@ export function colorsAreSimilar(
   color2: string | undefined,
   threshold = 40
 ): boolean {
-  return colorsAreSimilarFromMaterial(color1, color2, threshold);
+  const c1 = normalizeRgbaHex(color1);
+  const c2 = normalizeRgbaHex(color2);
+  return [1, 3, 5].every((index) =>
+    Math.abs(parseInt(c1.slice(index, index + 2), 16) - parseInt(c2.slice(index, index + 2), 16)) <= threshold,
+  );
 }
 
 /**

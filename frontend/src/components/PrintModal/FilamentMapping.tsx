@@ -19,6 +19,7 @@ export function FilamentMapping({
   currencySymbol,
   defaultCostPerKg,
   defaultExpanded = false,
+  forceColorMatch = true,
 }: FilamentMappingProps & { defaultExpanded?: boolean }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -39,10 +40,11 @@ export function FilamentMapping({
   });
 
   const { data: mappingPreview } = useQuery({
-    queryKey: ['filament-mapping-preview', printerId, filamentReqs?.filaments, manualMappings],
+    queryKey: ['filament-mapping-preview', printerId, filamentReqs?.filaments, manualMappings, forceColorMatch],
     queryFn: () => api.previewFilamentMapping(printerId, {
       filaments: filamentReqs?.filaments ?? [],
       manual_mappings: manualMappings,
+      force_color_match: forceColorMatch,
     }),
     enabled: !!printerId && !!filamentReqs?.filaments?.length,
     staleTime: 5000,

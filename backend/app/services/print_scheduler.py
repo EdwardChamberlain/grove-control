@@ -1,9 +1,11 @@
 """Print scheduler service - processes the print queue."""
 
 import asyncio
+import copy
 import json
 import logging
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -56,6 +58,15 @@ logger = logging.getLogger(__name__)
 # state value did change. SLICING is included because some firmwares park
 # briefly in SLICING between PREPARE and RUNNING while parsing the g-code.
 _ACTIVE_PRINT_STATES: frozenset[str] = frozenset({"PREPARE", "SLICING", "RUNNING", "PAUSE"})
+
+
+@dataclass(frozen=True)
+class FilamentMappingPolicy:
+    """Explicit mapping policy shared by dispatch and preview callers."""
+
+    prefer_lowest: bool
+    strict_color_slot_ids: frozenset[int]
+    inventory_remain_overrides: dict[int, float] | None = None
 
 
 class PrintScheduler:
@@ -1142,6 +1153,175 @@ class PrintScheduler:
         filaments = extract_filament_requirements(file_path, plate_id=item.plate_id)
         return filaments if filaments else None
 
+    async def build_filament_mapping_preview(
+        self,
+        db: AsyncSession,
+        printer_id: int,
+        status,
+        requirements: list[dict],
+        manual_mappings: dict[int, int],
+        *,
+        force_color_match: bool,
+    ) -> dict | None:
+        """Return the same mapping decision dispatch would make, without printing.
+
+        This is the public boundary for UI previews. It owns all dispatch
+        inputs, including FTS routing, force-colour slots, inventory remaining
+        weights, and the AMS Backup gate for Prefer Lowest.
+        """
+        normalized_requirements = copy.deepcopy(requirements)
+        fts_active = bool(status.fila_switch and status.fila_switch.installed)
+        if fts_active:
+            for requirement in normalized_requirements:
+                requirement.pop("nozzle_id", None)
+
+        loaded = self._build_loaded_filaments(status)
+        loaded_by_id = {filament["global_tray_id"]: filament for filament in loaded}
+        strict_color_slot_ids = frozenset(
+            int(requirement["slot_id"])
+            for requirement in normalized_requirements
+            if force_color_match and isinstance(requirement.get("slot_id"), int)
+        )
+        prefer_lowest = await self._get_bool_setting(db, "prefer_lowest_filament")
+        prefer_lowest = prefer_lowest and status.ams_filament_backup is not False
+        inventory_remain_overrides = (
+            await self._build_inventory_remain_overrides(db, printer_id, loaded) if prefer_lowest else None
+        )
+        policy = FilamentMappingPolicy(
+            prefer_lowest=prefer_lowest,
+            strict_color_slot_ids=strict_color_slot_ids,
+            inventory_remain_overrides=inventory_remain_overrides,
+        )
+
+        def candidate_tray_ids(requirement: dict) -> list[int]:
+            required = FilamentMaterial.from_3mf_requirement(requirement)
+            strict_color = requirement.get("slot_id") in policy.strict_color_slot_ids
+            return [
+                filament["global_tray_id"]
+                for filament in loaded
+                if required.is_dispatch_compatible(filament["material"])
+                and (
+                    not strict_color
+                    or (
+                        required.family_key == filament["material"].family_key
+                        and required.is_color_match(filament["material"])
+                    )
+                )
+                and (
+                    fts_active
+                    or requirement.get("nozzle_id") is None
+                    or filament.get("extruder_id") == requirement.get("nozzle_id")
+                )
+            ]
+
+        auto_mapping = self._match_filaments_to_slots(
+            normalized_requirements,
+            loaded,
+            policy.prefer_lowest,
+            policy.inventory_remain_overrides,
+            strict_color_slot_ids=set(policy.strict_color_slot_ids),
+        )
+        valid_manual_mappings: dict[int, int] = {}
+        reserved_manual_trays: set[int] = set()
+        for requirement in normalized_requirements:
+            slot_id = int(requirement.get("slot_id", 0))
+            tray_id = manual_mappings.get(slot_id)
+            if (
+                tray_id is not None
+                and tray_id in candidate_tray_ids(requirement)
+                and tray_id not in reserved_manual_trays
+            ):
+                valid_manual_mappings[slot_id] = tray_id
+                reserved_manual_trays.add(tray_id)
+
+        mapping = list(
+            self._match_filaments_to_slots(
+                normalized_requirements,
+                [filament for filament in loaded if filament["global_tray_id"] not in reserved_manual_trays],
+                policy.prefer_lowest,
+                policy.inventory_remain_overrides,
+                strict_color_slot_ids=set(policy.strict_color_slot_ids),
+            )
+            or []
+        )
+        max_slot_id = max((int(requirement.get("slot_id", 0)) for requirement in normalized_requirements), default=0)
+        if len(mapping) < max_slot_id:
+            mapping.extend([-1] * (max_slot_id - len(mapping)))
+
+        comparisons = []
+        for requirement in normalized_requirements:
+            slot_id = int(requirement.get("slot_id", 0))
+            if slot_id <= 0:
+                continue
+            required = FilamentMaterial.from_3mf_requirement(requirement)
+            if slot_id in valid_manual_mappings:
+                mapping[slot_id - 1] = valid_manual_mappings[slot_id]
+            mapped_tray_id = mapping[slot_id - 1] if slot_id <= len(mapping) else -1
+            mapped = loaded_by_id.get(mapped_tray_id)
+            if not mapped:
+                match_status = "missing"
+            elif required.is_color_match(mapped["material"]):
+                match_status = "match"
+            elif required.is_similar_color(mapped["material"]):
+                match_status = "similar_colour"
+            else:
+                match_status = "material_only"
+            comparisons.append(
+                {
+                    "slot_id": slot_id,
+                    "material": required.to_api_json(),
+                    "status": match_status,
+                    "mapped_tray_id": mapped_tray_id,
+                    "candidate_tray_ids": candidate_tray_ids(requirement),
+                }
+            )
+
+        return {
+            "auto_mapping": auto_mapping,
+            "mapping": mapping or None,
+            "loaded_filaments": [
+                {
+                    "global_tray_id": filament["global_tray_id"],
+                    "ams_id": filament["ams_id"],
+                    "tray_id": filament["tray_id"],
+                    "is_ht": filament["is_ht"],
+                    "is_external": filament["is_external"],
+                    "extruder_id": filament.get("extruder_id"),
+                    "remain": filament.get("remain", -1),
+                    "material": filament["material"].to_api_json(),
+                }
+                for filament in loaded
+            ],
+            "comparisons": comparisons,
+        }
+
+    def get_model_filament_options(self, requirements: list[dict], states: list) -> list[dict]:
+        """Return server-approved canonical override options across printer states."""
+        loaded_by_state = [(state, self._build_loaded_filaments(state)) for state in states]
+        slots = []
+        for requirement in requirements:
+            slot_id = int(requirement.get("slot_id", 0))
+            if slot_id <= 0:
+                continue
+            required = FilamentMaterial.from_3mf_requirement(requirement)
+            options: dict[tuple[str, str | None, str, str | None], dict] = {}
+            for state, loaded in loaded_by_state:
+                fts_active = bool(state.fila_switch and state.fila_switch.installed)
+                for filament in loaded:
+                    material = filament["material"]
+                    if not required.is_dispatch_compatible(material):
+                        continue
+                    if (
+                        not fts_active
+                        and requirement.get("nozzle_id") is not None
+                        and filament.get("extruder_id") not in {None, requirement["nozzle_id"]}
+                    ):
+                        continue
+                    key = (material.family, material.subtype, material.color_hex, material.profile_id)
+                    options.setdefault(key, {"material": material.to_api_json()})
+            slots.append({"slot_id": slot_id, "material": required.to_api_json(), "options": list(options.values())})
+        return slots
+
     def _build_loaded_filaments(self, status) -> list[dict]:
         """Build list of loaded filaments from printer status.
 
@@ -1430,12 +1610,11 @@ class PrintScheduler:
             available = [
                 f
                 for f in available
-                if (
-                    (f.get("material") or FilamentMaterial.from_queue_override(f)).family_key == req_material.family_key
-                    if strict_color
-                    else req_material.is_dispatch_compatible(
-                        f.get("material") or FilamentMaterial.from_queue_override(f)
-                    )
+                if req_material.is_dispatch_compatible(f.get("material") or FilamentMaterial.from_queue_override(f))
+                and (
+                    not strict_color
+                    or req_material.family_key
+                    == (f.get("material") or FilamentMaterial.from_queue_override(f)).family_key
                 )
             ]
 

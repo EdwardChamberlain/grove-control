@@ -433,6 +433,15 @@ class FilamentMaterial:
             "setting_id": self.setting_id,
         }
 
+    def to_api_json(self) -> dict[str, str | None]:
+        """Serialize canonical identity together with backend-owned display text."""
+        return {
+            **self.to_queue_json(),
+            "material_label": self.material_label,
+            "display_name": self.display_name,
+            "generic_color_name": self.generic_color_name,
+        }
+
     def to_legacy_type_color(self) -> dict[str, str]:
         return {
             "type": self.family,

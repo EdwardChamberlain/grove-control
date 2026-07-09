@@ -1,13 +1,10 @@
 import { useTranslation } from 'react-i18next';
-import type { FilamentMaterialJson } from '../../utils/filamentMaterial';
-import type { ModelFilamentOptions } from '../../api/client';
+import type { FilamentMaterialPayload, ModelFilamentOptions } from '../../api/client';
 import { FilamentProfileRow } from './FilamentProfileRow';
 import type { FilamentReqsData } from './types';
 
 export type FilamentOverrideSelection = {
-  type: string;
-  color: string;
-  material: FilamentMaterialJson;
+  material: FilamentMaterialPayload;
 };
 
 interface FilamentOverrideProps {
@@ -50,8 +47,6 @@ export function FilamentOverride({
       onChange({
         ...overrides,
         [slotId]: {
-          type: selected.material.family,
-          color: selected.material.color_hex.slice(0, 7),
           material: selected.material,
         },
       });
@@ -99,6 +94,6 @@ export function FilamentOverride({
   );
 }
 
-function materialKey(material: FilamentMaterialJson): string {
+function materialKey(material: FilamentMaterialPayload): string {
   return [material.family, material.subtype || '', material.color_hex, material.profile_id || ''].join('|');
 }

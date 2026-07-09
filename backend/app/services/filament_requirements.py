@@ -194,6 +194,18 @@ def build_queue_filament_overrides(
     return resolved
 
 
+def attach_canonical_materials(requirements: list[dict]) -> list[dict]:
+    """Attach backend-canonical material payloads to requirement API data."""
+    for requirement in requirements:
+        material = FilamentMaterial.from_3mf_requirement(requirement)
+        if material.family:
+            requirement["material"] = material.to_queue_json()
+            requirement["type"] = material.family
+            requirement["color"] = material.rgb_hex
+            requirement["tray_info_idx"] = material.profile_id or ""
+    return requirements
+
+
 def _collect_filaments(parent: ET.Element, into: list[dict]) -> None:
     """Walk every `./filament` child under `parent` and append normalised
     entries to `into`. Skips filaments with `used_g <= 0` (slot present in

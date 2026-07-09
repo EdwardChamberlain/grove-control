@@ -1954,11 +1954,7 @@ export interface ModelFilamentOptions {
 
 export interface QueueFilamentOverridePayload {
   slot_id: number;
-  material?: FilamentMaterialPayload;
-  type: string;
-  color: string;
-  tray_info_idx?: string;
-  color_name?: string;
+  material: FilamentMaterialPayload;
   force_color_match?: boolean;
 }
 
@@ -3627,7 +3623,7 @@ export const api = {
     request<PrinterStatus>(`/printers/${id}/status`),
   previewFilamentMapping: (
     id: number,
-    data: { filaments: Array<object>; manual_mappings?: Record<number, number> },
+    data: { filaments: Array<object>; manual_mappings?: Record<number, number>; force_color_match?: boolean },
   ) =>
     request<FilamentMappingPreview>(`/printers/${id}/filament-mapping-preview`, {
       method: 'POST',
@@ -4460,6 +4456,7 @@ export const api = {
         slot_id: number;
         type: string;
         color: string;
+        material: FilamentMaterialPayload;
         used_grams: number;
         used_meters: number;
         used_in_plate?: boolean;
@@ -6148,6 +6145,7 @@ export const api = {
         slot_id: number;
         type: string;
         color: string;
+        material: FilamentMaterialPayload;
         used_grams: number;
         used_meters: number;
         used_in_plate?: boolean;

@@ -1,12 +1,10 @@
 import asyncio
-import copy
 import logging
 import re
 import zipfile
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +21,12 @@ from backend.app.models.ams_label import AmsLabel
 from backend.app.models.printer import Printer
 from backend.app.models.slot_preset import SlotPresetMapping
 from backend.app.models.user import User
+from backend.app.schemas.filament_material import (
+    FilamentMappingPreviewRequest,
+    FilamentMappingPreviewResponse,
+    ModelFilamentOptionsRequest,
+    ModelFilamentOptionsResponse,
+)
 from backend.app.schemas.printer import (
     AmsLabelBody,
     AMSTray,
@@ -65,31 +69,6 @@ from backend.app.utils.http import build_content_disposition
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/printers", tags=["printers"])
-
-
-class FilamentMappingPreviewRequest(BaseModel):
-    """Client intent for a server-authoritative filament mapping preview."""
-
-    filaments: list[dict] = Field(default_factory=list)
-    manual_mappings: dict[int, int] = Field(default_factory=dict)
-
-
-class ModelFilamentOptionsRequest(BaseModel):
-    """Model-based override options, filtered by server material policy."""
-
-    model: str
-    location: str | None = None
-    filaments: list[dict] = Field(default_factory=list)
-
-
-def _material_response(material) -> dict:
-    """Serialize canonical material plus backend-derived presentation fields."""
-    return {
-        **material.to_queue_json(),
-        "material_label": material.material_label,
-        "display_name": material.display_name,
-        "generic_color_name": material.generic_color_name,
-    }
 
 
 # Seconds the /hms/execute-action route waits for a printer status push
@@ -323,7 +302,7 @@ async def get_available_filament_options(
     request: ModelFilamentOptionsRequest,
     _=RequirePermissionIfAuthEnabled(Permission.QUEUE_CREATE),
     db: AsyncSession = Depends(get_db),
-):
+) -> ModelFilamentOptionsResponse:
     """Return server-approved override choices for every sliced material slot."""
     from backend.app.services.print_scheduler import scheduler as print_scheduler
     from backend.app.utils.printer_models import normalize_printer_model, normalize_printer_model_id
@@ -338,39 +317,16 @@ async def get_available_filament_options(
         query = query.where(Printer.location == request.location)
     printers_list = list((await db.execute(query)).scalars().all())
 
-    loaded: list[dict] = []
+    states = []
     for printer in printers_list:
         state = printer_manager.get_status(printer.id)
         if state:
-            loaded.extend(print_scheduler._build_loaded_filaments(state))
-
-    slots = []
-    for requirement in request.filaments:
-        slot_id = int(requirement.get("slot_id", 0))
-        if slot_id <= 0:
-            continue
-        required = FilamentMaterial.from_3mf_requirement(requirement)
-        option_by_key: dict[tuple[str, str | None, str, str | None], dict] = {}
-        for filament in loaded:
-            material = filament["material"]
-            if not required.is_dispatch_compatible(material):
-                continue
-            if requirement.get("nozzle_id") is not None and filament.get("extruder_id") not in {
-                None,
-                requirement["nozzle_id"],
-            }:
-                continue
-            key = (material.family, material.subtype, material.color_hex, material.profile_id)
-            option_by_key.setdefault(key, {"material": _material_response(material)})
-        slots.append(
-            {
-                "slot_id": slot_id,
-                "material": _material_response(required),
-                "options": list(option_by_key.values()),
-            }
+            states.append(state)
+    return ModelFilamentOptionsResponse(
+        slots=print_scheduler.get_model_filament_options(
+            [filament.as_legacy_dict() for filament in request.filaments], states
         )
-
-    return {"slots": slots}
+    )
 
 
 @router.get("/developer-mode-warnings")
@@ -887,118 +843,29 @@ async def get_printer_status(
     )
 
 
-@router.post("/{printer_id}/filament-mapping-preview")
+@router.post("/{printer_id}/filament-mapping-preview", response_model=FilamentMappingPreviewResponse)
 async def preview_filament_mapping(
     printer_id: int,
     request: FilamentMappingPreviewRequest,
     _=RequirePermissionIfAuthEnabled(Permission.QUEUE_CREATE),
     db: AsyncSession = Depends(get_db),
-):
+) -> FilamentMappingPreviewResponse:
     """Return the scheduler's material mapping decision without dispatching."""
-    from backend.app.services.filament_material import FilamentMaterial
     from backend.app.services.print_scheduler import scheduler as print_scheduler
 
-    state = printer_manager.get_status(printer_id)
-    if not state:
+    status = printer_manager.get_status(printer_id)
+    if not status:
         raise HTTPException(404, "Printer status unavailable")
 
-    loaded = print_scheduler._build_loaded_filaments(state)
-    loaded_by_id = {filament["global_tray_id"]: filament for filament in loaded}
-    fts_active = bool(state.fila_switch and state.fila_switch.installed)
-    requirements = copy.deepcopy(request.filaments)
-    if fts_active:
-        for requirement in requirements:
-            requirement.pop("nozzle_id", None)
-
-    def candidate_tray_ids(requirement: dict) -> list[int]:
-        required = FilamentMaterial.from_3mf_requirement(requirement)
-        return [
-            filament["global_tray_id"]
-            for filament in loaded
-            if required.is_dispatch_compatible(filament["material"])
-            and (
-                fts_active
-                or requirement.get("nozzle_id") is None
-                or filament.get("extruder_id") == requirement.get("nozzle_id")
-            )
-        ]
-
-    prefer_lowest = await print_scheduler._get_bool_setting(db, "prefer_lowest_filament")
-    # AMS backup is a printer capability gate, not a browser preference.
-    prefer_lowest = prefer_lowest and state.ams_filament_backup is not False
-    auto_mapping = print_scheduler._match_filaments_to_slots(requirements, loaded, prefer_lowest)
-    valid_manual_mappings: dict[int, int] = {}
-    reserved_manual_trays: set[int] = set()
-    for requirement in requirements:
-        slot_id = int(requirement.get("slot_id", 0))
-        tray_id = request.manual_mappings.get(slot_id)
-        if tray_id is not None and tray_id in candidate_tray_ids(requirement) and tray_id not in reserved_manual_trays:
-            valid_manual_mappings[slot_id] = tray_id
-            reserved_manual_trays.add(tray_id)
-    # Reserve valid manual selections before the scheduler assigns remaining
-    # slots. This preserves a later manual choice rather than allowing an
-    # earlier automatic slot to consume the same tray.
-    final_mapping = list(
-        print_scheduler._match_filaments_to_slots(
-            requirements,
-            [filament for filament in loaded if filament["global_tray_id"] not in reserved_manual_trays],
-            prefer_lowest,
-        )
-        or []
+    preview = await print_scheduler.build_filament_mapping_preview(
+        db,
+        printer_id,
+        status,
+        [filament.as_legacy_dict() for filament in request.filaments],
+        request.manual_mappings,
+        force_color_match=request.force_color_match,
     )
-    max_slot_id = max((int(requirement.get("slot_id", 0)) for requirement in requirements), default=0)
-    if len(final_mapping) < max_slot_id:
-        final_mapping.extend([-1] * (max_slot_id - len(final_mapping)))
-
-    comparisons = []
-    for requirement in requirements:
-        slot_id = int(requirement.get("slot_id", 0))
-        if slot_id <= 0:
-            continue
-        required = FilamentMaterial.from_3mf_requirement(requirement)
-        candidates = candidate_tray_ids(requirement)
-        manual_tray_id = valid_manual_mappings.get(slot_id)
-        if manual_tray_id is not None:
-            final_mapping[slot_id - 1] = manual_tray_id
-
-        mapped_tray_id = final_mapping[slot_id - 1] if slot_id <= len(final_mapping) else -1
-        mapped = loaded_by_id.get(mapped_tray_id)
-        if not mapped:
-            status = "missing"
-        elif required.is_color_match(mapped["material"]):
-            status = "match"
-        elif required.is_similar_color(mapped["material"]):
-            status = "similar_colour"
-        else:
-            status = "material_only"
-        comparisons.append(
-            {
-                "slot_id": slot_id,
-                "material": _material_response(required),
-                "status": status,
-                "mapped_tray_id": mapped_tray_id,
-                "candidate_tray_ids": candidates,
-            }
-        )
-
-    return {
-        "auto_mapping": auto_mapping,
-        "mapping": final_mapping or None,
-        "loaded_filaments": [
-            {
-                "global_tray_id": filament["global_tray_id"],
-                "ams_id": filament["ams_id"],
-                "tray_id": filament["tray_id"],
-                "is_ht": filament["is_ht"],
-                "is_external": filament["is_external"],
-                "extruder_id": filament.get("extruder_id"),
-                "remain": filament.get("remain", -1),
-                "material": _material_response(filament["material"]),
-            }
-            for filament in loaded
-        ],
-        "comparisons": comparisons,
-    }
+    return FilamentMappingPreviewResponse.model_validate(preview)
 
 
 @router.get("/{printer_id}/current-print-user")

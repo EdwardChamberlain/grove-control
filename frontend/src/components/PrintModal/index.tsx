@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, AlertTriangle, Loader2, Palette, Pencil, Printer, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { PrinterStatus, PrintQueueItemCreate, PrintQueueItemUpdate, SpoolAssignment } from '../../api/client';
+import type { FilamentMaterialPayload, PrinterStatus, PrintQueueItemCreate, PrintQueueItemUpdate, SpoolAssignment } from '../../api/client';
 import { api } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { Card, CardContent } from '../Card';
@@ -10,7 +10,6 @@ import { Button } from '../Button';
 import { ConfirmModal } from '../ConfirmModal';
 import { useToast } from '../../contexts/ToastContext';
 import { useMultiPrinterFilamentMapping, type PerPrinterConfig } from '../../hooks/useMultiPrinterFilamentMapping';
-import { FilamentMaterial, type FilamentMaterialJson } from '../../utils/filamentMaterial';
 import { getCurrencySymbol } from '../../utils/currency';
 import { getBedTypeInfo } from '../../utils/bedType';
 import { toDateTimeLocalValue, parseUTCDate } from '../../utils/date';
@@ -32,7 +31,7 @@ import { DEFAULT_PRINT_OPTIONS, DEFAULT_SCHEDULE_OPTIONS } from './types';
 
 type QueueFilamentOverride = {
   slot_id: number;
-  material: FilamentMaterialJson;
+  material: FilamentMaterialPayload;
   type: string;
   color: string;
   tray_info_idx?: string;
@@ -191,11 +190,9 @@ export function PrintModal({
     if (mode === 'edit-queue-item' && queueItem?.filament_overrides) {
       const overrides: Record<number, FilamentOverrideSelection> = {};
       for (const o of queueItem.filament_overrides) {
-        const material = FilamentMaterial.fromQueueOverride(o);
+        if (!o.material) continue;
         overrides[o.slot_id] = {
-          type: material.family,
-          color: material.rgbHex,
-          material: material.toQueueJson(),
+          material: o.material,
         };
       }
       return overrides;
@@ -347,10 +344,11 @@ export function PrintModal({
   });
 
   const { data: singleMappingPreview } = useQuery({
-    queryKey: ['filament-mapping-preview', effectivePrinterId, effectiveFilamentReqs?.filaments, manualMappings],
+    queryKey: ['filament-mapping-preview', effectivePrinterId, effectiveFilamentReqs?.filaments, manualMappings, forceColorMatch],
     queryFn: () => api.previewFilamentMapping(effectivePrinterId!, {
       filaments: effectiveFilamentReqs?.filaments ?? [],
       manual_mappings: manualMappings,
+      force_color_match: forceColorMatch,
     }),
     enabled: !!effectivePrinterId && !!effectiveFilamentReqs?.filaments?.length,
     staleTime: 5000,
@@ -408,8 +406,6 @@ export function PrintModal({
         const selected = loaded.find((filament) => filament.global_tray_id === globalTrayId);
         if (selected) {
           next[slotId] = {
-            type: selected.material.family,
-            color: selected.material.color_hex.slice(0, 7),
             material: selected.material,
           };
         }
@@ -426,6 +422,7 @@ export function PrintModal({
     manualMappings,
     perPrinterConfigs,
     setPerPrinterConfigs,
+    forceColorMatch,
   );
 
   // Auto-select first plate when plates load (single or multi-plate)
@@ -679,12 +676,9 @@ export function PrintModal({
     const buildFilamentOverridesArray = () => {
       const entries: QueueFilamentOverride[] = [];
 
-      const entryFor = (slotId: number, material: FilamentMaterial): QueueFilamentOverride => ({
+      const entryFor = (slotId: number, material: FilamentMaterialPayload): QueueFilamentOverride => ({
         slot_id: slotId,
-        material: material.toQueueJson(),
-        type: material.family,
-        color: material.rgbHex,
-        tray_info_idx: material.profileId || '',
+        material,
         force_color_match: forceColorMatch,
       });
 
@@ -692,10 +686,8 @@ export function PrintModal({
       if (effectiveFilamentReqs?.filaments) {
         for (const req of effectiveFilamentReqs.filaments) {
           const userOverride = filamentOverrides[req.slot_id];
-          const sourceMaterial = FilamentMaterial.fromRequirement(req);
-          const material = userOverride
-            ? FilamentMaterial.fromQueueOverride(userOverride)
-            : sourceMaterial;
+          const material = userOverride?.material ?? req.material;
+          if (!material) continue;
 
           // Include every known slot so the job-level policy is explicit and
           // survives clients or API versions with different defaults.
@@ -705,7 +697,7 @@ export function PrintModal({
         // Fallback: no filament requirements data — only include explicit user overrides
         for (const [slotId, override] of Object.entries(filamentOverrides)) {
           const id = parseInt(slotId, 10);
-          entries.push(entryFor(id, FilamentMaterial.fromQueueOverride(override)));
+          entries.push(entryFor(id, override.material));
         }
       }
 
@@ -733,9 +725,6 @@ export function PrintModal({
         return {
           ...override,
           material: selected.material,
-          type: selected.material.family,
-          color: selected.material.color_hex.slice(0, 7),
-          tray_info_idx: selected.material.profile_id || '',
         };
       });
     };
@@ -1199,6 +1188,7 @@ export function PrintModal({
                 defaultExpanded={!!initialSelectedPrinterIds?.length || (settings?.per_printer_mapping_expanded ?? false)}
                 currencySymbol={currencySymbol}
                 defaultCostPerKg={defaultCostPerKg}
+                forceColorMatch={forceColorMatch}
               />
             )}
 

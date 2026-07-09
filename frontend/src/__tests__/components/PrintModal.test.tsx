@@ -266,7 +266,10 @@ describe('PrintModal', () => {
         http.get('/api/v1/archives/:id/filament-requirements', () =>
           HttpResponse.json({
             filaments: [
-              { slot_id: 1, type: 'PLA', color: '#FF0000', used_grams: 10, used_meters: 3 },
+              {
+                slot_id: 1, type: 'PLA', color: '#FF0000', used_grams: 10, used_meters: 3,
+                material: { family: 'PLA', subtype: 'Basic', color_hex: '#FF0000FF', profile_id: null, setting_id: null },
+              },
             ],
           }),
         ),
@@ -299,9 +302,12 @@ describe('PrintModal', () => {
       expect(capturedBody?.filament_overrides).toEqual([
         expect.objectContaining({
           slot_id: 1,
-          type: 'PLA',
-          color: '#FF0000',
           force_color_match: true,
+          material: expect.objectContaining({
+            family: 'PLA',
+            subtype: 'Basic',
+            color_hex: '#FF0000FF',
+          }),
         }),
       ]);
     });
@@ -312,7 +318,10 @@ describe('PrintModal', () => {
         http.get('/api/v1/archives/:id/filament-requirements', () =>
           HttpResponse.json({
             filaments: [
-              { slot_id: 1, type: 'PLA', color: '#FF0000', used_grams: 10, used_meters: 3 },
+              {
+                slot_id: 1, type: 'PLA', color: '#FF0000', used_grams: 10, used_meters: 3,
+                material: { family: 'PLA', subtype: 'Basic', color_hex: '#FF0000FF', profile_id: null, setting_id: null },
+              },
             ],
           }),
         ),

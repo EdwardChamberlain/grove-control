@@ -34,6 +34,7 @@ from backend.app.schemas.print_queue import (
     PrintQueueReorder,
 )
 from backend.app.services.filament_deficit import compute_deficit_for_queue_item
+from backend.app.services.filament_material import FilamentMaterial
 from backend.app.services.filament_requirements import (
     build_queue_filament_overrides,
     extract_filament_requirements,
@@ -82,6 +83,20 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
             filament_overrides_parsed = json.loads(item.filament_overrides)
         except json.JSONDecodeError:
             filament_overrides_parsed = None
+    if isinstance(filament_overrides_parsed, list):
+        canonical_overrides = []
+        for override in filament_overrides_parsed:
+            if not isinstance(override, dict):
+                continue
+            material = FilamentMaterial.from_queue_override(override)
+            canonical_overrides.append(
+                {
+                    **override,
+                    "material": material.to_queue_json(),
+                    **material.to_legacy_type_color(),
+                }
+            )
+        filament_overrides_parsed = canonical_overrides
 
     # Parse nozzle_mapping from JSON string (#1780 — H2C rack slicer-pick
     # preservation). Nullable opaque JSON blob stored verbatim from
@@ -417,7 +432,7 @@ async def add_to_queue(
     try:
         resolved_overrides = build_queue_filament_overrides(
             requirements,
-            data.filament_overrides,
+            [override.to_override_dict() for override in data.filament_overrides] if data.filament_overrides else None,
             force_color_match=data.force_color_match,
         )
     except ValueError as e:
@@ -1104,7 +1119,12 @@ async def update_queue_item(
             pass
         elif provided_overrides:
             try:
-                resolved_overrides = await _resolved_filament_overrides(provided_overrides)
+                resolved_overrides = await _resolved_filament_overrides(
+                    [
+                        override.model_dump(exclude_none=True) if hasattr(override, "model_dump") else override
+                        for override in provided_overrides
+                    ]
+                )
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=str(e)) from e
             update_data["filament_overrides"] = json.dumps(resolved_overrides) if resolved_overrides else None

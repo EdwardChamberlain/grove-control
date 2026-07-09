@@ -32,7 +32,6 @@ describe('FilamentOverride', () => {
     fireEvent.change(select, { target: { value: 'PLA|Matte|#FFFFFFFF|GFA01' } });
     expect(onChange).toHaveBeenCalledWith({
       1: {
-        type: 'PLA', color: '#FFFFFF',
         material: expect.objectContaining({ family: 'PLA', subtype: 'Matte', profile_id: 'GFA01' }),
       },
     });

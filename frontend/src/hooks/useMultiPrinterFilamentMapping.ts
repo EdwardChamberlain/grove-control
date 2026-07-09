@@ -85,6 +85,7 @@ export function useMultiPrinterFilamentMapping(
   defaultMappings: Record<number, number>,
   perPrinterConfigs: Record<number, PerPrinterConfig>,
   setPerPrinterConfigs: React.Dispatch<React.SetStateAction<Record<number, PerPrinterConfig>>>,
+  forceColorMatch: boolean,
 ): UseMultiPrinterFilamentMappingResult {
   const statusQueries = useQueries({
     queries: selectedPrinterIds.map((printerId) => ({
@@ -100,10 +101,11 @@ export function useMultiPrinterFilamentMapping(
       const config = perPrinterConfigs[printerId] || DEFAULT_PRINTER_CONFIG;
       const manualMappings = config.useDefault ? defaultMappings : config.manualMappings;
       return {
-        queryKey: ['filament-mapping-preview', printerId, filamentReqs?.filaments, manualMappings],
+        queryKey: ['filament-mapping-preview', printerId, filamentReqs?.filaments, manualMappings, forceColorMatch],
         queryFn: () => api.previewFilamentMapping(printerId, {
           filaments: filamentReqs?.filaments ?? [],
           manual_mappings: manualMappings,
+          force_color_match: forceColorMatch,
         }),
         enabled: selectedPrinterIds.length > 0 && !!filamentReqs?.filaments?.length,
         staleTime: 5000,
