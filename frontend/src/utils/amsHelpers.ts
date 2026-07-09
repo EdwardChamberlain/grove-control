@@ -338,7 +338,7 @@ export function autoMatchFilament(
           (f) => {
             const reqMaterial = FilamentMaterial.fromRequirement(req);
             const loadedMaterial = f.material ?? FilamentMaterial.fromQueueOverride({ type: f.type, color: f.color, tray_info_idx: f.trayInfoIdx });
-            return !usedTrayIds.has(f.globalTrayId) && reqMaterial.isFamilyMatch(loadedMaterial);
+            return !usedTrayIds.has(f.globalTrayId) && reqMaterial.isMaterialMatch(loadedMaterial);
           }
         );
   return exactMatch ?? similarMatch ?? typeOnlyMatch;

@@ -30,8 +30,12 @@ from backend.app.services.bambu_ftp import (
     with_ftp_retry,
 )
 from backend.app.services.filament_deficit import compute_deficit_for_queue_item
-from backend.app.services.filament_material import FilamentMaterial, colors_are_similar, normalize_color_hex
-from backend.app.services.filament_requirements import canonical_filament_type
+from backend.app.services.filament_material import (
+    FilamentMaterial,
+    canonical_filament_type,
+    colors_are_similar,
+    normalize_color_hex,
+)
 from backend.app.services.notification_service import notification_service
 from backend.app.services.printer_manager import (
     printer_manager,
@@ -301,11 +305,8 @@ class PrintScheduler:
                     # normal AMS mapper can fall back to a same-material,
                     # different-colour tray and silently print the wrong colour.
                     filament_overrides = self._get_filament_overrides(item)
-                    required_materials = sorted(
-                        {override["type"] for override in filament_overrides if override.get("type")}
-                    )
-                    if required_materials:
-                        missing_materials = self._get_missing_filament_types(item.printer_id, required_materials)
+                    if filament_overrides:
+                        missing_materials = self._get_missing_filament_materials(item.printer_id, filament_overrides)
                         if missing_materials:
                             waiting_reason = f"No matching material. Waiting on {', '.join(missing_materials)}"
                             if item.waiting_reason != waiting_reason:
@@ -647,26 +648,16 @@ class PrintScheduler:
                 continue
 
             # Validate filament compatibility if required types are specified
-            if required_filament_types:
+            if filament_overrides:
+                missing = self._get_missing_filament_materials(printer.id, filament_overrides)
+            elif required_filament_types:
                 missing = self._get_missing_filament_types(printer.id, required_filament_types)
-                if missing:
-                    # When force_overrides are present, enrich missing entries with
-                    # the canonical material label instead of just the broad family.
-                    if force_overrides:
-                        force_material_map: dict[str, str] = {}
-                        for override in force_overrides:
-                            material = FilamentMaterial.from_queue_override(override)
-                            if material.family:
-                                force_material_map.setdefault(
-                                    canonical_filament_type(material.family),
-                                    material.display_name,
-                                )
-                        missing_enriched = [force_material_map.get(canonical_filament_type(t), t) for t in missing]
-                        printers_missing_filament.append((printer.name, missing_enriched))
-                    else:
-                        printers_missing_filament.append((printer.name, missing))
-                    logger.debug("Skipping printer %s (%s) - missing filaments: %s", printer.id, printer.name, missing)
-                    continue
+            else:
+                missing = []
+            if missing:
+                printers_missing_filament.append((printer.name, missing))
+                logger.debug("Skipping printer %s (%s) - missing filaments: %s", printer.id, printer.name, missing)
+                continue
 
             # Force color match: ALL flagged slots must have an exact type+color match
             if force_overrides:
@@ -863,7 +854,7 @@ class PrintScheduler:
                 return False
             loaded_material = loaded_by_id.get(mapping[slot_id - 1])
             required_material = FilamentMaterial.from_queue_override(override)
-            if not loaded_material or not required_material.is_family_match(loaded_material):
+            if not loaded_material or not required_material.is_material_match(loaded_material):
                 return False
         return True
 
@@ -925,6 +916,34 @@ class PrintScheduler:
                 missing.append(req_type)
 
         return missing
+
+    def _get_missing_filament_materials(self, printer_id: int, overrides: list[dict]) -> list[str]:
+        """Return canonical materials not loaded on a printer.
+
+        Queue overrides preserve subtype information which the legacy
+        ``required_filament_types`` list cannot represent. A known subtype is
+        therefore a hard requirement; legacy requirements without one remain
+        compatible with any subtype in the same family.
+        """
+        status = printer_manager.get_status(printer_id)
+        requirements = [FilamentMaterial.from_queue_override(override) for override in overrides]
+        if not status:
+            return [material.display_name for material in requirements]
+
+        loaded: list[FilamentMaterial] = []
+        for ams_unit in status.raw_data.get("ams", []):
+            for tray in ams_unit.get("tray", []):
+                if tray.get("tray_type"):
+                    loaded.append(FilamentMaterial.from_ams_tray(tray))
+        for tray in status.raw_data.get("vt_tray") or []:
+            if tray.get("tray_type"):
+                loaded.append(FilamentMaterial.from_ams_tray(tray))
+
+        return [
+            material.display_name
+            for material in requirements
+            if not any(material.is_material_match(candidate) for candidate in loaded)
+        ]
 
     def _count_override_color_matches(self, printer_id: int, overrides: list[dict]) -> int:
         """Count how many filament overrides have an exact color match on the printer.
@@ -1404,19 +1423,16 @@ class PrintScheduler:
                 available = [f for f in available if f.get("extruder_id") == req_nozzle_id]
 
             # Material is always a hard boundary. Disabling colour matching may
-            # select a different shade or compatible subtype, but must never
-            # map PLA to ABS (or any other unrelated material). Forced slots
-            # additionally require the exact material type string.
+            # select a different shade, but a known subtype must still match.
+            # Legacy requirements without a subtype remain compatible with
+            # every subtype in the same material family.
             available = [
                 f
                 for f in available
                 if (
-                    (
-                        (f.get("material") or FilamentMaterial.from_queue_override(f)).family_key
-                        == req_material.family_key
-                    )
+                    (f.get("material") or FilamentMaterial.from_queue_override(f)).family_key == req_material.family_key
                     if strict_color
-                    else req_material.is_family_match(f.get("material") or FilamentMaterial.from_queue_override(f))
+                    else req_material.is_material_match(f.get("material") or FilamentMaterial.from_queue_override(f))
                 )
             ]
 
@@ -1483,7 +1499,7 @@ class PrintScheduler:
                         elif req_material.is_material_match(f_material) and req_material.is_similar_color(f_material):
                             if not similar_match:
                                 similar_match = f
-                        elif not strict_color and not type_only_match and req_material.is_family_match(f_material):
+                        elif not strict_color and not type_only_match and req_material.is_material_match(f_material):
                             type_only_match = f
 
             # If no idx_match yet, do standard type/color matching on all available trays
@@ -1497,7 +1513,7 @@ class PrintScheduler:
                     elif req_material.is_material_match(f_material) and req_material.is_similar_color(f_material):
                         if not similar_match:
                             similar_match = f
-                    elif not strict_color and not type_only_match and req_material.is_family_match(f_material):
+                    elif not strict_color and not type_only_match and req_material.is_material_match(f_material):
                         type_only_match = f
 
             # Forced slots are exact by definition: never degrade to a similar

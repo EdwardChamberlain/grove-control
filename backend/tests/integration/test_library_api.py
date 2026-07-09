@@ -10,6 +10,23 @@ import pytest
 from httpx import AsyncClient
 
 
+def _canonical_override(slot_id: int, family: str, color: str, force_color_match: bool) -> dict:
+    return {
+        "slot_id": slot_id,
+        "material": {
+            "family": family,
+            "subtype": None,
+            "color_hex": f"{color}FF",
+            "profile_id": None,
+            "setting_id": None,
+        },
+        "type": family,
+        "color": color,
+        "tray_info_idx": "",
+        "force_color_match": force_color_match,
+    }
+
+
 class TestLibraryFoldersAPI:
     """Integration tests for library folders endpoints."""
 
@@ -740,9 +757,7 @@ class TestLibraryAddToQueueAPI:
         item = await db_session.get(PrintQueueItem, queue_item_id, populate_existing=True)
         assert item is not None
         assert item.force_color_match is True
-        assert json.loads(item.filament_overrides) == [
-            {"slot_id": 1, "type": "PETG", "color": "#0000FF", "force_color_match": True}
-        ]
+        assert json.loads(item.filament_overrides) == [_canonical_override(1, "PETG", "#0000FF", True)]
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -769,9 +784,7 @@ class TestLibraryAddToQueueAPI:
         item = await db_session.get(PrintQueueItem, queue_item_id, populate_existing=True)
         assert item is not None
         assert item.force_color_match is False
-        assert json.loads(item.filament_overrides) == [
-            {"slot_id": 1, "type": "PETG", "color": "#0000FF", "force_color_match": False}
-        ]
+        assert json.loads(item.filament_overrides) == [_canonical_override(1, "PETG", "#0000FF", False)]
 
 
 class TestLibraryZipExtractAPI:

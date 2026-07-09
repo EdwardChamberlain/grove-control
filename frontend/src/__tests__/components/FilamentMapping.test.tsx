@@ -94,14 +94,14 @@ describe('FilamentMapping — FTS routing', () => {
     // PETG remains available despite the route, while unrelated PLA must not
     // be offered as an unsafe manual override.
     await waitFor(() => {
-      expect(screen.getByText(/PETG - Green/)).toBeInTheDocument();
+      expect(screen.getByText(/PETG Basic - Green/)).toBeInTheDocument();
     });
     expect(screen.queryByText(/PLA - Red/)).not.toBeInTheDocument();
 
     // The slot currently fed into a track gets an [L]/[R] badge. AMS-0 slot 1
     // (global tray ID 1) is in fila_switch.in_slots[1], whose track terminates
     // at extruder 1 → the LEFT-nozzle short label appears in that option.
-    const petgOption = screen.getByText(/PETG - Green/);
+    const petgOption = screen.getByText(/PETG Basic - Green/);
     expect(petgOption.textContent).toMatch(/\[L\]/);
 
     // AMS-0 slot 0 (global tray ID 0) is NOT currently fed into any track —
@@ -146,7 +146,7 @@ describe('FilamentMapping — FTS routing', () => {
     // The same-material PETG slot must still appear across extruders; the PLA
     // slot remains excluded because manual mapping cannot cross materials.
     await waitFor(() => {
-      expect(screen.getByText(/PETG - Green/)).toBeInTheDocument();
+      expect(screen.getByText(/PETG Basic - Green/)).toBeInTheDocument();
     });
     expect(screen.queryByText(/PLA - Red/)).not.toBeInTheDocument();
   });

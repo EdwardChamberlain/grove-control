@@ -101,6 +101,17 @@ def test_unforced_mapping_never_crosses_material_family(scheduler):
     assert mapping == [-1]
 
 
+def test_unforced_mapping_never_substitutes_a_known_subtype(scheduler):
+    required = [{"slot_id": 1, "type": "PLA-S", "color": "#FFFFFF"}]
+    loaded = [
+        {"global_tray_id": 0, "type": "PLA", "color": "#FFFFFF", "tray_info_idx": "GFA00"},
+    ]
+
+    mapping = scheduler._match_filaments_to_slots(required, loaded)
+
+    assert mapping == [-1]
+
+
 def test_missing_per_slot_flag_inherits_safe_queue_default(scheduler):
     item = _queue_item()
     item.filament_overrides = '[{"slot_id": 1, "type": "PLA", "color": "#FF0000"}]'
@@ -142,7 +153,7 @@ async def test_model_unforced_job_accepts_same_material_without_exact_colour(moc
 
     with (
         patch.object(scheduler, "_is_printer_idle", return_value=True),
-        patch.object(scheduler, "_get_missing_filament_types", return_value=[]),
+        patch.object(scheduler, "_get_missing_filament_materials", return_value=[]),
         patch.object(scheduler, "_count_override_color_matches", return_value=0),
     ):
         printer_id, waiting_reason = await scheduler._find_idle_printer_for_model(
@@ -292,7 +303,7 @@ async def test_assigned_job_waits_when_forced_colour_is_missing(mock_pm, schedul
         patch("backend.app.services.print_scheduler.async_session") as session_ctx,
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
         patch.object(scheduler, "_is_printer_idle", return_value=True),
-        patch.object(scheduler, "_get_missing_filament_types", return_value=[]),
+        patch.object(scheduler, "_get_missing_filament_materials", return_value=[]),
         patch.object(scheduler, "_get_missing_force_color_slots", return_value=["PLA (Red)"]),
         patch.object(scheduler, "_compute_ams_mapping_for_printer", new=AsyncMock()) as compute_mapping,
         patch.object(scheduler, "_start_print", new=AsyncMock()) as start_print,
@@ -321,7 +332,7 @@ async def test_assigned_job_recomputes_mapping_and_starts_on_exact_colour(mock_p
         patch("backend.app.services.print_scheduler.async_session") as session_ctx,
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
         patch.object(scheduler, "_is_printer_idle", return_value=True),
-        patch.object(scheduler, "_get_missing_filament_types", return_value=[]),
+        patch.object(scheduler, "_get_missing_filament_materials", return_value=[]),
         patch.object(scheduler, "_get_missing_force_color_slots", return_value=[]),
         patch.object(scheduler, "_compute_ams_mapping_for_printer", new=AsyncMock(return_value=[2])),
         patch.object(scheduler, "_block_on_filament_deficit", new=AsyncMock(return_value=False)),
@@ -350,7 +361,7 @@ async def test_assigned_job_allows_different_colour_when_force_is_disabled(mock_
         patch("backend.app.services.print_scheduler.async_session") as session_ctx,
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
         patch.object(scheduler, "_is_printer_idle", return_value=True),
-        patch.object(scheduler, "_get_missing_filament_types", return_value=[]),
+        patch.object(scheduler, "_get_missing_filament_materials", return_value=[]),
         patch.object(scheduler, "_ams_mapping_uses_compatible_materials", return_value=True),
         patch.object(scheduler, "_get_missing_force_color_slots") as missing_colors,
         patch.object(scheduler, "_block_on_filament_deficit", new=AsyncMock(return_value=False)),
@@ -378,7 +389,7 @@ async def test_assigned_unforced_job_waits_when_material_is_missing(mock_pm, sch
         patch("backend.app.services.print_scheduler.async_session") as session_ctx,
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
         patch.object(scheduler, "_is_printer_idle", return_value=True),
-        patch.object(scheduler, "_get_missing_filament_types", return_value=["PLA"]),
+        patch.object(scheduler, "_get_missing_filament_materials", return_value=["PLA - White"]),
         patch.object(scheduler, "_start_print", new=AsyncMock()) as start_print,
         patch.object(scheduler, "_check_auto_drying", new=AsyncMock()),
     ):
@@ -387,4 +398,4 @@ async def test_assigned_unforced_job_waits_when_material_is_missing(mock_pm, sch
         await scheduler.check_queue()
 
     start_print.assert_not_awaited()
-    assert item.waiting_reason == "No matching material. Waiting on PLA"
+    assert item.waiting_reason == "No matching material. Waiting on PLA - White"

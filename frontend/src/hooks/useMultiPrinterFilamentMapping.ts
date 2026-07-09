@@ -115,7 +115,7 @@ function computeMatchDetails(
       const manualLoaded = loadedFilaments.find((f) => f.globalTrayId === manualTrayId);
 
       if (manualLoaded) {
-        const typeMatch = reqMaterial.isFamilyMatch(manualLoaded.material);
+        const typeMatch = reqMaterial.isMaterialMatch(manualLoaded.material);
         const colorMatch =
           reqMaterial.isMaterialMatch(manualLoaded.material) &&
           (reqMaterial.isColorMatch(manualLoaded.material) || reqMaterial.isSimilarColor(manualLoaded.material));
@@ -156,7 +156,7 @@ function computeMatchDetails(
     const typeOnlyMatch =
       exactMatch || similarMatch
         ? undefined
-        : candidates.find((f) => reqMaterial.isFamilyMatch(f.material));
+        : candidates.find((f) => reqMaterial.isMaterialMatch(f.material));
     const loaded = exactMatch ?? similarMatch ?? typeOnlyMatch;
 
     if (loaded) {
@@ -236,7 +236,7 @@ function computeMappingWithOverrides(
     const typeOnlyMatch =
       exactMatch || similarMatch
         ? undefined
-        : candidates.find((f) => reqMaterial.isFamilyMatch(f.material));
+        : candidates.find((f) => reqMaterial.isMaterialMatch(f.material));
     const loaded = exactMatch ?? similarMatch ?? typeOnlyMatch;
 
     if (loaded) {

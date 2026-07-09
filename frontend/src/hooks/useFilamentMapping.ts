@@ -143,9 +143,9 @@ export function computeAmsMapping(
     }
 
     // Material is a hard boundary even when colour matching is disabled.
-    // Keep compatible subtypes in the same canonical family, but never let
-    // tray_info_idx or manual fallback map PLA to ABS (etc.).
-    available = available.filter((f) => reqMaterial.isFamilyMatch(f.material));
+    // Requirements with a known subtype must not silently substitute another
+    // subtype; legacy requirements without one remain family-compatible.
+    available = available.filter((f) => reqMaterial.isMaterialMatch(f.material));
 
     // Sort lowest-first when the preference is on. Inventory-tracked spools
     // sort before MQTT-only ones; see preferLowestSortKey for the rationale.
@@ -184,7 +184,7 @@ export function computeAmsMapping(
           similarMatch = idxMatches.find((f) => reqMaterial.isMaterialMatch(f.material) && reqMaterial.isSimilarColor(f.material));
         }
         if (!exactMatch && !similarMatch) {
-          typeOnlyMatch = idxMatches.find((f) => reqMaterial.isFamilyMatch(f.material));
+          typeOnlyMatch = idxMatches.find((f) => reqMaterial.isMaterialMatch(f.material));
         }
       }
     }
@@ -196,7 +196,7 @@ export function computeAmsMapping(
         similarMatch = available.find((f) => reqMaterial.isMaterialMatch(f.material) && reqMaterial.isSimilarColor(f.material));
       }
       if (!exactMatch && !similarMatch) {
-        typeOnlyMatch = available.find((f) => reqMaterial.isFamilyMatch(f.material));
+        typeOnlyMatch = available.find((f) => reqMaterial.isMaterialMatch(f.material));
       }
     }
 
@@ -353,7 +353,7 @@ export function useFilamentMapping(
         const manualLoaded = loadedFilaments.find((f) => f.globalTrayId === manualTrayId);
 
         if (manualLoaded) {
-          const typeMatch = reqMaterial.isFamilyMatch(manualLoaded.material);
+          const typeMatch = reqMaterial.isMaterialMatch(manualLoaded.material);
           const colorMatch =
             reqMaterial.isMaterialMatch(manualLoaded.material) &&
             (reqMaterial.isColorMatch(manualLoaded.material) || reqMaterial.isSimilarColor(manualLoaded.material));
@@ -431,7 +431,7 @@ export function useFilamentMapping(
             similarMatch = idxMatches.find((f) => reqMaterial.isMaterialMatch(f.material) && reqMaterial.isSimilarColor(f.material));
           }
           if (!exactMatch && !similarMatch) {
-            typeOnlyMatch = idxMatches.find((f) => reqMaterial.isFamilyMatch(f.material));
+            typeOnlyMatch = idxMatches.find((f) => reqMaterial.isMaterialMatch(f.material));
           }
         }
       }
@@ -443,7 +443,7 @@ export function useFilamentMapping(
           similarMatch = available.find((f) => reqMaterial.isMaterialMatch(f.material) && reqMaterial.isSimilarColor(f.material));
         }
         if (!exactMatch && !similarMatch) {
-          typeOnlyMatch = available.find((f) => reqMaterial.isFamilyMatch(f.material));
+          typeOnlyMatch = available.find((f) => reqMaterial.isMaterialMatch(f.material));
         }
       }
 

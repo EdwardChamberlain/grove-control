@@ -228,7 +228,7 @@ export function FilamentMapping({
               colorLabel: itemMaterial.genericColorName,
             };
             const compatibleLoadedFilaments = loadedFilaments.filter(
-              (filament) => itemMaterial.isFamilyMatch(filament.material),
+              (filament) => itemMaterial.isMaterialMatch(filament.material),
             );
             const options = compatibleLoadedFilaments.map((filament) => {
               const remainingWeight = trayRemainingWeightMap.get(filament.globalTrayId);

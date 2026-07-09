@@ -36,6 +36,23 @@ def _write_3mf_with_filaments(file_path: Path, filaments: list[dict], plate_inde
         zf.writestr(f"Metadata/plate_{plate_index}.gcode", "; gcode\n")
 
 
+def _canonical_override(slot_id: int, family: str, color: str, force_color_match: bool) -> dict:
+    return {
+        "slot_id": slot_id,
+        "material": {
+            "family": family,
+            "subtype": None,
+            "color_hex": f"{color}FF",
+            "profile_id": None,
+            "setting_id": None,
+        },
+        "type": family,
+        "color": color,
+        "tray_info_idx": "",
+        "force_color_match": force_color_match,
+    }
+
+
 class TestVirtualPrinterInstance:
     """Tests for VirtualPrinterInstance class."""
 
@@ -1042,8 +1059,8 @@ class TestVirtualPrinterInstance:
         # Setting off keeps the material/colour metadata but marks colour as
         # a preference rather than an exact dispatch requirement.
         assert json.loads(queue_item.filament_overrides) == [
-            {"slot_id": 1, "type": "PLA", "color": "#FFFFFF", "force_color_match": False},
-            {"slot_id": 2, "type": "PETG", "color": "#000000", "force_color_match": False},
+            _canonical_override(1, "PLA", "#FFFFFF", False),
+            _canonical_override(2, "PETG", "#000000", False),
         ]
 
     @pytest.mark.asyncio
@@ -1111,8 +1128,8 @@ class TestVirtualPrinterInstance:
         assert queue_item.filament_overrides is not None
         overrides = json.loads(queue_item.filament_overrides)
         assert overrides == [
-            {"slot_id": 1, "type": "PLA", "color": "#FFFFFF", "force_color_match": True},
-            {"slot_id": 2, "type": "PLA", "color": "#FF00FF", "force_color_match": True},
+            _canonical_override(1, "PLA", "#FFFFFF", True),
+            _canonical_override(2, "PLA", "#FF00FF", True),
         ]
         # required_filament_types still populated alongside overrides.
         assert json.loads(queue_item.required_filament_types) == ["PLA"]

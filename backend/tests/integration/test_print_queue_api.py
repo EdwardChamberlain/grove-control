@@ -30,6 +30,23 @@ def _write_queue_multiplate_3mf(path) -> None:
         )
 
 
+def _canonical_override(slot_id: int, family: str, color: str, force_color_match: bool) -> dict:
+    return {
+        "slot_id": slot_id,
+        "material": {
+            "family": family,
+            "subtype": None,
+            "color_hex": f"{color}FF",
+            "profile_id": None,
+            "setting_id": None,
+        },
+        "type": family,
+        "color": color,
+        "tray_info_idx": "",
+        "force_color_match": force_color_match,
+    }
+
+
 class TestPrintQueueAPI:
     """Integration tests for /api/v1/queue endpoints."""
 
@@ -182,13 +199,14 @@ class TestPrintQueueAPI:
         result = response.json()
         assert result["target_model"] is None
         assert result["force_color_match"] is True
-        assert result["filament_overrides"] == overrides
+        expected_overrides = [_canonical_override(1, "PLA", "#FF0000", True)]
+        assert result["filament_overrides"] == expected_overrides
 
         db_session.expire_all()
         stored = await db_session.get(PrintQueueItem, result["id"], populate_existing=True)
         assert stored is not None
         assert stored.force_color_match is True
-        assert json.loads(stored.filament_overrides) == overrides
+        assert json.loads(stored.filament_overrides) == expected_overrides
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -250,9 +268,7 @@ class TestPrintQueueAPI:
 
         assert response.status_code == 200
         assert response.json()["force_color_match"] is True
-        assert response.json()["filament_overrides"] == [
-            {"slot_id": 1, "type": "PLA", "color": "#FF0000", "force_color_match": True}
-        ]
+        assert response.json()["filament_overrides"] == [_canonical_override(1, "PLA", "#FF0000", True)]
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -271,9 +287,7 @@ class TestPrintQueueAPI:
 
         assert response.status_code == 200
         assert response.json()["force_color_match"] is False
-        assert response.json()["filament_overrides"] == [
-            {"slot_id": 1, "type": "PLA", "color": "#FF0000", "force_color_match": False}
-        ]
+        assert response.json()["filament_overrides"] == [_canonical_override(1, "PLA", "#FF0000", False)]
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -560,9 +574,7 @@ class TestPrintQueueAPI:
 
         assert response.status_code == 200
         assert response.json()["force_color_match"] is False
-        assert response.json()["filament_overrides"] == [
-            {"slot_id": 1, "type": "PLA", "color": "#FF0000", "force_color_match": False}
-        ]
+        assert response.json()["filament_overrides"] == [_canonical_override(1, "PLA", "#FF0000", False)]
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -578,9 +590,7 @@ class TestPrintQueueAPI:
             json={"printer_id": printer.id, "archive_id": archive.id, "plate_id": 1},
         )
         item_id = create_response.json()["id"]
-        assert create_response.json()["filament_overrides"] == [
-            {"slot_id": 1, "type": "PLA", "color": "#FF0000", "force_color_match": True}
-        ]
+        assert create_response.json()["filament_overrides"] == [_canonical_override(1, "PLA", "#FF0000", True)]
 
         response = await async_client.patch(
             f"/api/v1/queue/{item_id}",
@@ -590,9 +600,7 @@ class TestPrintQueueAPI:
         assert response.status_code == 200
         assert response.json()["plate_id"] == 2
         assert response.json()["force_color_match"] is True
-        assert response.json()["filament_overrides"] == [
-            {"slot_id": 1, "type": "PLA", "color": "#00FF00", "force_color_match": True}
-        ]
+        assert response.json()["filament_overrides"] == [_canonical_override(1, "PLA", "#00FF00", True)]
 
     @pytest.mark.asyncio
     @pytest.mark.integration

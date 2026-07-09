@@ -122,7 +122,7 @@ function InlineMappingEditor({
     let status: 'match' | 'type_only' | 'mismatch' = 'mismatch';
     if (loaded) {
       const reqMaterial = FilamentMaterial.fromRequirement(req);
-      const typeMatch = reqMaterial.isFamilyMatch(loaded.material);
+      const typeMatch = reqMaterial.isMaterialMatch(loaded.material);
       const colorMatch =
         reqMaterial.isMaterialMatch(loaded.material) &&
         (reqMaterial.isColorMatch(loaded.material) || reqMaterial.isSimilarColor(loaded.material));
@@ -164,7 +164,7 @@ function InlineMappingEditor({
             value={loaded ? String(loaded.globalTrayId) : ''}
             emptyLabel={t('printModal.selectFilamentSlot')}
             options={filterFilamentsByNozzle(printerResult.loadedFilaments, req.nozzle_id)
-              .filter((filament) => reqMaterial.isFamilyMatch(filament.material))
+              .filter((filament) => reqMaterial.isMaterialMatch(filament.material))
               .map((filament) => ({
                 value: String(filament.globalTrayId),
                 label: `${filament.label}: ${filament.material.displayName}`,
