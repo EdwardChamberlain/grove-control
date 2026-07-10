@@ -7,38 +7,13 @@ available for display, strict colour policy, and printer protocol boundaries.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
 from backend.app.utils.filament_ids import filament_id_to_setting_id
 
-_KNOWN_FAMILIES: tuple[str, ...] = tuple(
-    sorted(
-        {
-            "PLA-CF",
-            "PETG-CF",
-            "PETG-HF",
-            "PETG HF",
-            "PAHT-CF",
-            "PA12-CF",
-            "PA6-CF",
-            "PA-CF",
-            "PLA",
-            "PETG",
-            "ABS",
-            "ASA",
-            "TPU",
-            "PVA",
-            "HIPS",
-            "PC",
-            "PA",
-            "PET",
-            "NYLON",
-        },
-        key=len,
-        reverse=True,
-    )
-)
+_BRAND_PREFIXES = ("BAMBU LAB", "BAMBU", "GENERIC")
 
 
 def canonical_filament_type(filament_type: str) -> str:
@@ -82,71 +57,51 @@ def _normalize_subtype(value: str | None) -> str | None:
     return subtype
 
 
+def _strip_brand_prefix(value: str) -> str:
+    upper = value.upper()
+    for prefix in _BRAND_PREFIXES:
+        if upper == prefix:
+            return ""
+        if upper.startswith(f"{prefix} "):
+            return value[len(prefix) :].strip()
+    return value
+
+
+def _canonical_family(value: str | None) -> str:
+    return "-".join(_clean_token(value).upper().split())
+
+
+def _split_family_and_subtype(value: str) -> tuple[str, str | None]:
+    family, _, subtype = value.replace("-", " ").partition(" ")
+    return _canonical_family(family), _normalize_subtype(subtype)
+
+
 def parse_material_label(label: str | None, family_hint: str | None = None) -> tuple[str, str | None]:
     """Parse a slicer/printer material label into ``(family, subtype)``.
 
-    The scanner looks for a known material family anywhere in the label so it
-    handles brand-prefixed strings such as ``"Bambu PLA Basic"`` and
-    ``"Generic PLA"``. It intentionally stays conservative for unknown labels.
+    An explicit source family (such as an AMS ``tray_type``) is authoritative.
+    Labels only contribute optional subtype/display detail after a known brand
+    prefix is removed. Without a source family, the first non-brand token is
+    used as the family so newly introduced materials do not require code changes.
     """
     clean = _clean_token(label)
-    hint = _clean_token(family_hint).upper()
-    hint_family = ""
-    if hint:
-        normalized_hint = hint.replace(" ", "-")
-        for candidate in _KNOWN_FAMILIES:
-            candidate_upper = candidate.upper()
-            if normalized_hint == candidate_upper.replace(" ", "-"):
-                hint_family = candidate_upper
-                break
-    if not clean and hint:
-        return hint_family or hint, None
-    if not clean:
+    display = _strip_brand_prefix(clean)
+    hinted_family = ""
+    hinted_subtype = None
+    if family_hint:
+        hint_display = _strip_brand_prefix(_clean_token(family_hint))
+        hinted_family, hinted_subtype = _split_family_and_subtype(hint_display)
+
+    if hinted_family:
+        if not display:
+            return hinted_family, hinted_subtype
+        family_pattern = re.escape(hinted_family).replace(r"\-", r"[- ]+")
+        match = re.search(rf"(?<!\w){family_pattern}(?!\w)", display, flags=re.IGNORECASE)
+        subtype = _normalize_subtype(display[match.end() :].strip(" -")) if match else hinted_subtype
+        return hinted_family, subtype or hinted_subtype
+    if not display:
         return "", None
-
-    upper = clean.upper()
-    family = ""
-    subtype: str | None = None
-
-    if hint_family and (
-        upper == hint_family or f" {hint_family} " in f" {upper} " or upper.startswith(f"{hint_family}-")
-    ):
-        family = hint_family
-    else:
-        for candidate in _KNOWN_FAMILIES:
-            candidate_upper = candidate.upper()
-            padded = f" {upper.replace('-', ' - ')} "
-            candidate_padded = f" {candidate_upper.replace('-', ' - ')} "
-            if upper == candidate_upper or f" {candidate_upper} " in f" {upper} " or candidate_padded in padded:
-                family = candidate_upper.replace(" ", "-") if candidate_upper == "PETG-HF" else candidate_upper
-                break
-
-    if not family:
-        parts = clean.split(" ", 1)
-        return parts[0].upper(), _normalize_subtype(parts[1] if len(parts) > 1 else None)
-
-    # Treat PETG-HF as PETG + HF for consistent material labels.
-    if family in {"PETG-HF", "PETG HF"}:
-        family = "PETG"
-        subtype = "HF"
-
-    family_index = upper.find(family)
-    if family_index < 0 and family == "PETG":
-        family_index = max(upper.find("PETG-HF"), upper.find("PETG HF"))
-    if family_index >= 0:
-        after = clean[family_index + len(family) :].strip(" -")
-        if family == "PETG" and upper[family_index:].startswith(("PETG-HF", "PETG HF")):
-            after = clean[family_index + len("PETG-HF") :].strip(" -")
-        subtype = _normalize_subtype(after) or subtype
-
-    if hint_family and family == hint_family and not subtype:
-        # Brand-prefixed labels such as "Bambu PLA Basic": everything after the
-        # family token is the subtype; everything before it is vendor metadata.
-        hint_index = upper.find(hint_family)
-        if hint_index >= 0:
-            subtype = _normalize_subtype(clean[hint_index + len(hint_family) :].strip(" -"))
-
-    return family, subtype
+    return _split_family_and_subtype(display)
 
 
 @dataclass(frozen=True)
@@ -181,7 +136,7 @@ class FilamentMaterial:
     ) -> FilamentMaterial:
         parsed_family, parsed_subtype = parse_material_label(
             " ".join(part for part in [family or "", subtype or ""] if part).strip(),
-            family,
+            family if subtype is not None else None,
         )
         return cls(
             family=parsed_family or (family or ""),
@@ -208,7 +163,7 @@ class FilamentMaterial:
         material = req.get("material")
         if isinstance(material, dict):
             return cls.from_queue_material(material, fallback=req)
-        family, subtype = parse_material_label(req.get("tray_sub_brands") or req.get("type"), req.get("type"))
+        family, subtype = parse_material_label(req.get("tray_sub_brands") or req.get("type"))
         return cls(
             family=family,
             subtype=subtype,

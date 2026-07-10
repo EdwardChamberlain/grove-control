@@ -1,29 +1,9 @@
 /**
  * AMS (Automatic Material System) helper utilities for Bambu Lab printers.
- * These functions handle color normalization, slot labeling, and tray ID calculations
- * for AMS, AMS-HT, and external spool configurations.
+ * These functions handle slot labeling and tray ID calculations for AMS,
+ * AMS-HT, and external spool configurations.
  */
 import { parseUTCDate } from './date';
-
-function normalizeRgbaHex(value: string | null | undefined): string {
-  let raw = (value || '').trim().replace(/^#/, '');
-  if (!/^[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(raw)) raw = '808080FF';
-  if (raw.length === 6) raw += 'FF';
-  return `#${raw.toUpperCase()}`;
-}
-
-/**
- * Normalize color format from various sources for CSS rendering.
- * API returns "RRGGBBAA" (8-char), 3MF uses "#RRGGBB" (7-char with hash).
- * Result is "#RRGGBB" for opaque colors and "#RRGGBBAA" when alpha < FF —
- * CSS accepts both forms on `fill` / `backgroundColor`, and preserving alpha
- * lets transparent filaments render translucent instead of collapsing to
- * solid black (#1545).
- */
-export function normalizeColor(color: string | null | undefined): string {
-  const normalized = normalizeRgbaHex(color);
-  return normalized.slice(7, 9).toLowerCase() === 'ff' ? normalized.slice(0, 7) : normalized;
-}
 
 /**
  * AMS unit label using the codebase convention: "AMS-A / AMS-B / ..." for

@@ -64,9 +64,10 @@ class UnifiedPresetsResponse(BaseModel):
     """Every tier carries its full preset list — no cross-tier dedup.
 
     Priority order: ``local > orca_cloud > cloud > standard``. The order
-    drives auto-pick (first non-empty tier wins, name-lookup walks tiers
-    in this order, filament scoring tiebreaks by per-tier bonus) and
-    determines the visual rendering order of the SliceModal's optgroups,
+    drives auto-pick (first non-empty tier wins), name lookup, and the final
+    source-tier tiebreak after printer compatibility, material family, and
+    exact colour in filament recommendations. It also determines the visual
+    rendering order of the SliceModal's optgroups,
     but a name that exists in multiple tiers appears in EACH of their
     groups so the user can pick any source.
 

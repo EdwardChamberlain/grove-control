@@ -62,7 +62,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/slicer", tags=["Slicer Presets"])
 
-_TIER_BONUS = {"local": 1.75, "orca_cloud": 1.5, "cloud": 1.0, "standard": 0.5}
 _TIER_ORDER = ("local", "orca_cloud", "cloud", "standard")
 
 
@@ -87,24 +86,27 @@ def _rank_filament_presets(
             "material": requirement.material,
         }
     )
-    ranked: list[tuple[float, PresetReference]] = []
-    for tier in _TIER_ORDER:
+    ranked: list[tuple[tuple[int, int, int, int, str, str], PresetReference]] = []
+    for tier_index, tier in enumerate(_TIER_ORDER):
         for preset in getattr(presets, tier).filament:
-            score = _TIER_BONUS[tier]
+            candidate = None
             if preset.filament_type:
                 candidate = FilamentMaterial.from_parts(
                     family=preset.filament_type,
                     color_hex=preset.filament_colour,
                 )
-                if required.is_family_match(candidate):
-                    score += 10
-                if preset.filament_colour:
-                    if required.is_color_match(candidate):
-                        score += 5
-            if _preset_is_printer_mismatch(preset, printer_name):
-                score -= 100
-            ranked.append((score, PresetReference(id=preset.id, source=preset.source)))
-    return [reference for _, reference in sorted(ranked, key=lambda item: item[0], reverse=True)]
+            same_family = bool(candidate and required.is_family_match(candidate))
+            exact_color = bool(candidate and required.is_color_match(candidate))
+            ranking = (
+                int(_preset_is_printer_mismatch(preset, printer_name)),
+                int(not same_family),
+                int(not exact_color),
+                tier_index,
+                preset.name.casefold(),
+                preset.id,
+            )
+            ranked.append((ranking, PresetReference(id=preset.id, source=preset.source)))
+    return [reference for _, reference in sorted(ranked, key=lambda item: item[0])]
 
 
 # In-process cache for the bundled-profile list. The slicer sidecar walks a

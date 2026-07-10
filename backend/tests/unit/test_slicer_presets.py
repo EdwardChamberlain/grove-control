@@ -797,3 +797,55 @@ class TestFilamentPresetRecommendations:
         ranked = sp._rank_filament_presets(presets, requirement, None)
 
         assert [item.id for item in ranked] == ["basic-white", "petg-white"]
+
+    def test_ranking_uses_explicit_lexicographic_ordering(self):
+        presets = UnifiedPresetsResponse(
+            local=UnifiedPresetsBySlot(
+                filament=[
+                    UnifiedPreset(
+                        id="incompatible-local",
+                        name="Incompatible local PLA",
+                        source="local",
+                        filament_type="PLA",
+                        filament_colour="#FFFFFFFF",
+                        compatible_printers=["A1"],
+                    )
+                ]
+            ),
+            cloud=UnifiedPresetsBySlot(
+                filament=[
+                    UnifiedPreset(
+                        id="matching-cloud",
+                        name="Matching cloud PLA",
+                        source="cloud",
+                        filament_type="PLA",
+                        filament_colour="#FFFFFFFF",
+                    )
+                ]
+            ),
+            standard=UnifiedPresetsBySlot(
+                filament=[
+                    UnifiedPreset(
+                        id="matching-standard",
+                        name="Matching standard PLA",
+                        source="standard",
+                        filament_type="PLA",
+                        filament_colour="#FFFFFFFF",
+                    )
+                ]
+            ),
+        )
+        requirement = SlicerFilamentRequirement(
+            slot_id=1,
+            type="PLA",
+            color="#FFFFFFFF",
+            material=FilamentMaterialResponse(family="PLA", subtype="Basic", color_hex="#FFFFFFFF"),
+        )
+
+        ranked = sp._rank_filament_presets(presets, requirement, "X1C")
+
+        assert [item.id for item in ranked] == [
+            "matching-cloud",
+            "matching-standard",
+            "incompatible-local",
+        ]

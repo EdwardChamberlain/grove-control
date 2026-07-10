@@ -377,5 +377,5 @@ class TestBuildQueueFilamentOverrides:
         requirements = [{"slot_id": 1, "type": "PAHT-CF", "color": "#000000"}]
         overrides = [{"slot_id": 1, "type": "PA12-CF", "color": "#333333"}]
 
-        with pytest.raises(ValueError, match="cannot change material family from PAHT-CF to PA12-CF"):
+        with pytest.raises(ValueError, match="cannot change material family from PAHT to PA12"):
             build_queue_filament_overrides(requirements, overrides)

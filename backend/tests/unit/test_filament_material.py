@@ -69,6 +69,19 @@ def test_parse_material_label_handles_brand_prefixes_and_hf():
     assert parse_material_label("TPU 95A") == ("TPU", "95A")
 
 
+def test_ams_tray_type_is_authoritative_for_new_branded_family():
+    material = FilamentMaterial.from_ams_tray(
+        {
+            "tray_type": "PPA-CF",
+            "tray_sub_brands": "Bambu PPA-CF Tough",
+            "tray_color": "FFFFFFFF",
+        }
+    )
+
+    assert material.family == "PPA"
+    assert material.subtype == "CF Tough"
+
+
 def test_requirement_type_can_be_full_material_label():
     material = FilamentMaterial.from_3mf_requirement({"type": "PLA Matte", "color": "#FFFFFF"})
 

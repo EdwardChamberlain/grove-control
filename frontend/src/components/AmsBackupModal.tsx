@@ -20,7 +20,6 @@ import { useQuery } from '@tanstack/react-query';
 
 import { Toggle } from './Toggle';
 import { api, type AmsBackupGroup } from '../api/client';
-import { normalizeColor } from '../utils/amsHelpers';
 
 interface AmsBackupModalProps {
   isOpen: boolean;
@@ -69,7 +68,7 @@ function BackupRing({
   showExtruderBadge: boolean;
   extruderLabel: string;
 }) {
-  const filamentHex = normalizeColor(group.material.color_hex);
+  const filamentHex = group.material.color_hex ?? undefined;
   const ringTextColor = pickContrastTextColor(group.material.color_hex);
   // The pill background that sits behind each slot label — keeps text legible
   // regardless of the filament fill colour.
