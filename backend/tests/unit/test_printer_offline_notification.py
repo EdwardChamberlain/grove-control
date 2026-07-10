@@ -23,6 +23,13 @@ import pytest
 from backend.app import main as main_module
 
 
+def _close_unawaited(coro, **_kwargs):
+    """Close a coroutine discarded by a mocked background-task scheduler."""
+    if asyncio.iscoroutine(coro):
+        coro.close()
+    return None
+
+
 def _state(connected: bool, state: str = "IDLE") -> SimpleNamespace:
     """Minimal PrinterState stub. `state="IDLE"` keeps the reconcile-edge
     branch quiescent (it only fires on `connected=True` with a non-unknown
@@ -170,7 +177,7 @@ class TestOfflineEdgeDetection:
             patch("backend.app.main.ws_manager", ws_mgr),
             patch("backend.app.main.mqtt_relay", relay),
             patch("backend.app.main.printer_manager", pm),
-            patch("backend.app.main.spawn_background_task"),
+            patch("backend.app.main.spawn_background_task", side_effect=_close_unawaited),
             patch("backend.app.main.printer_state_to_dict", return_value={}),
         ):
             await main_module.on_printer_status_change(1, _state(connected=True))
@@ -186,7 +193,7 @@ class TestOfflineEdgeDetection:
             patch("backend.app.main.ws_manager", ws_mgr),
             patch("backend.app.main.mqtt_relay", relay),
             patch("backend.app.main.printer_manager", pm),
-            patch("backend.app.main.spawn_background_task"),
+            patch("backend.app.main.spawn_background_task", side_effect=_close_unawaited),
             patch("backend.app.main.printer_state_to_dict", return_value={}),
         ):
             await main_module.on_printer_status_change(1, _state(connected=False))
@@ -200,7 +207,7 @@ class TestOfflineEdgeDetection:
             patch("backend.app.main.ws_manager", ws_mgr),
             patch("backend.app.main.mqtt_relay", relay),
             patch("backend.app.main.printer_manager", pm),
-            patch("backend.app.main.spawn_background_task"),
+            patch("backend.app.main.spawn_background_task", side_effect=_close_unawaited),
             patch("backend.app.main._maybe_notify_printer_offline", new=AsyncMock()),
             patch("backend.app.main.printer_state_to_dict", return_value={}),
         ):
@@ -218,7 +225,7 @@ class TestOfflineEdgeDetection:
             patch("backend.app.main.ws_manager", ws_mgr),
             patch("backend.app.main.mqtt_relay", relay),
             patch("backend.app.main.printer_manager", pm),
-            patch("backend.app.main.spawn_background_task"),
+            patch("backend.app.main.spawn_background_task", side_effect=_close_unawaited),
             patch("backend.app.main._maybe_notify_printer_offline", new=AsyncMock()),
             patch("backend.app.main.printer_state_to_dict", return_value={}),
         ):
@@ -243,7 +250,7 @@ class TestOfflineEdgeDetection:
             patch("backend.app.main.ws_manager", ws_mgr),
             patch("backend.app.main.mqtt_relay", relay),
             patch("backend.app.main.printer_manager", pm),
-            patch("backend.app.main.spawn_background_task"),
+            patch("backend.app.main.spawn_background_task", side_effect=_close_unawaited),
             patch("backend.app.main._maybe_notify_printer_offline", new=AsyncMock()),
             patch("backend.app.main.printer_state_to_dict", return_value={}),
         ):
