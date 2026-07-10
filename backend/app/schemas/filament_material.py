@@ -2,15 +2,23 @@
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool, field_validator, model_validator
 
 
 class FilamentMaterialResponse(BaseModel):
-    family: str
+    family: str = Field(min_length=1)
     subtype: str | None = None
-    color_hex: str
+    color_hex: str | None = Field(default=None, pattern=r"^#[0-9A-F]{8}$")
     profile_id: str | None = None
     setting_id: str | None = None
+
+    @field_validator("family")
+    @classmethod
+    def family_must_be_canonical(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if value != normalized:
+            raise ValueError("family must be uppercase and whitespace-free")
+        return value
 
 
 class FilamentMaterialViewResponse(FilamentMaterialResponse):
@@ -22,7 +30,7 @@ class FilamentMaterialViewResponse(FilamentMaterialResponse):
 class FilamentRequirementRequest(BaseModel):
     slot_id: int
     type: str = ""
-    color: str = ""
+    color: str | None = None
     material: FilamentMaterialResponse | None = None
     tray_info_idx: str | None = None
     nozzle_id: int | None = None
@@ -45,12 +53,16 @@ class QueueFilamentOverrideRequest(BaseModel):
 
     slot_id: int
     material: FilamentMaterialResponse | None = None
-    # Validated by build_queue_filament_overrides so legacy invalid values keep
-    # the queue API's established 400 response rather than FastAPI's 422.
-    force_color_match: Any = None
+    force_color_match: StrictBool | None = None
     type: str | None = None
     color: str | None = None
     tray_info_idx: str | None = None
+
+    @model_validator(mode="after")
+    def explicit_force_color_match_must_not_be_null(self) -> "QueueFilamentOverrideRequest":
+        if "force_color_match" in self.model_fields_set and self.force_color_match is None:
+            raise ValueError("force_color_match must be a boolean")
+        return self
 
     def to_override_dict(self) -> dict[str, Any]:
         data = self.model_dump(exclude_none=True)
@@ -63,7 +75,7 @@ class QueueFilamentOverrideResponse(BaseModel):
     """Canonical queue metadata returned to clients during the transition."""
 
     slot_id: int
-    material: FilamentMaterialResponse | None = None
+    material: FilamentMaterialResponse
     force_color_match: bool = True
     type: str | None = None
     color: str | None = None
@@ -90,7 +102,7 @@ class FilamentMappingLoadedFilamentResponse(BaseModel):
 class FilamentMappingComparisonResponse(BaseModel):
     slot_id: int
     material: FilamentMaterialViewResponse
-    status: Literal["match", "similar_colour", "material_only", "missing"]
+    status: Literal["match", "material_only", "missing"]
     mapped_tray_id: int
     candidate_tray_ids: list[int]
 

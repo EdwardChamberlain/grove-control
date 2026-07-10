@@ -316,8 +316,7 @@ class TestPrintQueueAPI:
             },
         )
 
-        assert response.status_code == 400
-        assert "force_color_match must be a boolean" in response.json()["detail"]
+        assert response.status_code == 422
 
     @pytest.mark.asyncio
     @pytest.mark.integration

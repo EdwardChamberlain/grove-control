@@ -96,7 +96,7 @@ function InlineMappingEditor({
     const comparison = printerResult.comparisons.find((item) => item.slot_id === slotId);
     const mappedTrayId = comparison?.mapped_tray_id ?? -1;
     const loaded = printerResult.loadedFilaments.find((item) => item.globalTrayId === mappedTrayId);
-    const status: 'match' | 'type_only' | 'mismatch' = comparison?.status === 'match' || comparison?.status === 'similar_colour'
+    const status: 'match' | 'type_only' | 'mismatch' = comparison?.status === 'match'
       ? 'match'
       : comparison?.status === 'material_only'
         ? 'type_only'

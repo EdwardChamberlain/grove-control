@@ -32,9 +32,6 @@ import { DEFAULT_PRINT_OPTIONS, DEFAULT_SCHEDULE_OPTIONS } from './types';
 type QueueFilamentOverride = {
   slot_id: number;
   material: FilamentMaterialPayload;
-  type: string;
-  color: string;
-  tray_info_idx?: string;
   force_color_match: boolean;
 };
 

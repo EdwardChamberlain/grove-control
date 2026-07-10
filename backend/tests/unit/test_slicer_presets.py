@@ -18,7 +18,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from backend.app.api.routes import slicer_presets as sp
-from backend.app.schemas.slicer_presets import UnifiedPreset
+from backend.app.schemas.filament_material import FilamentMaterialResponse
+from backend.app.schemas.slicer_presets import (
+    SlicerFilamentRequirement,
+    UnifiedPreset,
+    UnifiedPresetsBySlot,
+    UnifiedPresetsResponse,
+)
 
 
 def _slot(items: list[tuple[str, str, str]]) -> dict[str, list[UnifiedPreset]]:
@@ -70,7 +76,7 @@ class TestEnrichCloudMetadata:
     def test_bambu_cloud_filament_metadata_backfilled_from_local(self):
         """Bambu Cloud's list response omits filament_type/colour for
         rate-limit reasons. A same-named local entry's metadata fills in
-        so the cloud entry can still score in pickFilamentForSlot."""
+        so the cloud entry can still score in backend recommendations."""
         local = {
             "printer": [],
             "process": [],
@@ -757,3 +763,37 @@ class TestListPrinterModels:
 
         result = sp.list_printer_models()
         assert result is not PRINTER_MODEL_MAP
+
+
+class TestFilamentPresetRecommendations:
+    def test_prefers_same_family_and_exact_colour(self):
+        presets = UnifiedPresetsResponse(
+            local=UnifiedPresetsBySlot(
+                filament=[
+                    UnifiedPreset(
+                        id="basic-white",
+                        name="PLA Basic White",
+                        source="local",
+                        filament_type="PLA",
+                        filament_colour="#FFFFFFFF",
+                    ),
+                    UnifiedPreset(
+                        id="petg-white",
+                        name="PETG White",
+                        source="local",
+                        filament_type="PETG",
+                        filament_colour="#FFFFFFFF",
+                    ),
+                ]
+            )
+        )
+        requirement = SlicerFilamentRequirement(
+            slot_id=1,
+            type="PLA",
+            color="#FFFFFFFF",
+            material=FilamentMaterialResponse(family="PLA", subtype="Basic", color_hex="#FFFFFFFF"),
+        )
+
+        ranked = sp._rank_filament_presets(presets, requirement, None)
+
+        assert [item.id for item in ranked] == ["basic-white", "petg-white"]

@@ -61,7 +61,7 @@ function toLoadedFilaments(preview: FilamentMappingPreview | undefined): LoadedF
 }
 
 function matchSummary(comparisons: FilamentMappingPreview['comparisons']): Pick<PrinterMappingResult, 'matchStatus' | 'exactMatches' | 'typeOnlyMatches' | 'missingTypes' | 'totalSlots'> {
-  const exactMatches = comparisons.filter((comparison) => comparison.status === 'match' || comparison.status === 'similar_colour').length;
+  const exactMatches = comparisons.filter((comparison) => comparison.status === 'match').length;
   const typeOnlyMatches = comparisons.filter((comparison) => comparison.status === 'material_only').length;
   const missingTypes = comparisons.filter((comparison) => comparison.status === 'missing').length;
   return {

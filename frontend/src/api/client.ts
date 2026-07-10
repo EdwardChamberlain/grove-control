@@ -1503,6 +1503,15 @@ export interface UnifiedPresetsResponse {
   orca_cloud_status: SlicerCloudStatus;
 }
 
+export interface PresetRecommendation {
+  slot_id: number;
+  ranked: PresetRef[];
+}
+
+export interface SlicerPresetRecommendations {
+  filament: PresetRecommendation[];
+}
+
 export interface SliceResponse {
   library_file_id: number;
   name: string;
@@ -1911,7 +1920,7 @@ export interface DiscoveredTasmotaDevice {
 export interface FilamentMaterialPayload {
   family: string;
   subtype?: string | null;
-  color_hex: string;
+  color_hex: string | null;
   profile_id?: string | null;
   setting_id?: string | null;
 }
@@ -1920,6 +1929,18 @@ export interface FilamentMaterialView extends FilamentMaterialPayload {
   material_label: string;
   display_name: string;
   generic_color_name: string;
+}
+
+export interface FilamentRequirementPayload {
+  slot_id: number;
+  type: string;
+  color: string | null;
+  material: FilamentMaterialPayload;
+  used_grams: number;
+  used_meters: number;
+  nozzle_id?: number;
+  tray_info_idx?: string;
+  used_in_plate?: boolean;
 }
 
 export interface FilamentMappingPreview {
@@ -1938,7 +1959,7 @@ export interface FilamentMappingPreview {
   comparisons: Array<{
     slot_id: number;
     material: FilamentMaterialView;
-    status: 'match' | 'similar_colour' | 'material_only' | 'missing';
+    status: 'match' | 'material_only' | 'missing';
     mapped_tray_id: number;
     candidate_tray_ids: number[];
   }>;
@@ -1956,6 +1977,19 @@ export interface QueueFilamentOverridePayload {
   slot_id: number;
   material: FilamentMaterialPayload;
   force_color_match?: boolean;
+}
+
+export interface AmsBackupGroup {
+  key: string;
+  profile_id: string;
+  extruder: number;
+  material: FilamentMaterialView;
+  members: Array<{ ams_id: number; tray_id: number; is_ht: boolean }>;
+}
+
+export interface AmsBackupGroupsResponse {
+  effective_dual_nozzle: boolean;
+  groups: AmsBackupGroup[];
 }
 
 export interface PrintQueueItem {
@@ -3614,7 +3648,7 @@ export const api = {
   getAvailableFilamentOptions: (
     model: string,
     location: string | undefined,
-    filaments: Array<object>,
+    filaments: FilamentRequirementPayload[],
   ) => request<ModelFilamentOptions>('/printers/available-filament-options', {
     method: 'POST',
     body: JSON.stringify({ model, location, filaments }),
@@ -3623,7 +3657,11 @@ export const api = {
     request<PrinterStatus>(`/printers/${id}/status`),
   previewFilamentMapping: (
     id: number,
-    data: { filaments: Array<object>; manual_mappings?: Record<number, number>; force_color_match?: boolean },
+    data: {
+      filaments: FilamentRequirementPayload[];
+      manual_mappings?: Record<number, number>;
+      force_color_match?: boolean;
+    },
   ) =>
     request<FilamentMappingPreview>(`/printers/${id}/filament-mapping-preview`, {
       method: 'POST',
@@ -3751,15 +3789,8 @@ export const api = {
       `/printers/${printerId}/ams-backup?enabled=${enabled}`,
       { method: 'POST' }
     ),
-
-  // Per-globalTrayId remaining grams for this printer's inventory-bound slots
-  // (#1766). Drives the client-side "Prefer Lowest Remaining Filament" sort
-  // when computing the AMS mapping; mirrors backend `_build_inventory_remain_overrides`
-  // so internal and Spoolman modes both work uniformly.
-  getInventoryRemain: (printerId: number) =>
-    request<{ inventory_remain_g: Record<string, number> }>(
-      `/printers/${printerId}/inventory-remain`,
-    ),
+  getAmsBackupGroups: (printerId: number) =>
+    request<AmsBackupGroupsResponse>(`/printers/${printerId}/ams-backup-groups`),
 
   // Skip Objects
   getPrintableObjects: (printerId: number) =>
@@ -4452,15 +4483,7 @@ export const api = {
       archive_id: number;
       filename: string;
       plate_id: number | null;
-      filaments: Array<{
-        slot_id: number;
-        type: string;
-        color: string;
-        material: FilamentMaterialPayload;
-        used_grams: number;
-        used_meters: number;
-        used_in_plate?: boolean;
-      }>;
+      filaments: FilamentRequirementPayload[];
     }>(`/archives/${archiveId}/filament-requirements${qs.toString() ? `?${qs}` : ''}`);
   },
   uploadArchive: async (file: File, printerId?: number): Promise<Archive> => {
@@ -6141,15 +6164,7 @@ export const api = {
     return request<{
       file_id: number;
       filename: string;
-      filaments: Array<{
-        slot_id: number;
-        type: string;
-        color: string;
-        material: FilamentMaterialPayload;
-        used_grams: number;
-        used_meters: number;
-        used_in_plate?: boolean;
-      }>;
+      filaments: FilamentRequirementPayload[];
     }>(`/library/files/${fileId}/filament-requirements${qs.toString() ? `?${qs}` : ''}`);
   },
 
@@ -6267,6 +6282,16 @@ export const api = {
     request<UnifiedPresetsResponse>(
       options?.refresh ? '/slicer/presets?refresh=true' : '/slicer/presets',
     ),
+
+  getSlicerPresetRecommendations: (data: {
+    presets: UnifiedPresetsResponse;
+    filaments: FilamentRequirementPayload[];
+    printer_name?: string | null;
+  }) =>
+    request<SlicerPresetRecommendations>('/slicer/preset-recommendations', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 
   // Canonical Bambu printer-model registry — "Bambu Lab <model>" → short code.
   // Single source of truth shared with backend (PRINTER_MODEL_MAP); the

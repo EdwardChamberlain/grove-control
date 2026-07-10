@@ -26,6 +26,7 @@ vi.mock('../../api/client', () => ({
     getArchivePlates: vi.fn(),
     getLibraryFileFilamentRequirements: vi.fn(),
     getArchiveFilamentRequirements: vi.fn(),
+    getSlicerPresetRecommendations: vi.fn(),
     getSlicerPrinterModels: vi.fn(),
     getSettings: vi.fn().mockResolvedValue({}),
     updateSettings: vi.fn().mockResolvedValue({}),
@@ -41,6 +42,7 @@ const mockApi = api as unknown as {
   getArchivePlates: ReturnType<typeof vi.fn>;
   getLibraryFileFilamentRequirements: ReturnType<typeof vi.fn>;
   getArchiveFilamentRequirements: ReturnType<typeof vi.fn>;
+  getSlicerPresetRecommendations: ReturnType<typeof vi.fn>;
   getSlicerPrinterModels: ReturnType<typeof vi.fn>;
 };
 
@@ -86,6 +88,20 @@ describe('SliceModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockApi.getSlicerPresets.mockResolvedValue(fullThreeTier);
+    mockApi.getSlicerPresetRecommendations.mockImplementation(({ presets, filaments }) => ({
+      filament: filaments.map((requirement: { slot_id: number; color: string }) => {
+        const requiredColor = requirement.color.replace('#', '').slice(0, 6).toUpperCase();
+        const candidates = ['local', 'orca_cloud', 'cloud', 'standard']
+          .flatMap((tier) => presets[tier].filament)
+          .sort((left, right) => {
+            const leftMatch = left.filament_colour?.replace('#', '').slice(0, 6).toUpperCase() === requiredColor ? 1 : 0;
+            const rightMatch = right.filament_colour?.replace('#', '').slice(0, 6).toUpperCase() === requiredColor ? 1 : 0;
+            return rightMatch - leftMatch;
+          })
+          .map((preset) => ({ source: preset.source, id: preset.id }));
+        return { slot_id: requirement.slot_id, ranked: candidates };
+      }),
+    }));
     mockApi.getSliceJob.mockResolvedValue({
       job_id: 42,
       status: 'running',

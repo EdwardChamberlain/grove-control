@@ -2258,9 +2258,7 @@ function SinglePrinterCockpit({
       <AmsBackupModal
         isOpen={amsBackupModalOpen}
         state={status.ams_filament_backup}
-        amsUnits={status.ams}
-        amsExtruderMap={status.ams_extruder_map}
-        isDualNozzle={printer.nozzle_count === 2 || status.temperatures?.nozzle_2 !== undefined}
+        printerId={printer.id}
         canToggle={hasPermission('printers:control')}
         pending={setAmsBackupMutation.isPending}
         onToggle={(next) => setAmsBackupMutation.mutate(next)}
@@ -5363,9 +5361,7 @@ function PrinterCard({
         <AmsBackupModal
           isOpen={amsBackupModalOpen}
           state={status.ams_filament_backup}
-          amsUnits={status.ams}
-          amsExtruderMap={status.ams_extruder_map}
-          isDualNozzle={printer.nozzle_count === 2 || status?.temperatures?.nozzle_2 !== undefined}
+          printerId={printer.id}
           canToggle={hasPermission('printers:control')}
           pending={setAmsBackupMutation.isPending}
           onToggle={(next) => setAmsBackupMutation.mutate(next)}

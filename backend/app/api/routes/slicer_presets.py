@@ -33,6 +33,11 @@ from backend.app.core.permissions import Permission
 from backend.app.models.local_preset import LocalPreset
 from backend.app.models.user import User
 from backend.app.schemas.slicer_presets import (
+    PresetReference,
+    SlicerFilamentRequirement,
+    SlicerPresetRecommendation,
+    SlicerPresetRecommendationRequest,
+    SlicerPresetRecommendationResponse,
     UnifiedPreset,
     UnifiedPresetsBySlot,
     UnifiedPresetsResponse,
@@ -42,6 +47,7 @@ from backend.app.services.bambu_cloud import (
     BambuCloudError,
     BambuCloudService,
 )
+from backend.app.services.filament_material import FilamentMaterial
 from backend.app.services.orca_cloud import (
     OrcaCloudAuthError,
     OrcaCloudError,
@@ -55,6 +61,50 @@ from backend.app.utils.printer_models import PRINTER_MODEL_MAP
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/slicer", tags=["Slicer Presets"])
+
+_TIER_BONUS = {"local": 1.75, "orca_cloud": 1.5, "cloud": 1.0, "standard": 0.5}
+_TIER_ORDER = ("local", "orca_cloud", "cloud", "standard")
+
+
+def _preset_is_printer_mismatch(preset: UnifiedPreset, printer_name: str | None) -> bool:
+    """Return whether a preset explicitly excludes the selected printer."""
+    if not printer_name:
+        return False
+    if preset.compatible_printers:
+        return printer_name not in preset.compatible_printers
+    return False
+
+
+def _rank_filament_presets(
+    presets: UnifiedPresetsResponse,
+    requirement: SlicerFilamentRequirement,
+    printer_name: str | None,
+) -> list[PresetReference]:
+    required = FilamentMaterial.from_3mf_requirement(
+        {
+            "type": requirement.type,
+            "color": requirement.color,
+            "material": requirement.material,
+        }
+    )
+    ranked: list[tuple[float, PresetReference]] = []
+    for tier in _TIER_ORDER:
+        for preset in getattr(presets, tier).filament:
+            score = _TIER_BONUS[tier]
+            if preset.filament_type:
+                candidate = FilamentMaterial.from_parts(
+                    family=preset.filament_type,
+                    color_hex=preset.filament_colour,
+                )
+                if required.is_family_match(candidate):
+                    score += 10
+                if preset.filament_colour:
+                    if required.is_color_match(candidate):
+                        score += 5
+            if _preset_is_printer_mismatch(preset, printer_name):
+                score -= 100
+            ranked.append((score, PresetReference(id=preset.id, source=preset.source)))
+    return [reference for _, reference in sorted(ranked, key=lambda item: item[0], reverse=True)]
 
 
 # In-process cache for the bundled-profile list. The slicer sidecar walks a
@@ -172,7 +222,7 @@ async def _fetch_cloud_presets(
         # The metadata-enrich pass (see _enrich_cloud_metadata) compensates:
         # a Bambu Cloud entry without its own filament_type/colour inherits
         # those values from a same-named local / orca_cloud / standard entry
-        # so it can still score for type/colour matches in pickFilamentForSlot.
+        # so it can still score for backend filament-preset recommendations.
         _cloud_cache[cache_key] = (now, slots)
         return slots, "ok"
     finally:
@@ -441,7 +491,7 @@ def _enrich_cloud_metadata(
     :func:`_fetch_cloud_presets`) inherits values from a same-named entry
     in ``local`` / ``orca_cloud`` / ``standard``. This is the only reason
     this function exists post-#1712 — without the enrich the Bambu Cloud
-    tier can't score in ``pickFilamentForSlot``.
+    tier can't score in the backend recommendation endpoint.
     """
     # Build a name → metadata lookup from the tiers that carry it (local,
     # orca_cloud, standard). Bambu cloud is intentionally skipped — it
@@ -528,6 +578,23 @@ async def list_unified_presets(
         standard=UnifiedPresetsBySlot(**standard),
         cloud_status=cloud_status,
         orca_cloud_status=orca_cloud_status,
+    )
+
+
+@router.post("/preset-recommendations", response_model=SlicerPresetRecommendationResponse)
+async def recommend_slicer_presets(
+    request: SlicerPresetRecommendationRequest,
+    _=RequirePermissionIfAuthEnabled(Permission.LIBRARY_UPLOAD),
+) -> SlicerPresetRecommendationResponse:
+    """Rank slicer filament presets for canonical sliced-material requirements."""
+    return SlicerPresetRecommendationResponse(
+        filament=[
+            SlicerPresetRecommendation(
+                slot_id=requirement.slot_id,
+                ranked=_rank_filament_presets(request.presets, requirement, request.printer_name),
+            )
+            for requirement in request.filaments
+        ]
     )
 
 

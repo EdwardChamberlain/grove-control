@@ -57,6 +57,13 @@ def test_strict_colour_mapping_never_falls_back_across_nozzles(scheduler):
     assert mapping == [-1]
 
 
+def test_strict_colour_mapping_rejects_unknown_colour(scheduler):
+    required = [{"slot_id": 1, "type": "PLA", "color": None}]
+    loaded = [{"global_tray_id": 0, "type": "PLA", "color": "#FFFFFF", "tray_info_idx": ""}]
+
+    assert scheduler._match_filaments_to_slots(required, loaded, strict_color_slot_ids={1}) == [-1]
+
+
 def test_strict_colour_mapping_rejects_different_material_variant(scheduler):
     required = [{"slot_id": 1, "type": "PAHT-CF", "color": "#000000"}]
     loaded = [
@@ -101,7 +108,14 @@ def test_unforced_mapping_never_crosses_material_family(scheduler):
     assert mapping == [-1]
 
 
-def test_unforced_mapping_never_substitutes_a_known_subtype(scheduler):
+def test_unforced_mapping_never_substitutes_pa_families(scheduler):
+    required = [{"slot_id": 1, "type": "PAHT-CF", "color": "#000000"}]
+    loaded = [{"global_tray_id": 0, "type": "PA12-CF", "color": "#000000", "tray_info_idx": ""}]
+
+    assert scheduler._match_filaments_to_slots(required, loaded) == [-1]
+
+
+def test_unforced_mapping_allows_subtypes_within_the_same_family(scheduler):
     required = [{"slot_id": 1, "type": "PLA-S", "color": "#FFFFFF"}]
     loaded = [
         {"global_tray_id": 0, "type": "PLA", "color": "#FFFFFF", "tray_info_idx": "GFA00"},
@@ -109,7 +123,7 @@ def test_unforced_mapping_never_substitutes_a_known_subtype(scheduler):
 
     mapping = scheduler._match_filaments_to_slots(required, loaded)
 
-    assert mapping == [-1]
+    assert mapping == [0]
 
 
 def test_missing_per_slot_flag_inherits_safe_queue_default(scheduler):

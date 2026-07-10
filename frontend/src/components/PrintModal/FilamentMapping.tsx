@@ -57,7 +57,7 @@ export function FilamentMapping({
   );
   const filamentComparison = (filamentReqs?.filaments ?? []).map((requirement) => {
     const comparison = mappingPreview?.comparisons.find((item) => item.slot_id === requirement.slot_id);
-    const status: 'match' | 'type_only' | 'mismatch' = comparison?.status === 'match' || comparison?.status === 'similar_colour'
+    const status: 'match' | 'type_only' | 'mismatch' = comparison?.status === 'match'
       ? 'match'
       : comparison?.status === 'material_only'
         ? 'type_only'

@@ -1,15 +1,26 @@
 import json
-from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
 
 from backend.app.core.database import _canonicalize_queue_filament_overrides_payload
+from backend.app.schemas.filament_material import FilamentMaterialResponse
 from backend.app.services.filament_material import FilamentMaterial, normalize_color_hex, parse_material_label
-
-_CONTRACT = json.loads((Path(__file__).parents[3] / "shared" / "filament-material-contract.json").read_text())
 
 
 def test_normalize_color_hex_adds_opaque_alpha():
     assert normalize_color_hex("#FFFFFF") == "#FFFFFFFF"
     assert normalize_color_hex("00000000") == "#00000000"
+    assert normalize_color_hex("not-a-colour") is None
+    assert normalize_color_hex(None) is None
+
+
+def test_canonical_material_dto_requires_normalized_rgba_hex():
+    with pytest.raises(ValidationError):
+        FilamentMaterialResponse(family="PLA", color_hex="#FFFFFF")
+    with pytest.raises(ValidationError):
+        FilamentMaterialResponse(family="PLA", color_hex="#GGGGGGFF")
+    assert FilamentMaterialResponse(family="PLA", color_hex=None).color_hex is None
 
 
 def test_display_name_uses_generic_color_not_catalogue_name():
@@ -18,39 +29,35 @@ def test_display_name_uses_generic_color_not_catalogue_name():
     assert material.generic_color_name == "White"
 
 
-def test_profile_id_derives_bambu_subtype_from_plain_3mf_requirement():
+def test_profile_id_is_opaque_and_does_not_reconstruct_subtype():
     matte = FilamentMaterial.from_3mf_requirement({"type": "PLA", "color": "#FFFFFF", "tray_info_idx": "GFA01"})
     basic = FilamentMaterial.from_3mf_requirement({"type": "PLA", "color": "#FFFFFF", "tray_info_idx": "GFA00"})
 
-    assert matte.material_label == "PLA Matte"
-    assert basic.material_label == "PLA Basic"
+    assert matte.material_label == "PLA"
+    assert basic.material_label == "PLA"
     assert matte.is_family_match(basic)
-    assert not matte.is_material_match(basic)
     assert matte.is_dispatch_compatible(basic)
-    assert not basic.is_dispatch_compatible(
-        FilamentMaterial.from_parts(family="PLA", subtype="Silk", color_hex="#FFFFFF")
-    )
+    assert matte.profile_id == "GFA01"
+    assert basic.profile_id == "GFA00"
 
 
-def test_profile_id_derives_extended_bambu_subtype():
-    glow = FilamentMaterial.from_3mf_requirement({"type": "PLA", "color": "#FFFFFF", "tray_info_idx": "GFA12"})
+def test_dispatch_compatibility_is_family_only():
+    basic = FilamentMaterial.from_parts(family="PLA", subtype="Basic", color_hex="#FFFFFF")
+    silk = FilamentMaterial.from_parts(family="PLA", subtype="Silk", color_hex="#FFFFFF")
+    paht = FilamentMaterial.from_parts(family="PAHT-CF", color_hex="#FFFFFF")
+    pa12 = FilamentMaterial.from_parts(family="PA12-CF", color_hex="#FFFFFF")
 
-    assert glow.material_label == "PLA Glow"
-
-
-def test_profile_fallbacks_match_the_cross_runtime_contract():
-    for profile in _CONTRACT["profiles"]:
-        material = FilamentMaterial.from_3mf_requirement(
-            {"type": profile["family"], "color": "#FFFFFF", "tray_info_idx": profile["id"]}
-        )
-        assert (material.family, material.subtype) == (profile["family"], profile["subtype"])
+    assert basic.is_dispatch_compatible(silk)
+    assert not paht.is_dispatch_compatible(pa12)
 
 
-def test_dispatch_compatibility_matches_the_cross_runtime_contract():
-    for case in _CONTRACT["dispatch_compatibility"]:
-        left = FilamentMaterial.from_parts(color_hex="#FFFFFF", **case["left"])
-        right = FilamentMaterial.from_parts(color_hex="#FFFFFF", **case["right"])
-        assert left.is_dispatch_compatible(right) is case["compatible"]
+def test_unknown_colour_is_not_a_colour_match():
+    unknown = FilamentMaterial.from_parts(family="PLA", color_hex="not-a-colour")
+    white = FilamentMaterial.from_parts(family="PLA", color_hex="#FFFFFF")
+
+    assert unknown.color_hex is None
+    assert unknown.generic_color_name == "Unknown colour"
+    assert not unknown.is_color_match(white)
 
 
 def test_parse_material_label_handles_brand_prefixes_and_hf():

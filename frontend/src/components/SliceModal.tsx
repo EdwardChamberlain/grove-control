@@ -17,13 +17,6 @@ import { useSliceJobTracker } from '../contexts/SliceJobTrackerContext';
 import { useToast } from '../contexts/ToastContext';
 import { PlatePickerModal } from './PlatePickerModal';
 import type { PlateFilament } from '../types/plates';
-import { normalizeColorForCompare, colorsAreSimilar } from '../utils/amsHelpers';
-import {
-  presetCompatibility,
-  buildCompatibilityIndex,
-  EMPTY_COMPATIBILITY_INDEX,
-  type PrinterCompatibilityIndex,
-} from '../utils/slicerPrinterMatch';
 
 export type SliceSource =
   | { kind: 'libraryFile'; id: number; filename: string }
@@ -82,86 +75,14 @@ function findPresetByName(
   return null;
 }
 
-// Process default: honour the process preset the 3MF was prepared with
-// (preferredName) when it's available and not incompatible with the selected
-// printer; otherwise the first preset compatible with the printer in tier
-// order, then the first whose compatibility is merely unknown, then plain
-// priority. Keeps the pre-pick honest with both the embedded config and the
-// printer filter instead of blindly taking list[0] (#1325).
+// Process default: honour the process preset embedded in the 3MF, otherwise
+// use the first backend-listed preset. Compatibility policy belongs to the
+// slicing backend, not this rendering component.
 function pickProcessDefault(
   by: UnifiedPresetsResponse,
-  printerName: string | null,
-  compatIndex: PrinterCompatibilityIndex,
   preferredName?: string | null,
 ): PresetRef | null {
-  const preferred = findPresetByName(by, 'process', preferredName);
-  if (preferred) {
-    const p = findPreset(by, preferred, 'process');
-    if (p && presetCompatibility(p, 'process', printerName, compatIndex) !== 'mismatch') {
-      return preferred;
-    }
-  }
-  for (const wanted of ['match', 'unknown'] as const) {
-    for (const tier of SLICE_MODAL_TIER_ORDER) {
-      for (const p of by[tier].process) {
-        if (presetCompatibility(p, 'process', printerName, compatIndex) === wanted) {
-          return { source: p.source, id: p.id };
-        }
-      }
-    }
-  }
-  return pickDefault(by, 'process');
-}
-
-const TIER_BONUS: Record<PresetSource, number> = {
-  local: 1.75,
-  orca_cloud: 1.5,
-  cloud: 1.0,
-  standard: 0.5,
-};
-
-function pickFilamentForSlot(
-  by: UnifiedPresetsResponse,
-  required: { type: string; color: string },
-  printerName: string | null,
-  compatIndex: PrinterCompatibilityIndex,
-): PresetRef | null {
-  // Score every filament preset against the plate slot's required (type,
-  // colour) and pick the highest. Mirrors the AMS slot-mapping match in the
-  // print/schedule modal: type match dominates, exact-colour-match bumps over
-  // similar-colour-match, and a small per-tier bonus breaks ties so cloud
-  // user customisations win over standard bundled fallbacks of equal merit.
-  const reqType = required.type.trim().toUpperCase();
-  const reqColor = normalizeColorForCompare(required.color);
-
-  let best: { ref: PresetRef; score: number } | null = null;
-  for (const tier of SLICE_MODAL_TIER_ORDER) {
-    for (const p of by[tier].filament) {
-      let score = 0;
-      const presetType = (p.filament_type ?? '').trim().toUpperCase();
-      const presetColor = normalizeColorForCompare(p.filament_colour ?? '');
-      if (reqType && presetType && reqType === presetType) score += 10;
-      if (reqColor && presetColor) {
-        if (presetColor === reqColor) score += 5;
-        else if (colorsAreSimilar(p.filament_colour ?? '', required.color)) score += 2;
-      }
-      score += TIER_BONUS[tier];
-      // Demote printer-incompatible filaments (#1325): a penalty rather than a
-      // hard skip so the pick still degrades gracefully if every filament
-      // mismatches the selected printer.
-      if (presetCompatibility(p, 'filament', printerName, compatIndex) === 'mismatch') {
-        score -= 100;
-      }
-      if (best == null || score > best.score) {
-        best = { ref: { source: p.source, id: p.id }, score };
-      }
-    }
-  }
-  // Fall back to plain priority pick if every preset scored 0+tier (i.e. no
-  // metadata matched). The fallback is exactly the single-color default —
-  // first preset in the highest-priority non-empty tier.
-  if (best == null) return pickDefault(by, 'filament');
-  return best.ref;
+  return findPresetByName(by, 'process', preferredName) ?? pickDefault(by, 'process');
 }
 
 function toRefValue(ref: PresetRef | null): string {
@@ -446,27 +367,21 @@ export function SliceModal({ source, onClose }: SliceModalProps) {
     }
   };
 
-  // Canonical Bambu printer-model registry — drives the @BBL <code> name
-  // fallback in slicerPrinterMatch for cloud / standard presets (#1325).
-  // Long staleTime: the registry only changes across backend releases.
-  const printerModelsQuery = useQuery({
-    queryKey: ['slicerPrinterModels'],
-    queryFn: api.getSlicerPrinterModels,
-    staleTime: Infinity,
-  });
-
-  // Selected-printer context for the process / filament filter (#1325).
+  // The selected printer is input to the backend preset recommender.
   const selectedPrinterName = useMemo<string | null>(() => {
     if (!presetsQuery.data || !printerPreset) return null;
     return findPreset(presetsQuery.data, printerPreset, 'printer')?.name ?? null;
   }, [presetsQuery.data, printerPreset]);
-  // Compatibility ground truth: the slicer's own `compatible_printers` list
-  // on local-imported presets, plus the @BBL <code> name fallback for cloud
-  // / standard presets via the backend Bambu printer-model registry.
-  const compatIndex = useMemo<PrinterCompatibilityIndex>(
-    () => buildCompatibilityIndex(printerModelsQuery.data ?? {}),
-    [printerModelsQuery.data],
-  );
+  const recommendationsQuery = useQuery({
+    queryKey: ['slicerPresetRecommendations', presetsQuery.data, filamentReqsQuery.data?.filaments, selectedPrinterName],
+    queryFn: () => api.getSlicerPresetRecommendations({
+      presets: presetsQuery.data!,
+      filaments: filamentReqsQuery.data!.filaments,
+      printer_name: selectedPrinterName,
+    }),
+    enabled: !!presetsQuery.data && !!filamentReqsQuery.data?.filaments?.length,
+    staleTime: 60_000,
+  });
 
   // Printer / process preset names the source 3MF was prepared with. The
   // plates query resolves before the presets query (the latter is gated on
@@ -488,22 +403,14 @@ export function SliceModal({ source, onClose }: SliceModalProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presetsQuery.data, embeddedPrinter]);
 
-  // Process pre-pick / re-pick (#1325): defaults to a process compatible with
-  // the selected printer, and re-defaults when a printer change leaves the
-  // current process incompatible. A compatible or unknown manual pick is kept.
+  // Preserve explicit process selections; otherwise use backend list order.
   useEffect(() => {
     const data = presetsQuery.data;
     if (!data) return;
     setProcessPreset((current) => {
-      if (current) {
-        const p = findPreset(data, current, 'process');
-        if (p && presetCompatibility(p, 'process', selectedPrinterName, compatIndex) !== 'mismatch') {
-          return current;
-        }
-      }
-      return pickProcessDefault(data, selectedPrinterName, compatIndex, embeddedProcess);
+      return current ?? pickProcessDefault(data, embeddedProcess);
     });
-  }, [presetsQuery.data, selectedPrinterName, compatIndex, embeddedProcess]);
+  }, [presetsQuery.data, embeddedProcess]);
 
   // Filament pre-pick: re-runs when the active filament-slot count changes
   // (plate selection, single-plate metadata arriving) or the selected printer
@@ -517,21 +424,22 @@ export function SliceModal({ source, onClose }: SliceModalProps) {
     setFilamentPresets((current) => {
       return filamentSlots.map((slot, i) => {
         const cur = current[i] ?? null;
-        if (cur) {
-          const p = findPreset(data, cur, 'filament');
-          if (p && presetCompatibility(p, 'filament', selectedPrinterName, compatIndex) !== 'mismatch') {
-            return cur;
-          }
-        }
-        return pickFilamentForSlot(
-          data,
-          { type: slot.type, color: slot.color },
-          selectedPrinterName,
-          compatIndex,
-        );
+        if (cur) return cur;
+        const recommended = recommendationsQuery.data?.filament.find((entry) => entry.slot_id === slot.slot_id)?.ranked[0];
+        if (recommended) return recommended;
+        // Wait for the backend policy before using the generic no-metadata
+        // fallback; otherwise the fallback becomes a sticky local decision.
+        if (filamentReqsQuery.data?.filaments?.length && !recommendationsQuery.isError) return null;
+        return pickDefault(data, 'filament');
       });
     });
-  }, [presetsQuery.data, filamentSlots, selectedPrinterName, compatIndex]);
+  }, [
+    presetsQuery.data,
+    filamentSlots,
+    filamentReqsQuery.data?.filaments?.length,
+    recommendationsQuery.data,
+    recommendationsQuery.isError,
+  ]);
 
   const enqueueMutation = useMutation({
     mutationFn: async (plate: number | null) => {
@@ -697,8 +605,6 @@ export function SliceModal({ source, onClose }: SliceModalProps) {
                 value={processPreset}
                 onChange={setProcessPreset}
                 disabled={isEnqueuing}
-                selectedPrinterName={selectedPrinterName}
-                compatIndex={compatIndex}
               />
               {/* Bed-type override (#1337). Always visible, always enabled.
                   The backend patches curr_bed_type on the resolved process
@@ -755,8 +661,6 @@ export function SliceModal({ source, onClose }: SliceModalProps) {
                       }
                       disabled={isEnqueuing || !isUsed}
                       swatchColor={filamentSlots.length > 1 ? slot.color : undefined}
-                      selectedPrinterName={selectedPrinterName}
-                      compatIndex={compatIndex}
                     />
                   );
                 })
@@ -949,11 +853,6 @@ interface PresetDropdownProps {
   // filament slots so the user can see at a glance which slot they're
   // configuring against the source 3MF's per-slot colour.
   swatchColor?: string;
-  // Selected printer context (#1325). When provided for a process / filament
-  // slot, presets that resolve to a different printer (per compatIndex) move
-  // into a trailing "Other printers" group instead of the main tier list.
-  selectedPrinterName?: string | null;
-  compatIndex?: PrinterCompatibilityIndex;
 }
 
 function PresetDropdown({
@@ -964,57 +863,25 @@ function PresetDropdown({
   onChange,
   disabled,
   swatchColor,
-  selectedPrinterName,
-  compatIndex,
 }: PresetDropdownProps) {
   const { t } = useTranslation();
 
-  // Tier sections (imported → cloud → standard), plus — for a process /
-  // filament slot with a selected printer — a trailing group of presets that
-  // resolve to a different printer (#1325). Compatibility-unknown presets
-  // stay in their tier, so a custom / untagged preset is never hidden, and
-  // empty sections collapse out.
-  const { sections, otherEntries } = useMemo(() => {
+  const sections = useMemo(() => {
     const tiers: { key: keyof UnifiedPresetsResponse; label: string; fallback: string }[] = [
       { key: 'local', label: 'slice.tier.local', fallback: 'Imported' },
       { key: 'orca_cloud', label: 'slice.tier.orcaCloud', fallback: 'Orca Cloud' },
       { key: 'cloud', label: 'slice.tier.cloud', fallback: 'Bambu Cloud' },
       { key: 'standard', label: 'slice.tier.standard', fallback: 'Standard' },
     ];
-    const filterByPrinter = slot !== 'printer';
-    const compatSections: { tierLabel: string; entries: UnifiedPreset[] }[] = [];
-    const other: UnifiedPreset[] = [];
+    const tierSections: { tierLabel: string; entries: UnifiedPreset[] }[] = [];
     for (const { key, label: lk, fallback } of tiers) {
       const entries = (data[key] as UnifiedPresetsBySlot)[slot];
-      if (!filterByPrinter) {
-        if (entries.length > 0) compatSections.push({ tierLabel: t(lk, fallback), entries });
-        continue;
-      }
-      const compatible: UnifiedPreset[] = [];
-      for (const p of entries) {
-        if (
-          presetCompatibility(
-            p,
-            // filterByPrinter is true here, so slot is never 'printer'.
-            slot as 'process' | 'filament',
-            selectedPrinterName ?? null,
-            compatIndex ?? EMPTY_COMPATIBILITY_INDEX,
-          ) === 'mismatch'
-        ) {
-          other.push(p);
-        } else {
-          compatible.push(p);
-        }
-      }
-      if (compatible.length > 0) {
-        compatSections.push({ tierLabel: t(lk, fallback), entries: compatible });
-      }
+      if (entries.length > 0) tierSections.push({ tierLabel: t(lk, fallback), entries });
     }
-    return { sections: compatSections, otherEntries: other };
-  }, [data, slot, t, selectedPrinterName, compatIndex]);
+    return tierSections;
+  }, [data, slot, t]);
 
-  const totalEntries =
-    sections.reduce((sum, s) => sum + s.entries.length, 0) + otherEntries.length;
+  const totalEntries = sections.reduce((sum, s) => sum + s.entries.length, 0);
 
   return (
     <label className="block">
@@ -1048,15 +915,6 @@ function PresetDropdown({
             ))}
           </optgroup>
         ))}
-        {otherEntries.length > 0 && (
-          <optgroup label={t('slice.otherPrinters')}>
-            {otherEntries.map((p) => (
-              <option key={`${p.source}:${p.id}`} value={`${p.source}:${p.id}`}>
-                {p.name}
-              </option>
-            ))}
-          </optgroup>
-        )}
       </select>
     </label>
   );

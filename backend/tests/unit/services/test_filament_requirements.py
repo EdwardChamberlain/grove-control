@@ -20,7 +20,7 @@ from backend.app.services.filament_requirements import (
 
 def _material(
     family: str,
-    color_hex: str,
+    color_hex: str | None,
     *,
     subtype: str | None = None,
     profile_id: str | None = None,
@@ -274,6 +274,20 @@ class TestBuildQueueFilamentOverrides:
             },
         ]
 
+    def test_invalid_source_colour_is_preserved_as_unknown(self):
+        overrides = build_queue_filament_overrides([{"slot_id": 1, "type": "PLA", "color": "not-a-colour"}])
+
+        assert overrides == [
+            {
+                "slot_id": 1,
+                "material": _material("PLA", None),
+                "type": "PLA",
+                "color": "",
+                "tray_info_idx": "",
+                "force_color_match": True,
+            }
+        ]
+
     def test_explicit_per_slot_false_wins_over_safe_default(self):
         overrides = [{"slot_id": 1, "type": "PLA", "color": "#00FF00", "force_color_match": False}]
         assert build_queue_filament_overrides(self.requirements, overrides) == [
@@ -339,17 +353,29 @@ class TestBuildQueueFilamentOverrides:
         with pytest.raises(ValueError, match="without sliced material metadata"):
             build_queue_filament_overrides([], overrides)
 
-    def test_allows_override_within_compatible_material_family(self):
-        requirements = [{"slot_id": 1, "type": "PAHT-CF", "color": "#000000"}]
-        overrides = [{"slot_id": 1, "type": "PA12-CF", "color": "#333333"}]
+    def test_allows_explicit_override_to_another_subtype_in_the_same_family(self):
+        requirements = [{"slot_id": 1, "type": "PLA", "color": "#000000", "tray_info_idx": "GFA01"}]
+        overrides = [
+            {
+                "slot_id": 1,
+                "material": {"family": "PLA", "subtype": "Silk", "color_hex": "#333333FF", "profile_id": "GFA05"},
+            }
+        ]
 
         assert build_queue_filament_overrides(requirements, overrides) == [
             {
                 "slot_id": 1,
-                "material": _material("PA12-CF", "#333333FF"),
-                "type": "PA12-CF",
+                "material": _material("PLA", "#333333FF", subtype="Silk", profile_id="GFA05", setting_id="GFSA05"),
+                "type": "PLA",
                 "color": "#333333",
-                "tray_info_idx": "",
+                "tray_info_idx": "GFA05",
                 "force_color_match": True,
             }
         ]
+
+    def test_rejects_override_to_a_different_raw_family(self):
+        requirements = [{"slot_id": 1, "type": "PAHT-CF", "color": "#000000"}]
+        overrides = [{"slot_id": 1, "type": "PA12-CF", "color": "#333333"}]
+
+        with pytest.raises(ValueError, match="cannot change material family from PAHT-CF to PA12-CF"):
+            build_queue_filament_overrides(requirements, overrides)

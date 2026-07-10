@@ -35,8 +35,6 @@ from backend.app.services.filament_deficit import compute_deficit_for_queue_item
 from backend.app.services.filament_material import (
     FilamentMaterial,
     canonical_filament_type,
-    colors_are_similar,
-    normalize_color_hex,
 )
 from backend.app.services.notification_service import notification_service
 from backend.app.services.printer_manager import (
@@ -1200,13 +1198,7 @@ class PrintScheduler:
                 filament["global_tray_id"]
                 for filament in loaded
                 if required.is_dispatch_compatible(filament["material"])
-                and (
-                    not strict_color
-                    or (
-                        required.family_key == filament["material"].family_key
-                        and required.is_color_match(filament["material"])
-                    )
-                )
+                and (not strict_color or required.is_color_match(filament["material"]))
                 and (
                     fts_active
                     or requirement.get("nozzle_id") is None
@@ -1262,8 +1254,6 @@ class PrintScheduler:
                 match_status = "missing"
             elif required.is_color_match(mapped["material"]):
                 match_status = "match"
-            elif required.is_similar_color(mapped["material"]):
-                match_status = "similar_colour"
             else:
                 match_status = "material_only"
             comparisons.append(
@@ -1309,7 +1299,9 @@ class PrintScheduler:
                 fts_active = bool(state.fila_switch and state.fila_switch.installed)
                 for filament in loaded:
                     material = filament["material"]
-                    if not required.is_dispatch_compatible(material):
+                    # These are explicit queue-override choices, so expose
+                    # every subtype in the same raw material family.
+                    if not required.is_family_match(material):
                         continue
                     if (
                         not fts_active
@@ -1392,18 +1384,6 @@ class PrintScheduler:
                 )
 
         return filaments
-
-    def _normalize_color(self, color: str | None) -> str:
-        """Normalize color to #RRGGBB format."""
-        return normalize_color_hex(color)[:7]
-
-    def _normalize_color_for_compare(self, color: str | None) -> str:
-        """Normalize color for comparison (lowercase, no hash)."""
-        return normalize_color_hex(color).replace("#", "").lower()[:6] if color else ""
-
-    def _colors_are_similar(self, color1: str | None, color2: str | None, threshold: int = 40) -> bool:
-        """Check if two colors are visually similar within a threshold."""
-        return colors_are_similar(color1, color2, threshold)
 
     async def _build_inventory_remain_overrides(
         self, db: AsyncSession, printer_id: int, loaded: list[dict]
@@ -1559,7 +1539,7 @@ class PrintScheduler:
     ) -> list[int] | None:
         """Match required filaments to loaded filaments and build AMS mapping.
 
-        Priority: unique tray_info_idx match > exact color match > similar color match > type-only match
+        Priority: matching profile as a tie-breaker > exact colour > family match.
 
         The tray_info_idx is a filament type identifier stored in the 3MF file when the user
         slices (e.g., "GFA00" for generic PLA, "P4d64437" for custom presets). If the same
@@ -1588,11 +1568,11 @@ class PrintScheduler:
             req_tray_info_idx = req_material.profile_id or ""
             strict_color = req.get("slot_id") in (strict_color_slot_ids or set())
 
-            # Find best match: unique tray_info_idx > exact color > similar color > type-only
+            # Profile IDs rank otherwise valid candidates; they never grant
+            # compatibility across material families.
             idx_match = None
             exact_match = None
-            similar_match = None
-            type_only_match = None
+            family_match = None
 
             # Get available trays (not already used)
             available = [f for f in loaded if f["global_tray_id"] not in used_tray_ids]
@@ -1604,18 +1584,11 @@ class PrintScheduler:
             if req_nozzle_id is not None:
                 available = [f for f in available if f.get("extruder_id") == req_nozzle_id]
 
-            # Material is always a hard boundary. Disabling colour matching may
-            # select a different shade; profile variants are only substituted
-            # when explicitly listed in FilamentMaterial's dispatch matrix.
+            # Material family is the only dispatch compatibility boundary.
             available = [
                 f
                 for f in available
                 if req_material.is_dispatch_compatible(f.get("material") or FilamentMaterial.from_queue_override(f))
-                and (
-                    not strict_color
-                    or req_material.family_key
-                    == (f.get("material") or FilamentMaterial.from_queue_override(f)).family_key
-                )
             ]
 
             # Sort by remaining filament (ascending) so lowest-remain spool wins .find().
@@ -1672,39 +1645,29 @@ class PrintScheduler:
                     )
                     if prefer_lowest:
                         idx_matches.sort(key=lambda f: self._prefer_lowest_sort_key(f, inventory_remain_overrides))
-                    # Use color matching within this subset
+                    # Prefer an exact colour within matching-profile candidates.
                     for f in idx_matches:
                         f_material = f.get("material") or FilamentMaterial.from_queue_override(f)
                         if req_material.is_dispatch_compatible(f_material) and req_material.is_color_match(f_material):
                             if not exact_match:
                                 exact_match = f
-                        elif req_material.is_dispatch_compatible(f_material) and req_material.is_similar_color(
-                            f_material
-                        ):
-                            if not similar_match:
-                                similar_match = f
-                        elif (
-                            not strict_color and not type_only_match and req_material.is_dispatch_compatible(f_material)
-                        ):
-                            type_only_match = f
+                        elif not strict_color and not family_match:
+                            family_match = f
 
             # If no idx_match yet, do standard type/color matching on all available trays
-            if not idx_match and not exact_match and not similar_match and not type_only_match:
+            if not idx_match and not exact_match and not family_match:
                 for f in available:
-                    # Type matches - check color
+                    # Family matches - prefer exact colour when it is known.
                     f_material = f.get("material") or FilamentMaterial.from_queue_override(f)
                     if req_material.is_dispatch_compatible(f_material) and req_material.is_color_match(f_material):
                         if not exact_match:
                             exact_match = f
-                    elif req_material.is_dispatch_compatible(f_material) and req_material.is_similar_color(f_material):
-                        if not similar_match:
-                            similar_match = f
-                    elif not strict_color and not type_only_match and req_material.is_dispatch_compatible(f_material):
-                        type_only_match = f
+                    elif not strict_color and not family_match and req_material.is_dispatch_compatible(f_material):
+                        family_match = f
 
-            # Forced slots are exact by definition: never degrade to a similar
-            # or type-only colour, even when the material itself matches.
-            match = exact_match if strict_color else idx_match or exact_match or similar_match or type_only_match
+            # Forced colour requires a known exact colour. Otherwise a matching
+            # family is sufficient and colour is only a ranking preference.
+            match = exact_match if strict_color else idx_match or exact_match or family_match
             if match:
                 used_tray_ids.add(match["global_tray_id"])
                 comparisons.append({"slot_id": req.get("slot_id", 0), "global_tray_id": match["global_tray_id"]})
@@ -1716,15 +1679,7 @@ class PrintScheduler:
                 # won — fast triage when "Prefer Lowest Filament" picks the
                 # wrong slot (#1766).
                 if match:
-                    bucket = (
-                        "idx"
-                        if idx_match is not None
-                        else "exact_color"
-                        if exact_match is not None
-                        else "similar_color"
-                        if similar_match is not None
-                        else "type_only"
-                    )
+                    bucket = "idx" if idx_match is not None else "exact_color" if exact_match is not None else "family"
                     logger.info(
                         "[prefer-lowest] picked gtid=%s via %s for req slot=%s",
                         match["global_tray_id"],

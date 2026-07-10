@@ -11,6 +11,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from backend.app.schemas.filament_material import FilamentMaterialResponse
+
 CloudStatus = Literal["ok", "not_authenticated", "expired", "unreachable"]
 
 
@@ -80,3 +82,30 @@ class UnifiedPresetsResponse(BaseModel):
     standard: UnifiedPresetsBySlot = UnifiedPresetsBySlot()
     cloud_status: CloudStatus = "ok"
     orca_cloud_status: CloudStatus = "ok"
+
+
+class PresetReference(BaseModel):
+    id: str
+    source: Literal["orca_cloud", "cloud", "local", "standard"]
+
+
+class SlicerFilamentRequirement(BaseModel):
+    slot_id: int
+    type: str = ""
+    color: str | None = None
+    material: FilamentMaterialResponse
+
+
+class SlicerPresetRecommendationRequest(BaseModel):
+    presets: UnifiedPresetsResponse
+    filaments: list[SlicerFilamentRequirement]
+    printer_name: str | None = None
+
+
+class SlicerPresetRecommendation(BaseModel):
+    slot_id: int
+    ranked: list[PresetReference]
+
+
+class SlicerPresetRecommendationResponse(BaseModel):
+    filament: list[SlicerPresetRecommendation]

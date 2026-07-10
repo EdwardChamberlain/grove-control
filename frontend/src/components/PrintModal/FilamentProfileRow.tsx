@@ -9,7 +9,7 @@ export interface FilamentProfileOption {
 }
 
 interface FilamentProfileRowProps {
-  requiredColor: string;
+  requiredColor: string | null;
   requiredLabel: string;
   usedGrams: number;
   value: string;
@@ -62,7 +62,7 @@ export function FilamentProfileRow({
       style={{ gridTemplateColumns: '16px minmax(70px, 1fr) auto minmax(120px, 2fr) 20px' }}
     >
       <span title={requiredTitle}>
-        <Circle className="w-3 h-3" fill={requiredColor} stroke={requiredColor} />
+        <Circle className="w-3 h-3" fill={requiredColor ?? 'transparent'} stroke={requiredColor ?? 'currentColor'} />
       </span>
       <span className="text-white truncate flex items-center gap-1">
         {leadingBadge}

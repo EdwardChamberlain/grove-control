@@ -10,68 +10,6 @@ from backend.app.services.print_scheduler import PrintScheduler
 from backend.app.utils.threemf_tools import extract_nozzle_mapping_from_3mf
 
 
-class TestSchedulerAmsMappingHelpers:
-    """Test the AMS mapping helper methods in PrintScheduler."""
-
-    @pytest.fixture
-    def scheduler(self):
-        return PrintScheduler()
-
-    def test_normalize_color_with_hash(self, scheduler):
-        """Color with hash should return #RRGGBB format."""
-        result = scheduler._normalize_color("#FF5500")
-        assert result == "#FF5500"
-
-    def test_normalize_color_without_hash(self, scheduler):
-        """Color without hash should add hash prefix."""
-        result = scheduler._normalize_color("FF5500")
-        assert result == "#FF5500"
-
-    def test_normalize_color_with_alpha(self, scheduler):
-        """Color with alpha channel should strip it."""
-        result = scheduler._normalize_color("FF5500AA")
-        assert result == "#FF5500"
-
-    def test_normalize_color_none(self, scheduler):
-        """None color should return default gray."""
-        result = scheduler._normalize_color(None)
-        assert result == "#808080"
-
-    def test_normalize_color_empty(self, scheduler):
-        """Empty color should return default gray."""
-        result = scheduler._normalize_color("")
-        assert result == "#808080"
-
-    def test_normalize_color_for_compare(self, scheduler):
-        """Color for compare should be lowercase without hash."""
-        result = scheduler._normalize_color_for_compare("#FF5500")
-        assert result == "ff5500"
-
-    def test_normalize_color_for_compare_with_alpha(self, scheduler):
-        """Alpha channel should be stripped for comparison."""
-        result = scheduler._normalize_color_for_compare("#FF5500AA")
-        assert result == "ff5500"
-
-    def test_colors_are_similar_exact_match(self, scheduler):
-        """Exact same colors should be similar."""
-        assert scheduler._colors_are_similar("#FF5500", "#FF5500") is True
-
-    def test_colors_are_similar_within_threshold(self, scheduler):
-        """Colors within threshold should be similar."""
-        # Red difference of 10, well within default threshold of 40
-        assert scheduler._colors_are_similar("#FF5500", "#F55500") is True
-
-    def test_colors_are_similar_outside_threshold(self, scheduler):
-        """Colors outside threshold should not be similar."""
-        # Red: FF (255) vs 00 (0) = 255 difference
-        assert scheduler._colors_are_similar("#FF0000", "#00FF00") is False
-
-    def test_colors_are_similar_none_colors(self, scheduler):
-        """None colors should not be similar."""
-        assert scheduler._colors_are_similar(None, "#FF5500") is False
-        assert scheduler._colors_are_similar("#FF5500", None) is False
-
-
 class TestBuildLoadedFilaments:
     """Test the _build_loaded_filaments method."""
 
@@ -1324,19 +1262,19 @@ class TestH2DModel:
         # White PLA on RIGHT: AMS 1 T1 (global 4)
         assert result == [4]
 
-    def test_reject_cross_nozzle(self, scheduler):
-        """H2D: hard filter rejects cross-nozzle assignment."""
+    def test_subtype_does_not_block_same_family_assignment(self, scheduler):
+        """H2D: a PLA subtype can use an available PLA slot on its nozzle."""
 
         class MockStatus:
             raw_data = _h2d_raw_data()
 
         loaded = scheduler._build_loaded_filaments(MockStatus())
-        # PLA-S only exists on AMS 2 T1 (LEFT), require on RIGHT
+        # PLA-S is a PLA-family requirement; the right nozzle's PLA slot is valid.
         required = [
             {"slot_id": 1, "type": "PLA-S", "color": "#FFFFFF", "nozzle_id": 0},
         ]
         result = scheduler._match_filaments_to_slots(required, loaded)
-        assert result == [-1]  # No fallback to wrong nozzle
+        assert result == [4]
 
     def test_dual_nozzle_multi_filament(self, scheduler):
         """H2D: multi-filament print maps to correct nozzles."""

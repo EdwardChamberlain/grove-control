@@ -16,21 +16,16 @@
 import { useEffect } from 'react';
 import { X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useQuery } from '@tanstack/react-query';
 
 import { Toggle } from './Toggle';
-import {
-  computeBackupGroups,
-  normalizeColor,
-  type AmsUnitLike,
-  type BackupGroup,
-} from '../utils/amsHelpers';
+import { api, type AmsBackupGroup } from '../api/client';
+import { normalizeColor } from '../utils/amsHelpers';
 
 interface AmsBackupModalProps {
   isOpen: boolean;
   state: boolean | null;
-  amsUnits: AmsUnitLike[] | undefined;
-  amsExtruderMap: Record<string, number> | undefined;
-  isDualNozzle: boolean;
+  printerId: number;
   canToggle: boolean;
   pending: boolean;
   onToggle: (next: boolean) => void;
@@ -41,11 +36,10 @@ interface AmsBackupModalProps {
  * Compact slot label like "A·3" / "HT·1" — the ring is small, every char
  * counts toward readability.
  */
-function formatSlotLabel(amsId: number, slotIdx: number, totalTraysOnUnit: number): string {
-  const isHt = totalTraysOnUnit === 1 || amsId >= 128;
+function formatSlotLabel(amsId: number, trayId: number, isHt: boolean): string {
   const normalizedId = amsId >= 128 ? amsId - 128 : amsId;
   const letter = String.fromCharCode(65 + normalizedId);
-  return isHt ? `HT·${slotIdx + 1}` : `${letter}·${slotIdx + 1}`;
+  return isHt ? `HT·${trayId + 1}` : `${letter}·${trayId + 1}`;
 }
 
 /** Pick a readable text colour for a given filament hex. */
@@ -62,23 +56,21 @@ function pickContrastTextColor(rgbaHex: string | null | undefined): string {
 
 function BackupRing({
   group,
-  trayCountByAms,
   innerBg,
   textPrimary,
   textSecondary,
   showExtruderBadge,
   extruderLabel,
 }: {
-  group: BackupGroup;
-  trayCountByAms: Map<number, number>;
+  group: AmsBackupGroup;
   innerBg: string;
   textPrimary: string;
   textSecondary: string;
   showExtruderBadge: boolean;
   extruderLabel: string;
 }) {
-  const filamentHex = normalizeColor(group.trayColor || undefined);
-  const ringTextColor = pickContrastTextColor(group.trayColor);
+  const filamentHex = normalizeColor(group.material.color_hex);
+  const ringTextColor = pickContrastTextColor(group.material.color_hex);
   // The pill background that sits behind each slot label — keeps text legible
   // regardless of the filament fill colour.
   const labelPillBg = ringTextColor === '#FFFFFF' ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.7)';
@@ -122,7 +114,7 @@ function BackupRing({
           fontWeight="700"
           fill={textPrimary}
         >
-          {group.displayName || '—'}
+          {group.material.material_label || '—'}
         </text>
         {/* Centre: rotation count */}
         <text
@@ -142,11 +134,11 @@ function BackupRing({
           const rad = (angleDeg * Math.PI) / 180;
           const x = labelRadius * Math.cos(rad);
           const y = labelRadius * Math.sin(rad);
-          const label = formatSlotLabel(m.amsId, m.slotIdx, trayCountByAms.get(m.amsId) ?? 4);
+          const label = formatSlotLabel(m.ams_id, m.tray_id, m.is_ht);
           // Approximate pill width based on char count (each digit ≈ 6.5 px @ 12 px font).
           const pillWidth = Math.max(22, label.length * 7 + 8);
           return (
-            <g key={`${m.amsId}-${m.slotIdx}`}>
+            <g key={`${m.ams_id}-${m.tray_id}`}>
               <rect
                 x={x - pillWidth / 2}
                 y={y - 9}
@@ -178,15 +170,19 @@ function BackupRing({
 export function AmsBackupModal({
   isOpen,
   state,
-  amsUnits,
-  amsExtruderMap,
-  isDualNozzle,
+  printerId,
   canToggle,
   pending,
   onToggle,
   onClose,
 }: AmsBackupModalProps) {
   const { t } = useTranslation();
+  const groupsQuery = useQuery({
+    queryKey: ['ams-backup-groups', printerId],
+    queryFn: () => api.getAmsBackupGroups(printerId),
+    enabled: isOpen,
+    staleTime: 5_000,
+  });
 
   // Close on Escape key while the modal is open. Captures at the window
   // level so it works even when focus isn't inside the modal subtree
@@ -212,27 +208,8 @@ export function AmsBackupModal({
   const textPrimary = 'var(--text-primary)';
   const textSecondary = 'var(--text-secondary)';
 
-  // Effective dual-nozzle detection: only split per extruder if the map
-  // actually carries 2 distinct values across the AMS units we have data
-  // for. Empty / single-value maps collapse to a single section to avoid
-  // misleading badges.
-  const effectiveDualNozzle = (() => {
-    if (!isDualNozzle) return false;
-    if (!amsExtruderMap) return false;
-    const distinctValues = new Set<number>();
-    for (const ams of amsUnits || []) {
-      const raw = amsExtruderMap[String(ams.id)];
-      if (raw === undefined) continue;
-      distinctValues.add(Number(raw));
-      if (distinctValues.size > 1) return true;
-    }
-    return false;
-  })();
-
-  const groups = computeBackupGroups(amsUnits, amsExtruderMap, effectiveDualNozzle);
-  const trayCountByAms = new Map<number, number>(
-    (amsUnits || []).map((u) => [u.id, u.tray.length]),
-  );
+  const groups = groupsQuery.data?.groups ?? [];
+  const effectiveDualNozzle = groupsQuery.data?.effective_dual_nozzle ?? false;
 
   // Only pairs are rendered — lone slots are deliberately suppressed.
   const pairs = groups.filter((g) => g.members.length >= 2);
@@ -313,7 +290,6 @@ export function AmsBackupModal({
                 <BackupRing
                   key={g.key}
                   group={g}
-                  trayCountByAms={trayCountByAms}
                   innerBg={modalBg}
                   textPrimary={textPrimary}
                   textSecondary={textSecondary}

@@ -45,6 +45,7 @@ from backend.app.schemas.printer import (
     PrinterUpdate,
     PrintOptionsResponse,
 )
+from backend.app.services.ams_backup_groups import build_ams_backup_groups
 from backend.app.services.bambu_ftp import (
     cache_3mf_download,
     delete_file_async,
@@ -2023,30 +2024,21 @@ async def set_ams_backup(
     return {"success": True, "ams_filament_backup": enabled}
 
 
-@router.get("/{printer_id}/inventory-remain")
-async def get_inventory_remain(
+@router.get("/{printer_id}/ams-backup-groups")
+async def get_ams_backup_groups(
     printer_id: int,
     _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
-    db: AsyncSession = Depends(get_db),
 ):
-    """Per-globalTrayId remaining grams for slots bound to an inventory spool.
+    """Return backend-derived exact material groups for the AMS backup UI."""
+    from backend.app.utils.printer_models import is_dual_nozzle_model
 
-    Mirrors `_build_inventory_remain_overrides` server-side so the PrintModal
-    client can apply the same two-tier "Prefer Lowest Remaining Filament" sort
-    the dispatcher uses (#1766). Works for both internal inventory and
-    Spoolman; unbound slots are absent from the map (client falls back to the
-    printer's MQTT `remain` for those).
-    """
-    from backend.app.services.print_scheduler import PrintScheduler
-
-    state = printer_manager.get_status(printer_id)
-    if not state:
-        return {"inventory_remain_g": {}}
-
-    scheduler = PrintScheduler()
-    loaded = scheduler._build_loaded_filaments(state)
-    overrides = await scheduler._build_inventory_remain_overrides(db, printer_id, loaded)
-    return {"inventory_remain_g": {str(k): v for k, v in overrides.items()}}
+    status = printer_manager.get_status(printer_id)
+    if not status:
+        return {"effective_dual_nozzle": False, "groups": []}
+    return build_ams_backup_groups(
+        status,
+        is_dual_nozzle=is_dual_nozzle_model(printer_manager.get_model(printer_id)),
+    )
 
 
 # ============================================

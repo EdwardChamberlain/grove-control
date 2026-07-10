@@ -146,7 +146,7 @@ def build_queue_filament_overrides(
             FilamentMaterial.from_queue_override(provided) if provided and provided_has_color_source else None
         )
         material = provided_material or requirement_material
-        if not material or not material.family or not material.color_hex:
+        if not material or not material.family:
             continue
 
         if provided_material and requirement_material and not provided_material.is_family_match(requirement_material):
@@ -177,7 +177,7 @@ def build_queue_filament_overrides(
         if provided_material and requirement_material:
             same_legacy_values = (
                 provided.get("type", requirement.get("type", "")) == requirement.get("type", "")
-                and provided_material.rgb_hex.upper() == requirement_material.rgb_hex.upper()
+                and provided_material.rgb_hex == requirement_material.rgb_hex
                 and not provided_material.subtype
             )
             if same_legacy_values:

@@ -1,30 +1,16 @@
 """Canonical filament material value object.
 
-This module keeps material identity separate from vendor colour names.  Print
-matching should compare family, subtype, colour, and profile ids; user-facing
-labels are derived from those fields instead of catalogue names like
-"Jade White" / "Ivory White".
+This module keeps material identity separate from vendor colour names. Dispatch
+compatibility is family-only; subtype, colour, and profile identifiers remain
+available for display, strict colour policy, and printer protocol boundaries.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import IntEnum
 from typing import Any
 
 from backend.app.utils.filament_ids import filament_id_to_setting_id
-
-_FILAMENT_TYPE_GROUPS: tuple[tuple[str, ...], ...] = (("PA-CF", "PA12-CF", "PAHT-CF"),)
-_FILAMENT_EQUIV_MAP = {
-    filament_type.upper(): group[0].upper() for group in _FILAMENT_TYPE_GROUPS for filament_type in group
-}
-
-# Profile variants that are interchangeable for dispatch. Keep this narrow:
-# a material family alone is not permission to substitute every specialty
-# profile (for example, PLA-S or PLA Silk for PLA Basic).
-_DISPATCH_COMPATIBLE_SUBTYPES: dict[str, frozenset[str]] = {
-    "PLA": frozenset({"BASIC", "MATTE"}),
-}
 
 _KNOWN_FAMILIES: tuple[str, ...] = tuple(
     sorted(
@@ -54,82 +40,32 @@ _KNOWN_FAMILIES: tuple[str, ...] = tuple(
     )
 )
 
-_PROFILE_MATERIAL_LABELS: dict[str, str] = {
-    "GFA00": "Bambu PLA Basic",
-    "GFA01": "Bambu PLA Matte",
-    "GFA02": "Bambu PLA Metal",
-    "GFA05": "Bambu PLA Silk",
-    "GFA06": "Bambu PLA Silk+",
-    "GFA07": "Bambu PLA Marble",
-    "GFA08": "Bambu PLA Sparkle",
-    "GFA09": "Bambu PLA Tough",
-    "GFA11": "Bambu PLA Aero",
-    "GFA12": "Bambu PLA Glow",
-    "GFA13": "Bambu PLA Dynamic",
-    "GFA15": "Bambu PLA Galaxy",
-    "GFA16": "Bambu PLA Wood",
-    "GFA50": "Bambu PLA-CF",
-    "GFB00": "Bambu ABS",
-    "GFB01": "Bambu ASA",
-    "GFB50": "Bambu ABS-GF",
-    "GFC00": "Bambu PC",
-    "GFG00": "Bambu PETG Basic",
-    "GFG01": "Bambu PETG Translucent",
-    "GFG02": "Bambu PETG HF",
-    "GFG50": "Bambu PETG-CF",
-    "GFG96": "Generic PETG HF",
-    "GFG98": "Generic PETG-CF",
-    "GFG99": "Generic PETG",
-    "GFL95": "Generic PLA High Speed",
-    "GFL96": "Generic PLA Silk",
-    "GFL98": "Generic PLA-CF",
-    "GFL99": "Generic PLA",
-    "GFN03": "Bambu PA-CF",
-    "GFN04": "Bambu PAHT-CF",
-    "GFN05": "Bambu PA6-CF",
-    "GFN98": "Generic PA-CF",
-    "GFN99": "Generic PA",
-    "GFS98": "Generic HIPS",
-    "GFS99": "Generic PVA",
-    "GFU00": "Bambu TPU 95A HF",
-    "GFU01": "Bambu TPU 95A",
-    "GFU02": "Bambu TPU for AMS",
-    "GFU98": "Generic TPU for AMS",
-    "GFU99": "Generic TPU",
-}
-
-
-class MatchScore(IntEnum):
-    NO_MATCH = 0
-    FAMILY = 100
-    MATERIAL_SIMILAR_COLOR = 200
-    MATERIAL_COLOR = 300
-    PROFILE = 400
-
 
 def canonical_filament_type(filament_type: str) -> str:
-    """Return the material-family identifier used for safe substitutions."""
-    upper = (filament_type or "").strip().upper()
-    return _FILAMENT_EQUIV_MAP.get(upper, upper)
+    """Return a normalized material family identifier.
+
+    Families are intentionally never collapsed into equivalence groups. PAHT-CF,
+    PA12-CF, and PA-CF are distinct printable materials.
+    """
+    return (filament_type or "").strip().upper()
 
 
-def normalize_color_hex(value: str | None, *, default: str = "#808080FF") -> str:
+def normalize_color_hex(value: str | None) -> str | None:
     """Normalize colour input to ``#RRGGBBAA``.
 
     Accepts ``#RRGGBB``, ``RRGGBB``, ``#RRGGBBAA``, or ``RRGGBBAA``. Missing
-    alpha becomes ``FF``. Invalid input falls back to the supplied default.
+    alpha becomes ``FF``. Missing or invalid input remains unknown (``None``)
+    rather than being converted into a real colour identity.
     """
     raw = (value or "").strip().lstrip("#")
     if len(raw) not in (6, 8):
-        raw = default.strip().lstrip("#")
+        return None
     if len(raw) == 6:
         raw += "FF"
     try:
         int(raw, 16)
     except ValueError:
-        raw = default.strip().lstrip("#")
-        if len(raw) == 6:
-            raw += "FF"
+        return None
     return f"#{raw[:8].upper()}"
 
 
@@ -213,40 +149,17 @@ def parse_material_label(label: str | None, family_hint: str | None = None) -> t
     return family, subtype
 
 
-def material_from_profile_id(profile_id: str | None) -> tuple[str, str | None]:
-    label = _PROFILE_MATERIAL_LABELS.get((profile_id or "").split("_")[0])
-    return parse_material_label(label) if label else ("", None)
-
-
-def colors_are_similar(color1: str | None, color2: str | None, threshold: int = 40) -> bool:
-    """Check if two RGB colours are visually similar within a component threshold."""
-    c1 = normalize_color_hex(color1)
-    c2 = normalize_color_hex(color2)
-    if c1[7:9] == "00" or c2[7:9] == "00":
-        return c1[7:9] == c2[7:9] and c1[:7] == c2[:7]
-    try:
-        return all(abs(int(c1[i : i + 2], 16) - int(c2[i : i + 2], 16)) <= threshold for i in (1, 3, 5))
-    except ValueError:
-        return False
-
-
 @dataclass(frozen=True)
 class FilamentMaterial:
     family: str
     subtype: str | None
-    color_hex: str
+    color_hex: str | None
     profile_id: str | None = None
     setting_id: str | None = None
 
     def __post_init__(self) -> None:
         family = (self.family or "").strip().upper()
         subtype = _normalize_subtype(self.subtype)
-        profile_family, profile_subtype = material_from_profile_id(self.profile_id)
-        if profile_family and (
-            not family or canonical_filament_type(family) == canonical_filament_type(profile_family)
-        ):
-            family = family or profile_family
-            subtype = subtype or profile_subtype
         object.__setattr__(self, "family", family)
         object.__setattr__(self, "subtype", subtype)
         object.__setattr__(self, "color_hex", normalize_color_hex(self.color_hex))
@@ -270,16 +183,10 @@ class FilamentMaterial:
             " ".join(part for part in [family or "", subtype or ""] if part).strip(),
             family,
         )
-        profile_family, profile_subtype = material_from_profile_id(profile_id)
-        if profile_family and (
-            not parsed_family or canonical_filament_type(parsed_family) == canonical_filament_type(profile_family)
-        ):
-            parsed_family = parsed_family or profile_family
-            parsed_subtype = subtype if subtype is not None else parsed_subtype or profile_subtype
         return cls(
             family=parsed_family or (family or ""),
             subtype=subtype if subtype is not None else parsed_subtype,
-            color_hex=color_hex or "#808080FF",
+            color_hex=color_hex,
             profile_id=profile_id,
             setting_id=setting_id,
         )
@@ -361,8 +268,8 @@ class FilamentMaterial:
         return (self.subtype or "").strip().upper()
 
     @property
-    def rgb_hex(self) -> str:
-        return self.color_hex[:7]
+    def rgb_hex(self) -> str | None:
+        return self.color_hex[:7] if self.color_hex else None
 
     @property
     def material_label(self) -> str:
@@ -370,6 +277,8 @@ class FilamentMaterial:
 
     @property
     def generic_color_name(self) -> str:
+        if not self.color_hex:
+            return "Unknown colour"
         if self.color_hex[7:9] == "00":
             return "Clear"
         r = int(self.color_hex[1:3], 16) / 255
@@ -445,7 +354,7 @@ class FilamentMaterial:
     def to_legacy_type_color(self) -> dict[str, str]:
         return {
             "type": self.family,
-            "color": self.rgb_hex,
+            "color": self.rgb_hex or "",
             "tray_info_idx": self.profile_id or "",
         }
 
@@ -453,7 +362,7 @@ class FilamentMaterial:
         return {
             "tray_type": self.family,
             "tray_sub_brands": self.material_label or self.family,
-            "tray_color": self.color_hex.lstrip("#"),
+            "tray_color": (self.color_hex or "").lstrip("#"),
             "tray_info_idx": self.profile_id or "",
             "setting_id": self.setting_id or "",
         }
@@ -463,48 +372,22 @@ class FilamentMaterial:
 
     def is_material_match(self, other: FilamentMaterial) -> bool:
         """Return whether two materials have the same family and subtype identity."""
-        if not self.is_family_match(other):
-            return False
-        return not self.subtype_key or not other.subtype_key or self.subtype_key == other.subtype_key
+        return self.is_family_match(other) and self.subtype_key == other.subtype_key
 
     def is_dispatch_compatible(self, other: FilamentMaterial) -> bool:
-        """Return whether a loaded material can satisfy this job's material family.
+        """Return whether a loaded material has the same material family.
 
-        Subtypes identify the profile and drive preference/display. A small,
-        explicit compatibility matrix permits safe substitutions such as PLA
-        Basic and PLA Matte without allowing every profile in the family.
-        Colour policy is evaluated separately by the caller.
+        Dispatch deliberately ignores subtype and profile. They describe the
+        selected printer/slicer settings, not whether PLA can be substituted
+        for PLA. Colour policy is evaluated separately by the caller.
         """
-        if not self.is_family_match(other):
-            return False
-        if not self.subtype_key or not other.subtype_key or self.subtype_key == other.subtype_key:
-            return True
-        compatible_subtypes = _DISPATCH_COMPATIBLE_SUBTYPES.get(self.compatible_family_key)
-        return bool(
-            compatible_subtypes and self.subtype_key in compatible_subtypes and other.subtype_key in compatible_subtypes
-        )
+        return self.is_family_match(other)
 
     def is_color_match(self, other: FilamentMaterial) -> bool:
-        return self.rgb_hex.upper() == other.rgb_hex.upper() and self.color_hex[7:9] == other.color_hex[7:9]
-
-    def is_similar_color(self, other: FilamentMaterial) -> bool:
-        return colors_are_similar(self.color_hex, other.color_hex)
+        return bool(self.color_hex and other.color_hex and self.color_hex == other.color_hex)
 
     def is_profile_match(self, other: FilamentMaterial) -> bool:
         return bool(self.profile_id and other.profile_id and self.profile_id == other.profile_id)
 
     def is_exact_match(self, other: FilamentMaterial) -> bool:
-        if self.profile_id and other.profile_id:
-            return self.is_profile_match(other)
         return self.is_material_match(other) and self.is_color_match(other)
-
-    def compatibility_score(self, other: FilamentMaterial, *, allow_family_fallback: bool = False) -> MatchScore:
-        if self.is_profile_match(other):
-            return MatchScore.PROFILE
-        if self.is_material_match(other) and self.is_color_match(other):
-            return MatchScore.MATERIAL_COLOR
-        if self.is_material_match(other) and self.is_similar_color(other):
-            return MatchScore.MATERIAL_SIMILAR_COLOR
-        if allow_family_fallback and self.is_family_match(other):
-            return MatchScore.FAMILY
-        return MatchScore.NO_MATCH
