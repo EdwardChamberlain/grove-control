@@ -7,21 +7,21 @@ from backend.app.core.database import Base
 
 
 class FilamentSkuSettings(Base):
-    """User-configured reorder settings for a filament SKU (material/subtype/brand group)."""
+    """User-configured reorder settings for a canonical filament SKU."""
 
     __tablename__ = "filament_sku_settings"
     __table_args__ = (
         # sqlite_where ensures NULL columns participate in uniqueness (NULLS NOT DISTINCT).
         # On PostgreSQL the partial index is not needed — standard UNIQUE handles it.
-        # color_name is part of the key so forecasts distinguish e.g. White vs Black
-        # PLA Matte (#forecast-color-grouping).
-        UniqueConstraint("material", "subtype", "brand", "color_name", name="uq_filament_sku"),
+        UniqueConstraint("material", "subtype", "brand", "color_hex", name="uq_filament_sku"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     material: Mapped[str] = mapped_column(String(50))
     subtype: Mapped[str | None] = mapped_column(String(50))
     brand: Mapped[str | None] = mapped_column(String(100))
+    color_hex: Mapped[str | None] = mapped_column(String(9))
+    # Legacy/import display metadata only. It is not part of SKU identity.
     color_name: Mapped[str | None] = mapped_column(String(100))
     lead_time_days: Mapped[int] = mapped_column(Integer, default=0)
     safety_margin_value: Mapped[int] = mapped_column(Integer, default=14)

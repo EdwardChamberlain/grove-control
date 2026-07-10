@@ -2896,6 +2896,7 @@ export interface FilamentSkuSettings {
   material: string;
   subtype: string | null;
   brand: string | null;
+  color_hex: string | null;
   color_name: string | null;
   lead_time_days: number;
   safety_margin_value: number;
@@ -2908,6 +2909,7 @@ export interface ShoppingListItem {
   material: string;
   subtype: string | null;
   brand: string | null;
+  color_hex: string | null;
   color_name: string | null;
   quantity_spools: number;
   note: string | null;
@@ -2920,6 +2922,7 @@ export interface ShoppingListItemCreate {
   material: string;
   subtype: string | null;
   brand: string | null;
+  color_hex: string | null;
   color_name: string | null;
   quantity_spools: number;
   note?: string | null;
@@ -3640,11 +3643,6 @@ export const api = {
     ),
   getDeveloperModeWarnings: () =>
     request<{ printer_id: number; name: string }[]>('/printers/developer-mode-warnings'),
-  getAvailableFilaments: (model: string, location?: string) => {
-    const params = new URLSearchParams({ model });
-    if (location) params.set('location', location);
-    return request<Array<{ type: string; color: string; tray_info_idx: string; tray_sub_brands: string; extruder_id: number | null }>>(`/printers/available-filaments?${params}`);
-  },
   getAvailableFilamentOptions: (
     model: string,
     location: string | undefined,

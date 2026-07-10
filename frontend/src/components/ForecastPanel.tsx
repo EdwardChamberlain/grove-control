@@ -25,7 +25,7 @@ interface SkuGroup {
   subtype: string | null;
   brand: string | null;
   colorName: string | null;
-  colorIdentity: string | null;
+  colorHex: string | null;
   spools: InventorySpool[];
 }
 
@@ -61,12 +61,12 @@ const CHART_COLORS = ['#1DB954', '#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6'];
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
-function skuKey(material: string, subtype: string | null, brand: string | null, colorIdentity: string | null) {
-  return `${material}||${subtype ?? ''}||${brand ?? ''}||${colorIdentity ?? ''}`;
+function skuKey(material: string, subtype: string | null, brand: string | null, colorHex: string | null) {
+  return `${material}||${subtype ?? ''}||${brand ?? ''}||${colorHex ?? ''}`;
 }
 
-function spoolColorIdentity(spool: { rgba?: string | null; color_name?: string | null }) {
-  return spool.rgba || spool.color_name || null;
+function spoolColorHex(spool: { rgba?: string | null }) {
+  return spool.rgba ? `#${spool.rgba.replace(/^#/, '')}` : null;
 }
 
 function addDays(date: Date, days: number): Date {
@@ -213,7 +213,7 @@ export function ForecastPanel({ spools }: { spools: InventorySpool[] }) {
 
   const settingsMap = useMemo(() => {
     const m = new Map<string, FilamentSkuSettings>();
-    for (const s of skuSettingsList) m.set(skuKey(s.material, s.subtype, s.brand, s.color_name), s);
+    for (const s of skuSettingsList) m.set(skuKey(s.material, s.subtype, s.brand, s.color_hex), s);
     return m;
   }, [skuSettingsList]);
 
@@ -231,14 +231,14 @@ export function ForecastPanel({ spools }: { spools: InventorySpool[] }) {
     const map = new Map<string, SkuGroup>();
     for (const spool of spools) {
       if (spool.archived_at) continue;
-      const key = skuKey(spool.material, spool.subtype, spool.brand, spoolColorIdentity(spool));
+      const key = skuKey(spool.material, spool.subtype, spool.brand, spoolColorHex(spool));
       const g = map.get(key) ?? {
         key,
         material: spool.material,
         subtype: spool.subtype,
         brand: spool.brand,
         colorName: spool.color_name,
-        colorIdentity: spoolColorIdentity(spool),
+        colorHex: spoolColorHex(spool),
         spools: [],
       };
       g.spools.push(spool);
@@ -251,14 +251,9 @@ export function ForecastPanel({ spools }: { spools: InventorySpool[] }) {
     const today = new Date(); today.setHours(0, 0, 0, 0);
 
     return groups.map((group): SkuForecast => {
-      // Fall back to the NULL-colour row that pre-upgrade users have so their
-      // lead-time / safety-margin overrides survive the first load after the
-      // color_name column is added (#forecast-color-grouping migration).
+      // Name-keyed settings are legacy data; new settings use colour hex only.
       const skuSettings =
         settingsMap.get(group.key) ??
-        (group.colorName !== group.colorIdentity
-          ? settingsMap.get(skuKey(group.material, group.subtype, group.brand, group.colorName)) ?? null
-          : null) ??
         (group.colorName !== null ? settingsMap.get(skuKey(group.material, group.subtype, group.brand, null)) ?? null : null);
       const skuLeadTime = skuSettings?.lead_time_days ?? 0;
       const effectiveLeadTimeDays = Math.max(globalLeadTime, skuLeadTime);
@@ -898,7 +893,7 @@ function ForecastRow({
     : 'text-green-400';
 
   function upsert(lead: number, marginVal: number, marginUnitArg: 'days' | 'g', alertsSnoozed = snoozed) {
-    upsertMutation.mutate({ material: f.group.material, subtype: f.group.subtype, brand: f.group.brand, color_name: f.group.colorIdentity, lead_time_days: lead, safety_margin_value: marginVal, safety_margin_unit: marginUnitArg, alerts_snoozed: alertsSnoozed });
+    upsertMutation.mutate({ material: f.group.material, subtype: f.group.subtype, brand: f.group.brand, color_hex: f.group.colorHex, color_name: f.group.colorName, lead_time_days: lead, safety_margin_value: marginVal, safety_margin_unit: marginUnitArg, alerts_snoozed: alertsSnoozed });
   }
 
   function toggleSnooze(e: React.MouseEvent) {
@@ -1285,7 +1280,7 @@ function ShoppingListPanel({
           label_weight: spoolWeight,
           core_weight: 0,
           core_weight_catalog_id: null,
-          color_name: item.color_name, rgba: null, extra_colors: null, effect_type: null,
+          color_name: item.color_name, rgba: item.color_hex?.replace(/^#/, '') ?? null, extra_colors: null, effect_type: null,
           nozzle_temp_min: null, nozzle_temp_max: null,
           note: item.note ?? null,
           tag_uid: null, tray_uuid: null,
@@ -1313,7 +1308,7 @@ function ShoppingListPanel({
     const m = new Map<string, SkuForecast>();
     for (const f of forecasts) {
       m.set(f.group.key, f);
-      m.set(skuKey(f.group.material, f.group.subtype, f.group.brand, f.group.colorName), f);
+      m.set(skuKey(f.group.material, f.group.subtype, f.group.brand, f.group.colorHex), f);
     }
     return m;
   }, [forecasts]);
@@ -1322,7 +1317,7 @@ function ShoppingListPanel({
   const cartForecasts = useMemo(() =>
     items.map((item) => ({
       item,
-      forecast: forecastMap.get(skuKey(item.material, item.subtype, item.brand, item.color_name)) ?? null,
+      forecast: forecastMap.get(skuKey(item.material, item.subtype, item.brand, item.color_hex)) ?? null,
     })),
     [items, forecastMap]
   );
@@ -1340,7 +1335,7 @@ function ShoppingListPanel({
   function downloadCsv() {
     const headers = [t('forecast.qty'), t('forecast.material'), t('inventory.brand'), t('inventory.subtype'), t('inventory.color'), `${t('forecast.weight')} (g)`, `${t('forecast.leadTime')} (d)`, t('forecast.expectedRestock'), t('forecast.status'), t('forecast.note')];
     const rows = items.map((i) => {
-      const f = forecastMap.get(skuKey(i.material, i.subtype, i.brand, i.color_name)) ?? null;
+      const f = forecastMap.get(skuKey(i.material, i.subtype, i.brand, i.color_hex)) ?? null;
       const avgSpoolG = f && f.totalSpools > 0 ? f.totalLabelG / f.totalSpools : 1000;
       const totalWeightG = Math.round(i.quantity_spools * avgSpoolG);
       const lt = f?.effectiveLeadTimeDays ?? globalLeadTime ?? 0;
@@ -1443,7 +1438,7 @@ function ShoppingListPanel({
               {items.map((item) => {
                 const lbl = [item.brand, item.material, item.subtype, item.color_name].filter(Boolean).join(' ');
                 const hasBreak = breakAlerts.some((a) => a.item.id === item.id);
-                const f = forecastMap.get(skuKey(item.material, item.subtype, item.brand, item.color_name)) ?? null;
+                const f = forecastMap.get(skuKey(item.material, item.subtype, item.brand, item.color_hex)) ?? null;
                 const avgSpoolG = f && f.totalSpools > 0 ? f.totalLabelG / f.totalSpools : 1000;
                 const totalWeightG = Math.round(item.quantity_spools * avgSpoolG);
                 const lt = f?.effectiveLeadTimeDays ?? globalLeadTime ?? 0;
@@ -1805,7 +1800,7 @@ function AddToCartModal({
 }: {
   forecast: SkuForecast;
   onClose: () => void;
-  onAdd: (item: { material: string; subtype: string | null; brand: string | null; color_name: string | null; quantity_spools: number; note: string | null }) => void;
+  onAdd: (item: { material: string; subtype: string | null; brand: string | null; color_hex: string | null; color_name: string | null; quantity_spools: number; note: string | null }) => void;
 }) {
   const { t } = useTranslation();
   const label = [f.group.brand, f.group.material, f.group.subtype, f.group.colorName].filter(Boolean).join(' ');
@@ -1827,7 +1822,7 @@ function AddToCartModal({
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    onAdd({ material: f.group.material, subtype: f.group.subtype, brand: f.group.brand, color_name: f.group.colorName, quantity_spools: finalQty, note: note || null });
+    onAdd({ material: f.group.material, subtype: f.group.subtype, brand: f.group.brand, color_hex: f.group.colorHex, color_name: f.group.colorName, quantity_spools: finalQty, note: note || null });
   }
 
   return (

@@ -343,6 +343,3 @@ class FilamentMaterial:
 
     def is_profile_match(self, other: FilamentMaterial) -> bool:
         return bool(self.profile_id and other.profile_id and self.profile_id == other.profile_id)
-
-    def is_exact_match(self, other: FilamentMaterial) -> bool:
-        return self.is_material_match(other) and self.is_color_match(other)

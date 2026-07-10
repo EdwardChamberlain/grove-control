@@ -471,6 +471,29 @@ async def _migrate_print_queue_filament_materials(conn) -> None:
                 )
 
 
+async def _backfill_forecast_color_hex(conn) -> None:
+    """Move legacy forecast rows that stored hex values in ``color_name``.
+
+    Vendor colour names remain display metadata. Only values that are valid
+    hex colours are migrated into the canonical SKU identity column.
+    """
+    from sqlalchemy import text
+
+    from backend.app.services.filament_material import normalize_color_hex
+
+    for table in ("filament_sku_settings", "filament_shopping_list"):
+        result = await conn.execute(text(f"SELECT id, color_name, color_hex FROM {table}"))
+        for row_id, color_name, color_hex in result.all():
+            if color_hex:
+                continue
+            normalized = normalize_color_hex(color_name)
+            if normalized:
+                await conn.execute(
+                    text(f"UPDATE {table} SET color_hex = :color_hex WHERE id = :id"),
+                    {"color_hex": normalized, "id": row_id},
+                )
+
+
 async def _api_keys_column_exists(conn, column_name: str) -> bool:
     """Return True if the named column exists on ``api_keys``.
 
@@ -2779,9 +2802,10 @@ async def run_migrations(conn):
                 safety_margin_value INTEGER NOT NULL DEFAULT 14,
                 safety_margin_unit VARCHAR(10) NOT NULL DEFAULT 'days',
                 color_name VARCHAR(100),
+                color_hex VARCHAR(9),
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE (material, subtype, brand, color_name)
+                UNIQUE (material, subtype, brand, color_hex)
             )""",
         )
         async with conn.begin_nested():
@@ -2801,6 +2825,7 @@ async def run_migrations(conn):
         # fresh installs the table doesn't exist yet at this point and
         # _safe_execute does not swallow "no such table".
         await _safe_execute(conn, "ALTER TABLE filament_sku_settings ADD COLUMN color_name VARCHAR(100)")
+        await _safe_execute(conn, "ALTER TABLE filament_sku_settings ADD COLUMN color_hex VARCHAR(9)")
         # Backfill and drop legacy safety_margin_days column — SQLite requires a table rebuild.
         # Only run if the stale column still exists.
         cols_result = await conn.execute(text("PRAGMA table_info(filament_sku_settings)"))
@@ -2824,33 +2849,34 @@ async def run_migrations(conn):
                         subtype VARCHAR(50),
                         brand VARCHAR(100),
                         color_name VARCHAR(100),
+                        color_hex VARCHAR(9),
                         lead_time_days INTEGER NOT NULL DEFAULT 0,
                         safety_margin_value INTEGER NOT NULL DEFAULT 14,
                         safety_margin_unit VARCHAR(10) NOT NULL DEFAULT 'days',
                         alerts_snoozed BOOLEAN NOT NULL DEFAULT 0,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        UNIQUE (material, subtype, brand, color_name)
+                        UNIQUE (material, subtype, brand, color_hex)
                     )"""
                     )
                 )
                 await conn.execute(
                     text(
                         """INSERT INTO filament_sku_settings_new
-                        (id, material, subtype, brand, color_name, lead_time_days, safety_margin_value,
+                        (id, material, subtype, brand, color_name, color_hex, lead_time_days, safety_margin_value,
                          safety_margin_unit, alerts_snoozed, created_at, updated_at)
-                       SELECT id, material, subtype, brand, color_name, lead_time_days, safety_margin_value,
+                       SELECT id, material, subtype, brand, color_name, color_hex, lead_time_days, safety_margin_value,
                               safety_margin_unit, COALESCE(alerts_snoozed, 0), created_at, updated_at
                        FROM filament_sku_settings"""
                     )
                 )
                 await conn.execute(text("DROP TABLE filament_sku_settings"))
                 await conn.execute(text("ALTER TABLE filament_sku_settings_new RENAME TO filament_sku_settings"))
-        # Widen the unique key to include color_name on pre-existing tables. The
+        # Move the unique key to canonical color_hex on pre-existing tables. The
         # auto-created UNIQUE index still covers only (material, subtype, brand)
         # after the ADD COLUMN above, so rebuild the table to refresh it (#forecast
         # -color-grouping). Detected by inspecting the index columns; skipped once
-        # color_name is already part of the key.
+        # color_hex is already part of the key.
         idx_rows = await conn.execute(text("PRAGMA index_list(filament_sku_settings)"))
         needs_uq_rebuild = False
         for idx in idx_rows.fetchall():
@@ -2858,7 +2884,7 @@ async def run_migrations(conn):
                 continue
             info = await conn.execute(text(f"PRAGMA index_info({idx[1]})"))
             cols = {row[2] for row in info.fetchall()}
-            if "material" in cols and "color_name" not in cols:
+            if "material" in cols and "color_hex" not in cols:
                 needs_uq_rebuild = True
                 break
         if needs_uq_rebuild:
@@ -2872,22 +2898,23 @@ async def run_migrations(conn):
                         subtype VARCHAR(50),
                         brand VARCHAR(100),
                         color_name VARCHAR(100),
+                        color_hex VARCHAR(9),
                         lead_time_days INTEGER NOT NULL DEFAULT 0,
                         safety_margin_value INTEGER NOT NULL DEFAULT 14,
                         safety_margin_unit VARCHAR(10) NOT NULL DEFAULT 'days',
                         alerts_snoozed BOOLEAN NOT NULL DEFAULT 0,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        UNIQUE (material, subtype, brand, color_name)
+                        UNIQUE (material, subtype, brand, color_hex)
                     )"""
                     )
                 )
                 await conn.execute(
                     text(
                         """INSERT INTO filament_sku_settings_uqfix
-                        (id, material, subtype, brand, color_name, lead_time_days, safety_margin_value,
+                        (id, material, subtype, brand, color_name, color_hex, lead_time_days, safety_margin_value,
                          safety_margin_unit, alerts_snoozed, created_at, updated_at)
-                       SELECT id, material, subtype, brand, color_name, lead_time_days, safety_margin_value,
+                       SELECT id, material, subtype, brand, color_name, color_hex, lead_time_days, safety_margin_value,
                               safety_margin_unit, COALESCE(alerts_snoozed, 0), created_at, updated_at
                        FROM filament_sku_settings"""
                     )
@@ -2902,6 +2929,7 @@ async def run_migrations(conn):
                 subtype VARCHAR(50),
                 brand VARCHAR(100),
                 color_name VARCHAR(100),
+                color_hex VARCHAR(9),
                 quantity_spools INTEGER NOT NULL DEFAULT 1,
                 note VARCHAR(500),
                 status VARCHAR(20) NOT NULL DEFAULT 'pending',
@@ -2913,6 +2941,8 @@ async def run_migrations(conn):
         # has it for fresh installs; the ALTER is the upgrade path. "duplicate
         # column name" is swallowed by _safe_execute, so re-runs are no-ops.
         await _safe_execute(conn, "ALTER TABLE filament_shopping_list ADD COLUMN color_name VARCHAR(100)")
+        await _safe_execute(conn, "ALTER TABLE filament_sku_settings ADD COLUMN color_hex VARCHAR(9)")
+        await _safe_execute(conn, "ALTER TABLE filament_shopping_list ADD COLUMN color_hex VARCHAR(9)")
         # SQLite has no implicit updated_at trigger — add one so the column stays current.
         await _safe_execute(
             conn,
@@ -2934,9 +2964,10 @@ async def run_migrations(conn):
                 safety_margin_value INTEGER NOT NULL DEFAULT 14,
                 safety_margin_unit VARCHAR(10) NOT NULL DEFAULT 'days',
                 color_name VARCHAR(100),
+                color_hex VARCHAR(9),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE (material, subtype, brand, color_name)
+                UNIQUE (material, subtype, brand, color_hex)
             )""",
         )
         async with conn.begin_nested():
@@ -2953,23 +2984,24 @@ async def run_migrations(conn):
             conn,
             "ALTER TABLE filament_sku_settings ADD COLUMN IF NOT EXISTS alerts_snoozed BOOLEAN NOT NULL DEFAULT FALSE",
         )
-        # Migration: add color_name to filament_sku_settings and widen the
+        # Migration: add canonical color_hex to filament_sku_settings and widen the
         # unique key to include it so forecasts distinguish colours within a
         # SKU (#forecast-color-grouping). The matching ALTER for
         # filament_shopping_list runs AFTER that table's CREATE below — on
         # fresh installs the table doesn't exist yet at this point.
         await _safe_execute(conn, "ALTER TABLE filament_sku_settings ADD COLUMN IF NOT EXISTS color_name VARCHAR(100)")
-        # Widen UNIQUE (material, subtype, brand) → (material, subtype, brand, color_name).
+        await _safe_execute(conn, "ALTER TABLE filament_sku_settings ADD COLUMN IF NOT EXISTS color_hex VARCHAR(9)")
+        # Widen UNIQUE (material, subtype, brand) → (material, subtype, brand, color_hex).
         # The original constraint was declared with name="uq_filament_sku" in the
         # model, so we drop/re-add by that name. Gated on a pg_constraint lookup so
-        # the rebuild only runs when color_name is missing from the key — without
+        # the rebuild only runs when color_hex is missing from the key — without
         # the gate, every startup would take an ACCESS EXCLUSIVE lock on the table
         # and churn the constraint.
         uq_check = await conn.execute(
             text(
                 "SELECT 1 FROM pg_constraint c "
                 "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey) "
-                "WHERE c.conname = 'uq_filament_sku' AND a.attname = 'color_name' LIMIT 1"
+                "WHERE c.conname = 'uq_filament_sku' AND a.attname = 'color_hex' LIMIT 1"
             )
         )
         if uq_check.scalar_one_or_none() is None:
@@ -2980,7 +3012,7 @@ async def run_migrations(conn):
             await _safe_execute(
                 conn,
                 "ALTER TABLE filament_sku_settings ADD CONSTRAINT uq_filament_sku "
-                "UNIQUE (material, subtype, brand, color_name)",
+                "UNIQUE (material, subtype, brand, color_hex)",
             )
         # Only backfill from safety_margin_days if that column still exists (PostgreSQL).
         col_check = await conn.execute(
@@ -3005,6 +3037,7 @@ async def run_migrations(conn):
                 subtype VARCHAR(50),
                 brand VARCHAR(100),
                 color_name VARCHAR(100),
+                color_hex VARCHAR(9),
                 quantity_spools INTEGER NOT NULL DEFAULT 1,
                 note VARCHAR(500),
                 status VARCHAR(20) NOT NULL DEFAULT 'pending',
@@ -3020,6 +3053,10 @@ async def run_migrations(conn):
         # Backfill color_name on pre-#1814 upgrades — the CREATE above already
         # has it for fresh installs; the ALTER is the upgrade path.
         await _safe_execute(conn, "ALTER TABLE filament_shopping_list ADD COLUMN IF NOT EXISTS color_name VARCHAR(100)")
+        await _safe_execute(conn, "ALTER TABLE filament_sku_settings ADD COLUMN IF NOT EXISTS color_hex VARCHAR(9)")
+        await _safe_execute(conn, "ALTER TABLE filament_shopping_list ADD COLUMN IF NOT EXISTS color_hex VARCHAR(9)")
+
+    await _backfill_forecast_color_hex(conn)
 
     # Migration: Add inventory stock alert columns to notification_providers.
     # Postgres rejects `DEFAULT 0` for BOOLEAN columns.

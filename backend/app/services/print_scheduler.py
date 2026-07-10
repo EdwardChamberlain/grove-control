@@ -34,7 +34,6 @@ from backend.app.services.bambu_ftp import (
 from backend.app.services.filament_deficit import compute_deficit_for_queue_item
 from backend.app.services.filament_material import (
     FilamentMaterial,
-    canonical_filament_type,
 )
 from backend.app.services.notification_service import notification_service
 from backend.app.services.printer_manager import (
@@ -900,9 +899,9 @@ class PrintScheduler:
         if not status:
             return required_types  # Can't determine, assume all missing
 
-        # Collect all filament types loaded on this printer (AMS units + external spool)
-        # Use canonical types so equivalence groups (e.g. PA-CF/PA12-CF/PAHT-CF) match.
-        loaded_types: set[str] = set()
+        # This is the legacy type-only path. Keep it on the same canonical
+        # family comparison used by the queue override and AMS mapping paths.
+        loaded: list[FilamentMaterial] = []
 
         # Check AMS units (stored in raw_data["ams"])
         ams_data = status.raw_data.get("ams", [])
@@ -911,18 +910,19 @@ class PrintScheduler:
                 for tray in ams_unit.get("tray", []):
                     tray_type = tray.get("tray_type")
                     if tray_type:
-                        loaded_types.add(canonical_filament_type(tray_type))
+                        loaded.append(FilamentMaterial.from_parts(family=tray_type))
 
         # Check external spool(s) (virtual tray, stored in raw_data["vt_tray"] as list)
         for vt in status.raw_data.get("vt_tray") or []:
             vt_type = vt.get("tray_type")
             if vt_type:
-                loaded_types.add(canonical_filament_type(vt_type))
+                loaded.append(FilamentMaterial.from_parts(family=vt_type))
 
         # Find which required types are missing (using canonical type for equivalence)
         missing = []
         for req_type in required_types:
-            if canonical_filament_type(req_type) not in loaded_types:
+            required = FilamentMaterial.from_parts(family=req_type)
+            if not any(required.is_dispatch_compatible(candidate) for candidate in loaded):
                 missing.append(req_type)
 
         return missing

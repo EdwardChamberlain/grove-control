@@ -15,6 +15,8 @@ class ShoppingListItem(Base):
     material: Mapped[str] = mapped_column(String(50))
     subtype: Mapped[str | None] = mapped_column(String(50))
     brand: Mapped[str | None] = mapped_column(String(100))
+    color_hex: Mapped[str | None] = mapped_column(String(9))
+    # Display metadata retained for inventory/import workflows.
     color_name: Mapped[str | None] = mapped_column(String(100))
     quantity_spools: Mapped[int] = mapped_column(Integer, default=1)
     note: Mapped[str | None] = mapped_column(String(500))

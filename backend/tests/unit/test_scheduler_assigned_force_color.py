@@ -126,6 +126,24 @@ def test_unforced_mapping_allows_subtypes_within_the_same_family(scheduler):
     assert mapping == [0]
 
 
+def test_legacy_model_type_check_uses_canonical_family_matching(scheduler):
+    status = SimpleNamespace(
+        raw_data={
+            "ams": [
+                {
+                    "tray": [
+                        {"tray_type": "PLA"},
+                    ]
+                }
+            ],
+            "vt_tray": [],
+        }
+    )
+
+    with patch("backend.app.services.print_scheduler.printer_manager.get_status", return_value=status):
+        assert scheduler._get_missing_filament_types(3, ["PLA-S"]) == []
+
+
 def test_missing_per_slot_flag_inherits_safe_queue_default(scheduler):
     item = _queue_item()
     item.filament_overrides = '[{"slot_id": 1, "type": "PLA", "color": "#FF0000"}]'

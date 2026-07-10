@@ -2164,6 +2164,7 @@ class FilamentSkuSettingsResponse(BaseModel):
     material: str
     subtype: str | None
     brand: str | None
+    color_hex: str | None
     color_name: str | None
     lead_time_days: int
     safety_margin_value: int
@@ -2178,6 +2179,7 @@ class FilamentSkuSettingsUpsert(BaseModel):
     material: str
     subtype: str | None = None
     brand: str | None = None
+    color_hex: str | None = None
     color_name: str | None = None
     lead_time_days: int = 0
     safety_margin_value: int = 14
@@ -2207,15 +2209,18 @@ async def upsert_sku_settings(
         Permission.INVENTORY_FORECAST_WRITE, Permission.INVENTORY_UPDATE
     ),
 ):
-    """Create or update reorder settings for a filament SKU (material/subtype/brand)."""
+    """Create or update reorder settings for a canonical filament SKU."""
     from backend.app.models.filament_sku_settings import FilamentSkuSettings
+    from backend.app.services.filament_material import normalize_color_hex
+
+    color_hex = normalize_color_hex(data.color_hex)
 
     result = await db.execute(
         select(FilamentSkuSettings).where(
             FilamentSkuSettings.material == data.material,
             FilamentSkuSettings.subtype == data.subtype,
             FilamentSkuSettings.brand == data.brand,
-            FilamentSkuSettings.color_name == data.color_name,
+            FilamentSkuSettings.color_hex == color_hex,
         )
     )
     row = result.scalar_one_or_none()
@@ -2229,6 +2234,7 @@ async def upsert_sku_settings(
             material=data.material,
             subtype=data.subtype,
             brand=data.brand,
+            color_hex=color_hex,
             color_name=data.color_name,
             lead_time_days=data.lead_time_days,
             safety_margin_value=data.safety_margin_value,
@@ -2249,6 +2255,7 @@ class ShoppingListItemResponse(BaseModel):
     material: str
     subtype: str | None
     brand: str | None
+    color_hex: str | None
     color_name: str | None
     quantity_spools: int
     note: str | None
@@ -2264,6 +2271,7 @@ class ShoppingListItemCreate(BaseModel):
     material: str
     subtype: str | None = None
     brand: str | None = None
+    color_hex: str | None = None
     color_name: str | None = None
     quantity_spools: int = 1
     note: str | None = None
@@ -2289,6 +2297,7 @@ async def get_shopping_list(
             material=i.material,
             subtype=i.subtype,
             brand=i.brand,
+            color_hex=i.color_hex,
             color_name=i.color_name,
             quantity_spools=i.quantity_spools,
             note=i.note,
@@ -2310,11 +2319,13 @@ async def add_to_shopping_list(
 ):
     """Add a filament SKU to the shopping list."""
     from backend.app.models.shopping_list import ShoppingListItem
+    from backend.app.services.filament_material import normalize_color_hex
 
     item = ShoppingListItem(
         material=data.material,
         subtype=data.subtype,
         brand=data.brand,
+        color_hex=normalize_color_hex(data.color_hex),
         color_name=data.color_name,
         quantity_spools=data.quantity_spools,
         note=data.note,
@@ -2327,6 +2338,7 @@ async def add_to_shopping_list(
         material=item.material,
         subtype=item.subtype,
         brand=item.brand,
+        color_hex=item.color_hex,
         color_name=item.color_name,
         quantity_spools=item.quantity_spools,
         note=item.note,
@@ -2371,6 +2383,7 @@ async def update_shopping_list_status(
         material=item.material,
         subtype=item.subtype,
         brand=item.brand,
+        color_hex=item.color_hex,
         color_name=item.color_name,
         quantity_spools=item.quantity_spools,
         note=item.note,
