@@ -3030,16 +3030,17 @@ async def run_migrations(conn):
         # and churn the constraint.
         uq_check = await conn.execute(
             text(
+                "SELECT EXISTS ("
                 "SELECT 1 FROM pg_constraint c "
-                "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey) "
                 "WHERE c.conname = 'uq_filament_sku' "
                 "AND EXISTS (SELECT 1 FROM pg_attribute x WHERE x.attrelid = c.conrelid "
                 "AND x.attnum = ANY(c.conkey) AND x.attname = 'color_hex') "
                 "AND NOT EXISTS (SELECT 1 FROM pg_attribute x WHERE x.attrelid = c.conrelid "
-                "AND x.attnum = ANY(c.conkey) AND x.attname = 'brand') LIMIT 1"
+                "AND x.attnum = ANY(c.conkey) AND x.attname = 'brand')"
+                ")"
             )
         )
-        if uq_check.scalar_one_or_none() is None:
+        if not uq_check.scalar_one():
             await _safe_execute(
                 conn,
                 "ALTER TABLE filament_sku_settings DROP CONSTRAINT IF EXISTS uq_filament_sku",
