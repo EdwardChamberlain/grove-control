@@ -4334,7 +4334,7 @@ export default {
     insufficientFilamentLine: '{{printer}} - {{slot}}: 必要 {{required}}g、残り {{remaining}}g',
     printAnyway: 'それでも印刷',
     forceColorMatch: '色を一致',
-    forceColorMatchHint: '選択した色を必須にします。オフにすると、同じ素材系統の任意の色を使用します。',
+    forceColorMatchHint: '開始前に選択した素材と色を必須にします。オフにすると優先しますが、互換性のある素材で開始できます。',
     staggerPrinterStarts: 'プリンター開始を段階的に',
     staggerGroupSize: 'グループサイズ',
     staggerInterval: '間隔（分）',

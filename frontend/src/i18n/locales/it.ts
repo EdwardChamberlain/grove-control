@@ -4322,7 +4322,7 @@ export default {
     insufficientFilamentLine: '{{printer}} - {{slot}}: necessita di {{required}}g, rimanenti {{remaining}}g',
     printAnyway: 'Stampa comunque',
     forceColorMatch: 'Abbina colore',
-    forceColorMatchHint: 'Richiede il colore selezionato. Disattiva per usare qualsiasi colore della stessa famiglia di materiale.',
+    forceColorMatchHint: 'Richiede il materiale e il colore selezionati prima dell\'avvio. Disattiva per preferirli, ma consentire qualsiasi materiale compatibile.',
     staggerPrinterStarts: 'Scaglionare avvii',
     staggerGroupSize: 'Dimensione gruppo',
     staggerInterval: 'Intervallo (min)',

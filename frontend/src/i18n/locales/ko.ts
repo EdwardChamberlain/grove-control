@@ -4111,7 +4111,7 @@ export default {
     insufficientFilamentLine: '{{printer}} - {{slot}}: {{required}}g 필요, {{remaining}}g 남음',
     printAnyway: '그래도 인쇄',
     forceColorMatch: '색상 일치',
-    forceColorMatchHint: '선택한 색상을 필수로 사용합니다. 끄면 같은 재질 계열의 다른 색상을 사용할 수 있습니다.',
+    forceColorMatchHint: '인쇄 시작 전에 선택한 재질과 색상을 요구합니다. 끄면 이를 우선하지만 호환되는 재질로 인쇄할 수 있습니다.',
     staggerPrinterStarts: '프린터 시작 분산',
     staggerGroupSize: '그룹 크기',
     staggerInterval: '간격 (분)',

@@ -4342,7 +4342,7 @@ export default {
     insufficientFilamentLine: '{{printer}} - {{slot}}: necesita {{required}} g, restante {{remaining}} g',
     printAnyway: 'Imprimir de todos modos',
     forceColorMatch: 'Coincidir color',
-    forceColorMatchHint: 'Exige el color seleccionado. Desactívalo para usar cualquier color de la misma familia de material.',
+    forceColorMatchHint: 'Exige el material y el color seleccionados antes de iniciar. Desactívalo para preferirlos, pero permitir cualquier material compatible.',
     staggerPrinterStarts: 'Escalonar los inicios de las impresoras',
     staggerGroupSize: 'Tamaño de grupo',
     staggerInterval: 'Intervalo (min)',

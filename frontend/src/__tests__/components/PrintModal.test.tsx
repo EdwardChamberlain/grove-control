@@ -355,7 +355,7 @@ describe('PrintModal', () => {
       ]);
     });
 
-    it.skip('persists a manually selected printer filament as the enforced profile', async () => {
+    it('persists a manually selected printer filament as the enforced profile', async () => {
       let capturedBody: Record<string, unknown> | null = null;
       server.use(
         http.get('/api/v1/archives/:id/filament-requirements', () =>
@@ -381,6 +381,53 @@ describe('PrintModal', () => {
             vt_tray: [],
           }),
         ),
+        http.post('/api/v1/printers/:id/filament-mapping-preview', async ({ request }) => {
+          const body = await request.json() as {
+            filaments?: Array<{ slot_id: number }>;
+            manual_mappings?: Record<string, number>;
+          };
+          const selectedTrayId = body.manual_mappings?.['1'] ?? 0;
+          const materials = [
+            {
+              global_tray_id: 0,
+              ams_id: 0,
+              tray_id: 0,
+              is_ht: false,
+              is_external: false,
+              extruder_id: null,
+              remain: 100,
+              material: {
+                family: 'PLA', subtype: 'Basic', color_hex: '#000000FF', profile_id: null, setting_id: null,
+                material_label: 'PLA Basic', display_name: 'PLA Basic - Black', generic_color_name: 'Black',
+              },
+            },
+            {
+              global_tray_id: 1,
+              ams_id: 0,
+              tray_id: 1,
+              is_ht: false,
+              is_external: false,
+              extruder_id: null,
+              remain: 100,
+              material: {
+                family: 'PLA', subtype: 'Matte', color_hex: '#FFFFFFFF', profile_id: null, setting_id: null,
+                material_label: 'PLA Matte', display_name: 'PLA Matte - White', generic_color_name: 'White',
+              },
+            },
+          ];
+          return HttpResponse.json({
+            auto_mapping: [0],
+            mapping: [selectedTrayId],
+            loaded_filaments: materials,
+            comparisons: [{
+              slot_id: 1,
+              material: materials[0].material,
+              status: selectedTrayId === 0 ? 'match' : 'material_only',
+              mapped_tray_id: selectedTrayId,
+              candidate_tray_ids: [0, 1],
+            }],
+          });
+        }),
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = (await request.json()) as Record<string, unknown>;
           return HttpResponse.json({ id: 1, status: 'pending' });
@@ -413,9 +460,12 @@ describe('PrintModal', () => {
       expect(capturedBody?.filament_overrides).toEqual([
         expect.objectContaining({
           slot_id: 1,
-          type: 'PLA',
-          color: '#FFFFFF',
           force_color_match: true,
+          material: expect.objectContaining({
+            family: 'PLA',
+            subtype: 'Matte',
+            color_hex: '#FFFFFFFF',
+          }),
         }),
       ]);
       expect(capturedBody?.ams_mapping).toEqual([1]);

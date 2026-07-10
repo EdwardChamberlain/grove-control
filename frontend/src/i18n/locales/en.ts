@@ -4358,7 +4358,7 @@ export default {
     insufficientFilamentLine: '{{printer}} - {{slot}}: needs {{required}}g, remaining {{remaining}}g',
     printAnyway: 'Print anyway',
     forceColorMatch: 'Match Colour',
-    forceColorMatchHint: 'Require the selected colour. Turn this off to use any colour in the same material family.',
+    forceColorMatchHint: 'Require the selected material and colour before dispatch. Turn this off to prefer it, but allow any compatible material.',
     staggerPrinterStarts: 'Stagger printer starts',
     staggerGroupSize: 'Group size',
     staggerInterval: 'Interval (min)',

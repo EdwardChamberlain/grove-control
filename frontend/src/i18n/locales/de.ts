@@ -4334,7 +4334,7 @@ export default {
     insufficientFilamentLine: '{{printer}} - {{slot}}: benötigt {{required}}g, verbleibend {{remaining}}g',
     printAnyway: 'Trotzdem drucken',
     forceColorMatch: 'Farbe abgleichen',
-    forceColorMatchHint: 'Die ausgewählte Farbe verlangen. Deaktivieren, um eine beliebige Farbe derselben Materialfamilie zu verwenden.',
+    forceColorMatchHint: 'Vor dem Start das ausgewählte Material und die Farbe verlangen. Deaktivieren, um sie zu bevorzugen, aber jedes kompatible Material zuzulassen.',
     staggerPrinterStarts: 'Druckerstarts staffeln',
     staggerGroupSize: 'Gruppengröße',
     staggerInterval: 'Intervall (Min.)',

@@ -51,6 +51,17 @@ def test_dispatch_compatibility_is_family_only():
     assert not paht.is_dispatch_compatible(pa12)
 
 
+def test_strict_material_colour_match_includes_subtype():
+    matte = FilamentMaterial.from_parts(family="PLA", subtype="Matte", color_hex="#FFFFFF")
+    basic = FilamentMaterial.from_parts(family="PLA", subtype="Basic", color_hex="#FFFFFF")
+
+    assert not matte.is_material_color_match(basic)
+    assert matte.is_material_color_match(
+        FilamentMaterial.from_parts(family="PLA", subtype="Matte", color_hex="#FFFFFF")
+    )
+    assert FilamentMaterial.from_parts(family="PLA", color_hex="#FFFFFF").is_material_color_match(matte)
+
+
 def test_unknown_colour_is_not_a_colour_match():
     unknown = FilamentMaterial.from_parts(family="PLA", color_hex="not-a-colour")
     white = FilamentMaterial.from_parts(family="PLA", color_hex="#FFFFFF")

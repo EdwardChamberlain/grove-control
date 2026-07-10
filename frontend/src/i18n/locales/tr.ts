@@ -4312,7 +4312,7 @@ export default {
     insufficientFilamentLine: '{{printer}} - {{slot}}: {{required}}g gerekli, {{remaining}}g kaldı',
     printAnyway: 'Yine de yazdır',
     forceColorMatch: 'Rengi eşleştir',
-    forceColorMatchHint: 'Seçilen rengi zorunlu kılar. Aynı malzeme ailesindeki herhangi bir rengi kullanmak için kapatın.',
+    forceColorMatchHint: 'Yazdırmadan önce seçilen malzeme ve rengi zorunlu kılar. Kapatıldığında bunları tercih eder, ancak uyumlu herhangi bir malzemeye izin verir.',
     staggerPrinterStarts: 'Yazıcı başlangıçlarını kademelendir',
     staggerGroupSize: 'Grup boyutu',
     staggerInterval: 'Aralık (dk)',

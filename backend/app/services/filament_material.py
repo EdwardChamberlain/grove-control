@@ -2,7 +2,8 @@
 
 This module keeps material identity separate from vendor colour names. Dispatch
 compatibility is family-only; subtype, colour, and profile identifiers remain
-available for display, strict colour policy, and printer protocol boundaries.
+available for display, strict selected-material policy, and printer protocol
+boundaries.
 """
 
 from __future__ import annotations
@@ -331,6 +332,20 @@ class FilamentMaterial:
 
     def is_color_match(self, other: FilamentMaterial) -> bool:
         return bool(self.color_hex and other.color_hex and self.color_hex == other.color_hex)
+
+    def is_material_color_match(self, other: FilamentMaterial) -> bool:
+        """Return whether ``other`` satisfies this strict material selection.
+
+        This is the strict dispatch rule used for a queue slot with Match
+        Colour enabled. A selected subtype is enforced when known; an absent
+        subtype is unspecified and therefore constrains only family and
+        colour. Normal dispatch compatibility stays family-only.
+        """
+        return (
+            self.is_family_match(other)
+            and self.is_color_match(other)
+            and (self.subtype is None or self.subtype_key == other.subtype_key)
+        )
 
     def is_profile_match(self, other: FilamentMaterial) -> bool:
         return bool(self.profile_id and other.profile_id and self.profile_id == other.profile_id)

@@ -75,21 +75,21 @@ def test_strict_colour_mapping_rejects_different_material_variant(scheduler):
     assert mapping == [-1]
 
 
-def test_strict_colour_mapping_accepts_compatible_basic_white_for_matte_white(scheduler):
-    required = [{"slot_id": 1, "type": "PLA", "color": "#FFFFFF", "tray_info_idx": "GFA01"}]
+def test_strict_colour_mapping_rejects_different_subtype(scheduler):
+    required = [{"slot_id": 1, "type": "PLA Matte", "color": "#FFFFFF", "tray_info_idx": "GFA01"}]
     loaded = [
-        {"global_tray_id": 0, "type": "PLA", "color": "#FFFFFF", "tray_info_idx": "GFA00"},
+        {"global_tray_id": 0, "type": "PLA Basic", "color": "#FFFFFF", "tray_info_idx": "GFA00"},
     ]
 
     mapping = scheduler._match_filaments_to_slots(required, loaded, strict_color_slot_ids={1})
 
-    assert mapping == [0]
+    assert mapping == [-1]
 
 
 def test_strict_colour_mapping_accepts_matte_white_for_matte_white(scheduler):
-    required = [{"slot_id": 1, "type": "PLA", "color": "#FFFFFF", "tray_info_idx": "GFA01"}]
+    required = [{"slot_id": 1, "type": "PLA Matte", "color": "#FFFFFF", "tray_info_idx": "GFA01"}]
     loaded = [
-        {"global_tray_id": 0, "type": "PLA", "color": "#FFFFFF", "tray_info_idx": "GFA01"},
+        {"global_tray_id": 0, "type": "PLA Matte", "color": "#FFFFFF", "tray_info_idx": "GFA01"},
     ]
 
     mapping = scheduler._match_filaments_to_slots(required, loaded, strict_color_slot_ids={1})
@@ -124,6 +124,52 @@ def test_unforced_mapping_allows_subtypes_within_the_same_family(scheduler):
     mapping = scheduler._match_filaments_to_slots(required, loaded)
 
     assert mapping == [0]
+
+
+@pytest.mark.asyncio
+async def test_mapping_preview_exposes_all_same_family_colours_regardless_of_dispatch_policy(scheduler):
+    """Mapping choices are family-compatible; exact colour is a dispatch constraint."""
+    status = SimpleNamespace(
+        raw_data={
+            "ams": [
+                {
+                    "id": 0,
+                    "tray": [
+                        {"id": 0, "tray_type": "PLA", "tray_sub_brands": "Bambu PLA Matte", "tray_color": "FFFFFF"},
+                        {"id": 1, "tray_type": "PLA", "tray_sub_brands": "Bambu PLA Matte", "tray_color": "FFFFFF"},
+                        {"id": 2, "tray_type": "PLA", "tray_sub_brands": "Bambu PLA Matte", "tray_color": "8B0000"},
+                        {"id": 3, "tray_type": "PLA", "tray_sub_brands": "Bambu PLA Matte", "tray_color": "FF8C00"},
+                    ],
+                }
+            ],
+            "vt_tray": [],
+        },
+        fila_switch=None,
+        ams_filament_backup=True,
+    )
+    requirement = {
+        "slot_id": 1,
+        "type": "PLA Matte",
+        "color": "#8B0000",
+        "material": {"family": "PLA", "subtype": "Matte", "color_hex": "#8B0000FF"},
+    }
+
+    with patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)):
+        exact_preview = await scheduler.build_filament_mapping_preview(
+            AsyncMock(), 3, status, [requirement], {}, force_color_match=True
+        )
+        family_preview = await scheduler.build_filament_mapping_preview(
+            AsyncMock(), 3, status, [requirement], {}, force_color_match=False
+        )
+        manually_selected_preview = await scheduler.build_filament_mapping_preview(
+            AsyncMock(), 3, status, [requirement], {1: 3}, force_color_match=True
+        )
+
+    assert exact_preview["comparisons"][0]["candidate_tray_ids"] == [0, 1, 2, 3]
+    assert family_preview["comparisons"][0]["candidate_tray_ids"] == [0, 1, 2, 3]
+    assert exact_preview["mapping"] == [2]
+    assert family_preview["mapping"] == [2]
+    assert manually_selected_preview["mapping"] == [3]
 
 
 def test_legacy_model_type_check_uses_canonical_family_matching(scheduler):

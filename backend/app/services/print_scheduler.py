@@ -577,7 +577,7 @@ class PrintScheduler:
                                      If provided, only printers with all required types loaded will match.
             target_location: Optional location filter. If provided, only printers in this location are considered.
             filament_overrides: Optional list of override dicts. Each entry may include
-                                 ``force_color_match: true`` to require an exact type+color match
+                                 ``force_color_match: true`` to require an exact material+color match
                                  on the printer for that slot. Without the flag the existing
                                  colour-preference logic applies.
 
@@ -605,7 +605,7 @@ class PrintScheduler:
         if not printers:
             return None, f"No active {normalized_model} printers{location_suffix} configured"
 
-        # Separate force-matched overrides from preference-only overrides
+        # Separate strict selected-material overrides from preference-only overrides.
         force_overrides = [o for o in (filament_overrides or []) if o.get("force_color_match")]
         pref_overrides = [o for o in (filament_overrides or []) if not o.get("force_color_match")]
 
@@ -667,7 +667,8 @@ class PrintScheduler:
                 logger.debug("Skipping printer %s (%s) - missing filaments: %s", printer.id, printer.name, missing)
                 continue
 
-            # Force color match: ALL flagged slots must have an exact type+color match
+            # Match Colour: every flagged slot must match family and colour,
+            # plus subtype where the selected material specifies one.
             if force_overrides:
                 missing_colors = self._get_missing_force_color_slots(printer.id, force_overrides)
                 if missing_colors:
@@ -741,7 +742,7 @@ class PrintScheduler:
 
         Each entry in ``force_overrides`` must have ``type`` and ``color`` fields and is expected
         to carry ``force_color_match: True``.  The printer must have **every** such slot loaded
-        with an exact type+color match.
+        with an exact family and colour match, plus subtype where specified.
 
         Returns:
             List of ``"TYPE (color)"`` strings for unmatched slots (empty list means all match).
@@ -762,10 +763,7 @@ class PrintScheduler:
         missing = []
         for o in force_overrides:
             required = FilamentMaterial.from_queue_override(o)
-            if not any(
-                required.is_dispatch_compatible(candidate) and required.is_color_match(candidate)
-                for candidate in loaded
-            ):
+            if not any(required.is_material_color_match(candidate) for candidate in loaded):
                 missing.append(required.display_name)
         return missing
 
@@ -831,7 +829,7 @@ class PrintScheduler:
 
     @classmethod
     def _get_force_color_overrides(cls, item: PrintQueueItem) -> list[dict]:
-        """Parse the exact-colour requirements persisted on a queue item."""
+        """Parse the strict material-and-colour requirements on a queue item."""
         return [override for override in cls._get_filament_overrides(item) if override.get("force_color_match")]
 
     def _ams_mapping_uses_compatible_materials(
@@ -869,7 +867,7 @@ class PrintScheduler:
 
     @staticmethod
     def _get_missing_force_mapping_slots(mapping: list[int] | None, force_overrides: list[dict]) -> list[str]:
-        """Return forced slots that did not receive an exact-colour AMS mapping."""
+        """Return forced slots that did not receive an exact material-and-colour AMS mapping."""
         missing = []
         for override in force_overrides:
             slot_id = override.get("slot_id")
@@ -1192,12 +1190,10 @@ class PrintScheduler:
 
         def candidate_tray_ids(requirement: dict) -> list[int]:
             required = FilamentMaterial.from_3mf_requirement(requirement)
-            strict_color = requirement.get("slot_id") in policy.strict_color_slot_ids
             return [
                 filament["global_tray_id"]
                 for filament in loaded
                 if required.is_dispatch_compatible(filament["material"])
-                and (not strict_color or required.is_color_match(filament["material"]))
                 and (
                     fts_active
                     or requirement.get("nozzle_id") is None
@@ -1647,7 +1643,11 @@ class PrintScheduler:
                     # Prefer an exact colour within matching-profile candidates.
                     for f in idx_matches:
                         f_material = f.get("material") or FilamentMaterial.from_queue_override(f)
-                        if req_material.is_dispatch_compatible(f_material) and req_material.is_color_match(f_material):
+                        if (
+                            req_material.is_material_color_match(f_material)
+                            if strict_color
+                            else req_material.is_color_match(f_material)
+                        ):
                             if not exact_match:
                                 exact_match = f
                         elif not strict_color and not family_match:
@@ -1658,14 +1658,20 @@ class PrintScheduler:
                 for f in available:
                     # Family matches - prefer exact colour when it is known.
                     f_material = f.get("material") or FilamentMaterial.from_queue_override(f)
-                    if req_material.is_dispatch_compatible(f_material) and req_material.is_color_match(f_material):
+                    if (
+                        req_material.is_material_color_match(f_material)
+                        if strict_color
+                        else req_material.is_color_match(f_material)
+                    ):
                         if not exact_match:
                             exact_match = f
                     elif not strict_color and not family_match and req_material.is_dispatch_compatible(f_material):
                         family_match = f
 
-            # Forced colour requires a known exact colour. Otherwise a matching
-            # family is sufficient and colour is only a ranking preference.
+            # Match Colour requires an exact family and colour, plus subtype
+            # where the selected material specifies one.
+            # Otherwise a matching family is sufficient and colour is only a
+            # ranking preference.
             match = exact_match if strict_color else idx_match or exact_match or family_match
             if match:
                 used_tray_ids.add(match["global_tray_id"])

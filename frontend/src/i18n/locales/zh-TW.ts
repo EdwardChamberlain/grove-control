@@ -4322,7 +4322,7 @@ export default {
     insufficientFilamentLine: '{{printer}} - {{slot}}：需要 {{required}}g，剩餘 {{remaining}}g',
     printAnyway: '仍然列印',
     forceColorMatch: '匹配顏色',
-    forceColorMatchHint: '要求使用所選顏色。關閉後可使用同一材料系列中的任意顏色。',
+    forceColorMatchHint: '開始列印前要求使用所選材料和顏色。關閉後會優先使用它們，但允許使用任何相容材料。',
     staggerPrinterStarts: '錯開印表機啟動',
     staggerGroupSize: '群組大小',
     staggerInterval: '間隔（分鐘）',
