@@ -42,6 +42,7 @@ from backend.app.core.config import settings as app_settings
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.spool_assignment import SpoolAssignment
 from backend.app.models.spoolman_slot_assignment import SpoolmanSlotAssignment
+from backend.app.services.filament_material import normalize_color_hex
 from backend.app.services.filament_requirements import extract_filament_requirements
 
 logger = logging.getLogger(__name__)
@@ -149,24 +150,25 @@ async def _warnings_disabled(db: AsyncSession) -> bool:
         return False
 
 
-def _normalize_color_for_id(raw: str | None) -> str:
-    """Canonicalise a hex colour for identity comparison.
+def _strict_backup_identity(profile_id: str | None, color: str | None, spool_id: object) -> str:
+    """Return a poolable identity only for a known profile and RGB colour.
 
-    Strips the leading ``#``, uppercases, and drops the alpha channel when
-    the hex is 8 chars long (``RRGGBBAA``) so a fully-opaque 8-char hex
-    matches a 6-char hex of the same RGB. Empty / None → empty string.
+    AMS backup can safely combine weight only when both dimensions are known.
+    Missing or malformed colour must stay unknown, not collapse into a shared
+    empty-colour bucket that could incorrectly suppress a deficit warning.
     """
-    s = (raw or "").strip().lstrip("#").upper()
-    if len(s) == 8:  # RRGGBBAA → strip alpha
-        s = s[:6]
-    return s
+    profile = (profile_id or "").strip()
+    normalized_color = normalize_color_hex(color)
+    if not profile or not normalized_color:
+        return f"unmatched:{spool_id}"
+    return f"profile:{profile}|color:{normalized_color[:7]}"
 
 
 def _material_identity_internal(spool) -> str:
     """Strict same-material key for backup-peer matching in internal mode.
 
     Requires a Bambu filament preset ID (``slicer_filament``, e.g. ``GFA00``)
-    AND a matching colour. The preset identifies the filament profile (PETG
+    AND a known matching colour. The preset identifies the filament profile (PETG
     HF, PLA Basic, etc.) — same hot-end behaviour — but the firmware's
     switch logic also requires the spool to be the same colour (otherwise
     every PETG HF spool would back every other PETG HF spool regardless of
@@ -175,14 +177,11 @@ def _material_identity_internal(spool) -> str:
     pair with anything else; without the Bambu preset the firmware can't
     trust the backup decision.
     """
-    preset = (spool.slicer_filament or "").strip() if spool else ""
-    if preset:
-        color = _normalize_color_for_id(spool.rgba if spool else None)
-        return f"preset:{preset}|color:{color}"
-    # Unique-per-spool key prevents grouping. Use the spool's primary key so
-    # the same spool always resolves to the same key within a request.
-    spool_id = getattr(spool, "id", None) if spool else None
-    return f"unmatched:{spool_id}"
+    return _strict_backup_identity(
+        getattr(spool, "slicer_filament", None),
+        getattr(spool, "rgba", None),
+        getattr(spool, "id", None),
+    )
 
 
 def _material_identity_spoolman(spool: dict | None) -> str:
@@ -198,16 +197,14 @@ def _material_identity_spoolman(spool: dict | None) -> str:
         return "unmatched:none"
     filament = spool.get("filament") or {}
     fil_id = filament.get("id")
-    if isinstance(fil_id, (int, str)) and str(fil_id).strip():
-        # Prefer the per-spool override colour when set (Spoolman lets the user
-        # tag a spool with a colour distinct from the filament catalog
-        # default); fall back to the filament catalog colour.
-        color = _normalize_color_for_id(
-            (spool.get("color_hex") if isinstance(spool.get("color_hex"), str) else None) or filament.get("color_hex")
-        )
-        return f"filament:{fil_id}|color:{color}"
-    spool_id = spool.get("id")
-    return f"unmatched:{spool_id}"
+    # Prefer the per-spool override colour when set (Spoolman lets the user
+    # tag a spool with a colour distinct from the filament catalog default).
+    color = (spool.get("color_hex") if isinstance(spool.get("color_hex"), str) else None) or filament.get("color_hex")
+    return _strict_backup_identity(
+        str(fil_id) if isinstance(fil_id, (int, str)) else None,
+        color,
+        spool.get("id"),
+    )
 
 
 def _ams_id_from_global(global_tray_id: int) -> int:

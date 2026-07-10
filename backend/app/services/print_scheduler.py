@@ -928,12 +928,11 @@ class PrintScheduler:
         return missing
 
     def _get_missing_filament_materials(self, printer_id: int, overrides: list[dict]) -> list[str]:
-        """Return canonical materials not loaded on a printer.
+        """Return canonical material families not loaded on a printer.
 
-        Queue overrides preserve subtype information which the legacy
-        ``required_filament_types`` list cannot represent. A known subtype is
-        therefore a hard requirement; legacy requirements without one remain
-        compatible with any subtype in the same family.
+        Dispatch compatibility is family-only. Subtype and profile identify
+        slicer settings and presentation, while colour is enforced separately
+        for slots that opt into exact colour matching.
         """
         status = printer_manager.get_status(printer_id)
         requirements = [FilamentMaterial.from_queue_override(override) for override in overrides]

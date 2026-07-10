@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -26,8 +27,28 @@ from backend.app.models.spool import Spool
 from backend.app.models.spool_assignment import SpoolAssignment
 from backend.app.services.filament_deficit import (
     FilamentDeficit,
+    _material_identity_internal,
+    _material_identity_spoolman,
     compute_deficit_for_queue_item,
 )
+
+
+@pytest.mark.parametrize("color", [None, "not-a-colour"])
+def test_internal_backup_identity_does_not_pool_unknown_colour(color):
+    first = SimpleNamespace(id=1, slicer_filament="GFA00", rgba=color)
+    second = SimpleNamespace(id=2, slicer_filament="GFA00", rgba=color)
+
+    assert _material_identity_internal(first) == "unmatched:1"
+    assert _material_identity_internal(second) == "unmatched:2"
+
+
+@pytest.mark.parametrize("color", [None, "not-a-colour"])
+def test_spoolman_backup_identity_does_not_pool_unknown_colour(color):
+    first = {"id": 1, "color_hex": color, "filament": {"id": 42, "color_hex": color}}
+    second = {"id": 2, "color_hex": color, "filament": {"id": 42, "color_hex": color}}
+
+    assert _material_identity_spoolman(first) == "unmatched:1"
+    assert _material_identity_spoolman(second) == "unmatched:2"
 
 
 def _write_3mf(file_path: Path, filaments: list[dict]) -> None:
