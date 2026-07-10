@@ -244,10 +244,11 @@ def _map_spoolman_spool(spool: dict) -> MappedSpoolFields:
     else:
         subtype = filament_name or None
 
-    # Colour: validate as 6-char hex; fall back to neutral grey for invalid values
+    # Spoolman colour is optional. Preserve missing or invalid values as unknown
+    # rather than creating a real grey canonical SKU identity.
     raw_color = (filament.get("color_hex") or "").upper().removeprefix("#")
-    color_hex: str = raw_color if _COLOR_HEX_RE.match(raw_color) else "808080"
-    rgba: str = color_hex + "FF"
+    color_hex: str | None = raw_color if _COLOR_HEX_RE.match(raw_color) else None
+    rgba: str | None = f"{color_hex}FF" if color_hex else None
 
     label_weight: int = _safe_int(filament.get("weight"), 1000)
     real_used_weight: float = _safe_float(spool.get("used_weight"), 0.0)
@@ -312,7 +313,7 @@ def _map_spoolman_spool(spool: dict) -> MappedSpoolFields:
         "color_name": color_name,
         "color_name_is_synthesized": color_name_is_synthesized,
         "rgba": rgba,
-        "sku_color_hex": f"#{rgba}",
+        "sku_color_hex": f"#{rgba}" if rgba else None,
         "brand": vendor.get("name") or None,
         "label_weight": label_weight,
         "core_weight": _safe_int(

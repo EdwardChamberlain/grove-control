@@ -182,21 +182,24 @@ class TestMapSpoolmanSpool:
         result = _map_spoolman_spool(spool)
         assert result["weight_used"] == 0.0
 
-    def test_invalid_color_hex_falls_back_to_grey(self):
+    def test_invalid_color_hex_stays_unknown(self):
         spool = {**MINIMAL_SPOOL, "filament": {**MINIMAL_SPOOL["filament"], "color_hex": "ZZZZZZ"}}
         result = _map_spoolman_spool(spool)
-        assert result["rgba"] == "808080FF"
+        assert result["rgba"] is None
+        assert result["sku_color_hex"] is None
 
-    def test_short_color_hex_falls_back(self):
+    def test_short_color_hex_stays_unknown(self):
         spool = {**MINIMAL_SPOOL, "filament": {**MINIMAL_SPOOL["filament"], "color_hex": "FFF"}}
         result = _map_spoolman_spool(spool)
-        assert result["rgba"] == "808080FF"
+        assert result["rgba"] is None
+        assert result["sku_color_hex"] is None
 
-    def test_eight_char_color_hex_falls_back(self):
-        # Only 6-char hex is valid from Spoolman; 8-char (RGBA) should fall back
+    def test_eight_char_color_hex_stays_unknown(self):
+        # Only 6-char hex is valid from Spoolman; RGBA is not valid input.
         spool = {**MINIMAL_SPOOL, "filament": {**MINIMAL_SPOOL["filament"], "color_hex": "FF0000FF"}}
         result = _map_spoolman_spool(spool)
-        assert result["rgba"] == "808080FF"
+        assert result["rgba"] is None
+        assert result["sku_color_hex"] is None
 
     def test_color_name_uses_explicit_field_when_present(self):
         """When Spoolman's filament has color_name set, that wins over the subtype fallback."""
@@ -330,7 +333,8 @@ class TestMapSpoolmanSpool:
         spool = {**MINIMAL_SPOOL, "filament": None}
         result = _map_spoolman_spool(spool)
         assert result["material"] == ""
-        assert result["rgba"] == "808080FF"
+        assert result["rgba"] is None
+        assert result["sku_color_hex"] is None
         assert result["label_weight"] == 1000
 
     def test_archived_spool_has_archived_at(self):

@@ -313,15 +313,6 @@ class FilamentMaterial:
             "tray_info_idx": self.profile_id or "",
         }
 
-    def to_mqtt_fields(self) -> dict[str, str]:
-        return {
-            "tray_type": self.family,
-            "tray_sub_brands": self.material_label or self.family,
-            "tray_color": (self.color_hex or "").lstrip("#"),
-            "tray_info_idx": self.profile_id or "",
-            "setting_id": self.setting_id or "",
-        }
-
     def is_family_match(self, other: FilamentMaterial) -> bool:
         return bool(self.compatible_family_key and self.compatible_family_key == other.compatible_family_key)
 
