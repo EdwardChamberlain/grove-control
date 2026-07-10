@@ -617,7 +617,11 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
 
   const clearDeepLinkParam = useCallback(() => {
     deepLinkHandled.current = true;
-    setSearchParams((prev) => { prev.delete('spool'); return prev; }, { replace: true });
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('spool');
+      return next;
+    }, { replace: true });
   }, [setSearchParams]);
 
   // Targeted fetch — only fires when mode is known and spool isn't in the list yet
