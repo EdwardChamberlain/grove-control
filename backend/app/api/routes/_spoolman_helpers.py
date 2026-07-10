@@ -30,6 +30,7 @@ class MappedSpoolFields(TypedDict):
     color_name: str | None
     color_name_is_synthesized: bool
     rgba: str | None
+    sku_color_hex: str | None
     label_weight: int | None
     core_weight: int | None
     core_weight_catalog_id: None
@@ -311,6 +312,7 @@ def _map_spoolman_spool(spool: dict) -> MappedSpoolFields:
         "color_name": color_name,
         "color_name_is_synthesized": color_name_is_synthesized,
         "rgba": rgba,
+        "sku_color_hex": f"#{rgba}",
         "brand": vendor.get("name") or None,
         "label_weight": label_weight,
         "core_weight": _safe_int(

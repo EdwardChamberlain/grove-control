@@ -1920,7 +1920,7 @@ export interface DiscoveredTasmotaDevice {
 export interface FilamentMaterialPayload {
   family: string;
   subtype?: string | null;
-  color_hex: string | null;
+  color_hex: string;
   profile_id?: string | null;
   setting_id?: string | null;
 }
@@ -2752,6 +2752,8 @@ export interface InventorySpool {
   // back to Spoolman as if it were a real user-set color_name (#1319).
   color_name_is_synthesized?: boolean;
   rgba: string | null;
+  /** Backend-normalized #RRGGBBAA identity for forecast grouping. */
+  sku_color_hex?: string | null;
   // Multi-colour gradient stops (#1154): comma-separated 6/8-char hex.
   extra_colors: string | null;
   // Visual effect overlay: sparkle | wood | marble | glow | matte.
@@ -5376,7 +5378,7 @@ export const api = {
     request<{ synced: number; skipped: number }>('/inventory/sync-ams-weights', { method: 'POST' }),
   getSkuSettings: () =>
     request<FilamentSkuSettings[]>('/inventory/sku-settings'),
-  upsertSkuSettings: (data: Omit<FilamentSkuSettings, 'id'>) =>
+  upsertSkuSettings: (data: Omit<FilamentSkuSettings, 'id' | 'color_hex'> & { color_hex: string }) =>
     request<FilamentSkuSettings>('/inventory/sku-settings', {
       method: 'POST',
       body: JSON.stringify(data),

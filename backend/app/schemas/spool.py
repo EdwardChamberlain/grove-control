@@ -205,6 +205,7 @@ class SpoolResponse(SpoolBase):
     # or data sourced from AMS firmware / backups may carry malformed values.
     # A single bad row must not 500 the entire inventory list endpoint (#1055).
     rgba: str | None = None
+    sku_color_hex: str | None = None
     added_full: bool | None = None
     last_used: datetime | None = None
     encode_time: datetime | None = None

@@ -2179,7 +2179,7 @@ class FilamentSkuSettingsUpsert(BaseModel):
     material: str
     subtype: str | None = None
     brand: str | None = None
-    color_hex: str | None = None
+    color_hex: str
     color_name: str | None = None
     lead_time_days: int = 0
     safety_margin_value: int = 14
@@ -2214,12 +2214,13 @@ async def upsert_sku_settings(
     from backend.app.services.filament_material import normalize_color_hex
 
     color_hex = normalize_color_hex(data.color_hex)
+    if color_hex is None:
+        raise HTTPException(status_code=422, detail="color_hex must be a valid RGB or RGBA hex value")
 
     result = await db.execute(
         select(FilamentSkuSettings).where(
             FilamentSkuSettings.material == data.material,
             FilamentSkuSettings.subtype == data.subtype,
-            FilamentSkuSettings.brand == data.brand,
             FilamentSkuSettings.color_hex == color_hex,
         )
     )

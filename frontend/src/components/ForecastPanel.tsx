@@ -61,12 +61,8 @@ const CHART_COLORS = ['#1DB954', '#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6'];
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
-function skuKey(material: string, subtype: string | null, brand: string | null, colorHex: string | null) {
-  return `${material}||${subtype ?? ''}||${brand ?? ''}||${colorHex ?? ''}`;
-}
-
-function spoolColorHex(spool: { rgba?: string | null }) {
-  return spool.rgba ? `#${spool.rgba.replace(/^#/, '')}` : null;
+function skuKey(material: string, subtype: string | null, colorHex: string | null) {
+  return `${material}||${subtype ?? ''}||${colorHex ?? ''}`;
 }
 
 function addDays(date: Date, days: number): Date {
@@ -213,7 +209,9 @@ export function ForecastPanel({ spools }: { spools: InventorySpool[] }) {
 
   const settingsMap = useMemo(() => {
     const m = new Map<string, FilamentSkuSettings>();
-    for (const s of skuSettingsList) m.set(skuKey(s.material, s.subtype, s.brand, s.color_hex), s);
+    for (const s of skuSettingsList) {
+      if (s.color_hex) m.set(skuKey(s.material, s.subtype, s.color_hex), s);
+    }
     return m;
   }, [skuSettingsList]);
 
@@ -231,14 +229,14 @@ export function ForecastPanel({ spools }: { spools: InventorySpool[] }) {
     const map = new Map<string, SkuGroup>();
     for (const spool of spools) {
       if (spool.archived_at) continue;
-      const key = skuKey(spool.material, spool.subtype, spool.brand, spoolColorHex(spool));
+      const key = skuKey(spool.material, spool.subtype, spool.sku_color_hex ?? null);
       const g = map.get(key) ?? {
         key,
         material: spool.material,
         subtype: spool.subtype,
         brand: spool.brand,
         colorName: spool.color_name,
-        colorHex: spoolColorHex(spool),
+        colorHex: spool.sku_color_hex ?? null,
         spools: [],
       };
       g.spools.push(spool);
@@ -251,10 +249,9 @@ export function ForecastPanel({ spools }: { spools: InventorySpool[] }) {
     const today = new Date(); today.setHours(0, 0, 0, 0);
 
     return groups.map((group): SkuForecast => {
-      // Name-keyed settings are legacy data; new settings use colour hex only.
-      const skuSettings =
-        settingsMap.get(group.key) ??
-        (group.colorName !== null ? settingsMap.get(skuKey(group.material, group.subtype, group.brand, null)) ?? null : null);
+      // Legacy name-keyed settings have no safe colour identity, so they are
+      // intentionally inert until a user saves a canonical replacement.
+      const skuSettings = settingsMap.get(group.key) ?? null;
       const skuLeadTime = skuSettings?.lead_time_days ?? 0;
       const effectiveLeadTimeDays = Math.max(globalLeadTime, skuLeadTime);
       const marginValue = skuSettings?.safety_margin_value ?? 14;
@@ -893,6 +890,7 @@ function ForecastRow({
     : 'text-green-400';
 
   function upsert(lead: number, marginVal: number, marginUnitArg: 'days' | 'g', alertsSnoozed = snoozed) {
+    if (!f.group.colorHex) return;
     upsertMutation.mutate({ material: f.group.material, subtype: f.group.subtype, brand: f.group.brand, color_hex: f.group.colorHex, color_name: f.group.colorName, lead_time_days: lead, safety_margin_value: marginVal, safety_margin_unit: marginUnitArg, alerts_snoozed: alertsSnoozed });
   }
 
@@ -1308,7 +1306,7 @@ function ShoppingListPanel({
     const m = new Map<string, SkuForecast>();
     for (const f of forecasts) {
       m.set(f.group.key, f);
-      m.set(skuKey(f.group.material, f.group.subtype, f.group.brand, f.group.colorHex), f);
+      m.set(skuKey(f.group.material, f.group.subtype, f.group.colorHex), f);
     }
     return m;
   }, [forecasts]);
@@ -1317,7 +1315,7 @@ function ShoppingListPanel({
   const cartForecasts = useMemo(() =>
     items.map((item) => ({
       item,
-      forecast: forecastMap.get(skuKey(item.material, item.subtype, item.brand, item.color_hex)) ?? null,
+      forecast: forecastMap.get(skuKey(item.material, item.subtype, item.color_hex)) ?? null,
     })),
     [items, forecastMap]
   );
@@ -1335,7 +1333,7 @@ function ShoppingListPanel({
   function downloadCsv() {
     const headers = [t('forecast.qty'), t('forecast.material'), t('inventory.brand'), t('inventory.subtype'), t('inventory.color'), `${t('forecast.weight')} (g)`, `${t('forecast.leadTime')} (d)`, t('forecast.expectedRestock'), t('forecast.status'), t('forecast.note')];
     const rows = items.map((i) => {
-      const f = forecastMap.get(skuKey(i.material, i.subtype, i.brand, i.color_hex)) ?? null;
+      const f = forecastMap.get(skuKey(i.material, i.subtype, i.color_hex)) ?? null;
       const avgSpoolG = f && f.totalSpools > 0 ? f.totalLabelG / f.totalSpools : 1000;
       const totalWeightG = Math.round(i.quantity_spools * avgSpoolG);
       const lt = f?.effectiveLeadTimeDays ?? globalLeadTime ?? 0;
@@ -1438,7 +1436,7 @@ function ShoppingListPanel({
               {items.map((item) => {
                 const lbl = [item.brand, item.material, item.subtype, item.color_name].filter(Boolean).join(' ');
                 const hasBreak = breakAlerts.some((a) => a.item.id === item.id);
-                const f = forecastMap.get(skuKey(item.material, item.subtype, item.brand, item.color_hex)) ?? null;
+                const f = forecastMap.get(skuKey(item.material, item.subtype, item.color_hex)) ?? null;
                 const avgSpoolG = f && f.totalSpools > 0 ? f.totalLabelG / f.totalSpools : 1000;
                 const totalWeightG = Math.round(item.quantity_spools * avgSpoolG);
                 const lt = f?.effectiveLeadTimeDays ?? globalLeadTime ?? 0;

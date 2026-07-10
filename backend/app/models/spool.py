@@ -77,6 +77,13 @@ class Spool(Base):
     assignments: Mapped[list["SpoolAssignment"]] = relationship(back_populates="spool", cascade="all, delete-orphan")
     location: Mapped["Location | None"] = relationship(back_populates="spools")
 
+    @property
+    def sku_color_hex(self) -> str | None:
+        """Backend-owned canonical colour identity for forecast grouping."""
+        from backend.app.services.filament_material import normalize_color_hex
+
+        return normalize_color_hex(self.rgba)
+
 
 from backend.app.models.location import Location  # noqa: E402
 from backend.app.models.spool_assignment import SpoolAssignment  # noqa: E402

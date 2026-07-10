@@ -471,7 +471,9 @@ async def _migrate_print_queue_filament_materials(conn) -> None:
                 )
 
 
-async def _backfill_forecast_color_hex(conn) -> None:
+async def _backfill_forecast_color_hex(
+    conn, tables: tuple[str, ...] = ("filament_sku_settings", "filament_shopping_list")
+) -> None:
     """Move legacy forecast rows that stored hex values in ``color_name``.
 
     Vendor colour names remain display metadata. Only values that are valid
@@ -481,7 +483,7 @@ async def _backfill_forecast_color_hex(conn) -> None:
 
     from backend.app.services.filament_material import normalize_color_hex
 
-    for table in ("filament_sku_settings", "filament_shopping_list"):
+    for table in tables:
         result = await conn.execute(text(f"SELECT id, color_name, color_hex FROM {table}"))
         for row_id, color_name, color_hex in result.all():
             if color_hex:
@@ -492,6 +494,31 @@ async def _backfill_forecast_color_hex(conn) -> None:
                     text(f"UPDATE {table} SET color_hex = :color_hex WHERE id = :id"),
                     {"color_hex": normalized, "id": row_id},
                 )
+
+
+async def _deduplicate_forecast_sku_settings(conn) -> None:
+    """Keep the most recently updated setting for each canonical SKU key."""
+    from sqlalchemy import bindparam, text
+
+    result = await conn.execute(
+        text(
+            "SELECT id, material, subtype, color_hex FROM filament_sku_settings "
+            "WHERE color_hex IS NOT NULL ORDER BY updated_at DESC, id DESC"
+        )
+    )
+    seen: set[tuple[str, str | None, str]] = set()
+    duplicate_ids: list[int] = []
+    for row_id, material, subtype, color_hex in result.all():
+        key = (material, subtype, color_hex)
+        if key in seen:
+            duplicate_ids.append(row_id)
+        else:
+            seen.add(key)
+    if duplicate_ids:
+        await conn.execute(
+            text("DELETE FROM filament_sku_settings WHERE id IN :ids").bindparams(bindparam("ids", expanding=True)),
+            {"ids": duplicate_ids},
+        )
 
 
 async def _api_keys_column_exists(conn, column_name: str) -> bool:
@@ -2805,7 +2832,7 @@ async def run_migrations(conn):
                 color_hex VARCHAR(9),
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE (material, subtype, brand, color_hex)
+                UNIQUE (material, subtype, color_hex)
             )""",
         )
         async with conn.begin_nested():
@@ -2826,6 +2853,8 @@ async def run_migrations(conn):
         # _safe_execute does not swallow "no such table".
         await _safe_execute(conn, "ALTER TABLE filament_sku_settings ADD COLUMN color_name VARCHAR(100)")
         await _safe_execute(conn, "ALTER TABLE filament_sku_settings ADD COLUMN color_hex VARCHAR(9)")
+        await _backfill_forecast_color_hex(conn, tables=("filament_sku_settings",))
+        await _deduplicate_forecast_sku_settings(conn)
         # Backfill and drop legacy safety_margin_days column — SQLite requires a table rebuild.
         # Only run if the stale column still exists.
         cols_result = await conn.execute(text("PRAGMA table_info(filament_sku_settings)"))
@@ -2856,7 +2885,7 @@ async def run_migrations(conn):
                         alerts_snoozed BOOLEAN NOT NULL DEFAULT 0,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        UNIQUE (material, subtype, brand, color_hex)
+                        UNIQUE (material, subtype, color_hex)
                     )"""
                     )
                 )
@@ -2884,7 +2913,7 @@ async def run_migrations(conn):
                 continue
             info = await conn.execute(text(f"PRAGMA index_info({idx[1]})"))
             cols = {row[2] for row in info.fetchall()}
-            if "material" in cols and "color_hex" not in cols:
+            if "material" in cols and ("color_hex" not in cols or "brand" in cols):
                 needs_uq_rebuild = True
                 break
         if needs_uq_rebuild:
@@ -2905,7 +2934,7 @@ async def run_migrations(conn):
                         alerts_snoozed BOOLEAN NOT NULL DEFAULT 0,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        UNIQUE (material, subtype, brand, color_hex)
+                        UNIQUE (material, subtype, color_hex)
                     )"""
                     )
                 )
@@ -2967,7 +2996,7 @@ async def run_migrations(conn):
                 color_hex VARCHAR(9),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE (material, subtype, brand, color_hex)
+                UNIQUE (material, subtype, color_hex)
             )""",
         )
         async with conn.begin_nested():
@@ -2991,7 +3020,9 @@ async def run_migrations(conn):
         # fresh installs the table doesn't exist yet at this point.
         await _safe_execute(conn, "ALTER TABLE filament_sku_settings ADD COLUMN IF NOT EXISTS color_name VARCHAR(100)")
         await _safe_execute(conn, "ALTER TABLE filament_sku_settings ADD COLUMN IF NOT EXISTS color_hex VARCHAR(9)")
-        # Widen UNIQUE (material, subtype, brand) → (material, subtype, brand, color_hex).
+        await _backfill_forecast_color_hex(conn, tables=("filament_sku_settings",))
+        await _deduplicate_forecast_sku_settings(conn)
+        # Move the legacy brand-specific key to canonical (material, subtype, color_hex).
         # The original constraint was declared with name="uq_filament_sku" in the
         # model, so we drop/re-add by that name. Gated on a pg_constraint lookup so
         # the rebuild only runs when color_hex is missing from the key — without
@@ -3001,7 +3032,11 @@ async def run_migrations(conn):
             text(
                 "SELECT 1 FROM pg_constraint c "
                 "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey) "
-                "WHERE c.conname = 'uq_filament_sku' AND a.attname = 'color_hex' LIMIT 1"
+                "WHERE c.conname = 'uq_filament_sku' "
+                "AND EXISTS (SELECT 1 FROM pg_attribute x WHERE x.attrelid = c.conrelid "
+                "AND x.attnum = ANY(c.conkey) AND x.attname = 'color_hex') "
+                "AND NOT EXISTS (SELECT 1 FROM pg_attribute x WHERE x.attrelid = c.conrelid "
+                "AND x.attnum = ANY(c.conkey) AND x.attname = 'brand') LIMIT 1"
             )
         )
         if uq_check.scalar_one_or_none() is None:
@@ -3012,7 +3047,7 @@ async def run_migrations(conn):
             await _safe_execute(
                 conn,
                 "ALTER TABLE filament_sku_settings ADD CONSTRAINT uq_filament_sku "
-                "UNIQUE (material, subtype, brand, color_hex)",
+                "UNIQUE (material, subtype, color_hex)",
             )
         # Only backfill from safety_margin_days if that column still exists (PostgreSQL).
         col_check = await conn.execute(
