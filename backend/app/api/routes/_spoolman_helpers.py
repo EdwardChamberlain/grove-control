@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 from typing_extensions import TypedDict
 
 from backend.app.api.routes._url_safety import CLOUD_METADATA_IPS, NUMERIC_IP_RE, unwrap_ipv4_mapped
+from backend.app.services.filament_material import FilamentMaterial
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,8 @@ class MappedSpoolFields(TypedDict):
     color_name_is_synthesized: bool
     rgba: str | None
     sku_color_hex: str | None
+    material_display_name: str
+    generic_color_name: str
     label_weight: int | None
     core_weight: int | None
     core_weight_catalog_id: None
@@ -249,6 +252,7 @@ def _map_spoolman_spool(spool: dict) -> MappedSpoolFields:
     raw_color = (filament.get("color_hex") or "").upper().removeprefix("#")
     color_hex: str | None = raw_color if _COLOR_HEX_RE.match(raw_color) else None
     rgba: str | None = f"{color_hex}FF" if color_hex else None
+    canonical_material = FilamentMaterial.from_parts(family=material, subtype=subtype, color_hex=rgba)
 
     label_weight: int = _safe_int(filament.get("weight"), 1000)
     real_used_weight: float = _safe_float(spool.get("used_weight"), 0.0)
@@ -314,6 +318,8 @@ def _map_spoolman_spool(spool: dict) -> MappedSpoolFields:
         "color_name_is_synthesized": color_name_is_synthesized,
         "rgba": rgba,
         "sku_color_hex": f"#{rgba}" if rgba else None,
+        "material_display_name": canonical_material.display_name,
+        "generic_color_name": canonical_material.generic_color_name,
         "brand": vendor.get("name") or None,
         "label_weight": label_weight,
         "core_weight": _safe_int(

@@ -180,10 +180,10 @@ export interface FilamentReqsData {
   filaments: Array<{
     slot_id: number;
     type: string;
-    color: string;
-    material: FilamentMaterialPayload;
-    used_grams: number;
-    used_meters: number;
+    color: string | null;
+    material?: FilamentMaterialPayload | null;
+    used_grams?: number | null;
+    used_meters?: number | null;
     nozzle_id?: number;
     /** Bambu/profile code from the 3MF (e.g. `GFA01` = PLA Matte). Used only
      *  as structured material metadata, not as an official colour name. */

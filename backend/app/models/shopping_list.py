@@ -23,3 +23,13 @@ class ShoppingListItem(Base):
     status: Mapped[str] = mapped_column(String(20), default="pending")  # pending | purchased | received
     purchased_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     added_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    @property
+    def material_display_name(self) -> str:
+        from backend.app.services.filament_material import FilamentMaterial
+
+        return FilamentMaterial.from_parts(
+            family=self.material,
+            subtype=self.subtype,
+            color_hex=self.color_hex,
+        ).display_name

@@ -84,6 +84,19 @@ class Spool(Base):
 
         return normalize_color_hex(self.rgba)
 
+    @property
+    def material_display_name(self) -> str:
+        """Canonical inventory label; vendor names remain metadata only."""
+        from backend.app.services.filament_material import FilamentMaterial
+
+        return FilamentMaterial.from_spool(self).display_name
+
+    @property
+    def generic_color_name(self) -> str:
+        from backend.app.services.filament_material import FilamentMaterial
+
+        return FilamentMaterial.from_spool(self).generic_color_name
+
 
 from backend.app.models.location import Location  # noqa: E402
 from backend.app.models.spool_assignment import SpoolAssignment  # noqa: E402

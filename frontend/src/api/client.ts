@@ -1920,7 +1920,7 @@ export interface DiscoveredTasmotaDevice {
 export interface FilamentMaterialPayload {
   family: string;
   subtype?: string | null;
-  color_hex: string;
+  color_hex: string | null;
   profile_id?: string | null;
   setting_id?: string | null;
 }
@@ -1935,9 +1935,9 @@ export interface FilamentRequirementPayload {
   slot_id: number;
   type: string;
   color: string | null;
-  material: FilamentMaterialPayload;
-  used_grams: number;
-  used_meters: number;
+  material?: FilamentMaterialPayload | null;
+  used_grams?: number | null;
+  used_meters?: number | null;
   nozzle_id?: number;
   tray_info_idx?: string;
   used_in_plate?: boolean;
@@ -2754,6 +2754,9 @@ export interface InventorySpool {
   rgba: string | null;
   /** Backend-normalized #RRGGBBAA identity for forecast grouping. */
   sku_color_hex?: string | null;
+  /** Backend-generated canonical material label, never a vendor colour name. */
+  material_display_name: string;
+  generic_color_name: string;
   // Multi-colour gradient stops (#1154): comma-separated 6/8-char hex.
   extra_colors: string | null;
   // Visual effect overlay: sparkle | wood | marble | glow | matte.
@@ -2900,6 +2903,7 @@ export interface FilamentSkuSettings {
   brand: string | null;
   color_hex: string | null;
   color_name: string | null;
+  material_display_name: string;
   lead_time_days: number;
   safety_margin_value: number;
   safety_margin_unit: 'days' | 'g';
@@ -2913,6 +2917,7 @@ export interface ShoppingListItem {
   brand: string | null;
   color_hex: string | null;
   color_name: string | null;
+  material_display_name: string;
   quantity_spools: number;
   note: string | null;
   status: 'pending' | 'purchased' | 'received';

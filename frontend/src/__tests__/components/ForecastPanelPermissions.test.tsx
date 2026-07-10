@@ -35,6 +35,9 @@ const mockSpool: InventorySpool = {
   brand: 'Polymaker',
   color_name: 'Red',
   rgba: 'FF0000FF',
+  sku_color_hex: '#FF0000FF',
+  material_display_name: 'PLA - Red',
+  generic_color_name: 'Red',
   label_weight: 1000,
   core_weight: 250,
   core_weight_catalog_id: null,
@@ -141,6 +144,7 @@ describe('ForecastPanel — read permission guard', () => {
           screen.queryByText(/do not have permission to view inventory forecasts/i),
         ).not.toBeInTheDocument();
         expect(screen.getByText('SKU')).toBeInTheDocument();
+        expect(screen.getByText('PLA - Red')).toBeInTheDocument();
       },
       { timeout: 3000 },
     );
@@ -169,6 +173,7 @@ describe('ForecastPanel — write permission guard (auth disabled baseline)', ()
         HttpResponse.json([
           {
             id: 1, material: 'PLA', subtype: null, brand: 'Polymaker',
+            color_hex: '#FF0000FF', color_name: 'Red', material_display_name: 'PLA - Red',
             quantity_spools: 2, status: 'pending', note: null,
             added_at: '2025-01-01T00:00:00Z',
           },

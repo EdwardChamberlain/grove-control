@@ -25,3 +25,13 @@ class FilamentSkuSettings(Base):
     alerts_snoozed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    @property
+    def material_display_name(self) -> str:
+        from backend.app.services.filament_material import FilamentMaterial
+
+        return FilamentMaterial.from_parts(
+            family=self.material,
+            subtype=self.subtype,
+            color_hex=self.color_hex,
+        ).display_name

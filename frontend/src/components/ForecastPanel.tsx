@@ -26,6 +26,7 @@ interface SkuGroup {
   brand: string | null;
   colorName: string | null;
   colorHex: string | null;
+  materialDisplayName: string;
   spools: InventorySpool[];
 }
 
@@ -237,6 +238,7 @@ export function ForecastPanel({ spools }: { spools: InventorySpool[] }) {
         brand: spool.brand,
         colorName: spool.color_name,
         colorHex: spool.sku_color_hex ?? null,
+        materialDisplayName: spool.material_display_name,
         spools: [],
       };
       g.spools.push(spool);
@@ -620,7 +622,7 @@ function SortableTh({
 
 function AlertBanner({ forecast: f, onCart }: { forecast: SkuForecast; onCart: () => void }) {
   const { t } = useTranslation();
-  const label = [f.group.brand, f.group.material, f.group.subtype, f.group.colorName].filter(Boolean).join(' ');
+  const label = f.group.materialDisplayName;
   const isBreak = f.stockBreakAlert;
 
   return (
@@ -668,7 +670,7 @@ function UsageChart({ forecasts, days: maxDays, onDaysChange }: {
 
   const series = forecasts.map((f, idx) => ({
     key: f.group.key,
-    label: [f.group.brand, f.group.material, f.group.subtype, f.group.colorName].filter(Boolean).join(' '),
+    label: f.group.materialDisplayName,
     color: CHART_COLORS[idx % CHART_COLORS.length],
     rop: f.reorderPointG,
     points: buildProjectionSeries(f, maxDays),
@@ -876,7 +878,7 @@ function ForecastRow({
 
   const snoozed = f.settings?.alerts_snoozed ?? false;
 
-  const label = [f.group.brand, f.group.material, f.group.subtype, f.group.colorName].filter(Boolean).join(' ');
+  const label = f.group.materialDisplayName;
   // Use getSwatchStyle so a Clear (alpha=00) lead spool renders as a
   // checkerboard rather than collapsing to solid black (#1545).
   const colorStyle = f.group.spools[0]?.rgba ? getSwatchStyle(f.group.spools[0].rgba) : { backgroundColor: '#4B5563' };
@@ -1434,7 +1436,7 @@ function ShoppingListPanel({
             </thead>
             <tbody className="divide-y divide-bambu-dark-tertiary">
               {items.map((item) => {
-                const lbl = [item.brand, item.material, item.subtype, item.color_name].filter(Boolean).join(' ');
+                const lbl = item.material_display_name;
                 const hasBreak = breakAlerts.some((a) => a.item.id === item.id);
                 const f = forecastMap.get(skuKey(item.material, item.subtype, item.color_hex)) ?? null;
                 const avgSpoolG = f && f.totalSpools > 0 ? f.totalLabelG / f.totalSpools : 1000;
@@ -1566,7 +1568,7 @@ function CartLogisticsRow({
   onRemove: () => void;
 }) {
   const { t } = useTranslation();
-  const label = [item.brand, item.material, item.subtype, item.color_name].filter(Boolean).join(' ');
+  const label = item.material_display_name;
 
   // Build a timeline showing stock depletion, arrival bump, then post-arrival depletion.
   // Two points are inserted at day `lt` (just-before and just-after arrival) so the
@@ -1801,7 +1803,7 @@ function AddToCartModal({
   onAdd: (item: { material: string; subtype: string | null; brand: string | null; color_hex: string | null; color_name: string | null; quantity_spools: number; note: string | null }) => void;
 }) {
   const { t } = useTranslation();
-  const label = [f.group.brand, f.group.material, f.group.subtype, f.group.colorName].filter(Boolean).join(' ');
+  const label = f.group.materialDisplayName;
   const [mode, setMode] = useState<'qty' | 'duration'>('qty');
   const [qty, setQty] = useState('1');
   const [durationDays, setDurationDays] = useState('30');

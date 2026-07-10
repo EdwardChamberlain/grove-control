@@ -206,6 +206,8 @@ class SpoolResponse(SpoolBase):
     # A single bad row must not 500 the entire inventory list endpoint (#1055).
     rgba: str | None = None
     sku_color_hex: str | None = None
+    material_display_name: str = ""
+    generic_color_name: str = "Unknown colour"
     added_full: bool | None = None
     last_used: datetime | None = None
     encode_time: datetime | None = None

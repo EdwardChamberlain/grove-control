@@ -2166,6 +2166,7 @@ class FilamentSkuSettingsResponse(BaseModel):
     brand: str | None
     color_hex: str | None
     color_name: str | None
+    material_display_name: str
     lead_time_days: int
     safety_margin_value: int
     safety_margin_unit: str
@@ -2258,6 +2259,7 @@ class ShoppingListItemResponse(BaseModel):
     brand: str | None
     color_hex: str | None
     color_name: str | None
+    material_display_name: str
     quantity_spools: int
     note: str | None
     status: str
@@ -2300,6 +2302,7 @@ async def get_shopping_list(
             brand=i.brand,
             color_hex=i.color_hex,
             color_name=i.color_name,
+            material_display_name=i.material_display_name,
             quantity_spools=i.quantity_spools,
             note=i.note,
             status=i.status or "pending",
@@ -2341,6 +2344,7 @@ async def add_to_shopping_list(
         brand=item.brand,
         color_hex=item.color_hex,
         color_name=item.color_name,
+        material_display_name=item.material_display_name,
         quantity_spools=item.quantity_spools,
         note=item.note,
         status=item.status or "pending",
@@ -2386,6 +2390,7 @@ async def update_shopping_list_status(
         brand=item.brand,
         color_hex=item.color_hex,
         color_name=item.color_name,
+        material_display_name=item.material_display_name,
         quantity_spools=item.quantity_spools,
         note=item.note,
         status=item.status or "pending",

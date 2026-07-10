@@ -101,6 +101,8 @@ class TestMapSpoolmanSpool:
         assert result["id"] == 1
         assert result["material"] == "PLA"
         assert result["rgba"] == "FF0000FF"
+        assert result["material_display_name"] == "PLA Basic - Red"
+        assert result["generic_color_name"] == "Red"
         assert result["label_weight"] == 1000
         # No remaining_weight set → fallback path: weight_used = used_weight, baseline = 0.
         assert result["weight_used"] == pytest.approx(250.0)

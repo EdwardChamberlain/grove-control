@@ -24,7 +24,6 @@ import { LocationsModal } from '../components/LocationsModal';
 import { BulkEditSpoolsModal } from '../components/BulkEditSpoolsModal';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
-import { resolveSpoolColorName } from '../utils/colors';
 import { getCurrencySymbol } from '../utils/currency';
 import { formatDateInput, parseUTCDate, type DateFormat } from '../utils/date';
 import { formatSlotLabel } from '../utils/amsHelpers';
@@ -60,7 +59,7 @@ function spoolGroupKey(s: InventorySpool): string {
   // Include extra_colors + effect_type so the "Group similar" toggle does
   // not collapse two spools that share the base colour but differ on
   // gradient stops or visual effect (#1154).
-  return `${s.material}|${s.subtype || ''}|${s.brand || ''}|${s.color_name || ''}|${s.rgba || ''}|${s.extra_colors || ''}|${s.effect_type || ''}|${s.label_weight}`;
+  return `${s.material}|${s.subtype || ''}|${s.sku_color_hex || ''}|${s.extra_colors || ''}|${s.effect_type || ''}|${s.label_weight}`;
 }
 
 // Column definitions for the inventory table
@@ -239,7 +238,7 @@ const columnCells: Record<string, (ctx: CellCtx) => ReactNode> = {
     <span className="text-sm text-bambu-gray">{spool.subtype || '-'}</span>
   ),
   color_name: ({ spool }) => (
-    <span className="text-sm text-bambu-gray">{resolveSpoolColorName(spool.color_name, spool.rgba) || '-'}</span>
+    <span className="text-sm text-bambu-gray">{spool.generic_color_name || '-'}</span>
   ),
   brand: ({ spool }) => (
     <span className="text-sm text-bambu-gray">{spool.brand || '-'}</span>
@@ -411,7 +410,7 @@ const columnSortValues: Record<string, (spool: InventorySpool, assignmentMap: Re
   last_used_time: (s) => s.last_used || '',
   material: (s) => (s.material || '').toLowerCase(),
   subtype: (s) => (s.subtype || '').toLowerCase(),
-  color_name: (s) => (s.color_name || '').toLowerCase(),
+  color_name: (s) => (s.generic_color_name || '').toLowerCase(),
   brand: (s) => (s.brand || '').toLowerCase(),
   slicer_filament: (s) => (s.slicer_filament_name || s.slicer_filament || '').toLowerCase(),
   location: (s, am) => {
@@ -926,7 +925,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
         await spoolbuddyApi.updateSpoolWeight(spool.id, spool.last_scale_weight);
       }
       queryClient.invalidateQueries({ queryKey: spoolsQueryKey });
-      const spoolName = [spool.brand, spool.material, spool.color_name].filter(Boolean).join(' ');
+      const spoolName = [spool.brand, spool.material_display_name].filter(Boolean).join(' ');
       showToast(`Synced "${spoolName}" to scale weight`, 'success');
     } catch (e) {
       const is404 = e instanceof ApiError && e.status === 404;
@@ -1896,7 +1895,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
                       >
                         <div className="h-10 flex items-center px-4 gap-3" style={groupBannerStyle}>
                           <span className="bg-white/90 text-gray-800 px-3 py-0.5 rounded-full text-sm font-medium">
-                            {resolveSpoolColorName(rep.color_name, rep.rgba) || '-'}
+                            {rep.generic_color_name || '-'}
                           </span>
                         </div>
                         <div className="px-4 py-3 flex items-center justify-between">
@@ -2434,7 +2433,7 @@ function SpoolCard({
     >
       <div className="h-14 flex items-center justify-center" style={bannerStyle}>
         <span className="bg-white/90 text-gray-800 px-3 py-0.5 rounded-full text-sm font-medium">
-          {resolveSpoolColorName(spool.color_name, spool.rgba) || '-'}
+          {spool.generic_color_name || '-'}
         </span>
         {onCopy && (
           <button
