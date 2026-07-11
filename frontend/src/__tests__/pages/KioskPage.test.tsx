@@ -131,6 +131,8 @@ describe('KioskPage', () => {
       expect(screen.getAllByText('Plate clear required')).toHaveLength(2);
       expect(screen.getByText('Waiting for compatible material')).toBeInTheDocument();
       expect(screen.getByRole('banner').parentElement).toHaveClass('h-screen', 'overflow-hidden');
+      expect(screen.getByTestId('kiosk-printer-1')).toHaveClass('flex-1');
+      expect(screen.queryByTestId('kiosk-fleet-overflow')).not.toBeInTheDocument();
     });
 
     const printing = screen.getByRole('heading', { name: 'Currently Printing' });
@@ -148,7 +150,7 @@ describe('KioskPage', () => {
     });
   });
 
-  it('renders a faded third row after eight printers, prioritising plate-clear and printing states', async () => {
+  it('shows three prioritised printers and a faded fourth card when the fleet overflows', async () => {
     vi.mocked(api.getPrinters).mockResolvedValue([
       { id: 1, name: 'Printing printer', model: 'X1 Carbon', is_active: true },
       { id: 2, name: 'Plate-clear printer', model: 'P1S', is_active: true },
@@ -171,10 +173,13 @@ describe('KioskPage', () => {
     await waitFor(() => {
       expect(screen.getByText('Plate-clear printer')).toBeInTheDocument();
       expect(screen.getByText('Printing printer')).toBeInTheDocument();
-      expect(screen.getByText('Idle printer 9')).toBeInTheDocument();
-      expect(screen.getByText('+1 Printers')).toBeInTheDocument();
-      expect(screen.getByTestId('kiosk-fleet-grid')).toHaveClass('grid-cols-4', 'auto-rows-[154px]');
-      expect(screen.getByTestId('kiosk-fleet-overflow')).toHaveClass('h-[77px]');
+      expect(screen.getByText('Idle printer 4')).toBeInTheDocument();
+      expect(screen.queryByText('Idle printer 9')).not.toBeInTheDocument();
+      expect(screen.getByText('+6 Printers')).toBeInTheDocument();
+      expect(screen.getAllByTestId(/^kiosk-printer-/)).toHaveLength(4);
+      expect(screen.getByTestId('kiosk-fleet-grid')).toHaveClass('flex', 'h-[154px]');
+      expect(screen.getByTestId('kiosk-printer-4')).toHaveClass('w-[calc((100%-2.25rem)/3.25)]', 'shrink-0');
+      expect(screen.getByTestId('kiosk-fleet-overflow')).toHaveClass('inset-y-0', 'right-0', 'w-[10%]');
     });
   });
 

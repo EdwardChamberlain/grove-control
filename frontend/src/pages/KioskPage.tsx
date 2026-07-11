@@ -61,12 +61,14 @@ function KioskPrinterTile({
   owner,
   timeFormat,
   t,
+  className,
 }: {
   printer: PrinterRecord;
   status: PrinterStatus | undefined;
   owner: string | undefined;
   timeFormat: TimeFormat;
   t: Translate;
+  className?: string;
 }) {
   const active = isActivePrint(status);
   const plateClearRequired = status?.awaiting_plate_clear === true && !active;
@@ -79,7 +81,7 @@ function KioskPrinterTile({
     : null;
 
   return (
-    <article data-testid={`kiosk-printer-${printer.id}`} className={`h-full min-w-0 border border-bambu-dark-tertiary bg-bambu-dark-secondary p-3 ${plateClearRequired ? 'border-yellow-400/60 kiosk-plate-clear-alert' : ''}`}>
+    <article data-testid={`kiosk-printer-${printer.id}`} className={`h-full min-w-0 border border-bambu-dark-tertiary bg-bambu-dark-secondary p-3 ${plateClearRequired ? 'border-yellow-400/60 kiosk-plate-clear-alert' : ''} ${className || ''}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="truncate text-sm font-semibold text-white">{printer.name}</h2>
@@ -189,6 +191,8 @@ function KioskQueueSection({
   timeFormat,
   t,
   className,
+  testId,
+  fillAvailableHeight = false,
   listClassName,
 }: {
   title: string;
@@ -197,13 +201,15 @@ function KioskQueueSection({
   timeFormat: TimeFormat;
   t: Translate;
   className?: string;
+  testId: string;
+  fillAvailableHeight?: boolean;
   listClassName?: string;
 }) {
   const { ref, hiddenItemCount } = useOverflowing([items, statuses]);
 
   return (
-    <section className={className} aria-label={title}>
-      <div className="mb-2 flex items-center gap-2">
+    <section data-testid={testId} className={`${fillAvailableHeight ? 'flex min-h-0 flex-col' : ''} ${className || ''}`} aria-label={title}>
+      <div className="mb-2 flex shrink-0 items-center gap-2">
         <ListOrdered className="h-4 w-4 text-bambu-green" />
         <h2 className="text-base font-semibold text-white">{title}</h2>
         <span className="text-xs text-bambu-gray">({items.length})</span>
@@ -211,12 +217,12 @@ function KioskQueueSection({
       {items.length === 0 ? (
         <p className="border border-dashed border-bambu-dark-tertiary px-3 py-4 text-sm text-bambu-gray">{title === t('queue.sections.currentlyPrinting') ? t('kiosk.noPrinting') : t('kiosk.noQueue')}</p>
       ) : (
-        <div className="relative">
-          <div ref={ref} className={`space-y-2 overflow-hidden ${listClassName || ''}`}>
+        <div className={`relative min-h-0 ${fillAvailableHeight ? 'flex-1' : ''}`}>
+          <div data-testid={`${testId}-list`} ref={ref} className={`${fillAvailableHeight ? 'h-full' : ''} space-y-2 overflow-hidden ${listClassName || ''}`}>
             {items.map((item) => <KioskQueueCard key={item.id} item={item} status={item.printer_id ? statuses.get(item.printer_id) : undefined} timeFormat={timeFormat} t={t} />)}
           </div>
           {hiddenItemCount > 0 && (
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 flex h-12 items-end justify-center bg-gradient-to-t from-bambu-dark to-transparent pb-1" aria-label={t('kiosk.moreJobs', { count: hiddenItemCount })}>
+            <div data-testid={`${testId}-overflow`} className="pointer-events-none absolute inset-x-0 bottom-0 flex h-12 items-end justify-center bg-gradient-to-t from-bambu-dark to-transparent pb-1" aria-label={t('kiosk.moreJobs', { count: hiddenItemCount })}>
               <span className="rounded-full bg-bambu-dark-tertiary px-2 py-0.5 text-sm font-medium text-white">{t('kiosk.moreJobs', { count: hiddenItemCount })}</span>
             </div>
           )}
@@ -274,11 +280,9 @@ export function KioskPage() {
     const priorityDifference = priority(a) - priority(b);
     return priorityDifference || a.name.localeCompare(b.name);
   }), [printers, statuses]);
-  // Keep the first two rows fully readable. A partially faded third row gives
-  // passing users an immediate cue that further printers exist.
-  const visiblePrinterLimit = 12;
-  const visiblePrinters = prioritizedPrinters.slice(0, visiblePrinterLimit);
-  const overflowPrinterCount = Math.max(0, prioritizedPrinters.length - 8);
+  const hasPrinterOverflow = prioritizedPrinters.length > 3;
+  const visiblePrinters = prioritizedPrinters.slice(0, hasPrinterOverflow ? 4 : 3);
+  const overflowPrinterCount = Math.max(0, prioritizedPrinters.length - 3);
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(new Date()), 10_000);
@@ -286,14 +290,14 @@ export function KioskPage() {
   }, []);
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-bambu-dark px-4 py-4 sm:px-6 lg:px-8">
+    <div data-testid="kiosk-page" className="flex h-screen flex-col overflow-hidden bg-bambu-dark px-4 py-4 sm:px-6 lg:px-8">
       <header className="mx-auto flex w-full shrink-0 max-w-[1920px] items-center justify-between border-b border-bambu-dark-tertiary pb-3">
         <img src={resolvedMode === 'dark' ? '/img/grove_control_logo_dark_transparent.png' : '/img/grove_control_logo_light.png'} alt="Grove Control" className="h-9 w-auto sm:h-10" />
         <time className="text-lg font-medium tabular-nums text-white sm:text-xl">{now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
       </header>
 
-      <main className="mx-auto min-h-0 w-full max-w-[1920px] flex-1 overflow-hidden pb-4">
-        <section className="py-4" aria-labelledby="kiosk-fleet-heading">
+      <main className="mx-auto flex min-h-0 w-full max-w-[1920px] flex-1 flex-col overflow-hidden pb-4">
+        <section className="shrink-0 py-3" aria-labelledby="kiosk-fleet-heading">
           <div className="mb-3 flex items-center gap-2">
             <Printer className="h-5 w-5 text-bambu-green" />
             <h1 id="kiosk-fleet-heading" className="text-lg font-semibold text-white">{t('nav.printers')}</h1>
@@ -301,12 +305,22 @@ export function KioskPage() {
           {printers.length === 0 ? (
             <p className="border border-dashed border-bambu-dark-tertiary px-4 py-8 text-center text-bambu-gray">{t('kiosk.noPrinters')}</p>
           ) : (
-            <div className="relative">
-              <div data-testid="kiosk-fleet-grid" className="grid grid-cols-4 auto-rows-[154px] gap-3">
-                {visiblePrinters.map((printer) => <KioskPrinterTile key={printer.id} printer={printer} status={statuses.get(printer.id)} owner={owners.get(printer.id)} timeFormat={timeFormat} t={t} />)}
+            <div className="relative overflow-hidden">
+              <div data-testid="kiosk-fleet-grid" className="flex h-[154px] gap-3">
+                {visiblePrinters.map((printer) => (
+                  <KioskPrinterTile
+                    key={printer.id}
+                    printer={printer}
+                    status={statuses.get(printer.id)}
+                    owner={owners.get(printer.id)}
+                    timeFormat={timeFormat}
+                    t={t}
+                    className={hasPrinterOverflow ? 'w-[calc((100%-2.25rem)/3.25)] shrink-0' : 'flex-1'}
+                  />
+                ))}
               </div>
               {overflowPrinterCount > 0 && (
-                <div data-testid="kiosk-fleet-overflow" className="pointer-events-none absolute inset-x-0 bottom-0 flex h-[77px] items-end justify-center bg-gradient-to-t from-bambu-dark to-transparent pb-1" aria-label={t('kiosk.morePrinters', { count: overflowPrinterCount })}>
+                <div data-testid="kiosk-fleet-overflow" className="pointer-events-none absolute inset-y-0 right-0 flex w-[10%] items-center justify-end bg-gradient-to-l from-bambu-dark via-bambu-dark/85 to-transparent pr-3" aria-label={t('kiosk.morePrinters', { count: overflowPrinterCount })}>
                   <span className="rounded-full bg-bambu-dark-tertiary px-2 py-0.5 text-sm font-medium text-white">{t('kiosk.morePrinters', { count: overflowPrinterCount })}</span>
                 </div>
               )}
@@ -314,9 +328,9 @@ export function KioskPage() {
           )}
         </section>
 
-        <div className="border-t border-bambu-dark-tertiary pt-4">
-          <KioskQueueSection title={t('queue.sections.currentlyPrinting')} items={printingItems} statuses={statuses} timeFormat={timeFormat} t={t} className="mb-5" listClassName="max-h-96" />
-          <KioskQueueSection title={t('queue.sections.queued')} items={pendingItems} statuses={statuses} timeFormat={timeFormat} t={t} listClassName="max-h-[30rem]" />
+        <div data-testid="kiosk-queue-area" className="flex min-h-0 flex-1 flex-col border-t border-bambu-dark-tertiary pt-3">
+          <KioskQueueSection title={t('queue.sections.currentlyPrinting')} items={printingItems} statuses={statuses} timeFormat={timeFormat} t={t} testId="kiosk-printing-section" className="mb-4 shrink-0" listClassName="max-h-52" />
+          <KioskQueueSection title={t('queue.sections.queued')} items={pendingItems} statuses={statuses} timeFormat={timeFormat} t={t} testId="kiosk-pending-section" fillAvailableHeight />
         </div>
       </main>
     </div>
