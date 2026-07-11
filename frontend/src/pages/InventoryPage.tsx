@@ -13,7 +13,7 @@ import { ForecastPanel } from '../components/ForecastPanel';
 import { api, spoolbuddyApi, ApiError } from '../api/client';
 import type { InventorySpool, SpoolCatalogEntry } from '../api/client';
 import { Button } from '../components/Button';
-import { ToolbarDropdown } from '../components/ToolbarControls';
+import { ToolbarDropdown, ReactSelect } from '../components/ToolbarControls';
 import { FilamentSwatch } from '../components/FilamentSwatch';
 import { buildFilamentBackground } from '../components/filamentSwatchHelpers';
 import {SpoolFormModal, type SpoolFormMode} from '../components/SpoolFormModal';
@@ -1717,7 +1717,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
         {/* Category dropdown chip (#729) — only render once at least one
             spool carries a category, otherwise it's noise. */}
         {(uniqueCategories.length > 0 || categoryFilter) && (
-          <select
+          <ReactSelect
             value={categoryFilter}
             onChange={(e) => { setCategoryFilter(e.target.value); resetPage(); }}
             className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer focus:outline-none ${
@@ -1733,12 +1733,12 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
             {hasUncategorized && (
               <option value="__none__">{t('inventory.categoryNone')}</option>
             )}
-          </select>
+          </ReactSelect>
         )}
 
         {/* Spool name dropdown chip */}
         {uniqueSpoolCatalogIds.length > 0 && (
-          <select
+          <ReactSelect
             value={spoolFilter}
             onChange={(e) => { setSpoolFilter(e.target.value); resetPage(); }}
             className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer focus:outline-none ${
@@ -1751,14 +1751,14 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
             {uniqueSpoolCatalogIds.map((id) => (
               <option key={id} value={id}>{catalogMap[id]?.name || `#${id}`}</option>
             ))}
-          </select>
+          </ReactSelect>
         )}
 
         {/* Storage location dropdown chip (#1400) — only render when at
             least one spool carries a storage location, otherwise it's noise
             (matches the category chip pattern). */}
         {(storageLocations.length > 0 || storageLocationFilter) && (
-          <select
+          <ReactSelect
             value={storageLocationFilter}
             onChange={(e) => { setStorageLocationFilter(e.target.value); }}
             className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer focus:outline-none ${
@@ -1774,7 +1774,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
             {hasUnsetStorageLocation && (
               <option value="__none__">{t('inventory.storageLocationNone')}</option>
             )}
-          </select>
+          </ReactSelect>
         )}
 
         {/* Clear filters */}
@@ -2122,7 +2122,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
 
               <div className="flex items-center gap-2">
                 <span className="text-bambu-gray">{t('inventory.show')}</span>
-                <select
+                <ReactSelect
                   value={pageSize}
                   onChange={(e) => handlePageSizeChange(Number(e.target.value))}
                   className="px-2 py-1 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded text-white text-sm focus:outline-none focus:border-bambu-green"
@@ -2131,7 +2131,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
                     <option key={n} value={n}>{n}</option>
                   ))}
                   <option value={-1}>{t('inventory.all')}</option>
-                </select>
+                </ReactSelect>
 
                 {!showAll && (
                   <>
@@ -2349,7 +2349,7 @@ function PaginationBar({
       </span>
       <div className="flex items-center gap-2">
         <span className="text-bambu-gray">{t('inventory.show')}</span>
-        <select
+        <ReactSelect
           value={pageSize}
           onChange={(e) => onPageSizeChange(Number(e.target.value))}
           className="px-2 py-1 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded text-white text-sm focus:outline-none focus:border-bambu-green"
@@ -2358,7 +2358,7 @@ function PaginationBar({
             <option key={n} value={n}>{n}</option>
           ))}
           <option value={-1}>{t('inventory.all')}</option>
-        </select>
+        </ReactSelect>
         {!isShowAll && (
           <>
             <button

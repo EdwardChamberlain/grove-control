@@ -45,6 +45,7 @@ import { Toggle } from '../components/Toggle';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
+import { ReactSelect } from '../components/ToolbarControls';
 
 // Icon mapping for maintenance types
 const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -651,7 +652,7 @@ function SettingsSection({
                   </div>
                   <div>
                     <label className="block text-xs text-bambu-gray mb-1.5">{t('maintenance.intervalType')}</label>
-                    <select
+                    <ReactSelect
                       value={newTypeIntervalType}
                       onChange={(e) => {
                         setNewTypeIntervalType(e.target.value as 'hours' | 'days');
@@ -666,7 +667,7 @@ function SettingsSection({
                     >
                       <option value="hours">{t('maintenance.printHours')}</option>
                       <option value="days">{t('maintenance.calendarDays')}</option>
-                    </select>
+                    </ReactSelect>
                   </div>
                   <div>
                     <label className="block text-xs text-bambu-gray mb-1.5">
@@ -805,14 +806,14 @@ function SettingsSection({
                       autoFocus
                     />
                     <div className="flex gap-2">
-                      <select
+                      <ReactSelect
                         value={editTypeIntervalType}
                         onChange={(e) => setEditTypeIntervalType(e.target.value as 'hours' | 'days')}
                         className="flex-1 px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:border-bambu-green focus:outline-none"
                       >
                         <option value="hours">{t('maintenance.printHours')}</option>
                         <option value="days">{t('maintenance.calendarDays')}</option>
-                      </select>
+                      </ReactSelect>
                       <input
                         type="number"
                         value={editTypeInterval}
@@ -1000,14 +1001,14 @@ function SettingsSection({
                               ) : (
                                 <Timer className="w-3.5 h-3.5 text-bambu-gray shrink-0" />
                               )}
-                              <select
+                              <ReactSelect
                                 value={intervalTypeInput}
                                 onChange={(e) => setIntervalTypeInput(e.target.value as 'hours' | 'days')}
                                 className="px-1.5 py-1 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded text-white text-xs"
                               >
                                 <option value="hours">{t('maintenance.printHours')}</option>
                                 <option value="days">{t('maintenance.calendarDays')}</option>
-                              </select>
+                              </ReactSelect>
                               <input
                                 type="number"
                                 value={intervalInput}

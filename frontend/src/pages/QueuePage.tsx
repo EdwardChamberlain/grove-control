@@ -73,7 +73,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { QueueStatsBar } from '../components/QueueStatsBar';
 import { CompactHistoryRow } from '../components/CompactHistoryRow';
 import { QueueTimelineView } from '../components/QueueTimelineView';
-import { ToolbarDropdown } from '../components/ToolbarControls';
+import { ToolbarDropdown, ReactSelect } from '../components/ToolbarControls';
 
 function formatWeight(g: number, useKg = false): string {
   if (useKg && g >= 1000) return `${(g / 1000).toFixed(1)}kg`;
@@ -196,7 +196,7 @@ function BulkEditModal({
           {/* Printer Assignment */}
           <div>
             <label className="block text-sm font-medium text-white mb-2">{t('queue.bulkEdit.printer')}</label>
-            <select
+            <ReactSelect
               value={printerId === null ? 'null' : printerId === 'unchanged' ? 'unchanged' : String(printerId)}
               onChange={(e) => {
                 const val = e.target.value;
@@ -211,7 +211,7 @@ function BulkEditModal({
               {printers.map(p => (
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
-            </select>
+            </ReactSelect>
           </div>
 
           {/* Queue Options */}

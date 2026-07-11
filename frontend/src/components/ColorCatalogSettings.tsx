@@ -8,6 +8,7 @@ import { Card, CardHeader, CardContent } from './Card';
 import { ConfirmModal } from './ConfirmModal';
 import { FilamentSwatch } from './FilamentSwatch';
 import { FILAMENT_EFFECT_OPTIONS } from './filamentSwatchHelpers';
+import { ReactSelect } from './ToolbarControls';
 
 export function ColorCatalogSettings() {
   const { t } = useTranslation();
@@ -418,7 +419,7 @@ export function ColorCatalogSettings() {
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <select
+          <ReactSelect
             className="px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
             value={filterManufacturer}
             onChange={(e) => setFilterManufacturer(e.target.value)}
@@ -427,7 +428,7 @@ export function ColorCatalogSettings() {
             {manufacturers.map(m => (
               <option key={m} value={m}>{m}</option>
             ))}
-          </select>
+          </ReactSelect>
         </div>
 
         {/* Add form */}
@@ -497,7 +498,7 @@ export function ColorCatalogSettings() {
                 value={formExtraColors}
                 onChange={(e) => setFormExtraColors(e.target.value)}
               />
-              <select
+              <ReactSelect
                 className="px-3 py-2 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:border-bambu-green focus:outline-none"
                 value={formEffectType}
                 onChange={(e) => setFormEffectType(e.target.value)}
@@ -507,7 +508,7 @@ export function ColorCatalogSettings() {
                     {t(opt.labelKey)}
                   </option>
                 ))}
-              </select>
+              </ReactSelect>
             </div>
           </div>
         )}
@@ -679,7 +680,7 @@ export function ColorCatalogSettings() {
                           />
                         </td>
                         <td className="px-3 py-2" colSpan={2}>
-                          <select
+                          <ReactSelect
                             className="w-full px-2 py-1 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded text-white text-sm focus:border-bambu-green focus:outline-none"
                             value={formEffectType}
                             onChange={(e) => setFormEffectType(e.target.value)}
@@ -689,7 +690,7 @@ export function ColorCatalogSettings() {
                                 {t(opt.labelKey)}
                               </option>
                             ))}
-                          </select>
+                          </ReactSelect>
                         </td>
                         <td></td>
                       </tr>

@@ -68,7 +68,7 @@ import { usePageFileDrop } from '../hooks/usePageFileDrop';
 import type { Archive, PrintLogEntry, ProjectListItem } from '../api/client';
 import { Card, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
-import { ToolbarDropdown } from '../components/ToolbarControls';
+import { ToolbarDropdown, ReactSelect } from '../components/ToolbarControls';
 import { PrintModal } from '../components/PrintModal';
 import { UploadModal } from '../components/UploadModal';
 import { PurgeArchivesModal } from '../components/PurgeArchivesModal';
@@ -3946,7 +3946,7 @@ export function ArchivesPage() {
                     </span>
                     <div className="flex items-center gap-1.5">
                       <label className="text-xs text-bambu-gray">{t('archives.log.rowsPerPage')}</label>
-                      <select
+                      <ReactSelect
                         className="px-2 py-1 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-xs focus:border-bambu-green focus:outline-none"
                         value={logPageSize}
                         onChange={(e) => { setLogPageSize(Number(e.target.value)); setLogOffset(0); }}
@@ -3955,7 +3955,7 @@ export function ArchivesPage() {
                         <option value={25}>25</option>
                         <option value={50}>50</option>
                         <option value={100}>100</option>
-                      </select>
+                      </ReactSelect>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -4097,7 +4097,7 @@ export function ArchivesPage() {
                 <label className="block text-sm text-bambu-gray mb-1">
                   {t('editArchive.status')}
                 </label>
-                <select
+                <ReactSelect
                   value={editingLogStatus}
                   onChange={(e) => setEditingLogStatus(e.target.value)}
                   className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-sm focus:border-bambu-green focus:outline-none"
@@ -4107,14 +4107,14 @@ export function ArchivesPage() {
                   <option value="stopped">{t('archives.log.statuses.stopped', { defaultValue: 'stopped' })}</option>
                   <option value="cancelled">{t('archives.log.statuses.cancelled', { defaultValue: 'cancelled' })}</option>
                   <option value="skipped">{t('archives.log.statuses.skipped', { defaultValue: 'skipped' })}</option>
-                </select>
+                </ReactSelect>
               </div>
 
               <div>
                 <label className="block text-sm text-bambu-gray mb-1">
                   {t('editArchive.failureReason')}
                 </label>
-                <select
+                <ReactSelect
                   value={editingLogFailureReason}
                   onChange={(e) => setEditingLogFailureReason(e.target.value)}
                   className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-sm focus:border-bambu-green focus:outline-none"
@@ -4125,7 +4125,7 @@ export function ArchivesPage() {
                       {t(`editArchive.failureReasons.${key}`)}
                     </option>
                   ))}
-                </select>
+                </ReactSelect>
               </div>
             </div>
 
@@ -4193,7 +4193,7 @@ function ArchivePaginationBar({
       </span>
       <div className="flex items-center gap-2">
         <span className="text-bambu-gray">{t('archives.pagination.show')}</span>
-        <select
+        <ReactSelect
           value={pageSize}
           onChange={(e) => onPageSizeChange(Number(e.target.value))}
           className="px-2 py-1 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded text-white text-sm focus:outline-none focus:border-bambu-green"
@@ -4202,7 +4202,7 @@ function ArchivePaginationBar({
             <option key={n} value={n}>{n}</option>
           ))}
           <option value={-1}>{t('archives.pagination.all')}</option>
-        </select>
+        </ReactSelect>
         {!isShowAll && (
           <>
             <button

@@ -6,6 +6,7 @@ import { api } from '../api/client';
 import type { NotificationProvider, NotificationProviderCreate, NotificationProviderUpdate, ProviderType } from '../api/client';
 import { Button } from './Button';
 import { Toggle } from './Toggle';
+import { ReactSelect } from './ToolbarControls';
 
 interface AddNotificationModalProps {
   provider?: NotificationProvider | null;
@@ -304,7 +305,7 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
           {/* Provider Type */}
           <div>
             <label className="block text-sm text-bambu-gray mb-1">{t('notifications.providerTypeLabel')}</label>
-            <select
+            <ReactSelect
               value={providerType}
               onChange={(e) => {
                 setProviderType(e.target.value as ProviderType);
@@ -319,7 +320,7 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
                   {t(`notifications.providerTypes.${value}`, value)}
                 </option>
               ))}
-            </select>
+            </ReactSelect>
             <p className="text-xs text-bambu-gray mt-1">
               {t(`notifications.providerDescriptions.${providerType}`, '')}
             </p>
@@ -336,7 +337,7 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
                   {field.label} {field.required && '*'}
                 </label>
                 {field.type === 'select' && 'options' in field && field.options ? (
-                  <select
+                  <ReactSelect
                     value={config[field.key] || field.options[0]?.value || ''}
                     onChange={(e) => {
                       setConfig({ ...config, [field.key]: e.target.value });
@@ -349,7 +350,7 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
                         {opt.label}
                       </option>
                     ))}
-                  </select>
+                  </ReactSelect>
                 ) : (
                   <input
                     type={field.type}
@@ -411,7 +412,7 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
           {/* Link to Printer */}
           <div>
             <label className="block text-sm text-bambu-gray mb-1">{t('notifications.printerFilter')}</label>
-            <select
+            <ReactSelect
               value={printerId ?? ''}
               onChange={(e) => setPrinterId(e.target.value ? Number(e.target.value) : null)}
               className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
@@ -422,7 +423,7 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
                   {p.name}
                 </option>
               ))}
-            </select>
+            </ReactSelect>
             <p className="text-xs text-bambu-gray mt-1">
               {t('notifications.onlyFromPrinter')}
             </p>
@@ -615,7 +616,7 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
                     {enabledEvents.map((ev) => (
                       <div key={ev.key} className="flex items-center justify-between gap-3">
                         <span className="text-sm text-white">{ev.label}</span>
-                        <select
+                        <ReactSelect
                           value={eventPriorities[ev.key] ?? 3}
                           onChange={(e) => {
                             const next = Number(e.target.value);
@@ -628,7 +629,7 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
                           <option value={3}>{t('notifications.eventPriority.default')}</option>
                           <option value={4}>{t('notifications.eventPriority.high')}</option>
                           <option value={5}>{t('notifications.eventPriority.urgent')}</option>
-                        </select>
+                        </ReactSelect>
                       </div>
                     ))}
                   </div>

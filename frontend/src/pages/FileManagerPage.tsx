@@ -63,7 +63,7 @@ import { FileUploadModal } from '../components/FileUploadModal';
 import { FolderReadmePanel } from '../components/FolderReadmePanel';
 import { LibraryTagsModal } from '../components/LibraryTagsModal';
 import { PurgeOldFilesModal } from '../components/PurgeOldFilesModal';
-import { ToolbarDropdown } from '../components/ToolbarControls';
+import { ToolbarDropdown, ReactSelect } from '../components/ToolbarControls';
 import { useToast } from '../contexts/ToastContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { usePageFileDrop } from '../hooks/usePageFileDrop';
@@ -1728,7 +1728,7 @@ export function FileManagerPage() {
       <div className="flex-1 flex flex-col lg:flex-row gap-4 lg:gap-6 min-h-0">
         {/* Mobile folder selector */}
         <div className="lg:hidden">
-          <select
+          <ReactSelect
             value={selectedFolderId !== null ? String(selectedFolderId) : `__top:${topLevelView}`}
             onChange={(e) => {
               const v = e.target.value;
@@ -1763,7 +1763,7 @@ export function FileManagerPage() {
                 </option>
               ));
             })()}
-          </select>
+          </ReactSelect>
         </div>
 
         {/* Folder sidebar - resizable, hidden on mobile */}

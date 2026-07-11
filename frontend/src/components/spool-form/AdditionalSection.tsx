@@ -3,6 +3,7 @@ import { Scale } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useToast } from '../../contexts/ToastContext';
 import type { AdditionalSectionProps } from './types';
+import { ReactSelect } from '../ToolbarControls';
 
 function SpoolWeightPicker({
   catalog,
@@ -388,7 +389,7 @@ export function AdditionalSection({
         <label className="block text-sm font-medium text-bambu-gray mb-1" htmlFor="spool-storage-location">
           {t('inventory.storageLocation')}
         </label>
-        <select
+        <ReactSelect
           id="spool-storage-location"
           className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:outline-none focus:border-bambu-green"
           value={formData.location_id ?? ''}
@@ -406,7 +407,7 @@ export function AdditionalSection({
           {availableLocations.map((loc) => (
             <option key={loc.id} value={loc.id}>{loc.name}</option>
           ))}
-        </select>
+        </ReactSelect>
         {onCreateLocation && (
           <div className="mt-2 flex gap-2">
             <input

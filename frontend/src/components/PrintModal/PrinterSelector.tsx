@@ -25,6 +25,7 @@ import type { PrinterSelectorProps, AssignmentMode } from './types';
 import type { PrinterMappingResult, PerPrinterConfig } from '../../hooks/useMultiPrinterFilamentMapping';
 import type { FilamentRequirement, LoadedFilament } from '../../hooks/useFilamentMapping';
 import { FilamentProfileRow } from './FilamentProfileRow';
+import { ReactSelect } from '../ToolbarControls';
 
 interface PrinterSelectorWithMappingProps extends PrinterSelectorProps {
   /** Per-printer mapping results (only used when multiple printers selected) */
@@ -413,7 +414,7 @@ export function PrinterSelector({
           {!slicedForModel && (
             <div>
               <label className="block text-xs text-bambu-gray mb-1">Target Model</label>
-              <select
+              <ReactSelect
                 value={targetModel || ''}
                 onChange={(e) => {
                   onTargetModelChange!(e.target.value || null);
@@ -430,7 +431,7 @@ export function PrinterSelector({
                     {model}
                   </option>
                 ))}
-              </select>
+              </ReactSelect>
             </div>
           )}
 
@@ -438,7 +439,7 @@ export function PrinterSelector({
           {targetModel && uniqueLocations.length > 0 && onTargetLocationChange && (
             <div>
               <label className="block text-xs text-bambu-gray mb-1">Location Filter (optional)</label>
-              <select
+              <ReactSelect
                 value={targetLocation || ''}
                 onChange={(e) => onTargetLocationChange(e.target.value || null)}
                 className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
@@ -449,7 +450,7 @@ export function PrinterSelector({
                     {location}
                   </option>
                 ))}
-              </select>
+              </ReactSelect>
             </div>
           )}
 

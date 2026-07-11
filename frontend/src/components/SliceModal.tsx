@@ -16,6 +16,7 @@ import {
 import { useSliceJobTracker } from '../contexts/SliceJobTrackerContext';
 import { useToast } from '../contexts/ToastContext';
 import { PlatePickerModal } from './PlatePickerModal';
+import { ReactSelect } from './ToolbarControls';
 import type { PlateFilament } from '../types/plates';
 import { normalizeColorForCompare, colorsAreSimilar } from '../utils/amsHelpers';
 import {
@@ -165,7 +166,7 @@ function pickFilamentForSlot(
 }
 
 function toRefValue(ref: PresetRef | null): string {
-  // The HTML `<select>` value space is flat strings; encode source + id so
+  // The HTML `<ReactSelect>` value space is flat strings; encode source + id so
   // the same preset name can live in multiple tiers without collision.
   return ref ? `${ref.source}:${ref.id}` : '';
 }
@@ -921,7 +922,7 @@ function BedTypeDropdown({
       <span className="block text-xs text-bambu-gray mb-1">
         {t('slice.bedType.label')}
       </span>
-      <select
+      <ReactSelect
         value={value ?? ''}
         onChange={(e) => onChange(e.target.value === '' ? null : e.target.value)}
         disabled={disabled}
@@ -933,7 +934,7 @@ function BedTypeDropdown({
             {t(opt.labelKey, opt.fallback)}
           </option>
         ))}
-      </select>
+      </ReactSelect>
     </label>
   );
 }
@@ -1028,7 +1029,7 @@ function PresetDropdown({
         )}
         <span>{label}</span>
       </span>
-      <select
+      <ReactSelect
         value={toRefValue(value)}
         onChange={(e) => onChange(fromRefValue(e.target.value))}
         disabled={disabled || totalEntries === 0}
@@ -1057,7 +1058,7 @@ function PresetDropdown({
             ))}
           </optgroup>
         )}
-      </select>
+      </ReactSelect>
     </label>
   );
 }

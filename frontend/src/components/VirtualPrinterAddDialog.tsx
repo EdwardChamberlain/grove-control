@@ -6,6 +6,7 @@ import { api, multiVirtualPrinterApi } from '../api/client';
 import { Card, CardContent } from './Card';
 import { Button } from './Button';
 import { useToast } from '../contexts/ToastContext';
+import { ReactSelect } from './ToolbarControls';
 
 type Mode = 'archive' | 'review' | 'queue' | 'proxy';
 
@@ -109,7 +110,7 @@ export function VirtualPrinterAddDialog({ onClose }: VirtualPrinterAddDialogProp
             <div>
               <label className="text-sm text-white font-medium block mb-1">{t('virtualPrinter.targetPrinter.title')}</label>
               <div className="relative">
-                <select
+                <ReactSelect
                   value={targetPrinterId ?? ''}
                   onChange={(e) => {
                     const id = parseInt(e.target.value, 10);
@@ -121,7 +122,7 @@ export function VirtualPrinterAddDialog({ onClose }: VirtualPrinterAddDialogProp
                   {printers?.map((p) => (
                     <option key={p.id} value={p.id}>{p.name} ({p.ip_address})</option>
                   ))}
-                </select>
+                </ReactSelect>
                 <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
               </div>
             </div>

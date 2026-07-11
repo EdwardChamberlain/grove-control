@@ -40,6 +40,7 @@ import { Toggle } from './Toggle';
 import { ConfirmModal } from './ConfirmModal';
 import { useToast } from '../contexts/ToastContext';
 import { formatRelativeTime, parseUTCDate } from '../utils/date';
+import { ReactSelect } from './ToolbarControls';
 
 function formatDateTime(dateStr: string | null): string {
   if (!dateStr) return '-';
@@ -616,7 +617,7 @@ export function GitHubBackupSettings() {
             {/* Provider Selection */}
             <div>
               <label htmlFor="git-provider-select" className="block text-sm text-bambu-gray mb-1">{t('backup.provider')}</label>
-              <select
+              <ReactSelect
                 id="git-provider-select"
                 value={provider}
                 onChange={(e) => { setProvider(e.target.value as GitProviderType); setTestResult(null); setSaveError(null); }}
@@ -626,7 +627,7 @@ export function GitHubBackupSettings() {
                 <option value="gitlab">{t('backup.providerGitLab')}</option>
                 <option value="gitea">{t('backup.providerGitea')}</option>
                 <option value="forgejo">{t('backup.providerForgejo')}</option>
-              </select>
+              </ReactSelect>
             </div>
 
                 {/* Repository URL */}
@@ -686,7 +687,7 @@ export function GitHubBackupSettings() {
               </div>
               <div>
                 <label className="block text-sm text-bambu-gray mb-1">{t('backup.autoBackup')}</label>
-                <select
+                <ReactSelect
                   value={scheduleEnabled ? scheduleType : 'disabled'}
                   onChange={(e) => {
                     if (e.target.value === 'disabled') {
@@ -702,7 +703,7 @@ export function GitHubBackupSettings() {
                   <option value="hourly">{t('backup.hourly')}</option>
                   <option value="daily">{t('backup.daily')}</option>
                   <option value="weekly">{t('backup.weekly')}</option>
-                </select>
+                </ReactSelect>
               </div>
             </div>
 
@@ -1159,7 +1160,7 @@ export function GitHubBackupSettings() {
                 <div className="grid grid-cols-3 gap-4">
                   <div>
                     <label className="block text-sm text-bambu-gray mb-1">{t('backup.frequency')}</label>
-                    <select
+                    <ReactSelect
                       value={localBackupStatus?.schedule ?? 'daily'}
                       className="w-full h-10 px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
                       onChange={async (e) => {
@@ -1175,7 +1176,7 @@ export function GitHubBackupSettings() {
                       <option value="hourly">{t('backup.hourly')}</option>
                       <option value="daily">{t('backup.daily')}</option>
                       <option value="weekly">{t('backup.weekly')}</option>
-                    </select>
+                    </ReactSelect>
                   </div>
                   {(localBackupStatus?.schedule ?? 'daily') !== 'hourly' && (
                     <div>

@@ -19,6 +19,7 @@ import { SliceModal, type SliceSource } from '../components/SliceModal';
 import { Cog } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
+import { ReactSelect } from '../components/ToolbarControls';
 
 // MakerWorld's API payloads are passed through as opaque dicts; these helpers
 // pull known fields out in a type-safe way so a missing/renamed field shows
@@ -62,7 +63,7 @@ function pickObject(obj: Record<string, unknown> | undefined, key: string): Reco
 }
 
 // Depth-first flatten of the library folder tree so it can be rendered in a
-// single <select>. Each entry carries its ``depth`` so the UI can indent the
+// single <ReactSelect>. Each entry carries its ``depth`` so the UI can indent the
 // option label.
 type FlatFolder = { folder: import('../api/client').LibraryFolderTree; depth: number };
 function flattenFolderTree(
@@ -550,7 +551,7 @@ export function MakerworldPage() {
                 <label className="text-xs text-gray-600 dark:text-gray-400">
                   {t('makerworld.importTo')}
                 </label>
-                <select
+                <ReactSelect
                   value={selectedFolderId ?? ''}
                   onChange={(e) => setSelectedFolderId(e.target.value ? Number(e.target.value) : null)}
                   className="text-sm px-2 py-1 border rounded bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-700"
@@ -565,7 +566,7 @@ export function MakerworldPage() {
                         {`${'— '.repeat(depth)}${folder.name}`}
                       </option>
                     ))}
-                </select>
+                </ReactSelect>
                 <Button
                   variant="primary"
                   size="sm"

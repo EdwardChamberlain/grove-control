@@ -81,7 +81,7 @@ import { getCurrencySymbol } from '../utils/currency';
 import type { Printer, PrinterCreate, PrinterStatus, AMSUnit, DiscoveredPrinter, LinkedSpoolInfo, SpoolAssignment, HMSError, InventorySpool, PrinterDiagnosticResult, PrintLogEntry } from '../api/client';
 import { Card, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
-import { ToolbarDropdown, ToolbarMenu } from '../components/ToolbarControls';
+import { ToolbarDropdown, ToolbarMenu, ReactSelect } from '../components/ToolbarControls';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { BulkPrinterToolbar, type PrinterState } from '../components/BulkPrinterToolbar';
 import { FileManagerModal } from '../components/FileManagerModal';
@@ -5593,7 +5593,7 @@ export function AddPrinterModal({
                 {t('printers.discovery.subnetToScan')}
               </label>
               {detectedSubnets.length > 0 ? (
-                <select
+                <ReactSelect
                   className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
                   value={useCustomSubnet ? '__custom__' : subnet}
                   onChange={(e) => {
@@ -5610,7 +5610,7 @@ export function AddPrinterModal({
                     <option key={s} value={s}>{s}</option>
                   ))}
                   <option value="__custom__">{t('printers.discovery.customSubnetOption')}</option>
-                </select>
+                </ReactSelect>
               ) : (
                 <input
                   type="text"
@@ -5757,7 +5757,7 @@ export function AddPrinterModal({
             </div>
             <div>
               <label className="block text-sm text-bambu-gray mb-1">{t('printers.modal.modelOptional')}</label>
-              <select
+              <ReactSelect
                 className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
                 value={form.model || ''}
                 onChange={(e) => setForm({ ...form, model: e.target.value })}
@@ -5789,7 +5789,7 @@ export function AddPrinterModal({
                 <optgroup label="X2 Series">
                   <option value="X2D">X2D</option>
                 </optgroup>
-              </select>
+              </ReactSelect>
             </div>
             <div>
               <label className="block text-sm text-bambu-gray mb-1">{t('printers.modal.locationGroup')}</label>
@@ -6009,7 +6009,7 @@ function EditPrinterModal({
             </div>
             <div>
               <label className="block text-sm text-bambu-gray mb-1">{t('printers.model')}</label>
-              <select
+              <ReactSelect
                 className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
                 value={form.model}
                 onChange={(e) => setForm({ ...form, model: e.target.value })}
@@ -6041,7 +6041,7 @@ function EditPrinterModal({
                 <optgroup label="X2 Series">
                   <option value="X2D">X2D</option>
                 </optgroup>
-              </select>
+              </ReactSelect>
             </div>
             <div>
               <label className="block text-sm text-bambu-gray mb-1">Location / Group</label>

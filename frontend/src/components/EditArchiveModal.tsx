@@ -6,6 +6,7 @@ import { api } from '../api/client';
 import type { Archive } from '../api/client';
 import { Button } from './Button';
 import { PrintLogTable } from './PrintLogTable';
+import { ReactSelect } from './ToolbarControls';
 
 // Keys for failure reasons - translated at render time.
 // Exported so the Print Log per-row classification editor (#1687 part 4)
@@ -255,7 +256,7 @@ export function EditArchiveModal({ archive, onClose, existingTags = [] }: EditAr
           {/* Printer */}
           <div>
             <label className="block text-sm text-bambu-gray mb-1">{t('editArchive.printer')}</label>
-            <select
+            <ReactSelect
               value={printerId ?? ''}
               onChange={(e) => setPrinterId(e.target.value ? Number(e.target.value) : null)}
               className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
@@ -266,7 +267,7 @@ export function EditArchiveModal({ archive, onClose, existingTags = [] }: EditAr
                   {p.name}
                 </option>
               ))}
-            </select>
+            </ReactSelect>
           </div>
 
           {/* Project */}
@@ -275,7 +276,7 @@ export function EditArchiveModal({ archive, onClose, existingTags = [] }: EditAr
               <FolderKanban className="w-4 h-4 inline mr-1" />
               {t('editArchive.project')}
             </label>
-            <select
+            <ReactSelect
               value={projectId ?? ''}
               onChange={(e) => setProjectId(e.target.value ? Number(e.target.value) : null)}
               className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
@@ -286,7 +287,7 @@ export function EditArchiveModal({ archive, onClose, existingTags = [] }: EditAr
                   {p.name}
                 </option>
               ))}
-            </select>
+            </ReactSelect>
           </div>
 
           {/* Quantity - number of items printed */}
@@ -407,7 +408,7 @@ export function EditArchiveModal({ archive, onClose, existingTags = [] }: EditAr
           {/* Status */}
           <div>
             <label className="block text-sm text-bambu-gray mb-1">{t('editArchive.status')}</label>
-            <select
+            <ReactSelect
               value={status}
               onChange={(e) => {
                 setStatus(e.target.value);
@@ -423,14 +424,14 @@ export function EditArchiveModal({ archive, onClose, existingTags = [] }: EditAr
                   {t(`editArchive.statuses.${statusKey}`)}
                 </option>
               ))}
-            </select>
+            </ReactSelect>
           </div>
 
           {/* Failure Reason - only show for failed/aborted prints */}
           {(status === 'failed' || status === 'aborted') && (
             <div>
               <label htmlFor="failure-reason-select" className="block text-sm text-bambu-gray mb-1">{t('editArchive.failureReason')}</label>
-              <select
+              <ReactSelect
                 id="failure-reason-select"
                 value={failureReason}
                 onChange={(e) => setFailureReason(e.target.value)}
@@ -442,7 +443,7 @@ export function EditArchiveModal({ archive, onClose, existingTags = [] }: EditAr
                     {t(`editArchive.failureReasons.${reasonKey}`)}
                   </option>
                 ))}
-              </select>
+              </ReactSelect>
             </div>
           )}
 

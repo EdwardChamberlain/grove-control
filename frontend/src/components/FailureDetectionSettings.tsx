@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader } from './Card';
 import { Button } from './Button';
 import { Toggle } from './Toggle';
 import { useToast } from '../contexts/ToastContext';
+import { ReactSelect } from './ToolbarControls';
 
 type TestResult = { ok: boolean; message: string } | null;
 
@@ -176,7 +177,7 @@ export function FailureDetectionSettings() {
               <label className="block text-sm text-bambu-gray mb-1">
                 {t('failureDetection.sensitivity')}
               </label>
-              <select
+              <ReactSelect
                 value={sensitivity}
                 onChange={(e) => setSensitivity(e.target.value as 'low' | 'medium' | 'high')}
                 disabled={!enabled}
@@ -185,7 +186,7 @@ export function FailureDetectionSettings() {
                 <option value="low">{t('failureDetection.sensitivityLow')}</option>
                 <option value="medium">{t('failureDetection.sensitivityMedium')}</option>
                 <option value="high">{t('failureDetection.sensitivityHigh')}</option>
-              </select>
+              </ReactSelect>
               <p className="text-xs text-bambu-gray mt-1">{t('failureDetection.sensitivityHint')}</p>
             </div>
 
@@ -193,7 +194,7 @@ export function FailureDetectionSettings() {
               <label className="block text-sm text-bambu-gray mb-1">
                 {t('failureDetection.action')}
               </label>
-              <select
+              <ReactSelect
                 value={action}
                 onChange={(e) => setAction(e.target.value as 'notify' | 'pause' | 'pause_and_off')}
                 disabled={!enabled}
@@ -202,7 +203,7 @@ export function FailureDetectionSettings() {
                 <option value="notify">{t('failureDetection.actionNotify')}</option>
                 <option value="pause">{t('failureDetection.actionPause')}</option>
                 <option value="pause_and_off">{t('failureDetection.actionPauseOff')}</option>
-              </select>
+              </ReactSelect>
             </div>
 
             <div>

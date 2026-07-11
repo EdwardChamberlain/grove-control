@@ -6,6 +6,7 @@ import type { TagInfo } from '../api/client';
 import { Card, CardContent } from './Card';
 import { Button } from './Button';
 import { useToast } from '../contexts/ToastContext';
+import { ReactSelect } from './ToolbarControls';
 
 interface TagManagementModalProps {
   onClose: () => void;
@@ -154,14 +155,14 @@ export function TagManagementModal({ onClose }: TagManagementModalProps) {
                   onChange={(e) => setSearch(e.target.value)}
                 />
               </div>
-              <select
+              <ReactSelect
                 className="px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:border-bambu-green focus:outline-none"
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as 'count' | 'name')}
               >
                 <option value="count">Sort by Count</option>
                 <option value="name">Sort by Name</option>
-              </select>
+              </ReactSelect>
             </div>
             {tags && (
               <p className="text-xs text-bambu-gray mt-2">

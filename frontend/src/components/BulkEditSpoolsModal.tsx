@@ -95,7 +95,7 @@ interface SearchableSelectProps {
 
 /** Lightweight searchable dropdown matching the per-spool form's pattern —
  *  text input + chevron + filtered list of buttons, click-outside closes.
- *  Native `<select>` is intentionally avoided per the project's UI conventions. */
+ *  Native `<ReactSelect>` is intentionally avoided per the project's UI conventions. */
 function SearchableSelect({ value, onChange, options, allowCustom, placeholderKey, disabled }: SearchableSelectProps) {
   const { t } = useTranslation();
   const ref = useRef<HTMLDivElement>(null);

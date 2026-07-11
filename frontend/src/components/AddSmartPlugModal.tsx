@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
 import type { SmartPlug, SmartPlugCreate, SmartPlugUpdate, DiscoveredTasmotaDevice } from '../api/client';
 import { Button } from './Button';
+import { ReactSelect } from './ToolbarControls';
 
 interface AddSmartPlugModalProps {
   plug?: SmartPlug | null;
@@ -591,12 +592,12 @@ export function AddSmartPlugModal({ plug, onClose }: AddSmartPlugModalProps) {
                   </div>
                   <div>
                     <label className="block text-sm text-bambu-gray mb-1 opacity-50">{t('smartPlugs.selectEntity')}</label>
-                    <select
+                    <ReactSelect
                       disabled
                       className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-bambu-gray cursor-not-allowed opacity-50"
                     >
                       <option>{t('smartPlugs.addSmartPlug.chooseEntity')}</option>
-                    </select>
+                    </ReactSelect>
                   </div>
                 </div>
               )}
@@ -1137,7 +1138,7 @@ export function AddSmartPlugModal({ plug, onClose }: AddSmartPlugModalProps) {
                 <p className="text-white font-medium text-sm">{t('smartPlugs.restControl')}</p>
                 <div>
                   <label className="block text-sm text-bambu-gray mb-1">{t('smartPlugs.restMethod')}</label>
-                  <select
+                  <ReactSelect
                     value={restMethod}
                     onChange={(e) => setRestMethod(e.target.value)}
                     className="w-full px-3 py-2 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
@@ -1146,7 +1147,7 @@ export function AddSmartPlugModal({ plug, onClose }: AddSmartPlugModalProps) {
                     <option value="POST">POST</option>
                     <option value="PUT">PUT</option>
                     <option value="PATCH">PATCH</option>
-                  </select>
+                  </ReactSelect>
                 </div>
                 <div>
                   <label className="block text-sm text-bambu-gray mb-1">{t('smartPlugs.restOnUrl')}</label>
@@ -1460,7 +1461,7 @@ export function AddSmartPlugModal({ plug, onClose }: AddSmartPlugModalProps) {
           {plugType !== 'mqtt' && (
             <div>
               <label className="block text-sm text-bambu-gray mb-1">{t('smartPlugs.linkToPrinter')}</label>
-              <select
+              <ReactSelect
                 value={printerId ?? ''}
                 onChange={(e) => setPrinterId(e.target.value ? Number(e.target.value) : null)}
                 className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
@@ -1471,7 +1472,7 @@ export function AddSmartPlugModal({ plug, onClose }: AddSmartPlugModalProps) {
                     {p.name}
                   </option>
                 ))}
-              </select>
+              </ReactSelect>
               <p className="text-xs text-bambu-gray mt-1">
                 {t('smartPlugs.linkingDescription')}
               </p>

@@ -6,6 +6,7 @@ import { QUICK_COLORS, ALL_COLORS } from './constants';
 import { FilamentSwatch } from '../FilamentSwatch';
 import { buildFilamentBackground, FILAMENT_EFFECT_OPTIONS } from '../filamentSwatchHelpers';
 import { getSwatchStyle } from '../../utils/colors';
+import { ReactSelect } from '../ToolbarControls';
 
 /** Parse user paste from 3dfilamentprofiles.com etc.: split on commas/whitespace,
  *  drop the leading `#`, accept 6/8-char hex, lowercase. Returns null when no
@@ -509,7 +510,7 @@ export function ColorSection({
             {t('inventory.colorEffectLabel')}
           </label>
           <div className="flex gap-2 items-stretch">
-            <select
+            <ReactSelect
               className="flex-1 px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:outline-none focus:border-bambu-green"
               value={formData.effect_type}
               onChange={(e) => updateField('effect_type', e.target.value)}
@@ -520,7 +521,7 @@ export function ColorSection({
                   {t(opt.labelKey)}
                 </option>
               ))}
-            </select>
+            </ReactSelect>
             <FilamentSwatch
               rgba={formData.rgba}
               extraColors={formData.extra_colors}

@@ -16,6 +16,7 @@ import type { InventorySpool, SpoolUsageRecord, FilamentSkuSettings, ShoppingLis
 import { getSwatchStyle } from '../utils/colors';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
+import { ReactSelect } from './ToolbarControls';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -411,7 +412,7 @@ export function ForecastPanel({ spools }: { spools: InventorySpool[] }) {
         )}
 
         {/* Material filter */}
-        <select
+        <ReactSelect
           value={materialFilter}
           onChange={(e) => setMaterialFilter(e.target.value)}
           className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer focus:outline-none ${
@@ -422,10 +423,10 @@ export function ForecastPanel({ spools }: { spools: InventorySpool[] }) {
         >
           <option value="">{t('inventory.material')}</option>
           {uniqueMaterials.map((m) => <option key={m} value={m}>{m}</option>)}
-        </select>
+        </ReactSelect>
 
         {/* Brand filter */}
-        <select
+        <ReactSelect
           value={brandFilter}
           onChange={(e) => setBrandFilter(e.target.value)}
           className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer focus:outline-none ${
@@ -436,7 +437,7 @@ export function ForecastPanel({ spools }: { spools: InventorySpool[] }) {
         >
           <option value="">{t('inventory.brand')}</option>
           {uniqueBrands.map((b) => <option key={b} value={b}>{b}</option>)}
-        </select>
+        </ReactSelect>
 
         {/* Shopping list toggle */}
         <button
