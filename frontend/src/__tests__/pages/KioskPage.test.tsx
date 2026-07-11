@@ -47,14 +47,9 @@ describe('KioskPage', () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
-    vi.unstubAllGlobals();
   });
 
   beforeEach(() => {
-    vi.stubGlobal('ResizeObserver', class {
-      observe() {}
-      disconnect() {}
-    });
     server.use(
       http.get('/api/v1/auth/status', () => HttpResponse.json({ auth_enabled: false, requires_setup: false })),
       http.get('/api/v1/settings/', () => HttpResponse.json(baseSettings)),
