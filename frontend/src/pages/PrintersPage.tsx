@@ -81,6 +81,7 @@ import { getCurrencySymbol } from '../utils/currency';
 import type { Printer, PrinterCreate, PrinterStatus, AMSUnit, DiscoveredPrinter, LinkedSpoolInfo, SpoolAssignment, HMSError, InventorySpool, PrinterDiagnosticResult, PrintLogEntry } from '../api/client';
 import { Card, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
+import { ToolbarDropdown, ToolbarMenu } from '../components/ToolbarControls';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { BulkPrinterToolbar, type PrinterState } from '../components/BulkPrinterToolbar';
 import { FileManagerModal } from '../components/FileManagerModal';
@@ -533,97 +534,6 @@ function normalizePrinterPageViewMode(value: string | null, legacyCardSize: stri
     default:
       return 'detail';
   }
-}
-
-type ToolbarDropdownOption<T extends string> = {
-  value: T;
-  label: string;
-};
-
-function ToolbarDropdown<T extends string>({
-  value,
-  options,
-  onChange,
-  fullWidth = false,
-}: {
-  value: T;
-  options: ToolbarDropdownOption<T>[];
-  onChange: (value: T) => void;
-  fullWidth?: boolean;
-}) {
-  const [isOpen, setIsOpen] = useState(false);
-  const selectedOption = options.find(option => option.value === value) ?? options[0];
-
-  return (
-    <div className={`relative ${fullWidth ? 'w-full min-w-0' : ''}`}>
-      <button
-        type="button"
-        onClick={() => setIsOpen(open => !open)}
-        className={`h-8 px-2 rounded-lg border bg-bambu-dark border-bambu-dark-tertiary text-white text-sm font-medium transition-colors hover:bg-bambu-dark-tertiary focus:outline-none focus:border-bambu-green flex items-center justify-between gap-2 ${fullWidth ? 'w-full' : 'min-w-28'}`}
-      >
-        <span className="truncate">{selectedOption?.label}</span>
-        <ChevronDown className={`w-4 h-4 text-bambu-gray transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-      </button>
-
-      {isOpen && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
-          <div className="absolute left-0 top-full z-20 mt-1 min-w-full rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary py-1 shadow-xl">
-            {options.map(option => (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => {
-                  onChange(option.value);
-                  setIsOpen(false);
-                }}
-                className={`w-full px-3 py-2 text-left text-sm transition-colors hover:bg-bambu-dark-tertiary ${
-                  option.value === value ? 'text-bambu-green' : 'text-white'
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-function ToolbarMenu({
-  label,
-  icon,
-  children,
-}: {
-  label: string;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  const [isOpen, setIsOpen] = useState(false);
-
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setIsOpen(open => !open)}
-        className="h-8 w-8 rounded-lg border bg-bambu-dark border-bambu-dark-tertiary text-white hover:bg-bambu-dark-tertiary transition-colors flex items-center justify-center"
-        aria-label={label}
-        title={label}
-      >
-        {icon}
-      </button>
-
-      {isOpen && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
-          <div className="absolute right-0 top-full z-20 mt-1 min-w-40 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary p-2 shadow-xl">
-            {children}
-          </div>
-        </>
-      )}
-    </div>
-  );
 }
 
 function IndicatorControlPopover({

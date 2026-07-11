@@ -362,7 +362,7 @@ describe('FileManagerPage', () => {
 
       await waitFor(() => {
         // Sort dropdown should show Name as default option (persisted to localStorage)
-        expect(screen.getByDisplayValue('Name')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Name' })).toBeInTheDocument();
       });
     });
   });

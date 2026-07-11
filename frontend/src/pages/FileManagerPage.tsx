@@ -63,6 +63,7 @@ import { FileUploadModal } from '../components/FileUploadModal';
 import { FolderReadmePanel } from '../components/FolderReadmePanel';
 import { LibraryTagsModal } from '../components/LibraryTagsModal';
 import { PurgeOldFilesModal } from '../components/PurgeOldFilesModal';
+import { ToolbarDropdown } from '../components/ToolbarControls';
 import { useToast } from '../contexts/ToastContext';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { usePageFileDrop } from '../hooks/usePageFileDrop';
@@ -1799,31 +1800,30 @@ export function FileManagerPage() {
               {/* Folder tree sort (#1770). Dropdown drives the comparator;
                   direction button flips asc/desc. Both persist to localStorage
                   on change so the choice survives reloads. */}
-              <select
+              <ToolbarDropdown
                 value={folderSortField}
-                onChange={(e) => {
-                  const v = e.target.value === 'activity' ? 'activity' : 'name';
+                onChange={(value) => {
+                  const v = value === 'activity' ? 'activity' : 'name';
                   setFolderSortField(v);
                   localStorage.setItem('library-folder-sort-field', v);
                 }}
-                className="text-xs px-1 py-0.5 rounded bg-bambu-dark border border-bambu-dark-tertiary text-bambu-gray focus:outline-none focus:border-bambu-green"
-                title={t('fileManager.folderSort')}
-                aria-label={t('fileManager.folderSort')}
-              >
-                <option value="name">{t('fileManager.folderSortByName')}</option>
-                <option value="activity">{t('fileManager.folderSortByActivity')}</option>
-              </select>
+                minWidthClass="min-w-20"
+                options={[
+                  { value: 'name', label: t('fileManager.folderSortByName') },
+                  { value: 'activity', label: t('fileManager.folderSortByActivity') },
+                ]}
+              />
               <button
                 onClick={() => {
                   const newValue = folderSortDirection === 'asc' ? 'desc' : 'asc';
                   setFolderSortDirection(newValue);
                   localStorage.setItem('library-folder-sort-direction', newValue);
                 }}
-                className="text-bambu-gray hover:text-white hover:bg-bambu-dark p-1 rounded transition-colors"
+                className="h-8 w-8 flex items-center justify-center text-bambu-gray hover:text-white hover:bg-bambu-dark rounded-lg transition-colors"
                 title={folderSortDirection === 'asc' ? t('fileManager.ascending') : t('fileManager.descending')}
                 aria-label={folderSortDirection === 'asc' ? t('fileManager.ascending') : t('fileManager.descending')}
               >
-                {folderSortDirection === 'asc' ? <SortAsc className="w-3.5 h-3.5" /> : <SortDesc className="w-3.5 h-3.5" />}
+                {folderSortDirection === 'asc' ? <SortAsc className="w-4 h-4" /> : <SortDesc className="w-4 h-4" />}
               </button>
               <button
                 onClick={() => {
@@ -2008,7 +2008,7 @@ export function FileManagerPage() {
                   placeholder={t('fileManager.searchFiles')}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-9 pr-3 py-1.5 bg-bambu-dark border border-bambu-dark-tertiary rounded text-sm text-white placeholder-bambu-gray focus:outline-none focus:border-bambu-green"
+                  className="h-8 w-full pl-9 pr-3 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-sm text-white placeholder-bambu-gray focus:outline-none focus:border-bambu-green"
                 />
                 {searchExpandsSubfolders && (
                   <span
@@ -2023,18 +2023,15 @@ export function FileManagerPage() {
               {/* Type filter */}
               <div className="flex items-center gap-2">
                 <Filter className="w-4 h-4 text-bambu-gray hidden sm:block" />
-                <select
+                <ToolbarDropdown
                   value={filterType}
-                  onChange={(e) => setFilterType(e.target.value)}
-                  className="bg-bambu-dark border border-bambu-dark-tertiary rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-bambu-green"
-                >
-                  <option value="all">{t('fileManager.allTypes')}</option>
-                  {fileTypes.map((type) => (
-                    <option key={type} value={type}>
-                      {type.toUpperCase()}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setFilterType}
+                  minWidthClass="min-w-28"
+                  options={[
+                    { value: 'all', label: t('fileManager.allTypes') },
+                    ...fileTypes.map((type) => ({ value: type, label: type.toUpperCase() })),
+                  ]}
+                />
               </div>
 
               {/* Username filter with autocomplete - only show when auth is enabled */}
@@ -2046,7 +2043,7 @@ export function FileManagerPage() {
                     value={filterUsername}
                     onChange={(e) => setFilterUsername(e.target.value)}
                     list="usernames-list"
-                    className={`w-32 sm:w-40 px-2 py-1.5 bg-bambu-dark border border-bambu-dark-tertiary rounded text-sm text-white placeholder-bambu-gray focus:outline-none focus:border-bambu-green ${filterUsername ? 'pr-7' : ''}`}
+                    className={`h-8 w-32 sm:w-40 px-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-sm text-white placeholder-bambu-gray focus:outline-none focus:border-bambu-green ${filterUsername ? 'pr-7' : ''}`}
                     style={filterUsername ? { WebkitAppearance: 'none', MozAppearance: 'textfield' } : undefined}
                   />
                   {filterUsername && (
@@ -2067,28 +2064,28 @@ export function FileManagerPage() {
 
               {/* Sort */}
               <div className="flex items-center gap-2">
-                <select
+                <ToolbarDropdown<SortField>
                   value={sortField}
-                  onChange={(e) => {
-                    const newField = e.target.value as SortField;
+                  onChange={(newField) => {
                     setSortField(newField);
                     localStorage.setItem('library-sort-field', newField);
                   }}
-                  className="bg-bambu-dark border border-bambu-dark-tertiary rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-bambu-green"
-                >
-                  <option value="name">{t('common.name')}</option>
-                  <option value="date">{t('common.date')}</option>
-                  <option value="size">{t('fileManager.size')}</option>
-                  <option value="type">{t('common.type')}</option>
-                  <option value="prints">{t('fileManager.prints')}</option>
-                </select>
+                  minWidthClass="min-w-28"
+                  options={[
+                    { value: 'name', label: t('common.name') },
+                    { value: 'date', label: t('common.date') },
+                    { value: 'size', label: t('fileManager.size') },
+                    { value: 'type', label: t('common.type') },
+                    { value: 'prints', label: t('fileManager.prints') },
+                  ]}
+                />
                 <button
                   onClick={() => setSortDirection((d) => {
                     const newDir = d === 'asc' ? 'desc' : 'asc';
                     localStorage.setItem('library-sort-direction', newDir);
                     return newDir;
                   })}
-                  className="p-1.5 rounded bg-bambu-dark border border-bambu-dark-tertiary hover:border-bambu-green transition-colors"
+                  className="h-8 w-8 flex items-center justify-center rounded-lg bg-bambu-dark border border-bambu-dark-tertiary hover:border-bambu-green transition-colors"
                   title={sortDirection === 'asc' ? t('fileManager.ascending') : t('fileManager.descending')}
                 >
                   {sortDirection === 'asc' ? (

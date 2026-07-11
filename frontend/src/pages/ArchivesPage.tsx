@@ -68,6 +68,7 @@ import { usePageFileDrop } from '../hooks/usePageFileDrop';
 import type { Archive, PrintLogEntry, ProjectListItem } from '../api/client';
 import { Card, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
+import { ToolbarDropdown } from '../components/ToolbarControls';
 import { PrintModal } from '../components/PrintModal';
 import { UploadModal } from '../components/UploadModal';
 import { PurgeArchivesModal } from '../components/PurgeArchivesModal';
@@ -3258,17 +3259,14 @@ export function ArchivesPage() {
                 {filteredArchives?.length || 0} of {archives?.length || 0} prints
               </p>
             </div>
-            <select
-              className="mt-0.5 px-3 py-1.5 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-bambu-gray-light text-sm focus:border-bambu-green focus:outline-none"
-              value={collection}
-              onChange={(e) => setCollection(e.target.value as Collection)}
-            >
-              {collections.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
+            <div className="mt-0.5">
+              <ToolbarDropdown
+                value={collection}
+                onChange={(value) => setCollection(value as Collection)}
+                minWidthClass="min-w-36"
+                options={collections.map((c) => ({ value: c.id, label: c.label }))}
+              />
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
@@ -3387,30 +3385,30 @@ export function ArchivesPage() {
       </div>
 
       {/* View mode toggle — always visible */}
-      <div className="flex items-center border border-bambu-dark-tertiary rounded-lg overflow-hidden flex-shrink-0 w-fit mb-4">
+      <div className="flex h-8 items-center border border-bambu-dark-tertiary rounded-lg overflow-hidden flex-shrink-0 w-fit mb-4">
         <button
-          className={`p-2 ${viewMode === 'grid' ? 'bg-bambu-green text-white' : 'bg-bambu-dark text-bambu-gray hover:text-white'}`}
+          className={`h-8 w-8 flex items-center justify-center ${viewMode === 'grid' ? 'bg-bambu-green text-white' : 'bg-bambu-dark text-bambu-gray hover:text-white'}`}
           onClick={() => setViewMode('grid')}
           title={t('archives.gridView')}
         >
           <LayoutGrid className="w-4 h-4" />
         </button>
         <button
-          className={`p-2 ${viewMode === 'list' ? 'bg-bambu-green text-white' : 'bg-bambu-dark text-bambu-gray hover:text-white'}`}
+          className={`h-8 w-8 flex items-center justify-center ${viewMode === 'list' ? 'bg-bambu-green text-white' : 'bg-bambu-dark text-bambu-gray hover:text-white'}`}
           onClick={() => setViewMode('list')}
           title={t('archives.listView')}
         >
           <List className="w-4 h-4" />
         </button>
         <button
-          className={`p-2 ${viewMode === 'calendar' ? 'bg-bambu-green text-white' : 'bg-bambu-dark text-bambu-gray hover:text-white'}`}
+          className={`h-8 w-8 flex items-center justify-center ${viewMode === 'calendar' ? 'bg-bambu-green text-white' : 'bg-bambu-dark text-bambu-gray hover:text-white'}`}
           onClick={() => setViewMode('calendar')}
           title={t('archives.calendarView')}
         >
           <CalendarDays className="w-4 h-4" />
         </button>
         <button
-          className={`p-2 ${viewMode === 'log' ? 'bg-bambu-green text-white' : 'bg-bambu-dark text-bambu-gray hover:text-white'}`}
+          className={`h-8 w-8 flex items-center justify-center ${viewMode === 'log' ? 'bg-bambu-green text-white' : 'bg-bambu-dark text-bambu-gray hover:text-white'}`}
           onClick={() => setViewMode('log')}
           title={t('archives.logView')}
         >
@@ -3429,134 +3427,123 @@ export function ArchivesPage() {
                 ref={searchInputRef}
                 type="text"
                 placeholder={t('archives.searchPlaceholder')}
-                className="w-full pl-10 pr-4 py-3 md:py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+                className="h-8 w-full pl-10 pr-4 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:border-bambu-green focus:outline-none"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
             {/* Filters - horizontal scroll on mobile */}
             <div className="flex gap-2 md:gap-4 overflow-x-auto pb-1 md:pb-0 -mx-4 px-4 md:mx-0 md:px-0 md:flex-wrap scrollbar-hide">
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <Filter className="w-4 h-4 text-bambu-gray hidden md:block" />
-              <select
-                className="px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
-                value={filterPrinter || ''}
-                onChange={(e) =>
-                  setFilterPrinter(e.target.value ? Number(e.target.value) : null)
-                }
-              >
-                <option value="">All Printers</option>
-                {printers?.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <Package className="w-4 h-4 text-bambu-gray hidden md:block" />
-              <select
-                className="px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
-                value={filterMaterial || ''}
-                onChange={(e) =>
-                  setFilterMaterial(e.target.value || null)
-                }
-              >
-                <option value="">All Materials</option>
-                {uniqueMaterials.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <FileCode className="w-4 h-4 text-bambu-gray hidden md:block" />
-              <select
-                className="px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
-                value={filterFileType}
-                onChange={(e) => setFilterFileType(e.target.value as 'all' | 'gcode' | 'source')}
-              >
-                <option value="all">All Files</option>
-                <option value="gcode">Sliced (GCODE)</option>
-                <option value="source">Source Only</option>
-              </select>
-            </div>
-            <button
-              onClick={() => setFilterFavorites(!filterFavorites)}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors flex-shrink-0 ${
-                filterFavorites
-                  ? 'bg-yellow-500/20 border-yellow-500 text-yellow-400'
-                  : 'bg-bambu-dark border-bambu-dark-tertiary text-bambu-gray hover:text-white'
-              }`}
-              title={filterFavorites ? t('archives.showAll') : t('archives.showFavoritesOnly')}
-            >
-              <Star className={`w-4 h-4 ${filterFavorites ? 'fill-yellow-400' : ''}`} />
-              <span className="text-sm hidden md:inline">Favorites</span>
-            </button>
-            <button
-              onClick={() => setHideFailed(!hideFailed)}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors flex-shrink-0 ${
-                hideFailed
-                  ? 'bg-red-500/20 border-red-500 text-red-400'
-                  : 'bg-bambu-dark border-bambu-dark-tertiary text-bambu-gray hover:text-white'
-              }`}
-              title={hideFailed ? t('archives.showFailedPrints') : t('archives.hideFailedPrints')}
-            >
-              <AlertCircle className={`w-4 h-4 ${hideFailed ? '' : ''}`} />
-              <span className="text-sm hidden md:inline">Hide Failed</span>
-            </button>
-            <button
-              onClick={() => setHideDuplicates(!hideDuplicates)}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors flex-shrink-0 ${
-                hideDuplicates
-                  ? 'bg-purple-500/20 border-purple-500 text-purple-400'
-                  : 'bg-bambu-dark border-bambu-dark-tertiary text-bambu-gray hover:text-white'
-              }`}
-              title={t('archives.hideDuplicates')}
-            >
-              <Copy className="w-4 h-4" />
-              <span className="text-sm hidden md:inline">{t('archives.hideDuplicates')}</span>
-            </button>
-            {uniqueTags.length > 0 && (
               <div className="flex items-center gap-2 flex-shrink-0">
-                <Tag className="w-4 h-4 text-bambu-gray hidden md:block" />
-                <select
-                  className="px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
-                  value={filterTag || ''}
-                  onChange={(e) => setFilterTag(e.target.value || null)}
-                >
-                  <option value="">All Tags</option>
-                  {uniqueTags.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  onClick={() => setShowTagManagement(true)}
-                  className="p-2 rounded-lg bg-bambu-dark border border-bambu-dark-tertiary text-bambu-gray hover:text-white hover:border-bambu-green transition-colors"
-                  title={t('archives.manageTags')}
-                >
-                  <Settings className="w-4 h-4" />
-                </button>
+                <Filter className="w-4 h-4 text-bambu-gray hidden md:block" />
+                <ToolbarDropdown
+                  value={filterPrinter ? String(filterPrinter) : 'all'}
+                  onChange={(value) => setFilterPrinter(value === 'all' ? null : Number(value))}
+                  minWidthClass="min-w-36"
+                  options={[
+                    { value: 'all', label: 'All Printers' },
+                    ...(printers?.map((p) => ({ value: String(p.id), label: p.name })) ?? []),
+                  ]}
+                />
               </div>
-            )}
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <ArrowUpDown className="w-4 h-4 text-bambu-gray hidden md:block" />
-              <select
-                className="px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as SortOption)}
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <Package className="w-4 h-4 text-bambu-gray hidden md:block" />
+                <ToolbarDropdown
+                  value={filterMaterial || 'all'}
+                  onChange={(value) => setFilterMaterial(value === 'all' ? null : value)}
+                  minWidthClass="min-w-36"
+                  options={[
+                    { value: 'all', label: 'All Materials' },
+                    ...uniqueMaterials.map((m) => ({ value: m, label: m })),
+                  ]}
+                />
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <FileCode className="w-4 h-4 text-bambu-gray hidden md:block" />
+                <ToolbarDropdown
+                  value={filterFileType}
+                  onChange={(value) => setFilterFileType(value as 'all' | 'gcode' | 'source')}
+                  minWidthClass="min-w-36"
+                  options={[
+                    { value: 'all', label: 'All Files' },
+                    { value: 'gcode', label: 'Sliced (GCODE)' },
+                    { value: 'source', label: 'Source Only' },
+                  ]}
+                />
+              </div>
+              <button
+                onClick={() => setFilterFavorites(!filterFavorites)}
+                className={`h-8 flex items-center gap-2 px-3 rounded-lg border transition-colors flex-shrink-0 ${
+                  filterFavorites
+                    ? 'bg-yellow-500/20 border-yellow-500 text-yellow-400'
+                    : 'bg-bambu-dark border-bambu-dark-tertiary text-bambu-gray hover:text-white'
+                }`}
+                title={filterFavorites ? t('archives.showAll') : t('archives.showFavoritesOnly')}
               >
-                <option value="date-desc">{t('archives.sortNewest')}</option>
-                <option value="date-asc">{t('archives.sortOldest')}</option>
-                <option value="name-asc">{t('archives.sortName')} A-Z</option>
-                <option value="name-desc">{t('archives.sortName')} Z-A</option>
-                <option value="size-desc">{t('archives.sortLargest')}</option>
-                <option value="size-asc">{t('archives.sortSmallest')}</option>
-              </select>
-            </div>
+                <Star className={`w-4 h-4 ${filterFavorites ? 'fill-yellow-400' : ''}`} />
+                <span className="text-sm hidden md:inline">Favorites</span>
+              </button>
+              <button
+                onClick={() => setHideFailed(!hideFailed)}
+                className={`h-8 flex items-center gap-2 px-3 rounded-lg border transition-colors flex-shrink-0 ${
+                  hideFailed
+                    ? 'bg-red-500/20 border-red-500 text-red-400'
+                    : 'bg-bambu-dark border-bambu-dark-tertiary text-bambu-gray hover:text-white'
+                }`}
+                title={hideFailed ? t('archives.showFailedPrints') : t('archives.hideFailedPrints')}
+              >
+                <AlertCircle className={`w-4 h-4 ${hideFailed ? '' : ''}`} />
+                <span className="text-sm hidden md:inline">Hide Failed</span>
+              </button>
+              <button
+                onClick={() => setHideDuplicates(!hideDuplicates)}
+                className={`h-8 flex items-center gap-2 px-3 rounded-lg border transition-colors flex-shrink-0 ${
+                  hideDuplicates
+                    ? 'bg-purple-500/20 border-purple-500 text-purple-400'
+                    : 'bg-bambu-dark border-bambu-dark-tertiary text-bambu-gray hover:text-white'
+                }`}
+                title={t('archives.hideDuplicates')}
+              >
+                <Copy className="w-4 h-4" />
+                <span className="text-sm hidden md:inline">{t('archives.hideDuplicates')}</span>
+              </button>
+              {uniqueTags.length > 0 && (
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <Tag className="w-4 h-4 text-bambu-gray hidden md:block" />
+                  <ToolbarDropdown
+                    value={filterTag || 'all'}
+                    onChange={(value) => setFilterTag(value === 'all' ? null : value)}
+                    minWidthClass="min-w-32"
+                    options={[
+                      { value: 'all', label: 'All Tags' },
+                      ...uniqueTags.map((tag) => ({ value: tag, label: tag })),
+                    ]}
+                  />
+                  <button
+                    onClick={() => setShowTagManagement(true)}
+                    className="h-8 w-8 flex items-center justify-center rounded-lg bg-bambu-dark border border-bambu-dark-tertiary text-bambu-gray hover:text-white hover:border-bambu-green transition-colors"
+                    title={t('archives.manageTags')}
+                  >
+                    <Settings className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <ArrowUpDown className="w-4 h-4 text-bambu-gray hidden md:block" />
+                <ToolbarDropdown<SortOption>
+                  value={sortBy}
+                  onChange={setSortBy}
+                  minWidthClass="min-w-36"
+                  options={[
+                    { value: 'date-desc', label: t('archives.sortNewest') },
+                    { value: 'date-asc', label: t('archives.sortOldest') },
+                    { value: 'name-asc', label: `${t('archives.sortName')} A-Z` },
+                    { value: 'name-desc', label: `${t('archives.sortName')} Z-A` },
+                    { value: 'size-desc', label: t('archives.sortLargest') },
+                    { value: 'size-asc', label: t('archives.sortSmallest') },
+                  ]}
+                />
+              </div>
             </div>
             {hasTopFilters && (
               <Button
@@ -3732,52 +3719,60 @@ export function ArchivesPage() {
                   <input
                     type="text"
                     placeholder={t('archives.searchPlaceholder')}
-                    className="w-full pl-10 pr-4 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
+                    className="h-8 w-full pl-10 pr-4 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
                     value={search}
                     onChange={(e) => { setSearch(e.target.value); setLogOffset(0); }}
                   />
                 </div>
                 {/* Printer filter */}
-                <select
-                  className="px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
-                  value={filterPrinter || ''}
-                  onChange={(e) => { setFilterPrinter(e.target.value ? Number(e.target.value) : null); setLogOffset(0); }}
-                >
-                  <option value="">{t('archives.log.allPrinters')}</option>
-                  {printers?.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
+                <ToolbarDropdown
+                  value={filterPrinter ? String(filterPrinter) : 'all'}
+                  onChange={(value) => {
+                    setFilterPrinter(value === 'all' ? null : Number(value));
+                    setLogOffset(0);
+                  }}
+                  minWidthClass="min-w-36"
+                  options={[
+                    { value: 'all', label: t('archives.log.allPrinters') },
+                    ...(printers?.map((p) => ({ value: String(p.id), label: p.name })) ?? []),
+                  ]}
+                />
                 {/* User filter */}
-                <select
-                  className="px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
-                  value={logFilterUser || ''}
-                  onChange={(e) => { setLogFilterUser(e.target.value || null); setLogOffset(0); }}
-                >
-                  <option value="">{t('archives.log.allUsers')}</option>
-                  {users?.map((u) => (
-                    <option key={u.id} value={u.username}>{u.username}</option>
-                  ))}
-                </select>
+                <ToolbarDropdown
+                  value={logFilterUser || 'all'}
+                  onChange={(value) => {
+                    setLogFilterUser(value === 'all' ? null : value);
+                    setLogOffset(0);
+                  }}
+                  minWidthClass="min-w-32"
+                  options={[
+                    { value: 'all', label: t('archives.log.allUsers') },
+                    ...(users?.map((u) => ({ value: u.username, label: u.username })) ?? []),
+                  ]}
+                />
                 {/* Status filter */}
-                <select
-                  className="px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
-                  value={logFilterStatus || ''}
-                  onChange={(e) => { setLogFilterStatus(e.target.value || null); setLogOffset(0); }}
-                >
-                  <option value="">{t('archives.log.allStatuses')}</option>
-                  <option value="completed">{t('archives.status.completed')}</option>
-                  <option value="failed">{t('archives.status.failed')}</option>
-                  <option value="stopped">{t('archives.status.stopped')}</option>
-                  <option value="cancelled">{t('archives.log.cancelled')}</option>
-                  <option value="skipped">{t('archives.log.skipped')}</option>
-                </select>
+                <ToolbarDropdown
+                  value={logFilterStatus || 'all'}
+                  onChange={(value) => {
+                    setLogFilterStatus(value === 'all' ? null : value);
+                    setLogOffset(0);
+                  }}
+                  minWidthClass="min-w-32"
+                  options={[
+                    { value: 'all', label: t('archives.log.allStatuses') },
+                    { value: 'completed', label: t('archives.status.completed') },
+                    { value: 'failed', label: t('archives.status.failed') },
+                    { value: 'stopped', label: t('archives.status.stopped') },
+                    { value: 'cancelled', label: t('archives.log.cancelled') },
+                    { value: 'skipped', label: t('archives.log.skipped') },
+                  ]}
+                />
                 {/* Date range */}
                 <div className="flex items-center gap-2">
                   <label className="text-sm text-bambu-gray">{t('archives.log.dateFrom')}</label>
                   <input
                     type="date"
-                    className="px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
+                    className="h-8 px-3 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
                     value={logFilterDateFrom}
                     onChange={(e) => { setLogFilterDateFrom(e.target.value); setLogOffset(0); }}
                   />
@@ -3786,7 +3781,7 @@ export function ArchivesPage() {
                   <label className="text-sm text-bambu-gray">{t('archives.log.dateTo')}</label>
                   <input
                     type="date"
-                    className="px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
+                    className="h-8 px-3 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
                     value={logFilterDateTo}
                     onChange={(e) => { setLogFilterDateTo(e.target.value); setLogOffset(0); }}
                   />

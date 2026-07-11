@@ -13,6 +13,7 @@ import { ForecastPanel } from '../components/ForecastPanel';
 import { api, spoolbuddyApi, ApiError } from '../api/client';
 import type { InventorySpool, SpoolCatalogEntry } from '../api/client';
 import { Button } from '../components/Button';
+import { ToolbarDropdown } from '../components/ToolbarControls';
 import { FilamentSwatch } from '../components/FilamentSwatch';
 import { buildFilamentBackground } from '../components/filamentSwatchHelpers';
 import {SpoolFormModal, type SpoolFormMode} from '../components/SpoolFormModal';
@@ -1516,7 +1517,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
           {viewMode === 'table' && (
             <button
               onClick={() => setShowColumnModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-bambu-gray border border-bambu-dark-tertiary rounded-lg hover:bg-bambu-dark-tertiary transition-colors"
+              className="h-8 flex items-center gap-1.5 px-3 text-sm font-medium text-bambu-gray border border-bambu-dark-tertiary rounded-lg hover:bg-bambu-dark-tertiary transition-colors"
               title={t('inventory.configureColumns')}
             >
               <Columns className="w-4 h-4" />
@@ -1527,7 +1528,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
           {viewMode !== 'forecast' && (
             <button
               onClick={toggleGroupSimilar}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium border rounded-lg transition-colors ${
+              className={`h-8 flex items-center gap-1.5 px-3 text-sm font-medium border rounded-lg transition-colors ${
                 groupSimilar
                   ? 'bg-bambu-green/20 text-bambu-green border-bambu-green/30'
                   : 'text-bambu-gray border-bambu-dark-tertiary hover:bg-bambu-dark-tertiary'
@@ -1539,10 +1540,10 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
             </button>
           )}
           {/* Table / Cards toggle */}
-          <div className="flex bg-bambu-dark-primary border border-bambu-dark-tertiary rounded-lg overflow-hidden">
+          <div className="flex h-8 bg-bambu-dark-primary border border-bambu-dark-tertiary rounded-lg overflow-hidden">
             <button
               onClick={() => setViewMode('table')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium transition-colors ${
+              className={`flex items-center gap-1.5 px-3 text-sm font-medium transition-colors ${
                 viewMode === 'table'
                   ? 'bg-bambu-green text-white'
                   : 'text-bambu-gray hover:bg-bambu-dark-tertiary'
@@ -1553,7 +1554,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
             </button>
             <button
               onClick={() => setViewMode('cards')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium transition-colors ${
+              className={`flex items-center gap-1.5 px-3 text-sm font-medium transition-colors ${
                 viewMode === 'cards'
                   ? 'bg-bambu-green text-white'
                   : 'text-bambu-gray hover:bg-bambu-dark-tertiary'
@@ -1566,7 +1567,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
               onClick={() => canViewForecast && setViewMode('forecast')}
               disabled={!canViewForecast}
               title={canViewForecast ? undefined : t('forecast.noReadAccess')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+              className={`flex items-center gap-1.5 px-3 text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                 viewMode === 'forecast'
                   ? 'bg-bambu-green text-white'
                   : 'text-bambu-gray hover:bg-bambu-dark-tertiary'
@@ -1582,10 +1583,10 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
       {/* Filter chips row — hidden in forecast mode */}
       <div className={`flex flex-wrap items-center gap-2 ${viewMode === 'forecast' ? 'hidden' : ''}`}>
         {/* Active / Archived chips */}
-        <div className="flex items-center rounded-lg border border-bambu-dark-tertiary overflow-hidden">
+        <div className="flex h-8 items-center rounded-lg border border-bambu-dark-tertiary overflow-hidden">
           <button
             onClick={() => { setArchiveFilter('active'); resetPage(); }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors ${
+            className={`h-8 flex items-center gap-1.5 px-3 text-xs font-medium transition-colors ${
               archiveFilter === 'active'
                 ? 'bg-bambu-green/20 text-bambu-green'
                 : 'text-bambu-gray hover:bg-bambu-dark-tertiary'
@@ -1596,7 +1597,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
           </button>
           <button
             onClick={() => { setArchiveFilter('archived'); resetPage(); }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors ${
+            className={`h-8 flex items-center gap-1.5 px-3 text-xs font-medium transition-colors ${
               archiveFilter === 'archived'
                 ? 'bg-bambu-green/20 text-bambu-green'
                 : 'text-bambu-gray hover:bg-bambu-dark-tertiary'
@@ -1610,10 +1611,10 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
         <div className="w-px h-5 bg-bambu-dark-tertiary" />
 
         {/* All / Used / New chips */}
-        <div className="flex items-center rounded-lg border border-bambu-dark-tertiary overflow-hidden">
+        <div className="flex h-8 items-center rounded-lg border border-bambu-dark-tertiary overflow-hidden">
           <button
             onClick={() => { setUsageFilter('all'); resetPage(); }}
-            className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+            className={`h-8 px-3 text-xs font-medium transition-colors ${
               usageFilter === 'all'
                 ? 'bg-bambu-green/20 text-bambu-green'
                 : 'text-bambu-gray hover:bg-bambu-dark-tertiary'
@@ -1623,7 +1624,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
           </button>
           <button
             onClick={() => { setUsageFilter('used'); resetPage(); }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors ${
+            className={`h-8 flex items-center gap-1.5 px-3 text-xs font-medium transition-colors ${
               usageFilter === 'used'
                 ? 'bg-bambu-green/20 text-bambu-green'
                 : 'text-bambu-gray hover:bg-bambu-dark-tertiary'
@@ -1634,7 +1635,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
           </button>
           <button
             onClick={() => { setUsageFilter('new'); resetPage(); }}
-            className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+            className={`h-8 px-3 text-xs font-medium transition-colors ${
               usageFilter === 'new'
                 ? 'bg-bambu-green/20 text-bambu-green'
                 : 'text-bambu-gray hover:bg-bambu-dark-tertiary'
@@ -1644,7 +1645,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
           </button>
           <button
             onClick={() => { setUsageFilter('lowstock'); resetPage(); }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors ${
+            className={`h-8 flex items-center gap-1.5 px-3 text-xs font-medium transition-colors ${
               usageFilter === 'lowstock'
                 ? 'bg-yellow-500/20 text-yellow-400'
                 : 'text-bambu-gray hover:bg-bambu-dark-tertiary'
@@ -1656,10 +1657,10 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
         </div>
 
         {/* Stock filter chips */}
-        <div className="flex items-center rounded-lg border border-bambu-dark-tertiary overflow-hidden">
+        <div className="flex h-8 items-center rounded-lg border border-bambu-dark-tertiary overflow-hidden">
           <button
             onClick={() => { setStockFilter('all'); resetPage(); }}
-            className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+            className={`h-8 px-3 text-xs font-medium transition-colors ${
               stockFilter === 'all'
                 ? 'bg-bambu-green/20 text-bambu-green'
                 : 'text-bambu-gray hover:bg-bambu-dark-tertiary'
@@ -1669,7 +1670,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
           </button>
           <button
             onClick={() => { setStockFilter('stock'); resetPage(); }}
-            className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+            className={`h-8 px-3 text-xs font-medium transition-colors ${
               stockFilter === 'stock'
                 ? 'bg-amber-500/20 text-amber-400'
                 : 'text-bambu-gray hover:bg-bambu-dark-tertiary'
@@ -1679,7 +1680,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
           </button>
           <button
             onClick={() => { setStockFilter('configured'); resetPage(); }}
-            className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+            className={`h-8 px-3 text-xs font-medium transition-colors ${
               stockFilter === 'configured'
                 ? 'bg-bambu-green/20 text-bambu-green'
                 : 'text-bambu-gray hover:bg-bambu-dark-tertiary'
@@ -1692,36 +1693,26 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
         <div className="w-px h-5 bg-bambu-dark-tertiary" />
 
         {/* Material dropdown chip */}
-        <select
+        <ToolbarDropdown
           value={materialFilter}
-          onChange={(e) => { setMaterialFilter(e.target.value); resetPage(); }}
-          className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer focus:outline-none ${
-            materialFilter
-              ? 'bg-bambu-green/20 text-bambu-green border-bambu-green/30'
-              : 'bg-transparent text-bambu-gray border-bambu-dark-tertiary hover:bg-bambu-dark-tertiary'
-          }`}
-        >
-          <option value="">{t('inventory.material')}</option>
-          {uniqueMaterials.map((m) => (
-            <option key={m} value={m}>{m}</option>
-          ))}
-        </select>
+          onChange={(value) => { setMaterialFilter(value); resetPage(); }}
+          minWidthClass="min-w-32"
+          options={[
+            { value: '', label: t('inventory.material') },
+            ...uniqueMaterials.map((m) => ({ value: m, label: m })),
+          ]}
+        />
 
         {/* Brand dropdown chip */}
-        <select
+        <ToolbarDropdown
           value={brandFilter}
-          onChange={(e) => { setBrandFilter(e.target.value); resetPage(); }}
-          className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer focus:outline-none ${
-            brandFilter
-              ? 'bg-bambu-green/20 text-bambu-green border-bambu-green/30'
-              : 'bg-transparent text-bambu-gray border-bambu-dark-tertiary hover:bg-bambu-dark-tertiary'
-          }`}
-        >
-          <option value="">{t('inventory.brand')}</option>
-          {uniqueBrands.map((b) => (
-            <option key={b} value={b}>{b}</option>
-          ))}
-        </select>
+          onChange={(value) => { setBrandFilter(value); resetPage(); }}
+          minWidthClass="min-w-32"
+          options={[
+            { value: '', label: t('inventory.brand') },
+            ...uniqueBrands.map((b) => ({ value: b, label: b })),
+          ]}
+        />
 
         {/* Category dropdown chip (#729) — only render once at least one
             spool carries a category, otherwise it's noise. */}
