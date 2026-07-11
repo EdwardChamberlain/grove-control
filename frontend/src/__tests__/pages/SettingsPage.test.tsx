@@ -111,6 +111,17 @@ describe('SettingsPage', () => {
   });
 
   describe('general settings', () => {
+    it('opens kiosk mode in a new tab', async () => {
+      const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+      const user = userEvent.setup();
+      render(<SettingsPage />);
+
+      await user.click(await screen.findByRole('button', { name: 'Open Kiosk Mode' }));
+
+      expect(open).toHaveBeenCalledWith('/kiosk', '_blank');
+      open.mockRestore();
+    });
+
     it('shows date format setting', async () => {
       render(<SettingsPage />);
 

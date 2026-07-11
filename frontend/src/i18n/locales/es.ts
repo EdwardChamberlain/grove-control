@@ -1528,10 +1528,24 @@ export default {
     configureSettings: 'Configurar tipos e intervalos de mantenimiento',
   },
 
+  kiosk: {
+    noPrinters: 'No hay impresoras configuradas',
+    noPrinting: 'No hay trabajos imprimiéndose',
+    noQueue: 'No hay trabajos en cola',
+    noJob: 'No hay trabajo activo',
+    unknownOwner: 'Propietario no disponible',
+    plateClearRequired: 'Se debe limpiar la placa',
+    morePrinters: '+{{count}} impresoras',
+    moreJobs: '+{{count}} trabajos',
+  },
+
   // Settings page
   settings: {
     title: 'Ajustes',
     general: 'General',
+    kioskMode: 'Modo quiosco',
+    openKioskMode: 'Abrir modo quiosco',
+    kioskModeDescription: 'Abre la pantalla de flota y cola de solo lectura en una nueva pestaña.',
     // Tab names
     tabs: {
       general: 'General',

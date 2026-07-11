@@ -1527,10 +1527,24 @@ export default {
     configureSettings: 'Configura tipi e intervalli manutenzione',
   },
 
+  kiosk: {
+    noPrinters: 'Nessuna stampante configurata',
+    noPrinting: 'Nessun lavoro in stampa',
+    noQueue: 'Nessun lavoro in coda',
+    noJob: 'Nessun lavoro attivo',
+    unknownOwner: 'Proprietario non disponibile',
+    plateClearRequired: 'Pulizia del piatto richiesta',
+    morePrinters: '+{{count}} stampanti',
+    moreJobs: '+{{count}} lavori',
+  },
+
   // Settings page
   settings: {
     title: 'Impostazioni',
     general: 'Generale',
+    kioskMode: 'Modalità kiosk',
+    openKioskMode: 'Apri modalità kiosk',
+    kioskModeDescription: 'Apre la schermata di sola lettura della flotta e della coda in una nuova scheda.',
     // Tab names
     tabs: {
       general: 'Generale',

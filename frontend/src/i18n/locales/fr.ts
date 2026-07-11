@@ -1527,10 +1527,24 @@ export default {
     configureSettings: 'Configurer types et intervalles',
   },
 
+  kiosk: {
+    noPrinters: 'Aucune imprimante configurée',
+    noPrinting: 'Aucun travail en cours d’impression',
+    noQueue: 'Aucun travail en file d’attente',
+    noJob: 'Aucun travail actif',
+    unknownOwner: 'Propriétaire indisponible',
+    plateClearRequired: 'Nettoyage du plateau requis',
+    morePrinters: '+{{count}} imprimantes',
+    moreJobs: '+{{count}} travaux',
+  },
+
   // Settings page
   settings: {
     title: 'Paramètres',
     general: 'Général',
+    kioskMode: 'Mode kiosque',
+    openKioskMode: 'Ouvrir le mode kiosque',
+    kioskModeDescription: 'Ouvre l’affichage en lecture seule du parc et de la file dans un nouvel onglet.',
     // Tab names
     tabs: {
       general: 'Général',

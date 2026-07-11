@@ -1529,10 +1529,24 @@ export default {
     configureSettings: 'Bakım türlerini ve aralıklarını yapılandır',
   },
 
+  kiosk: {
+    noPrinters: 'Yapılandırılmış yazıcı yok',
+    noPrinting: 'Şu anda yazdırılan iş yok',
+    noQueue: 'Kuyrukta iş yok',
+    noJob: 'Etkin iş yok',
+    unknownOwner: 'Sahip bilinmiyor',
+    plateClearRequired: 'Plakanın temizlenmesi gerekiyor',
+    morePrinters: '+{{count}} yazıcı',
+    moreJobs: '+{{count}} iş',
+  },
+
   // Ayarlar sayfası
   settings: {
     title: 'Ayarlar',
     general: 'Genel',
+    kioskMode: 'Kiosk Modu',
+    openKioskMode: 'Kiosk Modunu Aç',
+    kioskModeDescription: 'Salt okunur filo ve kuyruk ekranını yeni sekmede açar.',
     // Sekme adları
     tabs: {
       general: 'Genel',

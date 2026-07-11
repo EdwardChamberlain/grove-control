@@ -1539,10 +1539,24 @@ export default {
     configureSettings: 'Configure maintenance types and intervals',
   },
 
+  kiosk: {
+    noPrinters: 'No printers configured',
+    noPrinting: 'No jobs are currently printing',
+    noQueue: 'No jobs are queued',
+    noJob: 'No active job',
+    unknownOwner: 'Owner unavailable',
+    plateClearRequired: 'Plate clear required',
+    morePrinters: '+{{count}} Printers',
+    moreJobs: '+{{count}} Jobs',
+  },
+
   // Settings page
   settings: {
     title: 'Settings',
     general: 'General',
+    kioskMode: 'Kiosk Mode',
+    openKioskMode: 'Open Kiosk Mode',
+    kioskModeDescription: 'Open the read-only fleet and queue display in a new tab.',
     // Tab names
     tabs: {
       general: 'General',

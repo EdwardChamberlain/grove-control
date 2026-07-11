@@ -1527,10 +1527,24 @@ export default {
     configureSettings: 'Wartungstypen und Intervalle konfigurieren',
   },
 
+  kiosk: {
+    noPrinters: 'Keine Drucker konfiguriert',
+    noPrinting: 'Derzeit werden keine Aufträge gedruckt',
+    noQueue: 'Keine Aufträge in der Warteschlange',
+    noJob: 'Kein aktiver Auftrag',
+    unknownOwner: 'Besitzer nicht verfügbar',
+    plateClearRequired: 'Plattenfreigabe erforderlich',
+    morePrinters: '+{{count}} Drucker',
+    moreJobs: '+{{count}} Aufträge',
+  },
+
   // Settings page
   settings: {
     title: 'Einstellungen',
     general: 'Allgemein',
+    kioskMode: 'Kioskmodus',
+    openKioskMode: 'Kioskmodus öffnen',
+    kioskModeDescription: 'Öffnet die schreibgeschützte Flotten- und Warteschlangenanzeige in einem neuen Tab.',
     // Tab names
     tabs: {
       general: 'Allgemein',
