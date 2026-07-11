@@ -286,13 +286,13 @@ export function KioskPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-bambu-dark px-4 py-4 sm:px-6 lg:px-8">
-      <header className="mx-auto flex w-full max-w-[1920px] items-center justify-between border-b border-bambu-dark-tertiary pb-3">
+    <div className="flex h-screen flex-col overflow-hidden bg-bambu-dark px-4 py-4 sm:px-6 lg:px-8">
+      <header className="mx-auto flex w-full shrink-0 max-w-[1920px] items-center justify-between border-b border-bambu-dark-tertiary pb-3">
         <img src={resolvedMode === 'dark' ? '/img/grove_control_logo_dark_transparent.png' : '/img/grove_control_logo_light.png'} alt="Grove Control" className="h-9 w-auto sm:h-10" />
         <time className="text-lg font-medium tabular-nums text-white sm:text-xl">{now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
       </header>
 
-      <main className="mx-auto w-full max-w-[1920px] pb-4">
+      <main className="mx-auto min-h-0 w-full max-w-[1920px] flex-1 overflow-hidden pb-4">
         <section className="py-4" aria-labelledby="kiosk-fleet-heading">
           <div className="mb-3 flex items-center gap-2">
             <Printer className="h-5 w-5 text-bambu-green" />

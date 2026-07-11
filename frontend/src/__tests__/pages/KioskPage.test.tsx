@@ -135,6 +135,7 @@ describe('KioskPage', () => {
       expect(screen.getAllByText('42%')).toHaveLength(2);
       expect(screen.getAllByText('Plate clear required')).toHaveLength(2);
       expect(screen.getByText('Waiting for compatible material')).toBeInTheDocument();
+      expect(screen.getByRole('banner').parentElement).toHaveClass('h-screen', 'overflow-hidden');
     });
 
     const printing = screen.getByRole('heading', { name: 'Currently Printing' });
