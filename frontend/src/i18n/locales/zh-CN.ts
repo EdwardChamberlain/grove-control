@@ -1527,10 +1527,24 @@ export default {
     configureSettings: '配置维护类型和间隔',
   },
 
+  kiosk: {
+    noPrinters: '未配置打印机',
+    noPrinting: '当前没有打印任务',
+    noQueue: '队列中没有任务',
+    noJob: '没有活动任务',
+    unknownOwner: '所有者不可用',
+    plateClearRequired: '需要清理打印板',
+    morePrinters: '+{{count}} 台打印机',
+    moreJobs: '+{{count}} 个任务',
+  },
+
   // Settings page
   settings: {
     title: '设置',
     general: '通用',
+    kioskMode: '看板模式',
+    openKioskMode: '打开看板模式',
+    kioskModeDescription: '在新标签页中打开只读的机群和队列显示。',
     // Tab names
     tabs: {
       general: '通用',

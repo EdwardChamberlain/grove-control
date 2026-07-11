@@ -431,6 +431,33 @@ body {
   animation: slide-in-left 0.3s ease-out;
 }
 
+/* Kiosk plate-clear alerts need to stand out from normal finished jobs without
+   making the monitor view visually noisy. The outer shadow gives the tile a
+   soft depth cue while the ease-in-out pulse keeps the cue noticeable. */
+@keyframes kiosk-plate-clear-alert {
+  0%,
+  100% {
+    background-color: rgb(250 204 21 / 0.04);
+    border-color: rgb(250 204 21 / 0.45);
+    box-shadow: 0 0 0 0 rgb(250 204 21 / 0), 0 0 12px rgb(245 158 11 / 0.12);
+  }
+  50% {
+    background-color: rgb(250 204 21 / 0.1);
+    border-color: rgb(253 224 71 / 0.9);
+    box-shadow: 0 0 0 1px rgb(250 204 21 / 0.18), 0 0 26px rgb(245 158 11 / 0.32);
+  }
+}
+
+.kiosk-plate-clear-alert {
+  animation: kiosk-plate-clear-alert 1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kiosk-plate-clear-alert {
+    animation: none;
+  }
+}
+
 /* SpoolBuddy idle scan animation: transform/opacity only for low-power devices */
 @keyframes spoolbuddy-optimized-ping {
   0% {

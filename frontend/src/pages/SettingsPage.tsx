@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Plus, Plug, AlertTriangle, RotateCcw, Bell, Download, RefreshCw, ExternalLink, Globe, Droplets, Thermometer, FileText, Edit2, Send, CheckCircle, XCircle, History, Trash2, Zap, TrendingUp, Calendar, DollarSign, Power, PowerOff, Key, Copy, Database, X, Shield, Printer, Cylinder, Wifi, Home, Video, Users, Lock, Unlock, ChevronDown, Save, Mail, Flame, Layers, ListOrdered, Code, Search, Scale, Settings as SettingsIcon, ScanEye, Cog, QrCode } from 'lucide-react';
+import { Loader2, Plus, Plug, AlertTriangle, RotateCcw, Bell, Download, RefreshCw, ExternalLink, Globe, Droplets, Thermometer, FileText, Edit2, Send, CheckCircle, XCircle, History, Trash2, Zap, TrendingUp, Calendar, DollarSign, Power, PowerOff, Key, Copy, Database, X, Shield, Printer, Cylinder, Wifi, Home, Video, Users, Lock, Unlock, ChevronDown, Save, Mail, Flame, Layers, ListOrdered, Code, Search, Scale, Settings as SettingsIcon, ScanEye, Cog, QrCode, Monitor } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
@@ -62,6 +62,7 @@ registerSettingsSearch({ labelKey: 'settings.costTracking', tab: 'general', keyw
 registerSettingsSearch({ labelKey: 'settings.fileManager', tab: 'general', keywords: 'file manager archive mode disk warning storage', anchor: 'card-filemanager' });
 registerSettingsSearch({ labelKey: 'settings.updates', tab: 'general', keywords: 'updates version firmware beta check', anchor: 'card-updates' });
 registerSettingsSearch({ labelKey: 'settings.dataManagement', tab: 'general', keywords: 'data reset clear logs notifications preferences', anchor: 'card-data' });
+registerSettingsSearch({ labelKey: 'settings.kioskMode', tab: 'general', keywords: 'kiosk workshop monitor fleet queue display tv screen', anchor: 'control-kiosk-mode' });
 registerSettingsSearch({ labelKey: 'settings.smartPlugs', tab: 'plugs', keywords: 'smart plug energy power automation tapo kasa tplink shelly', anchor: 'card-plugs' });
 registerSettingsSearch({ labelKey: 'settings.providers', tab: 'notifications', keywords: 'telegram discord email notification providers webhook', anchor: 'card-providers' });
 registerSettingsSearch({ labelKey: 'settings.messageTemplates', tab: 'notifications', keywords: 'message templates notification text edit', anchor: 'card-templates' });
@@ -1593,6 +1594,16 @@ export function SettingsPage() {
                 <p className="text-xs text-bambu-gray mt-1">
                   {t('settings.defaultPrinterDescription')}
                 </p>
+              </div>
+              <div id="control-kiosk-mode" className="flex items-center justify-between gap-3 border-t border-bambu-dark-tertiary pt-3">
+                <div className="min-w-0">
+                  <p className="text-sm text-white">{t('settings.kioskMode')}</p>
+                  <p className="mt-0.5 text-xs text-bambu-gray">{t('settings.kioskModeDescription')}</p>
+                </div>
+                <Button variant="secondary" size="sm" className="shrink-0" title={t('settings.openKioskMode')} onClick={() => window.open('/kiosk', '_blank')}>
+                  <Monitor className="h-4 w-4" />
+                  <span className="hidden sm:inline">{t('settings.openKioskMode')}</span>
+                </Button>
               </div>
             </CardContent>
           </Card>

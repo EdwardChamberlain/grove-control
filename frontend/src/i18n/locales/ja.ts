@@ -1526,10 +1526,24 @@ export default {
     configureSettings: 'メンテナンスタイプと間隔を設定',
   },
 
+  kiosk: {
+    noPrinters: 'プリンターが設定されていません',
+    noPrinting: '印刷中のジョブはありません',
+    noQueue: 'キューにジョブはありません',
+    noJob: 'アクティブなジョブはありません',
+    unknownOwner: '所有者は不明です',
+    plateClearRequired: 'プレートの片付けが必要です',
+    morePrinters: 'プリンター +{{count}} 台',
+    moreJobs: 'ジョブ +{{count}} 件',
+  },
+
   // Settings page
   settings: {
     title: '設定',
     general: '一般',
+    kioskMode: 'キオスクモード',
+    openKioskMode: 'キオスクモードを開く',
+    kioskModeDescription: '読み取り専用のフリートとキュー表示を新しいタブで開きます。',
     // Tab names
     tabs: {
       general: '一般',

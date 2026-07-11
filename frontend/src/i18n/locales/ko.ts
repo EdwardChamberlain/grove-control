@@ -1446,9 +1446,23 @@ export default {
     noPermissionEditIntervals: '간격을 편집할 권한이 없습니다',
     configureSettings: '유지보수 유형 및 간격 설정'
   },
+  kiosk: {
+    noPrinters: '구성된 프린터가 없습니다',
+    noPrinting: '현재 인쇄 중인 작업이 없습니다',
+    noQueue: '대기 중인 작업이 없습니다',
+    noJob: '활성 작업이 없습니다',
+    unknownOwner: '작업자를 확인할 수 없습니다',
+    plateClearRequired: '플레이트 정리가 필요합니다',
+    morePrinters: '프린터 +{{count}}대',
+    moreJobs: '작업 +{{count}}개',
+  },
+
   settings: {
     title: '설정',
     general: '일반',
+    kioskMode: '키오스크 모드',
+    openKioskMode: '키오스크 모드 열기',
+    kioskModeDescription: '읽기 전용 프린터 현황 및 대기열 화면을 새 탭에서 엽니다.',
     tabs: {
       general: '일반',
       smartPlugs: '스마트 플러그',

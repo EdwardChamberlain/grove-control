@@ -24,6 +24,7 @@ import { LoginPage } from './pages/LoginPage';
 import { SetupPage } from './pages/SetupPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { GCodeViewerPage } from './pages/GCodeViewerPage';
+import { KioskPage } from './pages/KioskPage';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useStreamTokenSync } from './hooks/useCameraStreamToken';
 import { ThemeProvider } from './contexts/ThemeContext';
@@ -181,6 +182,9 @@ function App() {
 
                 {/* Stream overlay page - standalone for OBS/streaming embeds, no auth required */}
                 <Route path="/overlay/:printerId" element={<StreamOverlayPage />} />
+
+                {/* Fleet and queue monitor - standalone, read-only, with live updates */}
+                <Route path="/kiosk" element={<ProtectedRoute><WebSocketProvider><KioskPage /></WebSocketProvider></ProtectedRoute>} />
 
                 {/* SpoolBuddy kiosk UI */}
                 <Route element={<ProtectedRoute><WebSocketProvider><SpoolBuddyLayout /></WebSocketProvider></ProtectedRoute>}>

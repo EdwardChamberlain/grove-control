@@ -158,6 +158,15 @@ jobs:
         working-directory: frontend
         run: npm run test:run
 
+      - name: Install Chromium for browser tests
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser tests
+        timeout-minutes: 5
+        working-directory: frontend
+        run: npm run test:browser
+
   frontend-build:
     name: Frontend Build
     runs-on: ubuntu-latest
