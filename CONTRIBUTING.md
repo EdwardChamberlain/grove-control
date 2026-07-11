@@ -319,7 +319,7 @@ reprint eligibility. Archive reprint still needs `queue:create` before it can en
 The easiest way to run tests is with the provided scripts in the project root:
 
 ```bash
-./test_frontend.sh    # TypeScript check + ESLint + Vitest
+./test_frontend.sh    # TypeScript check + ESLint + Vitest + Playwright (installs Chromium on first run)
 ./test_backend.sh     # Ruff lint/format + pytest (parallel)
 ./test_docker.sh      # Full Docker build, unit tests, and integration tests
 ./test_all.sh         # All of the above (frontend → backend → docker)

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { AlertCircle, Clock, Layers, ListOrdered, Printer, User } from 'lucide-react';
 import type { TFunction } from 'i18next';
@@ -62,6 +62,7 @@ function KioskPrinterTile({
   timeFormat,
   t,
   className,
+  style,
 }: {
   printer: PrinterRecord;
   status: PrinterStatus | undefined;
@@ -69,6 +70,7 @@ function KioskPrinterTile({
   timeFormat: TimeFormat;
   t: Translate;
   className?: string;
+  style?: CSSProperties;
 }) {
   const active = isActivePrint(status);
   const plateClearRequired = status?.awaiting_plate_clear === true && !active;
@@ -81,7 +83,7 @@ function KioskPrinterTile({
     : null;
 
   return (
-    <article data-testid={`kiosk-printer-${printer.id}`} className={`h-full min-w-0 border border-bambu-dark-tertiary bg-bambu-dark-secondary p-3 ${plateClearRequired ? 'border-yellow-400/60 kiosk-plate-clear-alert' : ''} ${className || ''}`}>
+    <article data-testid={`kiosk-printer-${printer.id}`} className={`h-full min-w-0 border border-bambu-dark-tertiary bg-bambu-dark-secondary p-3 ${plateClearRequired ? 'border-yellow-400/60 kiosk-plate-clear-alert' : ''} ${className || ''}`} style={style}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="truncate text-sm font-semibold text-white">{printer.name}</h2>
@@ -315,7 +317,8 @@ export function KioskPage() {
                     owner={owners.get(printer.id)}
                     timeFormat={timeFormat}
                     t={t}
-                    className={hasPrinterOverflow ? 'w-[calc((100%-2.25rem)/3.25)] shrink-0' : 'flex-1'}
+                    className={hasPrinterOverflow ? 'shrink-0' : 'flex-1'}
+                    style={hasPrinterOverflow ? { flexBasis: 'calc((100% - 2.25rem) / 3.25)' } : undefined}
                   />
                 ))}
               </div>

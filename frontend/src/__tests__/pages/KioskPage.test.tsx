@@ -178,7 +178,8 @@ describe('KioskPage', () => {
       expect(screen.getByText('+6 Printers')).toBeInTheDocument();
       expect(screen.getAllByTestId(/^kiosk-printer-/)).toHaveLength(4);
       expect(screen.getByTestId('kiosk-fleet-grid')).toHaveClass('flex', 'h-[154px]');
-      expect(screen.getByTestId('kiosk-printer-4')).toHaveClass('w-[calc((100%-2.25rem)/3.25)]', 'shrink-0');
+      expect(screen.getByTestId('kiosk-printer-4')).toHaveClass('shrink-0');
+      expect(screen.getByTestId('kiosk-printer-4')).toHaveStyle({ flexBasis: 'calc((100% - 2.25rem) / 3.25)' });
       expect(screen.getByTestId('kiosk-fleet-overflow')).toHaveClass('inset-y-0', 'right-0', 'w-[10%]');
     });
   });
