@@ -2271,6 +2271,7 @@ function SinglePrinterCockpit({
           <PrinterThermalControls
             printer={printer}
             status={status}
+            variant="elevated"
             nozzleTempPresets={nozzleTempPresets}
             bedTempPresets={bedTempPresets}
             chamberTempPresets={chamberTempPresets}

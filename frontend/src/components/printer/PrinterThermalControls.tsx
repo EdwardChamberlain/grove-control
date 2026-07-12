@@ -727,6 +727,7 @@ interface PrinterThermalControlsProps {
   bedTempPresets?: readonly [number, number, number];
   chamberTempPresets?: readonly [number, number, number];
   fanSpeedPresets?: readonly [number, number, number];
+  variant?: 'default' | 'elevated';
   className?: string;
 }
 
@@ -738,6 +739,7 @@ export function PrinterThermalControls({
   bedTempPresets = BED_TEMP_DEFAULTS,
   chamberTempPresets = CHAMBER_TEMP_DEFAULTS,
   fanSpeedPresets = FAN_SPEED_DEFAULTS,
+  variant = 'default',
   className = '',
 }: PrinterThermalControlsProps) {
   const { t } = useTranslation();
@@ -832,8 +834,22 @@ export function PrinterThermalControls({
 
   const canControl = status.connected && hasPermission('printers:control');
   const controlTitle = canControl ? undefined : t('printers.permission.noControl');
-  const controlClass = `relative flex min-h-[3.25rem] flex-1 flex-col items-center justify-center rounded-lg bg-bambu-dark px-2 py-1.5 text-center transition-colors ${
-    canControl ? 'cursor-pointer hover:bg-bambu-dark-tertiary' : 'cursor-default opacity-80'
+  const controlSurfaceClass = variant === 'elevated'
+    ? 'border border-white/10 bg-bambu-dark-secondary/95 shadow-sm shadow-black/25 ring-1 ring-black/10'
+    : 'bg-bambu-dark';
+  const controlHoverClass = variant === 'elevated'
+    ? 'hover:border-bambu-green/30 hover:bg-bambu-dark-tertiary'
+    : 'hover:bg-bambu-dark-tertiary';
+  const controlBaseClass = `relative flex min-h-[3.25rem] flex-1 flex-col items-center justify-center rounded-lg px-2 py-1.5 text-center transition-colors ${controlSurfaceClass}`;
+  const controlClass = `${controlBaseClass} ${
+    canControl ? `cursor-pointer ${controlHoverClass}` : 'cursor-default opacity-80'
+  }`;
+  const staticControlClass = `${controlBaseClass} cursor-default`;
+  const activeNozzleClass = `relative flex h-full flex-col items-center justify-center rounded-lg px-3 py-1.5 text-center transition-colors ${controlSurfaceClass} ${
+    canControl ? `cursor-pointer ${controlHoverClass}` : 'cursor-default opacity-80'
+  }`;
+  const fanControlClass = `relative flex min-w-0 flex-1 items-center justify-center gap-1 rounded-lg px-2 py-1.5 transition-colors ${controlSurfaceClass} ${
+    canControl ? `cursor-pointer ${controlHoverClass}` : 'cursor-default opacity-80'
   }`;
   const isDualNozzle = printer.nozzle_count === 2 || temperatures.nozzle_2 !== undefined;
   const activeNozzle = status.active_extruder === 1 ? 'L' : 'R';
@@ -903,7 +919,7 @@ export function PrinterThermalControls({
           </div>
 
           {temperatures.chamber !== undefined && (
-            <div data-testid="thermal-chamber-control" className={status.supports_chamber_heater === true ? controlClass : 'relative flex min-h-[3.25rem] flex-1 flex-col items-center justify-center rounded-lg bg-bambu-dark px-2 py-1.5 text-center'} title={status.supports_chamber_heater ? controlTitle : undefined} onClick={status.supports_chamber_heater ? () => canControl && setControlMenu(controlMenu === 'chamber-temp' ? null : 'chamber-temp') : undefined}>
+            <div data-testid="thermal-chamber-control" className={status.supports_chamber_heater === true ? controlClass : staticControlClass} title={status.supports_chamber_heater ? controlTitle : undefined} onClick={status.supports_chamber_heater ? () => canControl && setControlMenu(controlMenu === 'chamber-temp' ? null : 'chamber-temp') : undefined}>
               {historyButton('chamber')}
               <HeaterThermometer className="mb-0.5 h-3.5 w-3.5" color="text-green-400" isHeating={temperatures.chamber_heating || false} />
               <p className="text-[9px] text-bambu-gray">{t('printers.temperatures.chamber')}</p>
@@ -914,7 +930,7 @@ export function PrinterThermalControls({
 
           {isDualNozzle && (
             <DualNozzleHoverCard leftSlot={leftNozzleSlot} rightSlot={rightNozzleSlot} activeNozzle={activeNozzle} filamentInfo={filamentInfo}>
-              <div className={`relative flex h-full flex-col items-center justify-center rounded-lg bg-bambu-dark px-3 py-1.5 text-center transition-colors ${canControl ? 'cursor-pointer hover:bg-bambu-dark-tertiary' : 'cursor-default opacity-80'}`} title={canControl ? t('printers.activeNozzle', { nozzle: activeNozzle === 'L' ? t('common.left') : t('common.right') }) : controlTitle} onClick={() => canControl && setControlMenu(controlMenu === 'nozzle-select' ? null : 'nozzle-select')}>
+              <div className={activeNozzleClass} title={canControl ? t('printers.activeNozzle', { nozzle: activeNozzle === 'L' ? t('common.left') : t('common.right') }) : controlTitle} onClick={() => canControl && setControlMenu(controlMenu === 'nozzle-select' ? null : 'nozzle-select')}>
                 <NozzleIcon className="mb-0.5 h-3.5 w-3.5 text-amber-400" />
                 <div className="flex items-center gap-2"><span className={`text-[11px] font-bold ${activeNozzle === 'L' ? 'text-amber-400' : 'text-gray-500'}`}>L{leftNozzleSlot?.nozzle_diameter ? ` ${leftNozzleSlot.nozzle_diameter}` : ''}</span><span className="text-[9px] text-bambu-gray/40">·</span><span className={`text-[11px] font-bold ${activeNozzle === 'R' ? 'text-amber-400' : 'text-gray-500'}`}>R{rightNozzleSlot?.nozzle_diameter ? ` ${rightNozzleSlot.nozzle_diameter}` : ''}</span></div>
                 <p className="text-[9px] text-bambu-gray">{t('printers.temperatures.nozzle')}</p>
@@ -927,7 +943,7 @@ export function PrinterThermalControls({
 
         <div className="mt-2 flex items-center gap-1.5">
           {fanItems.map(({ key, label, value, Icon, activeClass }) => (
-            <div key={key} className={`relative flex min-w-0 flex-1 items-center justify-center gap-1 rounded-lg bg-bambu-dark px-2 py-1.5 transition-colors ${canControl ? 'cursor-pointer hover:bg-bambu-dark-tertiary' : 'cursor-default opacity-80'}`} title={canControl ? label : controlTitle} onClick={() => canControl && setControlMenu(controlMenu === `fan-${key}` ? null : `fan-${key}`)}>
+            <div key={key} className={fanControlClass} title={canControl ? label : controlTitle} onClick={() => canControl && setControlMenu(controlMenu === `fan-${key}` ? null : `fan-${key}`)}>
               <Icon className={`h-3 w-3 shrink-0 ${value > 0 ? activeClass : 'text-bambu-gray/50'}`} />
               <span className={`text-[10px] leading-none ${value > 0 ? 'text-white' : 'text-bambu-gray/50'}`}>{value}%</span>
               {controlMenu === `fan-${key}` && <IndicatorControlPopover title={t('printers.single.setFanSpeed', { fan: label })} unit="%" customMin={0} customMax={100} isPending={fanSpeedMutation.isPending} options={buildPresetOptions(fanSpeedPresets, '%')} onClose={() => setControlMenu(null)} onSubmit={speed => fanSpeedMutation.mutate({ fan: key, speed })} />}
