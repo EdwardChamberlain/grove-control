@@ -1202,6 +1202,14 @@ function SinglePrinterCockpit({
   const { showToast } = useToast();
   const queryClient = useQueryClient();
   const [statusControlMenu, setStatusControlMenu] = useState<string | null>(null);
+  const [showMenu, setShowMenu] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteArchives, setDeleteArchives] = useState(true);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showMQTTDebug, setShowMQTTDebug] = useState(false);
+  const [showPrinterInfo, setShowPrinterInfo] = useState(false);
+  const [showDiagnostic, setShowDiagnostic] = useState(false);
+  const [confirmMaintenanceEnter, setConfirmMaintenanceEnter] = useState(false);
   const [jogStep, setJogStep] = useState(10);
   const [showUploadForPrint, setShowUploadForPrint] = useState(false);
   const [printAfterUpload, setPrintAfterUpload] = useState<{ id: number; filename: string } | null>(null);
@@ -1213,6 +1221,7 @@ function SinglePrinterCockpit({
   const [loadedCameraPrinterId, setLoadedCameraPrinterId] = useState<number | null>(null);
   const [failedCameraPrinterId, setFailedCameraPrinterId] = useState<number | null>(null);
   const cameraImageRef = useRef<HTMLImageElement>(null);
+  const printerActionsMenuRef = useRef<HTMLDivElement>(null);
   const { data: status } = useQuery({
     queryKey: ['printerStatus', printer.id],
     queryFn: () => api.getPrinterStatus(printer.id),
@@ -1337,7 +1346,66 @@ function SinglePrinterCockpit({
     };
   }, [printer.id, status?.connected]);
 
+  useEffect(() => {
+    if (!showMenu) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (target && !printerActionsMenuRef.current?.contains(target)) {
+        setShowMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showMenu]);
+
   const invalidateStatus = () => queryClient.invalidateQueries({ queryKey: ['printerStatus', printer.id] });
+  const deleteMutation = useMutation({
+    mutationFn: (options: { deleteArchives: boolean }) =>
+      api.deletePrinter(printer.id, options.deleteArchives),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['printers'] });
+      queryClient.invalidateQueries({ queryKey: ['archives'] });
+      queryClient.invalidateQueries({ queryKey: ['maintenanceOverview'] });
+    },
+    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToDelete'), 'error'),
+  });
+  const connectMutation = useMutation({
+    mutationFn: () => api.connectPrinter(printer.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['printerStatus', printer.id] });
+    },
+  });
+  const forceRefreshMutation = useMutation({
+    mutationFn: () => api.refreshPrinterStatus(printer.id),
+    onSuccess: () => {
+      invalidateStatus();
+      showToast(t('printers.forceRefreshSuccess'), 'success');
+    },
+    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
+  });
+  const maintenanceMutation = useMutation({
+    mutationFn: (isActive: boolean) => api.updatePrinter(printer.id, { is_active: isActive }),
+    onSuccess: (_data, isActive) => {
+      queryClient.invalidateQueries({ queryKey: ['printers'] });
+      invalidateStatus();
+      showToast(
+        isActive
+          ? t('printers.maintenance.toastExited', { name: printer.name })
+          : t('printers.maintenance.toastEntered', { name: printer.name }),
+        'success',
+      );
+    },
+    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToUpdateSetting'), 'error'),
+  });
+  const handleEnterMaintenance = () => {
+    if (status?.state === 'RUNNING' || status?.state === 'PAUSE') {
+      setConfirmMaintenanceEnter(true);
+    } else {
+      maintenanceMutation.mutate(false);
+    }
+  };
   const stopPrintMutation = useMutation({
     mutationFn: () => api.stopPrint(printer.id),
     onSuccess: () => {
@@ -1531,7 +1599,6 @@ function SinglePrinterCockpit({
 
   const issueItems = [
     knownHmsErrors.length > 0 ? t('printers.status.errorCount', '{{count}} active', { count: knownHmsErrors.length }) : null,
-    needsPlateClear ? t('printers.plateStatus.notCleared') : null,
     (maintenanceInfo?.due_count ?? 0) > 0 ? t('maintenance.dueCount', { count: maintenanceInfo?.due_count ?? 0 }) : null,
     (maintenanceInfo?.warning_count ?? 0) > 0 ? t('maintenance.warningCount', { count: maintenanceInfo?.warning_count ?? 0 }) : null,
     firmwareInfo?.update_available ? t('firmware.updateAvailable', 'Firmware update available') : null,
@@ -1756,6 +1823,130 @@ function SinglePrinterCockpit({
     </section>
   ) : null;
 
+  const printerActionsMenu = (
+    <div ref={printerActionsMenuRef} className="relative flex-shrink-0">
+      <Button
+        variant="secondary"
+        size="sm"
+        onClick={() => setShowMenu(!showMenu)}
+        title={t('common.more', 'More')}
+        className="h-9 min-h-9 w-9 px-0 py-0"
+      >
+        <MoreVertical className="h-4 w-4" />
+      </Button>
+      {showMenu && (
+        <div className="absolute right-0 top-full mt-2 w-48 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary shadow-lg z-30">
+          <button
+            className={`flex w-full items-center gap-2 px-4 py-2 text-left text-sm ${
+              hasPermission('printers:update')
+                ? 'hover:bg-bambu-dark-tertiary'
+                : 'cursor-not-allowed opacity-50'
+            }`}
+            onClick={() => {
+              if (!hasPermission('printers:update')) return;
+              setShowEditModal(true);
+              setShowMenu(false);
+            }}
+            title={!hasPermission('printers:update') ? t('printers.permission.noEdit') : undefined}
+          >
+            <Pencil className="h-4 w-4" />
+            {t('common.edit')}
+          </button>
+          <button
+            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-bambu-dark-tertiary"
+            onClick={() => {
+              setShowPrinterInfo(true);
+              setShowMenu(false);
+            }}
+          >
+            <Info className="h-4 w-4" />
+            {t('printers.printerInformation')}
+          </button>
+          <button
+            className={`flex w-full items-center gap-2 px-4 py-2 text-left text-sm ${
+              hasPermission('printers:update')
+                ? 'hover:bg-bambu-dark-tertiary'
+                : 'cursor-not-allowed opacity-50'
+            }`}
+            disabled={maintenanceMutation.isPending || !hasPermission('printers:update')}
+            onClick={() => {
+              if (!hasPermission('printers:update')) return;
+              setShowMenu(false);
+              if (printer.is_active !== false) {
+                handleEnterMaintenance();
+              } else {
+                maintenanceMutation.mutate(true);
+              }
+            }}
+            title={!hasPermission('printers:update') ? t('printers.permission.noEdit') : undefined}
+          >
+            <Wrench className="h-4 w-4" />
+            {printer.is_active !== false
+              ? t('printers.maintenance.menuEnter')
+              : t('printers.maintenance.menuExit')}
+          </button>
+          <button
+            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-bambu-dark-tertiary"
+            onClick={() => {
+              connectMutation.mutate();
+              setShowMenu(false);
+            }}
+          >
+            <RefreshCw className="h-4 w-4" />
+            {t('printers.reconnect')}
+          </button>
+          <button
+            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-bambu-dark-tertiary disabled:opacity-50"
+            disabled={forceRefreshMutation.isPending}
+            onClick={() => {
+              forceRefreshMutation.mutate();
+              setShowMenu(false);
+            }}
+          >
+            <RotateCw className={`h-4 w-4 ${forceRefreshMutation.isPending ? 'animate-spin' : ''}`} />
+            {t('printers.forceRefresh')}
+          </button>
+          <button
+            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-bambu-dark-tertiary"
+            onClick={() => {
+              setShowMQTTDebug(true);
+              setShowMenu(false);
+            }}
+          >
+            <Terminal className="h-4 w-4" />
+            {t('printers.mqttDebug')}
+          </button>
+          <button
+            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-bambu-dark-tertiary"
+            onClick={() => {
+              setShowDiagnostic(true);
+              setShowMenu(false);
+            }}
+          >
+            <Stethoscope className="h-4 w-4" />
+            {t('diagnostic.runButton')}
+          </button>
+          <button
+            className={`flex w-full items-center gap-2 px-4 py-2 text-left text-sm ${
+              hasPermission('printers:delete')
+                ? 'text-red-400 hover:bg-bambu-dark-tertiary'
+                : 'cursor-not-allowed text-red-400/50'
+            }`}
+            onClick={() => {
+              if (!hasPermission('printers:delete')) return;
+              setShowDeleteConfirm(true);
+              setShowMenu(false);
+            }}
+            title={!hasPermission('printers:delete') ? t('printers.permission.noDelete') : undefined}
+          >
+            <Trash2 className="h-4 w-4" />
+            {t('common.delete')}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <>
     <div className="relative h-full min-h-0 overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-gradient-to-br from-bambu-dark-secondary via-bambu-dark to-bambu-dark-secondary shadow-xl">
@@ -1782,6 +1973,7 @@ function SinglePrinterCockpit({
               <div className="min-w-0">
                 <div className="flex min-w-0 items-center gap-3">
                   <h2 className="min-w-0 flex-1 truncate text-3xl font-semibold leading-none text-white">{printer.name}</h2>
+                  {printerActionsMenu}
                   <PrinterHealthMenu
                     printer={printer}
                     status={status}
@@ -2108,6 +2300,107 @@ function SinglePrinterCockpit({
         initialSelectedPrinterIds={[printer.id]}
         onClose={() => setReprintEntry(null)}
         onSuccess={() => setReprintEntry(null)}
+      />
+    )}
+    {showDeleteConfirm && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <Card className="mx-4 w-full max-w-md">
+          <CardContent>
+            <div className="mb-4 flex items-start gap-3">
+              <div className="rounded-full bg-red-500/20 p-2">
+                <AlertTriangle className="h-5 w-5 text-red-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-white">{t('printers.confirm.deleteTitle')}</h3>
+                <p className="mt-1 text-sm text-bambu-gray">
+                  {t('printers.confirm.deleteMessage', { name: printer.name })}
+                </p>
+              </div>
+            </div>
+
+            <div className="mb-4 rounded-lg bg-bambu-dark p-3">
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={deleteArchives}
+                  onChange={(e) => setDeleteArchives(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-bambu-gray bg-bambu-dark-secondary text-bambu-green focus:ring-bambu-green focus:ring-offset-0"
+                />
+                <div>
+                  <span className="text-sm text-white">{t('printers.deleteArchives')}</span>
+                  <p className="mt-0.5 text-xs text-bambu-gray">
+                    {deleteArchives
+                      ? t('printers.confirm.deleteArchivesNote')
+                      : t('printers.confirm.keepArchivesNote')}
+                  </p>
+                </div>
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setShowDeleteConfirm(false);
+                  setDeleteArchives(true);
+                }}
+              >
+                {t('common.cancel')}
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => {
+                  deleteMutation.mutate({ deleteArchives });
+                  setShowDeleteConfirm(false);
+                  setDeleteArchives(true);
+                }}
+              >
+                {t('common.delete')}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )}
+    {showMQTTDebug && (
+      <MQTTDebugModal
+        printerId={printer.id}
+        printerName={printer.name}
+        onClose={() => setShowMQTTDebug(false)}
+      />
+    )}
+    {showDiagnostic && (
+      <ConnectionDiagnosticModal
+        printerId={printer.id}
+        printerName={printer.name}
+        onClose={() => setShowDiagnostic(false)}
+      />
+    )}
+    {showPrinterInfo && (
+      <PrinterInfoModal
+        printer={printer}
+        status={status}
+        totalPrintHours={maintenanceInfo?.total_print_hours}
+        onClose={() => setShowPrinterInfo(false)}
+      />
+    )}
+    {showEditModal && (
+      <EditPrinterModal
+        printer={printer}
+        onClose={() => setShowEditModal(false)}
+      />
+    )}
+    {confirmMaintenanceEnter && (
+      <ConfirmModal
+        title={t('printers.maintenance.confirmMidPrintTitle')}
+        message={t('printers.maintenance.confirmMidPrintMessage', { name: printer.name })}
+        confirmText={t('printers.maintenance.menuEnter')}
+        variant="danger"
+        onConfirm={() => {
+          maintenanceMutation.mutate(false);
+          setConfirmMaintenanceEnter(false);
+        }}
+        onCancel={() => setConfirmMaintenanceEnter(false)}
       />
     )}
     <AmsSlotControllerModals controller={amsSlotController} />
