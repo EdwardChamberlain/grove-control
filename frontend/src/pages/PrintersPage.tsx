@@ -1147,6 +1147,204 @@ function CockpitMetricCard({
   );
 }
 
+type PrinterActionsMenuProps = {
+  printer: Printer;
+  isOpen: boolean;
+  menuRef: React.RefObject<HTMLDivElement | null>;
+  triggerClassName: string;
+  menuClassName: string;
+  iconClassName?: string;
+  maintenancePending?: boolean;
+  forceRefreshPending?: boolean;
+  onToggle: () => void;
+  onEdit: () => void;
+  onInfo: () => void;
+  onToggleMaintenance: () => void;
+  onReconnect: () => void;
+  onForceRefresh: () => void;
+  onMqttDebug: () => void;
+  onDiagnostic: () => void;
+  onDelete: () => void;
+};
+
+function PrinterActionsMenu({
+  printer,
+  isOpen,
+  menuRef,
+  triggerClassName,
+  menuClassName,
+  iconClassName = 'h-4 w-4',
+  maintenancePending = false,
+  forceRefreshPending = false,
+  onToggle,
+  onEdit,
+  onInfo,
+  onToggleMaintenance,
+  onReconnect,
+  onForceRefresh,
+  onMqttDebug,
+  onDiagnostic,
+  onDelete,
+}: PrinterActionsMenuProps) {
+  const { t } = useTranslation();
+  const { hasPermission } = useAuth();
+  const itemClass = 'flex w-full items-center gap-2 px-4 py-2 text-left text-sm';
+
+  return (
+    <div ref={menuRef} className="relative flex-shrink-0">
+      <Button
+        variant="secondary"
+        size="sm"
+        onClick={onToggle}
+        title={t('common.more', 'More')}
+        className={triggerClassName}
+      >
+        <MoreVertical className={iconClassName} />
+      </Button>
+      {isOpen && (
+        <div className={menuClassName}>
+          <button
+            className={`${itemClass} ${
+              hasPermission('printers:update')
+                ? 'hover:bg-bambu-dark-tertiary'
+                : 'cursor-not-allowed opacity-50'
+            }`}
+            onClick={() => {
+              if (!hasPermission('printers:update')) return;
+              onEdit();
+            }}
+            title={!hasPermission('printers:update') ? t('printers.permission.noEdit') : undefined}
+          >
+            <Pencil className={iconClassName} />
+            {t('common.edit')}
+          </button>
+          <button className={`${itemClass} hover:bg-bambu-dark-tertiary`} onClick={onInfo}>
+            <Info className={iconClassName} />
+            {t('printers.printerInformation')}
+          </button>
+          <button
+            className={`${itemClass} ${
+              hasPermission('printers:update')
+                ? 'hover:bg-bambu-dark-tertiary'
+                : 'cursor-not-allowed opacity-50'
+            }`}
+            disabled={maintenancePending || !hasPermission('printers:update')}
+            onClick={() => {
+              if (!hasPermission('printers:update')) return;
+              onToggleMaintenance();
+            }}
+            title={!hasPermission('printers:update') ? t('printers.permission.noEdit') : undefined}
+          >
+            <Wrench className={iconClassName} />
+            {printer.is_active !== false
+              ? t('printers.maintenance.menuEnter')
+              : t('printers.maintenance.menuExit')}
+          </button>
+          <button className={`${itemClass} hover:bg-bambu-dark-tertiary`} onClick={onReconnect}>
+            <RefreshCw className={iconClassName} />
+            {t('printers.reconnect')}
+          </button>
+          <button
+            className={`${itemClass} hover:bg-bambu-dark-tertiary disabled:opacity-50`}
+            disabled={forceRefreshPending}
+            onClick={onForceRefresh}
+          >
+            <RotateCw className={`${iconClassName} ${forceRefreshPending ? 'animate-spin' : ''}`} />
+            {t('printers.forceRefresh')}
+          </button>
+          <button className={`${itemClass} hover:bg-bambu-dark-tertiary`} onClick={onMqttDebug}>
+            <Terminal className={iconClassName} />
+            {t('printers.mqttDebug')}
+          </button>
+          <button className={`${itemClass} hover:bg-bambu-dark-tertiary`} onClick={onDiagnostic}>
+            <Stethoscope className={iconClassName} />
+            {t('diagnostic.runButton')}
+          </button>
+          <button
+            className={`${itemClass} ${
+              hasPermission('printers:delete')
+                ? 'text-red-400 hover:bg-bambu-dark-tertiary'
+                : 'cursor-not-allowed text-red-400/50'
+            }`}
+            onClick={() => {
+              if (!hasPermission('printers:delete')) return;
+              onDelete();
+            }}
+            title={!hasPermission('printers:delete') ? t('printers.permission.noDelete') : undefined}
+          >
+            <Trash2 className={iconClassName} />
+            {t('common.delete')}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PrinterDeleteConfirmModal({
+  printer,
+  deleteArchives,
+  onDeleteArchivesChange,
+  onCancel,
+  onConfirm,
+}: {
+  printer: Printer;
+  deleteArchives: boolean;
+  onDeleteArchivesChange: (deleteArchives: boolean) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <Card className="mx-4 w-full max-w-md">
+        <CardContent>
+          <div className="mb-4 flex items-start gap-3">
+            <div className="rounded-full bg-red-500/20 p-2">
+              <AlertTriangle className="h-5 w-5 text-red-400" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-white">{t('printers.confirm.deleteTitle')}</h3>
+              <p className="mt-1 text-sm text-bambu-gray">
+                {t('printers.confirm.deleteMessage', { name: printer.name })}
+              </p>
+            </div>
+          </div>
+
+          <div className="mb-4 rounded-lg bg-bambu-dark p-3">
+            <label className="flex cursor-pointer items-start gap-3">
+              <input
+                type="checkbox"
+                checked={deleteArchives}
+                onChange={(e) => onDeleteArchivesChange(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-bambu-gray bg-bambu-dark-secondary text-bambu-green focus:ring-bambu-green focus:ring-offset-0"
+              />
+              <div>
+                <span className="text-sm text-white">{t('printers.deleteArchives')}</span>
+                <p className="mt-0.5 text-xs text-bambu-gray">
+                  {deleteArchives
+                    ? t('printers.confirm.deleteArchivesNote')
+                    : t('printers.confirm.keepArchivesNote')}
+                </p>
+              </div>
+            </label>
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={onCancel}>
+              {t('common.cancel')}
+            </Button>
+            <Button variant="danger" onClick={onConfirm}>
+              {t('common.delete')}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function SinglePrinterCockpit({
   printer,
   maintenanceInfo,
@@ -1824,127 +2022,52 @@ function SinglePrinterCockpit({
   ) : null;
 
   const printerActionsMenu = (
-    <div ref={printerActionsMenuRef} className="relative flex-shrink-0">
-      <Button
-        variant="secondary"
-        size="sm"
-        onClick={() => setShowMenu(!showMenu)}
-        title={t('common.more', 'More')}
-        className="h-9 min-h-9 w-9 px-0 py-0"
-      >
-        <MoreVertical className="h-4 w-4" />
-      </Button>
-      {showMenu && (
-        <div className="absolute right-0 top-full mt-2 w-48 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary shadow-lg z-30">
-          <button
-            className={`flex w-full items-center gap-2 px-4 py-2 text-left text-sm ${
-              hasPermission('printers:update')
-                ? 'hover:bg-bambu-dark-tertiary'
-                : 'cursor-not-allowed opacity-50'
-            }`}
-            onClick={() => {
-              if (!hasPermission('printers:update')) return;
-              setShowEditModal(true);
-              setShowMenu(false);
-            }}
-            title={!hasPermission('printers:update') ? t('printers.permission.noEdit') : undefined}
-          >
-            <Pencil className="h-4 w-4" />
-            {t('common.edit')}
-          </button>
-          <button
-            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-bambu-dark-tertiary"
-            onClick={() => {
-              setShowPrinterInfo(true);
-              setShowMenu(false);
-            }}
-          >
-            <Info className="h-4 w-4" />
-            {t('printers.printerInformation')}
-          </button>
-          <button
-            className={`flex w-full items-center gap-2 px-4 py-2 text-left text-sm ${
-              hasPermission('printers:update')
-                ? 'hover:bg-bambu-dark-tertiary'
-                : 'cursor-not-allowed opacity-50'
-            }`}
-            disabled={maintenanceMutation.isPending || !hasPermission('printers:update')}
-            onClick={() => {
-              if (!hasPermission('printers:update')) return;
-              setShowMenu(false);
-              if (printer.is_active !== false) {
-                handleEnterMaintenance();
-              } else {
-                maintenanceMutation.mutate(true);
-              }
-            }}
-            title={!hasPermission('printers:update') ? t('printers.permission.noEdit') : undefined}
-          >
-            <Wrench className="h-4 w-4" />
-            {printer.is_active !== false
-              ? t('printers.maintenance.menuEnter')
-              : t('printers.maintenance.menuExit')}
-          </button>
-          <button
-            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-bambu-dark-tertiary"
-            onClick={() => {
-              connectMutation.mutate();
-              setShowMenu(false);
-            }}
-          >
-            <RefreshCw className="h-4 w-4" />
-            {t('printers.reconnect')}
-          </button>
-          <button
-            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-bambu-dark-tertiary disabled:opacity-50"
-            disabled={forceRefreshMutation.isPending}
-            onClick={() => {
-              forceRefreshMutation.mutate();
-              setShowMenu(false);
-            }}
-          >
-            <RotateCw className={`h-4 w-4 ${forceRefreshMutation.isPending ? 'animate-spin' : ''}`} />
-            {t('printers.forceRefresh')}
-          </button>
-          <button
-            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-bambu-dark-tertiary"
-            onClick={() => {
-              setShowMQTTDebug(true);
-              setShowMenu(false);
-            }}
-          >
-            <Terminal className="h-4 w-4" />
-            {t('printers.mqttDebug')}
-          </button>
-          <button
-            className="flex w-full items-center gap-2 px-4 py-2 text-left text-sm hover:bg-bambu-dark-tertiary"
-            onClick={() => {
-              setShowDiagnostic(true);
-              setShowMenu(false);
-            }}
-          >
-            <Stethoscope className="h-4 w-4" />
-            {t('diagnostic.runButton')}
-          </button>
-          <button
-            className={`flex w-full items-center gap-2 px-4 py-2 text-left text-sm ${
-              hasPermission('printers:delete')
-                ? 'text-red-400 hover:bg-bambu-dark-tertiary'
-                : 'cursor-not-allowed text-red-400/50'
-            }`}
-            onClick={() => {
-              if (!hasPermission('printers:delete')) return;
-              setShowDeleteConfirm(true);
-              setShowMenu(false);
-            }}
-            title={!hasPermission('printers:delete') ? t('printers.permission.noDelete') : undefined}
-          >
-            <Trash2 className="h-4 w-4" />
-            {t('common.delete')}
-          </button>
-        </div>
-      )}
-    </div>
+    <PrinterActionsMenu
+      printer={printer}
+      isOpen={showMenu}
+      menuRef={printerActionsMenuRef}
+      triggerClassName="h-9 min-h-9 w-9 px-0 py-0"
+      menuClassName="absolute right-0 top-full z-30 mt-2 w-48 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary shadow-lg"
+      maintenancePending={maintenanceMutation.isPending}
+      forceRefreshPending={forceRefreshMutation.isPending}
+      onToggle={() => setShowMenu(!showMenu)}
+      onEdit={() => {
+        setShowEditModal(true);
+        setShowMenu(false);
+      }}
+      onInfo={() => {
+        setShowPrinterInfo(true);
+        setShowMenu(false);
+      }}
+      onToggleMaintenance={() => {
+        setShowMenu(false);
+        if (printer.is_active !== false) {
+          handleEnterMaintenance();
+        } else {
+          maintenanceMutation.mutate(true);
+        }
+      }}
+      onReconnect={() => {
+        connectMutation.mutate();
+        setShowMenu(false);
+      }}
+      onForceRefresh={() => {
+        forceRefreshMutation.mutate();
+        setShowMenu(false);
+      }}
+      onMqttDebug={() => {
+        setShowMQTTDebug(true);
+        setShowMenu(false);
+      }}
+      onDiagnostic={() => {
+        setShowDiagnostic(true);
+        setShowMenu(false);
+      }}
+      onDelete={() => {
+        setShowDeleteConfirm(true);
+        setShowMenu(false);
+      }}
+    />
   );
 
   return (
@@ -2303,64 +2426,20 @@ function SinglePrinterCockpit({
       />
     )}
     {showDeleteConfirm && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-        <Card className="mx-4 w-full max-w-md">
-          <CardContent>
-            <div className="mb-4 flex items-start gap-3">
-              <div className="rounded-full bg-red-500/20 p-2">
-                <AlertTriangle className="h-5 w-5 text-red-400" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-white">{t('printers.confirm.deleteTitle')}</h3>
-                <p className="mt-1 text-sm text-bambu-gray">
-                  {t('printers.confirm.deleteMessage', { name: printer.name })}
-                </p>
-              </div>
-            </div>
-
-            <div className="mb-4 rounded-lg bg-bambu-dark p-3">
-              <label className="flex cursor-pointer items-start gap-3">
-                <input
-                  type="checkbox"
-                  checked={deleteArchives}
-                  onChange={(e) => setDeleteArchives(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-bambu-gray bg-bambu-dark-secondary text-bambu-green focus:ring-bambu-green focus:ring-offset-0"
-                />
-                <div>
-                  <span className="text-sm text-white">{t('printers.deleteArchives')}</span>
-                  <p className="mt-0.5 text-xs text-bambu-gray">
-                    {deleteArchives
-                      ? t('printers.confirm.deleteArchivesNote')
-                      : t('printers.confirm.keepArchivesNote')}
-                  </p>
-                </div>
-              </label>
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setShowDeleteConfirm(false);
-                  setDeleteArchives(true);
-                }}
-              >
-                {t('common.cancel')}
-              </Button>
-              <Button
-                variant="danger"
-                onClick={() => {
-                  deleteMutation.mutate({ deleteArchives });
-                  setShowDeleteConfirm(false);
-                  setDeleteArchives(true);
-                }}
-              >
-                {t('common.delete')}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      <PrinterDeleteConfirmModal
+        printer={printer}
+        deleteArchives={deleteArchives}
+        onDeleteArchivesChange={setDeleteArchives}
+        onCancel={() => {
+          setShowDeleteConfirm(false);
+          setDeleteArchives(true);
+        }}
+        onConfirm={() => {
+          deleteMutation.mutate({ deleteArchives });
+          setShowDeleteConfirm(false);
+          setDeleteArchives(true);
+        }}
+      />
     )}
     {showMQTTDebug && (
       <MQTTDebugModal
@@ -3684,128 +3763,53 @@ function PrinterCard({
   };
 
   const printerActionsMenu = (
-    <div ref={printerActionsMenuRef} className="relative flex-shrink-0">
-      <Button
-        variant="secondary"
-        size="sm"
-        onClick={() => setShowMenu(!showMenu)}
-        title={t('common.more', 'More')}
-        className={footerIconButtonClass}
-      >
-        <MoreVertical className="w-4 h-4" />
-      </Button>
-      {showMenu && (
-        <div className="absolute left-0 bottom-full mb-2 w-48 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg shadow-lg z-20">
-          <button
-            className={`w-full px-4 py-2 text-left text-sm flex items-center gap-2 ${
-              hasPermission('printers:update')
-                ? 'hover:bg-bambu-dark-tertiary'
-                : 'opacity-50 cursor-not-allowed'
-            }`}
-            onClick={() => {
-              if (!hasPermission('printers:update')) return;
-              setShowEditModal(true);
-              setShowMenu(false);
-            }}
-            title={!hasPermission('printers:update') ? t('printers.permission.noEdit') : undefined}
-          >
-            <Pencil className="w-4 h-4" />
-            {t('common.edit')}
-          </button>
-          <button
-            className="w-full px-4 py-2 text-left text-sm hover:bg-bambu-dark-tertiary flex items-center gap-2"
-            onClick={() => {
-              setShowPrinterInfo(true);
-              setShowMenu(false);
-            }}
-          >
-            <Info className="w-4 h-4" />
-            {t('printers.printerInformation')}
-          </button>
-          {/* Maintenance Mode toggle (#1476) — leverages backend is_active flag */}
-          <button
-            className={`w-full px-4 py-2 text-left text-sm flex items-center gap-2 ${
-              hasPermission('printers:update')
-                ? 'hover:bg-bambu-dark-tertiary'
-                : 'opacity-50 cursor-not-allowed'
-            }`}
-            disabled={maintenanceMutation.isPending || !hasPermission('printers:update')}
-            onClick={() => {
-              if (!hasPermission('printers:update')) return;
-              setShowMenu(false);
-              if (printer.is_active !== false) {
-                handleEnterMaintenance();
-              } else {
-                maintenanceMutation.mutate(true);
-              }
-            }}
-            title={!hasPermission('printers:update') ? t('printers.permission.noEdit') : undefined}
-          >
-            <Wrench className="w-4 h-4" />
-            {printer.is_active !== false
-              ? t('printers.maintenance.menuEnter')
-              : t('printers.maintenance.menuExit')}
-          </button>
-          <button
-            className="w-full px-4 py-2 text-left text-sm hover:bg-bambu-dark-tertiary flex items-center gap-2"
-            onClick={() => {
-              connectMutation.mutate();
-              setShowMenu(false);
-            }}
-          >
-            <RefreshCw className="w-4 h-4" />
-            {t('printers.reconnect')}
-          </button>
-          <button
-            className="w-full px-4 py-2 text-left text-sm hover:bg-bambu-dark-tertiary flex items-center gap-2 disabled:opacity-50"
-            disabled={forceRefreshMutation.isPending}
-            onClick={() => {
-              forceRefreshMutation.mutate();
-              setShowMenu(false);
-            }}
-          >
-            <RotateCw className={`w-4 h-4 ${forceRefreshMutation.isPending ? 'animate-spin' : ''}`} />
-            {t('printers.forceRefresh')}
-          </button>
-          <button
-            className="w-full px-4 py-2 text-left text-sm hover:bg-bambu-dark-tertiary flex items-center gap-2"
-            onClick={() => {
-              setShowMQTTDebug(true);
-              setShowMenu(false);
-            }}
-          >
-            <Terminal className="w-4 h-4" />
-            {t('printers.mqttDebug')}
-          </button>
-          <button
-            className="w-full px-4 py-2 text-left text-sm hover:bg-bambu-dark-tertiary flex items-center gap-2"
-            onClick={() => {
-              setShowDiagnostic(true);
-              setShowMenu(false);
-            }}
-          >
-            <Stethoscope className="w-4 h-4" />
-            {t('diagnostic.runButton')}
-          </button>
-          <button
-            className={`w-full px-4 py-2 text-left text-sm flex items-center gap-2 ${
-              hasPermission('printers:delete')
-                ? 'text-red-400 hover:bg-bambu-dark-tertiary'
-                : 'text-red-400/50 cursor-not-allowed'
-            }`}
-            onClick={() => {
-              if (!hasPermission('printers:delete')) return;
-              setShowDeleteConfirm(true);
-              setShowMenu(false);
-            }}
-            title={!hasPermission('printers:delete') ? t('printers.permission.noDelete') : undefined}
-          >
-            <Trash2 className="w-4 h-4" />
-            {t('common.delete')}
-          </button>
-        </div>
-      )}
-    </div>
+    <PrinterActionsMenu
+      printer={printer}
+      isOpen={showMenu}
+      menuRef={printerActionsMenuRef}
+      triggerClassName={footerIconButtonClass}
+      menuClassName="absolute left-0 bottom-full z-20 mb-2 w-48 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary shadow-lg"
+      iconClassName="w-4 h-4"
+      maintenancePending={maintenanceMutation.isPending}
+      forceRefreshPending={forceRefreshMutation.isPending}
+      onToggle={() => setShowMenu(!showMenu)}
+      onEdit={() => {
+        setShowEditModal(true);
+        setShowMenu(false);
+      }}
+      onInfo={() => {
+        setShowPrinterInfo(true);
+        setShowMenu(false);
+      }}
+      onToggleMaintenance={() => {
+        setShowMenu(false);
+        if (printer.is_active !== false) {
+          handleEnterMaintenance();
+        } else {
+          maintenanceMutation.mutate(true);
+        }
+      }}
+      onReconnect={() => {
+        connectMutation.mutate();
+        setShowMenu(false);
+      }}
+      onForceRefresh={() => {
+        forceRefreshMutation.mutate();
+        setShowMenu(false);
+      }}
+      onMqttDebug={() => {
+        setShowMQTTDebug(true);
+        setShowMenu(false);
+      }}
+      onDiagnostic={() => {
+        setShowDiagnostic(true);
+        setShowMenu(false);
+      }}
+      onDelete={() => {
+        setShowDeleteConfirm(true);
+        setShowMenu(false);
+      }}
+    />
   );
 
   return (
@@ -3968,66 +3972,21 @@ function PrinterCard({
           )}
         </div>
 
-        {/* Delete Confirmation */}
         {showDeleteConfirm && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <Card className="w-full max-w-md mx-4">
-              <CardContent>
-                <div className="flex items-start gap-3 mb-4">
-                  <div className="p-2 rounded-full bg-red-500/20">
-                    <AlertTriangle className="w-5 h-5 text-red-400" />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-white">{t('printers.confirm.deleteTitle')}</h3>
-                    <p className="text-sm text-bambu-gray mt-1">
-                      {t('printers.confirm.deleteMessage', { name: printer.name })}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="bg-bambu-dark rounded-lg p-3 mb-4">
-                  <label className="flex items-start gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={deleteArchives}
-                      onChange={(e) => setDeleteArchives(e.target.checked)}
-                      className="mt-0.5 w-4 h-4 rounded border-bambu-gray bg-bambu-dark-secondary text-bambu-green focus:ring-bambu-green focus:ring-offset-0"
-                    />
-                    <div>
-                      <span className="text-sm text-white">{t('printers.deleteArchives')}</span>
-                      <p className="text-xs text-bambu-gray mt-0.5">
-                        {deleteArchives
-                          ? t('printers.confirm.deleteArchivesNote')
-                          : t('printers.confirm.keepArchivesNote')}
-                      </p>
-                    </div>
-                  </label>
-                </div>
-
-                <div className="flex justify-end gap-2">
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      setShowDeleteConfirm(false);
-                      setDeleteArchives(true);
-                    }}
-                  >
-                    {t('common.cancel')}
-                  </Button>
-                  <Button
-                    variant="danger"
-                    onClick={() => {
-                      deleteMutation.mutate({ deleteArchives });
-                      setShowDeleteConfirm(false);
-                      setDeleteArchives(true);
-                    }}
-                  >
-                    Delete
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+          <PrinterDeleteConfirmModal
+            printer={printer}
+            deleteArchives={deleteArchives}
+            onDeleteArchivesChange={setDeleteArchives}
+            onCancel={() => {
+              setShowDeleteConfirm(false);
+              setDeleteArchives(true);
+            }}
+            onConfirm={() => {
+              deleteMutation.mutate({ deleteArchives });
+              setShowDeleteConfirm(false);
+              setDeleteArchives(true);
+            }}
+          />
         )}
 
         {/* Status — see the equivalent defensive `=== false` check on the
