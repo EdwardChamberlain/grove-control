@@ -357,7 +357,7 @@ describe('GitHubBackupSettings - Provider Selection', () => {
   });
 
   it('does not let pending token autosave cancel provider settings autosave', async () => {
-    let patchBody: Record<string, unknown> | null = null;
+    const patchBodies: Record<string, unknown>[] = [];
     let postBody: Record<string, unknown> | null = null;
     const user = userEvent.setup();
 
@@ -388,7 +388,8 @@ describe('GitHubBackupSettings - Provider Selection', () => {
         })
       ),
       http.patch('/api/v1/github-backup/config', async ({ request }) => {
-        patchBody = await request.json() as Record<string, unknown>;
+        const patchBody = await request.json() as Record<string, unknown>;
+        patchBodies.push(patchBody);
         return HttpResponse.json({
           id: 6,
           repository_url: 'http://git.example.com/owner/repo',
@@ -451,7 +452,7 @@ describe('GitHubBackupSettings - Provider Selection', () => {
     await user.click(await screen.findByRole('option', { name: /forgejo/i }));
 
     await waitFor(() => {
-      expect(patchBody).toEqual({ provider: 'forgejo' });
+      expect(patchBodies).toContainEqual({ provider: 'forgejo' });
     }, { timeout: 2000 });
   });
 });
