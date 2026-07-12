@@ -30,7 +30,6 @@ import {
   AlertTriangle,
   Terminal,
   Power,
-  Zap,
   Wrench,
   ChevronDown,
   Filter,
@@ -1763,7 +1762,8 @@ function SinglePrinterCockpit({
     let completedDurationCount = 0;
     let filamentGrams = 0;
     let totalCost = 0;
-    let energyKwh = 0;
+    let longestPrintSeconds = 0;
+    let longestPrintName: string | null = null;
 
     printEntries.forEach(entry => {
       durationSeconds += entry.duration_seconds ?? 0;
@@ -1773,7 +1773,10 @@ function SinglePrinterCockpit({
       }
       filamentGrams += entry.filament_used_grams ?? 0;
       totalCost += entry.cost ?? 0;
-      energyKwh += entry.energy_kwh ?? 0;
+      if (entry.status === 'completed' && (entry.duration_seconds ?? 0) > longestPrintSeconds) {
+        longestPrintSeconds = entry.duration_seconds ?? 0;
+        longestPrintName = entry.print_name || null;
+      }
       if (entry.filament_type) {
         filamentByType.set(entry.filament_type, (filamentByType.get(entry.filament_type) ?? 0) + 1);
       }
@@ -1790,7 +1793,8 @@ function SinglePrinterCockpit({
       averageDurationSeconds: completedDurationCount > 0 ? completedDurationSeconds / completedDurationCount : null,
       filamentGrams,
       totalCost,
-      energyKwh,
+      longestPrintSeconds,
+      longestPrintName,
       topFilament,
     };
   }, [printEntries]);
@@ -1815,7 +1819,7 @@ function SinglePrinterCockpit({
     { mode: 3, label: t('printers.speed.sport', 'Sport') },
     { mode: 4, label: t('printers.speed.ludicrous', 'Ludicrous') },
   ];
-  const iconControlClass = 'relative inline-flex h-9 min-w-0 items-center justify-center gap-2 rounded-lg px-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50';
+  const iconControlClass = 'relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50';
   const jogButtonClass = 'flex h-7 w-7 shrink-0 items-center justify-center rounded bg-indigo-500/15 text-indigo-300 transition-colors hover:bg-indigo-500/30 disabled:cursor-not-allowed disabled:opacity-50';
   const currentPrintLabel = activePrintName || t('printers.noActiveJob', 'No active job');
   const plateDetectionEnabled = plateDetectionMutation.isPending && plateDetectionMutation.variables != null
@@ -1847,12 +1851,12 @@ function SinglePrinterCockpit({
     }
   };
   const jogPanel = (
-    <div className="mt-3 min-h-0">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="mb-2 flex items-center gap-2">
         <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">{t('printers.single.jog')}</span>
         <div className="h-[2px] flex-1 bg-bambu-dark-tertiary" />
       </div>
-      <div className="flex items-start justify-center gap-3 rounded-lg bg-bambu-dark/70 px-3 py-2">
+      <div className="flex flex-1 items-center justify-center gap-3 px-3 py-2">
         <div className="flex items-center justify-center gap-3">
           <div className="grid grid-cols-3 gap-1">
             <div />
@@ -1961,7 +1965,7 @@ function SinglePrinterCockpit({
   };
 
   const filamentPanel = ((status?.ams?.length ?? 0) > 0 || (status?.vt_tray?.length ?? 0) > 0) ? (
-    <section data-testid="cockpit-filament-pane" className="flex min-h-0 flex-col rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
+    <section data-testid="cockpit-filament-pane" className="flex min-w-0 flex-col">
       <div className="mb-2 flex shrink-0 items-center gap-2">
         <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">{t('printers.filaments')}</span>
         <AmsBackupBadge
@@ -1970,7 +1974,7 @@ function SinglePrinterCockpit({
         />
         <div className="h-[2px] flex-1 bg-bambu-dark-tertiary" />
       </div>
-      <div data-testid="cockpit-filament-scroll" className="flex min-h-0 min-w-0 gap-2 overflow-auto pb-1">
+      <div data-testid="cockpit-filament-scroll" className="grid min-w-0 gap-2">
         {status?.ams?.map((ams) => (
           <CompactAmsUnitCard key={ams.id} amsId={ams.id}>
             <div className="mb-1.5">
@@ -2008,7 +2012,7 @@ function SinglePrinterCockpit({
           </CompactAmsUnitCard>
         ))}
         {(status?.vt_tray?.length ?? 0) > 0 && (
-          <div className="min-w-24 rounded-lg bg-bambu-dark p-2">
+          <div className="rounded-lg bg-bambu-dark p-2">
             <div className="mb-1.5 flex min-h-7 items-center rounded-lg bg-bambu-dark-secondary px-2 py-1">
               <span className="truncate text-[10px] font-medium text-white">{t('printers.external')}</span>
             </div>
@@ -2070,10 +2074,244 @@ function SinglePrinterCockpit({
     />
   );
 
+  const primaryActionPanel = showClearPlateButton ? (
+    <button
+      type="button"
+      onClick={() => clearPlateMutation.mutate()}
+      disabled={clearPlateMutation.isPending || !hasPermission('printers:clear_plate')}
+      className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-yellow-500/20 px-3 text-sm font-medium text-yellow-400 transition-colors hover:bg-yellow-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+      title={!hasPermission('printers:clear_plate') ? t('printers.permission.noControl') : t('printers.plateStatus.markCleared')}
+    >
+      {clearPlateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlateClearedIcon className="h-4 w-4" />}
+      {t('printers.plateStatus.markCleared')}
+    </button>
+  ) : isPrintingOrPaused ? (
+    <div className="grid grid-cols-2 gap-2">
+      <button
+        type="button"
+        onClick={() => (isPaused ? resumePrintMutation.mutate() : pausePrintMutation.mutate())}
+        disabled={!canControl || controlBusy}
+        className={`flex h-10 items-center justify-center gap-2 rounded-lg text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+          isPaused
+            ? 'bg-bambu-green/20 text-bambu-green hover:bg-bambu-green/30'
+            : 'bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30'
+        }`}
+      >
+        {isPaused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
+        {isPaused ? t('printers.resume') : t('printers.pause')}
+      </button>
+      <button
+        type="button"
+        onClick={() => stopPrintMutation.mutate()}
+        disabled={!canControl || controlBusy}
+        className="flex h-10 items-center justify-center gap-2 rounded-lg bg-red-500/20 text-sm font-medium text-red-400 transition-colors hover:bg-red-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <Square className="h-4 w-4" />
+        {t('printers.stop')}
+      </button>
+    </div>
+  ) : (
+    <button
+      type="button"
+      onClick={() => setShowUploadForPrint(true)}
+      disabled={!hasPermission('queue:create')}
+      className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-bambu-green px-3 text-sm font-medium text-white transition-colors hover:bg-bambu-green-light disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      <Play className="h-4 w-4" />
+      {t('printers.startPrint', 'Start print')}
+    </button>
+  );
+
+  const quickControlsPanel = (
+    <div className="mt-3">
+      <div className="mb-2 flex items-center gap-2">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">
+          {t('printers.controls')}
+        </span>
+        <div className="h-[2px] flex-1 bg-bambu-dark-tertiary" />
+      </div>
+
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <button
+          type="button"
+          className={`${iconControlClass} ${
+            status?.chamber_light
+              ? 'bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20'
+              : 'bg-bambu-dark-tertiary/70 text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white'
+          }`}
+          onClick={() => chamberLightMutation.mutate(!status?.chamber_light)}
+          disabled={!canUseMachineTools || chamberLightMutation.isPending}
+          aria-label={status?.chamber_light ? t('printers.chamberLightOff') : t('printers.chamberLightOn')}
+          title={status?.chamber_light ? t('printers.chamberLightOff') : t('printers.chamberLightOn')}
+        >
+          <ChamberLight on={!!status?.chamber_light} className="h-4 w-4" />
+        </button>
+        <div className={`inline-flex rounded-lg ${plateDetectionEnabled ? 'ring-1 ring-green-500' : ''}`}>
+          <button
+            type="button"
+            onClick={() => plateDetectionMutation.mutate(!plateDetectionEnabled)}
+            disabled={!status?.connected || plateDetectionMutation.isPending || !hasPermission('printers:update')}
+            className={`${iconControlClass} rounded-r-none ${
+              plateDetectionEnabled
+                ? 'bg-green-500/10 text-green-400 hover:bg-green-500/20'
+                : 'bg-bambu-dark-tertiary/70 text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white'
+            }`}
+            aria-label={!hasPermission('printers:update') ? t('printers.plateDetection.noPermission') : (plateDetectionEnabled ? t('printers.plateDetection.enabledClick') : t('printers.plateDetection.disabledClick'))}
+            title={!hasPermission('printers:update') ? t('printers.plateDetection.noPermission') : (plateDetectionEnabled ? t('printers.plateDetection.enabledClick') : t('printers.plateDetection.disabledClick'))}
+          >
+            {plateDetectionMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <ScanSearch className="h-4 w-4" />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={handleOpenPlateCheck}
+            disabled={!status?.connected || isCheckingPlate || !hasPermission('printers:update')}
+            className={`${iconControlClass} rounded-l-none border-l border-bambu-dark-tertiary ${
+              plateDetectionEnabled
+                ? 'bg-green-500/10 text-green-400 hover:bg-green-500/20'
+                : 'bg-bambu-dark-tertiary/70 text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white'
+            }`}
+            aria-label={!hasPermission('printers:update') ? t('printers.plateDetection.noPermission') : t('printers.plateDetection.manageCalibration')}
+            title={!hasPermission('printers:update') ? t('printers.plateDetection.noPermission') : t('printers.plateDetection.manageCalibration')}
+          >
+            {isCheckingPlate ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <ChevronDown className="h-4 w-4" />
+            )}
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={() => canControl && isPrintingOrPaused && setStatusControlMenu(statusControlMenu === 'speed' ? null : 'speed')}
+          disabled={!isPrintingOrPaused || !canControl || printSpeedMutation.isPending}
+          className={`${iconControlClass} ${
+            isPrintingOrPaused && canControl
+              ? 'bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'
+              : 'bg-bambu-dark-tertiary/70 text-bambu-gray disabled:opacity-60'
+          }`}
+          aria-label={t('printers.speed.title')}
+          title={t('printers.speed.title')}
+        >
+          <Gauge className="h-4 w-4" />
+          {statusControlMenu === 'speed' && (
+            <IndicatorControlPopover
+              title={t('printers.speed.title')}
+              isPending={printSpeedMutation.isPending}
+              options={speedModes.map(({ mode, label }) => ({ label, value: mode }))}
+              onClose={() => setStatusControlMenu(null)}
+              onSubmit={(mode) => printSpeedMutation.mutate(mode)}
+            />
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowSkipObjectsModal(true)}
+          disabled={!isPrintingOrPaused || (status?.printable_objects_count ?? 0) < 2 || !canControl}
+          className={`${iconControlClass} ${
+            isPrintingOrPaused && (status?.printable_objects_count ?? 0) >= 2 && canControl
+              ? 'bg-bambu-dark-tertiary/70 text-white hover:bg-bambu-dark-tertiary'
+              : 'bg-bambu-dark-tertiary/70 text-bambu-gray disabled:opacity-60'
+          }`}
+          aria-label={
+            !hasPermission('printers:control')
+              ? t('printers.permission.noControl')
+              : !isPrintingOrPaused
+                ? t('printers.skipObjects.onlyWhilePrinting')
+                : (status?.printable_objects_count ?? 0) >= 2
+                  ? t('printers.skipObjects.tooltip')
+                  : t('printers.skipObjects.requiresMultiple')
+          }
+          title={
+            !hasPermission('printers:control')
+              ? t('printers.permission.noControl')
+              : !isPrintingOrPaused
+                ? t('printers.skipObjects.onlyWhilePrinting')
+                : (status?.printable_objects_count ?? 0) >= 2
+                  ? t('printers.skipObjects.tooltip')
+              : t('printers.skipObjects.requiresMultiple')
+          }
+        >
+          <SkipObjectsIcon className="h-4 w-4" />
+          {objectsData && objectsData.skipped_count > 0 && (
+            <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+              {objectsData.skipped_count}
+            </span>
+          )}
+        </button>
+        {isAirductCapable && (
+          <button
+            type="button"
+            onClick={() => airductMutation.mutate(status?.airduct_mode === 1 ? 'cooling' : 'heating')}
+            disabled={!canUseMachineTools || airductMutation.isPending}
+            className={`${iconControlClass} ${status?.airduct_mode === 1 ? 'bg-orange-500/10 text-orange-400 hover:bg-orange-500/20' : 'bg-sky-500/10 text-sky-400 hover:bg-sky-500/20'}`}
+            aria-label={`${t('printers.airduct.title')}: ${status?.airduct_mode === 1 ? t('printers.airduct.heating') : t('printers.airduct.cooling')}`}
+            title={`${t('printers.airduct.title')}: ${status?.airduct_mode === 1 ? t('printers.airduct.heating') : t('printers.airduct.cooling')}`}
+          >
+            {status?.airduct_mode === 1 ? <Flame className="h-4 w-4" /> : <Snowflake className="h-4 w-4" />}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  const machineControlsPanel = (
+    <section className="h-full min-h-0 rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
+      <div className="grid h-full min-h-0 gap-3 xl:grid-cols-[minmax(0,3fr)_1px_minmax(0,2fr)]">
+        <div className="min-w-0">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">
+              {t('printers.status.title', 'Status')}
+            </span>
+            <div className="h-[2px] flex-1 bg-bambu-dark-tertiary" />
+          </div>
+          <PrinterThermalControls
+            printer={printer}
+            status={status}
+            nozzleTempPresets={nozzleTempPresets}
+            bedTempPresets={bedTempPresets}
+            chamberTempPresets={chamberTempPresets}
+            fanSpeedPresets={fanSpeedPresets}
+          />
+          {issueItems.length > 0 && (
+            <div className="mt-2 grid gap-1 text-xs text-status-warning sm:grid-cols-2">
+              {issueItems.map(item => <div key={item} className="truncate">{item}</div>)}
+            </div>
+          )}
+          {quickControlsPanel}
+        </div>
+        <div className="hidden self-stretch bg-bambu-dark-tertiary xl:block" />
+        <div className="min-w-0">{jogPanel}</div>
+      </div>
+    </section>
+  );
+
+  const statsPanel = (
+    <section>
+      <div className="mb-2 flex items-center gap-2">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">
+          {t('stats.title')}
+        </span>
+        <div className="h-[2px] flex-1 bg-bambu-dark-tertiary" />
+      </div>
+      <div className="grid min-h-0 grid-cols-2 gap-1.5 sm:grid-cols-3 xl:grid-cols-2 2xl:grid-cols-3">
+        <CockpitMetricCard compact icon={BarChart3} label={t('stats.successRate', 'Success rate')} value={`${printerStats.successRate}%`} detail={`${printerStats.completed} / ${printerStats.failed} / ${printerStats.cancelled}`} />
+        <CockpitMetricCard compact icon={Package} label={t('stats.totalPrints', 'Total prints')} value={`${printLog?.total ?? printEntries.length}`} detail={t('stats.topFilament', 'Top filament: {{filament}}', { filament: printerStats.topFilament })} />
+        <CockpitMetricCard compact icon={Clock} label={t('stats.printTime', 'Print time')} value={`${printerStats.durationHours.toFixed(1)}h`} detail={`${maintenanceInfo?.total_print_hours?.toFixed(1) ?? '0.0'}h ${t('maintenance.title', 'Maintenance')}`} />
+        <CockpitMetricCard compact icon={Package} label={t('stats.filamentUsed', 'Filament used')} value={formatCockpitWeight(printerStats.filamentGrams)} detail={`${currencySymbol}${printerStats.totalCost.toFixed(2)} ${t('stats.filamentCost', 'filament cost')}`} />
+        <CockpitMetricCard compact icon={Clock} label={t('stats.longestPrint', 'Longest Print')} value={printerStats.longestPrintSeconds > 0 ? formatDuration(printerStats.longestPrintSeconds) : '---'} detail={printerStats.longestPrintName || t('stats.fromPrintHistory', 'From print history')} />
+        <CockpitMetricCard compact icon={Timer} label={t('stats.averagePrintTime', 'Average time')} value={printerStats.averageDurationSeconds != null ? formatDuration(Math.round(printerStats.averageDurationSeconds)) : '---'} detail={t('stats.completedPrintAverage', 'Completed prints')} />
+      </div>
+    </section>
+  );
+
   return (
     <>
     <div className="relative h-full min-h-0 overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-gradient-to-br from-bambu-dark-secondary via-bambu-dark to-bambu-dark-secondary shadow-xl">
-      <div className="relative grid h-full min-h-0 gap-3 p-3 xl:grid-cols-[minmax(0,1.45fr)_minmax(21rem,0.8fr)]">
+      <div className="relative grid h-full min-h-0 gap-3 p-3 xl:grid-cols-[minmax(0,1.5fr)_minmax(21rem,0.72fr)]">
         <div className="grid min-h-0 gap-3 xl:grid-rows-[auto_minmax(0,1fr)]">
           <section className="relative aspect-video w-full min-h-0 overflow-hidden rounded-xl border border-white/10 bg-bambu-dark">
             <CameraPlaceholder
@@ -2133,229 +2371,26 @@ function SinglePrinterCockpit({
             </div>
           </section>
 
-          {filamentPanel}
+          <div className="min-h-0 h-full">
+            {machineControlsPanel}
+          </div>
         </div>
 
         <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3">
           <section className="rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
-            {showClearPlateButton ? (
-              <button
-                type="button"
-                onClick={() => clearPlateMutation.mutate()}
-                disabled={clearPlateMutation.isPending || !hasPermission('printers:clear_plate')}
-                className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-yellow-500/20 px-3 text-sm font-medium text-yellow-400 transition-colors hover:bg-yellow-500/30 disabled:cursor-not-allowed disabled:opacity-50"
-                title={!hasPermission('printers:clear_plate') ? t('printers.permission.noControl') : t('printers.plateStatus.markCleared')}
-              >
-                {clearPlateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlateClearedIcon className="h-4 w-4" />}
-                {t('printers.plateStatus.markCleared')}
-              </button>
-            ) : isPrintingOrPaused ? (
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => (isPaused ? resumePrintMutation.mutate() : pausePrintMutation.mutate())}
-                  disabled={!canControl || controlBusy}
-                  className={`flex h-10 items-center justify-center gap-2 rounded-lg text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                    isPaused
-                      ? 'bg-bambu-green/20 text-bambu-green hover:bg-bambu-green/30'
-                      : 'bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30'
-                  }`}
-                >
-                  {isPaused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
-                  {isPaused ? t('printers.resume') : t('printers.pause')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => stopPrintMutation.mutate()}
-                  disabled={!canControl || controlBusy}
-                  className="flex h-10 items-center justify-center gap-2 rounded-lg bg-red-500/20 text-sm font-medium text-red-400 transition-colors hover:bg-red-500/30 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Square className="h-4 w-4" />
-                  {t('printers.stop')}
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setShowUploadForPrint(true)}
-                disabled={!hasPermission('queue:create')}
-                className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-bambu-green px-3 text-sm font-medium text-white transition-colors hover:bg-bambu-green-light disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Play className="h-4 w-4" />
-                {t('printers.startPrint', 'Start print')}
-              </button>
-            )}
+            {primaryActionPanel}
           </section>
 
-          <section data-testid="cockpit-status-pane" className="relative min-h-0 overflow-y-auto overscroll-contain rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
-            <div className="mb-2 flex items-center gap-2">
-              <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">
-                {t('printers.status.title', 'Status')}
-              </span>
-              <div className="h-[2px] flex-1 bg-bambu-dark-tertiary" />
+          <div data-testid="cockpit-status-pane" className="min-h-0 overflow-y-auto overscroll-contain rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
+            <div className="grid gap-4">
+              <PrinterPowerControls key={printer.id} printer={printer} isPrintingOrPaused={isPrintingOrPaused} />
+              {filamentPanel}
+              {statsPanel}
             </div>
-
-            <PrinterThermalControls
-              printer={printer}
-              status={status}
-              nozzleTempPresets={nozzleTempPresets}
-              bedTempPresets={bedTempPresets}
-              chamberTempPresets={chamberTempPresets}
-              fanSpeedPresets={fanSpeedPresets}
-            />
-            {issueItems.length > 0 && (
-              <div className="mt-2 space-y-1.5 text-xs text-status-warning">
-                {issueItems.map(item => <div key={item} className="truncate">{item}</div>)}
-              </div>
-            )}
-            <div className="mt-3 flex items-center gap-2">
-              <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">
-                {t('printers.controls')}
-              </span>
-              <div className="h-[2px] flex-1 bg-bambu-dark-tertiary" />
-            </div>
-
-            <div className="mt-2 grid min-h-0 gap-2 overflow-hidden">
-              <div className="grid grid-cols-2 items-center gap-2">
-                <button
-                  type="button"
-                  className={`${iconControlClass} w-full ${
-                    status?.chamber_light
-                      ? 'bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20'
-                      : 'bg-bambu-dark-tertiary/70 text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white'
-                  }`}
-                  onClick={() => chamberLightMutation.mutate(!status?.chamber_light)}
-                  disabled={!canUseMachineTools || chamberLightMutation.isPending}
-                  title={status?.chamber_light ? t('printers.chamberLightOff') : t('printers.chamberLightOn')}
-                >
-                  <ChamberLight on={!!status?.chamber_light} className="h-5 w-5" />
-                  <span className="min-w-0 truncate">{t('printers.chamberLight', 'Chamber Light')}</span>
-                </button>
-                <div className={`grid min-w-0 grid-cols-2 rounded-lg ${plateDetectionEnabled ? 'ring-1 ring-green-500' : ''}`}>
-                  <button
-                    type="button"
-                    onClick={() => plateDetectionMutation.mutate(!plateDetectionEnabled)}
-                    disabled={!status?.connected || plateDetectionMutation.isPending || !hasPermission('printers:update')}
-                    className={`${iconControlClass} w-full rounded-r-none ${
-                      plateDetectionEnabled
-                        ? 'bg-green-500/10 text-green-400 hover:bg-green-500/20'
-                        : 'bg-bambu-dark-tertiary/70 text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white'
-                    }`}
-                    title={!hasPermission('printers:update') ? t('printers.plateDetection.noPermission') : (plateDetectionEnabled ? t('printers.plateDetection.enabledClick') : t('printers.plateDetection.disabledClick'))}
-                  >
-                    {plateDetectionMutation.isPending ? (
-                      <Loader2 className="h-5 w-5 animate-spin" />
-                    ) : (
-                      <ScanSearch className="h-5 w-5" />
-                    )}
-                    <span className="min-w-0 truncate">{t('printers.plateStatus.title', 'Plate')}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleOpenPlateCheck}
-                    disabled={!status?.connected || isCheckingPlate || !hasPermission('printers:update')}
-                    className={`${iconControlClass} w-full rounded-l-none border-l border-bambu-dark-tertiary ${
-                      plateDetectionEnabled
-                        ? 'bg-green-500/10 text-green-400 hover:bg-green-500/20'
-                        : 'bg-bambu-dark-tertiary/70 text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white'
-                    }`}
-                    title={!hasPermission('printers:update') ? t('printers.plateDetection.noPermission') : t('printers.plateDetection.manageCalibration')}
-                  >
-                    {isCheckingPlate ? (
-                      <Loader2 className="h-5 w-5 animate-spin" />
-                    ) : (
-                      <ChevronDown className="h-5 w-5" />
-                    )}
-                    <span className="min-w-0 truncate">{t('printers.plateDetection.check', 'Check')}</span>
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => canControl && isPrintingOrPaused && setStatusControlMenu(statusControlMenu === 'speed' ? null : 'speed')}
-                  disabled={!isPrintingOrPaused || !canControl || printSpeedMutation.isPending}
-                  className={`${iconControlClass} w-full ${
-                    isPrintingOrPaused && canControl
-                      ? 'bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'
-                      : 'bg-bambu-dark-tertiary/70 text-bambu-gray disabled:opacity-60'
-                  }`}
-                  title={t('printers.speed.title')}
-                >
-                  <Gauge className="h-5 w-5" />
-                  <span className="min-w-0 truncate">{t('printers.speed.title')}</span>
-                  {statusControlMenu === 'speed' && (
-                    <IndicatorControlPopover
-                      title={t('printers.speed.title')}
-                      isPending={printSpeedMutation.isPending}
-                      options={speedModes.map(({ mode, label }) => ({ label, value: mode }))}
-                      onClose={() => setStatusControlMenu(null)}
-                      onSubmit={(mode) => printSpeedMutation.mutate(mode)}
-                    />
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowSkipObjectsModal(true)}
-                  disabled={!isPrintingOrPaused || (status?.printable_objects_count ?? 0) < 2 || !canControl}
-                  className={`${iconControlClass} w-full ${
-                    isPrintingOrPaused && (status?.printable_objects_count ?? 0) >= 2 && canControl
-                      ? 'bg-bambu-dark-tertiary/70 text-white hover:bg-bambu-dark-tertiary'
-                      : 'bg-bambu-dark-tertiary/70 text-bambu-gray disabled:opacity-60'
-                  }`}
-                  title={
-                    !hasPermission('printers:control')
-                      ? t('printers.permission.noControl')
-                      : !isPrintingOrPaused
-                        ? t('printers.skipObjects.onlyWhilePrinting')
-                        : (status?.printable_objects_count ?? 0) >= 2
-                          ? t('printers.skipObjects.tooltip')
-                          : t('printers.skipObjects.requiresMultiple')
-                  }
-                >
-                  <SkipObjectsIcon className="h-5 w-5" />
-                  <span className="min-w-0 truncate">{t('printers.skipObjects.title')}</span>
-                  {objectsData && objectsData.skipped_count > 0 && (
-                    <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
-                      {objectsData.skipped_count}
-                    </span>
-                  )}
-                </button>
-                {isAirductCapable && (
-                  <button
-                    type="button"
-                    onClick={() => airductMutation.mutate(status?.airduct_mode === 1 ? 'cooling' : 'heating')}
-                    disabled={!canUseMachineTools || airductMutation.isPending}
-                    className={`${iconControlClass} w-full ${status?.airduct_mode === 1 ? 'bg-orange-500/10 text-orange-400 hover:bg-orange-500/20' : 'bg-sky-500/10 text-sky-400 hover:bg-sky-500/20'}`}
-                    title={t('printers.airduct.title')}
-                  >
-                    {status?.airduct_mode === 1 ? <Flame className="h-5 w-5" /> : <Snowflake className="h-5 w-5" />}
-                    <span className="min-w-0 truncate">
-                      {status?.airduct_mode === 1 ? t('printers.airduct.heating') : t('printers.airduct.cooling')}
-                    </span>
-                  </button>
-                )}
-              </div>
-
-            </div>
-            <PrinterPowerControls key={printer.id} printer={printer} isPrintingOrPaused={isPrintingOrPaused} className="mt-3" />
-            {jogPanel}
-            <div className="mb-2 mt-3 flex items-center gap-2">
-              <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">
-                {t('stats.title')}
-              </span>
-              <div className="h-[2px] flex-1 bg-bambu-dark-tertiary" />
-            </div>
-            <div className="grid min-h-0 grid-cols-3 gap-1.5">
-              <CockpitMetricCard compact icon={BarChart3} label={t('stats.successRate', 'Success rate')} value={`${printerStats.successRate}%`} detail={`${printerStats.completed} / ${printerStats.failed} / ${printerStats.cancelled}`} />
-              <CockpitMetricCard compact icon={Package} label={t('stats.totalPrints', 'Total prints')} value={`${printLog?.total ?? printEntries.length}`} detail={t('stats.topFilament', 'Top filament: {{filament}}', { filament: printerStats.topFilament })} />
-              <CockpitMetricCard compact icon={Clock} label={t('stats.printTime', 'Print time')} value={`${printerStats.durationHours.toFixed(1)}h`} detail={`${maintenanceInfo?.total_print_hours?.toFixed(1) ?? '0.0'}h ${t('maintenance.title', 'Maintenance')}`} />
-              <CockpitMetricCard compact icon={Package} label={t('stats.filamentUsed', 'Filament used')} value={formatCockpitWeight(printerStats.filamentGrams)} detail={`${currencySymbol}${printerStats.totalCost.toFixed(2)} ${t('stats.filamentCost', 'filament cost')}`} />
-              <CockpitMetricCard compact icon={Zap} label={t('stats.energyUsed', 'Energy used')} value={`${printerStats.energyKwh.toFixed(2)} kWh`} detail={t('stats.fromPrintHistory', 'From print history')} />
-              <CockpitMetricCard compact icon={Timer} label={t('stats.averagePrintTime', 'Average time')} value={printerStats.averageDurationSeconds != null ? formatDuration(Math.round(printerStats.averageDurationSeconds)) : '---'} detail={t('stats.completedPrintAverage', 'Completed prints')} />
-            </div>
-          </section>
+          </div>
+        </div>
         </div>
       </div>
-    </div>
     {showUploadForPrint && (
       <FileUploadModal
         folderId={null}
