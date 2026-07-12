@@ -94,15 +94,14 @@ describe('FilamentMapping — FTS routing', () => {
     // PETG remains available despite the route, while unrelated PLA must not
     // be offered as an unsafe manual override.
     await waitFor(() => {
-      expect(screen.getByText(/Bambu PETG/)).toBeInTheDocument();
+      expect(screen.getByRole('combobox')).toHaveTextContent(/Bambu PETG/);
     });
     expect(screen.queryByText(/Bambu PLA/)).not.toBeInTheDocument();
 
     // The slot currently fed into a track gets an [L]/[R] badge. AMS-0 slot 1
     // (global tray ID 1) is in fila_switch.in_slots[1], whose track terminates
     // at extruder 1 → the LEFT-nozzle short label appears in that option.
-    const petgOption = screen.getByText(/Bambu PETG/);
-    expect(petgOption.textContent).toMatch(/\[L\]/);
+    expect(screen.getByRole('combobox')).toHaveTextContent(/\[L\]/);
 
     // AMS-0 slot 0 (global tray ID 0) is NOT currently fed into any track —
     // FTS routes it on demand, so no badge.

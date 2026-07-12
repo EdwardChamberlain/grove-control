@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils';
 import { TagManagementModal } from '../../components/TagManagementModal';
@@ -118,15 +118,14 @@ describe('TagManagementModal', () => {
     });
 
     it('can sort by name', async () => {
-      const user = userEvent.setup();
       render(<TagManagementModal onClose={mockOnClose} />);
 
       await waitFor(() => {
         expect(screen.getByText('functional')).toBeInTheDocument();
       });
 
-      const sortSelect = screen.getByDisplayValue('Sort by Count');
-      await user.selectOptions(sortSelect, 'name');
+      const sortSelect = screen.getByRole('combobox');
+      fireEvent.change(sortSelect, { target: { value: 'name' } });
 
       await waitFor(() => {
         const tagElements = screen.getAllByText(/functional|calibration|test|art/);

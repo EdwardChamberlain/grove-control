@@ -75,14 +75,10 @@ describe('AddPrinterModal — custom subnet (#1564)', () => {
 
     // The picker is now ungated; the detected subnet shows in the
     // dropdown alongside the "Custom..." sentinel.
-    await waitFor(() => {
-      expect(
-        screen.getByRole('option', { name: '192.168.1.0/24' }),
-      ).toBeInTheDocument();
-    });
-    expect(
-      screen.getByRole('option', { name: /custom subnet/i }),
-    ).toBeInTheDocument();
+    const select = await screen.findByRole('combobox', { name: '192.168.1.0/24' });
+    await userEvent.click(select);
+    expect(screen.getByRole('option', { name: '192.168.1.0/24' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /custom subnet/i })).toBeInTheDocument();
   });
 
   it('routes a custom CIDR through startSubnetScan, not SSDP', async () => {
@@ -96,16 +92,12 @@ describe('AddPrinterModal — custom subnet (#1564)', () => {
     );
 
     // Wait for discoveryApi.getInfo() to populate the dropdown.
-    await waitFor(() => {
-      expect(
-        screen.getByRole('option', { name: '192.168.1.0/24' }),
-      ).toBeInTheDocument();
-    });
+    const select = await screen.findByRole('combobox', { name: '192.168.1.0/24' });
 
     // Pick the "Custom..." sentinel. Scope by display value because the
     // modal also has a model <select>.
-    const select = screen.getByDisplayValue('192.168.1.0/24') as HTMLSelectElement;
-    await user.selectOptions(select, '__custom__');
+    await user.click(select);
+    await user.click(await screen.findByRole('option', { name: /custom subnet/i }));
 
     // The CIDR text input appears (aria-labelled "Custom subnet (CIDR)").
     const cidrInput = await screen.findByLabelText(/custom subnet \(cidr\)/i);
@@ -141,11 +133,7 @@ describe('AddPrinterModal — custom subnet (#1564)', () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(
-        screen.getByRole('option', { name: '192.168.1.0/24' }),
-      ).toBeInTheDocument();
-    });
+    await screen.findByRole('combobox', { name: '192.168.1.0/24' });
 
     // Don't change the selection — default is the detected subnet.
     const scanButton = screen.getByRole('button', {

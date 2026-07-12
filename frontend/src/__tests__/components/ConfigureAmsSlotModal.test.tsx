@@ -455,10 +455,12 @@ describe('ConfigureAmsSlotModal', () => {
     render(<ConfigureAmsSlotModal {...defaultProps} slotInfo={slotInfo} />);
 
     await waitFor(() => {
-      // Renders as an <option> on the K-profile select even though
+      // Renders as an option on the K-profile dropdown even though
       // "my-custom-tune" doesn't contain "PLA" anywhere.
-      expect(screen.getByRole('option', { name: /my-custom-tune/ })).toBeInTheDocument();
+      expect(screen.getByRole('combobox')).toBeInTheDocument();
     });
+    fireEvent.click(screen.getByRole('combobox'));
+    expect(await screen.findByRole('option', { name: /my-custom-tune/ })).toBeInTheDocument();
   });
 
   it("always includes the slot's currently-active K-profile when name and id don't match (#1689)", async () => {
@@ -493,8 +495,10 @@ describe('ConfigureAmsSlotModal', () => {
     render(<ConfigureAmsSlotModal {...defaultProps} slotInfo={slotInfo} />);
 
     await waitFor(() => {
-      expect(screen.getByRole('option', { name: /unrelated-petg-tune/ })).toBeInTheDocument();
+      expect(screen.getByRole('combobox')).toBeInTheDocument();
     });
+    fireEvent.click(screen.getByRole('combobox'));
+    expect(await screen.findByRole('option', { name: /unrelated-petg-tune/ })).toBeInTheDocument();
   });
 
   it("surfaces the slot's active K-profile when no preset is resolvable (#1689 follow-up)", async () => {
@@ -532,8 +536,10 @@ describe('ConfigureAmsSlotModal', () => {
     render(<ConfigureAmsSlotModal {...defaultProps} slotInfo={slotInfo} />);
 
     await waitFor(() => {
-      expect(screen.getByRole('option', { name: /active-on-unconfigured-slot/ })).toBeInTheDocument();
+      expect(screen.getByRole('combobox')).toBeInTheDocument();
     });
+    fireEvent.click(screen.getByRole('combobox'));
+    expect(await screen.findByRole('option', { name: /active-on-unconfigured-slot/ })).toBeInTheDocument();
   });
 
   it('does not include the active K-profile when caliIdx is 0 or null (#1689 guard)', async () => {
