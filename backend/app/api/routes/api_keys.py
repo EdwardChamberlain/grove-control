@@ -71,7 +71,7 @@ async def create_api_key(
         expires_at=data.expires_at,
     )
     db.add(api_key)
-    await db.flush()
+    await db.commit()
     await db.refresh(api_key)
 
     # Return with full key (only time it's shown)
@@ -157,7 +157,7 @@ async def update_api_key(
     if data.expires_at is not None:
         api_key.expires_at = data.expires_at
 
-    await db.flush()
+    await db.commit()
     await db.refresh(api_key)
 
     return api_key
@@ -177,5 +177,6 @@ async def delete_api_key(
         raise HTTPException(status_code=404, detail="API key not found")
 
     await db.delete(api_key)
+    await db.commit()
 
     return {"message": "API key deleted"}
