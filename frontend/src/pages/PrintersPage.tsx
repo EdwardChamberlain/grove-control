@@ -1802,15 +1802,15 @@ function SinglePrinterCockpit({
     };
   }, [printEntries]);
 
-  const cockpitStatusPillBase = 'flex w-full items-center gap-2 rounded-lg border bg-bambu-dark-secondary px-2.5 py-1.5 text-xs font-medium shadow-[0_2px_10px_rgba(0,0,0,0.45)]';
-  const cockpitStatusOkClass = 'border-status-ok/40 text-status-ok';
-  const cockpitStatusWarningClass = 'border-status-warning/50 text-status-warning';
-  const cockpitStatusErrorClass = 'border-status-error/50 text-status-error';
+  const cockpitStatusPillBase = 'flex min-h-8 w-full items-center gap-2 rounded-lg border px-2.5 py-1 text-xs font-semibold leading-none shadow-[0_2px_10px_rgba(0,0,0,0.55)] backdrop-blur-md';
+  const cockpitStatusOkClass = 'border-status-ok/50 bg-[linear-gradient(rgba(4,12,8,0.78),rgba(4,12,8,0.78)),linear-gradient(rgba(34,197,94,0.32),rgba(34,197,94,0.32))] text-status-ok';
+  const cockpitStatusWarningClass = 'border-status-warning/60 bg-[linear-gradient(rgba(18,12,4,0.8),rgba(18,12,4,0.8)),linear-gradient(rgba(245,158,11,0.38),rgba(245,158,11,0.38))] text-status-warning';
+  const cockpitStatusErrorClass = 'border-status-error/60 bg-[linear-gradient(rgba(18,6,6,0.82),rgba(18,6,6,0.82)),linear-gradient(rgba(239,68,68,0.38),rgba(239,68,68,0.38))] text-status-error';
   const cockpitStatusRowLabel = (title: string, state: string) => `${title}: ${state}`;
   const CockpitStatusRowText = ({ title, state }: { title: string; state: React.ReactNode }) => (
     <>
-      <span>{title}:</span>
-      <span className="min-w-0 truncate">{state}</span>
+      <span className="shrink-0 leading-none">{title}:</span>
+      <span className="min-w-0 truncate leading-none">{state}</span>
     </>
   );
   const connectionTitle = t('printers.status.connection', 'Connection');
