@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { stubWebSocket } from './mockWebSocket';
 
 const printers = Array.from({ length: 9 }, (_, index) => ({
   id: index + 1,
@@ -76,6 +77,7 @@ async function mockKioskApi(page: Page) {
 
 test('keeps queue truncation within the kiosk viewport at 1080p', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
+  await stubWebSocket(page);
   await mockKioskApi(page);
   await page.goto('/kiosk');
 

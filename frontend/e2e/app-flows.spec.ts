@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { stubWebSocket } from './mockWebSocket';
 
 type ApiCall = { method: string; path: string; body?: unknown };
 
@@ -149,7 +150,11 @@ async function mockApi(page: Page, calls: ApiCall[], options: { authEnabled?: bo
   });
 }
 
-test('login and setup smoke flows submit expected payloads', async ({ page }) => {
+test.beforeEach(async ({ page }) => {
+  await stubWebSocket(page);
+});
+
+test('login smoke flow submits expected payload', async ({ page }) => {
   const calls: ApiCall[] = [];
   await mockApi(page, calls, { authEnabled: true });
 
@@ -158,10 +163,12 @@ test('login and setup smoke flows submit expected payloads', async ({ page }) =>
   await page.getByLabel(/Password/i).fill('secret123');
   await page.getByRole('button', { name: /Sign in/i }).click();
   await expect.poll(() => calls.some((call) => call.path === '/api/v1/auth/login')).toBe(true);
+});
 
-  await page.unroute('**/*');
-  calls.length = 0;
+test('setup smoke flow submits expected payload', async ({ page }) => {
+  const calls: ApiCall[] = [];
   await mockApi(page, calls, { authEnabled: false });
+
   await page.goto('/setup');
   await page.getByLabel(/Enable Authentication/i).check();
   await page.getByLabel(/Admin Username/i).fill('owner');
@@ -171,7 +178,7 @@ test('login and setup smoke flows submit expected payloads', async ({ page }) =>
   await expect.poll(() => calls.some((call) => call.path === '/api/v1/auth/setup')).toBe(true);
 });
 
-test('core app smoke flows reach create, edit, upload, slice, queue, and settings APIs', async ({ page }) => {
+test('core app API smoke reaches create, edit, upload, slice, queue, and settings paths', async ({ page }) => {
   const calls: ApiCall[] = [];
   await mockApi(page, calls);
 
