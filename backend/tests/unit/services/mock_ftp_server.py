@@ -4,6 +4,7 @@ Built on pyftpdlib with implicit TLS support to match Bambu printer behavior.
 Supports failure injection, custom AVBL command, and filesystem inspection.
 """
 
+import errno
 import logging
 import os
 import threading
@@ -149,6 +150,7 @@ class MockBambuFTPServer:
         self.access_code = access_code
         self._server: FTPServer | None = None
         self._thread: threading.Thread | None = None
+        self._stopping = threading.Event()
         # Create a unique handler class per instance so _failure_map is isolated
         self._handler_class = type(
             "TestFTPHandler",
@@ -183,14 +185,31 @@ class MockBambuFTPServer:
         self._server.max_cons = 10
         self._server.max_cons_per_ip = 5
 
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._stopping.clear()
+        self._thread = threading.Thread(target=self._serve_forever, daemon=True)
         self._thread.start()
         # Brief wait for server to be ready
         time.sleep(0.1)
 
+    def _serve_forever(self):
+        """Run pyftpdlib and only suppress the expected shutdown race.
+
+        ``FTPServer.close_all()`` can close the kqueue descriptor while
+        ``serve_forever`` is blocked in the polling loop. That is an expected
+        teardown race for these tests, but other server-thread exceptions should
+        still fail loudly via pytest's unhandled-thread warning.
+        """
+        try:
+            self._server.serve_forever()
+        except OSError as exc:
+            if self._stopping.is_set() and exc.errno == errno.EBADF:
+                return
+            raise
+
     def stop(self):
         """Stop the FTP server and wait for thread to exit."""
         if self._server:
+            self._stopping.set()
             self._server.close_all()
         if self._thread:
             self._thread.join(timeout=5)
