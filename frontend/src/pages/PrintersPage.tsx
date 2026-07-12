@@ -2330,10 +2330,12 @@ function SinglePrinterCockpit({
                 onError={() => setFailedCameraPrinterId(printer.id)}
               />
             )}
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/65 via-black/30 to-transparent" />
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-black/70 via-black/35 to-transparent" />
             <div className="relative flex h-full min-h-0 flex-col gap-3 p-4">
               <div className="min-w-0">
                 <div className="flex min-w-0 items-center gap-3">
-                  <h2 className="min-w-0 flex-1 truncate text-3xl font-semibold leading-none text-white">{printer.name}</h2>
+                  <h2 className="min-w-0 flex-1 truncate text-3xl font-semibold leading-none text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.9)]">{printer.name}</h2>
                   {printerActionsMenu}
                   <PrinterHealthMenu
                     printer={printer}
@@ -2349,7 +2351,7 @@ function SinglePrinterCockpit({
                     triggerClassName="h-9 w-9"
                   />
                 </div>
-                <p className="truncate pl-0.5 text-base leading-tight text-bambu-gray">
+                <p className="truncate pl-0.5 text-base leading-tight text-white/80 drop-shadow-[0_2px_5px_rgba(0,0,0,0.9)]">
                   {printer.model || t('common.unknown', 'Unknown')}
                   {printer.location ? ` - ${printer.location}` : ''}
                 </p>
@@ -2359,12 +2361,12 @@ function SinglePrinterCockpit({
 
               <div className="min-w-0">
                 <div className="mb-2 flex items-center justify-between gap-3">
-                  <p className="min-w-0 flex-1 truncate text-xl font-semibold text-white">{currentPrintLabel}</p>
-                  <span className="shrink-0 text-3xl font-semibold tabular-nums text-white">
+                  <p className="min-w-0 flex-1 truncate text-xl font-semibold text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.9)]">{currentPrintLabel}</p>
+                  <span className="shrink-0 text-3xl font-semibold tabular-nums text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.9)]">
                     {isPrintingOrPaused ? `${Math.round(progress)}%` : '---'}
                   </span>
                 </div>
-                <div className="h-3 overflow-hidden rounded-full bg-bambu-dark-tertiary">
+                <div className="h-3 overflow-hidden rounded-full bg-black/60 shadow-[0_1px_8px_rgba(0,0,0,0.45)] ring-1 ring-white/15">
                   <div className="h-full rounded-full bg-gradient-to-r from-bambu-green to-emerald-300 transition-all" style={{ width: `${isPrintingOrPaused ? progress : 0}%` }} />
                 </div>
               </div>
