@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils';
 import { PrintModal } from '../../components/PrintModal';
@@ -368,7 +368,7 @@ describe('PrintModal', () => {
         expect(select).toBeDefined();
         return select!;
       });
-      await user.selectOptions(mappingSelect, '1');
+      fireEvent.change(mappingSelect, { target: { value: '1' } });
       await user.click(screen.getByRole('button', { name: /^print$/i }));
 
       await waitFor(() => expect(capturedBody).not.toBeNull());
@@ -767,7 +767,7 @@ describe('PrintModal', () => {
         return select!;
       });
       expect(mappingSelect.querySelector('option[value="2"]')).not.toBeInTheDocument();
-      await user.selectOptions(mappingSelect, '1');
+      fireEvent.change(mappingSelect, { target: { value: '1' } });
       const matchPolicy = screen.getByLabelText(/Match Colour and Material/i);
       expect(matchPolicy).toBeChecked();
       await user.click(matchPolicy);

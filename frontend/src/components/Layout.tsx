@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Printer, Archive, ListOrdered, BarChart3, Cloud, Settings, Sun, Moon, Monitor, ChevronLeft, Keyboard, Github, ArrowUpCircle, Wrench, FolderKanban, FolderOpen, X, Menu, Info, Plug, Bug, LogOut, Key, Loader2, Disc3, ShieldAlert, Globe, type LucideIcon } from 'lucide-react';
+import { Printer, Archive, ListOrdered, BarChart3, Cloud, Settings, Sun, Moon, Monitor, ChevronLeft, ArrowUpCircle, Wrench, FolderKanban, FolderOpen, X, Menu, Info, Plug, Bug, LogOut, Key, Loader2, Disc3, ShieldAlert, Globe, type LucideIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../contexts/ThemeContext';
 import { KeyboardShortcutsModal } from './KeyboardShortcutsModal';
@@ -707,22 +707,6 @@ export function Layout() {
                   </span>
                 )}
                 <InstallAppButton />
-                <a
-                  href="https://github.com/EdwardChamberlain/grove-control"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="p-2 rounded-lg hover:bg-bambu-dark-tertiary transition-colors text-bambu-gray-light hover:text-white"
-                  title={t('nav.viewOnGithub')}
-                >
-                  <Github className="w-5 h-5" />
-                </a>
-                <button
-                  onClick={() => setShowShortcuts(true)}
-                  className="p-2 rounded-lg hover:bg-bambu-dark-tertiary transition-colors text-bambu-gray-light hover:text-white"
-                  title={t('nav.keyboardShortcuts')}
-                >
-                  <Keyboard className="w-5 h-5" />
-                </button>
                 <button
                   onClick={toggleMode}
                   className="p-2 rounded-lg hover:bg-bambu-dark-tertiary transition-colors text-bambu-gray-light hover:text-white"
@@ -809,22 +793,6 @@ export function Layout() {
                 </span>
               )}
               <InstallAppButton />
-              <a
-                href="https://github.com/EdwardChamberlain/grove-control"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="p-2 rounded-lg hover:bg-bambu-dark-tertiary transition-colors text-bambu-gray-light hover:text-white"
-                title={t('nav.viewOnGithub')}
-              >
-                <Github className="w-5 h-5" />
-              </a>
-              <button
-                onClick={() => setShowShortcuts(true)}
-                className="p-2 rounded-lg hover:bg-bambu-dark-tertiary transition-colors text-bambu-gray-light hover:text-white"
-                title={t('nav.keyboardShortcuts')}
-              >
-                <Keyboard className="w-5 h-5" />
-              </button>
               <button
                 onClick={toggleMode}
                 className="p-2 rounded-lg hover:bg-bambu-dark-tertiary transition-colors text-bambu-gray-light hover:text-white"

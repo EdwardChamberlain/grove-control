@@ -80,14 +80,9 @@ describe('ColorCatalogSettings — Add form (#1154)', () => {
     fireEvent.change(screen.getByPlaceholderText('EC984C,#6CD4BC,A66EB9,D87694'), {
       target: { value: 'EC984C,#6CD4BC,A66EB9,D87694' },
     });
-    // Pick "Sparkle" from the effect-type combobox (the manufacturer filter
-    // is also a <select>, so disambiguate by looking for the one whose
-    // options include 'sparkle').
-    const effectSelectAdd = (
-      screen.getAllByRole('combobox') as HTMLSelectElement[]
-    ).find((s) => Array.from(s.options).some((o) => o.value === 'sparkle'));
-    expect(effectSelectAdd).toBeDefined();
-    fireEvent.change(effectSelectAdd!, { target: { value: 'sparkle' } });
+    // Pick "Sparkle" from the custom effect-type dropdown.
+    fireEvent.click(screen.getByRole('combobox', { name: /^None$/i }));
+    fireEvent.click(screen.getByRole('option', { name: /^Sparkle$/i }));
 
     // Submit. The form's submit "Add" button is now the second button with
     // that label (toolbar Add still exists), so query inside the form
@@ -115,32 +110,28 @@ describe('ColorCatalogSettings — Add form (#1154)', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /Add$/i }));
-    // Disambiguate from the toolbar's manufacturer-filter <select>.
-    const effectSelect = (
-      screen.getAllByRole('combobox') as HTMLSelectElement[]
-    ).find((s) => Array.from(s.options).some((o) => o.value === 'sparkle'));
-    expect(effectSelect).toBeDefined();
-    const options = Array.from(effectSelect!.options).map((o) => o.value);
+    fireEvent.click(screen.getByRole('combobox', { name: /^None$/i }));
+    const options = screen.getAllByRole('option').map((o) => o.textContent);
 
     // Surface effects (V1).
-    expect(options).toContain('sparkle');
-    expect(options).toContain('wood');
-    expect(options).toContain('marble');
-    expect(options).toContain('glow');
-    expect(options).toContain('matte');
+    expect(options).toContain('Sparkle');
+    expect(options).toContain('Wood');
+    expect(options).toContain('Marble');
+    expect(options).toContain('Glow');
+    expect(options).toContain('Matte');
     // Structural variants added in #1154 follow-up.
-    expect(options).toContain('gradient');
-    expect(options).toContain('dual-color');
-    expect(options).toContain('tri-color');
-    expect(options).toContain('multicolor');
+    expect(options).toContain('Gradient');
+    expect(options).toContain('Dual Color');
+    expect(options).toContain('Tri Color');
+    expect(options).toContain('Multicolor');
     // Sheen / finish variants.
-    expect(options).toContain('silk');
-    expect(options).toContain('galaxy');
-    expect(options).toContain('rainbow');
-    expect(options).toContain('metal');
-    expect(options).toContain('translucent');
+    expect(options).toContain('Silk');
+    expect(options).toContain('Galaxy');
+    expect(options).toContain('Rainbow');
+    expect(options).toContain('Metal');
+    expect(options).toContain('Translucent');
     // None / no-effect option.
-    expect(options).toContain('');
+    expect(options).toContain('None');
   });
 });
 
@@ -175,12 +166,7 @@ describe('ColorCatalogSettings — inline edit (#1154)', () => {
     ) as HTMLInputElement[];
     expect(extraColorsInputs[0].value).toBe('aabbcc,ddeeff');
 
-    // The effect dropdown reflects the seeded effect. The manufacturer
-    // filter is also a <select> at the toolbar level, so query all and
-    // pick the one whose value matches what we expect — the last one,
-    // since the filter never has 'galaxy' in its options.
-    const selects = screen.getAllByRole('combobox') as HTMLSelectElement[];
-    const effectSelect = selects.find((s) => s.value === 'galaxy');
-    expect(effectSelect).toBeDefined();
+    // The effect dropdown reflects the seeded effect.
+    expect(screen.getByRole('combobox', { name: /^Galaxy$/i })).toBeInTheDocument();
   });
 });

@@ -30,6 +30,7 @@ import {
   saveRecentColor,
 } from '../../components/spool-form/utils';
 import { MATERIALS } from '../../components/spool-form/constants';
+import { ReactSelect } from '../../components/ToolbarControls';
 
 type Tab = 'existing' | 'new' | 'replace';
 type WriteStatus = 'idle' | 'selected' | 'writing' | 'success' | 'error';
@@ -809,7 +810,7 @@ function NewSpoolTouchForm({ currencySymbol, onCreated, selectedSpool, spoolmanM
           <div className="p-4 space-y-4 overflow-y-auto bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg">
             <div>
               <label className="block text-xs text-zinc-400 mb-1">{t('spoolbuddy.writeTag.material', 'Material')}</label>
-              <select
+              <ReactSelect
                 value={formData.material}
                 onChange={(e) => updateField('material', e.target.value)}
                 className="w-full px-3 py-2 bg-bambu-dark-tertiary border border-bambu-dark-tertiary rounded text-sm text-white focus:outline-none focus:border-bambu-green"
@@ -817,7 +818,7 @@ function NewSpoolTouchForm({ currencySymbol, onCreated, selectedSpool, spoolmanM
                 {SIMPLE_COMMON_MATERIALS.map((m) => (
                   <option key={m} value={m}>{m}</option>
                 ))}
-              </select>
+              </ReactSelect>
             </div>
 
             <div className="flex gap-3">

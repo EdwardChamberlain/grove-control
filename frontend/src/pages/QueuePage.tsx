@@ -73,6 +73,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { QueueStatsBar } from '../components/QueueStatsBar';
 import { CompactHistoryRow } from '../components/CompactHistoryRow';
 import { QueueTimelineView } from '../components/QueueTimelineView';
+import { ToolbarDropdown, ReactSelect } from '../components/ToolbarControls';
 
 function formatWeight(g: number, useKg = false): string {
   if (useKg && g >= 1000) return `${(g / 1000).toFixed(1)}kg`;
@@ -195,7 +196,7 @@ function BulkEditModal({
           {/* Printer Assignment */}
           <div>
             <label className="block text-sm font-medium text-white mb-2">{t('queue.bulkEdit.printer')}</label>
-            <select
+            <ReactSelect
               value={printerId === null ? 'null' : printerId === 'unchanged' ? 'unchanged' : String(printerId)}
               onChange={(e) => {
                 const val = e.target.value;
@@ -210,7 +211,7 @@ function BulkEditModal({
               {printers.map(p => (
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
-            </select>
+            </ReactSelect>
           </div>
 
           {/* Queue Options */}
@@ -1066,15 +1067,16 @@ function HistorySection({
           </span>
         </h2>
         <div className="flex items-center gap-2">
-          <select
-            className="px-2 sm:px-3 py-1.5 text-xs sm:text-sm bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+          <ToolbarDropdown
             value={sortBy}
-            onChange={(e) => onSortByChange(e.target.value as 'date' | 'name' | 'printer')}
-          >
-            <option value="date">{t('queue.sort.byDate')}</option>
-            <option value="name">{t('queue.sort.byName')}</option>
-            <option value="printer">{t('queue.sort.byPrinter')}</option>
-          </select>
+            onChange={(value) => onSortByChange(value as 'date' | 'name' | 'printer')}
+            minWidthClass="min-w-32"
+            options={[
+              { value: 'date', label: t('queue.sort.byDate') },
+              { value: 'name', label: t('queue.sort.byName') },
+              { value: 'printer', label: t('queue.sort.byPrinter') },
+            ]}
+          />
           <Button
             variant="ghost"
             size="sm"
@@ -1989,48 +1991,46 @@ export function QueuePage() {
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2 sm:gap-4 mb-6">
-        <select
-          className="px-2 sm:px-3 py-2 text-sm sm:text-base bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none min-w-0 flex-1 sm:flex-none"
-          value={filterPrinter === -1 ? 'unassigned' : (filterPrinter || '')}
-          onChange={(e) => {
-            const val = e.target.value;
+        <ToolbarDropdown
+          value={filterPrinter === -1 ? 'unassigned' : filterPrinter ? String(filterPrinter) : 'all'}
+          onChange={(val) => {
             if (val === 'unassigned') setFilterPrinter(-1);
-            else if (val === '') setFilterPrinter(null);
+            else if (val === 'all') setFilterPrinter(null);
             else setFilterPrinter(Number(val));
           }}
-        >
-          <option value="">{t('queue.filter.allPrinters')}</option>
-          <option value="unassigned">{t('queue.filter.unassigned')}</option>
-          {printers?.map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
+          minWidthClass="min-w-36"
+          options={[
+            { value: 'all', label: t('queue.filter.allPrinters') },
+            { value: 'unassigned', label: t('queue.filter.unassigned') },
+            ...(printers?.map((p) => ({ value: String(p.id), label: p.name })) ?? []),
+          ]}
+        />
 
-        <select
-          className="px-2 sm:px-3 py-2 text-sm sm:text-base bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none min-w-0 flex-1 sm:flex-none"
+        <ToolbarDropdown
           value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value)}
-        >
-          <option value="">{t('queue.filter.allStatus')}</option>
-          <option value="pending">{t('queue.status.pending')}</option>
-          <option value="printing">{t('queue.status.printing')}</option>
-          <option value="completed">{t('queue.status.completed')}</option>
-          <option value="failed">{t('queue.status.failed')}</option>
-          <option value="skipped">{t('queue.status.skipped')}</option>
-          <option value="cancelled">{t('queue.status.cancelled')}</option>
-        </select>
+          onChange={setFilterStatus}
+          minWidthClass="min-w-32"
+          options={[
+            { value: '', label: t('queue.filter.allStatus') },
+            { value: 'pending', label: t('queue.status.pending') },
+            { value: 'printing', label: t('queue.status.printing') },
+            { value: 'completed', label: t('queue.status.completed') },
+            { value: 'failed', label: t('queue.status.failed') },
+            { value: 'skipped', label: t('queue.status.skipped') },
+            { value: 'cancelled', label: t('queue.status.cancelled') },
+          ]}
+        />
 
         {uniqueLocations.length > 0 && (
-          <select
-            className="px-2 sm:px-3 py-2 text-sm sm:text-base bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none min-w-0 flex-1 sm:flex-none"
+          <ToolbarDropdown
             value={filterLocation}
-            onChange={(e) => setFilterLocation(e.target.value)}
-          >
-            <option value="">{t('queue.filter.allLocations')}</option>
-            {uniqueLocations.map((loc) => (
-              <option key={loc} value={loc}>{loc}</option>
-            ))}
-          </select>
+            onChange={setFilterLocation}
+            minWidthClass="min-w-36"
+            options={[
+              { value: '', label: t('queue.filter.allLocations') },
+              ...uniqueLocations.map((loc) => ({ value: loc, label: loc })),
+            ]}
+          />
         )}
 
         <div className="hidden sm:block flex-1" />
@@ -2054,9 +2054,9 @@ export function QueuePage() {
           Hidden on History/Timeline tabs since they don't apply. */}
       {activeTab === 'queue' && (
         <div className="flex flex-wrap items-center gap-3 mb-6">
-          <div className="inline-flex items-center bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg p-0.5">
+          <div className="inline-flex h-8 items-center bg-bambu-dark border border-bambu-dark-tertiary rounded-lg p-0.5">
             <button
-              className={`px-3 py-1.5 text-xs sm:text-sm rounded-md transition-colors flex items-center gap-1.5 ${
+              className={`h-7 px-3 text-xs sm:text-sm rounded-md transition-colors flex items-center gap-1.5 ${
                 activeLayout === 'position' ? 'bg-bambu-dark-tertiary text-white' : 'text-bambu-gray hover:text-white'
               }`}
               onClick={() => setActiveLayout('position')}
@@ -2066,7 +2066,7 @@ export function QueuePage() {
               <span className="hidden sm:inline">{t('queue.layout.flatList')}</span>
             </button>
             <button
-              className={`px-3 py-1.5 text-xs sm:text-sm rounded-md transition-colors flex items-center gap-1.5 ${
+              className={`h-7 px-3 text-xs sm:text-sm rounded-md transition-colors flex items-center gap-1.5 ${
                 activeLayout === 'printer' ? 'bg-bambu-dark-tertiary text-white' : 'text-bambu-gray hover:text-white'
               }`}
               onClick={() => setActiveLayout('printer')}
@@ -2081,7 +2081,7 @@ export function QueuePage() {
               const newValue = !(settings?.queue_shortest_first ?? false);
               sjfMutation.mutate(newValue);
             }}
-            className={`flex items-center gap-1 px-2 py-1.5 text-xs rounded-lg border transition-colors ${
+            className={`h-8 flex items-center gap-1 px-2 text-xs rounded-lg border transition-colors ${
               settings?.queue_shortest_first
                 ? 'bg-bambu-green/20 border-bambu-green text-bambu-green'
                 : 'bg-bambu-dark-secondary border-bambu-dark-tertiary text-bambu-gray hover:text-white hover:border-bambu-gray'
@@ -2184,16 +2184,17 @@ export function QueuePage() {
                   </span>
                 </h2>
                 <div className="flex items-center gap-2">
-                  <select
-                    className="px-2 sm:px-3 py-1.5 text-xs sm:text-sm bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+                  <ToolbarDropdown
                     value={pendingSortBy}
-                    onChange={(e) => setPendingSortBy(e.target.value as 'position' | 'name' | 'printer' | 'time')}
-                  >
-                    <option value="position">{t('queue.sort.byPosition')}</option>
-                    <option value="name">{t('queue.sort.byName')}</option>
-                    <option value="printer">{t('queue.sort.byPrinter')}</option>
-                    <option value="time">{t('queue.sort.bySchedule')}</option>
-                  </select>
+                    onChange={(value) => setPendingSortBy(value as 'position' | 'name' | 'printer' | 'time')}
+                    minWidthClass="min-w-36"
+                    options={[
+                      { value: 'position', label: t('queue.sort.byPosition') },
+                      { value: 'name', label: t('queue.sort.byName') },
+                      { value: 'printer', label: t('queue.sort.byPrinter') },
+                      { value: 'time', label: t('queue.sort.bySchedule') },
+                    ]}
+                  />
                   <Button
                     variant="ghost"
                     size="sm"

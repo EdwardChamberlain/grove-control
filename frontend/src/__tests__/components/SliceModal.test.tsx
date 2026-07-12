@@ -271,7 +271,8 @@ describe('SliceModal', () => {
       (el as HTMLSelectElement).options[0]?.textContent?.toLowerCase().includes('auto'),
     ) as HTMLSelectElement;
     expect(bedSelect).toBeDefined();
-    await user.selectOptions(bedSelect, 'Textured PEI Plate');
+    await user.click(bedSelect);
+    await user.click(await screen.findByRole('option', { name: 'Textured PEI Plate' }));
     await user.click(screen.getByRole('button', { name: /^Slice$/ }));
 
     await waitFor(() => {
@@ -323,7 +324,8 @@ describe('SliceModal', () => {
 
     const user = userEvent.setup();
     const selects = screen.getAllByRole('combobox');
-    await user.selectOptions(selects[0], 'standard:Bambu Lab X1 Carbon 0.4 nozzle');
+    await user.click(selects[0]);
+    await user.click(await screen.findByRole('option', { name: 'Bambu Lab X1 Carbon 0.4 nozzle' }));
     await user.click(screen.getByRole('button', { name: /^Slice$/ }));
 
     await waitFor(() => {
@@ -824,7 +826,8 @@ describe('SliceModal', () => {
     // (#1337). Auto-picks land on printer/process/filaments; bed-type
     // defaults to "". Swap filament-1 (index 3) from the auto-picked black
     // to white.
-    await user.selectOptions(selects[3], 'cloud:F-WHITE');
+    await user.click(selects[3]);
+    await user.click(await screen.findByRole('option', { name: 'Cloud PLA White' }));
     await user.click(screen.getByRole('button', { name: /^Slice$/ }));
 
     await waitFor(() => {

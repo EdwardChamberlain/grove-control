@@ -25,6 +25,7 @@ import { Card, CardContent } from './Card';
 import { Button } from './Button';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
+import { ToolbarDropdown } from './ToolbarControls';
 
 interface KProfileCardProps {
   profile: KProfile;
@@ -454,10 +455,9 @@ function KProfileModal({
             {/* Filament - read-only when editing */}
             <div>
               <label className="block text-sm text-bambu-gray mb-1">{t('kProfiles.modal.filament')}</label>
-              <select
+              <ToolbarDropdown
                 value={filamentId}
-                onChange={(e) => {
-                  const newFilamentId = e.target.value;
+                onChange={(newFilamentId) => {
                   setFilamentId(newFilamentId);
                   // Auto-generate profile name when filament is selected (for new profiles)
                   // Only auto-generate if name is empty - don't overwrite user input
@@ -470,23 +470,18 @@ function KProfileModal({
                   }
                 }}
                 disabled={!!profile}
-                className={`w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none ${profile ? 'opacity-60 cursor-not-allowed' : ''}`}
-                required={!profile}
-              >
-                <option value="">{t('kProfiles.modal.selectFilament')}</option>
-                {/* Show current filament when editing - look up from knownFilaments */}
-                {profile?.filament_id && (
-                  <option key={profile.filament_id} value={profile.filament_id}>
-                    {knownFilaments.find(f => f.id === profile.filament_id)?.name || profile.filament_id}
-                  </option>
-                )}
-                {/* Show known filaments from existing K-profiles (for new profiles) */}
-                {!profile && knownFilaments.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.name}
-                  </option>
-                ))}
-              </select>
+                fullWidth
+                options={[
+                  { value: '', label: t('kProfiles.modal.selectFilament') },
+                  ...(profile?.filament_id
+                    ? [{
+                        value: profile.filament_id,
+                        label: knownFilaments.find(f => f.id === profile.filament_id)?.name || profile.filament_id,
+                      }]
+                    : []),
+                  ...(!profile ? knownFilaments.map((f) => ({ value: f.id, label: f.name })) : []),
+                ]}
+              />
               {!profile && knownFilaments.length === 0 && (
                 <p className="text-xs text-bambu-gray mt-1">
                   {t('kProfiles.modal.noFilamentsHelp')}
@@ -498,10 +493,9 @@ function KProfileModal({
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm text-bambu-gray mb-1">{t('kProfiles.modal.flowType')}</label>
-                <select
+                <ToolbarDropdown
                   value={nozzleType}
-                  onChange={(e) => {
-                    const newNozzleType = e.target.value;
+                  onChange={(newNozzleType) => {
                     setNozzleType(newNozzleType);
                     // Update profile name when flow type changes (for new profiles)
                     // Only auto-generate if name is empty - don't overwrite user input
@@ -514,25 +508,27 @@ function KProfileModal({
                     }
                   }}
                   disabled={!!profile}
-                  className={`w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none ${profile ? 'opacity-60 cursor-not-allowed' : ''}`}
-                >
-                  <option value="HH00">{t('kProfiles.modal.highFlow')}</option>
-                  <option value="HS00">{t('kProfiles.modal.standard')}</option>
-                </select>
+                  fullWidth
+                  options={[
+                    { value: 'HH00', label: t('kProfiles.modal.highFlow') },
+                    { value: 'HS00', label: t('kProfiles.modal.standard') },
+                  ]}
+                />
               </div>
               <div>
                 <label className="block text-sm text-bambu-gray mb-1">{t('kProfiles.modal.nozzleSize')}</label>
-                <select
+                <ToolbarDropdown
                   value={modalDiameter}
-                  onChange={(e) => setModalDiameter(e.target.value)}
+                  onChange={setModalDiameter}
                   disabled={!!profile}
-                  className={`w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none ${profile ? 'opacity-60 cursor-not-allowed' : ''}`}
-                >
-                  <option value="0.2">0.2mm</option>
-                  <option value="0.4">0.4mm</option>
-                  <option value="0.6">0.6mm</option>
-                  <option value="0.8">0.8mm</option>
-                </select>
+                  fullWidth
+                  options={[
+                    { value: '0.2', label: '0.2mm' },
+                    { value: '0.4', label: '0.4mm' },
+                    { value: '0.6', label: '0.6mm' },
+                    { value: '0.8', label: '0.8mm' },
+                  ]}
+                />
               </div>
             </div>
 
@@ -1175,31 +1171,30 @@ export function KProfilesView() {
       <div className="flex flex-wrap gap-4 mb-6">
         <div className="flex-1 min-w-48">
           <label className="block text-sm text-bambu-gray mb-1">{t('kProfiles.printer')}</label>
-          <select
-            value={selectedPrinter || ''}
-            onChange={(e) => setSelectedPrinter(parseInt(e.target.value))}
-            className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
-          >
-            {connectedPrinters.map((printer) => (
-              <option key={printer.id} value={printer.id}>
-                {printer.name}
-              </option>
-            ))}
-          </select>
+          <ToolbarDropdown
+            value={selectedPrinter ? String(selectedPrinter) : ''}
+            onChange={(nextPrinterId) => setSelectedPrinter(nextPrinterId ? parseInt(nextPrinterId, 10) : null)}
+            fullWidth
+            options={connectedPrinters.map((printer) => ({
+              value: String(printer.id),
+              label: printer.name,
+            }))}
+          />
         </div>
 
         <div className="w-32">
           <label className="block text-sm text-bambu-gray mb-1">{t('kProfiles.nozzle')}</label>
-          <select
+          <ToolbarDropdown
             value={nozzleDiameter}
-            onChange={(e) => setNozzleDiameter(e.target.value)}
-            className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
-          >
-            <option value="0.2">0.2mm</option>
-            <option value="0.4">0.4mm</option>
-            <option value="0.6">0.6mm</option>
-            <option value="0.8">0.8mm</option>
-          </select>
+            onChange={setNozzleDiameter}
+            fullWidth
+            options={[
+              { value: '0.2', label: '0.2mm' },
+              { value: '0.4', label: '0.4mm' },
+              { value: '0.6', label: '0.6mm' },
+              { value: '0.8', label: '0.8mm' },
+            ]}
+          />
         </div>
 
         <div className="flex items-end gap-2">
@@ -1208,6 +1203,7 @@ export function KProfilesView() {
             onClick={() => refetchProfiles()}
             disabled={isFetching || !hasPermission('kprofiles:read')}
             title={!hasPermission('kprofiles:read') ? t('kProfiles.permission.noRead') : undefined}
+            className="h-8 min-h-0"
           >
             <RefreshCw className={`w-4 h-4 ${isFetching ? 'animate-spin' : ''}`} />
             {t('kProfiles.refresh')}
@@ -1216,6 +1212,7 @@ export function KProfilesView() {
             onClick={() => setShowAddModal(true)}
             disabled={!hasPermission('kprofiles:create')}
             title={!hasPermission('kprofiles:create') ? t('kProfiles.permission.noCreate') : undefined}
+            className="h-8 min-h-0"
           >
             <Plus className="w-4 h-4" />
             {t('kProfiles.addProfile')}
@@ -1232,43 +1229,46 @@ export function KProfilesView() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={t('kProfiles.searchPlaceholder')}
-            className="w-full pl-10 pr-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white placeholder-bambu-gray focus:border-bambu-green focus:outline-none"
+            className="w-full h-8 pl-10 pr-3 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm placeholder-bambu-gray focus:border-bambu-green focus:outline-none"
           />
         </div>
         {isDualNozzle && (
           <div className="w-36">
-            <select
+            <ToolbarDropdown
               value={extruderFilter}
-              onChange={(e) => setExtruderFilter(e.target.value as ExtruderFilter)}
-              className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
-            >
-              <option value="all">{t('kProfiles.allExtruders')}</option>
-              <option value="left">{t('kProfiles.leftOnly')}</option>
-              <option value="right">{t('kProfiles.rightOnly')}</option>
-            </select>
+              onChange={(nextFilter) => setExtruderFilter(nextFilter as ExtruderFilter)}
+              fullWidth
+              options={[
+                { value: 'all', label: t('kProfiles.allExtruders') },
+                { value: 'left', label: t('kProfiles.leftOnly') },
+                { value: 'right', label: t('kProfiles.rightOnly') },
+              ]}
+            />
           </div>
         )}
         <div className="w-32">
-          <select
+          <ToolbarDropdown
             value={flowTypeFilter}
-            onChange={(e) => setFlowTypeFilter(e.target.value as FlowTypeFilter)}
-            className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
-          >
-            <option value="all">{t('kProfiles.allFlow')}</option>
-            <option value="hf">{t('kProfiles.hfOnly')}</option>
-            <option value="s">{t('kProfiles.sOnly')}</option>
-          </select>
+            onChange={(nextFilter) => setFlowTypeFilter(nextFilter as FlowTypeFilter)}
+            fullWidth
+            options={[
+              { value: 'all', label: t('kProfiles.allFlow') },
+              { value: 'hf', label: t('kProfiles.hfOnly') },
+              { value: 's', label: t('kProfiles.sOnly') },
+            ]}
+          />
         </div>
         <div className="w-32">
-          <select
+          <ToolbarDropdown
             value={sortOption}
-            onChange={(e) => setSortOption(e.target.value as SortOption)}
-            className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
-          >
-            <option value="name">{t('kProfiles.sortName')}</option>
-            <option value="k_value">{t('kProfiles.sortKValue')}</option>
-            <option value="filament">{t('kProfiles.sortFilament')}</option>
-          </select>
+            onChange={(nextSort) => setSortOption(nextSort as SortOption)}
+            fullWidth
+            options={[
+              { value: 'name', label: t('kProfiles.sortName') },
+              { value: 'k_value', label: t('kProfiles.sortKValue') },
+              { value: 'filament', label: t('kProfiles.sortFilament') },
+            ]}
+          />
         </div>
       </div>
 

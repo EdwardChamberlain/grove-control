@@ -9,6 +9,7 @@ import { Button } from './Button';
 import { Toggle } from './Toggle';
 import { ConfirmModal } from './ConfirmModal';
 import { useToast } from '../contexts/ToastContext';
+import { ReactSelect } from './ToolbarControls';
 
 const EMPTY_FORM: OIDCProviderCreate = {
   name: '',
@@ -175,7 +176,7 @@ function ProviderForm({
 
       <div>
         <label className={labelCls}>{t('settings.oidc.form.defaultGroup')}</label>
-        <select
+        <ReactSelect
           className={inputCls}
           value={form.default_group_id ?? ''}
           onChange={(e) => set('default_group_id', e.target.value ? Number(e.target.value) : null)}
@@ -184,7 +185,7 @@ function ProviderForm({
           {groups.map((g) => (
             <option key={g.id} value={g.id}>{g.name}</option>
           ))}
-        </select>
+        </ReactSelect>
         <p className="text-bambu-gray text-xs mt-1">{t('settings.oidc.form.defaultGroupDesc')}</p>
       </div>
 

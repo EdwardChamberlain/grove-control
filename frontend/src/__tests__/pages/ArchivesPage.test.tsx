@@ -196,7 +196,7 @@ describe('ArchivesPage', () => {
       render(<ArchivesPage />);
 
       await waitFor(() => {
-        expect(screen.getByText('All Printers')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'All Printers' })).toBeInTheDocument();
       });
     });
 
@@ -204,9 +204,9 @@ describe('ArchivesPage', () => {
       render(<ArchivesPage />);
 
       await waitFor(() => {
-        // Project filter dropdown may have different default text
-        const projectSelect = screen.getAllByRole('combobox');
-        expect(projectSelect.length).toBeGreaterThan(0);
+        // Filter dropdowns render as custom toolbar buttons.
+        expect(screen.getByRole('button', { name: 'All Archives' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'All Printers' })).toBeInTheDocument();
       });
     });
   });
@@ -398,8 +398,8 @@ describe('ArchivesPage', () => {
         expect(screen.getByText('NeverPrinted')).toBeInTheDocument();
       });
 
-      const collectionSelect = screen.getByDisplayValue('All Archives');
-      fireEvent.change(collectionSelect, { target: { value: 'not-printed' } });
+      fireEvent.click(screen.getByRole('button', { name: 'All Archives' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Not Printed' }));
 
       await waitFor(() => {
         expect(screen.getByText('NeverPrinted')).toBeInTheDocument();
@@ -416,8 +416,8 @@ describe('ArchivesPage', () => {
         expect(screen.getByText('NeverPrinted')).toBeInTheDocument();
       });
 
-      const collectionSelect = screen.getByDisplayValue('All Archives');
-      fireEvent.change(collectionSelect, { target: { value: 'printed' } });
+      fireEvent.click(screen.getByRole('button', { name: 'All Archives' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Printed' }));
 
       await waitFor(() => {
         expect(screen.queryByText('NeverPrinted')).not.toBeInTheDocument();

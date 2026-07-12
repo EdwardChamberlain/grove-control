@@ -7,6 +7,7 @@ import { parseUTCDate, formatTimeOnly, formatDateTime, type TimeFormat } from '.
 import type { NotificationLogEntry } from '../api/client';
 import { Button } from './Button';
 import { useToast } from '../contexts/ToastContext';
+import { ReactSelect } from './ToolbarControls';
 
 const EVENT_COLORS: Record<string, string> = {
   print_start: 'text-blue-400',
@@ -119,7 +120,7 @@ export function NotificationLogViewer({ onClose }: NotificationLogViewerProps) {
 
         {/* Filters */}
         <div className="px-4 py-3 border-b border-bambu-dark-tertiary flex items-center gap-4">
-          <select
+          <ReactSelect
             value={days}
             onChange={(e) => setDays(Number(e.target.value))}
             className="px-3 py-1.5 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-bambu-green"
@@ -128,7 +129,7 @@ export function NotificationLogViewer({ onClose }: NotificationLogViewerProps) {
             <option value={7}>{t('notifications.last7Days')}</option>
             <option value={30}>{t('notifications.last30Days')}</option>
             <option value={90}>{t('notifications.last90Days')}</option>
-          </select>
+          </ReactSelect>
 
           <label className="flex items-center gap-2 text-sm text-bambu-gray cursor-pointer">
             <input

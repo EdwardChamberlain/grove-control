@@ -31,6 +31,7 @@ import { ConfirmModal } from '../components/ConfirmModal';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { getCurrencySymbol } from '../utils/currency';
+import { ReactSelect } from '../components/ToolbarControls';
 
 const PROJECT_COLORS = [
   '#ef4444', // red
@@ -329,7 +330,7 @@ export function ProjectModal({ project, onClose, onSave, isLoading, currencySymb
               <label className="block text-sm font-medium text-white mb-1">
                 {t('projects.priority')}
               </label>
-              <select
+              <ReactSelect
                 value={priority}
                 onChange={(e) => setPriority(e.target.value)}
                 className="w-full bg-bambu-dark border border-bambu-dark-tertiary rounded px-3 py-2 text-white focus:outline-none focus:border-bambu-green"
@@ -338,7 +339,7 @@ export function ProjectModal({ project, onClose, onSave, isLoading, currencySymb
                 <option value="normal">{t('projects.priorityNormal')}</option>
                 <option value="high">{t('projects.priorityHigh')}</option>
                 <option value="urgent">{t('projects.priorityUrgent')}</option>
-              </select>
+              </ReactSelect>
             </div>
           </div>
 
@@ -367,7 +368,7 @@ export function ProjectModal({ project, onClose, onSave, isLoading, currencySymb
               <label className="block text-sm font-medium text-white mb-1">
                 {t('common.status')}
               </label>
-              <select
+              <ReactSelect
                 value={status}
                 onChange={(e) => setStatus(e.target.value)}
                 className="w-full bg-bambu-dark border border-bambu-dark-tertiary rounded px-3 py-2 text-white focus:outline-none focus:border-bambu-green"
@@ -375,7 +376,7 @@ export function ProjectModal({ project, onClose, onSave, isLoading, currencySymb
                 <option value="active">{t('projects.statusActive')}</option>
                 <option value="completed">{t('projects.statusCompleted')}</option>
                 <option value="archived">{t('projects.statusArchived')}</option>
-              </select>
+              </ReactSelect>
             </div>
           )}
           </div>

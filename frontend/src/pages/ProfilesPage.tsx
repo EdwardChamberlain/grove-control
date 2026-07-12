@@ -23,7 +23,6 @@ import {
   Clock,
   Layers,
   Filter,
-  ChevronDown,
   ArrowUp,
   Upload,
   Download,
@@ -47,6 +46,7 @@ import { formatRelativeTime } from '../utils/date';
 import type { SlicerSetting, SlicerSettingsResponse, SlicerSettingDetail, SlicerSettingCreate, Printer, FieldDefinition, Permission } from '../api/client';
 import { Card, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
+import { ToolbarDropdown } from '../components/ToolbarControls';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { KProfilesView } from '../components/KProfilesView';
@@ -197,14 +197,15 @@ function LoginForm({ onSuccess, t }: { onSuccess: () => void; t: TFunction }) {
               </div>
               <div>
                 <label className="block text-sm text-bambu-gray mb-1">{t('profiles.login.region')}</label>
-                <select
+                <ToolbarDropdown
                   value={region}
-                  onChange={(e) => setRegion(e.target.value)}
-                  className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
-                >
-                  <option value="global">{t('profiles.login.regionGlobal')}</option>
-                  <option value="china">{t('profiles.login.regionChina')}</option>
-                </select>
+                  onChange={setRegion}
+                  fullWidth
+                  options={[
+                    { value: 'global', label: t('profiles.login.regionGlobal') },
+                    { value: 'china', label: t('profiles.login.regionChina') },
+                  ]}
+                />
               </div>
             </>
           )}
@@ -247,14 +248,15 @@ function LoginForm({ onSuccess, t }: { onSuccess: () => void; t: TFunction }) {
               </div>
               <div>
                 <label className="block text-sm text-bambu-gray mb-1">{t('profiles.login.region')}</label>
-                <select
+                <ToolbarDropdown
                   value={region}
-                  onChange={(e) => setRegion(e.target.value)}
-                  className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
-                >
-                  <option value="global">{t('profiles.login.regionGlobal')}</option>
-                  <option value="china">{t('profiles.login.regionChina')}</option>
-                </select>
+                  onChange={setRegion}
+                  fullWidth
+                  options={[
+                    { value: 'global', label: t('profiles.login.regionGlobal') },
+                    { value: 'china', label: t('profiles.login.regionChina') },
+                  ]}
+                />
               </div>
             </>
           )}
@@ -317,42 +319,19 @@ export function FilterDropdown({
   options: { value: string; label: string; count?: number }[];
   onChange: (value: string) => void;
 }) {
-  const [isOpen, setIsOpen] = useState(false);
   const selectedOption = options.find(o => o.value === value);
 
   return (
-    <div className="relative">
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-sm text-white hover:border-bambu-gray-dark transition-colors"
-      >
-        <span className="text-bambu-gray">{label}:</span>
-        <span>{selectedOption?.label || 'All'}</span>
-        <ChevronDown className={`w-4 h-4 text-bambu-gray transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-      </button>
-
-      {isOpen && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
-          <div className="absolute top-full left-0 mt-1 min-w-[160px] bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg shadow-xl z-20 py-1 max-h-60 overflow-y-auto">
-            {options.map((option) => (
-              <button
-                key={option.value}
-                onClick={() => { onChange(option.value); setIsOpen(false); }}
-                className={`w-full px-3 py-2 text-left text-sm flex items-center justify-between hover:bg-bambu-dark-tertiary transition-colors ${
-                  value === option.value ? 'text-bambu-green' : 'text-white'
-                }`}
-              >
-                <span>{option.label}</span>
-                {option.count !== undefined && (
-                  <span className="text-bambu-gray text-xs">{option.count}</span>
-                )}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
+    <ToolbarDropdown
+      value={value}
+      onChange={onChange}
+      minWidthClass="min-w-36"
+      selectedLabel={`${label}: ${selectedOption?.label || 'All'}`}
+      options={options.map(option => ({
+        value: option.value,
+        label: option.count !== undefined ? `${option.label} (${option.count})` : option.label,
+      }))}
+    />
   );
 }
 
@@ -1665,16 +1644,15 @@ function CreatePresetModal({
 
     if (field.type === 'select') {
       return (
-        <select
+        <ToolbarDropdown
           value={(value as string) || ''}
-          onChange={(e) => updateField(field.key, e.target.value)}
-          className={baseClass}
-        >
-          <option value="">{placeholder}</option>
-          {field.options?.map(opt => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
-          ))}
-        </select>
+          onChange={(nextValue) => updateField(field.key, nextValue)}
+          fullWidth
+          options={[
+            { value: '', label: placeholder },
+            ...(field.options ?? []),
+          ]}
+        />
       );
     }
 
@@ -1764,28 +1742,28 @@ function CreatePresetModal({
             <div className="grid grid-cols-3 gap-4 max-[640px]:grid-cols-1">
               <div>
                 <label className="block text-sm text-bambu-gray mb-1">{t('common.type')}</label>
-                <select
+                <ToolbarDropdown
                   value={presetType}
-                  onChange={(e) => { setPresetType(e.target.value as 'filament' | 'print' | 'printer'); setBaseId(''); }}
-                  className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
-                >
-                  <option value="filament">{t('profiles.presets.types.filament')}</option>
-                  <option value="print">{t('profiles.presets.types.process')}</option>
-                  <option value="printer">{t('profiles.presets.types.printer')}</option>
-                </select>
+                  onChange={(nextType) => { setPresetType(nextType as 'filament' | 'print' | 'printer'); setBaseId(''); }}
+                  fullWidth
+                  options={[
+                    { value: 'filament', label: t('profiles.presets.types.filament') },
+                    { value: 'print', label: t('profiles.presets.types.process') },
+                    { value: 'printer', label: t('profiles.presets.types.printer') },
+                  ]}
+                />
               </div>
               <div>
                 <label className="block text-sm text-bambu-gray mb-1">{t('profiles.presets.basePreset')}</label>
-                <select
+                <ToolbarDropdown
                   value={baseId}
-                  onChange={(e) => setBaseId(e.target.value)}
-                  className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:border-bambu-green focus:outline-none"
-                >
-                  <option value="">{t('profiles.presets.selectBasePreset')}</option>
-                  {availableBasePresets.map((preset) => (
-                    <option key={preset.setting_id} value={preset.setting_id}>{preset.name}</option>
-                  ))}
-                </select>
+                  onChange={setBaseId}
+                  fullWidth
+                  options={[
+                    { value: '', label: t('profiles.presets.selectBasePreset') },
+                    ...availableBasePresets.map((preset) => ({ value: preset.setting_id, label: preset.name })),
+                  ]}
+                />
               </div>
               <div>
                 <label className="block text-sm text-bambu-gray mb-1">{t('profiles.presets.presetName')}</label>
@@ -2453,7 +2431,7 @@ function CloudProfilesView({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={t('profiles.cloudView.searchPlaceholder')}
-              className="w-full pl-10 pr-4 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white placeholder-bambu-gray-dark focus:border-bambu-green focus:outline-none"
+              className="w-full h-8 pl-10 pr-4 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm placeholder-bambu-gray-dark focus:border-bambu-green focus:outline-none"
             />
           </div>
 
@@ -2468,6 +2446,7 @@ function CloudProfilesView({
                   setCompareMode(true);
                 }
               }}
+              className="h-8 min-h-0"
             >
               <GitCompare className="w-4 h-4" />
               {compareMode ? t('common.cancel') : t('profiles.presets.compare')}
@@ -2477,6 +2456,7 @@ function CloudProfilesView({
               onClick={() => setShowTemplatesModal(true)}
               disabled={!hasPermission('cloud:auth')}
               title={!hasPermission('cloud:auth') ? t('profiles.cloudView.noTemplatesPermission') : undefined}
+              className="h-8 min-h-0"
             >
               <Sparkles className="w-4 h-4" />
               {t('profiles.cloudView.templates')}
@@ -2486,6 +2466,7 @@ function CloudProfilesView({
               onClick={onRefresh}
               disabled={isRefreshing || !hasPermission('cloud:auth')}
               title={!hasPermission('cloud:auth') ? t('profiles.cloudView.noRefreshPermission') : undefined}
+              className="h-8 min-h-0"
             >
               <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
               {t('profiles.cloudView.refresh')}
@@ -2494,6 +2475,7 @@ function CloudProfilesView({
               onClick={() => setShowCreateModal(true)}
               disabled={!hasPermission('cloud:auth')}
               title={!hasPermission('cloud:auth') ? t('profiles.cloudView.noCreatePermission') : undefined}
+              className="h-8 min-h-0"
             >
               <Plus className="w-4 h-4" />
               {t('profiles.cloudView.newPreset')}
@@ -2579,7 +2561,7 @@ function CloudProfilesView({
           {hasActiveFilters && (
             <button
               onClick={clearFilters}
-              className="px-3 py-2 text-sm text-bambu-gray hover:text-white transition-colors"
+              className="h-8 px-3 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark text-sm text-bambu-gray transition-colors hover:bg-bambu-dark-tertiary hover:text-white"
             >
               {t('profiles.cloudView.clearFilters')}
             </button>

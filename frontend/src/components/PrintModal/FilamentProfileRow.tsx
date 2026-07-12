@@ -1,5 +1,6 @@
 import { AlertTriangle, Check, Circle, RotateCcw } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { ReactSelect } from '../ToolbarControls';
 
 export type FilamentProfileStatus = 'match' | 'type_only' | 'mismatch' | 'empty' | 'neutral';
 
@@ -69,7 +70,7 @@ export function FilamentProfileRow({
         {requiredLabel} <span className="text-bambu-gray">({usedGrams}g)</span>
       </span>
       <span className="text-bambu-gray">→</span>
-      <select
+      <ReactSelect
         value={value}
         onChange={(event) => onChange(event.target.value)}
         disabled={disabled}
@@ -87,7 +88,7 @@ export function FilamentProfileRow({
             {option.label}
           </option>
         ))}
-      </select>
+      </ReactSelect>
       {onReset && value ? (
         <button
           type="button"

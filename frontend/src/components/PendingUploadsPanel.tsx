@@ -9,6 +9,7 @@ import { Button } from './Button';
 import { useToast } from '../contexts/ToastContext';
 import { ConfirmModal } from './ConfirmModal';
 import { formatFileSize } from '../utils/file';
+import { ReactSelect } from './ToolbarControls';
 
 function formatTimeAgo(dateStr: string): string {
   const date = new Date(dateStr);
@@ -148,7 +149,7 @@ function PendingUploadItem({
             </div>
             <div>
               <label className="block text-sm text-bambu-gray mb-1">Project</label>
-              <select
+              <ReactSelect
                 value={projectId || ''}
                 onChange={(e) => setProjectId(e.target.value ? Number(e.target.value) : null)}
                 className="w-full bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-md px-3 py-2 text-white text-sm"
@@ -159,7 +160,7 @@ function PendingUploadItem({
                     {project.name}
                   </option>
                 ))}
-              </select>
+              </ReactSelect>
             </div>
           </div>
         )}

@@ -127,7 +127,8 @@ describe('AddNotificationModal — ntfy Priority (#990)', () => {
     const sectionRoot = sectionHeader.closest('div')!;
     const failedRow = within(sectionRoot).getByText('Failed').closest('div')!;
     const select = within(failedRow).getByRole('combobox');
-    await user.selectOptions(select, '5');
+    await user.click(select);
+    await user.click(await screen.findByRole('option', { name: /urgent/i }));
 
     await user.click(screen.getByRole('button', { name: /^save$/i }));
 

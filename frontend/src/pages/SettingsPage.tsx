@@ -47,6 +47,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Palette } from 'lucide-react';
 import { registerSettingsSearch, getSettingsSearchEntries } from '../lib/settingsSearch';
 import type { UsersSubTab } from '../lib/settingsSearch';
+import { ReactSelect } from '../components/ToolbarControls';
 
 const validTabs = ['general', 'plugs', 'notifications', 'queue', 'filament', 'network', 'apikeys', 'virtual-printer', 'spoolbuddy', 'failure-detection', 'users', 'backup'] as const;
 type TabType = typeof validTabs[number];
@@ -1485,7 +1486,7 @@ export function SettingsPage() {
                   {t('settings.language')}
                 </label>
                 <div className="relative">
-                  <select
+                  <ReactSelect
                     value={i18n.language}
                     onChange={(e) => {
                       const newLang = e.target.value;
@@ -1506,7 +1507,7 @@ export function SettingsPage() {
                         {lang.nativeName} ({lang.name})
                       </option>
                     ))}
-                  </select>
+                  </ReactSelect>
                   <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                 </div>
                 <p className="text-xs text-bambu-gray mt-1">
@@ -1518,7 +1519,7 @@ export function SettingsPage() {
                   {t('settings.defaultView')}
                 </label>
                 <div className="relative">
-                  <select
+                  <ReactSelect
                     value={defaultView}
                     onChange={(e) => handleDefaultViewChange(e.target.value)}
                     className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
@@ -1528,7 +1529,7 @@ export function SettingsPage() {
                         {t(item.labelKey)}
                       </option>
                     ))}
-                  </select>
+                  </ReactSelect>
                   <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                 </div>
                 <p className="text-xs text-bambu-gray mt-1">
@@ -1541,7 +1542,7 @@ export function SettingsPage() {
                     {t('settings.dateFormat')}
                   </label>
                   <div className="relative">
-                    <select
+                    <ReactSelect
                       value={localSettings.date_format || 'system'}
                       onChange={(e) => updateSetting('date_format', e.target.value as 'system' | 'us' | 'eu' | 'iso')}
                       className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
@@ -1550,7 +1551,7 @@ export function SettingsPage() {
                       <option value="us">{t('settings.dateFormatUs')}</option>
                       <option value="eu">{t('settings.dateFormatEu')}</option>
                       <option value="iso">{t('settings.dateFormatIso')}</option>
-                    </select>
+                    </ReactSelect>
                     <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                   </div>
                 </div>
@@ -1559,7 +1560,7 @@ export function SettingsPage() {
                     {t('settings.timeFormat')}
                   </label>
                   <div className="relative">
-                    <select
+                    <ReactSelect
                       value={localSettings.time_format || 'system'}
                       onChange={(e) => updateSetting('time_format', e.target.value as 'system' | '12h' | '24h')}
                       className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
@@ -1567,7 +1568,7 @@ export function SettingsPage() {
                       <option value="system">{t('settings.systemDefault')}</option>
                       <option value="12h">{t('settings.timeFormat12')}</option>
                       <option value="24h">{t('settings.timeFormat24')}</option>
-                    </select>
+                    </ReactSelect>
                     <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                   </div>
                 </div>
@@ -1577,7 +1578,7 @@ export function SettingsPage() {
                   {t('settings.defaultPrinter')}
                 </label>
                 <div className="relative">
-                  <select
+                  <ReactSelect
                     value={localSettings.default_printer_id ?? ''}
                     onChange={(e) => updateSetting('default_printer_id', e.target.value ? Number(e.target.value) : null)}
                     className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
@@ -1588,7 +1589,7 @@ export function SettingsPage() {
                         {printer.name}
                       </option>
                     ))}
-                  </select>
+                  </ReactSelect>
                   <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                 </div>
                 <p className="text-xs text-bambu-gray mt-1">
@@ -1645,7 +1646,7 @@ export function SettingsPage() {
                 <div className="grid grid-cols-3 gap-3">
                   <div>
                     <label className="block text-xs text-bambu-gray mb-1">{t('settings.background')}</label>
-                    <select
+                    <ReactSelect
                       value={darkBackground}
                       onChange={(e) => { setDarkBackground(e.target.value as DarkBackground); showToast(t('settings.toast.settingsSaved'), 'success'); }}
                       className="w-full px-2 py-1.5 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
@@ -1656,11 +1657,11 @@ export function SettingsPage() {
                       <option value="oled">{t('settings.bgOled')}</option>
                       <option value="slate">{t('settings.bgSlate')}</option>
                       <option value="forest">{t('settings.bgForest')}</option>
-                    </select>
+                    </ReactSelect>
                   </div>
                   <div>
                     <label className="block text-xs text-bambu-gray mb-1">{t('settings.accent')}</label>
-                    <select
+                    <ReactSelect
                       value={darkAccent}
                       onChange={(e) => { setDarkAccent(e.target.value as ThemeAccent); showToast(t('settings.toast.settingsSaved'), 'success'); }}
                       className="w-full px-2 py-1.5 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
@@ -1671,11 +1672,11 @@ export function SettingsPage() {
                       <option value="orange">{t('settings.accentOrange')}</option>
                       <option value="purple">{t('settings.accentPurple')}</option>
                       <option value="red">{t('settings.accentRed')}</option>
-                    </select>
+                    </ReactSelect>
                   </div>
                   <div>
                     <label className="block text-xs text-bambu-gray mb-1">{t('settings.style')}</label>
-                    <select
+                    <ReactSelect
                       value={darkStyle}
                       onChange={(e) => { setDarkStyle(e.target.value as ThemeStyle); showToast(t('settings.toast.settingsSaved'), 'success'); }}
                       className="w-full px-2 py-1.5 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
@@ -1683,7 +1684,7 @@ export function SettingsPage() {
                       <option value="classic">{t('settings.styleClassic')}</option>
                       <option value="glow">{t('settings.styleGlow')}</option>
                       <option value="vibrant">{t('settings.styleVibrant')}</option>
-                    </select>
+                    </ReactSelect>
                   </div>
                 </div>
               </div>
@@ -1697,7 +1698,7 @@ export function SettingsPage() {
                 <div className="grid grid-cols-3 gap-3">
                   <div>
                     <label className="block text-xs text-bambu-gray mb-1">{t('settings.background')}</label>
-                    <select
+                    <ReactSelect
                       value={lightBackground}
                       onChange={(e) => { setLightBackground(e.target.value as LightBackground); showToast(t('settings.toast.settingsSaved'), 'success'); }}
                       className="w-full px-2 py-1.5 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
@@ -1705,11 +1706,11 @@ export function SettingsPage() {
                       <option value="neutral">{t('settings.bgNeutral')}</option>
                       <option value="warm">{t('settings.bgWarm')}</option>
                       <option value="cool">{t('settings.bgCool')}</option>
-                    </select>
+                    </ReactSelect>
                   </div>
                   <div>
                     <label className="block text-xs text-bambu-gray mb-1">{t('settings.accent')}</label>
-                    <select
+                    <ReactSelect
                       value={lightAccent}
                       onChange={(e) => { setLightAccent(e.target.value as ThemeAccent); showToast(t('settings.toast.settingsSaved'), 'success'); }}
                       className="w-full px-2 py-1.5 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
@@ -1720,11 +1721,11 @@ export function SettingsPage() {
                       <option value="orange">{t('settings.accentOrange')}</option>
                       <option value="purple">{t('settings.accentPurple')}</option>
                       <option value="red">{t('settings.accentRed')}</option>
-                    </select>
+                    </ReactSelect>
                   </div>
                   <div>
                     <label className="block text-xs text-bambu-gray mb-1">{t('settings.style')}</label>
-                    <select
+                    <ReactSelect
                       value={lightStyle}
                       onChange={(e) => { setLightStyle(e.target.value as ThemeStyle); showToast(t('settings.toast.settingsSaved'), 'success'); }}
                       className="w-full px-2 py-1.5 text-sm bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
@@ -1732,7 +1733,7 @@ export function SettingsPage() {
                       <option value="classic">{t('settings.styleClassic')}</option>
                       <option value="glow">{t('settings.styleGlow')}</option>
                       <option value="vibrant">{t('settings.styleVibrant')}</option>
-                    </select>
+                    </ReactSelect>
                   </div>
                 </div>
               </div>
@@ -1895,14 +1896,14 @@ export function SettingsPage() {
                 <label className="block text-sm text-bambu-gray mb-1">
                   {t('settings.cameraViewMode')}
                 </label>
-                <select
+                <ReactSelect
                   value={localSettings.camera_view_mode ?? 'window'}
                   onChange={(e) => updateSetting('camera_view_mode', e.target.value as 'window' | 'embedded')}
                   className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
                 >
                   <option value="window">{t('settings.newWindow')}</option>
                   <option value="embedded">{t('settings.embeddedOverlay')}</option>
-                </select>
+                </ReactSelect>
                 <p className="text-xs text-bambu-gray mt-1">
                   {localSettings.camera_view_mode === 'embedded'
                     ? t('settings.cameraOverlayDescription')
@@ -1944,7 +1945,7 @@ export function SettingsPage() {
                               className="w-full px-3 py-2 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded text-white text-sm focus:border-bambu-green focus:outline-none"
                             />
                             <div className="flex gap-2">
-                              <select
+                              <ReactSelect
                                 value={printer.external_camera_type || 'mjpeg'}
                                 onChange={(e) => handleUpdatePrinterCamera(printer.id, { type: e.target.value })}
                                 className="flex-1 px-3 py-2 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded text-white text-sm focus:border-bambu-green focus:outline-none"
@@ -1953,7 +1954,7 @@ export function SettingsPage() {
                                 <option value="rtsp">{t('settings.cameraTypeRtsp')}</option>
                                 <option value="snapshot">{t('settings.cameraTypeSnapshot')}</option>
                                 <option value="usb">{t('settings.cameraTypeUsb')}</option>
-                              </select>
+                              </ReactSelect>
                               <Button
                                 size="sm"
                                 variant="secondary"
@@ -2013,7 +2014,7 @@ export function SettingsPage() {
                             )}
                             <div className="flex items-center gap-2">
                               <label className="text-xs text-bambu-gray">{t('settings.cameraRotation')}</label>
-                              <select
+                              <ReactSelect
                                 value={printer.camera_rotation || 0}
                                 onChange={(e) => handleUpdatePrinterCamera(printer.id, { rotation: parseInt(e.target.value) })}
                                 className="px-2 py-1 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded text-white text-xs focus:border-bambu-green focus:outline-none"
@@ -2022,7 +2023,7 @@ export function SettingsPage() {
                                 <option value={90}>90°</option>
                                 <option value={180}>180°</option>
                                 <option value={270}>270°</option>
-                              </select>
+                              </ReactSelect>
                             </div>
                           </div>
                         )}
@@ -2044,7 +2045,7 @@ export function SettingsPage() {
             <CardContent className="space-y-3">
               <div>
                 <label className="block text-sm text-bambu-gray mb-1">{t('settings.currency')}</label>
-                <select
+                <ReactSelect
                   value={localSettings.currency}
                   onChange={(e) => updateSetting('currency', e.target.value)}
                   className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
@@ -2052,7 +2053,7 @@ export function SettingsPage() {
                   {SUPPORTED_CURRENCIES.map((c) => (
                     <option key={c.code} value={c.code}>{c.label}</option>
                   ))}
-                </select>
+                </ReactSelect>
               </div>
               <div>
                 <label className="block text-sm text-bambu-gray mb-1">
@@ -2100,14 +2101,14 @@ export function SettingsPage() {
                 <label className="block text-sm text-bambu-gray mb-1">
                   {t('settings.energyDisplayMode')}
                 </label>
-                <select
+                <ReactSelect
                   value={localSettings.energy_tracking_mode || 'total'}
                   onChange={(e) => updateSetting('energy_tracking_mode', e.target.value as 'print' | 'total')}
                   className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
                 >
                   <option value="print">{t('settings.printsOnly')}</option>
                   <option value="total">{t('settings.totalConsumption')}</option>
-                </select>
+                </ReactSelect>
                 <p className="text-xs text-bambu-gray mt-1">
                   {localSettings.energy_tracking_mode === 'print'
                     ? t('settings.energyModePrintDescription')
@@ -2131,7 +2132,7 @@ export function SettingsPage() {
                 <label className="block text-sm text-bambu-gray mb-1">
                   {t('settings.createArchiveEntry')}
                 </label>
-                <select
+                <ReactSelect
                   value={localSettings.library_archive_mode ?? 'ask'}
                   onChange={(e) => updateSetting('library_archive_mode', e.target.value as 'always' | 'never' | 'ask')}
                   className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
@@ -2139,7 +2140,7 @@ export function SettingsPage() {
                   <option value="always">{t('settings.archiveMode.always')}</option>
                   <option value="never">{t('settings.archiveMode.never')}</option>
                   <option value="ask">{t('settings.archiveMode.ask')}</option>
-                </select>
+                </ReactSelect>
                 <p className="text-xs text-bambu-gray mt-1">
                   {t('settings.createArchiveEntryDescription')}
                 </p>
@@ -2630,7 +2631,7 @@ export function SettingsPage() {
                       {t('settings.retryAttempts')}
                     </label>
                     <div className="relative w-44">
-                      <select
+                      <ReactSelect
                         value={localSettings.ftp_retry_count ?? 3}
                         onChange={(e) => updateSetting('ftp_retry_count', parseInt(e.target.value))}
                         className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
@@ -2638,7 +2639,7 @@ export function SettingsPage() {
                         {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
                           <option key={n} value={n}>{t('settings.time', { count: n })}</option>
                         ))}
-                      </select>
+                      </ReactSelect>
                       <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                     </div>
                   </div>
@@ -2648,7 +2649,7 @@ export function SettingsPage() {
                       {t('settings.retryDelay')}
                     </label>
                     <div className="relative w-44">
-                      <select
+                      <ReactSelect
                         value={localSettings.ftp_retry_delay ?? 2}
                         onChange={(e) => updateSetting('ftp_retry_delay', parseInt(e.target.value))}
                         className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
@@ -2656,7 +2657,7 @@ export function SettingsPage() {
                         {[1, 2, 3, 5, 10, 15, 20, 30].map(n => (
                           <option key={n} value={n}>{t('settings.second', { count: n })}</option>
                         ))}
-                      </select>
+                      </ReactSelect>
                       <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                     </div>
                   </div>
@@ -2665,7 +2666,7 @@ export function SettingsPage() {
                       {t('settings.connectionTimeout')}
                     </label>
                     <div className="relative w-44">
-                      <select
+                      <ReactSelect
                         value={localSettings.ftp_timeout ?? 30}
                         onChange={(e) => updateSetting('ftp_timeout', parseInt(e.target.value))}
                         className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
@@ -2673,7 +2674,7 @@ export function SettingsPage() {
                         {[10, 15, 20, 30, 45, 60, 90, 120, 180, 300].map(n => (
                           <option key={n} value={n}>{t('settings.nSeconds', { count: n })}</option>
                         ))}
-                      </select>
+                      </ReactSelect>
                       <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                     </div>
                     <p className="text-xs text-bambu-gray mt-1">
@@ -3341,7 +3342,7 @@ export function SettingsPage() {
                     <p className="text-white text-sm font-medium">{t('settings.notificationLanguage')}</p>
                     <p className="text-xs text-bambu-gray">{t('settings.notificationLanguageDescription')}</p>
                   </div>
-                  <select
+                  <ReactSelect
                     value={localSettings.notification_language || 'en'}
                     onChange={(e) => updateSetting('notification_language', e.target.value)}
                     className="px-2 py-1.5 bg-bambu-dark border border-bambu-dark-tertiary rounded text-white text-sm focus:outline-none focus:ring-1 focus:ring-bambu-green"
@@ -3351,7 +3352,7 @@ export function SettingsPage() {
                         {lang.nativeName}
                       </option>
                     ))}
-                  </select>
+                  </ReactSelect>
                 </div>
               </CardContent>
             </Card>
@@ -4337,14 +4338,14 @@ export function SettingsPage() {
                   {t('settings.preferredSlicer')}
                 </label>
                 <div className="relative">
-                  <select
+                  <ReactSelect
                     value={localSettings.preferred_slicer ?? 'bambu_studio'}
                     onChange={(e) => updateSetting('preferred_slicer', e.target.value as 'bambu_studio' | 'orcaslicer')}
                     className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
                   >
                     <option value="bambu_studio">{t('settings.slicerBambuStudio')}</option>
                     <option value="orcaslicer">{t('settings.slicerOrcaSlicer')}</option>
-                  </select>
+                  </ReactSelect>
                   <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                 </div>
                 <p className="text-xs text-bambu-gray mt-1">
@@ -4378,7 +4379,7 @@ export function SettingsPage() {
                   {t('settings.openInSlicerLabel', 'Open in Slicer')}
                 </label>
                 <div className="relative">
-                  <select
+                  <ReactSelect
                     value={localSettings.open_in_slicer ?? ''}
                     onChange={(e) =>
                       updateSetting(
@@ -4391,7 +4392,7 @@ export function SettingsPage() {
                     <option value="">{t('settings.openInSlicerInherit', 'Same as API slicer')}</option>
                     <option value="bambu_studio">{t('settings.slicerBambuStudio')}</option>
                     <option value="orcaslicer">{t('settings.slicerOrcaSlicer')}</option>
-                  </select>
+                  </ReactSelect>
                   <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                 </div>
                 <p className="text-xs text-bambu-gray mt-1">

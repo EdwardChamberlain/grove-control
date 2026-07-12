@@ -9,6 +9,7 @@ import { Button } from './Button';
 import { useToast } from '../contexts/ToastContext';
 import { useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { ReactSelect } from './ToolbarControls';
 
 const SECURITY_PORT_MAP: Record<string, number> = {
   starttls: 587,
@@ -258,14 +259,14 @@ export function EmailSettings() {
                 <label className="block text-sm font-medium text-white mb-1">
                   {t('settings.email.authentication') || 'Authentication'}
                 </label>
-                <select
+                <ReactSelect
                   value={smtpSettings.smtp_auth_enabled ? 'true' : 'false'}
                   onChange={(e) => handleAuthChange(e.target.value === 'true')}
                   className={inputClasses}
                 >
                   <option value="true">{t('settings.email.authOptions.enabled')}</option>
                   <option value="false">{t('settings.email.authOptions.disabled')}</option>
-                </select>
+                </ReactSelect>
               </div>
 
               {/* Username / Password - dimmed when auth disabled */}
@@ -331,7 +332,7 @@ export function EmailSettings() {
                 <label className="block text-sm font-medium text-white mb-1">
                   {t('settings.email.security') || 'Security'}
                 </label>
-                <select
+                <ReactSelect
                   value={smtpSettings.smtp_security}
                   onChange={(e) => handleSecurityChange(e.target.value as 'starttls' | 'ssl' | 'none')}
                   className={inputClasses}
@@ -339,7 +340,7 @@ export function EmailSettings() {
                   <option value="starttls">{t('settings.email.securityOptions.starttls')}</option>
                   <option value="ssl">{t('settings.email.securityOptions.ssl')}</option>
                   <option value="none">{t('settings.email.securityOptions.none')}</option>
-                </select>
+                </ReactSelect>
               </div>
 
               {/* From Email / Name */}

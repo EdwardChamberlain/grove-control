@@ -8,6 +8,7 @@ import { matchesPrinterModelSuffix, presetCompatibility, buildCompatibilityIndex
 import { toFilamentId, isGenericFilamentId } from './spool-form/utils';
 import { Button } from './Button';
 import { getAmsLabel } from '../utils/amsHelpers';
+import { ReactSelect } from './ToolbarControls';
 
 interface SlotInfo {
   amsId: number;
@@ -1236,7 +1237,7 @@ export function ConfigureAmsSlotModal({
                   </label>
                   {matchingKProfiles.length > 0 ? (
                     <div className="relative">
-                      <select
+                      <ReactSelect
                         value={selectedKProfile?.name || ''}
                         onChange={(e) => {
                           const profile = matchingKProfiles.find(p => p.name === e.target.value);
@@ -1250,7 +1251,7 @@ export function ConfigureAmsSlotModal({
                             {profile.name} (K={profile.k_value})
                           </option>
                         ))}
-                      </select>
+                      </ReactSelect>
                       <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                     </div>
                   ) : selectedPresetId ? (
@@ -1475,7 +1476,7 @@ export function ConfigureAmsSlotModal({
                 </label>
                 {matchingKProfiles.length > 0 ? (
                   <div className="relative">
-                    <select
+                    <ReactSelect
                       value={selectedKProfile?.name || ''}
                       onChange={(e) => {
                         const profile = matchingKProfiles.find(p => p.name === e.target.value);
@@ -1489,7 +1490,7 @@ export function ConfigureAmsSlotModal({
                           {profile.name} (K={profile.k_value})
                         </option>
                       ))}
-                    </select>
+                    </ReactSelect>
                     <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                   </div>
                 ) : selectedPresetId ? (

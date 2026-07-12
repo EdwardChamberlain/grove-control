@@ -555,7 +555,7 @@ describe('VirtualPrinterSettings', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Target Printer')).toBeInTheDocument();
-        expect(screen.getByText('Select a printer...')).toBeInTheDocument();
+        expect(screen.getByRole('combobox')).toHaveTextContent('Select a printer...');
       });
     });
 

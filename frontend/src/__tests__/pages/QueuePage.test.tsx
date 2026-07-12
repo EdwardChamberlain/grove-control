@@ -178,8 +178,8 @@ describe('QueuePage', () => {
       render(<QueuePage />);
 
       await waitFor(() => {
-        expect(screen.getByText('All Printers')).toBeInTheDocument();
-        expect(screen.getByText('All Status')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'All Printers' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'All Status' })).toBeInTheDocument();
       });
     });
   });
@@ -279,10 +279,9 @@ describe('QueuePage', () => {
         expect(screen.getByText('All Printers')).toBeInTheDocument();
       });
 
-      const printerSelect = screen.getByDisplayValue('All Printers');
-      await user.click(printerSelect);
+      await user.click(screen.getByRole('button', { name: 'All Printers' }));
 
-      expect(screen.getByText('Unassigned')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Unassigned' })).toBeInTheDocument();
     });
 
     it('has status filter options', async () => {
@@ -293,12 +292,11 @@ describe('QueuePage', () => {
         expect(screen.getByText('All Status')).toBeInTheDocument();
       });
 
-      const statusSelect = screen.getByDisplayValue('All Status');
-      await user.click(statusSelect);
+      await user.click(screen.getByRole('button', { name: 'All Status' }));
 
-      expect(screen.getByRole('option', { name: 'Pending' })).toBeInTheDocument();
-      expect(screen.getByRole('option', { name: 'Printing' })).toBeInTheDocument();
-      expect(screen.getByRole('option', { name: 'Completed' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Pending' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Printing' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Completed' })).toBeInTheDocument();
     });
   });
 

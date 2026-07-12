@@ -245,7 +245,8 @@ describe('EditArchiveModal', () => {
 
       render(<EditArchiveModal archive={failedArchive} onClose={mockOnClose} onSave={mockOnSave} />);
       const select = screen.getByLabelText(/failure reason/i);
-      await user.selectOptions(select, 'cloggedNozzle');
+      await user.click(select);
+      await user.click(await screen.findByRole('option', { name: /clogged nozzle/i }));
       await user.click(screen.getByRole('button', { name: /save/i }));
 
       await waitFor(() => {

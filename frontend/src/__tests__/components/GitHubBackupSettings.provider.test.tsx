@@ -4,6 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { render } from '../utils';
 import { GitHubBackupSettings } from '../../components/GitHubBackupSettings';
 import { http, HttpResponse } from 'msw';
@@ -217,6 +218,7 @@ describe('GitHubBackupSettings - Provider Selection', () => {
 
   it('autosaves provider changes after debounce', async () => {
     let patchBody: Record<string, unknown> | null = null;
+    const user = userEvent.setup();
 
     server.use(
       http.get('/api/v1/github-backup/config', () =>
@@ -277,7 +279,8 @@ describe('GitHubBackupSettings - Provider Selection', () => {
     const providerSelect = await screen.findByRole('combobox', { name: /git provider/i });
     await waitFor(() => expect(providerSelect).toHaveValue('gitea'));
 
-    fireEvent.change(providerSelect, { target: { value: 'forgejo' } });
+    await user.click(providerSelect);
+    await user.click(await screen.findByRole('option', { name: /forgejo/i }));
 
     await waitFor(() => {
       expect(patchBody).toEqual({ provider: 'forgejo' });
@@ -354,8 +357,9 @@ describe('GitHubBackupSettings - Provider Selection', () => {
   });
 
   it('does not let pending token autosave cancel provider settings autosave', async () => {
-    let patchBody: Record<string, unknown> | null = null;
+    const patchBodies: Record<string, unknown>[] = [];
     let postBody: Record<string, unknown> | null = null;
+    const user = userEvent.setup();
 
     server.use(
       http.get('/api/v1/github-backup/config', () =>
@@ -384,7 +388,8 @@ describe('GitHubBackupSettings - Provider Selection', () => {
         })
       ),
       http.patch('/api/v1/github-backup/config', async ({ request }) => {
-        patchBody = await request.json() as Record<string, unknown>;
+        const patchBody = await request.json() as Record<string, unknown>;
+        patchBodies.push(patchBody);
         return HttpResponse.json({
           id: 6,
           repository_url: 'http://git.example.com/owner/repo',
@@ -443,10 +448,11 @@ describe('GitHubBackupSettings - Provider Selection', () => {
     fireEvent.change(tokenInput, { target: { value: 'new-token' } });
 
     const providerSelect = await screen.findByRole('combobox', { name: /git provider/i });
-    fireEvent.change(providerSelect, { target: { value: 'forgejo' } });
+    await user.click(providerSelect);
+    await user.click(await screen.findByRole('option', { name: /forgejo/i }));
 
     await waitFor(() => {
-      expect(patchBody).toEqual({ provider: 'forgejo' });
+      expect(patchBodies).toContainEqual({ provider: 'forgejo' });
     }, { timeout: 2000 });
   });
 });

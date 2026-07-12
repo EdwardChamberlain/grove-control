@@ -6,6 +6,7 @@ import { api, virtualPrinterApi } from '../api/client';
 import { Card, CardContent, CardHeader } from './Card';
 import { Button } from './Button';
 import { useToast } from '../contexts/ToastContext';
+import { ReactSelect } from './ToolbarControls';
 
 type LocalMode = 'archive' | 'review' | 'queue' | 'proxy';
 
@@ -241,7 +242,7 @@ export function VirtualPrinterSettings() {
               {t('virtualPrinter.model.description')}
             </div>
             <div className="relative">
-              <select
+              <ReactSelect
                 value={localModel}
                 onChange={(e) => handleModelChange(e.target.value)}
                 disabled={pendingAction === 'model'}
@@ -254,7 +255,7 @@ export function VirtualPrinterSettings() {
                     {name}
                   </option>
                 ))}
-              </select>
+              </ReactSelect>
               <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
             </div>
             {localEnabled && isRunning && (
@@ -337,7 +338,7 @@ export function VirtualPrinterSettings() {
                 )}
               </div>
               <div className="relative">
-                <select
+                <ReactSelect
                   value={localTargetPrinterId ?? ''}
                   onChange={(e) => {
                     const id = parseInt(e.target.value, 10);
@@ -354,7 +355,7 @@ export function VirtualPrinterSettings() {
                       {printer.name} ({printer.ip_address})
                     </option>
                   ))}
-                </select>
+                </ReactSelect>
                 <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
               </div>
               <p className="text-xs text-bambu-gray mt-2">
@@ -387,7 +388,7 @@ export function VirtualPrinterSettings() {
                 )}
               </div>
               <div className="relative">
-                <select
+                <ReactSelect
                   value={localRemoteInterfaceIp}
                   onChange={(e) => handleRemoteInterfaceChange(e.target.value)}
                   disabled={pendingAction === 'remoteInterface'}
@@ -399,7 +400,7 @@ export function VirtualPrinterSettings() {
                       {iface.name} ({iface.ip}) - {iface.subnet}
                     </option>
                   ))}
-                </select>
+                </ReactSelect>
                 <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
               </div>
               <p className="text-xs text-bambu-gray mt-2">

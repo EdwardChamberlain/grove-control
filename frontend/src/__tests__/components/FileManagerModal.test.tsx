@@ -313,8 +313,7 @@ describe('FileManagerModal', () => {
       const sortSelect = screen.getByRole('combobox');
       expect(sortSelect).toBeInTheDocument();
 
-      // Check that options exist
-      expect(screen.getByText('Name (A-Z)')).toBeInTheDocument();
+      expect(sortSelect).toHaveTextContent('Name (A-Z)');
     });
   });
 

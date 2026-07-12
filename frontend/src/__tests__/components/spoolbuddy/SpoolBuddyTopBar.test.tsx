@@ -31,6 +31,7 @@ vi.mock('../../../utils/date', () => ({
 }));
 
 vi.mock('lucide-react', () => ({
+  ChevronDown: (props: Record<string, unknown>) => <span data-testid="chevron-down" {...props} />,
   WifiOff: (props: Record<string, unknown>) => <span data-testid="wifi-off" {...props} />,
 }));
 

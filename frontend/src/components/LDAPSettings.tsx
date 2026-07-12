@@ -9,6 +9,7 @@ import { Button } from './Button';
 import { Collapsible } from './Collapsible';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
+import { ReactSelect } from './ToolbarControls';
 
 const SECURITY_PORT_MAP: Record<string, string> = {
   starttls: '389',
@@ -385,7 +386,7 @@ export function LDAPSettings() {
                   <label className="block text-sm font-medium text-bambu-gray mb-1">
                     {t('settings.ldap.defaultGroup') || 'Default group'}
                   </label>
-                  <select
+                  <ReactSelect
                     className={inputClasses}
                     value={form.ldap_default_group}
                     onChange={e => setForm({ ...form, ldap_default_group: e.target.value })}
@@ -394,7 +395,7 @@ export function LDAPSettings() {
                     {groups.map(g => (
                       <option key={g.id} value={g.name}>{g.name}</option>
                     ))}
-                  </select>
+                  </ReactSelect>
                   <p className="text-xs text-bambu-gray mt-1">
                     {t('settings.ldap.defaultGroupHint') || 'Fallback group assigned when an LDAP user authenticates but is not listed in any mapped group. Leave empty to leave unmapped users without permissions.'}
                   </p>

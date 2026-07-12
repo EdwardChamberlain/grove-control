@@ -206,7 +206,7 @@ describe('OIDCProviderSettings', () => {
       // Dropdown should render with Viewers fallback option
       const select = screen.getByRole('combobox');
       expect(select).toBeInTheDocument();
-      expect(screen.getByText(/Viewers.*default/i)).toBeInTheDocument();
+      expect(select).toHaveTextContent(/Viewers.*default/i);
     });
 
     it('populates Default Group dropdown with groups from API', async () => {
@@ -219,12 +219,15 @@ describe('OIDCProviderSettings', () => {
       await userEvent.click(screen.getAllByRole('button', { name: /Add Provider/i })[0]);
 
       await waitFor(() => {
-        // Global MSW mock returns Administrators, Operators, Viewers
-        const options = screen.getAllByRole('option');
-        const optionTexts = options.map((o) => o.textContent);
-        expect(optionTexts).toContain('Operators');
-        expect(optionTexts).toContain('Administrators');
+        expect(screen.getByRole('combobox')).toBeInTheDocument();
       });
+      await userEvent.click(screen.getByRole('combobox'));
+
+      // Global MSW mock returns Administrators, Operators, Viewers.
+      const options = screen.getAllByRole('option');
+      const optionTexts = options.map((o) => o.textContent);
+      expect(optionTexts).toContain('Operators');
+      expect(optionTexts).toContain('Administrators');
     });
   });
 
