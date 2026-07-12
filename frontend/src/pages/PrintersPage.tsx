@@ -1135,7 +1135,7 @@ function CockpitMetricCard({
   className?: string;
 }) {
   return (
-    <div className={`rounded-xl border border-white/5 bg-bambu-dark/70 shadow-sm ${compact ? 'min-w-0 p-2' : 'p-3'} ${className}`}>
+    <div className={`rounded-xl border border-white/10 bg-bambu-dark-secondary/95 shadow-sm shadow-black/25 ring-1 ring-black/10 ${compact ? 'min-w-0 p-2' : 'p-3'} ${className}`}>
       <div className={`flex items-center font-medium uppercase tracking-wide text-bambu-gray ${compact ? 'gap-1 text-[9px]' : 'gap-2 text-xs'}`}>
         <Icon className={`${compact ? 'h-3 w-3' : 'h-4 w-4'} shrink-0 text-bambu-green`} />
         <span className="truncate">{label}</span>
@@ -1397,6 +1397,7 @@ function SinglePrinterCockpit({
   const { t } = useTranslation();
   const { hasPermission } = useAuth();
   const { showToast } = useToast();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [statusControlMenu, setStatusControlMenu] = useState<string | null>(null);
   const [showMenu, setShowMenu] = useState(false);
@@ -1406,6 +1407,8 @@ function SinglePrinterCockpit({
   const [showMQTTDebug, setShowMQTTDebug] = useState(false);
   const [showPrinterInfo, setShowPrinterInfo] = useState(false);
   const [showDiagnostic, setShowDiagnostic] = useState(false);
+  const [showHMSModal, setShowHMSModal] = useState(false);
+  const [showFirmwareModal, setShowFirmwareModal] = useState(false);
   const [confirmMaintenanceEnter, setConfirmMaintenanceEnter] = useState(false);
   const [jogStep, setJogStep] = useState(10);
   const [showUploadForPrint, setShowUploadForPrint] = useState(false);
@@ -1799,12 +1802,168 @@ function SinglePrinterCockpit({
     };
   }, [printEntries]);
 
-  const issueItems = [
-    knownHmsErrors.length > 0 ? t('printers.status.errorCount', '{{count}} active', { count: knownHmsErrors.length }) : null,
-    (maintenanceInfo?.due_count ?? 0) > 0 ? t('maintenance.dueCount', { count: maintenanceInfo?.due_count ?? 0 }) : null,
-    (maintenanceInfo?.warning_count ?? 0) > 0 ? t('maintenance.warningCount', { count: maintenanceInfo?.warning_count ?? 0 }) : null,
-    firmwareInfo?.update_available ? t('firmware.updateAvailable', 'Firmware update available') : null,
-  ].filter((item): item is string => Boolean(item));
+  const cockpitStatusPillBase = 'flex w-full items-center gap-2 rounded-lg border bg-bambu-dark-secondary px-2.5 py-1.5 text-xs font-medium shadow-[0_2px_10px_rgba(0,0,0,0.45)]';
+  const cockpitStatusOkClass = 'border-status-ok/40 text-status-ok';
+  const cockpitStatusWarningClass = 'border-status-warning/50 text-status-warning';
+  const cockpitStatusErrorClass = 'border-status-error/50 text-status-error';
+  const cockpitStatusRowLabel = (title: string, state: string) => `${title}: ${state}`;
+  const CockpitStatusRowText = ({ title, state }: { title: string; state: React.ReactNode }) => (
+    <>
+      <span>{title}:</span>
+      <span className="min-w-0 truncate">{state}</span>
+    </>
+  );
+  const connectionTitle = t('printers.status.connection', 'Connection');
+  const plateTitle = t('printers.plateStatus.title', 'Plate');
+  const networkTitle = t('printers.status.network', 'Network');
+  const errorsTitle = t('printers.status.errors', 'Errors');
+  const maintenanceTitle = t('maintenance.title', 'Maintenance');
+  const firmwareTitle = t('printers.status.firmware', 'Firmware');
+  const doorTitle = t('printers.status.door', 'Door');
+  const wifiSignal = status?.wifi_signal;
+  const maintenanceDueCount = maintenanceInfo?.due_count ?? 0;
+  const maintenanceWarningCount = maintenanceInfo?.warning_count ?? 0;
+  const maintenanceStateLabel = maintenanceDueCount > 0
+    ? t('maintenance.dueCount', { count: maintenanceDueCount })
+    : maintenanceWarningCount > 0
+    ? t('maintenance.warningCount', { count: maintenanceWarningCount })
+    : t('common.ok', 'OK');
+  const networkStateLabel = !status?.connected
+    ? t('printers.connection.offline')
+    : status.wired_network
+    ? t('printers.connection.ethernet', 'Ethernet')
+    : wifiSignal != null
+    ? `${wifiSignal}dBm`
+    : t('common.unknown', 'Unknown');
+  const networkTitleLabel = status?.connected && !status.wired_network && wifiSignal != null
+    ? `${wifiSignal} dBm - ${t(getWifiStrength(wifiSignal).labelKey)}`
+    : networkStateLabel;
+  const networkClassName = !status?.connected
+    ? cockpitStatusErrorClass
+    : status.wired_network || wifiSignal == null || wifiSignal >= -60
+    ? cockpitStatusOkClass
+    : wifiSignal >= -80
+    ? cockpitStatusWarningClass
+    : cockpitStatusErrorClass;
+  const isMaintenanceMode = printer.is_active === false;
+  const cockpitPlateStatus = (() => {
+    if (!requirePlateClear || !status?.connected || !needsPlateClear) return null;
+    return {
+      label: t('printers.plateStatus.notCleared'),
+      className: cockpitStatusWarningClass,
+    };
+  })();
+  const showConnectionPill = !isMaintenanceMode && !status?.connected;
+  const showPlateStatusPill = !!cockpitPlateStatus;
+  const showNetworkPill = !isMaintenanceMode && (!status?.connected || (!status?.wired_network && wifiSignal != null && wifiSignal < -60));
+  const showHmsPill = !isMaintenanceMode && (!status?.connected || knownHmsErrors.length > 0);
+  const showMaintenancePill = maintenanceDueCount > 0 || maintenanceWarningCount > 0;
+  const showFirmwarePill = !!(checkPrinterFirmware && firmwareInfo?.current_version && firmwareInfo?.latest_version && firmwareInfo.update_available);
+  const showDoorPill = !!(status?.connected && hasDoorSensor && status.door_open);
+  const hasCockpitStatusPills = isMaintenanceMode ||
+    showConnectionPill ||
+    showPlateStatusPill ||
+    showNetworkPill ||
+    showHmsPill ||
+    showMaintenancePill ||
+    showFirmwarePill ||
+    showDoorPill;
+  const cockpitConnectionStatusPill = (
+    <span
+      className={`${cockpitStatusPillBase} ${
+        status?.connected
+          ? cockpitStatusOkClass
+          : cockpitStatusErrorClass
+      }`}
+      title={cockpitStatusRowLabel(connectionTitle, status?.connected ? t('printers.connection.connected') : t('printers.connection.offline'))}
+    >
+      {status?.connected ? <Link className="h-3 w-3 shrink-0" /> : <Unlink className="h-3 w-3 shrink-0" />}
+      <CockpitStatusRowText title={connectionTitle} state={status?.connected ? t('printers.connection.connected') : t('printers.connection.offline')} />
+    </span>
+  );
+  const cockpitPlateStatusPill = showPlateStatusPill && cockpitPlateStatus ? (
+    <span className={`${cockpitStatusPillBase} ${cockpitPlateStatus.className}`} title={cockpitStatusRowLabel(plateTitle, cockpitPlateStatus.label)}>
+      <PlateClearedIcon className="h-3 w-3 shrink-0" />
+      <CockpitStatusRowText title={plateTitle} state={cockpitPlateStatus.label} />
+    </span>
+  ) : null;
+  const cockpitNetworkStatusPill = (
+    <span
+      className={`${cockpitStatusPillBase} ${networkClassName}`}
+      title={cockpitStatusRowLabel(networkTitle, networkTitleLabel)}
+    >
+      {status?.wired_network ? <Cable className="h-3 w-3 shrink-0" /> : <Signal className="h-3 w-3 shrink-0" />}
+      <CockpitStatusRowText title={networkTitle} state={networkStateLabel} />
+    </span>
+  );
+  const cockpitHmsStatusPill = (
+    <button
+      type="button"
+      onClick={() => status?.connected && setShowHMSModal(true)}
+      className={`${cockpitStatusPillBase} text-left ${status?.connected ? 'cursor-pointer hover:opacity-80 transition-opacity' : 'cursor-default'} ${
+        !status?.connected
+          ? cockpitStatusErrorClass
+          : knownHmsErrors.length > 0
+          ? knownHmsErrors.some(e => e.severity <= 2)
+            ? cockpitStatusErrorClass
+            : cockpitStatusWarningClass
+          : cockpitStatusOkClass
+      }`}
+      title={cockpitStatusRowLabel(errorsTitle, status?.connected ? (knownHmsErrors.length > 0 ? t('printers.status.errorCount', '{{count}} active', { count: knownHmsErrors.length }) : t('common.ok', 'OK')) : t('common.unknown', 'Unknown'))}
+    >
+      <AlertTriangle className="h-3 w-3 shrink-0" />
+      <CockpitStatusRowText title={errorsTitle} state={status?.connected ? (knownHmsErrors.length > 0 ? t('printers.status.errorCount', '{{count}} active', { count: knownHmsErrors.length }) : t('common.ok', 'OK')) : t('common.unknown', 'Unknown')} />
+    </button>
+  );
+  const cockpitMaintenanceStatusPill = (
+    <button
+      type="button"
+      onClick={() => navigate('/maintenance')}
+      className={`${cockpitStatusPillBase} cursor-pointer text-left hover:opacity-80 transition-opacity ${
+        maintenanceDueCount > 0
+          ? cockpitStatusErrorClass
+          : maintenanceWarningCount > 0
+          ? cockpitStatusWarningClass
+          : cockpitStatusOkClass
+      }`}
+      title={cockpitStatusRowLabel(maintenanceTitle, maintenanceStateLabel)}
+    >
+      <Wrench className="h-3 w-3 shrink-0" />
+      <CockpitStatusRowText title={maintenanceTitle} state={maintenanceStateLabel} />
+    </button>
+  );
+  const cockpitFirmwareStatusPill = checkPrinterFirmware && firmwareInfo?.current_version && firmwareInfo?.latest_version ? (
+    <button
+      type="button"
+      onClick={() => setShowFirmwareModal(true)}
+      className={`${cockpitStatusPillBase} text-left hover:opacity-80 transition-opacity ${
+        firmwareInfo.update_available
+          ? cockpitStatusWarningClass
+          : cockpitStatusOkClass
+      }`}
+      title={
+        firmwareInfo.update_available
+          ? t('printers.firmwareUpdateAvailable', { current: firmwareInfo.current_version, latest: firmwareInfo.latest_version })
+          : t('printers.firmwareUpToDate', { version: firmwareInfo.current_version })
+      }
+    >
+      {firmwareInfo.update_available ? <Download className="h-3 w-3 shrink-0" /> : <CheckCircle className="h-3 w-3 shrink-0" />}
+      <CockpitStatusRowText title={firmwareTitle} state={firmwareInfo.update_available ? t('printers.status.updateAvailable', 'Update available') : t('common.ok', 'OK')} />
+    </button>
+  ) : null;
+  const cockpitDoorStatusPill = status?.connected && hasDoorSensor ? (
+    <span
+      className={`${cockpitStatusPillBase} ${
+        status?.door_open
+          ? cockpitStatusWarningClass
+          : cockpitStatusOkClass
+      }`}
+      title={cockpitStatusRowLabel(doorTitle, status?.door_open ? t('printers.door.open') : t('printers.door.closed'))}
+    >
+      {status?.door_open ? <DoorOpen className="h-3 w-3 shrink-0" /> : <DoorClosed className="h-3 w-3 shrink-0" />}
+      <CockpitStatusRowText title={doorTitle} state={status?.door_open ? t('printers.door.open') : t('printers.door.closed')} />
+    </span>
+  ) : null;
 
   const recentPrints = printEntries.slice(0, 4);
   const reprintableRecentPrints = recentPrints.filter(entry => entry.archive_id != null).slice(0, 3);
@@ -2277,11 +2436,6 @@ function SinglePrinterCockpit({
             chamberTempPresets={chamberTempPresets}
             fanSpeedPresets={fanSpeedPresets}
           />
-          {issueItems.length > 0 && (
-            <div className="mt-2 grid gap-1 text-xs text-status-warning sm:grid-cols-2">
-              {issueItems.map(item => <div key={item} className="truncate">{item}</div>)}
-            </div>
-          )}
           {quickControlsPanel}
         </div>
         <div className="hidden self-stretch bg-bambu-dark-tertiary xl:block" />
@@ -2338,19 +2492,49 @@ function SinglePrinterCockpit({
                 <div className="flex min-w-0 items-center gap-3">
                   <h2 className="min-w-0 flex-1 truncate text-3xl font-semibold leading-none text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.9)]">{printer.name}</h2>
                   {printerActionsMenu}
-                  <PrinterHealthMenu
-                    printer={printer}
-                    status={status}
-                    printerHealth={printerHealth}
-                    knownHmsErrors={knownHmsErrors}
-                    maintenanceInfo={maintenanceInfo}
-                    requirePlateClear={requirePlateClear}
-                    needsPlateClear={needsPlateClear}
-                    firmwareInfo={firmwareInfo}
-                    hasDoorSensor={hasDoorSensor}
-                    checkPrinterFirmware={checkPrinterFirmware}
-                    triggerClassName="h-9 w-9"
-                  />
+                  <div className="relative flex shrink-0 flex-col items-end">
+                    <PrinterHealthMenu
+                      printer={printer}
+                      status={status}
+                      printerHealth={printerHealth}
+                      knownHmsErrors={knownHmsErrors}
+                      maintenanceInfo={maintenanceInfo}
+                      requirePlateClear={requirePlateClear}
+                      needsPlateClear={needsPlateClear}
+                      firmwareInfo={firmwareInfo}
+                      hasDoorSensor={hasDoorSensor}
+                      checkPrinterFirmware={checkPrinterFirmware}
+                      triggerClassName="h-9 w-9"
+                    />
+                    {hasCockpitStatusPills && (
+                      <div className="absolute right-0 top-full z-20 mt-2 w-48 space-y-1.5">
+                        {isMaintenanceMode && (
+                          <span className={`${cockpitStatusPillBase} border-amber-400/50 text-amber-400`}>
+                            <Wrench className="h-3 w-3 shrink-0" />
+                            <CockpitStatusRowText title={maintenanceTitle} state={t('printers.maintenance.pillLabel', 'Maintenance')} />
+                          </span>
+                        )}
+                        {showConnectionPill && cockpitConnectionStatusPill}
+                        {cockpitPlateStatusPill}
+                        {!isMaintenanceMode && !status?.connected && (
+                          <button
+                            type="button"
+                            onClick={() => setShowDiagnostic(true)}
+                            className={`${cockpitStatusPillBase} ${cockpitStatusWarningClass} cursor-pointer text-left hover:opacity-80 transition-opacity`}
+                            title={cockpitStatusRowLabel(t('diagnostic.title', 'Diagnostic'), t('diagnostic.runButton'))}
+                          >
+                            <Stethoscope className="h-3 w-3 shrink-0" />
+                            <CockpitStatusRowText title={t('diagnostic.title', 'Diagnostic')} state={t('diagnostic.runButton')} />
+                          </button>
+                        )}
+                        {showNetworkPill && cockpitNetworkStatusPill}
+                        {showHmsPill && cockpitHmsStatusPill}
+                        {showMaintenancePill && cockpitMaintenanceStatusPill}
+                        {showFirmwarePill && cockpitFirmwareStatusPill}
+                        {showDoorPill && cockpitDoorStatusPill}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <p className="truncate pl-0.5 text-base leading-tight text-white/80 drop-shadow-[0_2px_5px_rgba(0,0,0,0.9)]">
                   {printer.model || t('common.unknown', 'Unknown')}
@@ -2491,6 +2675,22 @@ function SinglePrinterCockpit({
         printerId={printer.id}
         printerName={printer.name}
         onClose={() => setShowDiagnostic(false)}
+      />
+    )}
+    {showHMSModal && (
+      <HMSErrorModal
+        printerName={printer.name}
+        errors={status?.hms_errors || []}
+        onClose={() => setShowHMSModal(false)}
+        printerId={printer.id}
+        hasPermission={hasPermission}
+      />
+    )}
+    {showFirmwareModal && firmwareInfo && (
+      <FirmwareUpdateModal
+        printer={printer}
+        firmwareInfo={firmwareInfo}
+        onClose={() => setShowFirmwareModal(false)}
       />
     )}
     {showPrinterInfo && (
