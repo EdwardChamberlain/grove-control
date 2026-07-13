@@ -47,18 +47,14 @@ import {
   Play,
   X,
   Download,
-  ScanSearch,
   CheckCircle,
   CheckSquare,
-  XCircle,
   User,
   Home,
   Printer as PrinterIcon,
   Info,
   Cable,
-  Flame,
   Repeat,
-  Snowflake,
   Gauge,
   DoorOpen,
   DoorClosed,
@@ -75,7 +71,7 @@ import {
 
 import { useNavigate } from 'react-router-dom';
 import { api, discoveryApi, firmwareApi, getAuthToken, withStreamToken, ApiError } from '../api/client';
-import { formatDateOnly, formatETA, formatDuration, parseUTCDate } from '../utils/date';
+import { formatDateOnly, formatETA, formatDuration } from '../utils/date';
 import { getCurrencySymbol } from '../utils/currency';
 import type { Printer, PrinterCreate, PrinterStatus, AMSUnit, DiscoveredPrinter, LinkedSpoolInfo, SpoolAssignment, HMSError, InventorySpool, PrinterDiagnosticResult, PrintLogEntry } from '../api/client';
 import { Card, CardContent } from '../components/Card';
@@ -102,6 +98,8 @@ import { PrinterPowerControls } from '../components/printer/PrinterPowerControls
 import { PrinterHealthMenu } from '../components/printer/PrinterHealthMenu';
 import { FirmwareUpdateModal } from '../components/printer/FirmwareUpdateModal';
 import { PrinterThermalControls } from '../components/printer/PrinterThermalControls';
+import { PrinterAirductControl } from '../components/printer/PrinterAirductControl';
+import { PrinterPlateDetectionControl } from '../components/printer/PrinterPlateDetectionControl';
 import {
   AmsDryingControl,
   AmsDryingPopover,
@@ -1414,7 +1412,6 @@ function SinglePrinterCockpit({
   const [showUploadForPrint, setShowUploadForPrint] = useState(false);
   const [printAfterUpload, setPrintAfterUpload] = useState<{ id: number; filename: string } | null>(null);
   const [reprintEntry, setReprintEntry] = useState<PrintLogEntry | null>(null);
-  const [isCheckingPlate, setIsCheckingPlate] = useState(false);
   const [showSkipObjectsModal, setShowSkipObjectsModal] = useState(false);
   const [amsBackupModalOpen, setAmsBackupModalOpen] = useState(false);
   const [showNotHomedModal, setShowNotHomedModal] = useState<null | { distance: number }>(null);
@@ -1466,6 +1463,34 @@ function SinglePrinterCockpit({
     enabled: cockpitTrayInfoIds.length > 0,
     staleTime: 5 * 60 * 1000,
   });
+  const loadedFilamentTypes = useMemo(() => {
+    const types = new Set<string>();
+    for (const ams of status?.ams ?? []) {
+      for (const tray of ams.tray ?? []) {
+        if (tray.tray_type) types.add(tray.tray_type.toUpperCase());
+      }
+    }
+    for (const tray of status?.vt_tray ?? []) {
+      if (tray.tray_type) types.add(tray.tray_type.toUpperCase());
+    }
+    return types;
+  }, [status?.ams, status?.vt_tray]);
+  const loadedFilaments = useMemo(() => {
+    const filaments = new Set<string>();
+    for (const ams of status?.ams ?? []) {
+      for (const tray of ams.tray ?? []) {
+        if (tray.tray_type && tray.tray_color) {
+          filaments.add(`${tray.tray_type.toUpperCase()}:${tray.tray_color.replace('#', '').toLowerCase().slice(0, 6)}`);
+        }
+      }
+    }
+    for (const tray of status?.vt_tray ?? []) {
+      if (tray.tray_type && tray.tray_color) {
+        filaments.add(`${tray.tray_type.toUpperCase()}:${tray.tray_color.replace('#', '').toLowerCase().slice(0, 6)}`);
+      }
+    }
+    return filaments;
+  }, [status?.ams, status?.vt_tray]);
   const { data: cockpitSlotPresets } = useQuery({
     queryKey: ['slotPresets', printer.id],
     queryFn: () => api.getSlotPresets(printer.id),
@@ -1984,17 +2009,6 @@ function SinglePrinterCockpit({
   const plateDetectionEnabled = plateDetectionMutation.isPending && plateDetectionMutation.variables != null
     ? plateDetectionMutation.variables
     : printer.plate_detection_enabled;
-  const handleOpenPlateCheck = async () => {
-    setIsCheckingPlate(true);
-    try {
-      const result = await api.checkPlateEmpty(printer.id, { includeDebugImage: false });
-      showToast(result.is_empty ? t('printers.plateDetection.plateEmpty') : t('printers.plateDetection.objectsDetected'), result.is_empty ? 'success' : 'warning');
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : t('printers.toast.failedToCheckPlate'), 'error');
-    } finally {
-      setIsCheckingPlate(false);
-    }
-  };
   const requestBedJog = (distance: number) => {
     const warnedKey = `bambuddy.bedJog.warned.${printer.id}`;
     let warned = false;
@@ -2305,44 +2319,17 @@ function SinglePrinterCockpit({
         >
           <ChamberLight on={!!status?.chamber_light} className="h-4 w-4" />
         </button>
-        <div className={`inline-flex rounded-lg ${plateDetectionEnabled ? 'ring-1 ring-green-500' : ''}`}>
-          <button
-            type="button"
-            onClick={() => plateDetectionMutation.mutate(!plateDetectionEnabled)}
-            disabled={!status?.connected || plateDetectionMutation.isPending || !hasPermission('printers:update')}
-            className={`${iconControlClass} rounded-r-none ${
-              plateDetectionEnabled
-                ? 'bg-green-500/10 text-green-400 hover:bg-green-500/20'
-                : 'bg-bambu-dark-tertiary/70 text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white'
-            }`}
-            aria-label={!hasPermission('printers:update') ? t('printers.plateDetection.noPermission') : (plateDetectionEnabled ? t('printers.plateDetection.enabledClick') : t('printers.plateDetection.disabledClick'))}
-            title={!hasPermission('printers:update') ? t('printers.plateDetection.noPermission') : (plateDetectionEnabled ? t('printers.plateDetection.enabledClick') : t('printers.plateDetection.disabledClick'))}
-          >
-            {plateDetectionMutation.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <ScanSearch className="h-4 w-4" />
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={handleOpenPlateCheck}
-            disabled={!status?.connected || isCheckingPlate || !hasPermission('printers:update')}
-            className={`${iconControlClass} rounded-l-none border-l border-bambu-dark-tertiary ${
-              plateDetectionEnabled
-                ? 'bg-green-500/10 text-green-400 hover:bg-green-500/20'
-                : 'bg-bambu-dark-tertiary/70 text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white'
-            }`}
-            aria-label={!hasPermission('printers:update') ? t('printers.plateDetection.noPermission') : t('printers.plateDetection.manageCalibration')}
-            title={!hasPermission('printers:update') ? t('printers.plateDetection.noPermission') : t('printers.plateDetection.manageCalibration')}
-          >
-            {isCheckingPlate ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <ChevronDown className="h-4 w-4" />
-            )}
-          </button>
-        </div>
+        <PrinterPlateDetectionControl
+          printer={printer}
+          status={status}
+          enabled={plateDetectionEnabled}
+          connected={!!status?.connected}
+          canUpdate={hasPermission('printers:update')}
+          togglePending={plateDetectionMutation.isPending}
+          iconControlClass={iconControlClass}
+          inactiveClassName="bg-bambu-dark-tertiary/70 text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white"
+          onToggle={() => plateDetectionMutation.mutate(!plateDetectionEnabled)}
+        />
         <button
           type="button"
           onClick={() => canControl && isPrintingOrPaused && setStatusControlMenu(statusControlMenu === 'speed' ? null : 'speed')}
@@ -2401,18 +2388,16 @@ function SinglePrinterCockpit({
             </span>
           )}
         </button>
-        {isAirductCapable && (
-          <button
-            type="button"
-            onClick={() => airductMutation.mutate(status?.airduct_mode === 1 ? 'cooling' : 'heating')}
-            disabled={!canUseMachineTools || airductMutation.isPending}
-            className={`${iconControlClass} ${status?.airduct_mode === 1 ? 'bg-orange-500/10 text-orange-400 hover:bg-orange-500/20' : 'bg-sky-500/10 text-sky-400 hover:bg-sky-500/20'}`}
-            aria-label={`${t('printers.airduct.title')}: ${status?.airduct_mode === 1 ? t('printers.airduct.heating') : t('printers.airduct.cooling')}`}
-            title={`${t('printers.airduct.title')}: ${status?.airduct_mode === 1 ? t('printers.airduct.heating') : t('printers.airduct.cooling')}`}
-          >
-            {status?.airduct_mode === 1 ? <Flame className="h-4 w-4" /> : <Snowflake className="h-4 w-4" />}
-          </button>
-        )}
+        <PrinterAirductControl
+          isCapable={isAirductCapable}
+          mode={status?.airduct_mode}
+          isOpen={statusControlMenu === 'airduct'}
+          disabled={!canUseMachineTools || airductMutation.isPending}
+          buttonClassName={iconControlClass}
+          onToggleMenu={() => setStatusControlMenu(statusControlMenu === 'airduct' ? null : 'airduct')}
+          onCloseMenu={() => setStatusControlMenu(null)}
+          onSelectMode={(mode) => airductMutation.mutate(mode)}
+        />
       </div>
     </div>
   );
@@ -2566,6 +2551,13 @@ function SinglePrinterCockpit({
         <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3">
           <section className="rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
             {primaryActionPanel}
+            <PrinterQueueWidget
+              printerId={printer.id}
+              printerModel={printer.model}
+              loadedFilamentTypes={loadedFilamentTypes}
+              loadedFilaments={loadedFilaments}
+              variant="panelExtension"
+            />
           </section>
 
           <div data-testid="cockpit-status-pane" className="min-h-0 overflow-y-auto overscroll-contain rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
@@ -2908,23 +2900,6 @@ function PrinterCard({
     mode: 'humidity' | 'temperature';
   } | null>(null);
   const [showFirmwareModal, setShowFirmwareModal] = useState(false);
-  const [plateCheckResult, setPlateCheckResult] = useState<{
-    is_empty: boolean;
-    confidence: number;
-    difference_percent: number;
-    message: string;
-    debug_image_url?: string;
-    needs_calibration: boolean;
-    light_warning?: boolean;
-    reference_count?: number;
-    max_references?: number;
-    roi?: { x: number; y: number; w: number; h: number };
-  } | null>(null);
-  const [isCheckingPlate, setIsCheckingPlate] = useState(false);
-  const [isCalibrating, setIsCalibrating] = useState(false);
-  const [editingRoi, setEditingRoi] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
-  const [isSavingRoi, setIsSavingRoi] = useState(false);
-  const [plateCheckLightWasOff, setPlateCheckLightWasOff] = useState(false);
 
   const { data: status } = useQuery({
     queryKey: ['printerStatus', printer.id],
@@ -3708,143 +3683,10 @@ function PrinterCard({
     },
   });
 
-  // Plate references state
-  const [plateReferences, setPlateReferences] = useState<{
-    references: Array<{ index: number; label: string; timestamp: string; has_image: boolean; thumbnail_url: string }>;
-    max_references: number;
-  } | null>(null);
-  const [editingRefLabel, setEditingRefLabel] = useState<{ index: number; label: string } | null>(null);
-
-  // Fetch plate references
-  const fetchPlateReferences = async () => {
-    try {
-      const data = await api.getPlateReferences(printer.id);
-      setPlateReferences(data);
-    } catch {
-      // Ignore errors - references will show as empty
-    }
-  };
-
   // Toggle plate detection enabled/disabled
   const handleTogglePlateDetection = () => {
     plateDetectionMutation.mutate(!printer.plate_detection_enabled);
   };
-
-  // Open plate detection management modal (for calibration/references)
-  const handleOpenPlateManagement = async () => {
-    setIsCheckingPlate(true);
-    setPlateCheckResult(null);
-
-    // Auto-turn on light if it's off
-    const lightWasOff = status?.chamber_light === false;
-    setPlateCheckLightWasOff(lightWasOff);
-    if (lightWasOff) {
-      await api.setChamberLight(printer.id, true);
-      // Wait for light to physically turn on and camera to adjust exposure
-      // (MQTT command is async, light takes ~1s to turn on, camera needs time to adjust)
-      await new Promise(resolve => setTimeout(resolve, 2500));
-    }
-
-    try {
-      const result = await api.checkPlateEmpty(printer.id, { includeDebugImage: true });
-      setPlateCheckResult(result);
-      fetchPlateReferences();
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : t('printers.toast.failedToCheckPlate'), 'error');
-      // Restore light if check failed
-      if (lightWasOff) {
-        await api.setChamberLight(printer.id, false);
-        setPlateCheckLightWasOff(false);
-      }
-    } finally {
-      setIsCheckingPlate(false);
-    }
-  };
-
-  // Close plate check modal and restore light state
-  const closePlateCheckModal = useCallback(async () => {
-    setPlateCheckResult(null);
-    // Restore light to original state if we turned it on
-    if (plateCheckLightWasOff) {
-      await api.setChamberLight(printer.id, false);
-      setPlateCheckLightWasOff(false);
-    }
-  }, [plateCheckLightWasOff, printer.id]);
-
-  // Calibrate plate detection handler
-  const handleCalibratePlate = async (label?: string) => {
-    setIsCalibrating(true);
-    try {
-      const result = await api.calibratePlateDetection(printer.id, { label });
-      if (result.success) {
-        showToast(result.message || t('printers.toast.calibrationSaved'), 'success');
-        // Refresh references and re-check
-        fetchPlateReferences();
-        const checkResult = await api.checkPlateEmpty(printer.id, { includeDebugImage: true });
-        setPlateCheckResult(checkResult);
-      } else {
-        showToast(result.message || t('printers.toast.calibrationFailed'), 'error');
-      }
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : t('printers.toast.calibrationFailed'), 'error');
-    } finally {
-      setIsCalibrating(false);
-    }
-  };
-
-  // Update reference label
-  const handleUpdateRefLabel = async (index: number, label: string) => {
-    try {
-      await api.updatePlateReferenceLabel(printer.id, index, label);
-      setEditingRefLabel(null);
-      fetchPlateReferences();
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : t('printers.toast.failedToUpdateLabel'), 'error');
-    }
-  };
-
-  // Delete reference
-  const handleDeleteRef = async (index: number) => {
-    try {
-      await api.deletePlateReference(printer.id, index);
-      showToast(t('printers.toast.referenceDeleted'), 'success');
-      fetchPlateReferences();
-      // Re-check to update counts
-      const checkResult = await api.checkPlateEmpty(printer.id, { includeDebugImage: true });
-      setPlateCheckResult(checkResult);
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : t('printers.toast.failedToDeleteReference'), 'error');
-    }
-  };
-
-  // Save ROI settings
-  const handleSaveRoi = async () => {
-    if (!editingRoi) return;
-    setIsSavingRoi(true);
-    try {
-      await api.updatePrinter(printer.id, { plate_detection_roi: editingRoi });
-      showToast(t('printers.toast.detectionAreaSaved'), 'success');
-      setEditingRoi(null);
-      // Re-check to see new ROI in action
-      const checkResult = await api.checkPlateEmpty(printer.id, { includeDebugImage: true });
-      setPlateCheckResult(checkResult);
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : t('printers.toast.failedToSaveDetectionArea'), 'error');
-    } finally {
-      setIsSavingRoi(false);
-    }
-  };
-
-  // Close plate check modal on Escape key
-  useEffect(() => {
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && plateCheckResult) {
-        closePlateCheckModal();
-      }
-    };
-    window.addEventListener('keydown', handleEscape);
-    return () => window.removeEventListener('keydown', handleEscape);
-  }, [plateCheckResult, closePlateCheckModal]);
 
   // Watch ams_status_main to detect when RFID read completes
   // ams_status_main: 0=idle, 2=rfid_identifying
@@ -4444,52 +4286,17 @@ function PrinterCard({
                         <ChamberLight on={status.chamber_light ?? false} className="w-4 h-4" />
                       </button>
 
-                      {/* Airduct Mode (P2S / X2D / H2*) */}
-                      {(['P2S', 'X2D', 'H2D', 'H2C', 'H2S'].includes(printer.model ?? '')) && (() => {
-                        const isHeating = status.airduct_mode === 1;
-                        const Icon = isHeating ? Flame : Snowflake;
-                        const color = isHeating ? 'text-orange-400' : 'text-sky-400';
-                        const bg = isHeating ? 'bg-orange-500/10 text-orange-400 hover:bg-orange-500/20' : 'bg-sky-500/10 text-sky-400 hover:bg-sky-500/20';
-                        return (
-                          <div className="relative">
-                            <button
-                              onClick={() => setShowAirductMenu(showAirductMenu === printer.id ? null : printer.id)}
-                              disabled={!hasPermission('printers:control')}
-                              className={`${iconControlClass} ${bg}`}
-                              title={`${t('printers.airduct.title')}: ${isHeating ? t('printers.airduct.heating') : t('printers.airduct.cooling')}`}
-                            >
-                              <Icon className={`w-4 h-4 ${color}`} />
-                            </button>
-                            {showAirductMenu === printer.id && (
-                              <>
-                                <div className="fixed inset-0 z-40" onClick={() => setShowAirductMenu(null)} />
-                                <div className="absolute bottom-full left-0 mb-1 z-50 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg shadow-lg py-1 min-w-[130px]">
-                                  {([
-                                    { mode: 'cooling', label: t('printers.airduct.cooling'), modeId: 0 },
-                                    { mode: 'heating', label: t('printers.airduct.heating'), modeId: 1 },
-                                  ] as const).map(({ mode, label, modeId }) => (
-                                    <button
-                                      key={mode}
-                                      onClick={() => {
-                                        airductMutation.mutate(mode);
-                                        setShowAirductMenu(null);
-                                      }}
-                                      className={`w-full text-left px-3 py-1.5 text-xs transition-colors flex items-center gap-2 ${
-                                        status.airduct_mode === modeId
-                                          ? 'text-bambu-green bg-bambu-green/10'
-                                          : 'text-white hover:bg-bambu-dark-tertiary'
-                                      }`}
-                                    >
-                                      {mode === 'heating' ? <Flame className="w-3 h-3" /> : <Snowflake className="w-3 h-3" />}
-                                      {label}
-                                    </button>
-                                  ))}
-                                </div>
-                              </>
-                            )}
-                          </div>
-                        );
-                      })()}
+                      <PrinterAirductControl
+                        isCapable={['P2S', 'X2D', 'H2D', 'H2C', 'H2S'].includes(printer.model ?? '')}
+                        mode={status.airduct_mode}
+                        isOpen={showAirductMenu === printer.id}
+                        disabled={!hasPermission('printers:control') || airductMutation.isPending}
+                        buttonClassName={iconControlClass}
+                        iconClassName="w-4 h-4"
+                        onToggleMenu={() => setShowAirductMenu(showAirductMenu === printer.id ? null : printer.id)}
+                        onCloseMenu={() => setShowAirductMenu(null)}
+                        onSelectMode={(mode) => airductMutation.mutate(mode)}
+                      />
 
                       {/* Movement — compact badge, popover holds XY, Z, and home controls */}
                       {(() => {
@@ -4661,40 +4468,17 @@ function PrinterCard({
                         );
                       })()}
 
-                      <div className={`inline-flex rounded-lg ${printer.plate_detection_enabled ? 'ring-1 ring-green-500' : ''}`}>
-                        <button
-                          onClick={handleTogglePlateDetection}
-                          disabled={!status.connected || plateDetectionMutation.isPending || !hasPermission('printers:update')}
-                          className={`${iconControlClass} rounded-r-none ${
-                            printer.plate_detection_enabled
-                              ? 'bg-green-500/10 text-green-400 hover:bg-green-500/20'
-                              : 'bg-bambu-dark text-bambu-gray/50 hover:bg-bambu-dark-tertiary hover:text-white'
-                          }`}
-                          title={!hasPermission('printers:update') ? t('printers.plateDetection.noPermission') : (printer.plate_detection_enabled ? t('printers.plateDetection.enabledClick') : t('printers.plateDetection.disabledClick'))}
-                        >
-                          {plateDetectionMutation.isPending ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <ScanSearch className="w-4 h-4" />
-                          )}
-                        </button>
-                        <button
-                          onClick={handleOpenPlateManagement}
-                          disabled={!status.connected || isCheckingPlate || !hasPermission('printers:update')}
-                          className={`flex h-8 w-8 items-center justify-center rounded-r-lg border-l border-bambu-dark-tertiary transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                            printer.plate_detection_enabled
-                              ? 'bg-green-500/10 text-green-400 hover:bg-green-500/20'
-                              : 'bg-bambu-dark text-bambu-gray/50 hover:bg-bambu-dark-tertiary hover:text-white'
-                          }`}
-                          title={!hasPermission('printers:update') ? t('printers.plateDetection.noPermission') : t('printers.plateDetection.manageCalibration')}
-                        >
-                          {isCheckingPlate ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <ChevronDown className="w-4 h-4" />
-                          )}
-                        </button>
-                      </div>
+                      <PrinterPlateDetectionControl
+                        printer={printer}
+                        status={status}
+                        enabled={printer.plate_detection_enabled}
+                        connected={status.connected}
+                        canUpdate={hasPermission('printers:update')}
+                        togglePending={plateDetectionMutation.isPending}
+                        iconControlClass={iconControlClass}
+                        iconClassName="w-4 h-4"
+                        onToggle={handleTogglePlateDetection}
+                      />
 
                       {/* Print Speed */}
                       {(() => (
@@ -5401,278 +5185,6 @@ function PrinterCard({
           totalPrintHours={maintenanceInfo?.total_print_hours}
           onClose={closePrinterInfo}
         />
-      )}
-
-      {/* Plate Check Result Modal */}
-      {plateCheckResult && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => closePlateCheckModal()}>
-          <div className="bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-xl shadow-2xl max-w-lg w-full" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-4 border-b border-bambu-dark-tertiary">
-              <div className="flex items-center gap-2">
-                {plateCheckResult.needs_calibration ? (
-                  <ScanSearch className="w-5 h-5 text-blue-500" />
-                ) : plateCheckResult.is_empty ? (
-                  <CheckCircle className="w-5 h-5 text-green-500" />
-                ) : (
-                  <XCircle className="w-5 h-5 text-yellow-500" />
-                )}
-                <h2 className="text-lg font-semibold text-white">
-                  Build Plate Check
-                </h2>
-                {plateCheckResult.reference_count !== undefined && plateCheckResult.max_references && (
-                  <span className="text-xs text-bambu-gray bg-bambu-dark-tertiary px-2 py-1 rounded">
-                    {plateCheckResult.reference_count}/{plateCheckResult.max_references} refs
-                  </span>
-                )}
-              </div>
-              <button
-                onClick={() => closePlateCheckModal()}
-                className="p-1 text-bambu-gray hover:text-white rounded transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-4 space-y-4">
-              {plateCheckResult.needs_calibration ? (
-                <>
-                  <div className="p-3 rounded-lg bg-blue-500/20 border border-blue-500/50">
-                    <p className="font-medium text-blue-400">
-                      {t('printers.plateDetection.calibrationRequired')}
-                    </p>
-                    <p className="text-sm text-bambu-gray mt-1" dangerouslySetInnerHTML={{ __html: t('printers.plateDetection.calibrationInstructions') }} />
-                  </div>
-                  <div className="text-sm text-bambu-gray space-y-2">
-                    <p>{t('printers.plateDetection.calibrationDescription')}</p>
-                    <p dangerouslySetInnerHTML={{ __html: t('printers.plateDetection.calibrationTip') }} />
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className={`p-3 rounded-lg ${plateCheckResult.is_empty ? 'bg-green-500/20 border border-green-500/50' : 'bg-yellow-500/20 border border-yellow-500/50'}`}>
-                    <p className={`font-medium ${plateCheckResult.is_empty ? 'text-green-400' : 'text-yellow-400'}`}>
-                      {plateCheckResult.is_empty ? t('printers.plateDetection.plateEmpty') : t('printers.plateDetection.objectsDetected')}
-                    </p>
-                    <p className="text-sm text-bambu-gray mt-1">
-                      {t('printers.plateDetection.confidence')}: {Math.round(plateCheckResult.confidence * 100)}% | {t('printers.plateDetection.difference')}: {plateCheckResult.difference_percent.toFixed(1)}%
-                    </p>
-                  </div>
-                  {plateCheckResult.debug_image_url && (
-                    <div>
-                      <p className="text-sm text-bambu-gray mb-2">{t('printers.plateDetection.analysisPreview')}</p>
-                      <img
-                        src={plateCheckResult.debug_image_url}
-                        alt={t('printers.plateDetection.analysisPreview')}
-                        className="w-full rounded-lg border border-bambu-dark-tertiary"
-                      />
-                      <p className="text-xs text-bambu-gray mt-2">
-                        {t('printers.plateDetection.analysisLegend')}
-                      </p>
-                    </div>
-                  )}
-                  <p className="text-xs text-bambu-gray">
-                    {plateCheckResult.message}
-                  </p>
-                </>
-              )}
-
-              {/* Saved References Grid */}
-              {plateReferences && plateReferences.references.length > 0 && (
-                <div className="mt-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <p className="text-sm font-medium text-white shrink-0">
-                      {t('printers.plateDetection.savedReferences', { count: plateReferences.references.length, max: plateReferences.max_references })}
-                    </p>
-                    <div className="flex-1 h-[2px] bg-bambu-dark-tertiary" />
-                  </div>
-                  <div className="grid grid-cols-5 gap-2">
-                    {plateReferences.references.map((ref) => (
-                      <div key={ref.index} className="relative group">
-                        <img
-                          src={api.getPlateReferenceThumbnailUrl(printer.id, ref.index)}
-                          alt={ref.label || `Reference ${ref.index + 1}`}
-                          className="w-full aspect-video object-cover rounded border border-bambu-dark-tertiary"
-                        />
-                        {/* Delete button */}
-                        <button
-                          onClick={() => handleDeleteRef(ref.index)}
-                          className="absolute top-1 right-1 p-0.5 bg-red-500/80 rounded opacity-0 group-hover:opacity-100 transition-opacity"
-                          title={t('printers.plateDetection.deleteReference')}
-                        >
-                          <X className="w-3 h-3 text-white" />
-                        </button>
-                        {/* Label */}
-                        {editingRefLabel?.index === ref.index ? (
-                          <input
-                            type="text"
-                            value={editingRefLabel.label}
-                            onChange={(e) => setEditingRefLabel({ ...editingRefLabel, label: e.target.value })}
-                            onBlur={() => handleUpdateRefLabel(ref.index, editingRefLabel.label)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleUpdateRefLabel(ref.index, editingRefLabel.label);
-                              if (e.key === 'Escape') setEditingRefLabel(null);
-                            }}
-                            className="w-full mt-1 px-1 py-0.5 text-xs bg-bambu-dark-tertiary border border-bambu-green rounded text-white"
-                            autoFocus
-                            placeholder={t('printers.plateDetection.labelPlaceholder')}
-                          />
-                        ) : (
-                          <p
-                            className="text-xs text-bambu-gray mt-1 truncate cursor-pointer hover:text-white"
-                            onClick={() => setEditingRefLabel({ index: ref.index, label: ref.label })}
-                            title={ref.label ? t('printers.plateDetection.clickToEdit', { label: ref.label }) : t('printers.plateDetection.clickToAddLabel')}
-                          >
-                            {ref.label || <span className="italic opacity-50">{t('printers.noLabel')}</span>}
-                          </p>
-                        )}
-                        {/* Timestamp */}
-                        <p className="text-[10px] text-bambu-gray/60">
-                          {ref.timestamp ? parseUTCDate(ref.timestamp)?.toLocaleDateString() ?? '' : ''}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* ROI Editor */}
-              {!plateCheckResult.needs_calibration && (
-                <div className="mt-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                      <p className="text-sm font-medium text-white shrink-0">{t('printers.roi.title')}</p>
-                      <div className="flex-1 h-[2px] bg-bambu-dark-tertiary" />
-                    </div>
-                    {!editingRoi ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setEditingRoi(plateCheckResult.roi || { x: 0.15, y: 0.35, w: 0.70, h: 0.55 })}
-                      >
-                        <Pencil className="w-3 h-3 mr-1" />
-                        {t('common.edit')}
-                      </Button>
-                    ) : (
-                      <div className="flex gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setEditingRoi(null)}
-                          disabled={isSavingRoi}
-                        >
-                          {t('common.cancel')}
-                        </Button>
-                        <Button
-                          size="sm"
-                          onClick={handleSaveRoi}
-                          disabled={isSavingRoi}
-                        >
-                          {isSavingRoi ? <Loader2 className="w-3 h-3 animate-spin" /> : t('common.save')}
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                  {editingRoi ? (
-                    <div className="space-y-3 bg-bambu-dark-tertiary/50 p-3 rounded-lg">
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="text-xs text-bambu-gray">{t('printers.roi.xStart')}</label>
-                          <input
-                            type="range"
-                            min="0"
-                            max="0.9"
-                            step="0.01"
-                            value={editingRoi.x}
-                            onChange={(e) => setEditingRoi({ ...editingRoi, x: parseFloat(e.target.value) })}
-                            className="w-full h-1.5 bg-bambu-dark-tertiary rounded-lg cursor-pointer accent-green-500"
-                          />
-                          <span className="text-xs text-bambu-gray">{Math.round(editingRoi.x * 100)}%</span>
-                        </div>
-                        <div>
-                          <label className="text-xs text-bambu-gray">{t('printers.roi.yStart')}</label>
-                          <input
-                            type="range"
-                            min="0"
-                            max="0.9"
-                            step="0.01"
-                            value={editingRoi.y}
-                            onChange={(e) => setEditingRoi({ ...editingRoi, y: parseFloat(e.target.value) })}
-                            className="w-full h-1.5 bg-bambu-dark-tertiary rounded-lg cursor-pointer accent-green-500"
-                          />
-                          <span className="text-xs text-bambu-gray">{Math.round(editingRoi.y * 100)}%</span>
-                        </div>
-                        <div>
-                          <label className="text-xs text-bambu-gray">{t('printers.width')}</label>
-                          <input
-                            type="range"
-                            min="0.1"
-                            max="1"
-                            step="0.01"
-                            value={editingRoi.w}
-                            onChange={(e) => setEditingRoi({ ...editingRoi, w: parseFloat(e.target.value) })}
-                            className="w-full h-1.5 bg-bambu-dark-tertiary rounded-lg cursor-pointer accent-green-500"
-                          />
-                          <span className="text-xs text-bambu-gray">{Math.round(editingRoi.w * 100)}%</span>
-                        </div>
-                        <div>
-                          <label className="text-xs text-bambu-gray">{t('printers.height')}</label>
-                          <input
-                            type="range"
-                            min="0.1"
-                            max="1"
-                            step="0.01"
-                            value={editingRoi.h}
-                            onChange={(e) => setEditingRoi({ ...editingRoi, h: parseFloat(e.target.value) })}
-                            className="w-full h-1.5 bg-bambu-dark-tertiary rounded-lg cursor-pointer accent-green-500"
-                          />
-                          <span className="text-xs text-bambu-gray">{Math.round(editingRoi.h * 100)}%</span>
-                        </div>
-                      </div>
-                      <p className="text-xs text-bambu-gray">
-                        {t('printers.roi.instruction')}
-                      </p>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-bambu-gray">
-                      Current: X={Math.round((plateCheckResult.roi?.x || 0.15) * 100)}%, Y={Math.round((plateCheckResult.roi?.y || 0.35) * 100)}%,
-                      W={Math.round((plateCheckResult.roi?.w || 0.70) * 100)}%, H={Math.round((plateCheckResult.roi?.h || 0.55) * 100)}%
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-            <div className="flex justify-end gap-2 p-4">
-              {plateCheckResult.needs_calibration ? (
-                <>
-                  <Button variant="ghost" onClick={() => closePlateCheckModal()}>
-                    {t('common.cancel')}
-                  </Button>
-                  <Button
-                    onClick={() => handleCalibratePlate()}
-                    disabled={isCalibrating}
-                  >
-                    {isCalibrating ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Calibrating...
-                      </>
-                    ) : (
-                      'Calibrate Empty Plate'
-                    )}
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button variant="ghost" onClick={() => handleCalibratePlate()} disabled={isCalibrating}>
-                    {isCalibrating ? 'Adding...' : `Add Reference (${plateReferences?.references.length || 0}/${plateReferences?.max_references || 5})`}
-                  </Button>
-                  <Button onClick={() => closePlateCheckModal()}>
-                    Close
-                  </Button>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
       )}
 
       {/* Maintenance Mode mid-print confirmation (#1476) — entering maintenance
