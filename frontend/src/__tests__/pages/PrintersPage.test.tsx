@@ -750,21 +750,23 @@ describe('PrintersPage', () => {
       expect(screen.getByTestId('cockpit-layout')).toHaveClass('flex-1', 'min-h-0');
       expect(statusPane).toHaveClass('overflow-y-auto');
       expect(statusPane).not.toHaveClass('z-20');
-      expect(within(statusPane).getByText('Jog')).toBeInTheDocument();
+      // Jog is deliberately beside the status controls in the shared
+      // left-hand cockpit panel, not inside the right-hand scroll pane.
+      expect(screen.getByText('Jog')).toBeInTheDocument();
       expect(within(statusPane).getByText('Statistics')).toBeInTheDocument();
       expect(within(statusPane).getByText('Success Rate')).toBeInTheDocument();
 
-      expect(await screen.findByTestId('cockpit-filament-pane')).toHaveClass('min-h-0');
-      expect(screen.getByTestId('cockpit-filament-scroll')).toHaveClass('overflow-auto');
+      expect(await screen.findByTestId('cockpit-filament-pane')).toHaveClass('flex', 'min-w-0', 'flex-col');
+      expect(screen.getByTestId('cockpit-filament-scroll')).toHaveClass('grid', 'min-w-0', 'gap-2');
 
       fireEvent.click(await screen.findByRole('button', { name: /AMS Filament Backup is OFF/ }));
       expect((await screen.findAllByText('AMS Filament Backup')).length).toBeGreaterThan(0);
       fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 
-      const skipObjectsButton = screen.getByRole('button', { name: 'Skip Objects' });
+      const skipObjectsButton = screen.getByRole('button', { name: /skip objects/i });
       expect(skipObjectsButton).toBeEnabled();
       fireEvent.click(skipObjectsButton);
-      expect((await screen.findAllByText('Skip Objects')).length).toBeGreaterThan(1);
+      expect(await screen.findByText('Part 1')).toBeInTheDocument();
     });
 
     it('provides AMS drying and power socket controls in the single-printer cockpit', async () => {
