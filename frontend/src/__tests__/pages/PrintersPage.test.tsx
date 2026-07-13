@@ -664,6 +664,31 @@ describe('PrintersPage', () => {
       expect(screen.getByRole('button', { name: /Sample Widget/ })).toBeInTheDocument();
     });
 
+    it('confirms before stopping a print from the cockpit', async () => {
+      let stopRequests = 0;
+      server.use(
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+          ...mockPrinterStatus,
+          state: 'RUNNING',
+          current_print: 'test-print.3mf',
+        })),
+        http.post('/api/v1/printers/:id/print/stop', () => {
+          stopRequests += 1;
+          return HttpResponse.json({ success: true, message: 'Print stopped' });
+        }),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Stop' }));
+      expect(stopRequests).toBe(0);
+      expect(await screen.findByRole('heading', { name: 'Stop Print' })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Stop Print' }));
+      await waitFor(() => expect(stopRequests).toBe(1));
+    });
+
     it('provides AMS filament backup and skip objects controls in the single-printer cockpit', async () => {
       server.use(
         http.get('/api/v1/printers/:id/status', () => {

@@ -100,6 +100,7 @@ import { FirmwareUpdateModal } from '../components/printer/FirmwareUpdateModal';
 import { PrinterThermalControls } from '../components/printer/PrinterThermalControls';
 import { PrinterAirductControl } from '../components/printer/PrinterAirductControl';
 import { PrinterPlateDetectionControl } from '../components/printer/PrinterPlateDetectionControl';
+import { PrinterStopPrintConfirmation } from '../components/printer/PrinterStopPrintConfirmation';
 import {
   AmsDryingControl,
   AmsDryingPopover,
@@ -1406,6 +1407,7 @@ function SinglePrinterCockpit({
   const [showPrinterInfo, setShowPrinterInfo] = useState(false);
   const [showDiagnostic, setShowDiagnostic] = useState(false);
   const [showHMSModal, setShowHMSModal] = useState(false);
+  const [showStopConfirm, setShowStopConfirm] = useState(false);
   const [showFirmwareModal, setShowFirmwareModal] = useState(false);
   const [confirmMaintenanceEnter, setConfirmMaintenanceEnter] = useState(false);
   const [jogStep, setJogStep] = useState(10);
@@ -2275,7 +2277,7 @@ function SinglePrinterCockpit({
       </button>
       <button
         type="button"
-        onClick={() => stopPrintMutation.mutate()}
+        onClick={() => setShowStopConfirm(true)}
         disabled={!canControl || controlBusy}
         className="flex h-10 items-center justify-center gap-2 rounded-lg bg-red-500/20 text-sm font-medium text-red-400 transition-colors hover:bg-red-500/30 disabled:cursor-not-allowed disabled:opacity-50"
       >
@@ -2712,6 +2714,12 @@ function SinglePrinterCockpit({
         onCancel={() => setConfirmMaintenanceEnter(false)}
       />
     )}
+    <PrinterStopPrintConfirmation
+      printerName={printer.name}
+      isOpen={showStopConfirm}
+      onStop={() => stopPrintMutation.mutate()}
+      onClose={() => setShowStopConfirm(false)}
+    />
     <AmsSlotControllerModals controller={amsSlotController} />
     {showNotHomedModal && (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
@@ -5205,20 +5213,12 @@ function PrinterCard({
         />
       )}
 
-      {/* Stop Print Confirmation */}
-      {showStopConfirm && (
-        <ConfirmModal
-          title={t('printers.confirm.stopTitle')}
-          message={t('printers.confirm.stopMessage', { name: printer.name })}
-          confirmText={t('printers.confirm.stopButton')}
-          variant="danger"
-          onConfirm={() => {
-            stopPrintMutation.mutate();
-            setShowStopConfirm(false);
-          }}
-          onCancel={() => setShowStopConfirm(false)}
-        />
-      )}
+      <PrinterStopPrintConfirmation
+        printerName={printer.name}
+        isOpen={showStopConfirm}
+        onStop={() => stopPrintMutation.mutate()}
+        onClose={() => setShowStopConfirm(false)}
+      />
 
       {/* Pause Print Confirmation */}
       {showPauseConfirm && (
