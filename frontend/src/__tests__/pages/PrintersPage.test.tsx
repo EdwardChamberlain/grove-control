@@ -689,6 +689,28 @@ describe('PrintersPage', () => {
       await waitFor(() => expect(stopRequests).toBe(1));
     });
 
+    it('shows the active print owner above the job name in the cockpit', async () => {
+      server.use(
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+          ...mockPrinterStatus,
+          state: 'RUNNING',
+          current_print: 'test-print.3mf',
+        })),
+        http.get('/api/v1/queue/', ({ request }) => {
+          const status = new URL(request.url).searchParams.get('status');
+          return HttpResponse.json(status === 'printing' ? [{ created_by_username: 'Avery' }] : []);
+        }),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+
+      const owner = await screen.findByTestId('cockpit-print-owner');
+      const jobName = screen.getByTestId('cockpit-current-print');
+      expect(owner).toHaveTextContent('Avery');
+      expect(owner.compareDocumentPosition(jobName) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
     it('provides AMS filament backup and skip objects controls in the single-printer cockpit', async () => {
       server.use(
         http.get('/api/v1/printers/:id/status', () => {

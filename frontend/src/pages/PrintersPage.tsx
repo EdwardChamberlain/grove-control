@@ -1343,6 +1343,21 @@ function PrinterDeleteConfirmModal({
   );
 }
 
+function useCurrentPrintOwner(printerId: number, isPrintingOrPaused: boolean) {
+  const { data: printingQueueItems } = useQuery({
+    queryKey: ['queue', printerId, 'printing'],
+    queryFn: () => api.getQueue(printerId, 'printing'),
+    enabled: isPrintingOrPaused,
+  });
+  const { data: reprintUser } = useQuery({
+    queryKey: ['currentPrintUser', printerId],
+    queryFn: () => api.getCurrentPrintUser(printerId),
+    enabled: isPrintingOrPaused,
+  });
+
+  return printingQueueItems?.[0]?.created_by_username || reprintUser?.username;
+}
+
 function SinglePrinterCockpit({
   printer,
   maintenanceInfo,
@@ -1780,6 +1795,7 @@ function SinglePrinterCockpit({
   const activePrintName = status?.current_print && isPrintingOrPaused
     ? formatPrintName(status.subtask_name || status.current_print || null, status.gcode_file, t)
     : null;
+  const currentPrintUser = useCurrentPrintOwner(printer.id, isPrintingOrPaused);
   const printEntries = useMemo(() => printLog?.items ?? [], [printLog?.items]);
   const printerStats = useMemo(() => {
     const completed = printEntries.filter(entry => entry.status === 'completed').length;
@@ -2532,8 +2548,14 @@ function SinglePrinterCockpit({
               <div className="min-h-0 flex-1" />
 
               <div className="min-w-0">
+                {currentPrintUser && isPrintingOrPaused && (
+                  <div data-testid="cockpit-print-owner" className="mb-1 flex items-center gap-1.5 text-xs font-medium text-white/90 drop-shadow-[0_2px_5px_rgba(0,0,0,0.9)]" title={`Started by ${currentPrintUser}`}>
+                    <User className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">{currentPrintUser}</span>
+                  </div>
+                )}
                 <div className="mb-2 flex items-center justify-between gap-3">
-                  <p className="min-w-0 flex-1 truncate text-xl font-semibold text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.9)]">{currentPrintLabel}</p>
+                  <p data-testid="cockpit-current-print" className="min-w-0 flex-1 truncate text-xl font-semibold text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.9)]">{currentPrintLabel}</p>
                   <span className="shrink-0 text-3xl font-semibold tabular-nums text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.9)]">
                     {isPrintingOrPaused ? `${Math.round(progress)}%` : '---'}
                   </span>
@@ -3098,23 +3120,6 @@ function PrinterCard({
     return filterCompatibleQueueItems(queueItems, loadedFilamentTypes, loadedFilaments).length;
   }, [queueItems, loadedFilamentTypes, loadedFilaments]);
 
-  // Fetch currently printing queue item to show who started it (Issue #206)
-  const { data: printingQueueItems } = useQuery({
-    queryKey: ['queue', printer.id, 'printing'],
-    queryFn: () => api.getQueue(printer.id, 'printing'),
-    enabled: status?.state === 'RUNNING',
-  });
-
-  // Fetch reprint user info (for prints started via Reprint, not queue - Issue #206)
-  const { data: reprintUser } = useQuery({
-    queryKey: ['currentPrintUser', printer.id],
-    queryFn: () => api.getCurrentPrintUser(printer.id),
-    enabled: status?.state === 'RUNNING',
-  });
-
-  // Combine both sources: queue item user takes precedence, then reprint user
-  const currentPrintUser = printingQueueItems?.[0]?.created_by_username || reprintUser?.username;
-
   // Fetch last completed print for this printer
   const { data: lastPrints } = useQuery({
     queryKey: ['archives', printer.id, 'last'],
@@ -3123,6 +3128,7 @@ function PrinterCard({
   });
   const lastPrint = lastPrints?.[0];
   const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
+  const currentPrintUser = useCurrentPrintOwner(printer.id, isPrintingOrPaused);
   const needsPlateClear = requirePlateClear && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
   const showClearPlateButton = status?.connected && needsPlateClear && !isPrintingOrPaused;
   const activePrintName = status?.current_print && isPrintingOrPaused
