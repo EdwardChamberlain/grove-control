@@ -664,6 +664,53 @@ describe('PrintersPage', () => {
       expect(screen.getByRole('button', { name: /Sample Widget/ })).toBeInTheDocument();
     });
 
+    it('confirms before stopping a print from the cockpit', async () => {
+      let stopRequests = 0;
+      server.use(
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+          ...mockPrinterStatus,
+          state: 'RUNNING',
+          current_print: 'test-print.3mf',
+        })),
+        http.post('/api/v1/printers/:id/print/stop', () => {
+          stopRequests += 1;
+          return HttpResponse.json({ success: true, message: 'Print stopped' });
+        }),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Stop' }));
+      expect(stopRequests).toBe(0);
+      expect(await screen.findByRole('heading', { name: 'Stop Print' })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Stop Print' }));
+      await waitFor(() => expect(stopRequests).toBe(1));
+    });
+
+    it('shows the active print owner above the job name in the cockpit', async () => {
+      server.use(
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+          ...mockPrinterStatus,
+          state: 'RUNNING',
+          current_print: 'test-print.3mf',
+        })),
+        http.get('/api/v1/queue/', ({ request }) => {
+          const status = new URL(request.url).searchParams.get('status');
+          return HttpResponse.json(status === 'printing' ? [{ created_by_username: 'Avery' }] : []);
+        }),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+
+      const owner = await screen.findByTestId('cockpit-print-owner');
+      const jobName = screen.getByTestId('cockpit-current-print');
+      expect(owner).toHaveTextContent('Avery');
+      expect(owner.compareDocumentPosition(jobName) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
     it('provides AMS filament backup and skip objects controls in the single-printer cockpit', async () => {
       server.use(
         http.get('/api/v1/printers/:id/status', () => {
@@ -703,21 +750,23 @@ describe('PrintersPage', () => {
       expect(screen.getByTestId('cockpit-layout')).toHaveClass('flex-1', 'min-h-0');
       expect(statusPane).toHaveClass('overflow-y-auto');
       expect(statusPane).not.toHaveClass('z-20');
-      expect(within(statusPane).getByText('Jog')).toBeInTheDocument();
+      // Jog is deliberately beside the status controls in the shared
+      // left-hand cockpit panel, not inside the right-hand scroll pane.
+      expect(screen.getByText('Jog')).toBeInTheDocument();
       expect(within(statusPane).getByText('Statistics')).toBeInTheDocument();
       expect(within(statusPane).getByText('Success Rate')).toBeInTheDocument();
 
-      expect(await screen.findByTestId('cockpit-filament-pane')).toHaveClass('min-h-0');
-      expect(screen.getByTestId('cockpit-filament-scroll')).toHaveClass('overflow-auto');
+      expect(await screen.findByTestId('cockpit-filament-pane')).toHaveClass('flex', 'min-w-0', 'flex-col');
+      expect(screen.getByTestId('cockpit-filament-scroll')).toHaveClass('grid', 'min-w-0', 'gap-2');
 
       fireEvent.click(await screen.findByRole('button', { name: /AMS Filament Backup is OFF/ }));
       expect((await screen.findAllByText('AMS Filament Backup')).length).toBeGreaterThan(0);
       fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 
-      const skipObjectsButton = screen.getByRole('button', { name: 'Skip Objects' });
+      const skipObjectsButton = screen.getByRole('button', { name: /skip objects/i });
       expect(skipObjectsButton).toBeEnabled();
       fireEvent.click(skipObjectsButton);
-      expect((await screen.findAllByText('Skip Objects')).length).toBeGreaterThan(1);
+      expect(await screen.findByText('Part 1')).toBeInTheDocument();
     });
 
     it('provides AMS drying and power socket controls in the single-printer cockpit', async () => {
