@@ -218,18 +218,13 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-        # Repair the columns used by the queue insert path *before* the full
-        # historical migration sequence.  If an interrupted upgrade left this
-        # subset behind, waiting until after ``run_migrations`` defeats the
-        # guard: a later migration can touch one of the missing columns and
-        # abort startup before the repair is reached.
-        await ensure_queue_insert_schema(conn)
-
-        # Run the remaining migrations for new columns (SQLite doesn't
-        # auto-add columns). The queue preflight above deliberately handles
-        # only the fields required to submit a print; this remains the
-        # authoritative whole-schema migration path.
+        # Run migrations for new columns (SQLite doesn't auto-add columns).
         await run_migrations(conn)
+
+        # Verify the columns used by the queue insert path after every legacy
+        # table-rebuild migration has completed. This is a narrow, idempotent
+        # safety net for interrupted upgrades and restored databases.
+        await ensure_queue_insert_schema(conn)
 
     # Re-encrypt any legacy plaintext OIDC client_secret / TOTP secret rows
     # that exist from before the encryption key was configured.
@@ -427,6 +422,7 @@ _QUEUE_INSERT_COLUMN_DEFINITIONS: dict[str, tuple[str, str]] = {
     "cleanup_library_after_dispatch": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
     "nozzle_mapping": ("TEXT", "TEXT"),
     "nozzles_info": ("TEXT", "TEXT"),
+    "nozzle_offset_cali": ("BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT true"),
     "gate_acknowledged": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
     "force_color_match": ("BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT true"),
 }
@@ -454,7 +450,7 @@ async def ensure_queue_insert_schema(conn) -> None:
     """Repair and verify columns required by the current queue insert path.
 
     ``run_migrations`` remains the authoritative full migration sequence. This
-    narrow pre-flight repair covers its most customer-visible failure mode:
+    narrow post-migration repair covers its most customer-visible failure mode:
     newer queue code against a persistent database that did not receive the
     latest queue-column migrations. It is idempotent and safe to run on every
     startup.
@@ -1171,6 +1167,11 @@ async def run_migrations(conn):
                         require_previous_success BOOLEAN DEFAULT 0,
                         auto_off_after BOOLEAN DEFAULT 0,
                         ams_mapping TEXT,
+                        filament_short BOOLEAN DEFAULT 0,
+                        skip_filament_check BOOLEAN DEFAULT 0,
+                        cleanup_library_after_dispatch BOOLEAN DEFAULT 0,
+                        nozzle_mapping TEXT,
+                        nozzles_info TEXT,
                         status VARCHAR(20) DEFAULT 'pending',
                         started_at DATETIME,
                         completed_at DATETIME,
@@ -1184,6 +1185,8 @@ async def run_migrations(conn):
                     INSERT INTO print_queue_new
                     SELECT id, printer_id, archive_id, project_id, position, scheduled_time,
                            manual_start, require_previous_success, auto_off_after, ams_mapping,
+                           COALESCE(filament_short, 0), COALESCE(skip_filament_check, 0),
+                           COALESCE(cleanup_library_after_dispatch, 0), nozzle_mapping, nozzles_info,
                            status, started_at, completed_at, error_message, created_at
                     FROM print_queue
                 """)
@@ -1333,6 +1336,11 @@ async def run_migrations(conn):
                         require_previous_success BOOLEAN DEFAULT 0,
                         auto_off_after BOOLEAN DEFAULT 0,
                         ams_mapping TEXT,
+                        filament_short BOOLEAN DEFAULT 0,
+                        skip_filament_check BOOLEAN DEFAULT 0,
+                        cleanup_library_after_dispatch BOOLEAN DEFAULT 0,
+                        nozzle_mapping TEXT,
+                        nozzles_info TEXT,
                         plate_id INTEGER,
                         bed_levelling BOOLEAN DEFAULT 1,
                         flow_cali BOOLEAN DEFAULT 0,
@@ -1340,6 +1348,7 @@ async def run_migrations(conn):
                         layer_inspect BOOLEAN DEFAULT 0,
                         timelapse BOOLEAN DEFAULT 0,
                         use_ams BOOLEAN DEFAULT 1,
+                        nozzle_offset_cali BOOLEAN DEFAULT 1,
                         status VARCHAR(20) DEFAULT 'pending',
                         started_at DATETIME,
                         completed_at DATETIME,
@@ -1352,9 +1361,13 @@ async def run_migrations(conn):
                     text("""
                     INSERT INTO print_queue_new2
                     SELECT id, printer_id, archive_id, NULL, project_id, position, scheduled_time,
-                           manual_start, require_previous_success, auto_off_after, ams_mapping, plate_id,
+                           manual_start, require_previous_success, auto_off_after, ams_mapping,
+                           COALESCE(filament_short, 0), COALESCE(skip_filament_check, 0),
+                           COALESCE(cleanup_library_after_dispatch, 0), nozzle_mapping, nozzles_info,
+                           plate_id,
                            COALESCE(bed_levelling, 1), COALESCE(flow_cali, 0), COALESCE(vibration_cali, 1),
                            COALESCE(layer_inspect, 0), COALESCE(timelapse, 0), COALESCE(use_ams, 1),
+                           COALESCE(nozzle_offset_cali, 1),
                            status, started_at, completed_at, error_message, created_at
                     FROM print_queue
                 """)

@@ -33,6 +33,7 @@ async def test_queue_schema_repair_adds_missing_insert_columns(tmp_path):
             "cleanup_library_after_dispatch",
             "nozzle_mapping",
             "nozzles_info",
+            "nozzle_offset_cali",
             "gate_acknowledged",
             "force_color_match",
         } <= columns
