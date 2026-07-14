@@ -1,10 +1,15 @@
+import { useState } from 'react';
+import { ChevronDown, ChevronUp, ListOrdered } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Hand, Power, Code, ListOrdered } from 'lucide-react';
-import type { ScheduleOptionsProps } from './types';
+import type { ScheduleOptionsProps, ScheduleOptions } from './types';
 
-/**
- * Queue options component for queue items.
- */
+type QueueOptionConfig = {
+  key: keyof ScheduleOptions;
+  label: string;
+  disabled?: boolean;
+};
+
+/** Collapsible queue behavior controls for a print job. */
 export function ScheduleOptionsPanel({
   options,
   onChange,
@@ -12,83 +17,45 @@ export function ScheduleOptionsPanel({
   hasGcodeSnippets = false,
 }: ScheduleOptionsProps) {
   const { t } = useTranslation();
+  const [isExpanded, setIsExpanded] = useState(false);
+  const controls: QueueOptionConfig[] = [
+    { key: 'insertAtTop', label: t('printModal.insertAtTop', 'Insert at top of queue') },
+    { key: 'requireManualStart', label: t('printModal.requireManualStart') },
+    { key: 'requirePreviousSuccess', label: t('printModal.requirePreviousSuccess') },
+    { key: 'autoOffAfter', label: t('printModal.autoOffAfter'), disabled: !canControlPrinter },
+    ...(hasGcodeSnippets ? [{ key: 'gcodeInjection' as const, label: t('printModal.gcodeInjection', 'Inject auto-print G-code') }] : []),
+  ];
 
   return (
-    <div className="space-y-4">
-      <label className="flex items-start gap-3 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark p-3 cursor-pointer select-none">
-        <input
-          type="checkbox"
-          id="insertAtTop"
-          checked={options.insertAtTop}
-          onChange={(e) => onChange({ ...options, insertAtTop: e.target.checked })}
-          className="accent-bambu-green w-4 h-4 mt-0.5"
-        />
-        <ListOrdered className="w-4 h-4 mt-0.5 text-bambu-gray flex-shrink-0" />
-        <span className="text-sm text-white">{t('printModal.insertAtTop', 'Insert at top of queue')}</span>
-      </label>
-
-      {/* Manual start */}
-      <label className="flex items-start gap-3 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark p-3 cursor-pointer select-none">
-        <input
-          type="checkbox"
-          id="requireManualStart"
-          checked={options.requireManualStart}
-          onChange={(e) => onChange({ ...options, requireManualStart: e.target.checked })}
-          className="accent-bambu-green w-4 h-4 mt-0.5"
-        />
-        <Hand className="w-4 h-4 mt-0.5 text-bambu-gray flex-shrink-0" />
-        <span className="text-sm text-white">{t('printModal.requireManualStart')}</span>
-      </label>
-
-      {/* Require previous success */}
-      <label className="flex items-start gap-3 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark p-3 cursor-pointer select-none">
-        <input
-          type="checkbox"
-          id="requirePrevious"
-          checked={options.requirePreviousSuccess}
-          onChange={(e) => onChange({ ...options, requirePreviousSuccess: e.target.checked })}
-          className="accent-bambu-green w-4 h-4 mt-0.5"
-        />
-        <ListOrdered className="w-4 h-4 mt-0.5 text-bambu-gray flex-shrink-0" />
-        <span className="text-sm text-white">{t('printModal.requirePreviousSuccess')}</span>
-      </label>
-
-      {/* Auto power off */}
-      <label className={`flex items-start gap-3 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark p-3 select-none ${canControlPrinter ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
-        <input
-          type="checkbox"
-          id="autoOffAfter"
-          checked={options.autoOffAfter}
-          onChange={(e) => onChange({ ...options, autoOffAfter: e.target.checked })}
-          disabled={!canControlPrinter}
-          className="accent-bambu-green w-4 h-4 mt-0.5"
-        />
-        <Power className="w-4 h-4 mt-0.5 text-bambu-gray flex-shrink-0" />
-        <span className="text-sm text-white">{t('printModal.autoOffAfter')}</span>
-      </label>
-
-      {/* G-code injection */}
-      {hasGcodeSnippets && (
-        <div className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            id="gcodeInjection"
-            checked={options.gcodeInjection}
-            onChange={(e) => onChange({ ...options, gcodeInjection: e.target.checked })}
-            className="rounded border-bambu-dark-tertiary bg-bambu-dark text-bambu-green focus:ring-bambu-green"
-          />
-          <label htmlFor="gcodeInjection" className="text-sm flex items-center gap-1 text-bambu-gray">
-            <Code className="w-3.5 h-3.5" />
-            {t('printModal.gcodeInjection', 'Inject auto-print G-code')}
-          </label>
+    <div className="mb-4">
+      <button
+        type="button"
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="flex items-center gap-2 text-sm text-bambu-gray hover:text-white transition-colors w-full"
+      >
+        <ListOrdered className="w-4 h-4" />
+        <span>{t('printModal.queueOptions', 'Queue options')}</span>
+        {isExpanded ? <ChevronUp className="w-4 h-4 ml-auto" /> : <ChevronDown className="w-4 h-4 ml-auto" />}
+      </button>
+      {isExpanded && (
+        <div className="mt-2 bg-bambu-dark rounded-lg p-3 space-y-2">
+          {controls.map(({ key, label, disabled }) => (
+            <label key={key} className={`flex items-center justify-between ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer group'}`}>
+              <span className="text-sm text-white">{label}</span>
+              <input
+                type="checkbox"
+                checked={options[key]}
+                onChange={() => !disabled && onChange({ ...options, [key]: !options[key] })}
+                disabled={disabled}
+                className="peer sr-only"
+              />
+              <div className={`relative w-10 h-5 rounded-full transition-colors ${options[key] ? 'bg-bambu-green' : 'bg-bambu-dark-tertiary'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${options[key] ? 'translate-x-5' : 'translate-x-0.5'}`} />
+              </div>
+            </label>
+          ))}
         </div>
       )}
-
-
-      {/* Help text */}
-      <p className="text-xs text-bambu-gray">
-        {t('printModal.helpQueue')}
-      </p>
     </div>
   );
 }

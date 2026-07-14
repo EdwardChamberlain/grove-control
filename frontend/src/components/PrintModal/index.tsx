@@ -1,5 +1,5 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, AlertTriangle, Loader2, Palette, Pencil, Printer, X } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Loader2, Pencil, Printer, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { PrintQueueItemCreate, PrintQueueItemUpdate, SpoolAssignment } from '../../api/client';
@@ -1116,28 +1116,31 @@ export function PrintModal({
                 defaultExpanded={!!initialSelectedPrinterIds?.length || (settings?.per_printer_mapping_expanded ?? false)}
                 currencySymbol={currencySymbol}
                 defaultCostPerKg={defaultCostPerKg}
+                forceColorMatch={forceColorMatch}
+                onForceColorMatchChange={setForceColorMatch}
               />
             )}
 
-            {/* Material matching is always enforced; this controls whether the
-                selected colour must match exactly. */}
-            {!!effectiveFilamentReqs?.filaments?.length && !archiveDataMissing && (
-              <label className="flex items-start gap-3 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark p-3 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={forceColorMatch}
-                  onChange={(event) => setForceColorMatch(event.target.checked)}
-                  className="accent-bambu-green w-4 h-4 mt-0.5"
-                />
-                <Palette className="w-4 h-4 mt-0.5 text-bambu-gray flex-shrink-0" />
-                <span className="min-w-0">
-                  <span className="block text-sm text-white">{t('printModal.forceColorMatch')}</span>
-                  <span className="block text-xs text-bambu-gray mt-0.5">
-                    {t('printModal.forceColorMatchHint')}
-                  </span>
-                </span>
-              </label>
-            )}
+            {/* Multiple-printer and model assignments have no single filament
+                mapping panel, so retain this control alongside their filament UI. */}
+            {!!effectiveFilamentReqs?.filaments?.length && !archiveDataMissing &&
+              (assignmentMode === 'model' || selectedPrinters.length !== 1) && (
+                <label className="flex items-center justify-between bg-bambu-dark rounded-lg p-3 cursor-pointer">
+                  <div>
+                    <span className="text-sm text-white">{t('printModal.forceColorMatch')}</span>
+                    <p className="text-xs text-bambu-gray">{t('printModal.forceColorMatchHint')}</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={forceColorMatch}
+                    onChange={(event) => setForceColorMatch(event.target.checked)}
+                    className="peer sr-only"
+                  />
+                  <div className={`relative w-10 h-5 rounded-full transition-colors ${forceColorMatch ? 'bg-bambu-green' : 'bg-bambu-dark-tertiary'}`}>
+                    <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${forceColorMatch ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                  </div>
+                </label>
+              )}
 
             {/* Print options */}
             {(mode === 'create' || effectivePrinterCount > 0 || (assignmentMode === 'model' && targetModel)) && (
@@ -1148,6 +1151,13 @@ export function PrintModal({
                 showDualNozzleOptions={showDualNozzleOptions}
               />
             )}
+
+            <ScheduleOptionsPanel
+              options={scheduleOptions}
+              onChange={setScheduleOptions}
+              canControlPrinter={hasPermission('printers:control')}
+              hasGcodeSnippets={!!settings?.gcode_snippets}
+            />
 
             {/* Quantity — create multiple copies (batch). Hidden for multi-printer selection. */}
             {mode !== 'edit-queue-item' && (assignmentMode === 'model' || selectedPrinters.length <= 1) && (
@@ -1171,14 +1181,6 @@ export function PrintModal({
                 )}
               </div>
             )}
-
-            {/* Queue options */}
-            <ScheduleOptionsPanel
-              options={scheduleOptions}
-              onChange={setScheduleOptions}
-              canControlPrinter={hasPermission('printers:control')}
-              hasGcodeSnippets={!!settings?.gcode_snippets}
-            />
 
             {/* Error message */}
             {updateQueueMutation.isError && (

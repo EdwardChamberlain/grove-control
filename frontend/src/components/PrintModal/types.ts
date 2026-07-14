@@ -189,6 +189,10 @@ export interface FilamentMappingProps {
   onManualMappingChange: (mappings: Record<number, number>) => void;
   currencySymbol: string;
   defaultCostPerKg: number;
+  /** Whether the selected filament colour must match exactly. */
+  forceColorMatch?: boolean;
+  /** Updates the job-level colour matching requirement. */
+  onForceColorMatchChange?: (enabled: boolean) => void;
 }
 
 /**
