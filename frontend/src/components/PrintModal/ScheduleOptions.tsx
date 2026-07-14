@@ -15,64 +15,57 @@ export function ScheduleOptionsPanel({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
+      <label className="flex items-start gap-3 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark p-3 cursor-pointer select-none">
         <input
           type="checkbox"
           id="insertAtTop"
           checked={options.insertAtTop}
           onChange={(e) => onChange({ ...options, insertAtTop: e.target.checked })}
-          className="rounded border-bambu-dark-tertiary bg-bambu-dark text-bambu-green focus:ring-bambu-green"
+          className="accent-bambu-green w-4 h-4 mt-0.5"
         />
-        <label htmlFor="insertAtTop" className="text-sm flex items-center gap-1 text-bambu-gray">
-          <ListOrdered className="w-3.5 h-3.5" />
-          {t('printModal.insertAtTop', 'Insert at top of queue')}
-        </label>
-      </div>
+        <ListOrdered className="w-4 h-4 mt-0.5 text-bambu-gray flex-shrink-0" />
+        <span className="text-sm text-white">{t('printModal.insertAtTop', 'Insert at top of queue')}</span>
+      </label>
 
       {/* Manual start */}
-      <div className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            id="requireManualStart"
-            checked={options.requireManualStart}
-            onChange={(e) => onChange({ ...options, requireManualStart: e.target.checked })}
-            className="rounded border-bambu-dark-tertiary bg-bambu-dark text-bambu-green focus:ring-bambu-green"
-          />
-          <label htmlFor="requireManualStart" className="text-sm flex items-center gap-1 text-bambu-gray">
-            <Hand className="w-3.5 h-3.5" />
-            {t('printModal.requireManualStart')}
-          </label>
-      </div>
+      <label className="flex items-start gap-3 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark p-3 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          id="requireManualStart"
+          checked={options.requireManualStart}
+          onChange={(e) => onChange({ ...options, requireManualStart: e.target.checked })}
+          className="accent-bambu-green w-4 h-4 mt-0.5"
+        />
+        <Hand className="w-4 h-4 mt-0.5 text-bambu-gray flex-shrink-0" />
+        <span className="text-sm text-white">{t('printModal.requireManualStart')}</span>
+      </label>
 
       {/* Require previous success */}
-      <div className="flex items-center gap-2">
+      <label className="flex items-start gap-3 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark p-3 cursor-pointer select-none">
         <input
           type="checkbox"
           id="requirePrevious"
           checked={options.requirePreviousSuccess}
           onChange={(e) => onChange({ ...options, requirePreviousSuccess: e.target.checked })}
-          className="rounded border-bambu-dark-tertiary bg-bambu-dark text-bambu-green focus:ring-bambu-green"
+          className="accent-bambu-green w-4 h-4 mt-0.5"
         />
-        <label htmlFor="requirePrevious" className="text-sm text-bambu-gray">
-          {t('printModal.requirePreviousSuccess')}
-        </label>
-      </div>
+        <ListOrdered className="w-4 h-4 mt-0.5 text-bambu-gray flex-shrink-0" />
+        <span className="text-sm text-white">{t('printModal.requirePreviousSuccess')}</span>
+      </label>
 
       {/* Auto power off */}
-      <div className="flex items-center gap-2">
+      <label className={`flex items-start gap-3 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark p-3 select-none ${canControlPrinter ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
         <input
           type="checkbox"
           id="autoOffAfter"
           checked={options.autoOffAfter}
           onChange={(e) => onChange({ ...options, autoOffAfter: e.target.checked })}
           disabled={!canControlPrinter}
-          className="rounded border-bambu-dark-tertiary bg-bambu-dark text-bambu-green focus:ring-bambu-green disabled:opacity-50"
+          className="accent-bambu-green w-4 h-4 mt-0.5"
         />
-        <label htmlFor="autoOffAfter" className={`text-sm flex items-center gap-1 ${canControlPrinter ? 'text-bambu-gray' : 'text-bambu-gray/50'}`}>
-          <Power className="w-3.5 h-3.5" />
-          {t('printModal.autoOffAfter')}
-        </label>
-      </div>
+        <Power className="w-4 h-4 mt-0.5 text-bambu-gray flex-shrink-0" />
+        <span className="text-sm text-white">{t('printModal.autoOffAfter')}</span>
+      </label>
 
       {/* G-code injection */}
       {hasGcodeSnippets && (

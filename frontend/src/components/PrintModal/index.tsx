@@ -1046,27 +1046,6 @@ export function PrintModal({
               multiSelect={!isEditing}
             />
 
-            {/* One dispatch policy for the whole job. Filament rows select the
-                required profile; this control decides whether its colour must
-                match exactly. Material family is always enforced. */}
-            {!!effectiveFilamentReqs?.filaments?.length && !archiveDataMissing && (
-              <label className="flex items-start gap-3 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark p-3 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={forceColorMatch}
-                  onChange={(event) => setForceColorMatch(event.target.checked)}
-                  className="accent-bambu-green w-4 h-4 mt-0.5"
-                />
-                <Palette className="w-4 h-4 mt-0.5 text-bambu-gray flex-shrink-0" />
-                <span className="min-w-0">
-                  <span className="block text-sm text-white">{t('printModal.forceColorMatch')}</span>
-                  <span className="block text-xs text-bambu-gray mt-0.5">
-                    {t('printModal.forceColorMatchHint')}
-                  </span>
-                </span>
-              </label>
-            )}
-
             {/* Printer selection with per-printer mapping — hidden when printer is pre-selected via props */}
             {!initialSelectedPrinterIds?.length && (
               <PrinterSelector
@@ -1138,6 +1117,26 @@ export function PrintModal({
                 currencySymbol={currencySymbol}
                 defaultCostPerKg={defaultCostPerKg}
               />
+            )}
+
+            {/* Material matching is always enforced; this controls whether the
+                selected colour must match exactly. */}
+            {!!effectiveFilamentReqs?.filaments?.length && !archiveDataMissing && (
+              <label className="flex items-start gap-3 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark p-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={forceColorMatch}
+                  onChange={(event) => setForceColorMatch(event.target.checked)}
+                  className="accent-bambu-green w-4 h-4 mt-0.5"
+                />
+                <Palette className="w-4 h-4 mt-0.5 text-bambu-gray flex-shrink-0" />
+                <span className="min-w-0">
+                  <span className="block text-sm text-white">{t('printModal.forceColorMatch')}</span>
+                  <span className="block text-xs text-bambu-gray mt-0.5">
+                    {t('printModal.forceColorMatchHint')}
+                  </span>
+                </span>
+              </label>
             )}
 
             {/* Print options */}
