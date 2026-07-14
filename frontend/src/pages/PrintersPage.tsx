@@ -2265,7 +2265,7 @@ function SinglePrinterCockpit({
     />
   );
 
-  const primaryActionPanel = showClearPlateButton ? (
+  const stateActionPanel = showClearPlateButton ? (
     <button
       type="button"
       onClick={() => clearPlateMutation.mutate()}
@@ -2301,16 +2301,21 @@ function SinglePrinterCockpit({
         {t('printers.stop')}
       </button>
     </div>
-  ) : (
-    <button
-      type="button"
-      onClick={() => setShowUploadForPrint(true)}
-      disabled={!hasPermission('queue:create')}
-      className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-bambu-green px-3 text-sm font-medium text-white transition-colors hover:bg-bambu-green-light disabled:cursor-not-allowed disabled:opacity-50"
-    >
-      <Play className="h-4 w-4" />
-      {t('printers.startPrint', 'Start print')}
-    </button>
+  ) : null;
+
+  const primaryActionPanel = (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={() => setShowUploadForPrint(true)}
+        disabled={!hasPermission('queue:create')}
+        className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-bambu-green px-3 text-sm font-medium text-white transition-colors hover:bg-bambu-green-light disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <PrinterIcon className="h-4 w-4" />
+        {t('common.print')}
+      </button>
+      {stateActionPanel}
+    </div>
   );
 
   const quickControlsPanel = (
@@ -5102,24 +5107,22 @@ function PrinterCard({
                 >
                   <HardDrive className="w-4 h-4" />
                 </Button>
-                {isConnected && status?.state !== 'RUNNING' && status?.state !== 'PAUSE' && (
-                  <Button
-                    size="sm"
-                    onClick={() => setShowUploadForPrint(true)}
-                    disabled={!hasPermission('library:upload') || !hasPermission('queue:create')}
-                    title={
-                      !hasPermission('library:upload')
-                        ? t('fileManager.noPermissionUpload')
-                        : !hasPermission('queue:create')
-                          ? t('fileManager.noPermissionAddToQueue')
-                          : t('common.print')
-                    }
-                    className={`${footerActionButtonClass} !bg-bambu-green hover:!bg-bambu-green/80 !text-white`}
-                  >
-                    <PrinterIcon className="w-4 h-4" />
-                    {t('common.print')}
-                  </Button>
-                )}
+                <Button
+                  size="sm"
+                  onClick={() => setShowUploadForPrint(true)}
+                  disabled={!hasPermission('library:upload') || !hasPermission('queue:create')}
+                  title={
+                    !hasPermission('library:upload')
+                      ? t('fileManager.noPermissionUpload')
+                      : !hasPermission('queue:create')
+                        ? t('fileManager.noPermissionAddToQueue')
+                        : t('common.print')
+                  }
+                  className={`${footerActionButtonClass} !bg-bambu-green hover:!bg-bambu-green/80 !text-white`}
+                >
+                  <PrinterIcon className="w-4 h-4" />
+                  {t('common.print')}
+                </Button>
               </div>
             </div>
         </div>
