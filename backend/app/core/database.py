@@ -218,8 +218,13 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-        # Run migrations for new columns (SQLite doesn't auto-add columns)
+        # Run migrations for new columns (SQLite doesn't auto-add columns).
         await run_migrations(conn)
+
+        # Verify the columns used by the queue insert path after every legacy
+        # table-rebuild migration has completed. This is a narrow, idempotent
+        # safety net for interrupted upgrades and restored databases.
+        await ensure_queue_insert_schema(conn)
 
     # Re-encrypt any legacy plaintext OIDC client_secret / TOTP secret rows
     # that exist from before the encryption key was configured.
@@ -404,6 +409,76 @@ async def _safe_execute(conn, sql):
         ):
             logger.error("Migration statement failed: %s | SQL: %.200s", exc, sql)
             raise
+
+
+# These fields are written by POST /queue/ on every current Grove Control
+# install.  They are deliberately verified separately from the long historical
+# migration sequence: an interrupted upgrade or a database restored from an
+# older image must be repaired at startup, not discovered later as a generic
+# 500 while the user tries to start a print.
+_QUEUE_INSERT_COLUMN_DEFINITIONS: dict[str, tuple[str, str]] = {
+    "filament_short": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
+    "skip_filament_check": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
+    "cleanup_library_after_dispatch": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
+    "nozzle_mapping": ("TEXT", "TEXT"),
+    "nozzles_info": ("TEXT", "TEXT"),
+    "nozzle_offset_cali": ("BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT true"),
+    "gate_acknowledged": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
+    "force_color_match": ("BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT true"),
+}
+
+
+async def _table_columns(conn, table_name: str) -> set[str]:
+    """Return the live column names for a table on the connection's dialect."""
+    from sqlalchemy import text
+
+    if conn.dialect.name == "sqlite":
+        result = await conn.execute(text(f"PRAGMA table_info({table_name})"))
+        return {row[1] for row in result}
+
+    result = await conn.execute(
+        text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = :table_name"
+        ),
+        {"table_name": table_name},
+    )
+    return set(result.scalars())
+
+
+async def ensure_queue_insert_schema(conn) -> None:
+    """Repair and verify columns required by the current queue insert path.
+
+    ``run_migrations`` remains the authoritative full migration sequence. This
+    narrow post-migration repair covers its most customer-visible failure mode:
+    newer queue code against a persistent database that did not receive the
+    latest queue-column migrations. It is idempotent and safe to run on every
+    startup.
+    """
+    columns = await _table_columns(conn, "print_queue")
+    sqlite = conn.dialect.name == "sqlite"
+    repaired: list[str] = []
+
+    for column, (sqlite_definition, postgres_definition) in _QUEUE_INSERT_COLUMN_DEFINITIONS.items():
+        if column in columns:
+            continue
+        definition = sqlite_definition if sqlite else postgres_definition
+        try:
+            await _safe_execute(conn, f"ALTER TABLE print_queue ADD COLUMN {column} {definition}")
+        except (OperationalError, ProgrammingError) as exc:
+            raise RuntimeError(
+                f"Failed to repair required print_queue column '{column}' during startup: {exc}"
+            ) from exc
+        repaired.append(column)
+
+    missing = set(_QUEUE_INSERT_COLUMN_DEFINITIONS) - await _table_columns(conn, "print_queue")
+    if missing:
+        raise RuntimeError(
+            "Required print_queue columns are missing after startup repair: "
+            f"{', '.join(sorted(missing))}. Check the database migration logs."
+        )
+    if repaired:
+        logger.warning("Repaired missing print_queue columns during startup: %s", ", ".join(repaired))
 
 
 async def _api_keys_column_exists(conn, column_name: str) -> bool:
@@ -1092,6 +1167,11 @@ async def run_migrations(conn):
                         require_previous_success BOOLEAN DEFAULT 0,
                         auto_off_after BOOLEAN DEFAULT 0,
                         ams_mapping TEXT,
+                        filament_short BOOLEAN DEFAULT 0,
+                        skip_filament_check BOOLEAN DEFAULT 0,
+                        cleanup_library_after_dispatch BOOLEAN DEFAULT 0,
+                        nozzle_mapping TEXT,
+                        nozzles_info TEXT,
                         status VARCHAR(20) DEFAULT 'pending',
                         started_at DATETIME,
                         completed_at DATETIME,
@@ -1105,6 +1185,8 @@ async def run_migrations(conn):
                     INSERT INTO print_queue_new
                     SELECT id, printer_id, archive_id, project_id, position, scheduled_time,
                            manual_start, require_previous_success, auto_off_after, ams_mapping,
+                           COALESCE(filament_short, 0), COALESCE(skip_filament_check, 0),
+                           COALESCE(cleanup_library_after_dispatch, 0), nozzle_mapping, nozzles_info,
                            status, started_at, completed_at, error_message, created_at
                     FROM print_queue
                 """)
@@ -1254,6 +1336,11 @@ async def run_migrations(conn):
                         require_previous_success BOOLEAN DEFAULT 0,
                         auto_off_after BOOLEAN DEFAULT 0,
                         ams_mapping TEXT,
+                        filament_short BOOLEAN DEFAULT 0,
+                        skip_filament_check BOOLEAN DEFAULT 0,
+                        cleanup_library_after_dispatch BOOLEAN DEFAULT 0,
+                        nozzle_mapping TEXT,
+                        nozzles_info TEXT,
                         plate_id INTEGER,
                         bed_levelling BOOLEAN DEFAULT 1,
                         flow_cali BOOLEAN DEFAULT 0,
@@ -1261,6 +1348,7 @@ async def run_migrations(conn):
                         layer_inspect BOOLEAN DEFAULT 0,
                         timelapse BOOLEAN DEFAULT 0,
                         use_ams BOOLEAN DEFAULT 1,
+                        nozzle_offset_cali BOOLEAN DEFAULT 1,
                         status VARCHAR(20) DEFAULT 'pending',
                         started_at DATETIME,
                         completed_at DATETIME,
@@ -1273,9 +1361,13 @@ async def run_migrations(conn):
                     text("""
                     INSERT INTO print_queue_new2
                     SELECT id, printer_id, archive_id, NULL, project_id, position, scheduled_time,
-                           manual_start, require_previous_success, auto_off_after, ams_mapping, plate_id,
+                           manual_start, require_previous_success, auto_off_after, ams_mapping,
+                           COALESCE(filament_short, 0), COALESCE(skip_filament_check, 0),
+                           COALESCE(cleanup_library_after_dispatch, 0), nozzle_mapping, nozzles_info,
+                           plate_id,
                            COALESCE(bed_levelling, 1), COALESCE(flow_cali, 0), COALESCE(vibration_cali, 1),
                            COALESCE(layer_inspect, 0), COALESCE(timelapse, 0), COALESCE(use_ams, 1),
+                           COALESCE(nozzle_offset_cali, 1),
                            status, started_at, completed_at, error_message, created_at
                     FROM print_queue
                 """)

@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, PlainSerializer, model_validator
+from pydantic import BaseModel, Field, PlainSerializer, model_validator
 
 
 # Custom serializer to ensure UTC datetimes have Z suffix
@@ -15,12 +15,34 @@ def serialize_utc_datetime(dt: datetime | None) -> str | None:
 UTCDatetime = Annotated[datetime | None, PlainSerializer(serialize_utc_datetime)]
 
 
+class FilamentOverride(BaseModel):
+    """A client-supplied per-slot material override for a queued print.
+
+    This is intentionally a concrete schema rather than ``dict``.  Queue
+    creation merges these values with sliced-file metadata and calls string
+    helpers on ``type`` and ``color``; accepting arbitrary JSON here let a
+    malformed client request escape as an unhandled 500.
+    """
+
+    slot_id: int = Field(gt=0)
+    type: str = Field(min_length=1)
+    color: str = Field(min_length=1)
+    color_name: str | None = None
+    # Kept deliberately untyped at the HTTP boundary so the queue service can
+    # preserve its established 400 response for invalid values (rather than
+    # coercing ``0``/``"false"`` to bool).  ``build_queue_filament_overrides``
+    # is the single validation point for this policy field.
+    force_color_match: Any = None
+
+
 class PrintQueueItemCreate(BaseModel):
     printer_id: int | None = None  # None = unassigned, user assigns later
     target_model: str | None = None  # Target printer model (mutually exclusive with printer_id)
     target_location: str | None = None  # Target location filter (only used with target_model)
     required_filament_types: list[str] | None = None  # Required filament types for model-based assignment
-    filament_overrides: list[dict] | None = None  # Per-slot filament requirements and force-colour preferences
+    filament_overrides: list[FilamentOverride] | None = (
+        None  # Per-slot filament requirements and force-colour preferences
+    )
     force_color_match: bool = True  # Safe default; false is an explicit global opt-out
     # Either archive_id OR library_file_id must be provided
     archive_id: int | None = None
@@ -65,12 +87,21 @@ class PrintQueueItemCreate(BaseModel):
     # deletes them after creating the durable archive copy.
     cleanup_library_after_dispatch: bool = False
 
+    @model_validator(mode="after")
+    def _validate_source(self) -> "PrintQueueItemCreate":
+        """A queue item has one durable print source, never two or neither."""
+        if self.archive_id is not None and self.library_file_id is not None:
+            raise ValueError("Only one of archive_id or library_file_id may be provided")
+        return self
+
 
 class PrintQueueItemUpdate(BaseModel):
     printer_id: int | None = None
     target_model: str | None = None  # Target printer model (mutually exclusive with printer_id)
     target_location: str | None = None  # Target location filter (only used with target_model)
-    filament_overrides: list[dict] | None = None  # Per-slot filament requirements and force-colour preferences
+    filament_overrides: list[FilamentOverride] | None = (
+        None  # Per-slot filament requirements and force-colour preferences
+    )
     force_color_match: bool | None = None
     position: int | None = None
     scheduled_time: datetime | None = None

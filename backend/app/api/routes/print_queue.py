@@ -426,7 +426,9 @@ async def add_to_queue(
     try:
         resolved_overrides = build_queue_filament_overrides(
             requirements,
-            data.filament_overrides,
+            [override.model_dump(exclude_unset=True) for override in data.filament_overrides]
+            if data.filament_overrides
+            else None,
             force_color_match=data.force_color_match,
         )
     except ValueError as e:

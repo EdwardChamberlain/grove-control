@@ -153,6 +153,42 @@ class TestPrintQueueAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_add_to_queue_rejects_malformed_filament_override(
+        self, async_client: AsyncClient, printer_factory, archive_factory, db_session
+    ):
+        """Invalid nested override data must be a validation error, not a 500."""
+        printer = await printer_factory()
+        archive = await archive_factory()
+
+        response = await async_client.post(
+            "/api/v1/queue/",
+            json={
+                "printer_id": printer.id,
+                "archive_id": archive.id,
+                "filament_overrides": [{"slot_id": 1, "type": ["PLA"], "color": "#FFFFFF"}],
+            },
+        )
+
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_add_to_queue_rejects_multiple_sources(
+        self, async_client: AsyncClient, printer_factory, archive_factory, db_session
+    ):
+        """Archive and library sources are mutually exclusive queue inputs."""
+        printer = await printer_factory()
+        archive = await archive_factory()
+
+        response = await async_client.post(
+            "/api/v1/queue/",
+            json={"printer_id": printer.id, "archive_id": archive.id, "library_file_id": 9999},
+        )
+
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_printer_targeted_job_persists_force_color_match(
         self, async_client: AsyncClient, printer_factory, archive_factory, db_session, tmp_path
     ):
