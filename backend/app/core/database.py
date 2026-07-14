@@ -218,9 +218,18 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-        # Run migrations for new columns (SQLite doesn't auto-add columns)
-        await run_migrations(conn)
+        # Repair the columns used by the queue insert path *before* the full
+        # historical migration sequence.  If an interrupted upgrade left this
+        # subset behind, waiting until after ``run_migrations`` defeats the
+        # guard: a later migration can touch one of the missing columns and
+        # abort startup before the repair is reached.
         await ensure_queue_insert_schema(conn)
+
+        # Run the remaining migrations for new columns (SQLite doesn't
+        # auto-add columns). The queue preflight above deliberately handles
+        # only the fields required to submit a print; this remains the
+        # authoritative whole-schema migration path.
+        await run_migrations(conn)
 
     # Re-encrypt any legacy plaintext OIDC client_secret / TOTP secret rows
     # that exist from before the encryption key was configured.
@@ -445,7 +454,7 @@ async def ensure_queue_insert_schema(conn) -> None:
     """Repair and verify columns required by the current queue insert path.
 
     ``run_migrations`` remains the authoritative full migration sequence. This
-    narrow post-flight check covers its most customer-visible failure mode:
+    narrow pre-flight repair covers its most customer-visible failure mode:
     newer queue code against a persistent database that did not receive the
     latest queue-column migrations. It is idempotent and safe to run on every
     startup.
@@ -458,7 +467,12 @@ async def ensure_queue_insert_schema(conn) -> None:
         if column in columns:
             continue
         definition = sqlite_definition if sqlite else postgres_definition
-        await _safe_execute(conn, f"ALTER TABLE print_queue ADD COLUMN {column} {definition}")
+        try:
+            await _safe_execute(conn, f"ALTER TABLE print_queue ADD COLUMN {column} {definition}")
+        except (OperationalError, ProgrammingError) as exc:
+            raise RuntimeError(
+                f"Failed to repair required print_queue column '{column}' during startup: {exc}"
+            ) from exc
         repaired.append(column)
 
     missing = set(_QUEUE_INSERT_COLUMN_DEFINITIONS) - await _table_columns(conn, "print_queue")
