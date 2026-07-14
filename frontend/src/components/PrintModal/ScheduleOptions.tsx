@@ -14,15 +14,17 @@ export function ScheduleOptionsPanel({
   options,
   onChange,
   canControlPrinter = true,
+  canInsertAtTop = false,
+  showAutoOff = false,
   hasGcodeSnippets = false,
 }: ScheduleOptionsProps) {
   const { t } = useTranslation();
   const [isExpanded, setIsExpanded] = useState(false);
   const controls: QueueOptionConfig[] = [
-    { key: 'insertAtTop', label: t('printModal.insertAtTop', 'Insert at top of queue') },
+    ...(canInsertAtTop ? [{ key: 'insertAtTop' as const, label: t('printModal.insertAtTop', 'Insert at top of queue') }] : []),
     { key: 'requireManualStart', label: t('printModal.requireManualStart') },
     { key: 'requirePreviousSuccess', label: t('printModal.requirePreviousSuccess') },
-    { key: 'autoOffAfter', label: t('printModal.autoOffAfter'), disabled: !canControlPrinter },
+    ...(showAutoOff ? [{ key: 'autoOffAfter' as const, label: t('printModal.autoOffAfter'), disabled: !canControlPrinter }] : []),
     ...(hasGcodeSnippets ? [{ key: 'gcodeInjection' as const, label: t('printModal.gcodeInjection', 'Inject auto-print G-code') }] : []),
   ];
 

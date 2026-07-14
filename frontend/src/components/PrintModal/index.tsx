@@ -2,7 +2,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import { AlertCircle, AlertTriangle, Loader2, Pencil, Printer, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { PrintQueueItemCreate, PrintQueueItemUpdate, SpoolAssignment } from '../../api/client';
+import type { PrintQueueItemCreate, PrintQueueItemUpdate, SmartPlug, SpoolAssignment } from '../../api/client';
 import { api } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { Card, CardContent } from '../Card';
@@ -228,6 +228,37 @@ export function PrintModal({
     queryKey: ['printers'],
     queryFn: api.getPrinters,
   });
+
+  // Auto-off only has an effect when every explicitly selected printer has an
+  // enabled, non-script smart plug. Model-targeted jobs are assigned later, so
+  // there is no reliable printer association to expose this control for.
+  const { data: smartPlugs } = useQuery({
+    queryKey: ['smart-plugs'],
+    queryFn: api.getSmartPlugs,
+    enabled: assignmentMode === 'printer' && selectedPrinters.length > 0 && hasPermission('smart_plugs:read'),
+  });
+  const canAutoOffAfterPrint = useMemo(() => {
+    if (assignmentMode !== 'printer' || selectedPrinters.length === 0 || !smartPlugs) return false;
+    return selectedPrinters.every((printerId) => smartPlugs.some((plug: SmartPlug) => (
+      plug.printer_id === printerId
+      && plug.enabled
+      && !(plug.plug_type === 'homeassistant' && plug.ha_entity_id?.startsWith('script.'))
+    )));
+  }, [assignmentMode, selectedPrinters, smartPlugs]);
+
+  const canInsertAtTop = hasPermission('queue:insert_top');
+
+  // Prevent stale edit state or a changed printer selection from submitting
+  // privileged / inapplicable options that are no longer available.
+  useEffect(() => {
+    if ((!canInsertAtTop && scheduleOptions.insertAtTop) || (!canAutoOffAfterPrint && scheduleOptions.autoOffAfter)) {
+      setScheduleOptions((current) => ({
+        ...current,
+        insertAtTop: canInsertAtTop ? current.insertAtTop : false,
+        autoOffAfter: canAutoOffAfterPrint ? current.autoOffAfter : false,
+      }));
+    }
+  }, [canInsertAtTop, canAutoOffAfterPrint, scheduleOptions.insertAtTop, scheduleOptions.autoOffAfter]);
 
   const { data: spoolAssignments } = useQuery({
     queryKey: ['spool-assignments'],
@@ -722,7 +753,7 @@ export function PrintModal({
       printerId: number | null,
       itemCount = 1,
     ) => {
-      if (!scheduleOptions.insertAtTop) return;
+      if (!canInsertAtTop || !scheduleOptions.insertAtTop) return;
       const scopeKey = printerId !== null ? `printer:${printerId}` : 'unassigned';
       const insertPosition = (topInsertionCounts.get(scopeKey) ?? 0) + 1;
       queueData.insert_at_top = true;
@@ -746,7 +777,7 @@ export function PrintModal({
         archive_id: isLibraryFile ? undefined : archiveId,
         library_file_id: isLibraryFile ? libraryFileId : undefined,
         require_previous_success: scheduleOptions.requirePreviousSuccess,
-        auto_off_after: scheduleOptions.autoOffAfter,
+        auto_off_after: canAutoOffAfterPrint ? scheduleOptions.autoOffAfter : false,
         gcode_injection: scheduleOptions.gcodeInjection,
         manual_start: scheduleOptions.requireManualStart,
         // When the user clicks "Print Anyway" on the frontend deficit warning,
@@ -1157,6 +1188,8 @@ export function PrintModal({
               options={scheduleOptions}
               onChange={setScheduleOptions}
               canControlPrinter={hasPermission('printers:control')}
+              canInsertAtTop={canInsertAtTop}
+              showAutoOff={canAutoOffAfterPrint}
               hasGcodeSnippets={!!settings?.gcode_snippets}
             />
 

@@ -452,7 +452,7 @@ describe('PrintModal', () => {
       expect(screen.getByRole('checkbox', { name: /insert at top of queue/i })).toBeInTheDocument();
     });
 
-    it('shows power off option', async () => {
+    it('only shows power off when the selected printer has a smart socket', async () => {
       const user = userEvent.setup();
       render(
         <PrintModal
@@ -464,7 +464,25 @@ describe('PrintModal', () => {
       );
 
       await user.click(screen.getByRole('button', { name: /queue options/i }));
-      expect(screen.getByText(/power off/i)).toBeInTheDocument();
+      expect(screen.queryByText(/power off/i)).not.toBeInTheDocument();
+    });
+
+    it('shows power off for a selected printer with a smart socket', async () => {
+      const user = userEvent.setup();
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Test Print"
+          initialSelectedPrinterIds={[1]}
+          onClose={mockOnClose}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      await waitFor(() => {
+        expect(screen.getByText(/power off/i)).toBeInTheDocument();
+      });
     });
 
     it('removes the queue, ASAP, and schedule switcher', async () => {

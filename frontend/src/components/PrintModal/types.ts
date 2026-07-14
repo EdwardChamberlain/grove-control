@@ -215,6 +215,10 @@ export interface ScheduleOptionsProps {
   onChange: (options: ScheduleOptions) => void;
   /** Whether the user has permission to control printers (for auto power off) */
   canControlPrinter?: boolean;
+  /** Whether the user may insert new jobs ahead of existing queue items. */
+  canInsertAtTop?: boolean;
+  /** Whether every selected target printer has an enabled main smart plug. */
+  showAutoOff?: boolean;
   /** Whether G-code snippets are configured in settings */
   hasGcodeSnippets?: boolean;
 }

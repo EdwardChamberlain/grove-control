@@ -298,6 +298,15 @@ async def add_to_queue(
     current_user: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_CREATE),
 ):
     """Add an item to the print queue."""
+    # Inserting a new item ahead of pending work is a separate privilege from
+    # simply creating a queue item.  Keep the check here (rather than only in
+    # the modal) so API callers cannot bypass the queue policy.
+    if (
+        (data.insert_at_top or data.insert_position is not None)
+        and current_user is not None
+        and not current_user.has_permission(Permission.QUEUE_INSERT_TOP.value)
+    ):
+        raise HTTPException(status_code=403, detail="Missing required permission: queue:insert_top")
     # Normalize target_model (e.g., "Bambu Lab X1E" / "C13" -> "X1E")
     target_model_norm = None
     if data.target_model:
