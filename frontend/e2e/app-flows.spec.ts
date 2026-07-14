@@ -39,6 +39,7 @@ const spool = {
 const archive = {
   id: 1,
   filename: 'benchy.3mf',
+  file_path: 'archives/benchy.3mf',
   print_name: 'Benchy',
   file_size: 1024,
   status: 'completed',
@@ -176,6 +177,32 @@ test('setup smoke flow submits expected payload', async ({ page }) => {
   await page.getByLabel(/Confirm Password/i).fill('secret123');
   await page.getByRole('button', { name: /Complete Setup/i }).click();
   await expect.poll(() => calls.some((call) => call.path === '/api/v1/auth/setup')).toBe(true);
+});
+
+test('print modal exposes queue-first controls', async ({ page }) => {
+  const calls: ApiCall[] = [];
+  await mockApi(page, calls);
+
+  await page.goto('/archives');
+  await expect(page.getByRole('heading', { name: /Archives/i })).toBeVisible();
+  await page.getByRole('button', { name: /^Print$/i }).first().click();
+
+  await expect(page.getByRole('heading', { name: /^Print$/i })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Queue options/i })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^(ASAP|Queue|Schedule)$/i })).toHaveCount(0);
+
+  await page.getByRole('button', { name: /Queue options/i }).click();
+  await expect(page.getByRole('checkbox', { name: /Require manual start/i })).toBeVisible();
+  await expect(page.getByText(/Power off printer when done/i)).toHaveCount(0);
+
+  await page.locator('label', { hasText: 'Require manual start' }).click();
+  await expect(page.getByRole('checkbox', { name: /Require manual start/i })).toBeChecked();
+  await page.getByRole('button', { name: /^Print$/i }).last().click();
+
+  await expect.poll(() => calls.some((call) => call.method === 'POST' && call.path === '/api/v1/queue/')).toBe(true);
+  const queueCall = calls.find((call) => call.method === 'POST' && call.path === '/api/v1/queue/');
+  expect(queueCall?.body).toMatchObject({ manual_start: true });
+  expect(queueCall?.body).not.toHaveProperty('scheduled_time');
 });
 
 test('core app API smoke reaches create, edit, upload, slice, queue, and settings paths', async ({ page }) => {
