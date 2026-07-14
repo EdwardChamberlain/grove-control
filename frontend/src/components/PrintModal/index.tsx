@@ -1106,8 +1106,9 @@ export function PrintModal({
               </div>
             )}
 
-            {/* Filament mapping - only show when single printer selected */}
-            {showFilamentMapping && !archiveDataMissing && selectedPrinters.length === 1 && (
+            {/* Slot mapping only applies to an explicitly selected printer. Model
+                assignments derive their mapping from the chosen printer at dispatch. */}
+            {assignmentMode === 'printer' && showFilamentMapping && !archiveDataMissing && selectedPrinters.length === 1 && (
               <FilamentMapping
                 printerId={effectivePrinterId!}
                 filamentReqs={effectiveFilamentReqs}
