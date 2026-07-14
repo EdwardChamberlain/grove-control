@@ -40,7 +40,9 @@ class PrintQueueItemCreate(BaseModel):
     target_model: str | None = None  # Target printer model (mutually exclusive with printer_id)
     target_location: str | None = None  # Target location filter (only used with target_model)
     required_filament_types: list[str] | None = None  # Required filament types for model-based assignment
-    filament_overrides: list[FilamentOverride] | None = None  # Per-slot filament requirements and force-colour preferences
+    filament_overrides: list[FilamentOverride] | None = (
+        None  # Per-slot filament requirements and force-colour preferences
+    )
     force_color_match: bool = True  # Safe default; false is an explicit global opt-out
     # Either archive_id OR library_file_id must be provided
     archive_id: int | None = None
@@ -97,7 +99,9 @@ class PrintQueueItemUpdate(BaseModel):
     printer_id: int | None = None
     target_model: str | None = None  # Target printer model (mutually exclusive with printer_id)
     target_location: str | None = None  # Target location filter (only used with target_model)
-    filament_overrides: list[FilamentOverride] | None = None  # Per-slot filament requirements and force-colour preferences
+    filament_overrides: list[FilamentOverride] | None = (
+        None  # Per-slot filament requirements and force-colour preferences
+    )
     force_color_match: bool | None = None
     position: int | None = None
     scheduled_time: datetime | None = None
