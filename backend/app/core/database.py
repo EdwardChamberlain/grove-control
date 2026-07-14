@@ -3558,7 +3558,7 @@ async def seed_default_groups():
         if admin_group and admin_group.permissions is not None:
             perms = list(admin_group.permissions)
             added = False
-            for new_perm in ("library:purge", "archives:purge"):
+            for new_perm in ("library:purge", "archives:purge", "queue:insert_top"):
                 if new_perm not in perms:
                     perms.append(new_perm)
                     added = True

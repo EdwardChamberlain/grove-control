@@ -63,38 +63,25 @@ export const DEFAULT_PRINT_OPTIONS: PrintOptions = {
 };
 
 /**
- * Schedule type for queue items.
- */
-export type ScheduleType = 'asap' | 'queue' | 'scheduled';
-
-/**
- * Schedule options for queue items.
+ * Queue options for queue items.
  */
 export interface ScheduleOptions {
-  scheduleType: ScheduleType;
-  scheduledTime: string;
+  insertAtTop: boolean;
   requireManualStart: boolean;
   requirePreviousSuccess: boolean;
   autoOffAfter: boolean;
   gcodeInjection: boolean;
-  staggerEnabled: boolean;
-  staggerGroupSize: number;
-  staggerIntervalMinutes: number;
 }
 
 /**
  * Default schedule options values.
  */
 export const DEFAULT_SCHEDULE_OPTIONS: ScheduleOptions = {
-  scheduleType: 'asap',
-  scheduledTime: '',
+  insertAtTop: false,
   requireManualStart: false,
   requirePreviousSuccess: false,
   autoOffAfter: false,
   gcodeInjection: false,
-  staggerEnabled: false,
-  staggerGroupSize: 2,
-  staggerIntervalMinutes: 5,
 };
 
 /**
@@ -202,6 +189,10 @@ export interface FilamentMappingProps {
   onManualMappingChange: (mappings: Record<number, number>) => void;
   currencySymbol: string;
   defaultCostPerKg: number;
+  /** Whether the selected filament colour must match exactly. */
+  forceColorMatch?: boolean;
+  /** Updates the job-level colour matching requirement. */
+  onForceColorMatchChange?: (enabled: boolean) => void;
 }
 
 /**
@@ -217,21 +208,17 @@ export interface PrintOptionsProps {
 }
 
 /**
- * Props for the ScheduleOptions component.
+ * Props for the queue options component.
  */
 export interface ScheduleOptionsProps {
   options: ScheduleOptions;
   onChange: (options: ScheduleOptions) => void;
-  /** Date format setting from user preferences */
-  dateFormat?: 'system' | 'us' | 'eu' | 'iso';
-  /** Time format setting from user preferences */
-  timeFormat?: 'system' | '12h' | '24h';
   /** Whether the user has permission to control printers (for auto power off) */
   canControlPrinter?: boolean;
-  /** Show stagger options (only when multiple printers selected in queue mode) */
-  showStagger?: boolean;
-  /** Number of selected printers (for stagger preview) */
-  printerCount?: number;
+  /** Whether the user may insert new jobs ahead of existing queue items. */
+  canInsertAtTop?: boolean;
+  /** Whether every selected target printer has an enabled main smart plug. */
+  showAutoOff?: boolean;
   /** Whether G-code snippets are configured in settings */
   hasGcodeSnippets?: boolean;
 }

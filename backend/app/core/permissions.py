@@ -50,6 +50,7 @@ class Permission(StrEnum):
     QUEUE_DELETE_OWN = "queue:delete_own"
     QUEUE_DELETE_ALL = "queue:delete_all"
     QUEUE_REORDER = "queue:reorder"
+    QUEUE_INSERT_TOP = "queue:insert_top"  # Insert newly created jobs ahead of pending queue items
 
     # Library
     LIBRARY_READ = "library:read"
@@ -217,6 +218,7 @@ PERMISSION_CATEGORIES = {
         Permission.QUEUE_DELETE_OWN,
         Permission.QUEUE_DELETE_ALL,
         Permission.QUEUE_REORDER,
+        Permission.QUEUE_INSERT_TOP,
     ],
     "Library": [
         Permission.LIBRARY_READ,  # legacy — kept for back-compat with custom roles

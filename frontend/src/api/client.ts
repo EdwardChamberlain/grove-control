@@ -1202,9 +1202,6 @@ export interface AppSettings {
   default_layer_inspect: boolean;
   default_timelapse: boolean;
   default_nozzle_offset_cali: boolean;
-  // Staggered batch start defaults
-  stagger_group_size: number;
-  stagger_interval_minutes: number;
   // Plate-clear confirmation
   require_plate_clear: boolean;
   // Shortest job first scheduling
@@ -2976,7 +2973,7 @@ export type Permission =
   | 'archives:reprint_own' | 'archives:reprint_all' | 'archives:purge'
   | 'queue:read' | 'queue:read_own' | 'queue:read_all' | 'queue:create'
   | 'queue:update_own' | 'queue:update_all' | 'queue:delete_own' | 'queue:delete_all'
-  | 'queue:reorder'
+  | 'queue:reorder' | 'queue:insert_top'
   | 'library:read' | 'library:read_own' | 'library:read_all' | 'library:upload'
   | 'library:update_own' | 'library:update_all' | 'library:delete_own' | 'library:delete_all'
   | 'library:purge'

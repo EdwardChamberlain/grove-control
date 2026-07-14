@@ -104,6 +104,7 @@ _APIKEY_SCOPE_BY_PERMISSION: dict[Permission, str] = {
     Permission.QUEUE_DELETE_OWN: "can_queue",
     Permission.QUEUE_DELETE_ALL: "can_queue",
     Permission.QUEUE_REORDER: "can_queue",
+    Permission.QUEUE_INSERT_TOP: "can_queue",
     Permission.ARCHIVES_REPRINT_OWN: "can_queue",
     Permission.ARCHIVES_REPRINT_ALL: "can_queue",
     # can_control_printer — physical-world side effects on hardware

@@ -22,6 +22,8 @@ export function FilamentMapping({
   currencySymbol,
   defaultCostPerKg,
   defaultExpanded = false,
+  forceColorMatch = true,
+  onForceColorMatchChange,
 }: FilamentMappingProps & { defaultExpanded?: boolean }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -281,6 +283,31 @@ export function FilamentMapping({
           </div>
           {hasTypeMismatch && (
             <p className="text-xs text-orange-400 mt-2">Required filament type not found in printer.</p>
+          )}
+          {onForceColorMatchChange && (
+            <label className="flex items-center justify-between cursor-pointer group pt-2 border-t border-bambu-dark-tertiary">
+              <div>
+                <span className="text-sm text-white">{t('printModal.forceColorMatch')}</span>
+                <p className="text-xs text-bambu-gray">{t('printModal.forceColorMatchHint')}</p>
+              </div>
+              <input
+                type="checkbox"
+                checked={forceColorMatch}
+                onChange={(event) => onForceColorMatchChange(event.target.checked)}
+                className="peer sr-only"
+              />
+              <div
+                className={`relative w-10 h-5 rounded-full transition-colors ${
+                  forceColorMatch ? 'bg-bambu-green' : 'bg-bambu-dark-tertiary'
+                }`}
+              >
+                <div
+                  className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                    forceColorMatch ? 'translate-x-5' : 'translate-x-0.5'
+                  }`}
+                />
+              </div>
+            </label>
           )}
         </div>
       )}

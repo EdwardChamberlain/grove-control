@@ -658,7 +658,7 @@ describe('PrintersPage', () => {
       await screen.findByText('Top filament: PLA');
 
       expect(screen.queryByText('Quick reprint')).not.toBeInTheDocument();
-      fireEvent.click(await screen.findByRole('button', { name: 'Start print' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Print' }));
 
       expect(await screen.findByText('Quick reprint')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /Sample Widget/ })).toBeInTheDocument();
@@ -681,12 +681,31 @@ describe('PrintersPage', () => {
       render(<PrintersPage />);
       fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
 
+      expect(await screen.findByRole('button', { name: 'Print' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Pause' })).toBeInTheDocument();
       fireEvent.click(await screen.findByRole('button', { name: 'Stop' }));
       expect(stopRequests).toBe(0);
       expect(await screen.findByRole('heading', { name: 'Stop Print' })).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole('button', { name: 'Stop Print' }));
       await waitFor(() => expect(stopRequests).toBe(1));
+    });
+
+    it('keeps Print available on expanded cards while a printer is running', async () => {
+      server.use(
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+          ...mockPrinterStatus,
+          state: 'RUNNING',
+          current_print: 'test-print.3mf',
+        })),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Detail cards' }));
+
+      await waitFor(() => {
+        expect(screen.getAllByRole('button', { name: 'Print' }).length).toBeGreaterThan(0);
+      });
     });
 
     it('shows the active print owner above the job name in the cockpit', async () => {

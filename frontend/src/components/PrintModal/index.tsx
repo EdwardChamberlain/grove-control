@@ -1,8 +1,8 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, AlertTriangle, Loader2, Palette, Pencil, Printer, X } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Loader2, Pencil, Printer, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { PrinterStatus, PrintQueueItemCreate, PrintQueueItemUpdate, SpoolAssignment } from '../../api/client';
+import type { PrintQueueItemCreate, PrintQueueItemUpdate, SmartPlug, SpoolAssignment } from '../../api/client';
 import { api } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { Card, CardContent } from '../Card';
@@ -14,8 +14,7 @@ import { useMultiPrinterFilamentMapping, type PerPrinterConfig } from '../../hoo
 import { getColorName } from '../../utils/colors';
 import { getCurrencySymbol } from '../../utils/currency';
 import { getBedTypeInfo } from '../../utils/bedType';
-import { toDateTimeLocalValue, parseUTCDate } from '../../utils/date';
-import { getGlobalTrayId, isPlaceholderDate, effectivePreferLowest } from '../../utils/amsHelpers';
+import { getGlobalTrayId, effectivePreferLowest } from '../../utils/amsHelpers';
 import { FilamentMapping } from './FilamentMapping';
 import { FilamentOverride } from './FilamentOverride';
 import { PlateSelector } from './PlateSelector';
@@ -27,7 +26,6 @@ import type {
   PrintModalProps,
   PrintOptions,
   ScheduleOptions,
-  ScheduleType,
 } from './types';
 import { DEFAULT_PRINT_OPTIONS, DEFAULT_SCHEDULE_OPTIONS } from './types';
 
@@ -109,28 +107,12 @@ export function PrintModal({
 
   const [scheduleOptions, setScheduleOptions] = useState<ScheduleOptions>(() => {
     if (mode === 'edit-queue-item' && queueItem) {
-      let scheduleType: ScheduleType = 'queue';
-      if (queueItem.scheduled_time && !isPlaceholderDate(queueItem.scheduled_time)) {
-        scheduleType = 'scheduled';
-      }
-
-      let scheduledTime = '';
-      if (queueItem.scheduled_time && !isPlaceholderDate(queueItem.scheduled_time)) {
-        const date = parseUTCDate(queueItem.scheduled_time) ?? new Date();
-        // Use toDateTimeLocalValue to convert UTC to local time for datetime-local input
-        scheduledTime = toDateTimeLocalValue(date);
-      }
-
       return {
-        scheduleType,
-        scheduledTime,
+        insertAtTop: false,
         requireManualStart: queueItem.manual_start,
         requirePreviousSuccess: queueItem.require_previous_success,
         autoOffAfter: queueItem.auto_off_after,
         gcodeInjection: queueItem.gcode_injection ?? false,
-        staggerEnabled: false,
-        staggerGroupSize: DEFAULT_SCHEDULE_OPTIONS.staggerGroupSize,
-        staggerIntervalMinutes: DEFAULT_SCHEDULE_OPTIONS.staggerIntervalMinutes,
       };
     }
     return DEFAULT_SCHEDULE_OPTIONS;
@@ -239,18 +221,6 @@ export function PrintModal({
     });
   }, [settings, mode]);
 
-  // Sync stagger defaults from settings once available
-  const staggerDefaultsApplied = useRef(false);
-  useEffect(() => {
-    if (!settings || staggerDefaultsApplied.current || mode === 'edit-queue-item') return;
-    staggerDefaultsApplied.current = true;
-    setScheduleOptions((prev) => ({
-      ...prev,
-      staggerGroupSize: settings.stagger_group_size ?? prev.staggerGroupSize,
-      staggerIntervalMinutes: settings.stagger_interval_minutes ?? prev.staggerIntervalMinutes,
-    }));
-  }, [settings, mode]);
-
   const currencySymbol = getCurrencySymbol(settings?.currency || 'USD');
   const defaultCostPerKg = settings?.default_filament_cost ?? 0;
 
@@ -258,6 +228,37 @@ export function PrintModal({
     queryKey: ['printers'],
     queryFn: api.getPrinters,
   });
+
+  // Auto-off only has an effect when every explicitly selected printer has an
+  // enabled, non-script smart plug. Model-targeted jobs are assigned later, so
+  // there is no reliable printer association to expose this control for.
+  const { data: smartPlugs } = useQuery({
+    queryKey: ['smart-plugs'],
+    queryFn: api.getSmartPlugs,
+    enabled: assignmentMode === 'printer' && selectedPrinters.length > 0 && hasPermission('smart_plugs:read'),
+  });
+  const canAutoOffAfterPrint = useMemo(() => {
+    if (assignmentMode !== 'printer' || selectedPrinters.length === 0 || !smartPlugs) return false;
+    return selectedPrinters.every((printerId) => smartPlugs.some((plug: SmartPlug) => (
+      plug.printer_id === printerId
+      && plug.enabled
+      && !(plug.plug_type === 'homeassistant' && plug.ha_entity_id?.startsWith('script.'))
+    )));
+  }, [assignmentMode, selectedPrinters, smartPlugs]);
+
+  const canInsertAtTop = hasPermission('queue:insert_top');
+
+  // Prevent stale edit state or a changed printer selection from submitting
+  // privileged / inapplicable options that are no longer available.
+  useEffect(() => {
+    if ((!canInsertAtTop && scheduleOptions.insertAtTop) || (!canAutoOffAfterPrint && scheduleOptions.autoOffAfter)) {
+      setScheduleOptions((current) => ({
+        ...current,
+        insertAtTop: canInsertAtTop ? current.insertAtTop : false,
+        autoOffAfter: canAutoOffAfterPrint ? current.autoOffAfter : false,
+      }));
+    }
+  }, [canInsertAtTop, canAutoOffAfterPrint, scheduleOptions.insertAtTop, scheduleOptions.autoOffAfter]);
 
   const { data: spoolAssignments } = useQuery({
     queryKey: ['spool-assignments'],
@@ -371,33 +372,6 @@ export function PrintModal({
     settings?.prefer_lowest_filament,
     printerStatus?.ams_filament_backup,
   );
-
-  const isPrinterCurrentlyDispatchable = (status: PrinterStatus | undefined): boolean => {
-    if (!status?.connected) return false;
-    if (status.awaiting_plate_clear) return false;
-    if (status.ams?.some((ams) => ams.dry_time > 0)) return false;
-    return ['IDLE', 'FINISH', 'FAILED'].includes(status.state ?? '');
-  };
-
-  const asapToastShouldPromiseLaterStart = async (): Promise<boolean> => {
-    if (scheduleOptions.scheduleType !== 'asap' || assignmentMode !== 'printer') return false;
-    if (selectedPrinters.length === 0) return false;
-
-    try {
-      const statuses = await Promise.all(
-        selectedPrinters.map((printerId) =>
-          queryClient.fetchQuery({
-            queryKey: ['printer-status', printerId],
-            queryFn: () => api.getPrinterStatus(printerId),
-            staleTime: 0,
-          }),
-        ),
-      );
-      return statuses.some((status) => !isPrinterCurrentlyDispatchable(status));
-    } catch {
-      return true;
-    }
-  };
 
   // Get AMS mapping from hook (only when single printer selected)
   const { amsMapping } = useFilamentMapping(
@@ -772,19 +746,19 @@ export function PrintModal({
         autoBatchId = null;
       }
     }
-    const asapInsertionCounts = new Map<string, number>();
+    const topInsertionCounts = new Map<string, number>();
 
-    const applyAsapInsertion = (
+    const applyTopInsertion = (
       queueData: PrintQueueItemCreate,
       printerId: number | null,
       itemCount = 1,
     ) => {
-      if (scheduleOptions.scheduleType !== 'asap') return;
+      if (!canInsertAtTop || !scheduleOptions.insertAtTop) return;
       const scopeKey = printerId !== null ? `printer:${printerId}` : 'unassigned';
-      const insertPosition = (asapInsertionCounts.get(scopeKey) ?? 0) + 1;
+      const insertPosition = (topInsertionCounts.get(scopeKey) ?? 0) + 1;
       queueData.insert_at_top = true;
       queueData.insert_position = insertPosition;
-      asapInsertionCounts.set(scopeKey, insertPosition + itemCount - 1);
+      topInsertionCounts.set(scopeKey, insertPosition + itemCount - 1);
     };
 
     // Common queue data for create and edit modes
@@ -803,18 +777,15 @@ export function PrintModal({
         archive_id: isLibraryFile ? undefined : archiveId,
         library_file_id: isLibraryFile ? libraryFileId : undefined,
         require_previous_success: scheduleOptions.requirePreviousSuccess,
-        auto_off_after: scheduleOptions.autoOffAfter,
+        auto_off_after: canAutoOffAfterPrint ? scheduleOptions.autoOffAfter : false,
         gcode_injection: scheduleOptions.gcodeInjection,
-        manual_start: scheduleOptions.scheduleType === 'queue' && scheduleOptions.requireManualStart,
+        manual_start: scheduleOptions.requireManualStart,
         // When the user clicks "Print Anyway" on the frontend deficit warning,
         // persist that acknowledgement so the scheduler doesn't immediately
         // re-flag the item on its first dispatch tick (#1698-followup).
         skip_filament_check: options?.skipFilamentCheck === true ? true : undefined,
         ams_mapping: printerId ? getMappingForPrinter(printerId) : undefined,
         plate_id: plateOverride !== undefined ? plateOverride : selectedPlate,
-        scheduled_time: scheduleOptions.scheduleType === 'scheduled' && scheduleOptions.scheduledTime
-          ? new Date(scheduleOptions.scheduledTime).toISOString()
-          : undefined,
         ...printOptions,
         project_id: projectId ?? undefined,
         batch_id: autoBatchId ?? undefined,
@@ -842,12 +813,10 @@ export function PrintModal({
               require_previous_success: scheduleOptions.requirePreviousSuccess,
               auto_off_after: scheduleOptions.autoOffAfter,
               gcode_injection: scheduleOptions.gcodeInjection,
-              manual_start: scheduleOptions.scheduleType === 'queue' && scheduleOptions.requireManualStart,
+              manual_start: scheduleOptions.requireManualStart,
               ams_mapping: undefined,
               plate_id: plateId,
-              scheduled_time: scheduleOptions.scheduleType === 'scheduled' && scheduleOptions.scheduledTime
-                ? new Date(scheduleOptions.scheduledTime).toISOString()
-                : null,
+              scheduled_time: null,
               ...printOptions,
             };
             await updateQueueMutation.mutateAsync(updateData);
@@ -855,7 +824,7 @@ export function PrintModal({
             // Add-to-queue mode with model-based assignment
             const queueData = getQueueData(null, plateId);
             if (effectiveQuantity > 1) queueData.quantity = effectiveQuantity;
-            applyAsapInsertion(queueData, null, effectiveQuantity);
+            applyTopInsertion(queueData, null, effectiveQuantity);
             await addToQueueMutation.mutateAsync(queueData);
           }
           results.success++;
@@ -867,16 +836,6 @@ export function PrintModal({
       }
     } else {
       // Printer-based assignment: loop through plates × printers
-      // Compute stagger base time once before the loop
-      const useStagger = scheduleOptions.staggerEnabled
-        && !isEditing
-        && selectedPrinters.length > 1;
-      const staggerBaseTime = useStagger
-        ? (scheduleOptions.scheduleType === 'scheduled' && scheduleOptions.scheduledTime
-          ? new Date(scheduleOptions.scheduledTime).getTime()
-          : Date.now())
-        : 0;
-
       let progressCounter = 0;
       for (const plate of platesToQueue) {
         const plateId = plate ? plate.index : selectedPlate;
@@ -900,12 +859,10 @@ export function PrintModal({
                 require_previous_success: scheduleOptions.requirePreviousSuccess,
                 auto_off_after: scheduleOptions.autoOffAfter,
                 gcode_injection: scheduleOptions.gcodeInjection,
-                manual_start: scheduleOptions.scheduleType === 'queue' && scheduleOptions.requireManualStart,
+                manual_start: scheduleOptions.requireManualStart,
                 ams_mapping: printerMapping,
                 plate_id: plateId,
-                scheduled_time: scheduleOptions.scheduleType === 'scheduled' && scheduleOptions.scheduledTime
-                  ? new Date(scheduleOptions.scheduledTime).toISOString()
-                  : null,
+                scheduled_time: null,
                 ...printOptions,
               };
               await updateQueueMutation.mutateAsync(updateData);
@@ -913,17 +870,7 @@ export function PrintModal({
               // New print mode, staggered print, or edit mode with additional entries
               const queueData = getQueueData(printerId, plateId);
               if (effectiveQuantity > 1) queueData.quantity = effectiveQuantity;
-              applyAsapInsertion(queueData, printerId, effectiveQuantity);
-              // Apply stagger offset for groups after the first
-              if (useStagger) {
-                const groupIndex = Math.floor(i / scheduleOptions.staggerGroupSize);
-                if (groupIndex > 0) {
-                  const offsetMs = groupIndex * scheduleOptions.staggerIntervalMinutes * 60_000;
-                  queueData.scheduled_time = new Date(staggerBaseTime + offsetMs).toISOString();
-                }
-                // Group 0 with ASAP: no scheduled_time (start immediately)
-                // Group 0 with scheduled: keeps the scheduled_time from getQueueData
-              }
+              applyTopInsertion(queueData, printerId, effectiveQuantity);
               await addToQueueMutation.mutateAsync(queueData);
             }
             results.success++;
@@ -947,20 +894,14 @@ export function PrintModal({
           showToast('Queue item updated');
         }
       } else if (results.success === 1) {
-        const waitForIdleToast = await asapToastShouldPromiseLaterStart();
         showToast(
-          waitForIdleToast
-            ? t('queue.printQueuedWillStartWhenIdle')
-            : assignmentMode === 'model'
+          assignmentMode === 'model'
               ? `Queued for any ${targetModel}`
               : t('queue.printQueued'),
         );
       } else {
-        const waitForIdleToast = await asapToastShouldPromiseLaterStart();
         showToast(
-          waitForIdleToast
-            ? t('queue.printQueuedWillStartWhenIdle')
-            : t('queue.itemsQueued', { count: results.success }),
+          t('queue.itemsQueued', { count: results.success }),
         );
       }
       queryClient.invalidateQueries({ queryKey: ['queue'] });
@@ -1136,27 +1077,6 @@ export function PrintModal({
               multiSelect={!isEditing}
             />
 
-            {/* One dispatch policy for the whole job. Filament rows select the
-                required profile; this control decides whether its colour must
-                match exactly. Material family is always enforced. */}
-            {!!effectiveFilamentReqs?.filaments?.length && !archiveDataMissing && (
-              <label className="flex items-start gap-3 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark p-3 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={forceColorMatch}
-                  onChange={(event) => setForceColorMatch(event.target.checked)}
-                  className="accent-bambu-green w-4 h-4 mt-0.5"
-                />
-                <Palette className="w-4 h-4 mt-0.5 text-bambu-gray flex-shrink-0" />
-                <span className="min-w-0">
-                  <span className="block text-sm text-white">{t('printModal.forceColorMatch')}</span>
-                  <span className="block text-xs text-bambu-gray mt-0.5">
-                    {t('printModal.forceColorMatchHint')}
-                  </span>
-                </span>
-              </label>
-            )}
-
             {/* Printer selection with per-printer mapping — hidden when printer is pre-selected via props */}
             {!initialSelectedPrinterIds?.length && (
               <PrinterSelector
@@ -1217,8 +1137,9 @@ export function PrintModal({
               </div>
             )}
 
-            {/* Filament mapping - only show when single printer selected */}
-            {showFilamentMapping && !archiveDataMissing && selectedPrinters.length === 1 && (
+            {/* Slot mapping only applies to an explicitly selected printer. Model
+                assignments derive their mapping from the chosen printer at dispatch. */}
+            {assignmentMode === 'printer' && showFilamentMapping && !archiveDataMissing && selectedPrinters.length === 1 && (
               <FilamentMapping
                 printerId={effectivePrinterId!}
                 filamentReqs={effectiveFilamentReqs}
@@ -1227,8 +1148,31 @@ export function PrintModal({
                 defaultExpanded={!!initialSelectedPrinterIds?.length || (settings?.per_printer_mapping_expanded ?? false)}
                 currencySymbol={currencySymbol}
                 defaultCostPerKg={defaultCostPerKg}
+                forceColorMatch={forceColorMatch}
+                onForceColorMatchChange={setForceColorMatch}
               />
             )}
+
+            {/* Multiple-printer and model assignments have no single filament
+                mapping panel, so retain this control alongside their filament UI. */}
+            {!!effectiveFilamentReqs?.filaments?.length && !archiveDataMissing &&
+              (assignmentMode === 'model' || selectedPrinters.length !== 1) && (
+                <label className="flex items-center justify-between bg-bambu-dark rounded-lg p-3 cursor-pointer">
+                  <div>
+                    <span className="text-sm text-white">{t('printModal.forceColorMatch')}</span>
+                    <p className="text-xs text-bambu-gray">{t('printModal.forceColorMatchHint')}</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={forceColorMatch}
+                    onChange={(event) => setForceColorMatch(event.target.checked)}
+                    className="peer sr-only"
+                  />
+                  <div className={`relative w-10 h-5 rounded-full transition-colors ${forceColorMatch ? 'bg-bambu-green' : 'bg-bambu-dark-tertiary'}`}>
+                    <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${forceColorMatch ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                  </div>
+                </label>
+              )}
 
             {/* Print options */}
             {(mode === 'create' || effectivePrinterCount > 0 || (assignmentMode === 'model' && targetModel)) && (
@@ -1239,6 +1183,15 @@ export function PrintModal({
                 showDualNozzleOptions={showDualNozzleOptions}
               />
             )}
+
+            <ScheduleOptionsPanel
+              options={scheduleOptions}
+              onChange={setScheduleOptions}
+              canControlPrinter={hasPermission('printers:control')}
+              canInsertAtTop={canInsertAtTop}
+              showAutoOff={canAutoOffAfterPrint}
+              hasGcodeSnippets={!!settings?.gcode_snippets}
+            />
 
             {/* Quantity — create multiple copies (batch). Hidden for multi-printer selection. */}
             {mode !== 'edit-queue-item' && (assignmentMode === 'model' || selectedPrinters.length <= 1) && (
@@ -1262,18 +1215,6 @@ export function PrintModal({
                 )}
               </div>
             )}
-
-            {/* Schedule options */}
-            <ScheduleOptionsPanel
-              options={scheduleOptions}
-              onChange={setScheduleOptions}
-              dateFormat={settings?.date_format || 'system'}
-              timeFormat={settings?.time_format || 'system'}
-              canControlPrinter={hasPermission('printers:control')}
-              showStagger={!isEditing && assignmentMode === 'printer' && selectedPrinters.length > 1}
-              printerCount={selectedPrinters.length}
-              hasGcodeSnippets={!!settings?.gcode_snippets}
-            />
 
             {/* Error message */}
             {updateQueueMutation.isError && (

@@ -259,7 +259,7 @@ describe('PrintModal', () => {
         />
       );
 
-      const forceMatch = await screen.findByLabelText(/Match Colour and Material/i) as HTMLInputElement;
+      const forceMatch = await screen.findByLabelText(/Match colour/i) as HTMLInputElement;
       expect(forceMatch).toBeChecked();
 
       await user.click(screen.getByRole('button', { name: /^print$/i }));
@@ -305,7 +305,7 @@ describe('PrintModal', () => {
         />
       );
 
-      const forceMatch = await screen.findByLabelText(/Match Colour and Material/i) as HTMLInputElement;
+      const forceMatch = await screen.findByLabelText(/Match colour/i) as HTMLInputElement;
       await user.click(forceMatch);
       expect(forceMatch).not.toBeChecked();
       await user.click(screen.getByRole('button', { name: /^print$/i }));
@@ -437,7 +437,8 @@ describe('PrintModal', () => {
       expect(screen.getByRole('button', { name: /cancel/i })).toBeInTheDocument();
     });
 
-    it('shows Queue option', () => {
+    it('shows queue insertion controls', async () => {
+      const user = userEvent.setup();
       render(
         <PrintModal
           mode="create"
@@ -447,10 +448,12 @@ describe('PrintModal', () => {
         />
       );
 
-      expect(screen.getByRole('button', { name: /queue/i })).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      expect(screen.getByRole('checkbox', { name: /insert at top of queue/i })).toBeInTheDocument();
     });
 
-    it('shows power off option', () => {
+    it('only shows power off when the selected printer has a smart socket', async () => {
+      const user = userEvent.setup();
       render(
         <PrintModal
           mode="create"
@@ -460,25 +463,30 @@ describe('PrintModal', () => {
         />
       );
 
-      expect(screen.getByText(/power off/i)).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      expect(screen.queryByText(/power off/i)).not.toBeInTheDocument();
     });
 
-    it('shows schedule options', () => {
+    it('shows power off for a selected printer with a smart socket', async () => {
+      const user = userEvent.setup();
       render(
         <PrintModal
           mode="create"
           archiveId={1}
           archiveName="Test Print"
+          initialSelectedPrinterIds={[1]}
           onClose={mockOnClose}
         />
       );
 
-      expect(screen.getByRole('button', { name: /asap/i })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /queue/i })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /schedule/i })).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      await waitFor(() => {
+        expect(screen.getByText(/power off/i)).toBeInTheDocument();
+      });
     });
 
-    it('orders schedule options by time', () => {
+    it('removes the queue, ASAP, and schedule switcher', async () => {
+      const user = userEvent.setup();
       render(
         <PrintModal
           mode="create"
@@ -488,8 +496,9 @@ describe('PrintModal', () => {
         />
       );
 
-      const options = screen.getAllByRole('button', { name: /^(asap|queue|schedule)$/i });
-      expect(options.map(button => button.textContent?.trim())).toEqual(['ASAP', 'Queue', 'Schedule']);
+      expect(screen.queryByRole('button', { name: /^(asap|queue|schedule)$/i })).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      expect(screen.getByRole('checkbox', { name: /insert at top of queue/i })).not.toBeChecked();
     });
 
     it('calls onClose when cancel is clicked', async () => {
@@ -574,7 +583,8 @@ describe('PrintModal', () => {
       expect(screen.getByText('Print Options')).toBeInTheDocument();
     });
 
-    it('shows Queue option', () => {
+    it('shows queue insertion controls', async () => {
+      const user = userEvent.setup();
       const item = createMockQueueItem();
 
       render(
@@ -587,10 +597,12 @@ describe('PrintModal', () => {
         />
       );
 
-      expect(screen.getByRole('button', { name: /queue/i })).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      expect(screen.getByRole('checkbox', { name: /insert at top of queue/i })).toBeInTheDocument();
     });
 
-    it('shows power off option', () => {
+    it('shows power off option', async () => {
+      const user = userEvent.setup();
       const item = createMockQueueItem();
 
       render(
@@ -603,6 +615,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
       expect(screen.getByText(/power off/i)).toBeInTheDocument();
     });
 
@@ -768,7 +781,7 @@ describe('PrintModal', () => {
       });
       expect(mappingSelect.querySelector('option[value="2"]')).not.toBeInTheDocument();
       fireEvent.change(mappingSelect, { target: { value: '1' } });
-      const matchPolicy = screen.getByLabelText(/Match Colour and Material/i);
+      const matchPolicy = screen.getByLabelText(/Match colour/i);
       expect(matchPolicy).toBeChecked();
       await user.click(matchPolicy);
       await user.click(screen.getByRole('button', { name: /^print$/i }));
@@ -956,7 +969,7 @@ describe('PrintModal', () => {
     });
   });
 
-  describe('stagger start', () => {
+  describe('removed stagger scheduling controls', () => {
     it('does not show stagger option with single printer in queue mode', async () => {
       const user = userEvent.setup();
       render(
@@ -978,7 +991,7 @@ describe('PrintModal', () => {
       expect(screen.queryByText('Stagger printer starts')).not.toBeInTheDocument();
     });
 
-    it('shows stagger option when multiple printers selected in queue mode', async () => {
+    it('does not show stagger option when multiple printers are selected', async () => {
       const user = userEvent.setup();
       render(
         <PrintModal
@@ -995,12 +1008,10 @@ describe('PrintModal', () => {
 
       await user.click(screen.getByText('Select all'));
 
-      await waitFor(() => {
-        expect(screen.getByText('Stagger printer starts')).toBeInTheDocument();
-      });
+      expect(screen.queryByText('Stagger printer starts')).not.toBeInTheDocument();
     });
 
-    it('shows stagger option in create mode with multiple printers', async () => {
+    it('does not show stagger option in create mode with multiple printers', async () => {
       const user = userEvent.setup();
       render(
         <PrintModal
@@ -1021,10 +1032,10 @@ describe('PrintModal', () => {
         expect(screen.getByText(/2 printers selected|3 printers selected/)).toBeInTheDocument();
       });
 
-      expect(screen.getByText('Stagger printer starts')).toBeInTheDocument();
+      expect(screen.queryByText('Stagger printer starts')).not.toBeInTheDocument();
     });
 
-    it('shows stagger preview in create mode when enabled', async () => {
+    it('does not show stagger preview controls in create mode', async () => {
       const user = userEvent.setup();
       render(
         <PrintModal
@@ -1041,16 +1052,8 @@ describe('PrintModal', () => {
 
       await user.click(screen.getByText('Select all'));
 
-      await waitFor(() => {
-        expect(screen.getByText('Stagger printer starts')).toBeInTheDocument();
-      });
-
-      await user.click(screen.getByLabelText('Stagger printer starts'));
-
-      await waitFor(() => {
-        // Default: 3 printers, group size 2 = 2 groups — preview text shown
-        expect(screen.getByText(/3 printers.*2 groups/)).toBeInTheDocument();
-      });
+      expect(screen.queryByText('Stagger printer starts')).not.toBeInTheDocument();
+      expect(screen.queryByText(/printers.*groups/)).not.toBeInTheDocument();
     });
 
     it('does not show stagger option in create mode with single printer', async () => {
@@ -1074,7 +1077,7 @@ describe('PrintModal', () => {
       expect(screen.queryByText('Stagger printer starts')).not.toBeInTheDocument();
     });
 
-    it('shows stagger inputs when stagger checkbox is enabled', async () => {
+    it('does not show stagger input controls', async () => {
       const user = userEvent.setup();
       render(
         <PrintModal
@@ -1091,19 +1094,12 @@ describe('PrintModal', () => {
 
       await user.click(screen.getByText('Select all'));
 
-      await waitFor(() => {
-        expect(screen.getByText('Stagger printer starts')).toBeInTheDocument();
-      });
-
-      await user.click(screen.getByLabelText('Stagger printer starts'));
-
-      await waitFor(() => {
-        expect(screen.getByText('Group size')).toBeInTheDocument();
-        expect(screen.getByText('Interval (min)')).toBeInTheDocument();
-      });
+      expect(screen.queryByText('Stagger printer starts')).not.toBeInTheDocument();
+      expect(screen.queryByText('Group size')).not.toBeInTheDocument();
+      expect(screen.queryByText('Interval (min)')).not.toBeInTheDocument();
     });
 
-    it('shows stagger preview with printer count', async () => {
+    it('does not show stagger preview after selecting all printers', async () => {
       const user = userEvent.setup();
       render(
         <PrintModal
@@ -1120,16 +1116,8 @@ describe('PrintModal', () => {
 
       await user.click(screen.getByText('Select all'));
 
-      await waitFor(() => {
-        expect(screen.getByText('Stagger printer starts')).toBeInTheDocument();
-      });
-
-      await user.click(screen.getByLabelText('Stagger printer starts'));
-
-      await waitFor(() => {
-        // Default: 3 printers, group size 2 = 2 groups — preview text includes printer count
-        expect(screen.getByText(/3 printers.*2 groups/)).toBeInTheDocument();
-      });
+      expect(screen.queryByText('Stagger printer starts')).not.toBeInTheDocument();
+      expect(screen.queryByText(/3 printers.*2 groups/)).not.toBeInTheDocument();
     });
   });
 
@@ -1422,6 +1410,7 @@ describe('PrintModal', () => {
       expect(qty.value).toBe('3');
 
       // Checkbox only renders once snippets are loaded AND quantity > 1
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
       await user.click(await screen.findByLabelText(/inject auto-print/i));
 
       await user.click(document.querySelector('button[type="submit"]') as HTMLElement);
@@ -1568,7 +1557,7 @@ describe('PrintModal', () => {
       });
     });
 
-    it('adds ASAP prints to the top of the queue', async () => {
+    it('adds prints to the top of the queue when selected', async () => {
       let capturedBody: Record<string, unknown> | null = null;
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
@@ -1593,6 +1582,8 @@ describe('PrintModal', () => {
         expect(screen.getByRole('button', { name: /^print$/i })).toBeInTheDocument();
       });
 
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      await user.click(screen.getByRole('checkbox', { name: /insert at top of queue/i }));
       await user.click(screen.getByRole('button', { name: /^print$/i }));
 
       await waitFor(() => {
@@ -1604,7 +1595,7 @@ describe('PrintModal', () => {
       });
     });
 
-    it('adds Queue prints to the back unless manual start is required', async () => {
+    it('adds prints to the back by default and supports manual start', async () => {
       let capturedBody: Record<string, unknown> | null = null;
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
@@ -1625,7 +1616,7 @@ describe('PrintModal', () => {
         />
       );
 
-      await user.click(screen.getByRole('button', { name: /^queue$/i }));
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
       expect(screen.getByLabelText(/require manual start/i)).toBeInTheDocument();
       await user.click(screen.getByLabelText(/require manual start/i));
       await user.click(screen.getByRole('button', { name: /^print$/i }));

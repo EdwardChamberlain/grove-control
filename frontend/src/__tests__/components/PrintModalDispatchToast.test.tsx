@@ -84,7 +84,7 @@ describe('PrintModal dispatch toast', () => {
     expect(toastMessages).toContain('Print queued');
   });
 
-  it('uses wait-for-idle copy when an ASAP target is offline', async () => {
+  it('uses queued copy when the target is offline', async () => {
     server.use(
       http.get('/api/v1/printers/:id/status', () => {
         return HttpResponse.json({ connected: false, state: null, ams: [], vt_tray: [] });
@@ -113,11 +113,10 @@ describe('PrintModal dispatch toast', () => {
     });
 
     const toastMessages = mockShowToast.mock.calls.map(call => call[0]);
-    expect(toastMessages).toContain('Will start when printer is idle');
-    expect(toastMessages).not.toContain('Print queued');
+    expect(toastMessages).toContain('Print queued');
   });
 
-  it('uses wait-for-idle copy when an ASAP target is held for plate clear', async () => {
+  it('uses queued copy when the target is held for plate clear', async () => {
     server.use(
       http.get('/api/v1/printers/:id/status', () => {
         return HttpResponse.json({
@@ -152,10 +151,10 @@ describe('PrintModal dispatch toast', () => {
     });
 
     const toastMessages = mockShowToast.mock.calls.map(call => call[0]);
-    expect(toastMessages).toContain('Will start when printer is idle');
+    expect(toastMessages).toContain('Print queued');
   });
 
-  it('uses wait-for-idle copy when an ASAP target is drying filament', async () => {
+  it('uses queued copy when the target is drying filament', async () => {
     server.use(
       http.get('/api/v1/printers/:id/status', () => {
         return HttpResponse.json({
@@ -190,6 +189,6 @@ describe('PrintModal dispatch toast', () => {
     });
 
     const toastMessages = mockShowToast.mock.calls.map(call => call[0]);
-    expect(toastMessages).toContain('Will start when printer is idle');
+    expect(toastMessages).toContain('Print queued');
   });
 });
