@@ -303,14 +303,6 @@ class AppSettings(BaseModel):
         description="Default nozzle offset calibration option for new prints (dual-nozzle printers only)",
     )
 
-    # Staggered batch start for multi-printer jobs
-    stagger_group_size: int = Field(
-        default=2, ge=1, le=50, description="Number of printers to start simultaneously in staggered mode"
-    )
-    stagger_interval_minutes: int = Field(
-        default=5, ge=1, le=60, description="Minutes between staggered printer groups"
-    )
-
     # Plate-clear confirmation for queue scheduling
     require_plate_clear: bool = Field(
         default=True,
@@ -505,8 +497,6 @@ class AppSettingsUpdate(BaseModel):
     default_layer_inspect: bool | None = None
     default_timelapse: bool | None = None
     default_nozzle_offset_cali: bool | None = None
-    stagger_group_size: int | None = Field(default=None, ge=1, le=50)
-    stagger_interval_minutes: int | None = Field(default=None, ge=1, le=60)
     require_plate_clear: bool | None = None
     queue_shortest_first: bool | None = None
     nozzle_temp_presets: str | None = None

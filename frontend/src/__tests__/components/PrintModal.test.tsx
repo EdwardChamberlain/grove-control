@@ -969,7 +969,7 @@ describe('PrintModal', () => {
     });
   });
 
-  describe.skip('removed stagger scheduling controls', () => {
+  describe('removed stagger scheduling controls', () => {
     it('does not show stagger option with single printer in queue mode', async () => {
       const user = userEvent.setup();
       render(
@@ -991,7 +991,7 @@ describe('PrintModal', () => {
       expect(screen.queryByText('Stagger printer starts')).not.toBeInTheDocument();
     });
 
-    it('shows stagger option when multiple printers selected in queue mode', async () => {
+    it('does not show stagger option when multiple printers are selected', async () => {
       const user = userEvent.setup();
       render(
         <PrintModal
@@ -1008,12 +1008,10 @@ describe('PrintModal', () => {
 
       await user.click(screen.getByText('Select all'));
 
-      await waitFor(() => {
-        expect(screen.getByText('Stagger printer starts')).toBeInTheDocument();
-      });
+      expect(screen.queryByText('Stagger printer starts')).not.toBeInTheDocument();
     });
 
-    it('shows stagger option in create mode with multiple printers', async () => {
+    it('does not show stagger option in create mode with multiple printers', async () => {
       const user = userEvent.setup();
       render(
         <PrintModal
@@ -1034,10 +1032,10 @@ describe('PrintModal', () => {
         expect(screen.getByText(/2 printers selected|3 printers selected/)).toBeInTheDocument();
       });
 
-      expect(screen.getByText('Stagger printer starts')).toBeInTheDocument();
+      expect(screen.queryByText('Stagger printer starts')).not.toBeInTheDocument();
     });
 
-    it('shows stagger preview in create mode when enabled', async () => {
+    it('does not show stagger preview controls in create mode', async () => {
       const user = userEvent.setup();
       render(
         <PrintModal
@@ -1054,16 +1052,8 @@ describe('PrintModal', () => {
 
       await user.click(screen.getByText('Select all'));
 
-      await waitFor(() => {
-        expect(screen.getByText('Stagger printer starts')).toBeInTheDocument();
-      });
-
-      await user.click(screen.getByLabelText('Stagger printer starts'));
-
-      await waitFor(() => {
-        // Default: 3 printers, group size 2 = 2 groups — preview text shown
-        expect(screen.getByText(/3 printers.*2 groups/)).toBeInTheDocument();
-      });
+      expect(screen.queryByText('Stagger printer starts')).not.toBeInTheDocument();
+      expect(screen.queryByText(/printers.*groups/)).not.toBeInTheDocument();
     });
 
     it('does not show stagger option in create mode with single printer', async () => {
@@ -1087,7 +1077,7 @@ describe('PrintModal', () => {
       expect(screen.queryByText('Stagger printer starts')).not.toBeInTheDocument();
     });
 
-    it('shows stagger inputs when stagger checkbox is enabled', async () => {
+    it('does not show stagger input controls', async () => {
       const user = userEvent.setup();
       render(
         <PrintModal
@@ -1104,19 +1094,12 @@ describe('PrintModal', () => {
 
       await user.click(screen.getByText('Select all'));
 
-      await waitFor(() => {
-        expect(screen.getByText('Stagger printer starts')).toBeInTheDocument();
-      });
-
-      await user.click(screen.getByLabelText('Stagger printer starts'));
-
-      await waitFor(() => {
-        expect(screen.getByText('Group size')).toBeInTheDocument();
-        expect(screen.getByText('Interval (min)')).toBeInTheDocument();
-      });
+      expect(screen.queryByText('Stagger printer starts')).not.toBeInTheDocument();
+      expect(screen.queryByText('Group size')).not.toBeInTheDocument();
+      expect(screen.queryByText('Interval (min)')).not.toBeInTheDocument();
     });
 
-    it('shows stagger preview with printer count', async () => {
+    it('does not show stagger preview after selecting all printers', async () => {
       const user = userEvent.setup();
       render(
         <PrintModal
@@ -1133,16 +1116,8 @@ describe('PrintModal', () => {
 
       await user.click(screen.getByText('Select all'));
 
-      await waitFor(() => {
-        expect(screen.getByText('Stagger printer starts')).toBeInTheDocument();
-      });
-
-      await user.click(screen.getByLabelText('Stagger printer starts'));
-
-      await waitFor(() => {
-        // Default: 3 printers, group size 2 = 2 groups — preview text includes printer count
-        expect(screen.getByText(/3 printers.*2 groups/)).toBeInTheDocument();
-      });
+      expect(screen.queryByText('Stagger printer starts')).not.toBeInTheDocument();
+      expect(screen.queryByText(/3 printers.*2 groups/)).not.toBeInTheDocument();
     });
   });
 

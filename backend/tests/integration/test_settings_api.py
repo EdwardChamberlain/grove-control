@@ -417,64 +417,6 @@ class TestSettingsAPI:
         assert isinstance(result["per_printer_mapping_expanded"], bool)
 
     # ========================================================================
-    # Stagger settings tests
-    # ========================================================================
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_stagger_settings_defaults(self, async_client: AsyncClient):
-        """Verify stagger settings have correct defaults."""
-        response = await async_client.get("/api/v1/settings/")
-        result = response.json()
-
-        assert result["stagger_group_size"] == 2
-        assert result["stagger_interval_minutes"] == 5
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_update_stagger_settings(self, async_client: AsyncClient):
-        """Verify stagger settings can be updated."""
-        response = await async_client.put(
-            "/api/v1/settings/",
-            json={"stagger_group_size": 3, "stagger_interval_minutes": 10},
-        )
-
-        assert response.status_code == 200
-        result = response.json()
-        assert result["stagger_group_size"] == 3
-        assert result["stagger_interval_minutes"] == 10
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_stagger_settings_persist(self, async_client: AsyncClient):
-        """Verify stagger settings persist after update."""
-        await async_client.put(
-            "/api/v1/settings/",
-            json={"stagger_group_size": 4, "stagger_interval_minutes": 15},
-        )
-
-        response = await async_client.get("/api/v1/settings/")
-        result = response.json()
-        assert result["stagger_group_size"] == 4
-        assert result["stagger_interval_minutes"] == 15
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_stagger_settings_validation(self, async_client: AsyncClient):
-        """Verify stagger settings reject out-of-range values."""
-        response = await async_client.put("/api/v1/settings/", json={"stagger_group_size": 0})
-        assert response.status_code == 422
-
-        response = await async_client.put("/api/v1/settings/", json={"stagger_group_size": 51})
-        assert response.status_code == 422
-
-        response = await async_client.put("/api/v1/settings/", json={"stagger_interval_minutes": 0})
-        assert response.status_code == 422
-
-        response = await async_client.put("/api/v1/settings/", json={"stagger_interval_minutes": 61})
-        assert response.status_code == 422
-
-    # ========================================================================
     # Default print options tests
     # ========================================================================
 

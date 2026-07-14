@@ -581,11 +581,11 @@ describe('SettingsPage', () => {
       await user.click(screen.getByText('Workflow'));
 
       await waitFor(() => {
-        expect(screen.getByText('Staggered Start')).toBeInTheDocument();
+        expect(screen.getByText('Default Print Options')).toBeInTheDocument();
       });
     });
 
-    it('shows stagger settings on Workflow tab', async () => {
+    it('does not show removed stagger settings on Workflow tab', async () => {
       const user = userEvent.setup();
       render(<SettingsPage />);
 
@@ -596,10 +596,9 @@ describe('SettingsPage', () => {
       await user.click(screen.getByText('Workflow'));
 
       await waitFor(() => {
-        expect(screen.getByText('Staggered Start')).toBeInTheDocument();
-        expect(screen.getByText('Group size')).toBeInTheDocument();
-        expect(screen.getByText('Interval (minutes)')).toBeInTheDocument();
+        expect(screen.getByText('Default Print Options')).toBeInTheDocument();
       });
+      expect(screen.queryByText('Staggered Start')).not.toBeInTheDocument();
     });
 
     it('shows auto-drying settings on Workflow tab', async () => {

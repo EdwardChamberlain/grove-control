@@ -1202,9 +1202,6 @@ export interface AppSettings {
   default_layer_inspect: boolean;
   default_timelapse: boolean;
   default_nozzle_offset_cali: boolean;
-  // Staggered batch start defaults
-  stagger_group_size: number;
-  stagger_interval_minutes: number;
   // Plate-clear confirmation
   require_plate_clear: boolean;
   // Shortest job first scheduling

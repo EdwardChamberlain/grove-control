@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Plus, Plug, AlertTriangle, RotateCcw, Bell, Download, RefreshCw, ExternalLink, Globe, Droplets, Thermometer, FileText, Edit2, Send, CheckCircle, XCircle, History, Trash2, Zap, TrendingUp, Calendar, DollarSign, Power, PowerOff, Key, Copy, Database, X, Shield, Printer, Cylinder, Wifi, Home, Video, Users, Lock, Unlock, ChevronDown, Save, Mail, Flame, Layers, ListOrdered, Code, Search, Scale, Settings as SettingsIcon, ScanEye, Cog, QrCode, Monitor } from 'lucide-react';
+import { Loader2, Plus, Plug, AlertTriangle, RotateCcw, Bell, Download, RefreshCw, ExternalLink, Globe, Droplets, Thermometer, FileText, Edit2, Send, CheckCircle, XCircle, History, Trash2, Zap, TrendingUp, Calendar, DollarSign, Power, PowerOff, Key, Copy, Database, X, Shield, Printer, Cylinder, Wifi, Home, Video, Users, Lock, Unlock, ChevronDown, Save, Mail, Flame, ListOrdered, Code, Search, Scale, Settings as SettingsIcon, ScanEye, Cog, QrCode, Monitor } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
@@ -69,7 +69,6 @@ registerSettingsSearch({ labelKey: 'settings.providers', tab: 'notifications', k
 registerSettingsSearch({ labelKey: 'settings.messageTemplates', tab: 'notifications', keywords: 'message templates notification text edit', anchor: 'card-templates' });
 registerSettingsSearch({ labelKey: 'settings.defaultPrintOptions', labelFallback: 'Default Print Options', tab: 'queue', keywords: 'print bed leveling flow calibration vibration first layer timelapse', anchor: 'card-print-options' });
 registerSettingsSearch({ labelKey: 'settings.tempFanPresetsTitle', labelFallback: 'Temperature & Fan Presets', tab: 'queue', keywords: 'temperature fan presets nozzle bed chamber quick buttons popover', anchor: 'card-temp-fan-presets' });
-registerSettingsSearch({ labelKey: 'settings.staggeredStart', labelFallback: 'Staggered Start', tab: 'queue', keywords: 'staggered batch delay start queue group', anchor: 'card-staggered' });
 registerSettingsSearch({ labelKey: 'settings.plateClear', labelFallback: 'Plate-Clear Confirmation', tab: 'queue', keywords: 'plate clear confirm auto queue', anchor: 'card-plate' });
 registerSettingsSearch({ labelKey: 'settings.gcodeInjection', labelFallback: 'G-code Injection', tab: 'queue', keywords: 'gcode injection start end autoprint farmloop swapmod autoclear printflow', anchor: 'card-gcode' });
 registerSettingsSearch({ labelKey: 'settings.slicerCard', labelFallback: 'Slicer', tab: 'queue', keywords: 'slicer orcaslicer bambustudio orca bambu api sidecar url docker preferred', anchor: 'card-slicer' });
@@ -987,8 +986,6 @@ export function SettingsPage() {
       (settings.default_layer_inspect ?? false) !== (localSettings.default_layer_inspect ?? false) ||
       (settings.default_timelapse ?? false) !== (localSettings.default_timelapse ?? false) ||
       (settings.default_nozzle_offset_cali ?? true) !== (localSettings.default_nozzle_offset_cali ?? true) ||
-      (settings.stagger_group_size ?? 2) !== (localSettings.stagger_group_size ?? 2) ||
-      (settings.stagger_interval_minutes ?? 5) !== (localSettings.stagger_interval_minutes ?? 5) ||
       (settings.require_plate_clear ?? false) !== (localSettings.require_plate_clear ?? false) ||
       (settings.nozzle_temp_presets ?? '') !== (localSettings.nozzle_temp_presets ?? '') ||
       (settings.bed_temp_presets ?? '') !== (localSettings.bed_temp_presets ?? '') ||
@@ -1080,8 +1077,6 @@ export function SettingsPage() {
         default_layer_inspect: localSettings.default_layer_inspect,
         default_timelapse: localSettings.default_timelapse,
         default_nozzle_offset_cali: localSettings.default_nozzle_offset_cali,
-        stagger_group_size: localSettings.stagger_group_size,
-        stagger_interval_minutes: localSettings.stagger_interval_minutes,
         require_plate_clear: localSettings.require_plate_clear,
         nozzle_temp_presets: localSettings.nozzle_temp_presets,
         bed_temp_presets: localSettings.bed_temp_presets,
@@ -4131,55 +4126,6 @@ export function SettingsPage() {
                   </div>
                 );
               })}
-            </CardContent>
-          </Card>
-
-          {/* Staggered Batch Start */}
-          <Card id="card-staggered">
-            <CardHeader>
-              <h3 className="text-base font-semibold text-white flex items-center gap-2">
-                <Layers className="w-4 h-4 text-bambu-green" />
-                {t('settings.staggeredStart', 'Staggered Start')}
-              </h3>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <p className="text-xs text-bambu-gray">
-                {t('settings.staggeredStartDescription', 'Default group size and interval when staggering multi-printer batch starts. Can be overridden per batch in the print modal.')}
-              </p>
-              <div className="flex gap-4">
-                <div className="flex-1">
-                  <label className="block text-xs text-bambu-gray mb-1">
-                    {t('settings.staggerGroupSize', 'Group size')}
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={50}
-                    value={localSettings.stagger_group_size ?? 2}
-                    onChange={(e) => updateSetting('stagger_group_size', Math.max(1, Math.min(50, parseInt(e.target.value) || 1)))}
-                    className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:outline-none focus:border-bambu-green"
-                  />
-                  <p className="text-xs text-bambu-gray mt-1">
-                    {t('settings.staggerGroupSizeHelp', 'Printers to start simultaneously per group')}
-                  </p>
-                </div>
-                <div className="flex-1">
-                  <label className="block text-xs text-bambu-gray mb-1">
-                    {t('settings.staggerInterval', 'Interval (minutes)')}
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={60}
-                    value={localSettings.stagger_interval_minutes ?? 5}
-                    onChange={(e) => updateSetting('stagger_interval_minutes', Math.max(1, Math.min(60, parseInt(e.target.value) || 1)))}
-                    className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:outline-none focus:border-bambu-green"
-                  />
-                  <p className="text-xs text-bambu-gray mt-1">
-                    {t('settings.staggerIntervalHelp', 'Delay between each group starting')}
-                  </p>
-                </div>
-              </div>
             </CardContent>
           </Card>
 
