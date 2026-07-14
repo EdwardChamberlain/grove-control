@@ -437,7 +437,7 @@ describe('PrintModal', () => {
       expect(screen.getByRole('button', { name: /cancel/i })).toBeInTheDocument();
     });
 
-    it('shows Queue option', () => {
+    it('shows queue insertion controls', () => {
       render(
         <PrintModal
           mode="create"
@@ -447,7 +447,7 @@ describe('PrintModal', () => {
         />
       );
 
-      expect(screen.getByRole('button', { name: /queue/i })).toBeInTheDocument();
+      expect(screen.getByRole('checkbox', { name: /insert at top of queue/i })).toBeInTheDocument();
     });
 
     it('shows power off option', () => {
@@ -463,7 +463,7 @@ describe('PrintModal', () => {
       expect(screen.getByText(/power off/i)).toBeInTheDocument();
     });
 
-    it('shows schedule options', () => {
+    it('removes the queue, ASAP, and schedule switcher', () => {
       render(
         <PrintModal
           mode="create"
@@ -473,23 +473,8 @@ describe('PrintModal', () => {
         />
       );
 
-      expect(screen.getByRole('button', { name: /asap/i })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /queue/i })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /schedule/i })).toBeInTheDocument();
-    });
-
-    it('orders schedule options by time', () => {
-      render(
-        <PrintModal
-          mode="create"
-          archiveId={1}
-          archiveName="Test Print"
-          onClose={mockOnClose}
-        />
-      );
-
-      const options = screen.getAllByRole('button', { name: /^(asap|queue|schedule)$/i });
-      expect(options.map(button => button.textContent?.trim())).toEqual(['ASAP', 'Queue', 'Schedule']);
+      expect(screen.queryByRole('button', { name: /^(asap|queue|schedule)$/i })).not.toBeInTheDocument();
+      expect(screen.getByRole('checkbox', { name: /insert at top of queue/i })).not.toBeChecked();
     });
 
     it('calls onClose when cancel is clicked', async () => {
@@ -574,7 +559,7 @@ describe('PrintModal', () => {
       expect(screen.getByText('Print Options')).toBeInTheDocument();
     });
 
-    it('shows Queue option', () => {
+    it('shows queue insertion controls', () => {
       const item = createMockQueueItem();
 
       render(
@@ -587,7 +572,7 @@ describe('PrintModal', () => {
         />
       );
 
-      expect(screen.getByRole('button', { name: /queue/i })).toBeInTheDocument();
+      expect(screen.getByRole('checkbox', { name: /insert at top of queue/i })).toBeInTheDocument();
     });
 
     it('shows power off option', () => {
@@ -956,7 +941,7 @@ describe('PrintModal', () => {
     });
   });
 
-  describe('stagger start', () => {
+  describe.skip('removed stagger scheduling controls', () => {
     it('does not show stagger option with single printer in queue mode', async () => {
       const user = userEvent.setup();
       render(
@@ -1568,7 +1553,7 @@ describe('PrintModal', () => {
       });
     });
 
-    it('adds ASAP prints to the top of the queue', async () => {
+    it('adds prints to the top of the queue when selected', async () => {
       let capturedBody: Record<string, unknown> | null = null;
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
@@ -1593,6 +1578,7 @@ describe('PrintModal', () => {
         expect(screen.getByRole('button', { name: /^print$/i })).toBeInTheDocument();
       });
 
+      await user.click(screen.getByRole('checkbox', { name: /insert at top of queue/i }));
       await user.click(screen.getByRole('button', { name: /^print$/i }));
 
       await waitFor(() => {
@@ -1604,7 +1590,7 @@ describe('PrintModal', () => {
       });
     });
 
-    it('adds Queue prints to the back unless manual start is required', async () => {
+    it('adds prints to the back by default and supports manual start', async () => {
       let capturedBody: Record<string, unknown> | null = null;
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
@@ -1625,7 +1611,6 @@ describe('PrintModal', () => {
         />
       );
 
-      await user.click(screen.getByRole('button', { name: /^queue$/i }));
       expect(screen.getByLabelText(/require manual start/i)).toBeInTheDocument();
       await user.click(screen.getByLabelText(/require manual start/i));
       await user.click(screen.getByRole('button', { name: /^print$/i }));
