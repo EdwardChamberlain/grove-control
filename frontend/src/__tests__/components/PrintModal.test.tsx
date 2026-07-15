@@ -14,7 +14,7 @@ import { PrintModal } from '../../components/PrintModal';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import type { PrintQueueItem } from '../../api/client';
-import { formatDateInput, getMaximumScheduleDate, parseDateInput, parseTimeInput } from '../../utils/date';
+import { formatDateInput, parseDateInput, parseTimeInput } from '../../utils/date';
 
 const mockPrinters = [
   { id: 1, name: 'X1 Carbon', model: 'X1C', ip_address: '192.168.1.100', enabled: true, is_active: true },
@@ -604,16 +604,26 @@ describe('PrintModal', () => {
       expect(timePicker).toHaveAttribute('type', 'time');
       expect(timePicker).toHaveAttribute('step', '60');
       expect((timePicker as HTMLInputElement).value).toMatch(/^\d{2}:(00|15|30|45)$/);
-      await user.click(screen.getByTitle('Open calendar'));
+      const calendarTrigger = screen.getByTitle('Open calendar');
+      await user.click(calendarTrigger);
       const datePicker = screen.getByRole('dialog', { name: 'Choose date' });
       expect(datePicker).toBeInTheDocument();
       expect(datePicker).toHaveClass('bottom-full', 'z-50');
       expect(within(datePicker).getByRole('grid', { name: 'Choose date' })).toBeInTheDocument();
       expect(within(datePicker).getAllByRole('columnheader')).toHaveLength(7);
-      expect(within(datePicker).getByRole('button', { name: 'Previous month' })).toBeInTheDocument();
+      const previousMonth = within(datePicker).getByRole('button', { name: 'Previous month' });
+      expect(previousMonth).toBeInTheDocument();
       expect(within(datePicker).getByRole('button', { name: 'Next month' })).toBeInTheDocument();
-      await user.click(within(datePicker).getByRole('button', { name: 'Cancel' }));
+      expect(previousMonth).toHaveFocus();
+      const save = within(datePicker).getByRole('button', { name: 'Save' });
+      save.focus();
+      await user.tab();
+      expect(previousMonth).toHaveFocus();
+      await user.tab({ shift: true });
+      expect(save).toHaveFocus();
+      await user.keyboard('{Escape}');
       expect(screen.queryByRole('dialog', { name: 'Choose date' })).not.toBeInTheDocument();
+      expect(calendarTrigger).toHaveFocus();
     });
 
     it('applies a date selected in the postpone calendar', async () => {
@@ -688,7 +698,7 @@ describe('PrintModal', () => {
       expect(screen.getByRole('button', { name: /^print$/i })).toBeDisabled();
     });
 
-    it('rejects a postpone date beyond the six-calendar-month limit', async () => {
+    it('allows a postponed print more than six months away', async () => {
       const user = userEvent.setup();
       render(
         <PrintModal
@@ -704,12 +714,12 @@ describe('PrintModal', () => {
       await user.click(screen.getByRole('checkbox', { name: 'Postpone print' }));
       const dateInput = screen.getByLabelText('Do not start before');
       await waitFor(() => expect(dateInput).not.toHaveValue(''));
-      const outsideLimit = getMaximumScheduleDate();
-      outsideLimit.setDate(outsideLimit.getDate() + 1);
-      fireEvent.change(dateInput, { target: { value: formatDateInput(outsideLimit, 'system') } });
+      const longFutureDate = new Date(2099, 11, 31, 9, 30, 0, 0);
+      fireEvent.change(dateInput, { target: { value: formatDateInput(longFutureDate, 'system') } });
+      fireEvent.change(screen.getByLabelText('Postpone time'), { target: { value: '09:30' } });
 
-      expect(screen.getByText('Choose a date within six months')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /^print$/i })).toBeDisabled();
+      expect(screen.queryByText('Choose a date within six months')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^print$/i })).toBeEnabled();
     });
 
     it('only shows power off when the selected printer has a smart socket', async () => {
@@ -811,7 +821,7 @@ describe('PrintModal', () => {
       expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument();
     });
 
-    it('preserves a scheduled time when saving an existing queue item', async () => {
+    it('preserves a long-future scheduled time when saving an existing queue item', async () => {
       let capturedBody: Record<string, unknown> | null = null;
       server.use(
         http.patch('/api/v1/queue/:id', async ({ request }) => {
@@ -820,8 +830,7 @@ describe('PrintModal', () => {
         }),
       );
       const user = userEvent.setup();
-      const scheduledTime = getMaximumScheduleDate();
-      scheduledTime.setSeconds(0, 0);
+      const scheduledTime = new Date(2099, 11, 31, 9, 30, 0, 0);
       const item = createMockQueueItem({ scheduled_time: scheduledTime.toISOString() });
 
       render(<PrintModal mode="edit-queue-item" archiveId={1} archiveName="Test Print" queueItem={item} onClose={mockOnClose} />);
@@ -843,8 +852,7 @@ describe('PrintModal', () => {
         }),
       );
       const user = userEvent.setup();
-      const scheduledTime = getMaximumScheduleDate();
-      scheduledTime.setSeconds(0, 0);
+      const scheduledTime = new Date(2099, 11, 31, 9, 30, 0, 0);
       const item = createMockQueueItem({ scheduled_time: scheduledTime.toISOString() });
 
       render(<PrintModal mode="edit-queue-item" archiveId={1} archiveName="Test Print" queueItem={item} onClose={mockOnClose} />);

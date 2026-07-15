@@ -4327,7 +4327,6 @@ export default {
     chooseDate: '日付を選択',
     previousMonth: '前の月',
     nextMonth: '次の月',
-    scheduleWithinSixMonths: '6か月以内の日付を選択してください',
     requireManualStart: '手動開始を要求',
     postponePrint: '印刷を延期',
     postponeTime: '印刷時刻',

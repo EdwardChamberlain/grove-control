@@ -4315,7 +4315,6 @@ export default {
     chooseDate: '选择日期',
     previousMonth: '上个月',
     nextMonth: '下个月',
-    scheduleWithinSixMonths: '请选择六个月内的日期',
     requireManualStart: '要求手动开始',
     postponePrint: '延后打印',
     postponeTime: '打印时间',

@@ -14,7 +14,7 @@ import { useMultiPrinterFilamentMapping, type PerPrinterConfig } from '../../hoo
 import { getColorName } from '../../utils/colors';
 import { getCurrencySymbol } from '../../utils/currency';
 import { getBedTypeInfo } from '../../utils/bedType';
-import { isWithinSchedulingWindow, toDateTimeLocalValue, parseUTCDate } from '../../utils/date';
+import { toDateTimeLocalValue, parseUTCDate } from '../../utils/date';
 import { getGlobalTrayId, effectivePreferLowest } from '../../utils/amsHelpers';
 import { FilamentMapping } from './FilamentMapping';
 import { FilamentOverride } from './FilamentOverride';
@@ -943,7 +943,7 @@ export function PrintModal({
 
     if (scheduleOptions.postponePrint) {
       const scheduledTime = new Date(scheduleOptions.scheduledTime);
-      if (!scheduleOptions.scheduledTime || scheduledTime <= new Date() || !isWithinSchedulingWindow(scheduledTime)) return false;
+      if (!scheduleOptions.scheduledTime || scheduledTime <= new Date()) return false;
     }
 
     return true;

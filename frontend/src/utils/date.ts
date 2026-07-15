@@ -191,33 +191,6 @@ export function toDateTimeLocalValue(date: Date): string {
 }
 
 /**
- * Return the latest local date/time that may be used to schedule a print.
- * Uses calendar months rather than a fixed day count so 31 August correctly
- * caps at 28/29 February.
- */
-export function getMaximumScheduleDate(now: Date = new Date()): Date {
-  const targetMonth = now.getMonth() + 6;
-  const targetYear = now.getFullYear() + Math.floor(targetMonth / 12);
-  const normalizedMonth = targetMonth % 12;
-  const lastDayOfTargetMonth = new Date(targetYear, normalizedMonth + 1, 0).getDate();
-
-  return new Date(
-    targetYear,
-    normalizedMonth,
-    Math.min(now.getDate(), lastDayOfTargetMonth),
-    now.getHours(),
-    now.getMinutes(),
-    now.getSeconds(),
-    now.getMilliseconds(),
-  );
-}
-
-/** Whether a local scheduled time is no more than six calendar months away. */
-export function isWithinSchedulingWindow(date: Date, now: Date = new Date()): boolean {
-  return date <= getMaximumScheduleDate(now);
-}
-
-/**
  * Apply time format setting to Intl.DateTimeFormatOptions.
  * This modifies the options object in place and returns it.
  */

@@ -4104,7 +4104,6 @@ export default {
     chooseDate: '날짜 선택',
     previousMonth: '이전 달',
     nextMonth: '다음 달',
-    scheduleWithinSixMonths: '6개월 이내의 날짜를 선택하세요',
     requireManualStart: '수동 시작 필요',
     postponePrint: '인쇄 연기',
     postponeTime: '인쇄 시간',

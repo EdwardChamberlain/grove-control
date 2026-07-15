@@ -230,26 +230,16 @@ test('postponed print submits its UTC start time and is shown as scheduled in th
   await page.getByRole('button', { name: /Queue options/i }).click();
   await page.locator('label', { hasText: 'Postpone print' }).click();
   await expect(page.getByRole('checkbox', { name: /Postpone print/i })).toBeChecked();
-  const schedule = await page.evaluate(() => {
-    const date = new Date();
-    date.setDate(15);
-    date.setMonth(date.getMonth() + 5);
-    date.setHours(9, 30, 0, 0);
-    return {
-      dateInput: `${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}/${date.getFullYear()}`,
-      utcTime: date.toISOString(),
-    };
-  });
-  await page.getByLabel(/Do not start before/i).fill(schedule.dateInput);
+  await page.getByLabel(/Do not start before/i).fill('12/31/2099');
   await page.getByLabel(/Postpone time/i).fill('09:30');
   await page.getByRole('button', { name: /^Print$/i }).last().click();
 
   await expect.poll(() => calls.some((call) => call.method === 'POST' && call.path === '/api/v1/queue/')).toBe(true);
   const queueCall = calls.find((call) => call.method === 'POST' && call.path === '/api/v1/queue/');
-  expect(queueCall?.body).toMatchObject({ scheduled_time: schedule.utcTime });
+  expect(queueCall?.body).toMatchObject({ scheduled_time: '2099-12-31T09:30:00.000Z' });
 
   await page.goto('/queue');
-  await expect(page.getByText(/^Scheduled · /)).toBeVisible();
+  await expect(page.getByText(/Scheduled · Dec 31, 2099, 09:30 AM/)).toBeVisible();
 });
 
 test('invalid postponed dates cannot create a queue item', async ({ page }) => {
@@ -263,27 +253,6 @@ test('invalid postponed dates cannot create a queue item', async ({ page }) => {
   await page.getByLabel(/Do not start before/i).fill('02/31/2099');
 
   await expect(page.getByText(/Please enter a valid date and time/i)).toBeVisible();
-  await expect(page.getByRole('button', { name: /^Print$/i }).last()).toBeDisabled();
-  expect(calls.some((call) => call.method === 'POST' && call.path === '/api/v1/queue/')).toBe(false);
-});
-
-test('postponed prints beyond six calendar months cannot create a queue item', async ({ page }) => {
-  const calls: ApiCall[] = [];
-  await mockApi(page, calls);
-
-  await page.goto('/archives');
-  await page.getByRole('button', { name: /^Print$/i }).first().click();
-  await page.getByRole('button', { name: /Queue options/i }).click();
-  await page.locator('label', { hasText: 'Postpone print' }).click();
-  const outsideLimit = await page.evaluate(() => {
-    const date = new Date();
-    date.setDate(15);
-    date.setMonth(date.getMonth() + 7);
-    return `${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}/${date.getFullYear()}`;
-  });
-  await page.getByLabel(/Do not start before/i).fill(outsideLimit);
-
-  await expect(page.getByText(/Choose a date within six months/i)).toBeVisible();
   await expect(page.getByRole('button', { name: /^Print$/i }).last()).toBeDisabled();
   expect(calls.some((call) => call.method === 'POST' && call.path === '/api/v1/queue/')).toBe(false);
 });

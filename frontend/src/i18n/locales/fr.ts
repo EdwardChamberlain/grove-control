@@ -4316,7 +4316,6 @@ export default {
     chooseDate: 'Choisir une date',
     previousMonth: 'Mois précédent',
     nextMonth: 'Mois suivant',
-    scheduleWithinSixMonths: 'Choisissez une date dans les six prochains mois',
     requireManualStart: 'Démarrage manuel requis',
     postponePrint: 'Reporter l’impression',
     postponeTime: 'Heure d’impression',

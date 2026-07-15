@@ -1530,13 +1530,10 @@ export function QueuePage() {
       items = items.filter(matchesLocationFilter);
     }
 
-    // Helper to get scheduled time as timestamp (ASAP/placeholder = 0 for earliest)
+    // Helper to get scheduled time as timestamp (ASAP = 0 for earliest)
     const getScheduledTime = (item: PrintQueueItem): number => {
       if (!item.scheduled_time) return 0;
-      const time = parseUTCDate(item.scheduled_time)?.getTime() ?? 0;
-      // Placeholder dates (> 6 months out) are treated as ASAP
-      const sixMonthsFromNow = Date.now() + (180 * 24 * 60 * 60 * 1000);
-      return time > sixMonthsFromNow ? 0 : time;
+      return parseUTCDate(item.scheduled_time)?.getTime() ?? 0;
     };
 
     // When SJF is enabled, override sort to match scheduler order

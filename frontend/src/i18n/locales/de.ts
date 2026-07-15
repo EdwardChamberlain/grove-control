@@ -4327,7 +4327,6 @@ export default {
     chooseDate: 'Datum auswählen',
     previousMonth: 'Vorheriger Monat',
     nextMonth: 'Nächster Monat',
-    scheduleWithinSixMonths: 'Wählen Sie ein Datum innerhalb der nächsten sechs Monate',
     requireManualStart: 'Manuellen Start erfordern',
     postponePrint: 'Druck verschieben',
     postponeTime: 'Druckzeit',

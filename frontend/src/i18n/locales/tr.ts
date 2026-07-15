@@ -4305,7 +4305,6 @@ export default {
     chooseDate: 'Tarih seç',
     previousMonth: 'Önceki ay',
     nextMonth: 'Sonraki ay',
-    scheduleWithinSixMonths: 'Altı ay içindeki bir tarihi seçin',
     requireManualStart: 'Manuel başlatma gerektir',
     postponePrint: 'Yazdırmayı ertele',
     postponeTime: 'Yazdırma zamanı',
