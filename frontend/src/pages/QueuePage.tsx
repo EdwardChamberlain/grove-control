@@ -571,6 +571,12 @@ function SortableQueueItem({
                 {t('queue.badges.staged')}
               </span>
             )}
+            {isPending && item.scheduled_time && (parseUTCDate(item.scheduled_time)?.getTime() ?? 0) > Date.now() && (
+              <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 bg-yellow-500/10 text-yellow-300 rounded-full border border-yellow-500/20 flex items-center gap-1">
+                <Calendar className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                {t('queue.scheduledTime')}
+              </span>
+            )}
             {item.require_previous_success && (
               <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 bg-orange-500/10 text-orange-400 rounded-full border border-orange-500/20">
                 {t('queue.badges.requiresPrevious')}

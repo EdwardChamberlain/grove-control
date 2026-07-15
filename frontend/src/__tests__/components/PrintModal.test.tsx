@@ -452,6 +452,22 @@ describe('PrintModal', () => {
       expect(screen.getByRole('checkbox', { name: /insert at top of queue/i })).toBeInTheDocument();
     });
 
+    it('reveals a do-not-start-before picker when postponing a print', async () => {
+      const user = userEvent.setup();
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Test Print"
+          onClose={mockOnClose}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      await user.click(screen.getByRole('checkbox', { name: 'Postpone print' }));
+      expect(screen.getByText('Do not start before')).toBeInTheDocument();
+    });
+
     it('only shows power off when the selected printer has a smart socket', async () => {
       const user = userEvent.setup();
       render(

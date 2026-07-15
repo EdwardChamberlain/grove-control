@@ -4324,6 +4324,8 @@ export default {
     invalidDateTime: '有効な日時を入力してください',
     openCalendar: 'カレンダーを開く',
     requireManualStart: '手動開始を要求',
+    postponePrint: '印刷を延期',
+    doNotStartBefore: 'この時刻より前には開始しない',
     requirePreviousSuccess: '前の印刷が成功した場合のみ開始',
     autoOffAfter: '完了後にプリンターの電源を切る',
     helpAsap: '印刷はキューの先頭に追加され、対象プリンターがアイドルになるとすぐに開始します。',

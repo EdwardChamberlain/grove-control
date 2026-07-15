@@ -4101,6 +4101,8 @@ export default {
     invalidDateTime: '유효한 날짜와 시간을 입력하세요',
     openCalendar: '달력 열기',
     requireManualStart: '수동 시작 필요',
+    postponePrint: '인쇄 연기',
+    doNotStartBefore: '다음 시간 전에는 시작하지 않음',
     requirePreviousSuccess: '이전 인쇄가 성공한 경우에만 시작',
     autoOffAfter: '완료 후 프린터 전원 끄기',
     helpAsap: '인쇄가 대기열 맨 앞에 추가되고 적합한 프린터가 유휴 상태가 되는 즉시 시작됩니다.',

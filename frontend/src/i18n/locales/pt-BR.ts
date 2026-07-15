@@ -4312,6 +4312,8 @@ export default {
     invalidDateTime: 'Digite uma data e hora válidas',
     openCalendar: 'Abrir calendário',
     requireManualStart: 'Exigir início manual',
+    postponePrint: 'Adiar impressão',
+    doNotStartBefore: 'Não iniciar antes de',
     requirePreviousSuccess: 'Iniciar somente se a impressão anterior foi concluída com sucesso',
     autoOffAfter: 'Desligar impressora ao finalizar',
     helpAsap: 'A impressão será adicionada ao topo da fila e começará assim que uma impressora elegível estiver ociosa.',

@@ -4348,6 +4348,8 @@ export default {
     invalidDateTime: 'Please enter a valid date and time',
     openCalendar: 'Open calendar',
     requireManualStart: 'Require manual start',
+    postponePrint: 'Postpone print',
+    doNotStartBefore: 'Do not start before',
     requirePreviousSuccess: 'Only start if previous print succeeded',
     autoOffAfter: 'Power off printer when done',
     helpAsap: 'Print will be added to the top of the queue and start as soon as an eligible printer is idle.',

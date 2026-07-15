@@ -4302,6 +4302,8 @@ export default {
     invalidDateTime: 'Lütfen geçerli bir tarih ve saat girin',
     openCalendar: 'Takvimi aç',
     requireManualStart: 'Manuel başlatma gerektir',
+    postponePrint: 'Yazdırmayı ertele',
+    doNotStartBefore: 'Şundan önce başlatma',
     requirePreviousSuccess: 'Yalnızca önceki baskı başarılıysa başlat',
     autoOffAfter: 'Bittiğinde yazıcıyı kapat',
     helpAsap: 'Baskı kuyruğun en üstüne eklenir ve uygun bir yazıcı boştaysa başlar.',

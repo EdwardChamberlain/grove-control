@@ -4324,6 +4324,8 @@ export default {
     invalidDateTime: 'Bitte ein gültiges Datum und eine gültige Uhrzeit eingeben',
     openCalendar: 'Kalender öffnen',
     requireManualStart: 'Manuellen Start erfordern',
+    postponePrint: 'Druck verschieben',
+    doNotStartBefore: 'Nicht starten vor',
     requirePreviousSuccess: 'Nur starten, wenn der vorherige Druck erfolgreich war',
     autoOffAfter: 'Drucker nach Abschluss ausschalten',
     helpAsap: 'Der Druck wird oben in die Warteschlange eingefügt und startet, sobald ein geeigneter Drucker im Leerlauf ist.',

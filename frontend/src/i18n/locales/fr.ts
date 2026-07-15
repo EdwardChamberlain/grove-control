@@ -4313,6 +4313,8 @@ export default {
     invalidDateTime: 'Veuillez saisir une date et une heure valides',
     openCalendar: 'Ouvrir calendrier',
     requireManualStart: 'Démarrage manuel requis',
+    postponePrint: 'Reporter l’impression',
+    doNotStartBefore: 'Ne pas démarrer avant',
     requirePreviousSuccess: 'Démarrer seulement si l\'impression précédente a réussi',
     autoOffAfter: 'Éteindre l\'imprimante à la fin',
     helpAsap: 'L\'impression sera ajoutée en haut de la file et démarrera dès qu\'une imprimante éligible sera inactive.',

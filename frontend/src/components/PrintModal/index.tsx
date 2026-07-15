@@ -14,7 +14,8 @@ import { useMultiPrinterFilamentMapping, type PerPrinterConfig } from '../../hoo
 import { getColorName } from '../../utils/colors';
 import { getCurrencySymbol } from '../../utils/currency';
 import { getBedTypeInfo } from '../../utils/bedType';
-import { getGlobalTrayId, effectivePreferLowest } from '../../utils/amsHelpers';
+import { toDateTimeLocalValue, parseUTCDate } from '../../utils/date';
+import { getGlobalTrayId, isPlaceholderDate, effectivePreferLowest } from '../../utils/amsHelpers';
 import { FilamentMapping } from './FilamentMapping';
 import { FilamentOverride } from './FilamentOverride';
 import { PlateSelector } from './PlateSelector';
@@ -107,8 +108,13 @@ export function PrintModal({
 
   const [scheduleOptions, setScheduleOptions] = useState<ScheduleOptions>(() => {
     if (mode === 'edit-queue-item' && queueItem) {
+      const scheduledTime = queueItem.scheduled_time && !isPlaceholderDate(queueItem.scheduled_time)
+        ? toDateTimeLocalValue(parseUTCDate(queueItem.scheduled_time) ?? new Date())
+        : '';
       return {
         insertAtTop: false,
+        postponePrint: Boolean(queueItem.scheduled_time && !isPlaceholderDate(queueItem.scheduled_time)),
+        scheduledTime,
         requireManualStart: queueItem.manual_start,
         requirePreviousSuccess: queueItem.require_previous_success,
         autoOffAfter: queueItem.auto_off_after,
@@ -786,6 +792,9 @@ export function PrintModal({
         skip_filament_check: options?.skipFilamentCheck === true ? true : undefined,
         ams_mapping: printerId ? getMappingForPrinter(printerId) : undefined,
         plate_id: plateOverride !== undefined ? plateOverride : selectedPlate,
+        scheduled_time: scheduleOptions.postponePrint && scheduleOptions.scheduledTime
+          ? new Date(scheduleOptions.scheduledTime).toISOString()
+          : undefined,
         ...printOptions,
         project_id: projectId ?? undefined,
         batch_id: autoBatchId ?? undefined,
@@ -816,7 +825,9 @@ export function PrintModal({
               manual_start: scheduleOptions.requireManualStart,
               ams_mapping: undefined,
               plate_id: plateId,
-              scheduled_time: null,
+              scheduled_time: scheduleOptions.postponePrint && scheduleOptions.scheduledTime
+                ? new Date(scheduleOptions.scheduledTime).toISOString()
+                : null,
               ...printOptions,
             };
             await updateQueueMutation.mutateAsync(updateData);
@@ -862,7 +873,9 @@ export function PrintModal({
                 manual_start: scheduleOptions.requireManualStart,
                 ams_mapping: printerMapping,
                 plate_id: plateId,
-                scheduled_time: null,
+                scheduled_time: scheduleOptions.postponePrint && scheduleOptions.scheduledTime
+                  ? new Date(scheduleOptions.scheduledTime).toISOString()
+                  : null,
                 ...printOptions,
               };
               await updateQueueMutation.mutateAsync(updateData);
@@ -1187,6 +1200,8 @@ export function PrintModal({
             <ScheduleOptionsPanel
               options={scheduleOptions}
               onChange={setScheduleOptions}
+              dateFormat={settings?.date_format || 'system'}
+              timeFormat={settings?.time_format || 'system'}
               canControlPrinter={hasPermission('printers:control')}
               canInsertAtTop={canInsertAtTop}
               showAutoOff={canAutoOffAfterPrint}

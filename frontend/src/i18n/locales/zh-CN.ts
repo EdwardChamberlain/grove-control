@@ -4312,6 +4312,8 @@ export default {
     invalidDateTime: '请输入有效的日期和时间',
     openCalendar: '打开日历',
     requireManualStart: '要求手动开始',
+    postponePrint: '延后打印',
+    doNotStartBefore: '请勿早于此时间开始',
     requirePreviousSuccess: '仅在上一次打印成功后开始',
     autoOffAfter: '完成后关闭打印机',
     helpAsap: '打印将添加到队列顶部，并在符合条件的打印机空闲后立即开始。',

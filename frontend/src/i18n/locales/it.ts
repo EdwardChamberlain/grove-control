@@ -4312,6 +4312,8 @@ export default {
     invalidDateTime: 'Inserisci data e ora valide',
     openCalendar: 'Apri calendario',
     requireManualStart: 'Richiedi avvio manuale',
+    postponePrint: 'Posticipa stampa',
+    doNotStartBefore: 'Non avviare prima di',
     requirePreviousSuccess: 'Avvia solo se la stampa precedente è riuscita',
     autoOffAfter: 'Spegni la stampante al termine',
     helpAsap: 'La stampa verrà aggiunta in cima alla coda e partirà appena una stampante idonea è inattiva.',
