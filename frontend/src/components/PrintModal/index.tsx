@@ -940,8 +940,10 @@ export function PrintModal({
     // For multi-plate files, need at least one plate selected
     if (isMultiPlate && selectedPlates.size === 0) return false;
 
+    if (scheduleOptions.postponePrint && (!scheduleOptions.scheduledTime || new Date(scheduleOptions.scheduledTime) <= new Date())) return false;
+
     return true;
-  }, [selectedPrinters.length, assignmentMode, targetModel, isMultiPlate, selectedPlates.size, isPending]);
+  }, [selectedPrinters.length, assignmentMode, targetModel, isMultiPlate, selectedPlates.size, isPending, scheduleOptions.postponePrint, scheduleOptions.scheduledTime]);
 
   // Quantity only applies for single-printer or model-based assignment (not multi-printer)
   const effectiveQuantity = (assignmentMode === 'printer' && selectedPrinters.length > 1) ? 1 : quantity;

@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils';
 import { PrintModal } from '../../components/PrintModal';
@@ -452,7 +452,7 @@ describe('PrintModal', () => {
       expect(screen.getByRole('checkbox', { name: /insert at top of queue/i })).toBeInTheDocument();
     });
 
-    it('reveals a do-not-start-before picker when postponing a print', async () => {
+    it('uses a native time picker with a quarter-hour default when postponing a print', async () => {
       const user = userEvent.setup();
       render(
         <PrintModal
@@ -464,8 +464,39 @@ describe('PrintModal', () => {
       );
 
       await user.click(screen.getByRole('button', { name: /queue options/i }));
-      await user.click(screen.getByRole('checkbox', { name: 'Postpone print' }));
+      const postponePrint = screen.getByRole('checkbox', { name: 'Postpone print' });
+      await user.click(postponePrint);
       expect(screen.getByText('Do not start before')).toBeInTheDocument();
+      expect(postponePrint.closest('label')?.nextElementSibling).toHaveTextContent('Do not start before');
+      const timePicker = screen.getByLabelText('Postpone time');
+      expect(timePicker).toHaveAttribute('type', 'time');
+      expect(timePicker).toHaveAttribute('step', '60');
+      expect((timePicker as HTMLInputElement).value).toMatch(/^\d{2}:(00|15|30|45)$/);
+      await user.click(screen.getByTitle('Open calendar'));
+      const datePicker = screen.getByRole('dialog', { name: 'Choose date' });
+      expect(datePicker).toBeInTheDocument();
+      await user.click(within(datePicker).getByRole('button', { name: 'Cancel' }));
+      expect(screen.queryByRole('dialog', { name: 'Choose date' })).not.toBeInTheDocument();
+    });
+
+    it('prevents a postponed print from using a past start time', async () => {
+      const user = userEvent.setup();
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Test Print"
+          initialSelectedPrinterIds={[1]}
+          onClose={mockOnClose}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      await user.click(screen.getByRole('checkbox', { name: 'Postpone print' }));
+      fireEvent.change(screen.getByLabelText('Postpone time'), { target: { value: '00:00' } });
+
+      expect(screen.getByText('Choose a future date and time')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^print$/i })).toBeDisabled();
     });
 
     it('only shows power off when the selected printer has a smart socket', async () => {
