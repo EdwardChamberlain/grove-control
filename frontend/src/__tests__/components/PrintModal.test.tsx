@@ -475,6 +475,7 @@ describe('PrintModal', () => {
       await user.click(screen.getByTitle('Open calendar'));
       const datePicker = screen.getByRole('dialog', { name: 'Choose date' });
       expect(datePicker).toBeInTheDocument();
+      expect(datePicker).toHaveClass('bottom-full', 'z-50');
       await user.click(within(datePicker).getByRole('button', { name: 'Cancel' }));
       expect(screen.queryByRole('dialog', { name: 'Choose date' })).not.toBeInTheDocument();
     });
