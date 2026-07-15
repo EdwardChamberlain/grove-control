@@ -411,20 +411,57 @@ async def _safe_execute(conn, sql):
             raise
 
 
-# These fields are written by POST /queue/ on every current Grove Control
-# install.  They are deliberately verified separately from the long historical
-# migration sequence: an interrupted upgrade or a database restored from an
-# older image must be repaired at startup, not discovered later as a generic
-# 500 while the user tries to start a print.
+# Every non-primary-key column on PrintQueueItem. These are deliberately
+# verified separately from the long historical migration sequence: an
+# interrupted upgrade or a database restored from an older image must be
+# repaired at startup, not discovered later as a generic 500 while a user
+# submits a print. Keep this in lockstep with PrintQueueItem; the unit test
+# compares the two sets so newly added model columns cannot be overlooked.
 _QUEUE_INSERT_COLUMN_DEFINITIONS: dict[str, tuple[str, str]] = {
+    # Identity / queue targeting
+    "printer_id": ("INTEGER", "INTEGER"),
+    "target_model": ("VARCHAR(50)", "VARCHAR(50)"),
+    "target_location": ("VARCHAR(100)", "VARCHAR(100)"),
+    "required_filament_types": ("TEXT", "TEXT"),
+    "waiting_reason": ("TEXT", "TEXT"),
+    "archive_id": ("INTEGER", "INTEGER"),
+    "library_file_id": ("INTEGER", "INTEGER"),
+    "project_id": ("INTEGER", "INTEGER"),
+    "batch_id": ("INTEGER", "INTEGER"),
+    # Scheduling and dispatch policy
+    "position": ("INTEGER DEFAULT 0", "INTEGER DEFAULT 0"),
+    "scheduled_time": ("DATETIME", "TIMESTAMP"),
+    "manual_start": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
+    "require_previous_success": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
+    "auto_off_after": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
+    "ams_mapping": ("TEXT", "TEXT"),
+    "filament_overrides": ("TEXT", "TEXT"),
+    "force_color_match": ("BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT true"),
+    "plate_id": ("INTEGER", "INTEGER"),
+    "print_time_seconds": ("INTEGER", "INTEGER"),
+    "been_jumped": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
+    "gcode_injection": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
+    "nozzle_mapping": ("TEXT", "TEXT"),
+    "nozzles_info": ("TEXT", "TEXT"),
     "filament_short": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
     "skip_filament_check": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
     "cleanup_library_after_dispatch": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
-    "nozzle_mapping": ("TEXT", "TEXT"),
-    "nozzles_info": ("TEXT", "TEXT"),
+    # Printer options
+    "bed_levelling": ("BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT true"),
+    "flow_cali": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
+    "vibration_cali": ("BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT true"),
+    "layer_inspect": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
+    "timelapse": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
+    "use_ams": ("BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT true"),
     "nozzle_offset_cali": ("BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT true"),
+    # Lifecycle / audit fields
+    "status": ("VARCHAR(20) DEFAULT 'pending'", "VARCHAR(20) DEFAULT 'pending'"),
     "gate_acknowledged": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
-    "force_color_match": ("BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT true"),
+    "started_at": ("DATETIME", "TIMESTAMP"),
+    "completed_at": ("DATETIME", "TIMESTAMP"),
+    "error_message": ("TEXT", "TEXT"),
+    "created_at": ("DATETIME DEFAULT CURRENT_TIMESTAMP", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+    "created_by_id": ("INTEGER", "INTEGER"),
 }
 
 
@@ -456,6 +493,10 @@ async def ensure_queue_insert_schema(conn) -> None:
     startup.
     """
     columns = await _table_columns(conn, "print_queue")
+    if "id" not in columns:
+        raise RuntimeError(
+            "Required print_queue primary key 'id' is missing. Restore the database backup or use the queue rebuild tool."
+        )
     sqlite = conn.dialect.name == "sqlite"
     repaired: list[str] = []
 
