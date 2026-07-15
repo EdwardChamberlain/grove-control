@@ -231,6 +231,48 @@ describe('PrintModal', () => {
       });
     });
 
+    it('keeps model filament controls collapsed until they are needed', async () => {
+      let filamentRequirementsRequested = false;
+      server.use(
+        http.get('/api/v1/archives/:id/plates', () =>
+          HttpResponse.json({ is_multi_plate: false, plates: [] }),
+        ),
+        http.get('/api/v1/archives/:id/filament-requirements', () => {
+          filamentRequirementsRequested = true;
+          return HttpResponse.json({
+            filaments: [
+              { slot_id: 1, type: 'PLA', color: '#FF0000', used_grams: 10, used_meters: 3 },
+            ],
+          });
+        }),
+      );
+      const user = userEvent.setup();
+
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={99}
+          archiveName="Benchy"
+          onClose={mockOnClose}
+          onSuccess={mockOnSuccess}
+        />
+      );
+
+      await user.click(await screen.findByRole('button', { name: 'Any Model' }));
+      await waitFor(() => expect(filamentRequirementsRequested).toBe(true));
+
+      const filamentOptions = await screen.findByRole('button', { name: 'Filament Requirements' });
+      expect(filamentOptions).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.queryByLabelText(/Match colour/i)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/PLA filament profile/i)).not.toBeInTheDocument();
+
+      await user.click(filamentOptions);
+
+      expect(filamentOptions).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByLabelText(/Match colour/i)).toBeInTheDocument();
+      expect(await screen.findByLabelText(/PLA filament profile/i)).toBeInTheDocument();
+    });
+
     it('queues printer-targeted jobs with force colour matching enabled by default', async () => {
       let capturedBody: Record<string, unknown> | null = null;
       server.use(

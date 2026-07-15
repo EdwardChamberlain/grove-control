@@ -1,5 +1,5 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, AlertTriangle, Loader2, Pencil, Printer, X } from 'lucide-react';
+import { AlertCircle, AlertTriangle, ChevronDown, ChevronUp, Loader2, Palette, Pencil, Printer, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { PrintQueueItemCreate, PrintQueueItemUpdate, SmartPlug, SpoolAssignment } from '../../api/client';
@@ -186,6 +186,7 @@ export function PrintModal({
     if (typeof queueItem.force_color_match === 'boolean') return queueItem.force_color_match;
     return queueItem.filament_overrides?.some((override) => override.force_color_match !== false) ?? true;
   });
+  const [isModelFilamentOptionsExpanded, setIsModelFilamentOptionsExpanded] = useState(false);
 
   // Track initial values for clearing mappings on change (edit mode only)
   const [initialPrinterIds] = useState(() => (mode === 'edit-queue-item' && queueItem?.printer_id ? [queueItem.printer_id] : []));
@@ -1116,14 +1117,49 @@ export function PrintModal({
               />
             )}
 
-            {/* Filament override - shown in model mode when filament requirements are available */}
-            {assignmentMode === 'model' && targetModel && effectiveFilamentReqs && (
-              <FilamentOverride
-                filamentReqs={effectiveFilamentReqs}
-                availableFilaments={availableFilaments ?? []}
-                overrides={filamentOverrides}
-                onChange={setFilamentOverrides}
-              />
+            {/* Model assignments can be dispatched to any matching printer. Keep
+                their profile controls together and out of the way by default. */}
+            {assignmentMode === 'model' && targetModel && (
+              <section className="mb-4">
+                <button
+                  type="button"
+                  onClick={() => setIsModelFilamentOptionsExpanded((expanded) => !expanded)}
+                  aria-expanded={isModelFilamentOptionsExpanded}
+                  aria-controls="model-filament-options"
+                  className="flex w-full items-center gap-2 text-sm text-bambu-gray transition-colors hover:text-white"
+                >
+                  <Palette className="h-4 w-4" />
+                  <span>{t('printModal.filamentOverride')}</span>
+                  {isModelFilamentOptionsExpanded ? <ChevronUp className="ml-auto h-4 w-4" /> : <ChevronDown className="ml-auto h-4 w-4" />}
+                </button>
+
+                {isModelFilamentOptionsExpanded && (
+                  <div id="model-filament-options" className="mt-2 space-y-3 rounded-lg bg-bambu-dark p-3">
+                    <label className="group flex cursor-pointer items-center justify-between">
+                      <div>
+                        <span className="text-sm text-white">{t('printModal.forceColorMatch')}</span>
+                        <p className="text-xs text-bambu-gray">{t('printModal.forceColorMatchHint')}</p>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={forceColorMatch}
+                        onChange={(event) => setForceColorMatch(event.target.checked)}
+                        className="peer sr-only"
+                      />
+                      <div className={`relative w-10 h-5 rounded-full transition-colors ${forceColorMatch ? 'bg-bambu-green' : 'bg-bambu-dark-tertiary'}`}>
+                        <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${forceColorMatch ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                      </div>
+                    </label>
+                    <FilamentOverride
+                      filamentReqs={effectiveFilamentReqs}
+                      availableFilaments={availableFilaments ?? []}
+                      overrides={filamentOverrides}
+                      onChange={setFilamentOverrides}
+                      showHeader={false}
+                    />
+                  </div>
+                )}
+              </section>
             )}
 
             {/* Compatibility warning when sliced model doesn't match selected printer */}
@@ -1168,10 +1204,10 @@ export function PrintModal({
               />
             )}
 
-            {/* Multiple-printer and model assignments have no single filament
-                mapping panel, so retain this control alongside their filament UI. */}
+            {/* Multiple-printer assignments have no single filament mapping
+                panel, so retain this control alongside their filament UI. */}
             {!!effectiveFilamentReqs?.filaments?.length && !archiveDataMissing &&
-              (assignmentMode === 'model' || selectedPrinters.length !== 1) && (
+              assignmentMode !== 'model' && selectedPrinters.length !== 1 && (
                 <label className="flex items-center justify-between bg-bambu-dark rounded-lg p-3 cursor-pointer">
                   <div>
                     <span className="text-sm text-white">{t('printModal.forceColorMatch')}</span>

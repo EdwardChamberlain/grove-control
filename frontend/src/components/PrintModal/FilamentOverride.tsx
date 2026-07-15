@@ -11,7 +11,7 @@ interface FilamentOverrideProps {
   availableFilaments: Array<{ type: string; color: string; tray_info_idx: string; tray_sub_brands: string; extruder_id: number | null }>;
   overrides: Record<number, { type: string; color: string }>;
   onChange: (overrides: Record<number, { type: string; color: string }>) => void;
-
+  showHeader?: boolean;
 }
 
 /**
@@ -24,6 +24,7 @@ export function FilamentOverride({
   availableFilaments,
   overrides,
   onChange,
+  showHeader = true,
 }: FilamentOverrideProps) {
   const { t } = useTranslation();
 
@@ -64,9 +65,11 @@ export function FilamentOverride({
 
   return (
     <div className="mb-4">
-      <div className="flex items-center gap-2 text-sm text-bambu-gray mb-2">
-        <span>{t('printModal.filamentOverride')}</span>
-      </div>
+      {showHeader && (
+        <div className="flex items-center gap-2 text-sm text-bambu-gray mb-2">
+          <span>{t('printModal.filamentOverride')}</span>
+        </div>
+      )}
       <p className="text-xs text-bambu-gray mb-2">{t('printModal.filamentOverrideHint')}</p>
       <div className="bg-bambu-dark rounded-lg p-3 space-y-2">
         {filaments.map((req, slotIdx) => {

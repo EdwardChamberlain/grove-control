@@ -416,6 +416,7 @@ export function PrinterSelector({
               <label className="block text-xs text-bambu-gray mb-1">Target Model</label>
               <ReactSelect
                 value={targetModel || ''}
+                aria-label="Target Model"
                 onChange={(e) => {
                   onTargetModelChange!(e.target.value || null);
                   // Clear location when model changes
