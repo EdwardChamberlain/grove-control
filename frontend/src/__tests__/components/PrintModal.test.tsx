@@ -14,6 +14,7 @@ import { PrintModal } from '../../components/PrintModal';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import type { PrintQueueItem } from '../../api/client';
+import { parseDateInput, parseTimeInput } from '../../utils/date';
 
 const mockPrinters = [
   { id: 1, name: 'X1 Carbon', model: 'X1C', ip_address: '192.168.1.100', enabled: true, is_active: true },
@@ -273,6 +274,95 @@ describe('PrintModal', () => {
       expect(await screen.findByLabelText(/PLA filament profile/i)).toBeInTheDocument();
     });
 
+    it('queues a postponed print with the selected UTC start time', async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      server.use(
+        http.post('/api/v1/queue/', async ({ request }) => {
+          capturedBody = await request.json() as Record<string, unknown>;
+          return HttpResponse.json({ id: 1, status: 'pending' });
+        }),
+      );
+      const user = userEvent.setup();
+
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Benchy"
+          initialSelectedPrinterIds={[1]}
+          onClose={mockOnClose}
+        />,
+      );
+
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      await user.click(screen.getByRole('checkbox', { name: 'Postpone print' }));
+      const dateInput = screen.getByLabelText('Do not start before') as HTMLInputElement;
+      const timeInput = screen.getByLabelText('Postpone time') as HTMLInputElement;
+      await waitFor(() => expect(dateInput.value).not.toBe(''));
+      const date = parseDateInput(dateInput.value, 'system')!;
+      const time = parseTimeInput(timeInput.value)!;
+      date.setHours(time.hours, time.minutes, 0, 0);
+
+      await user.click(screen.getByRole('button', { name: /^print$/i }));
+
+      await waitFor(() => expect(capturedBody).not.toBeNull());
+      expect(capturedBody?.scheduled_time).toBe(date.toISOString());
+    });
+
+    it('queues a postponed model-assigned print with its target model', async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      server.use(
+        http.post('/api/v1/queue/', async ({ request }) => {
+          capturedBody = await request.json() as Record<string, unknown>;
+          return HttpResponse.json({ id: 1, status: 'pending' });
+        }),
+      );
+      const user = userEvent.setup();
+
+      render(<PrintModal mode="create" archiveId={1} archiveName="Benchy" onClose={mockOnClose} />);
+
+      await user.click(await screen.findByRole('button', { name: 'Any Model' }));
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      await user.click(screen.getByRole('checkbox', { name: 'Postpone print' }));
+      await user.click(screen.getByRole('button', { name: /^print$/i }));
+
+      await waitFor(() => expect(capturedBody).not.toBeNull());
+      expect(capturedBody).toMatchObject({ target_model: 'A1M' });
+      expect(capturedBody?.scheduled_time).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00\.000Z$/);
+    });
+
+    it('persists model filament overrides and the colour-match policy', async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      server.use(
+        http.get('/api/v1/archives/:id/filament-requirements', () => HttpResponse.json({
+          filaments: [{ slot_id: 1, type: 'PLA', color: '#FF0000', used_grams: 10, used_meters: 3 }],
+        })),
+        http.get('/api/v1/printers/available-filaments', () => HttpResponse.json([
+          { type: 'PLA', color: '#00FF00', tray_info_idx: '1', tray_sub_brands: 'PLA Basic', extruder_id: null },
+        ])),
+        http.post('/api/v1/queue/', async ({ request }) => {
+          capturedBody = await request.json() as Record<string, unknown>;
+          return HttpResponse.json({ id: 1, status: 'pending' });
+        }),
+      );
+      const user = userEvent.setup();
+
+      render(<PrintModal mode="create" archiveId={1} archiveName="Benchy" onClose={mockOnClose} />);
+
+      await user.click(await screen.findByRole('button', { name: 'Any Model' }));
+      await user.click(await screen.findByRole('button', { name: 'Filament Requirements' }));
+      await user.click(screen.getByLabelText(/Match colour/i));
+      await user.click(await screen.findByRole('combobox', { name: /PLA filament profile/i }));
+      await user.click(await screen.findByRole('option', { name: /PLA Basic \(Green\)/i }));
+      await user.click(screen.getByRole('button', { name: /^print$/i }));
+
+      await waitFor(() => expect(capturedBody).not.toBeNull());
+      expect(capturedBody?.force_color_match).toBe(false);
+      expect(capturedBody?.filament_overrides).toEqual([
+        expect.objectContaining({ slot_id: 1, type: 'PLA', color: '#00FF00', force_color_match: false }),
+      ]);
+    });
+
     it('queues printer-targeted jobs with force colour matching enabled by default', async () => {
       let capturedBody: Record<string, unknown> | null = null;
       server.use(
@@ -522,6 +612,33 @@ describe('PrintModal', () => {
       expect(screen.queryByRole('dialog', { name: 'Choose date' })).not.toBeInTheDocument();
     });
 
+    it('applies a date selected in the postpone calendar', async () => {
+      const user = userEvent.setup();
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Test Print"
+          initialSelectedPrinterIds={[1]}
+          onClose={mockOnClose}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      await user.click(screen.getByRole('checkbox', { name: 'Postpone print' }));
+      const dateInput = screen.getByLabelText('Do not start before') as HTMLInputElement;
+      await waitFor(() => expect(dateInput.value).not.toBe(''));
+      const selectedDay = String(parseDateInput(dateInput.value, 'system')!.getDate());
+
+      await user.click(screen.getByTitle('Open calendar'));
+      const datePicker = screen.getByRole('dialog', { name: 'Choose date' });
+      await user.click(within(datePicker).getByRole('button', { name: selectedDay }));
+      await user.click(within(datePicker).getByRole('button', { name: 'Save' }));
+
+      expect(screen.queryByRole('dialog', { name: 'Choose date' })).not.toBeInTheDocument();
+      expect(dateInput).not.toHaveValue('');
+    });
+
     it('prevents a postponed print from using a past start time', async () => {
       const user = userEvent.setup();
       render(
@@ -539,6 +656,29 @@ describe('PrintModal', () => {
       fireEvent.change(screen.getByLabelText('Postpone time'), { target: { value: '00:00' } });
 
       expect(screen.getByText('Choose a future date and time')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^print$/i })).toBeDisabled();
+    });
+
+    it('clears the scheduled value when the postpone date becomes invalid', async () => {
+      const user = userEvent.setup();
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Test Print"
+          initialSelectedPrinterIds={[1]}
+          onClose={mockOnClose}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      await user.click(screen.getByRole('checkbox', { name: 'Postpone print' }));
+      const dateInput = screen.getByLabelText('Do not start before');
+      expect(dateInput).not.toHaveValue('');
+
+      await user.clear(dateInput);
+
+      expect(screen.getByText('Please enter a valid date and time')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /^print$/i })).toBeDisabled();
     });
 
@@ -639,6 +779,52 @@ describe('PrintModal', () => {
       );
 
       expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument();
+    });
+
+    it('preserves a scheduled time when saving an existing queue item', async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      server.use(
+        http.patch('/api/v1/queue/:id', async ({ request }) => {
+          capturedBody = await request.json() as Record<string, unknown>;
+          return HttpResponse.json({ id: 1, status: 'pending' });
+        }),
+      );
+      const user = userEvent.setup();
+      const scheduledTime = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      scheduledTime.setSeconds(0, 0);
+      const item = createMockQueueItem({ scheduled_time: scheduledTime.toISOString() });
+
+      render(<PrintModal mode="edit-queue-item" archiveId={1} archiveName="Test Print" queueItem={item} onClose={mockOnClose} />);
+
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      expect(screen.getByRole('checkbox', { name: 'Postpone print' })).toBeChecked();
+      await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+      await waitFor(() => expect(capturedBody).not.toBeNull());
+      expect(capturedBody?.scheduled_time).toBe(scheduledTime.toISOString());
+    });
+
+    it('clears a scheduled time when postponing is disabled during edit', async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      server.use(
+        http.patch('/api/v1/queue/:id', async ({ request }) => {
+          capturedBody = await request.json() as Record<string, unknown>;
+          return HttpResponse.json({ id: 1, status: 'pending' });
+        }),
+      );
+      const user = userEvent.setup();
+      const scheduledTime = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      scheduledTime.setSeconds(0, 0);
+      const item = createMockQueueItem({ scheduled_time: scheduledTime.toISOString() });
+
+      render(<PrintModal mode="edit-queue-item" archiveId={1} archiveName="Test Print" queueItem={item} onClose={mockOnClose} />);
+
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      await user.click(screen.getByRole('checkbox', { name: 'Postpone print' }));
+      await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+      await waitFor(() => expect(capturedBody).not.toBeNull());
+      expect(capturedBody?.scheduled_time).toBeNull();
     });
 
     it('shows cancel button', () => {

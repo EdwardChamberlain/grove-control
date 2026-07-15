@@ -1123,6 +1123,7 @@ export default {
     // Status
     status: {
       pending: '等待中',
+      scheduled: '已排程',
       waiting: '等待中',
       printing: '列印中',
       paused: '已暫停',

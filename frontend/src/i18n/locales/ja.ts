@@ -1122,6 +1122,7 @@ export default {
     // Status
     status: {
       pending: '待機中',
+      scheduled: '予定済み',
       waiting: '待機中',
       printing: '印刷中',
       paused: '一時停止',

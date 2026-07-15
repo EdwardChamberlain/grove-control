@@ -61,7 +61,7 @@ import {
   PlayCircle,
 } from 'lucide-react';
 import { api, ApiError } from '../api/client';
-import { type TimeFormat, formatETA, formatDuration, formatRelativeTime, parseUTCDate } from '../utils/date';
+import { type TimeFormat, formatDate, formatETA, formatDuration, formatRelativeTime, parseUTCDate } from '../utils/date';
 import { getBedTypeInfo } from '../utils/bedType';
 import type { PrintQueueItem, PrintQueueBulkUpdate, Permission } from '../api/client';
 import { Card } from '../components/Card';
@@ -80,7 +80,18 @@ function formatWeight(g: number, useKg = false): string {
   return `${Math.round(g)}g`;
 }
 
-function StatusBadge({ status, waitingReason, printerState, t }: { status: PrintQueueItem['status']; waitingReason?: string | null; printerState?: string | null; t: (key: string) => string }) {
+function StatusBadge({ status, scheduledTime, waitingReason, printerState, t }: { status: PrintQueueItem['status']; scheduledTime?: string | null; waitingReason?: string | null; printerState?: string | null; t: (key: string) => string }) {
+  // A future pending job has its own explicit status. The relative timestamp
+  // in the row is useful context, but the pill makes the scheduler state clear.
+  if (status === 'pending' && scheduledTime && (parseUTCDate(scheduledTime)?.getTime() ?? 0) > Date.now()) {
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border text-yellow-300 bg-yellow-500/10 border-yellow-500/20">
+        <Calendar className="w-3.5 h-3.5" />
+        {t('queue.status.scheduled')} · {formatDate(scheduledTime)}
+      </span>
+    );
+  }
+
   // Special case: pending with waiting_reason shows as "Waiting"
   if (status === 'pending' && waitingReason) {
     return (
@@ -571,12 +582,6 @@ function SortableQueueItem({
                 {t('queue.badges.staged')}
               </span>
             )}
-            {isPending && item.scheduled_time && (parseUTCDate(item.scheduled_time)?.getTime() ?? 0) > Date.now() && (
-              <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 bg-yellow-500/10 text-yellow-300 rounded-full border border-yellow-500/20 flex items-center gap-1">
-                <Calendar className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
-                {t('queue.scheduledTime')}
-              </span>
-            )}
             {item.require_previous_success && (
               <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 bg-orange-500/10 text-orange-400 rounded-full border border-orange-500/20">
                 {t('queue.badges.requiresPrevious')}
@@ -671,7 +676,7 @@ function SortableQueueItem({
 
         {/* Status badge + Actions */}
         <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2 sm:gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-          <StatusBadge status={item.status} waitingReason={item.waiting_reason} printerState={printerState} t={t} />
+          <StatusBadge status={item.status} scheduledTime={item.scheduled_time} waitingReason={item.waiting_reason} printerState={printerState} t={t} />
 
           <div className="flex items-center gap-0.5 sm:gap-1">
             {isPrinting && (

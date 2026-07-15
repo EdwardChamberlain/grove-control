@@ -129,7 +129,8 @@ describe('KioskPage', () => {
       expect(screen.getByText('Morgan')).toBeInTheDocument();
       expect(screen.getAllByText('42%')).toHaveLength(2);
       expect(screen.getAllByText('Plate clear required')).toHaveLength(2);
-      expect(screen.getByText('Waiting for compatible material')).toBeInTheDocument();
+      expect(screen.getByTestId('kiosk-queue-status-10')).toHaveTextContent('Printing');
+      expect(screen.getByTestId('kiosk-queue-status-11')).toHaveTextContent('Waiting · Waiting for compatible material');
       expect(screen.getByRole('banner').parentElement).toHaveClass('h-screen', 'overflow-hidden');
       expect(screen.getByTestId('kiosk-printer-1')).toHaveClass('flex-1');
       expect(screen.queryByTestId('kiosk-fleet-overflow')).not.toBeInTheDocument();
@@ -147,6 +148,29 @@ describe('KioskPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('kiosk-progress-2')).toHaveClass('bg-yellow-400');
       expect(screen.getByTestId('kiosk-printer-2')).toHaveClass('border-yellow-400/60', 'kiosk-plate-clear-alert');
+    });
+  });
+
+  it('shows future pending jobs as scheduled with their start time', async () => {
+    vi.mocked(api.getQueue).mockResolvedValue([
+      {
+        id: 12,
+        printer_id: 2,
+        archive_id: 2,
+        library_file_id: null,
+        archive_name: 'Scheduled assembly',
+        printer_name: 'Beacon',
+        position: 1,
+        status: 'pending',
+        scheduled_time: '2099-01-01T09:30:00Z',
+        waiting_reason: null,
+      },
+    ] as never);
+
+    render(<KioskPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('kiosk-queue-status-12')).toHaveTextContent('Scheduled · Jan 1, 2099, 09:30 AM');
     });
   });
 

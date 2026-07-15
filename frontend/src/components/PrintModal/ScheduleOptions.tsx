@@ -72,7 +72,14 @@ export function ScheduleOptionsPanel({
     const parsedTime = parseTimeInput(nextTime);
     setIsDateValid(!!parsedDate);
     setIsTimeValid(!!parsedTime);
-    if (!parsedDate || !parsedTime) return;
+    if (!parsedDate || !parsedTime) {
+      // Do not retain the last valid value while the visible fields are
+      // incomplete or invalid. Otherwise the form can submit a hidden,
+      // stale schedule time.
+      setIsPast(false);
+      onChange({ ...options, scheduledTime: '' });
+      return;
+    }
     parsedDate.setHours(parsedTime.hours, parsedTime.minutes, 0, 0);
     setIsPast(parsedDate <= new Date());
     onChange({ ...options, scheduledTime: toDateTimeLocalValue(parsedDate) });
@@ -134,10 +141,10 @@ export function ScheduleOptionsPanel({
 
           {options.postponePrint && (
             <div>
-              <label className="mb-1 block text-sm text-bambu-gray">{t('printModal.doNotStartBefore', 'Do not start before')}</label>
+              <label className="mb-1 block text-sm text-bambu-gray" htmlFor="postponeDate">{t('printModal.doNotStartBefore', 'Do not start before')}</label>
               <div className="flex gap-2">
                 <div className="relative flex-1">
-                  <input type="text" value={dateValue} onChange={(event) => { setDateValue(event.target.value); updateScheduledTime(event.target.value, timeValue); }} placeholder={getDatePlaceholder(dateFormat as DateFormat)} className={`w-full rounded-lg border bg-bambu-dark px-3 py-2 pr-10 text-white focus:outline-none ${isDateValid ? 'border-bambu-dark-tertiary focus:border-bambu-green' : 'border-red-500'}`} />
+                  <input id="postponeDate" type="text" value={dateValue} onChange={(event) => { setDateValue(event.target.value); updateScheduledTime(event.target.value, timeValue); }} placeholder={getDatePlaceholder(dateFormat as DateFormat)} className={`w-full rounded-lg border bg-bambu-dark px-3 py-2 pr-10 text-white focus:outline-none ${isDateValid ? 'border-bambu-dark-tertiary focus:border-bambu-green' : 'border-red-500'}`} />
                   <button type="button" onClick={openCalendar} className="absolute right-2 top-1/2 -translate-y-1/2 text-bambu-gray hover:text-white" title={t('printModal.openCalendar')}><Calendar className="w-4 h-4" /></button>
                   {isCalendarOpen && (
                     <div ref={calendarRef} role="dialog" aria-label={t('printModal.chooseDate', 'Choose date')} className="absolute bottom-full left-0 z-50 mb-2 w-72 rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary p-3 shadow-xl">

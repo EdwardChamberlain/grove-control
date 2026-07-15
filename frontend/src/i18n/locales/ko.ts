@@ -1066,6 +1066,7 @@ export default {
     },
     status: {
       pending: '대기 중',
+      scheduled: '예약됨',
       waiting: '기다리는 중',
       printing: '인쇄 중',
       paused: '일시정지',

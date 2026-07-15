@@ -1123,6 +1123,7 @@ export default {
     // Durum
     status: {
       pending: 'Beklemede',
+      scheduled: 'Planlandı',
       waiting: 'Bekliyor',
       printing: 'Yazdırılıyor',
       paused: 'Duraklatıldı',

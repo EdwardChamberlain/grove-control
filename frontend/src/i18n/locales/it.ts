@@ -1123,6 +1123,7 @@ export default {
     // Status
     status: {
       pending: 'In attesa',
+      scheduled: 'Pianificata',
       waiting: 'In attesa',
       printing: 'In stampa',
       paused: 'In pausa',
