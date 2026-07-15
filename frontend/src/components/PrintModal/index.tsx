@@ -14,8 +14,8 @@ import { useMultiPrinterFilamentMapping, type PerPrinterConfig } from '../../hoo
 import { getColorName } from '../../utils/colors';
 import { getCurrencySymbol } from '../../utils/currency';
 import { getBedTypeInfo } from '../../utils/bedType';
-import { toDateTimeLocalValue, parseUTCDate } from '../../utils/date';
-import { getGlobalTrayId, isPlaceholderDate, effectivePreferLowest } from '../../utils/amsHelpers';
+import { isWithinSchedulingWindow, toDateTimeLocalValue, parseUTCDate } from '../../utils/date';
+import { getGlobalTrayId, effectivePreferLowest } from '../../utils/amsHelpers';
 import { FilamentMapping } from './FilamentMapping';
 import { FilamentOverride } from './FilamentOverride';
 import { PlateSelector } from './PlateSelector';
@@ -108,12 +108,12 @@ export function PrintModal({
 
   const [scheduleOptions, setScheduleOptions] = useState<ScheduleOptions>(() => {
     if (mode === 'edit-queue-item' && queueItem) {
-      const scheduledTime = queueItem.scheduled_time && !isPlaceholderDate(queueItem.scheduled_time)
+      const scheduledTime = queueItem.scheduled_time
         ? toDateTimeLocalValue(parseUTCDate(queueItem.scheduled_time) ?? new Date())
         : '';
       return {
         insertAtTop: false,
-        postponePrint: Boolean(queueItem.scheduled_time && !isPlaceholderDate(queueItem.scheduled_time)),
+        postponePrint: Boolean(queueItem.scheduled_time),
         scheduledTime,
         requireManualStart: queueItem.manual_start,
         requirePreviousSuccess: queueItem.require_previous_success,
@@ -941,7 +941,10 @@ export function PrintModal({
     // For multi-plate files, need at least one plate selected
     if (isMultiPlate && selectedPlates.size === 0) return false;
 
-    if (scheduleOptions.postponePrint && (!scheduleOptions.scheduledTime || new Date(scheduleOptions.scheduledTime) <= new Date())) return false;
+    if (scheduleOptions.postponePrint) {
+      const scheduledTime = new Date(scheduleOptions.scheduledTime);
+      if (!scheduleOptions.scheduledTime || scheduledTime <= new Date() || !isWithinSchedulingWindow(scheduledTime)) return false;
+    }
 
     return true;
   }, [selectedPrinters.length, assignmentMode, targetModel, isMultiPlate, selectedPlates.size, isPending, scheduleOptions.postponePrint, scheduleOptions.scheduledTime]);

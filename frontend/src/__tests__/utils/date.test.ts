@@ -16,6 +16,8 @@ import {
   formatETA,
   formatDuration,
   formatRelativeTime,
+  getMaximumScheduleDate,
+  isWithinSchedulingWindow,
   localDateKey,
 } from '../../utils/date';
 
@@ -155,6 +157,17 @@ describe('parseDateInput', () => {
     expect(parseDateInput('02/29/2025', 'us')).toBeNull();
     expect(parseDateInput('31/04/2025', 'eu')).toBeNull();
     expect(parseDateInput('2025-02-29', 'iso')).toBeNull();
+  });
+});
+
+describe('scheduling window', () => {
+  it('uses six calendar months and clamps month-end dates instead of assuming 30-day months', () => {
+    const now = new Date(2026, 7, 31, 9, 30, 0, 0);
+    const maximum = getMaximumScheduleDate(now);
+
+    expect(maximum).toEqual(new Date(2027, 1, 28, 9, 30, 0, 0));
+    expect(isWithinSchedulingWindow(maximum, now)).toBe(true);
+    expect(isWithinSchedulingWindow(new Date(2027, 2, 1, 9, 30, 0, 0), now)).toBe(false);
   });
 });
 

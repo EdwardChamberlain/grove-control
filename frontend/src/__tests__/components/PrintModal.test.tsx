@@ -14,7 +14,7 @@ import { PrintModal } from '../../components/PrintModal';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import type { PrintQueueItem } from '../../api/client';
-import { parseDateInput, parseTimeInput } from '../../utils/date';
+import { formatDateInput, getMaximumScheduleDate, parseDateInput, parseTimeInput } from '../../utils/date';
 
 const mockPrinters = [
   { id: 1, name: 'X1 Carbon', model: 'X1C', ip_address: '192.168.1.100', enabled: true, is_active: true },
@@ -608,6 +608,10 @@ describe('PrintModal', () => {
       const datePicker = screen.getByRole('dialog', { name: 'Choose date' });
       expect(datePicker).toBeInTheDocument();
       expect(datePicker).toHaveClass('bottom-full', 'z-50');
+      expect(within(datePicker).getByRole('grid', { name: 'Choose date' })).toBeInTheDocument();
+      expect(within(datePicker).getAllByRole('columnheader')).toHaveLength(7);
+      expect(within(datePicker).getByRole('button', { name: 'Previous month' })).toBeInTheDocument();
+      expect(within(datePicker).getByRole('button', { name: 'Next month' })).toBeInTheDocument();
       await user.click(within(datePicker).getByRole('button', { name: 'Cancel' }));
       expect(screen.queryByRole('dialog', { name: 'Choose date' })).not.toBeInTheDocument();
     });
@@ -632,7 +636,9 @@ describe('PrintModal', () => {
 
       await user.click(screen.getByTitle('Open calendar'));
       const datePicker = screen.getByRole('dialog', { name: 'Choose date' });
-      await user.click(within(datePicker).getByRole('button', { name: selectedDay }));
+      const selectedDayButton = within(datePicker).getAllByRole('button').find((button) => button.textContent === selectedDay);
+      expect(selectedDayButton).toBeDefined();
+      await user.click(selectedDayButton!);
       await user.click(within(datePicker).getByRole('button', { name: 'Save' }));
 
       expect(screen.queryByRole('dialog', { name: 'Choose date' })).not.toBeInTheDocument();
@@ -679,6 +685,30 @@ describe('PrintModal', () => {
       await user.clear(dateInput);
 
       expect(screen.getByText('Please enter a valid date and time')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^print$/i })).toBeDisabled();
+    });
+
+    it('rejects a postpone date beyond the six-calendar-month limit', async () => {
+      const user = userEvent.setup();
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Test Print"
+          initialSelectedPrinterIds={[1]}
+          onClose={mockOnClose}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      await user.click(screen.getByRole('checkbox', { name: 'Postpone print' }));
+      const dateInput = screen.getByLabelText('Do not start before');
+      await waitFor(() => expect(dateInput).not.toHaveValue(''));
+      const outsideLimit = getMaximumScheduleDate();
+      outsideLimit.setDate(outsideLimit.getDate() + 1);
+      fireEvent.change(dateInput, { target: { value: formatDateInput(outsideLimit, 'system') } });
+
+      expect(screen.getByText('Choose a date within six months')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /^print$/i })).toBeDisabled();
     });
 
@@ -790,7 +820,7 @@ describe('PrintModal', () => {
         }),
       );
       const user = userEvent.setup();
-      const scheduledTime = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      const scheduledTime = getMaximumScheduleDate();
       scheduledTime.setSeconds(0, 0);
       const item = createMockQueueItem({ scheduled_time: scheduledTime.toISOString() });
 
@@ -813,7 +843,7 @@ describe('PrintModal', () => {
         }),
       );
       const user = userEvent.setup();
-      const scheduledTime = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      const scheduledTime = getMaximumScheduleDate();
       scheduledTime.setSeconds(0, 0);
       const item = createMockQueueItem({ scheduled_time: scheduledTime.toISOString() });
 
