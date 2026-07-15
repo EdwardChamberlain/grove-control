@@ -6665,6 +6665,26 @@ async def auth_middleware(request, call_next):
 
 
 @app.middleware("http")
+async def unhandled_http_exception_logger(request, call_next):
+    """Persist actionable details for unexpected 5xx request failures.
+
+    Uvicorn normally writes these tracebacks to stderr, which is not part of
+    the application support bundle.  Keep the record intentionally small:
+    method and path are enough to identify the failing endpoint, while
+    ``logger.exception`` preserves the traceback and request trace ID without
+    risking request bodies, query values, credentials, or cookies in logs.
+    Expected HTTPException responses are converted to responses by FastAPI
+    before reaching this boundary, so routine 4xx/intentional errors stay
+    quiet.
+    """
+    try:
+        return await call_next(request)
+    except Exception:
+        logging.getLogger(__name__).exception("Unhandled HTTP request failure: %s %s", request.method, request.url.path)
+        raise
+
+
+@app.middleware("http")
 async def trace_id_middleware(request, call_next):
     """Stamp every HTTP request with a trace ID and echo it back.
 

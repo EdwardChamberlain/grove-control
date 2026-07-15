@@ -150,6 +150,22 @@ docker compose up -d
 docker compose exec grove-control /bin/bash
 ```
 
+**Queue recovery (SQLite only):** If support has confirmed that a legacy
+BambuBuddy-to-Grove-Control migration left the queue table incompatible, stop
+the service and run the recovery script. It creates a timestamped `.backup`
+copy of the database before deleting and recreating only the queue table; all
+queued jobs are removed.
+
+```bash
+docker compose down
+docker compose run --rm --no-deps grove-control \
+  python /app/scripts/rebuild_print_queue.py --yes
+docker compose up -d
+```
+
+The command requires an image that includes this recovery tool. Do not use it
+with an external PostgreSQL database.
+
 **Custom Port:**
 
 ```yaml

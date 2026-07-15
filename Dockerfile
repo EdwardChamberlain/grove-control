@@ -61,6 +61,10 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 COPY VERSION ./VERSION
 COPY backend/ ./backend/
 
+# Operational recovery tooling is deliberately shipped in the image so it can
+# be run against the named data volume without requiring a source checkout.
+COPY scripts/rebuild_print_queue.py ./scripts/rebuild_print_queue.py
+
 # Capture the current git branch at build time. `.git/HEAD` is the only
 # .git metadata the build context lets through (see .dockerignore); it
 # contains `ref: refs/heads/<branch>`, which the SpoolBuddy remote-update
