@@ -1123,6 +1123,7 @@ export default {
     // Status
     status: {
       pending: 'Pendiente',
+      scheduled: 'Programada',
       waiting: 'En espera',
       printing: 'Imprimiendo',
       paused: 'En pausa',
@@ -4331,7 +4332,14 @@ export default {
     dateTime: 'Fecha y hora',
     invalidDateTime: 'Introduzca una fecha y hora válidas',
     openCalendar: 'Abrir calendario',
+    chooseDate: 'Elegir fecha',
+    previousMonth: 'Mes anterior',
+    nextMonth: 'Mes siguiente',
     requireManualStart: 'Requerir inicio manual',
+    postponePrint: 'Posponer impresión',
+    postponeTime: 'Hora de impresión',
+    doNotStartBefore: 'No iniciar antes de',
+    futureDateTime: 'Elige una fecha y hora futuras',
     requirePreviousSuccess: 'Iniciar solo si la impresión anterior se completó correctamente',
     autoOffAfter: 'Apagar la impresora al terminar',
     helpAsap: 'La impresión se añadirá al principio de la cola y comenzará en cuanto haya una impresora elegible inactiva.',

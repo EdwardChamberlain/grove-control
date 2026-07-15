@@ -138,7 +138,6 @@ export function QueueTimelineView({
       }
     }
 
-    const sixMonthsFromNow = Date.now() + 180 * 24 * HOUR_MS;
     for (const [lk, items] of pendingByLaneKey) {
       items.sort((a, b) => a.position - b.position);
       const hasActive = lanesWithActive.has(lk);
@@ -147,13 +146,12 @@ export function QueueTimelineView({
       // committed anchor exists). Otherwise every chained ASAP item is just
       // a guess — drop the whole lane to keep the view honest.
       const firstScheduled = items[0] ? parseUTCDate(items[0].scheduled_time) : null;
-      const firstScheduledOk = firstScheduled && firstScheduled.getTime() <= sixMonthsFromNow;
-      if (!hasActive && !firstScheduledOk) continue;
+      if (!hasActive && !firstScheduled) continue;
 
       let chainEnd = chainEndByLane.get(lk) ?? nowMs;
       for (const item of items) {
         const scheduled = parseUTCDate(item.scheduled_time);
-        if (scheduled && scheduled.getTime() <= sixMonthsFromNow) {
+        if (scheduled) {
           chainEnd = Math.max(chainEnd, scheduled.getTime());
         }
         const duration = (item.print_time_seconds || 3600) * 1000;

@@ -3,8 +3,6 @@
  * These functions handle color normalization, slot labeling, and tray ID calculations
  * for AMS, AMS-HT, and external spool configurations.
  */
-import { parseUTCDate } from './date';
-
 /**
  * Normalize color format from various sources for CSS rendering.
  * API returns "RRGGBBAA" (8-char), 3MF uses "#RRGGBB" (7-char with hash).
@@ -242,16 +240,6 @@ export function getMinDateTime(): string {
   const now = new Date();
   now.setMinutes(now.getMinutes() + 1);
   return now.toISOString().slice(0, 16);
-}
-
-/**
- * Check if a scheduled time is a placeholder far-future date.
- * Placeholder dates (more than 6 months out) are treated as ASAP.
- */
-export function isPlaceholderDate(scheduledTime: string | null | undefined): boolean {
-  if (!scheduledTime) return false;
-  const sixMonthsFromNow = Date.now() + 180 * 24 * 60 * 60 * 1000;
-  return (parseUTCDate(scheduledTime)?.getTime() ?? 0) > sixMonthsFromNow;
 }
 
 /**

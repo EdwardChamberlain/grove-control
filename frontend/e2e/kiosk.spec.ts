@@ -30,6 +30,8 @@ const queue = [
     status: 'pending',
     created_by_username: `Operator ${index + 1}`,
     print_time_seconds: 3_600,
+    scheduled_time: index === 0 ? '2099-01-01T09:30:00Z' : null,
+    waiting_reason: index === 1 ? 'Waiting for compatible material' : null,
   })),
 ];
 
@@ -82,6 +84,8 @@ test('keeps queue truncation within the kiosk viewport at 1080p', async ({ page 
   await page.goto('/kiosk');
 
   await expect(page.getByRole('heading', { name: 'Printers' })).toBeVisible();
+  await expect(page.getByText(/Scheduled · Jan 1, 2099/)).toBeVisible();
+  await expect(page.getByText('Waiting · Waiting for compatible material')).toBeVisible();
   await expect(page.getByTestId('kiosk-pending-section-overflow')).toContainText(/^\+\d+ Jobs$/);
 
   const pageBounds = await page.getByTestId('kiosk-page').boundingBox();

@@ -67,6 +67,8 @@ export const DEFAULT_PRINT_OPTIONS: PrintOptions = {
  */
 export interface ScheduleOptions {
   insertAtTop: boolean;
+  postponePrint: boolean;
+  scheduledTime: string;
   requireManualStart: boolean;
   requirePreviousSuccess: boolean;
   autoOffAfter: boolean;
@@ -78,6 +80,8 @@ export interface ScheduleOptions {
  */
 export const DEFAULT_SCHEDULE_OPTIONS: ScheduleOptions = {
   insertAtTop: false,
+  postponePrint: false,
+  scheduledTime: '',
   requireManualStart: false,
   requirePreviousSuccess: false,
   autoOffAfter: false,
@@ -213,6 +217,8 @@ export interface PrintOptionsProps {
 export interface ScheduleOptionsProps {
   options: ScheduleOptions;
   onChange: (options: ScheduleOptions) => void;
+  dateFormat?: 'system' | 'us' | 'eu' | 'iso';
+  timeFormat?: 'system' | '12h' | '24h';
   /** Whether the user has permission to control printers (for auto power off) */
   canControlPrinter?: boolean;
   /** Whether the user may insert new jobs ahead of existing queue items. */

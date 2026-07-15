@@ -1123,6 +1123,7 @@ export default {
     // Status
     status: {
       pending: 'Ausstehend',
+      scheduled: 'Geplant',
       waiting: 'Wartend',
       printing: 'Druckt',
       paused: 'Pausiert',
@@ -4323,7 +4324,14 @@ export default {
     dateTime: 'Datum & Uhrzeit',
     invalidDateTime: 'Bitte ein gültiges Datum und eine gültige Uhrzeit eingeben',
     openCalendar: 'Kalender öffnen',
+    chooseDate: 'Datum auswählen',
+    previousMonth: 'Vorheriger Monat',
+    nextMonth: 'Nächster Monat',
     requireManualStart: 'Manuellen Start erfordern',
+    postponePrint: 'Druck verschieben',
+    postponeTime: 'Druckzeit',
+    doNotStartBefore: 'Nicht starten vor',
+    futureDateTime: 'Wählen Sie ein zukünftiges Datum und eine zukünftige Uhrzeit',
     requirePreviousSuccess: 'Nur starten, wenn der vorherige Druck erfolgreich war',
     autoOffAfter: 'Drucker nach Abschluss ausschalten',
     helpAsap: 'Der Druck wird oben in die Warteschlange eingefügt und startet, sobald ein geeigneter Drucker im Leerlauf ist.',

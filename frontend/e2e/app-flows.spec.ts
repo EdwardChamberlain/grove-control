@@ -56,6 +56,10 @@ const archive = {
 };
 
 async function mockApi(page: Page, calls: ApiCall[], options: { authEnabled?: boolean } = {}) {
+  const queueItems: Array<Record<string, unknown>> = [
+    { id: 1, archive_id: 1, archive_name: 'Benchy', printer_id: 1, printer_name: printer.name, status: 'pending', position: 1 },
+  ];
+
   await page.route('**/*', async (route) => {
     const url = new URL(route.request().url());
     const { pathname } = url;
@@ -130,13 +134,25 @@ async function mockApi(page: Page, calls: ApiCall[], options: { authEnabled?: bo
     } else if (pathname === '/api/v1/archives/1/slice' && method === 'POST') {
       await route.fulfill({ status: 202, json: { job_id: 7, status_url: '/api/v1/slice-jobs/7' } });
     } else if (pathname === '/api/v1/queue/' && method === 'POST') {
-      await route.fulfill({ json: { id: 2, archive_id: 1, printer_id: 1, status: 'pending', position: 2 } });
+      const queueBody = (body ?? {}) as Record<string, unknown>;
+      const queuedItem = {
+        id: queueItems.length + 1,
+        archive_id: 1,
+        archive_name: 'Benchy',
+        printer_id: queueBody.printer_id ?? 1,
+        printer_name: printer.name,
+        status: 'pending',
+        position: queueItems.length + 1,
+        ...queueBody,
+      };
+      queueItems.push(queuedItem);
+      await route.fulfill({ json: queuedItem });
     } else if (pathname === '/api/v1/queue/1' && method === 'PATCH') {
       await route.fulfill({ json: { id: 1, archive_id: 1, printer_id: 1, status: 'pending', position: 1, ...(body as object) } });
     } else if (pathname === '/api/v1/queue/1/cancel' && method === 'POST') {
       await route.fulfill({ json: { message: 'Queue item cancelled' } });
     } else if (pathname === '/api/v1/queue/') {
-      await route.fulfill({ json: [{ id: 1, archive_id: 1, archive_name: 'Benchy', printer_id: 1, printer_name: printer.name, status: 'pending', position: 1 }] });
+      await route.fulfill({ json: queueItems });
     } else if (pathname === '/api/v1/archives/') {
       await route.fulfill({ json: [archive] });
     } else if (pathname === '/api/v1/spoolman/settings') {
@@ -203,6 +219,42 @@ test('print modal exposes queue-first controls', async ({ page }) => {
   const queueCall = calls.find((call) => call.method === 'POST' && call.path === '/api/v1/queue/');
   expect(queueCall?.body).toMatchObject({ manual_start: true });
   expect(queueCall?.body).not.toHaveProperty('scheduled_time');
+});
+
+test('postponed print submits its UTC start time and is shown as scheduled in the queue', async ({ page }) => {
+  const calls: ApiCall[] = [];
+  await mockApi(page, calls);
+
+  await page.goto('/archives');
+  await page.getByRole('button', { name: /^Print$/i }).first().click();
+  await page.getByRole('button', { name: /Queue options/i }).click();
+  await page.locator('label', { hasText: 'Postpone print' }).click();
+  await expect(page.getByRole('checkbox', { name: /Postpone print/i })).toBeChecked();
+  await page.getByLabel(/Do not start before/i).fill('12/31/2099');
+  await page.getByLabel(/Postpone time/i).fill('09:30');
+  await page.getByRole('button', { name: /^Print$/i }).last().click();
+
+  await expect.poll(() => calls.some((call) => call.method === 'POST' && call.path === '/api/v1/queue/')).toBe(true);
+  const queueCall = calls.find((call) => call.method === 'POST' && call.path === '/api/v1/queue/');
+  expect(queueCall?.body).toMatchObject({ scheduled_time: '2099-12-31T09:30:00.000Z' });
+
+  await page.goto('/queue');
+  await expect(page.getByText(/Scheduled · Dec 31, 2099, 09:30 AM/)).toBeVisible();
+});
+
+test('invalid postponed dates cannot create a queue item', async ({ page }) => {
+  const calls: ApiCall[] = [];
+  await mockApi(page, calls);
+
+  await page.goto('/archives');
+  await page.getByRole('button', { name: /^Print$/i }).first().click();
+  await page.getByRole('button', { name: /Queue options/i }).click();
+  await page.locator('label', { hasText: 'Postpone print' }).click();
+  await page.getByLabel(/Do not start before/i).fill('02/31/2099');
+
+  await expect(page.getByText(/Please enter a valid date and time/i)).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Print$/i }).last()).toBeDisabled();
+  expect(calls.some((call) => call.method === 'POST' && call.path === '/api/v1/queue/')).toBe(false);
 });
 
 test('core app API smoke reaches create, edit, upload, slice, queue, and settings paths', async ({ page }) => {

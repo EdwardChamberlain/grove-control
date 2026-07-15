@@ -1122,6 +1122,7 @@ export default {
     // Status
     status: {
       pending: '待機中',
+      scheduled: '予定済み',
       waiting: '待機中',
       printing: '印刷中',
       paused: '一時停止',
@@ -4323,7 +4324,14 @@ export default {
     dateTime: '日時',
     invalidDateTime: '有効な日時を入力してください',
     openCalendar: 'カレンダーを開く',
+    chooseDate: '日付を選択',
+    previousMonth: '前の月',
+    nextMonth: '次の月',
     requireManualStart: '手動開始を要求',
+    postponePrint: '印刷を延期',
+    postponeTime: '印刷時刻',
+    doNotStartBefore: 'この時刻より前には開始しない',
+    futureDateTime: '未来の日時を選択してください',
     requirePreviousSuccess: '前の印刷が成功した場合のみ開始',
     autoOffAfter: '完了後にプリンターの電源を切る',
     helpAsap: '印刷はキューの先頭に追加され、対象プリンターがアイドルになるとすぐに開始します。',

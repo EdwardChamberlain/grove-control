@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
-import { AlertCircle, Clock, Layers, ListOrdered, Printer, User } from 'lucide-react';
+import { AlertCircle, Calendar, Clock, Layers, ListOrdered, Pause, Play, Printer, User } from 'lucide-react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { api, type Printer as PrinterRecord, type PrinterStatus, type PrintQueueItem } from '../api/client';
 import { useTheme } from '../contexts/ThemeContext';
-import { type TimeFormat, formatDuration, formatETA } from '../utils/date';
+import { type TimeFormat, formatDate, formatDuration, formatETA, parseUTCDate } from '../utils/date';
 import { formatPrintName } from '../utils/printName';
 
 type Translate = TFunction;
@@ -156,12 +156,7 @@ function KioskQueueCard({
             {item.print_time_seconds && <span>{formatDuration(item.print_time_seconds)}</span>}
           </div>
         </div>
-        {item.status === 'pending' && item.waiting_reason && (
-          <p className="flex max-w-[42%] shrink-0 items-center gap-1 self-center truncate rounded-full border border-purple-400/30 bg-purple-400/10 px-2 py-1 text-right text-xs text-purple-400" title={item.waiting_reason}>
-            <AlertCircle className="h-3 w-3 shrink-0" />
-            <span className="truncate">{item.waiting_reason}</span>
-          </p>
-        )}
+        <KioskQueueStatusPill item={item} status={status} t={t} />
       </div>
 
       {printing && (
@@ -183,6 +178,55 @@ function KioskQueueCard({
       )}
 
     </article>
+  );
+}
+
+/** Compact kiosk equivalent of the main Queue page's status badge. */
+function KioskQueueStatusPill({
+  item,
+  status,
+  t,
+}: {
+  item: PrintQueueItem;
+  status: PrinterStatus | undefined;
+  t: Translate;
+}) {
+  const scheduled = item.status === 'pending' && item.scheduled_time && (parseUTCDate(item.scheduled_time)?.getTime() ?? 0) > Date.now();
+  const className = 'flex max-w-[48%] shrink-0 items-center gap-1 self-center truncate rounded-full border px-2 py-1 text-right text-xs';
+
+  if (scheduled) {
+    return (
+      <p data-testid={`kiosk-queue-status-${item.id}`} className={`${className} border-yellow-500/20 bg-yellow-500/10 text-yellow-300`} title={formatDate(item.scheduled_time)}>
+        <Calendar className="h-3 w-3 shrink-0" />
+        <span className="truncate">{t('queue.status.scheduled')} · {formatDate(item.scheduled_time)}</span>
+      </p>
+    );
+  }
+
+  if (item.status === 'pending' && item.waiting_reason) {
+    return (
+      <p data-testid={`kiosk-queue-status-${item.id}`} className={`${className} border-purple-400/30 bg-purple-400/10 text-purple-400`} title={item.waiting_reason}>
+        <AlertCircle className="h-3 w-3 shrink-0" />
+        <span className="truncate">{t('queue.status.waiting')} · {item.waiting_reason}</span>
+      </p>
+    );
+  }
+
+  if (item.status === 'printing') {
+    const paused = status?.state === 'PAUSE';
+    return (
+      <p data-testid={`kiosk-queue-status-${item.id}`} className={`${className} ${paused ? 'border-yellow-400/20 bg-yellow-400/10 text-yellow-400' : 'border-blue-400/20 bg-blue-400/10 text-blue-400'}`}>
+        {paused ? <Pause className="h-3 w-3 shrink-0" /> : <Play className="h-3 w-3 shrink-0" />}
+        <span className="truncate">{paused ? t('queue.status.paused') : t('queue.status.printing')}</span>
+      </p>
+    );
+  }
+
+  return (
+    <p data-testid={`kiosk-queue-status-${item.id}`} className={`${className} border-status-warning/20 bg-status-warning/10 text-status-warning`}>
+      <Clock className="h-3 w-3 shrink-0" />
+      <span className="truncate">{t('queue.status.pending')}</span>
+    </p>
   );
 }
 

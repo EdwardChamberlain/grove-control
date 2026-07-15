@@ -1123,6 +1123,7 @@ export default {
     // Durum
     status: {
       pending: 'Beklemede',
+      scheduled: 'Planlandı',
       waiting: 'Bekliyor',
       printing: 'Yazdırılıyor',
       paused: 'Duraklatıldı',
@@ -4301,7 +4302,14 @@ export default {
     dateTime: 'Tarih ve saat',
     invalidDateTime: 'Lütfen geçerli bir tarih ve saat girin',
     openCalendar: 'Takvimi aç',
+    chooseDate: 'Tarih seç',
+    previousMonth: 'Önceki ay',
+    nextMonth: 'Sonraki ay',
     requireManualStart: 'Manuel başlatma gerektir',
+    postponePrint: 'Yazdırmayı ertele',
+    postponeTime: 'Yazdırma zamanı',
+    doNotStartBefore: 'Şundan önce başlatma',
+    futureDateTime: 'Gelecekteki bir tarih ve saat seçin',
     requirePreviousSuccess: 'Yalnızca önceki baskı başarılıysa başlat',
     autoOffAfter: 'Bittiğinde yazıcıyı kapat',
     helpAsap: 'Baskı kuyruğun en üstüne eklenir ve uygun bir yazıcı boştaysa başlar.',

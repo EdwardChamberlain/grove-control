@@ -7,13 +7,14 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils';
 import { PrintModal } from '../../components/PrintModal';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import type { PrintQueueItem } from '../../api/client';
+import { formatDateInput, parseDateInput, parseTimeInput } from '../../utils/date';
 
 const mockPrinters = [
   { id: 1, name: 'X1 Carbon', model: 'X1C', ip_address: '192.168.1.100', enabled: true, is_active: true },
@@ -229,6 +230,137 @@ describe('PrintModal', () => {
       await waitFor(() => {
         expect(screen.getByText('Print Options')).toBeInTheDocument();
       });
+    });
+
+    it('keeps model filament controls collapsed until they are needed', async () => {
+      let filamentRequirementsRequested = false;
+      server.use(
+        http.get('/api/v1/archives/:id/plates', () =>
+          HttpResponse.json({ is_multi_plate: false, plates: [] }),
+        ),
+        http.get('/api/v1/archives/:id/filament-requirements', () => {
+          filamentRequirementsRequested = true;
+          return HttpResponse.json({
+            filaments: [
+              { slot_id: 1, type: 'PLA', color: '#FF0000', used_grams: 10, used_meters: 3 },
+            ],
+          });
+        }),
+      );
+      const user = userEvent.setup();
+
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={99}
+          archiveName="Benchy"
+          onClose={mockOnClose}
+          onSuccess={mockOnSuccess}
+        />
+      );
+
+      await user.click(await screen.findByRole('button', { name: 'Any Model' }));
+      await waitFor(() => expect(filamentRequirementsRequested).toBe(true));
+
+      const filamentOptions = await screen.findByRole('button', { name: 'Filament Requirements' });
+      expect(filamentOptions).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.queryByLabelText(/Match colour/i)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/PLA filament profile/i)).not.toBeInTheDocument();
+
+      await user.click(filamentOptions);
+
+      expect(filamentOptions).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByLabelText(/Match colour/i)).toBeInTheDocument();
+      expect(await screen.findByLabelText(/PLA filament profile/i)).toBeInTheDocument();
+    });
+
+    it('queues a postponed print with the selected UTC start time', async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      server.use(
+        http.post('/api/v1/queue/', async ({ request }) => {
+          capturedBody = await request.json() as Record<string, unknown>;
+          return HttpResponse.json({ id: 1, status: 'pending' });
+        }),
+      );
+      const user = userEvent.setup();
+
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Benchy"
+          initialSelectedPrinterIds={[1]}
+          onClose={mockOnClose}
+        />,
+      );
+
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      await user.click(screen.getByRole('checkbox', { name: 'Postpone print' }));
+      const dateInput = screen.getByLabelText('Do not start before') as HTMLInputElement;
+      const timeInput = screen.getByLabelText('Postpone time') as HTMLInputElement;
+      await waitFor(() => expect(dateInput.value).not.toBe(''));
+      const date = parseDateInput(dateInput.value, 'system')!;
+      const time = parseTimeInput(timeInput.value)!;
+      date.setHours(time.hours, time.minutes, 0, 0);
+
+      await user.click(screen.getByRole('button', { name: /^print$/i }));
+
+      await waitFor(() => expect(capturedBody).not.toBeNull());
+      expect(capturedBody?.scheduled_time).toBe(date.toISOString());
+    });
+
+    it('queues a postponed model-assigned print with its target model', async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      server.use(
+        http.post('/api/v1/queue/', async ({ request }) => {
+          capturedBody = await request.json() as Record<string, unknown>;
+          return HttpResponse.json({ id: 1, status: 'pending' });
+        }),
+      );
+      const user = userEvent.setup();
+
+      render(<PrintModal mode="create" archiveId={1} archiveName="Benchy" onClose={mockOnClose} />);
+
+      await user.click(await screen.findByRole('button', { name: 'Any Model' }));
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      await user.click(screen.getByRole('checkbox', { name: 'Postpone print' }));
+      await user.click(screen.getByRole('button', { name: /^print$/i }));
+
+      await waitFor(() => expect(capturedBody).not.toBeNull());
+      expect(capturedBody).toMatchObject({ target_model: 'A1M' });
+      expect(capturedBody?.scheduled_time).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00\.000Z$/);
+    });
+
+    it('persists model filament overrides and the colour-match policy', async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      server.use(
+        http.get('/api/v1/archives/:id/filament-requirements', () => HttpResponse.json({
+          filaments: [{ slot_id: 1, type: 'PLA', color: '#FF0000', used_grams: 10, used_meters: 3 }],
+        })),
+        http.get('/api/v1/printers/available-filaments', () => HttpResponse.json([
+          { type: 'PLA', color: '#00FF00', tray_info_idx: '1', tray_sub_brands: 'PLA Basic', extruder_id: null },
+        ])),
+        http.post('/api/v1/queue/', async ({ request }) => {
+          capturedBody = await request.json() as Record<string, unknown>;
+          return HttpResponse.json({ id: 1, status: 'pending' });
+        }),
+      );
+      const user = userEvent.setup();
+
+      render(<PrintModal mode="create" archiveId={1} archiveName="Benchy" onClose={mockOnClose} />);
+
+      await user.click(await screen.findByRole('button', { name: 'Any Model' }));
+      await user.click(await screen.findByRole('button', { name: 'Filament Requirements' }));
+      await user.click(screen.getByLabelText(/Match colour/i));
+      await user.click(await screen.findByRole('combobox', { name: /PLA filament profile/i }));
+      await user.click(await screen.findByRole('option', { name: /PLA Basic \(Green\)/i }));
+      await user.click(screen.getByRole('button', { name: /^print$/i }));
+
+      await waitFor(() => expect(capturedBody).not.toBeNull());
+      expect(capturedBody?.force_color_match).toBe(false);
+      expect(capturedBody?.filament_overrides).toEqual([
+        expect.objectContaining({ slot_id: 1, type: 'PLA', color: '#00FF00', force_color_match: false }),
+      ]);
     });
 
     it('queues printer-targeted jobs with force colour matching enabled by default', async () => {
@@ -452,6 +584,144 @@ describe('PrintModal', () => {
       expect(screen.getByRole('checkbox', { name: /insert at top of queue/i })).toBeInTheDocument();
     });
 
+    it('uses a native time picker with a quarter-hour default when postponing a print', async () => {
+      const user = userEvent.setup();
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Test Print"
+          onClose={mockOnClose}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      const postponePrint = screen.getByRole('checkbox', { name: 'Postpone print' });
+      await user.click(postponePrint);
+      expect(screen.getByText('Do not start before')).toBeInTheDocument();
+      expect(postponePrint.closest('label')?.nextElementSibling).toHaveTextContent('Do not start before');
+      const timePicker = screen.getByLabelText('Postpone time');
+      expect(timePicker).toHaveAttribute('type', 'time');
+      expect(timePicker).toHaveAttribute('step', '60');
+      expect((timePicker as HTMLInputElement).value).toMatch(/^\d{2}:(00|15|30|45)$/);
+      const calendarTrigger = screen.getByTitle('Open calendar');
+      await user.click(calendarTrigger);
+      const datePicker = screen.getByRole('dialog', { name: 'Choose date' });
+      expect(datePicker).toBeInTheDocument();
+      expect(datePicker).toHaveClass('bottom-full', 'z-50');
+      expect(within(datePicker).getByRole('grid', { name: 'Choose date' })).toBeInTheDocument();
+      expect(within(datePicker).getAllByRole('columnheader')).toHaveLength(7);
+      const previousMonth = within(datePicker).getByRole('button', { name: 'Previous month' });
+      expect(previousMonth).toBeInTheDocument();
+      expect(within(datePicker).getByRole('button', { name: 'Next month' })).toBeInTheDocument();
+      expect(previousMonth).toHaveFocus();
+      const save = within(datePicker).getByRole('button', { name: 'Save' });
+      save.focus();
+      await user.tab();
+      expect(previousMonth).toHaveFocus();
+      await user.tab({ shift: true });
+      expect(save).toHaveFocus();
+      await user.keyboard('{Escape}');
+      expect(screen.queryByRole('dialog', { name: 'Choose date' })).not.toBeInTheDocument();
+      expect(calendarTrigger).toHaveFocus();
+    });
+
+    it('applies a date selected in the postpone calendar', async () => {
+      const user = userEvent.setup();
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Test Print"
+          initialSelectedPrinterIds={[1]}
+          onClose={mockOnClose}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      await user.click(screen.getByRole('checkbox', { name: 'Postpone print' }));
+      const dateInput = screen.getByLabelText('Do not start before') as HTMLInputElement;
+      await waitFor(() => expect(dateInput.value).not.toBe(''));
+      const selectedDay = String(parseDateInput(dateInput.value, 'system')!.getDate());
+
+      await user.click(screen.getByTitle('Open calendar'));
+      const datePicker = screen.getByRole('dialog', { name: 'Choose date' });
+      const selectedDayButton = within(datePicker).getAllByRole('button').find((button) => button.textContent === selectedDay);
+      expect(selectedDayButton).toBeDefined();
+      await user.click(selectedDayButton!);
+      await user.click(within(datePicker).getByRole('button', { name: 'Save' }));
+
+      expect(screen.queryByRole('dialog', { name: 'Choose date' })).not.toBeInTheDocument();
+      expect(dateInput).not.toHaveValue('');
+    });
+
+    it('prevents a postponed print from using a past start time', async () => {
+      const user = userEvent.setup();
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Test Print"
+          initialSelectedPrinterIds={[1]}
+          onClose={mockOnClose}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      await user.click(screen.getByRole('checkbox', { name: 'Postpone print' }));
+      fireEvent.change(screen.getByLabelText('Postpone time'), { target: { value: '00:00' } });
+
+      expect(screen.getByText('Choose a future date and time')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^print$/i })).toBeDisabled();
+    });
+
+    it('clears the scheduled value when the postpone date becomes invalid', async () => {
+      const user = userEvent.setup();
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Test Print"
+          initialSelectedPrinterIds={[1]}
+          onClose={mockOnClose}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      await user.click(screen.getByRole('checkbox', { name: 'Postpone print' }));
+      const dateInput = screen.getByLabelText('Do not start before');
+      expect(dateInput).not.toHaveValue('');
+
+      await user.clear(dateInput);
+
+      expect(screen.getByText('Please enter a valid date and time')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^print$/i })).toBeDisabled();
+    });
+
+    it('allows a postponed print more than six months away', async () => {
+      const user = userEvent.setup();
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Test Print"
+          initialSelectedPrinterIds={[1]}
+          onClose={mockOnClose}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      await user.click(screen.getByRole('checkbox', { name: 'Postpone print' }));
+      const dateInput = screen.getByLabelText('Do not start before');
+      await waitFor(() => expect(dateInput).not.toHaveValue(''));
+      const longFutureDate = new Date(2099, 11, 31, 9, 30, 0, 0);
+      fireEvent.change(dateInput, { target: { value: formatDateInput(longFutureDate, 'system') } });
+      fireEvent.change(screen.getByLabelText('Postpone time'), { target: { value: '09:30' } });
+
+      expect(screen.queryByText('Choose a date within six months')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^print$/i })).toBeEnabled();
+    });
+
     it('only shows power off when the selected printer has a smart socket', async () => {
       const user = userEvent.setup();
       render(
@@ -549,6 +819,50 @@ describe('PrintModal', () => {
       );
 
       expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument();
+    });
+
+    it('preserves a long-future scheduled time when saving an existing queue item', async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      server.use(
+        http.patch('/api/v1/queue/:id', async ({ request }) => {
+          capturedBody = await request.json() as Record<string, unknown>;
+          return HttpResponse.json({ id: 1, status: 'pending' });
+        }),
+      );
+      const user = userEvent.setup();
+      const scheduledTime = new Date(2099, 11, 31, 9, 30, 0, 0);
+      const item = createMockQueueItem({ scheduled_time: scheduledTime.toISOString() });
+
+      render(<PrintModal mode="edit-queue-item" archiveId={1} archiveName="Test Print" queueItem={item} onClose={mockOnClose} />);
+
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      expect(screen.getByRole('checkbox', { name: 'Postpone print' })).toBeChecked();
+      await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+      await waitFor(() => expect(capturedBody).not.toBeNull());
+      expect(capturedBody?.scheduled_time).toBe(scheduledTime.toISOString());
+    });
+
+    it('clears a scheduled time when postponing is disabled during edit', async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      server.use(
+        http.patch('/api/v1/queue/:id', async ({ request }) => {
+          capturedBody = await request.json() as Record<string, unknown>;
+          return HttpResponse.json({ id: 1, status: 'pending' });
+        }),
+      );
+      const user = userEvent.setup();
+      const scheduledTime = new Date(2099, 11, 31, 9, 30, 0, 0);
+      const item = createMockQueueItem({ scheduled_time: scheduledTime.toISOString() });
+
+      render(<PrintModal mode="edit-queue-item" archiveId={1} archiveName="Test Print" queueItem={item} onClose={mockOnClose} />);
+
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      await user.click(screen.getByRole('checkbox', { name: 'Postpone print' }));
+      await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+      await waitFor(() => expect(capturedBody).not.toBeNull());
+      expect(capturedBody?.scheduled_time).toBeNull();
     });
 
     it('shows cancel button', () => {

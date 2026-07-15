@@ -61,7 +61,7 @@ import {
   PlayCircle,
 } from 'lucide-react';
 import { api, ApiError } from '../api/client';
-import { type TimeFormat, formatETA, formatDuration, formatRelativeTime, parseUTCDate } from '../utils/date';
+import { type TimeFormat, formatDate, formatETA, formatDuration, formatRelativeTime, parseUTCDate } from '../utils/date';
 import { getBedTypeInfo } from '../utils/bedType';
 import type { PrintQueueItem, PrintQueueBulkUpdate, Permission } from '../api/client';
 import { Card } from '../components/Card';
@@ -80,7 +80,18 @@ function formatWeight(g: number, useKg = false): string {
   return `${Math.round(g)}g`;
 }
 
-function StatusBadge({ status, waitingReason, printerState, t }: { status: PrintQueueItem['status']; waitingReason?: string | null; printerState?: string | null; t: (key: string) => string }) {
+function StatusBadge({ status, scheduledTime, waitingReason, printerState, t }: { status: PrintQueueItem['status']; scheduledTime?: string | null; waitingReason?: string | null; printerState?: string | null; t: (key: string) => string }) {
+  // A future pending job has its own explicit status. The relative timestamp
+  // in the row is useful context, but the pill makes the scheduler state clear.
+  if (status === 'pending' && scheduledTime && (parseUTCDate(scheduledTime)?.getTime() ?? 0) > Date.now()) {
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border text-yellow-300 bg-yellow-500/10 border-yellow-500/20">
+        <Calendar className="w-3.5 h-3.5" />
+        {t('queue.status.scheduled')} · {formatDate(scheduledTime)}
+      </span>
+    );
+  }
+
   // Special case: pending with waiting_reason shows as "Waiting"
   if (status === 'pending' && waitingReason) {
     return (
@@ -665,7 +676,7 @@ function SortableQueueItem({
 
         {/* Status badge + Actions */}
         <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2 sm:gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-          <StatusBadge status={item.status} waitingReason={item.waiting_reason} printerState={printerState} t={t} />
+          <StatusBadge status={item.status} scheduledTime={item.scheduled_time} waitingReason={item.waiting_reason} printerState={printerState} t={t} />
 
           <div className="flex items-center gap-0.5 sm:gap-1">
             {isPrinting && (
@@ -1519,13 +1530,10 @@ export function QueuePage() {
       items = items.filter(matchesLocationFilter);
     }
 
-    // Helper to get scheduled time as timestamp (ASAP/placeholder = 0 for earliest)
+    // Helper to get scheduled time as timestamp (ASAP = 0 for earliest)
     const getScheduledTime = (item: PrintQueueItem): number => {
       if (!item.scheduled_time) return 0;
-      const time = parseUTCDate(item.scheduled_time)?.getTime() ?? 0;
-      // Placeholder dates (> 6 months out) are treated as ASAP
-      const sixMonthsFromNow = Date.now() + (180 * 24 * 60 * 60 * 1000);
-      return time > sixMonthsFromNow ? 0 : time;
+      return parseUTCDate(item.scheduled_time)?.getTime() ?? 0;
     };
 
     // When SJF is enabled, override sort to match scheduler order

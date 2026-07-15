@@ -139,7 +139,18 @@ export function parseDateInput(value: string, dateFormat: DateFormat = 'system')
   if (day < 1 || day > 31) return null;
   if (year < 1900 || year > 2100) return null;
 
-  return new Date(year, month - 1, day);
+  const date = new Date(year, month - 1, day);
+  // Date normalizes overflow (for example, 31 February becomes 3 March),
+  // so round-trip the parts to reject dates that do not actually exist.
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return date;
 }
 
 /**

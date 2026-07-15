@@ -1123,6 +1123,7 @@ export default {
     // Status
     status: {
       pending: '等待中',
+      scheduled: '已排程',
       waiting: '等待中',
       printing: '列印中',
       paused: '已暫停',
@@ -4311,7 +4312,14 @@ export default {
     dateTime: '日期和時間',
     invalidDateTime: '請輸入有效的日期和時間',
     openCalendar: '開啟日曆',
+    chooseDate: '選擇日期',
+    previousMonth: '上個月',
+    nextMonth: '下個月',
     requireManualStart: '要求手動開始',
+    postponePrint: '延後列印',
+    postponeTime: '列印時間',
+    doNotStartBefore: '請勿早於此時間開始',
+    futureDateTime: '請選擇未來的日期和時間',
     requirePreviousSuccess: '僅在上一次列印成功後開始',
     autoOffAfter: '完成後關閉印表機',
     helpAsap: '列印將新增到佇列頂端，並在符合條件的印表機閒置後立即開始。',

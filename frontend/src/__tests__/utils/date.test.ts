@@ -150,6 +150,12 @@ describe('parseDateInput', () => {
     expect(parseDateInput('01/32/2025', 'us')).toBeNull();
     expect(parseDateInput('01/00/2025', 'us')).toBeNull();
   });
+
+  it('returns null for nonexistent calendar dates', () => {
+    expect(parseDateInput('02/29/2025', 'us')).toBeNull();
+    expect(parseDateInput('31/04/2025', 'eu')).toBeNull();
+    expect(parseDateInput('2025-02-29', 'iso')).toBeNull();
+  });
 });
 
 describe('parseTimeInput', () => {

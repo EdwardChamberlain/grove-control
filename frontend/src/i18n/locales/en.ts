@@ -1133,6 +1133,7 @@ export default {
     // Status
     status: {
       pending: 'Pending',
+      scheduled: 'Scheduled',
       waiting: 'Waiting',
       printing: 'Printing',
       paused: 'Paused',
@@ -4347,7 +4348,14 @@ export default {
     dateTime: 'Date & Time',
     invalidDateTime: 'Please enter a valid date and time',
     openCalendar: 'Open calendar',
+    chooseDate: 'Choose date',
+    previousMonth: 'Previous month',
+    nextMonth: 'Next month',
     requireManualStart: 'Require manual start',
+    postponePrint: 'Postpone print',
+    postponeTime: 'Postpone time',
+    doNotStartBefore: 'Do not start before',
+    futureDateTime: 'Choose a future date and time',
     requirePreviousSuccess: 'Only start if previous print succeeded',
     autoOffAfter: 'Power off printer when done',
     helpAsap: 'Print will be added to the top of the queue and start as soon as an eligible printer is idle.',

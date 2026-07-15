@@ -223,6 +223,20 @@ describe('QueuePage', () => {
       });
     });
 
+    it('shows future jobs as scheduled, including their scheduled time', async () => {
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json([
+          { ...mockQueueItems[0], scheduled_time: '2099-01-01T09:30:00Z' },
+        ])),
+      );
+
+      render(<QueuePage />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/^Scheduled · Jan 1, 2099/)).toBeInTheDocument();
+      });
+    });
+
     it('shows printer names', async () => {
       render(<QueuePage />);
 
