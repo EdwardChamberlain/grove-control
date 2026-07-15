@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -607,7 +608,22 @@ async def add_to_queue(
         db.add(item)
         items.append(item)
 
-    await db.commit()
+    try:
+        await db.commit()
+    except SQLAlchemyError:
+        # Keep a compact queue-specific breadcrumb alongside the traceback
+        # emitted by the HTTP exception boundary. IDs are enough to identify
+        # the operation; avoid logging the request body or source filenames.
+        logger.error(
+            "Queue insert database commit failed "
+            "(archive_id=%s, library_file_id=%s, printer_id=%s, target_model=%s, quantity=%s)",
+            data.archive_id,
+            data.library_file_id,
+            data.printer_id,
+            target_model_norm,
+            quantity,
+        )
+        raise
 
     # Refresh the first item for the response
     item = items[0]
