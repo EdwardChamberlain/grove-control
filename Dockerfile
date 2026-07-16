@@ -64,6 +64,7 @@ COPY backend/ ./backend/
 # Operational recovery tooling is deliberately shipped in the image so it can
 # be run against the named data volume without requiring a source checkout.
 COPY scripts/rebuild_print_queue.py ./scripts/rebuild_print_queue.py
+COPY scripts/rebuild_database.py ./scripts/rebuild_database.py
 
 # Capture the current git branch at build time. `.git/HEAD` is the only
 # .git metadata the build context lets through (see .dockerignore); it
