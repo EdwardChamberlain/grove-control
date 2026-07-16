@@ -14,6 +14,11 @@ export default defineConfig({
     },
     setupFiles: ['./src/__tests__/setup.ts'],
     testTimeout: 10000,
+    // Fork startup can exhaust constrained CI runners under the full suite,
+    // leaving otherwise unrelated tests to time out before their workers run.
+    // A bounded thread pool keeps parallel test execution without that churn.
+    pool: 'threads',
+    maxWorkers: 4,
     include: ['src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
     exclude: ['node_modules', 'dist'],
     coverage: {

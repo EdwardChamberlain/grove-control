@@ -97,6 +97,39 @@ class TestNotificationService:
 
             mock_send.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_print_lifecycle_notifications_include_structured_owner(self, service, mock_provider, mock_db):
+        """Start and terminal print events share the same owner payload builder."""
+        mock_db.get.return_value = MagicMock(username="alice")
+
+        with (
+            patch.object(service, "_get_providers_for_event", new_callable=AsyncMock) as mock_get,
+            patch.object(service, "_send_to_providers", new_callable=AsyncMock) as mock_send,
+            patch.object(service, "_build_message_from_template", new_callable=AsyncMock) as mock_build,
+        ):
+            mock_get.return_value = [mock_provider]
+            mock_build.return_value = ("Test", "Test")
+
+            await service.on_print_start(
+                printer_id=1,
+                printer_name="Test Printer",
+                data={"filename": "test.3mf"},
+                db=mock_db,
+                archive_data={"owner_id": 42, "created_by_id": 99},
+            )
+            await service.on_print_complete(
+                printer_id=1,
+                printer_name="Test Printer",
+                status="failed",
+                data={"filename": "test.3mf"},
+                db=mock_db,
+                archive_data={"owner_id": 42, "created_by_id": 99},
+            )
+
+        assert mock_db.get.await_count == 2
+        for call in mock_send.call_args_list:
+            assert call.kwargs["variables"]["owner"] == {"id": 42, "username": "alice"}
+
     # ========================================================================
     # Tests for on_print_complete (status routing)
     # ========================================================================
@@ -642,6 +675,29 @@ class TestNotificationProviderTypes:
             call_args = mock_client.post.call_args
             payload = call_args.kwargs.get("json") or call_args[1].get("json")
             assert "image" not in payload
+
+    @pytest.mark.asyncio
+    async def test_webhook_generic_format_includes_print_owner(self, service):
+        """Generic print webhooks preserve the structured owning-user context."""
+        config = {"webhook_url": "http://test.local/webhook"}
+        mock_response = MagicMock(status_code=200)
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        with patch.object(service, "_get_client", new_callable=AsyncMock) as mock_get_client:
+            mock_get_client.return_value = mock_client
+
+            success, _ = await service._send_webhook(
+                config,
+                "Print complete",
+                "Test print completed",
+                event_type="print_complete",
+                variables={"owner": {"id": 42, "username": "alice"}},
+            )
+
+        assert success is True
+        payload = mock_client.post.call_args.kwargs["json"]
+        assert payload["owner"] == {"id": 42, "username": "alice"}
 
     @pytest.mark.asyncio
     async def test_webhook_slack_format_excludes_image(self, service):

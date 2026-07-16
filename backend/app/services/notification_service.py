@@ -164,6 +164,30 @@ class NotificationService:
             return f"{hours}h {minutes}m"
         return f"{minutes}m"
 
+    async def _get_print_owner_payload(
+        self, db: AsyncSession, archive_data: dict | None
+    ) -> dict[str, int | str | None] | None:
+        """Return the user who owns a print for structured notification payloads.
+
+        Print lifecycle callbacks carry the job owner's ID as ``owner_id`` and
+        fall back to the archive creator for prints without a queue owner.
+        Resolving the user here keeps each notification path consistent and
+        gives webhook consumers a stable owner object.
+        """
+        owner_id = (archive_data or {}).get("owner_id")
+        if owner_id is None:
+            owner_id = (archive_data or {}).get("created_by_id")
+        if owner_id is None:
+            return None
+
+        from backend.app.models.user import User
+
+        owner = await db.get(User, owner_id)
+        return {
+            "id": owner_id,
+            "username": owner.username if owner else None,
+        }
+
     def _clean_filename(self, filename: str) -> str:
         """Extract filename and remove file extensions."""
         import os
@@ -955,6 +979,7 @@ class NotificationService:
             "filename": filename,
             "estimated_time": time_str,
             "eta": eta_str,
+            "owner": await self._get_print_owner_payload(db, archive_data),
         }
 
         # Extract image data for providers that support attachments (e.g. Pushover)
@@ -1021,6 +1046,7 @@ class NotificationService:
             "duration": "Unknown",
             "filament_grams": "Unknown",
             "reason": "Unknown",
+            "owner": await self._get_print_owner_payload(db, archive_data),
         }
 
         if archive_data:

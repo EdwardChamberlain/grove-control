@@ -2220,6 +2220,23 @@ async def _dispatch_user_print_email(
     )
 
 
+def _resolve_print_notification_owner_id(
+    completed_queue_item_id: int | None,
+    completed_queue_item_owner_id: int | None,
+    archive_created_by_id: int | None,
+) -> int | None:
+    """Return the persisted queue-job owner for a print notification.
+
+    Queue ownership belongs to the print run, while ``archive_created_by_id``
+    identifies the file uploader. The queue-status transition supplies both
+    queue values from the database, so this remains correct after a service
+    restart has cleared printer-manager's in-memory user cache.
+    """
+    if completed_queue_item_id is not None:
+        return completed_queue_item_owner_id
+    return archive_created_by_id
+
+
 def _load_objects_from_archive(archive, printer_id: int, logger) -> None:
     """Extract printable objects from an archive's 3MF file and store in printer state."""
     try:
@@ -2634,9 +2651,9 @@ async def on_print_start(printer_id: int, data: dict):
 
                 # Send notification with archive data (reprint/scheduled)
                 if not notification_sent:
-                    # Use archive's created_by_id; fall back to the creator registered via
-                    # register_expected_print (handles library-file-based queue items where
-                    # the freshly-created archive has no created_by_id yet).
+                    # The queue item owns this job, even when someone else uploaded
+                    # its source archive. Fall back to the archive creator for
+                    # printer-initiated and legacy prints with no queue owner.
                     # Pop ALL matching keys so no stale entries remain in the dict.
                     fallback_creator = None
                     for key in expected_keys:
@@ -2646,6 +2663,7 @@ async def on_print_start(printer_id: int, data: dict):
                     archive_data = {
                         "print_time_seconds": archive.print_time_seconds,
                         "created_by_id": archive.created_by_id or fallback_creator,
+                        "owner_id": fallback_creator or archive.created_by_id,
                     }
                     await _send_print_start_notification(printer_id, data, archive_data, logger)
 
@@ -4242,6 +4260,7 @@ async def on_print_complete(printer_id: int, data: dict):
     # so queue items don't get stuck in "printing" when archive lookup fails.
     # Uses run_with_retry to handle SQLite "database is locked" errors (#897).
     queue_item_id = None
+    queue_item_owner_id = None
     queue_status = None
     queue_auto_off = False
     try:
@@ -4249,7 +4268,7 @@ async def on_print_complete(printer_id: int, data: dict):
         from backend.app.models.print_queue import PrintQueueItem
 
         async def _update_queue_status(db):
-            nonlocal queue_item_id, queue_status, queue_auto_off
+            nonlocal queue_item_id, queue_item_owner_id, queue_status, queue_auto_off
             result = await db.execute(
                 select(PrintQueueItem)
                 .where(PrintQueueItem.printer_id == printer_id)
@@ -4281,6 +4300,7 @@ async def on_print_complete(printer_id: int, data: dict):
 
                 await db.commit()
                 queue_item_id = item.id
+                queue_item_owner_id = item.created_by_id
                 queue_auto_off = item.auto_off_after
                 logger.info("Updated queue item %s status to %s", item.id, queue_status)
 
@@ -4491,7 +4511,20 @@ async def on_print_complete(printer_id: int, data: dict):
                     # NOTE: By the time this task runs the queue item status has already
                     # been updated to a terminal state (completed/failed/cancelled), so
                     # we look for recently-completed items (within the last 5 minutes).
-                    no_archive_data: dict | None = None
+                    # Prefer the exact queue item that the status transition
+                    # above completed. Unlike printer_manager's in-memory
+                    # current-print-user cache, this survives a service restart.
+                    no_archive_data: dict | None = (
+                        {
+                            "owner_id": _resolve_print_notification_owner_id(
+                                queue_item_id,
+                                queue_item_owner_id,
+                                None,
+                            )
+                        }
+                        if queue_item_id is not None
+                        else None
+                    )
                     try:
                         cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
                         q_result = await db.execute(
@@ -4504,7 +4537,9 @@ async def on_print_complete(printer_id: int, data: dict):
                         )
                         queue_item = q_result.scalar_one_or_none()
                         if queue_item:
-                            no_archive_data = {"created_by_id": queue_item.created_by_id}
+                            if no_archive_data is None:
+                                no_archive_data = {}
+                            no_archive_data["created_by_id"] = queue_item.created_by_id
                             # Pull estimated time from library file when available
                             if queue_item.library_file_id:
                                 lib_result = await db.execute(
@@ -4977,6 +5012,14 @@ async def on_print_complete(printer_id: int, data: dict):
                             "actual_filament_grams": archive.filament_used_grams,
                             "failure_reason": archive.failure_reason,
                             "created_by_id": archive.created_by_id,
+                            # The persisted queue item owns this run. It is
+                            # available after a backend restart, unlike the
+                            # printer-manager's in-memory user cache.
+                            "owner_id": _resolve_print_notification_owner_id(
+                                queue_item_id,
+                                queue_item_owner_id,
+                                archive.created_by_id,
+                            ),
                         }
 
                         # Scale filament usage for partial prints
