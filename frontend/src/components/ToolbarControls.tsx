@@ -315,7 +315,10 @@ export function ReactSelect({
       return;
     }
 
-    const escapedId = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(id) : id.replace(/"/g, '\\"');
+    const escapedId =
+      typeof CSS !== 'undefined' && CSS.escape
+        ? CSS.escape(id)
+        : id.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     const label = document.querySelector<HTMLLabelElement>(`label[for="${escapedId}"]`);
     if (!label) {
       setLabelId(undefined);
