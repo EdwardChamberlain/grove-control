@@ -2634,9 +2634,9 @@ async def on_print_start(printer_id: int, data: dict):
 
                 # Send notification with archive data (reprint/scheduled)
                 if not notification_sent:
-                    # Use archive's created_by_id; fall back to the creator registered via
-                    # register_expected_print (handles library-file-based queue items where
-                    # the freshly-created archive has no created_by_id yet).
+                    # The queue item owns this job, even when someone else uploaded
+                    # its source archive. Fall back to the archive creator for
+                    # printer-initiated and legacy prints with no queue owner.
                     # Pop ALL matching keys so no stale entries remain in the dict.
                     fallback_creator = None
                     for key in expected_keys:
@@ -2646,6 +2646,7 @@ async def on_print_start(printer_id: int, data: dict):
                     archive_data = {
                         "print_time_seconds": archive.print_time_seconds,
                         "created_by_id": archive.created_by_id or fallback_creator,
+                        "owner_id": fallback_creator or archive.created_by_id,
                     }
                     await _send_print_start_notification(printer_id, data, archive_data, logger)
 
@@ -4977,6 +4978,11 @@ async def on_print_complete(printer_id: int, data: dict):
                             "actual_filament_grams": archive.filament_used_grams,
                             "failure_reason": archive.failure_reason,
                             "created_by_id": archive.created_by_id,
+                            # A queue item's creator owns this run, which may
+                            # differ from the user who uploaded the archive.
+                            "owner_id": (
+                                _print_user_info.get("user_id") if _print_user_info else archive.created_by_id
+                            ),
                         }
 
                         # Scale filament usage for partial prints
