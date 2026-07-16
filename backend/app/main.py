@@ -2220,6 +2220,23 @@ async def _dispatch_user_print_email(
     )
 
 
+def _resolve_print_notification_owner_id(
+    completed_queue_item_id: int | None,
+    completed_queue_item_owner_id: int | None,
+    archive_created_by_id: int | None,
+) -> int | None:
+    """Return the persisted queue-job owner for a print notification.
+
+    Queue ownership belongs to the print run, while ``archive_created_by_id``
+    identifies the file uploader. The queue-status transition supplies both
+    queue values from the database, so this remains correct after a service
+    restart has cleared printer-manager's in-memory user cache.
+    """
+    if completed_queue_item_id is not None:
+        return completed_queue_item_owner_id
+    return archive_created_by_id
+
+
 def _load_objects_from_archive(archive, printer_id: int, logger) -> None:
     """Extract printable objects from an archive's 3MF file and store in printer state."""
     try:
@@ -4498,7 +4515,15 @@ async def on_print_complete(printer_id: int, data: dict):
                     # above completed. Unlike printer_manager's in-memory
                     # current-print-user cache, this survives a service restart.
                     no_archive_data: dict | None = (
-                        {"owner_id": queue_item_owner_id} if queue_item_id is not None else None
+                        {
+                            "owner_id": _resolve_print_notification_owner_id(
+                                queue_item_id,
+                                queue_item_owner_id,
+                                None,
+                            )
+                        }
+                        if queue_item_id is not None
+                        else None
                     )
                     try:
                         cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
@@ -4990,7 +5015,11 @@ async def on_print_complete(printer_id: int, data: dict):
                             # The persisted queue item owns this run. It is
                             # available after a backend restart, unlike the
                             # printer-manager's in-memory user cache.
-                            "owner_id": (queue_item_owner_id if queue_item_id is not None else archive.created_by_id),
+                            "owner_id": _resolve_print_notification_owner_id(
+                                queue_item_id,
+                                queue_item_owner_id,
+                                archive.created_by_id,
+                            ),
                         }
 
                         # Scale filament usage for partial prints
