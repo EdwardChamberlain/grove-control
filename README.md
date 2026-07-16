@@ -166,6 +166,22 @@ docker compose up -d
 The command requires an image that includes this recovery tool. Do not use it
 with an external PostgreSQL database.
 
+**Full SQLite database recovery:** This last-resort tool rebuilds the entire
+database schema and copies compatible data into it, preserving IDs and rows
+for printers, users, groups and permissions, settings, archives, and library
+files. It aborts without replacing the live database if data cannot be copied
+or foreign-key validation fails.
+
+```bash
+docker compose down
+docker compose run --rm --no-deps grove-control \
+  python /app/scripts/rebuild_database.py --yes
+docker compose up -d
+```
+
+It is SQLite-only. A timestamped `.backup` is retained beside the database;
+keep it until the rebuilt installation has been verified.
+
 **Custom Port:**
 
 ```yaml
