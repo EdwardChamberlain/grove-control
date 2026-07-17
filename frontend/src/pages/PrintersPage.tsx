@@ -3772,7 +3772,12 @@ function PrinterCard({
     return null;
   }
 
-  const canDrop = isConnected && status?.state !== 'RUNNING' && status?.state !== 'PAUSE' && hasPermission('printers:control');
+  // Dropping a file follows the same queue-first flow as the Print button: it
+  // uploads the file to the library, then opens PrintModal to enqueue it. A
+  // currently running or paused print must not prevent that workflow.
+  const canDrop = isConnected
+    && hasPermission('library:upload')
+    && hasPermission('queue:create');
 
   const handleCardDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
