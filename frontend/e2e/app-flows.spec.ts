@@ -55,7 +55,7 @@ const archive = {
   sliced_for_model: 'X1C',
 };
 
-async function mockApi(page: Page, calls: ApiCall[], options: { authEnabled?: boolean } = {}) {
+async function mockApi(page: Page, calls: ApiCall[], options: { authEnabled?: boolean; printerState?: string } = {}) {
   const queueItems: Array<Record<string, unknown>> = [
     { id: 1, archive_id: 1, archive_name: 'Benchy', printer_id: 1, printer_name: printer.name, status: 'pending', position: 1 },
   ];
@@ -123,7 +123,22 @@ async function mockApi(page: Page, calls: ApiCall[], options: { authEnabled?: bo
     } else if (pathname === '/api/v1/printers/1' && method === 'PATCH') {
       await route.fulfill({ json: { ...printer, ...(body as object) } });
     } else if (pathname === '/api/v1/printers/1/status') {
-      await route.fulfill({ json: { id: 1, name: printer.name, connected: true, state: 'IDLE', progress: 0 } });
+      await route.fulfill({ json: {
+        id: 1,
+        name: printer.name,
+        connected: true,
+        state: options.printerState ?? 'IDLE',
+        current_print: options.printerState === 'RUNNING' ? 'active-print.gcode.3mf' : null,
+        progress: 0,
+        layer_num: 0,
+        total_layers: 0,
+        remaining_time: 0,
+        awaiting_plate_clear: false,
+        temperatures: { nozzle: 25, bed: 25, chamber: 25 },
+        vt_tray: [],
+      } });
+    } else if (pathname === '/api/v1/library/files' && method === 'POST') {
+      await route.fulfill({ json: { id: 42, filename: 'queued-print.gcode.3mf', metadata: {} } });
     } else if (pathname === '/api/v1/inventory/spools') {
       if (method === 'POST') await route.fulfill({ json: { ...spool, id: 2, ...(body as object) } });
       else await route.fulfill({ json: [spool] });
@@ -255,6 +270,23 @@ test('invalid postponed dates cannot create a queue item', async ({ page }) => {
   await expect(page.getByText(/Please enter a valid date and time/i)).toBeVisible();
   await expect(page.getByRole('button', { name: /^Print$/i }).last()).toBeDisabled();
   expect(calls.some((call) => call.method === 'POST' && call.path === '/api/v1/queue/')).toBe(false);
+});
+
+test('a running printer accepts a dropped print file for queueing', async ({ page }) => {
+  const calls: ApiCall[] = [];
+  await mockApi(page, calls, { printerState: 'RUNNING' });
+
+  await page.goto('/');
+  const printerCard = page.locator('#printer-card-1');
+  await expect(printerCard).toBeVisible();
+
+  await printerCard.evaluate((card) => {
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(new File(['gcode'], 'queued-print.gcode.3mf', { type: 'application/octet-stream' }));
+    card.dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer }));
+  });
+
+  await expect.poll(() => calls.some((call) => call.method === 'POST' && call.path === '/api/v1/library/files')).toBe(true);
 });
 
 test('core app API smoke reaches create, edit, upload, slice, queue, and settings paths', async ({ page }) => {
