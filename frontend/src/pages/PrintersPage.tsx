@@ -2505,6 +2505,7 @@ function SinglePrinterCockpit({
 
       const gridStyles = window.getComputedStyle(grid);
       const cameraControlsStyles = window.getComputedStyle(controls.parentElement!);
+      const rootFontSize = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16;
       const horizontalPadding = Number.parseFloat(gridStyles.paddingLeft) + Number.parseFloat(gridStyles.paddingRight);
       const verticalPadding = Number.parseFloat(gridStyles.paddingTop) + Number.parseFloat(gridStyles.paddingBottom);
       const columnGap = Number.parseFloat(gridStyles.columnGap) || 0;
@@ -2522,11 +2523,18 @@ function SinglePrinterCockpit({
         + Number.parseFloat(controlsContentStyles.borderTopWidth)
         + Number.parseFloat(controlsContentStyles.borderBottomWidth),
       );
+      const cockpitContentHeight = grid.clientHeight - verticalPadding;
+      const availableWidth = grid.clientWidth - horizontalPadding - columnGap;
+      const desiredRightColumnWidth = 18 * rootFontSize;
+      const controlsHeightToProtectRightColumn = cockpitContentHeight
+        - Math.max(0, availableWidth - desiredRightColumnWidth) * (9 / 16);
       const controlsHeight = Math.max(
         naturalControlsHeight,
-        Math.ceil((grid.clientHeight - verticalPadding) * 0.3),
+        Math.ceil(Math.min(
+          cockpitContentHeight * 0.4,
+          Math.max(cockpitContentHeight * 0.3, controlsHeightToProtectRightColumn),
+        )),
       );
-      const availableWidth = grid.clientWidth - horizontalPadding - columnGap;
       const availableCameraHeight = grid.clientHeight - verticalPadding - controlsHeight - cameraControlsGap;
       const nextWidth = Math.max(0, Math.min(availableWidth, availableCameraHeight * (16 / 9)));
 
