@@ -238,6 +238,7 @@ export default {
       title: '유지보수 중',
       subtitle: '이 프린터는 일시 중지되었습니다 — 연결되지 않음, 대기열에서 제외, 알림 전송 안 함.',
       pillLabel: '유지보수',
+      modeLabel: '유지보수 모드',
       exitButton: '유지보수 종료',
       menuEnter: '유지보수 모드로 전환',
       menuExit: '유지보수 모드 종료',

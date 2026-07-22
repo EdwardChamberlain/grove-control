@@ -254,6 +254,7 @@ export default {
       title: 'Bakımda',
       subtitle: 'Bu yazıcı duraklatıldı — bağlı değil, kuyruğa uygun değil, bildirim göndermiyor.',
       pillLabel: 'Bakım',
+      modeLabel: 'Bakım modu',
       exitButton: 'Bakımdan çık',
       menuEnter: 'Bakım moduna gir',
       menuExit: 'Bakım modundan çık',

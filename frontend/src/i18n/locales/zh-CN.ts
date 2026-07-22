@@ -254,6 +254,7 @@ export default {
       title: '维护中',
       subtitle: '此打印机已暂停 — 未连接、不参与队列调度、不发送通知。',
       pillLabel: '维护',
+      modeLabel: '维护模式',
       exitButton: '退出维护',
       menuEnter: '进入维护模式',
       menuExit: '退出维护模式',

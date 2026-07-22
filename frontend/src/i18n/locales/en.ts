@@ -257,6 +257,7 @@ export default {
       title: 'In Maintenance',
       subtitle: 'This printer is paused — not connected, not eligible for the queue, not sending notifications.',
       pillLabel: 'Maintenance',
+      modeLabel: 'Maintenance Mode',
       exitButton: 'Exit maintenance',
       menuEnter: 'Enter maintenance mode',
       menuExit: 'Exit maintenance mode',

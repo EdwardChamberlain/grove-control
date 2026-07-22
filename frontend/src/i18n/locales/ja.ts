@@ -253,6 +253,7 @@ export default {
       title: 'メンテナンス中',
       subtitle: 'このプリンターは一時停止中です — 未接続、キュー対象外、通知も送信されません。',
       pillLabel: 'メンテナンス',
+      modeLabel: 'メンテナンスモード',
       exitButton: 'メンテナンスを終了',
       menuEnter: 'メンテナンスモードに入る',
       menuExit: 'メンテナンスモードを終了',

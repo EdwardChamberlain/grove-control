@@ -254,6 +254,7 @@ export default {
       title: 'In Wartung',
       subtitle: 'Dieser Drucker ist pausiert — keine Verbindung, nicht für die Warteschlange verfügbar, keine Benachrichtigungen.',
       pillLabel: 'Wartung',
+      modeLabel: 'Wartungsmodus',
       exitButton: 'Wartung beenden',
       menuEnter: 'In den Wartungsmodus wechseln',
       menuExit: 'Wartungsmodus beenden',

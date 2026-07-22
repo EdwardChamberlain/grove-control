@@ -1137,7 +1137,7 @@ describe('PrintersPage', () => {
       expect(screen.queryByText(/ready to print/i)).not.toBeInTheDocument();
     });
 
-    it('shows the amber Maintenance pill in the header (no Connected/Offline)', async () => {
+    it('shows the blue Maintenance Mode health state without involuntary-offline alerts', async () => {
       server.use(
         http.get('/api/v1/printers/', () => HttpResponse.json([inMaintenancePrinter])),
         http.get('/api/v1/printers/:id/status', () =>
@@ -1146,12 +1146,36 @@ describe('PrintersPage', () => {
       );
       render(<PrintersPage />);
 
-      // The header pill row contains "Maintenance" exactly once.
+      const healthButton = await screen.findByLabelText(/Machine health: Offline/);
+      expect(healthButton).toHaveClass('bg-blue-500/20', 'text-blue-400');
+      fireEvent.click(healthButton);
       await waitFor(() => {
-        expect(screen.getAllByText('Maintenance').length).toBeGreaterThan(0);
+        expect(screen.getByText('Status details')).toBeInTheDocument();
       });
+      expect(screen.getAllByText('Maintenance Mode').length).toBeGreaterThan(0);
       // No connection diagnostic CTA (that's reserved for involuntary offline).
       expect(screen.queryByRole('button', { name: /run.*diagnostic/i })).not.toBeInTheDocument();
+    });
+
+    it('uses the blue Offline health state when an associated smart socket is off', async () => {
+      server.use(
+        http.get('/api/v1/printers/', () => HttpResponse.json([{ ...mockPrinters[0], is_active: true }])),
+        http.get('/api/v1/printers/:id/status', () =>
+          HttpResponse.json({ ...mockPrinterStatus, connected: false }),
+        ),
+        http.get('/api/v1/smart-plugs/', () => HttpResponse.json([{
+          id: 42,
+          name: 'Printer Socket',
+          printer_id: 1,
+          plug_type: 'tasmota',
+          last_state: 'OFF',
+        }])),
+      );
+
+      render(<PrintersPage />);
+
+      const healthButton = await screen.findByLabelText(/Machine health: Offline/);
+      expect(healthButton).toHaveClass('bg-blue-500/20', 'text-blue-400');
     });
 
     it('PATCHes is_active=true when the Exit button is clicked', async () => {

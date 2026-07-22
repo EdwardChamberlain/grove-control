@@ -49,7 +49,10 @@ export function PrinterPowerControls({
     mutationFn: (action: 'on' | 'off') => smartPlug
       ? api.controlSmartPlug(smartPlug.id, action)
       : Promise.reject(new Error('No power socket is assigned')),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['smartPlugStatus', smartPlug?.id] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['smartPlugStatus', smartPlug?.id] });
+      queryClient.invalidateQueries({ queryKey: ['smart-plugs'] });
+    },
     onError: (error: Error) => showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
   });
   const toggleAutoOffMutation = useMutation({

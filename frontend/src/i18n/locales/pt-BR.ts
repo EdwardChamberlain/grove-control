@@ -254,6 +254,7 @@ export default {
       title: 'Em manutenção',
       subtitle: 'Esta impressora está pausada — sem conexão, não elegível para a fila, sem enviar notificações.',
       pillLabel: 'Manutenção',
+      modeLabel: 'Modo manutenção',
       exitButton: 'Sair da manutenção',
       menuEnter: 'Entrar no modo manutenção',
       menuExit: 'Sair do modo manutenção',

@@ -45,6 +45,7 @@ interface PrinterHealthMenuProps {
   printer: Printer;
   status?: PrinterStatus;
   printerHealth: PrinterHealthMeta;
+  smartPlugPoweredOff?: boolean;
   knownHmsErrors: HMSError[];
   maintenanceInfo?: { due_count?: number; warning_count?: number };
   requirePlateClear?: boolean;
@@ -61,6 +62,7 @@ export function PrinterHealthMenu({
   printer,
   status,
   printerHealth,
+  smartPlugPoweredOff = false,
   knownHmsErrors,
   maintenanceInfo,
   requirePlateClear,
@@ -108,6 +110,9 @@ export function PrinterHealthMenu({
   }, [isOpen]);
 
   const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
+  const isMaintenanceMode = printer.is_active === false;
+  const isPlannedOffline = isMaintenanceMode || (!status?.connected && smartPlugPoweredOff);
+  const plannedOfflineClass = 'bg-blue-500/20 text-blue-400';
   const maintenanceDueCount = maintenanceInfo?.due_count ?? 0;
   const maintenanceWarningCount = maintenanceInfo?.warning_count ?? 0;
   const effectiveQueueCount = queueCount ?? pendingQueue.length;
@@ -150,7 +155,9 @@ export function PrinterHealthMenu({
       key: 'connection',
       title: t('printers.status.connection', 'Connection'),
       state: status?.connected ? t('printers.connection.connected') : t('printers.connection.offline'),
-      className: status?.connected ? 'bg-status-ok/20 text-status-ok' : 'bg-status-error/20 text-status-error',
+      className: !status?.connected && isPlannedOffline
+        ? plannedOfflineClass
+        : status?.connected ? 'bg-status-ok/20 text-status-ok' : 'bg-status-error/20 text-status-error',
       icon: status?.connected ? <Link className="h-3 w-3" /> : <Unlink className="h-3 w-3" />,
     },
     ...(requirePlateClear && status?.connected ? [{
@@ -164,7 +171,7 @@ export function PrinterHealthMenu({
       key: 'network',
       title: t('printers.status.network', 'Network'),
       state: networkState,
-      className: networkClass,
+      className: !status?.connected && isPlannedOffline ? plannedOfflineClass : networkClass,
       icon: status?.wired_network ? <Cable className="h-3 w-3" /> : <Signal className="h-3 w-3" />,
     },
     {
@@ -172,7 +179,7 @@ export function PrinterHealthMenu({
       title: t('printers.status.errors', 'Errors'),
       state: errorState,
       className: !status?.connected
-        ? 'bg-status-error/20 text-status-error'
+        ? isPlannedOffline ? plannedOfflineClass : 'bg-status-error/20 text-status-error'
         : knownHmsErrors.length > 0
           ? knownHmsErrors.some(error => error.severity <= 2)
             ? 'bg-status-error/20 text-status-error'
@@ -184,8 +191,12 @@ export function PrinterHealthMenu({
     {
       key: 'maintenance',
       title: t('maintenance.title', 'Maintenance'),
-      state: maintenanceState,
-      className: maintenanceDueCount > 0
+      state: isMaintenanceMode
+        ? t('printers.maintenance.modeLabel', 'Maintenance Mode')
+        : maintenanceState,
+      className: isMaintenanceMode
+        ? plannedOfflineClass
+        : maintenanceDueCount > 0
         ? 'bg-status-error/20 text-status-error'
         : maintenanceWarningCount > 0
           ? 'bg-status-warning/20 text-status-warning'
@@ -284,11 +295,11 @@ export function PrinterHealthMenu({
                   </>
                 );
                 return row.action ? (
-                  <button key={row.key} type="button" onClick={row.action} className={className}>
+                  <button key={row.key} type="button" data-testid={`printer-health-${row.key}`} onClick={row.action} className={className}>
                     {content}
                   </button>
                 ) : (
-                  <div key={row.key} className={className}>
+                  <div key={row.key} data-testid={`printer-health-${row.key}`} className={className}>
                     {content}
                   </div>
                 );

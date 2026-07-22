@@ -55,7 +55,17 @@ const archive = {
   sliced_for_model: 'X1C',
 };
 
-async function mockApi(page: Page, calls: ApiCall[], options: { authEnabled?: boolean; printerState?: string } = {}) {
+async function mockApi(page: Page, calls: ApiCall[], options: {
+  authEnabled?: boolean;
+  printerState?: string;
+  connected?: boolean;
+  maintenanceMode?: boolean;
+  smartPlugState?: 'ON' | 'OFF';
+} = {}) {
+  const configuredPrinter = {
+    ...printer,
+    is_active: options.maintenanceMode ? false : printer.is_active,
+  };
   const queueItems: Array<Record<string, unknown>> = [
     { id: 1, archive_id: 1, archive_name: 'Benchy', printer_id: 1, printer_name: printer.name, status: 'pending', position: 1 },
   ];
@@ -119,14 +129,14 @@ async function mockApi(page: Page, calls: ApiCall[], options: { authEnabled?: bo
       });
     } else if (pathname === '/api/v1/printers/') {
       if (method === 'POST') await route.fulfill({ json: { ...printer, id: 2, ...(body as object) } });
-      else await route.fulfill({ json: [printer] });
+      else await route.fulfill({ json: [configuredPrinter] });
     } else if (pathname === '/api/v1/printers/1' && method === 'PATCH') {
       await route.fulfill({ json: { ...printer, ...(body as object) } });
     } else if (pathname === '/api/v1/printers/1/status') {
       await route.fulfill({ json: {
         id: 1,
         name: printer.name,
-        connected: true,
+        connected: options.connected ?? true,
         state: options.printerState ?? 'IDLE',
         current_print: options.printerState === 'RUNNING' ? 'active-print.gcode.3mf' : null,
         progress: 0,
@@ -137,6 +147,14 @@ async function mockApi(page: Page, calls: ApiCall[], options: { authEnabled?: bo
         temperatures: { nozzle: 25, bed: 25, chamber: 25 },
         vt_tray: [],
       } });
+    } else if (pathname === '/api/v1/smart-plugs/') {
+      await route.fulfill({ json: options.smartPlugState ? [{
+        id: 1,
+        name: 'Workshop Socket',
+        printer_id: printer.id,
+        plug_type: 'tasmota',
+        last_state: options.smartPlugState,
+      }] : [] });
     } else if (pathname === '/api/v1/library/files' && method === 'POST') {
       await route.fulfill({ json: { id: 42, filename: 'queued-print.gcode.3mf', metadata: {} } });
     } else if (pathname === '/api/v1/inventory/spools') {
@@ -287,6 +305,35 @@ test('a running printer accepts a dropped print file for queueing', async ({ pag
   });
 
   await expect.poll(() => calls.some((call) => call.method === 'POST' && call.path === '/api/v1/library/files')).toBe(true);
+});
+
+test('maintenance mode has a blue Offline health indicator and a blue Maintenance Mode detail row', async ({ page }) => {
+  await mockApi(page, [], { connected: false, maintenanceMode: true });
+
+  await page.goto('/');
+  const healthIndicator = page.getByLabel('Machine health: Offline');
+  await expect(healthIndicator).toBeVisible();
+  await expect(healthIndicator).toHaveClass(/bg-blue-500\/20/);
+  await expect(page.getByText('Maintenance Mode', { exact: true })).toBeVisible();
+
+  await healthIndicator.click();
+  const maintenanceRow = page.getByTestId('printer-health-maintenance');
+  await expect(maintenanceRow).toHaveClass(/bg-blue-500\/20/);
+  await expect(maintenanceRow).toHaveText('Maintenance:Maintenance Mode');
+});
+
+test('the mobile list uses the blue Offline health indicator for a powered-off smart socket', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => localStorage.setItem('printerViewMode', 'list'));
+  await mockApi(page, [], { connected: false, smartPlugState: 'OFF' });
+
+  await page.goto('/');
+  const healthIndicator = page.locator('[class~="md:hidden"]').getByLabel('Machine health: Offline');
+  await expect(healthIndicator).toBeVisible();
+  await expect(healthIndicator).toHaveClass(/bg-blue-500\/20/);
+
+  await healthIndicator.click();
+  await expect(page.getByTestId('printer-health-connection')).toHaveClass(/bg-blue-500\/20/);
 });
 
 test('core app API smoke reaches create, edit, upload, slice, queue, and settings paths', async ({ page }) => {
