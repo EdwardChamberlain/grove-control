@@ -134,6 +134,32 @@ class TestPrinterMaintenanceAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_vision_encoder_calibration_only_applies_to_supported_models(
+        self, async_client: AsyncClient, printer_factory
+    ):
+        h2_printer = await printer_factory(model="H2D")
+        x2_printer = await printer_factory(model="X2D")
+        unsupported_printer = await printer_factory(model="P1S")
+
+        h2_response = await async_client.get(f"/api/v1/maintenance/printers/{h2_printer.id}")
+        x2_response = await async_client.get(f"/api/v1/maintenance/printers/{x2_printer.id}")
+        unsupported_response = await async_client.get(f"/api/v1/maintenance/printers/{unsupported_printer.id}")
+
+        assert h2_response.status_code == 200
+        assert x2_response.status_code == 200
+        assert unsupported_response.status_code == 200
+
+        h2_tasks = {item["maintenance_type_name"]: item for item in h2_response.json()["maintenance_items"]}
+        x2_tasks = {item["maintenance_type_name"]: item for item in x2_response.json()["maintenance_items"]}
+        unsupported_tasks = {
+            item["maintenance_type_name"]: item for item in unsupported_response.json()["maintenance_items"]
+        }
+        assert h2_tasks["Vision Encoder Calibration"]["interval_hours"] == 250.0
+        assert x2_tasks["Vision Encoder Calibration"]["interval_hours"] == 250.0
+        assert "Vision Encoder Calibration" not in unsupported_tasks
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_get_all_maintenance_overview(self, async_client: AsyncClient, printer_factory, db_session):
         """Verify overview endpoint returns all printers."""
         await printer_factory(name="Overview Printer 1")
