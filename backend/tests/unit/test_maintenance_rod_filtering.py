@@ -41,6 +41,16 @@ class TestShouldApplyToPrinter:
     def test_linear_rail_tasks_do_not_apply_to_p2s(self):
         assert _should_apply_to_printer("Lubricate Linear Rails", "P2S") is False
 
+    @pytest.mark.parametrize(
+        "model", ["X2D", "N6", "H2D", "H2D Pro", "H2C", "H2S", "O1D", "O1E", "O2D", "O1C", "O1C2", "O1S"]
+    )
+    def test_vision_encoder_calibration_applies_to_supported_models(self, model: str):
+        assert _should_apply_to_printer("Vision Encoder Calibration", model) is True
+
+    @pytest.mark.parametrize("model", [None, "X1C", "P2S", "A1", "UNKNOWN"])
+    def test_vision_encoder_calibration_excludes_unsupported_models(self, model: str | None):
+        assert _should_apply_to_printer("Vision Encoder Calibration", model) is False
+
     # Universal tasks apply to all models
     @pytest.mark.parametrize("model", ["X1C", "P2S", "A1", "H2D"])
     def test_universal_tasks_apply_to_all(self, model: str):

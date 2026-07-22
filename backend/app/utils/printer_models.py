@@ -116,6 +116,25 @@ LINEAR_RAIL_MODELS = frozenset(
 )
 
 
+# Bambu Lab's Vision Encoder is compatible with the H2 series and X2D.
+VISION_ENCODER_MODELS = frozenset(
+    [
+        "X2D",
+        "H2D",
+        "H2DPRO",
+        "H2C",
+        "H2S",
+        "O1D",  # H2D
+        "O1E",  # H2D Pro
+        "O2D",  # H2D Pro (alternate)
+        "O1C",  # H2C
+        "O1C2",  # H2C (dual nozzle variant)
+        "O1S",  # H2S
+        "N6",  # X2D
+    ]
+)
+
+
 # Models without any external storage (MicroSD / SD card slot).
 # The A1 and A1 Mini ship with internal storage only — there is no
 # firmware-side "Store sent files on external storage" toggle and no
@@ -241,6 +260,14 @@ def get_rod_type(model: str | None) -> str | None:
     if normalized in LINEAR_RAIL_MODELS:
         return "linear_rail"
     return None
+
+
+def supports_vision_encoder(model: str | None) -> bool:
+    """Return True when a printer supports the Bambu Lab Vision Encoder."""
+    if not model:
+        return False
+    normalized = model.strip().upper().replace(" ", "").replace("-", "")
+    return normalized in VISION_ENCODER_MODELS
 
 
 def normalize_printer_model_id(model_id: str | None) -> str | None:

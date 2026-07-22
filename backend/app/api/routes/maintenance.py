@@ -26,7 +26,7 @@ from backend.app.schemas.maintenance import (
     PrinterMaintenanceUpdate,
 )
 from backend.app.services.notification_service import notification_service
-from backend.app.utils.printer_models import get_rod_type
+from backend.app.utils.printer_models import get_rod_type, supports_vision_encoder
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +94,13 @@ DEFAULT_MAINTENANCE_TYPES = [
         "default_interval_hours": 500.0,
         "icon": "Cable",
     },
+    # H2 series and X2D only (Bambu Lab Vision Encoder compatibility)
+    {
+        "name": "Vision Encoder Calibration",
+        "description": "Calibrate motion accuracy with the Vision Encoder",
+        "default_interval_hours": 250.0,
+        "icon": "ScanLine",
+    },
 ]
 
 # System types that only apply to printers with a specific rod/rail type.
@@ -110,6 +117,9 @@ _ROD_TYPE_REQUIREMENTS: dict[str, str] = {
 
 def _should_apply_to_printer(type_name: str, printer_model: str | None) -> bool:
     """Check if a system maintenance type should apply to a given printer model."""
+    if type_name == "Vision Encoder Calibration":
+        return supports_vision_encoder(printer_model)
+
     rod_requirement = _ROD_TYPE_REQUIREMENTS.get(type_name)
     if rod_requirement is None:
         return True  # Not model-specific, applies to all
