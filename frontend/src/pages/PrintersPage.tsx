@@ -2525,13 +2525,16 @@ function SinglePrinterCockpit({
       );
       const cockpitContentHeight = grid.clientHeight - verticalPadding;
       const availableWidth = grid.clientWidth - horizontalPadding - columnGap;
-      const desiredRightColumnWidth = 18 * rootFontSize;
+      // The AMS unit needs enough room for its four spool slots and the
+      // humidity/temperature controls to remain legible. Protect this width
+      // before giving any extra space to the 16:9 camera column.
+      const desiredRightColumnWidth = 22 * rootFontSize;
       const controlsHeightToProtectRightColumn = cockpitContentHeight
         - Math.max(0, availableWidth - desiredRightColumnWidth) * (9 / 16);
       const controlsHeight = Math.max(
         naturalControlsHeight,
         Math.ceil(Math.min(
-          cockpitContentHeight * 0.4,
+          cockpitContentHeight * 0.55,
           Math.max(cockpitContentHeight * 0.3, controlsHeightToProtectRightColumn),
         )),
       );

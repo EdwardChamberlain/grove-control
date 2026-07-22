@@ -135,6 +135,17 @@ async function mockApi(page: Page, calls: ApiCall[], options: { authEnabled?: bo
         remaining_time: 0,
         awaiting_plate_clear: false,
         temperatures: { nozzle: 25, bed: 25, chamber: 25 },
+        ams: [{
+          id: 0,
+          humidity: 35,
+          temp: 25,
+          tray: [
+            { id: 0, tray_type: 'PLA', tray_color: 'FF0000FF', remain: 85 },
+            { id: 1, tray_type: 'PETG', tray_color: '00AEEF', remain: 60 },
+            { id: 2, tray_type: 'ABS', tray_color: '1F2937', remain: 40 },
+            { id: 3, tray_type: 'PLA', tray_color: 'F5F5F5', remain: 95 },
+          ],
+        }],
         vt_tray: [],
       } });
     } else if (pathname === '/api/v1/library/files' && method === 'POST') {
@@ -397,6 +408,11 @@ async function expectCockpitToFitViewport(page: Page) {
     return (grid.clientHeight - parseFloat(styles.paddingTop) - parseFloat(styles.paddingBottom)) * 0.3;
   });
   expect(controls!.height).toBeGreaterThanOrEqual(controlsMinimumHeight - 1);
+  const amsHeader = await page.getByTestId('cockpit-ams-header-0').boundingBox();
+  expect(amsHeader).not.toBeNull();
+  // The compact AMS card has a 15rem intrinsic width for its header controls
+  // and four tray slots; it must never be clipped by the status column.
+  expect(amsHeader!.width).toBeGreaterThanOrEqual(15 * 16 - 24);
   const cameraControlsGap = await page.getByTestId('cockpit-camera-panel').evaluate((cameraPanel) => (
     parseFloat(getComputedStyle(cameraPanel.parentElement!).rowGap)
   ));
@@ -440,6 +456,7 @@ for (const viewport of [
     await page.goto('/');
 
     await expect(page.getByTestId('cockpit-layout')).toBeVisible();
+    await expect(page.getByTestId('cockpit-ams-header-0')).toBeVisible();
     await expectCockpitToFitViewport(page);
     await page.getByTestId('cockpit-layout').screenshot({
       path: testInfo.outputPath(`cockpit-${viewport.width}x${viewport.height}-expanded.png`),
