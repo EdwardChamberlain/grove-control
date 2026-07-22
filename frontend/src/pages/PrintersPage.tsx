@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { formatPrintName } from '../utils/printName';
 import { computePopoverPosition } from '../utils/popoverPosition';
@@ -1409,6 +1409,12 @@ function SinglePrinterCockpit({
   onUnassignSpoolmanSpool?: (spoolmanSpoolId: number) => void;
 }) {
   const { t } = useTranslation();
+  const cockpitDetailRef = useRef<HTMLDivElement>(null);
+  const cockpitDetailGridRef = useRef<HTMLDivElement>(null);
+  const cockpitMachineControlsRef = useRef<HTMLDivElement>(null);
+  const cockpitMachineControlsContentRef = useRef<HTMLElement>(null);
+  const [cockpitCameraColumnWidth, setCockpitCameraColumnWidth] = useState<number | null>(null);
+  const [cockpitControlsHeight, setCockpitControlsHeight] = useState<number | null>(null);
   const { hasPermission } = useAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
@@ -2426,8 +2432,8 @@ function SinglePrinterCockpit({
   );
 
   const machineControlsPanel = (
-    <section className="h-full min-h-0 rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
-      <div className="grid h-full min-h-0 gap-3 xl:grid-cols-[minmax(0,3fr)_1px_minmax(0,2fr)]">
+    <section ref={cockpitMachineControlsContentRef} data-testid="cockpit-machine-controls-content" className="min-h-0 rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
+      <div className="grid min-h-0 gap-3 xl:grid-cols-[minmax(0,3fr)_1px_minmax(0,2fr)]">
         <div className="min-w-0">
           <div className="mb-2 flex items-center gap-2">
             <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">
@@ -2471,12 +2477,63 @@ function SinglePrinterCockpit({
     </section>
   );
 
+  useLayoutEffect(() => {
+    const detail = cockpitDetailRef.current;
+    const grid = cockpitDetailGridRef.current;
+    const controls = cockpitMachineControlsRef.current;
+    const controlsContent = cockpitMachineControlsContentRef.current;
+    if (!detail || !grid || !controls || !controlsContent) return;
+    if (typeof ResizeObserver === 'undefined') return;
+
+    const measureCameraColumn = () => {
+      // The camera and controls share one column. The camera stays 16:9, while
+      // the controls use their natural content height and the status pane takes
+      // the remaining horizontal space.
+      if (detail.clientWidth < 640) {
+        setCockpitCameraColumnWidth(null);
+        setCockpitControlsHeight(null);
+        return;
+      }
+
+      const gridStyles = window.getComputedStyle(grid);
+      const rootFontSize = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16;
+      const horizontalPadding = Number.parseFloat(gridStyles.paddingLeft) + Number.parseFloat(gridStyles.paddingRight);
+      const verticalPadding = Number.parseFloat(gridStyles.paddingTop) + Number.parseFloat(gridStyles.paddingBottom);
+      const gap = Number.parseFloat(gridStyles.rowGap) || 0;
+      const controlsHeight = Math.ceil(controlsContent.getBoundingClientRect().height);
+      const availableWidth = grid.clientWidth - horizontalPadding - (18 * rootFontSize) - gap;
+      const availableCameraHeight = grid.clientHeight - verticalPadding - controlsHeight - gap;
+      const nextWidth = Math.max(0, Math.min(availableWidth, availableCameraHeight * (16 / 9)));
+
+      setCockpitCameraColumnWidth((currentWidth) => (
+        currentWidth !== null && Math.abs(currentWidth - nextWidth) < 1 ? currentWidth : nextWidth
+      ));
+      setCockpitControlsHeight((currentHeight) => (
+        currentHeight !== null && Math.abs(currentHeight - controlsHeight) < 1 ? currentHeight : controlsHeight
+      ));
+    };
+
+    const observer = new ResizeObserver(measureCameraColumn);
+    observer.observe(detail);
+    observer.observe(controls);
+    observer.observe(controlsContent);
+    measureCameraColumn();
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <>
-    <div className="relative h-full min-h-0 overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-gradient-to-br from-bambu-dark-secondary via-bambu-dark to-bambu-dark-secondary shadow-xl">
-      <div className="relative grid h-full min-h-0 gap-3 p-3 xl:grid-cols-[minmax(0,1.5fr)_minmax(21rem,0.72fr)]">
-        <div className="grid min-h-0 gap-3 xl:grid-rows-[auto_minmax(0,1fr)]">
-          <section className="relative aspect-video w-full min-h-0 overflow-hidden rounded-xl border border-white/10 bg-bambu-dark">
+    <div
+      ref={cockpitDetailRef}
+      className="cockpit-detail-container relative h-full min-h-0 overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-gradient-to-br from-bambu-dark-secondary via-bambu-dark to-bambu-dark-secondary shadow-xl"
+      style={{
+        ...(cockpitCameraColumnWidth === null ? {} : { '--cockpit-camera-column-width': `${cockpitCameraColumnWidth}px` }),
+        ...(cockpitControlsHeight === null ? {} : { '--cockpit-controls-height': `${cockpitControlsHeight}px` }),
+      } as CSSProperties}
+    >
+      <div ref={cockpitDetailGridRef} className="cockpit-detail-grid relative grid h-full min-h-0 gap-3 p-3">
+        <div className="cockpit-camera-controls grid min-h-0 gap-0">
+          <section data-testid="cockpit-camera-panel" className="relative h-full min-h-0 w-full overflow-hidden rounded-xl border border-white/10 bg-bambu-dark">
             <CameraPlaceholder
               model={printer.model}
               className="absolute inset-0 h-full w-full object-cover"
@@ -2572,13 +2629,13 @@ function SinglePrinterCockpit({
             </div>
           </section>
 
-          <div className="min-h-0 h-full">
+          <div ref={cockpitMachineControlsRef} data-testid="cockpit-machine-controls-panel" className="min-h-0 h-full">
             {machineControlsPanel}
           </div>
         </div>
 
         <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3">
-          <section className="rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
+          <section data-testid="cockpit-actions-panel" className="rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
             {primaryActionPanel}
             <PrinterQueueWidget
               printerId={printer.id}
@@ -7273,7 +7330,8 @@ export function PrintersPage() {
         />
 
       ) : printerPageViewMode === 'single' && !isMobilePrinterView && selectedSinglePrinter ? (
-        <div data-testid="cockpit-layout" className="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[17.5rem_minmax(0,1fr)]">
+        <div className="cockpit-layout-container min-h-0 flex-1">
+        <div data-testid="cockpit-layout" className="cockpit-layout grid h-full min-h-0 flex-1 gap-4 overflow-hidden">
           <aside className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary p-3">
             <div className="mb-3 text-center">
               <div className="min-w-0">
@@ -7333,6 +7391,7 @@ export function PrintersPage() {
               onUnassignSpoolmanSpool={(id) => unassignSpoolmanMutation.mutate(id)}
             />
           </div>
+        </div>
         </div>
       ) : printerPageViewMode === 'list' ? (
         <div className="overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary">

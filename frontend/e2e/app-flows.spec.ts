@@ -367,3 +367,77 @@ test('core app API smoke reaches create, edit, upload, slice, queue, and setting
     expect(calls.some((call) => call.method === expected[0] && call.path === expected[1])).toBe(true);
   }
 });
+
+async function expectCockpitToFitViewport(page: Page) {
+  const [layout, camera, controls, controlsContent, actions, status, currentPrint] = await Promise.all([
+    page.getByTestId('cockpit-layout').boundingBox(),
+    page.getByTestId('cockpit-camera-panel').boundingBox(),
+    page.getByTestId('cockpit-machine-controls-panel').boundingBox(),
+    page.getByTestId('cockpit-machine-controls-content').boundingBox(),
+    page.getByTestId('cockpit-actions-panel').boundingBox(),
+    page.getByTestId('cockpit-status-pane').boundingBox(),
+    page.getByTestId('cockpit-current-print').boundingBox(),
+  ]);
+
+  expect(layout).not.toBeNull();
+  expect(camera).not.toBeNull();
+  expect(controls).not.toBeNull();
+  expect(controlsContent).not.toBeNull();
+  expect(actions).not.toBeNull();
+  expect(status).not.toBeNull();
+  expect(currentPrint).not.toBeNull();
+
+  expect(camera!.width / camera!.height).toBeCloseTo(16 / 9, 2);
+  expect(camera!.width).toBeCloseTo(controls!.width, 1);
+  expect(Math.abs(controls!.height - controlsContent!.height)).toBeLessThanOrEqual(1);
+  expect(Math.abs((camera!.y + camera!.height) - controls!.y)).toBeLessThanOrEqual(1);
+  expect(currentPrint!.y + currentPrint!.height).toBeLessThanOrEqual(camera!.y + camera!.height - 16);
+  expect(controls!.y + controls!.height).toBeLessThanOrEqual(layout!.y + layout!.height + 1);
+  expect(actions!.x).toBeGreaterThanOrEqual(controls!.x + controls!.width - 1);
+  expect(actions!.y + actions!.height).toBeLessThanOrEqual(status!.y + 1);
+  expect(status!.y + status!.height).toBeLessThanOrEqual(layout!.y + layout!.height + 1);
+  await expect(page.getByTestId('cockpit-status-pane')).toHaveCSS('overflow-y', 'auto');
+
+  const fixedPanelHeights = await page.locator('[data-testid="cockpit-machine-controls-panel"], [data-testid="cockpit-actions-panel"]').evaluateAll((panels) => panels.map((panel) => ({
+    clientHeight: panel.clientHeight,
+    scrollHeight: panel.scrollHeight,
+  })));
+  for (const panel of fixedPanelHeights) {
+    expect(panel.scrollHeight).toBeLessThanOrEqual(panel.clientHeight + 1);
+  }
+
+  const documentSize = await page.evaluate(() => ({
+    clientHeight: document.scrollingElement?.clientHeight ?? 0,
+    scrollHeight: document.scrollingElement?.scrollHeight ?? 0,
+  }));
+  expect(documentSize.scrollHeight).toBeLessThanOrEqual(documentSize.clientHeight + 1);
+}
+
+for (const viewport of [
+  { width: 1024, height: 768 },
+  { width: 1280, height: 720 },
+  { width: 1366, height: 768 },
+  { width: 1920, height: 1080 },
+]) {
+  test(`cockpit keeps fixed controls inside the viewport at ${viewport.width}x${viewport.height} through sidebar collapse`, async ({ page }) => {
+    const calls: ApiCall[] = [];
+    await page.setViewportSize(viewport);
+    await page.addInitScript(() => {
+      localStorage.setItem('printerViewMode', 'single');
+      localStorage.setItem('singlePrinterViewId', '1');
+    });
+    await mockApi(page, calls, { printerState: 'RUNNING' });
+    await page.goto('/');
+
+    await expect(page.getByTestId('cockpit-layout')).toBeVisible();
+    await expectCockpitToFitViewport(page);
+
+    const collapseSidebar = page.getByTitle('Collapse sidebar');
+    if (await collapseSidebar.count()) {
+      await collapseSidebar.click();
+      await page.waitForTimeout(150);
+      await expect(page.getByTitle('Expand sidebar')).toBeVisible();
+      await expectCockpitToFitViewport(page);
+    }
+  });
+}

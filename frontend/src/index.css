@@ -215,6 +215,52 @@ html {
   }
 }
 
+/* The cockpit lives beside a sidebar whose width changes at runtime. Its
+   layout must therefore respond to the space it actually receives, not the
+   browser viewport that happened to trigger a Tailwind breakpoint. */
+.cockpit-layout-container {
+  container: cockpit-layout / inline-size;
+}
+
+.cockpit-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@container cockpit-layout (min-width: 900px) {
+  .cockpit-layout {
+    grid-template-columns: 17.5rem minmax(0, 1fr);
+  }
+}
+
+.cockpit-detail-container {
+  container: cockpit-detail / size;
+}
+
+.cockpit-detail-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@container cockpit-detail (min-width: 640px) {
+  .cockpit-detail-grid {
+    grid-template-columns: minmax(0, var(--cockpit-camera-column-width, 20rem)) minmax(18rem, 1fr);
+  }
+}
+
+/* The shared camera/control column derives its width from the available height.
+   Controls use their natural content height so the camera receives spare space. */
+.cockpit-camera-controls {
+  align-content: start;
+  grid-template-rows: auto var(--cockpit-controls-height, 25rem);
+}
+
+.cockpit-camera-controls > [data-testid='cockpit-camera-panel'] {
+  aspect-ratio: 16 / 9;
+  height: auto;
+  width: 100%;
+  max-width: none;
+  justify-self: stretch;
+}
+
 /* ============================================
    LAYER 2: STYLE EFFECTS
    ============================================ */
