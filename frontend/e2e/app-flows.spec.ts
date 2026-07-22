@@ -391,7 +391,7 @@ async function expectCockpitToFitViewport(page: Page) {
 
   expect(camera!.width / camera!.height).toBeCloseTo(16 / 9, 2);
   expect(camera!.width).toBeCloseTo(controls!.width, 1);
-  expect(controls!.height).toBeGreaterThanOrEqual(controlsContent!.height - 1);
+  expect(Math.abs(controls!.height - controlsContent!.height)).toBeLessThanOrEqual(1);
   const controlsMinimumHeight = await page.getByTestId('cockpit-detail-grid').evaluate((grid) => {
     const styles = getComputedStyle(grid);
     return (grid.clientHeight - parseFloat(styles.paddingTop) - parseFloat(styles.paddingBottom)) * 0.3;

@@ -1413,6 +1413,9 @@ function SinglePrinterCockpit({
   const cockpitDetailGridRef = useRef<HTMLDivElement>(null);
   const cockpitMachineControlsRef = useRef<HTMLDivElement>(null);
   const cockpitMachineControlsContentRef = useRef<HTMLElement>(null);
+  const cockpitMachineControlsInnerRef = useRef<HTMLDivElement>(null);
+  const cockpitMachineControlsPrimaryRef = useRef<HTMLDivElement>(null);
+  const cockpitJogControlsRef = useRef<HTMLDivElement>(null);
   const [cockpitCameraColumnWidth, setCockpitCameraColumnWidth] = useState<number | null>(null);
   const [cockpitControlsHeight, setCockpitControlsHeight] = useState<number | null>(null);
   const { hasPermission } = useAuth();
@@ -2432,9 +2435,9 @@ function SinglePrinterCockpit({
   );
 
   const machineControlsPanel = (
-    <section ref={cockpitMachineControlsContentRef} data-testid="cockpit-machine-controls-content" className="min-h-0 rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
-      <div className="grid min-h-0 gap-3 xl:grid-cols-[minmax(0,3fr)_1px_minmax(0,2fr)]">
-        <div className="min-w-0">
+    <section ref={cockpitMachineControlsContentRef} data-testid="cockpit-machine-controls-content" className="h-full min-h-0 rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
+      <div ref={cockpitMachineControlsInnerRef} className="grid h-full min-h-0 gap-3 xl:grid-cols-[minmax(0,3fr)_1px_minmax(0,2fr)]">
+        <div ref={cockpitMachineControlsPrimaryRef} className="min-w-0 self-start">
           <div className="mb-2 flex items-center gap-2">
             <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">
               {t('printers.status.title', 'Status')}
@@ -2453,7 +2456,9 @@ function SinglePrinterCockpit({
           {quickControlsPanel}
         </div>
         <div className="hidden self-stretch bg-bambu-dark-tertiary xl:block" />
-        <div className="min-w-0">{jogPanel}</div>
+        <div className="min-w-0 xl:h-full">
+          <div ref={cockpitJogControlsRef} className="w-full xl:h-full">{jogPanel}</div>
+        </div>
       </div>
     </section>
   );
@@ -2482,7 +2487,10 @@ function SinglePrinterCockpit({
     const grid = cockpitDetailGridRef.current;
     const controls = cockpitMachineControlsRef.current;
     const controlsContent = cockpitMachineControlsContentRef.current;
-    if (!detail || !grid || !controls || !controlsContent) return;
+    const controlsInner = cockpitMachineControlsInnerRef.current;
+    const controlsPrimary = cockpitMachineControlsPrimaryRef.current;
+    const jogControls = cockpitJogControlsRef.current;
+    if (!detail || !grid || !controls || !controlsContent || !controlsInner || !controlsPrimary || !jogControls) return;
     if (typeof ResizeObserver === 'undefined') return;
 
     const measureCameraColumn = () => {
@@ -2501,7 +2509,19 @@ function SinglePrinterCockpit({
       const verticalPadding = Number.parseFloat(gridStyles.paddingTop) + Number.parseFloat(gridStyles.paddingBottom);
       const columnGap = Number.parseFloat(gridStyles.columnGap) || 0;
       const cameraControlsGap = Number.parseFloat(cameraControlsStyles.rowGap) || 0;
-      const naturalControlsHeight = Math.ceil(controlsContent.getBoundingClientRect().height);
+      const controlsContentStyles = window.getComputedStyle(controlsContent);
+      const controlsInnerStyles = window.getComputedStyle(controlsInner);
+      const isTwoColumnControls = controlsInnerStyles.gridTemplateColumns.trim().split(/\s+/).length > 1;
+      const naturalInnerHeight = isTwoColumnControls
+        ? controlsPrimary.getBoundingClientRect().height
+        : controlsPrimary.getBoundingClientRect().height + jogControls.getBoundingClientRect().height + (Number.parseFloat(controlsInnerStyles.rowGap) || 0);
+      const naturalControlsHeight = Math.ceil(
+        naturalInnerHeight
+        + Number.parseFloat(controlsContentStyles.paddingTop)
+        + Number.parseFloat(controlsContentStyles.paddingBottom)
+        + Number.parseFloat(controlsContentStyles.borderTopWidth)
+        + Number.parseFloat(controlsContentStyles.borderBottomWidth),
+      );
       const controlsHeight = Math.max(
         naturalControlsHeight,
         Math.ceil((grid.clientHeight - verticalPadding) * 0.3),
@@ -2522,6 +2542,9 @@ function SinglePrinterCockpit({
     observer.observe(detail);
     observer.observe(controls);
     observer.observe(controlsContent);
+    observer.observe(controlsInner);
+    observer.observe(controlsPrimary);
+    observer.observe(jogControls);
     measureCameraColumn();
     return () => observer.disconnect();
   }, []);
