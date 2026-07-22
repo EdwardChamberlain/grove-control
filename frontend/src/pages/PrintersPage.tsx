@@ -73,7 +73,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, discoveryApi, firmwareApi, getAuthToken, withStreamToken, ApiError } from '../api/client';
 import { formatDateOnly, formatETA, formatDuration } from '../utils/date';
 import { getCurrencySymbol } from '../utils/currency';
-import type { Printer, PrinterCreate, PrinterStatus, AMSUnit, DiscoveredPrinter, LinkedSpoolInfo, SpoolAssignment, HMSError, InventorySpool, PrinterDiagnosticResult, PrintLogEntry } from '../api/client';
+import type { Printer, PrinterCreate, PrinterStatus, AMSUnit, DiscoveredPrinter, LinkedSpoolInfo, SpoolAssignment, HMSError, InventorySpool, PrinterDiagnosticResult, PrintLogEntry, SmartPlug } from '../api/client';
 import { Card, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
 import { ToolbarDropdown, ToolbarMenu, ReactSelect } from '../components/ToolbarControls';
@@ -302,7 +302,7 @@ interface PrinterMaintenanceInfo {
 }
 
 type PrinterHealthMeta = {
-  level: 'healthy' | 'attention' | 'error';
+  level: 'healthy' | 'attention' | 'error' | 'offline';
   label: string;
   className: string;
 };
@@ -316,6 +316,8 @@ function getPrinterHealthMeta({
   firmwareUpdateAvailable,
   hasDoorSensor,
   doorOpen,
+  isMaintenanceMode,
+  smartPlugPoweredOff,
   labels,
 }: {
   connected: boolean | undefined;
@@ -326,12 +328,26 @@ function getPrinterHealthMeta({
   firmwareUpdateAvailable: boolean;
   hasDoorSensor: boolean;
   doorOpen: boolean | undefined;
+  isMaintenanceMode: boolean;
+  smartPlugPoweredOff: boolean;
   labels: {
     healthy: string;
     attentionRequired: string;
     error: string;
+    offline: string;
   };
 }): PrinterHealthMeta {
+  const plannedOffline = isMaintenanceMode || (!connected && smartPlugPoweredOff);
+  // A planned outage is more useful to operators than the underlying red
+  // telemetry condition. It intentionally wins over every other health state.
+  if (plannedOffline) {
+    return {
+      level: 'offline',
+      label: labels.offline,
+      className: 'bg-blue-500/20 text-blue-400',
+    };
+  }
+
   if (!connected) {
     return {
       level: 'error',
@@ -783,6 +799,7 @@ function PrinterListRow({
   printer,
   hideIfDisconnected,
   maintenanceInfo,
+  smartPlugPoweredOff = false,
   requirePlateClear,
   selectionMode,
   isSelected,
@@ -794,6 +811,7 @@ function PrinterListRow({
   printer: Printer;
   hideIfDisconnected?: boolean;
   maintenanceInfo?: PrinterMaintenanceInfo;
+  smartPlugPoweredOff?: boolean;
   requirePlateClear?: boolean;
   selectionMode?: boolean;
   isSelected?: boolean;
@@ -861,10 +879,13 @@ function PrinterListRow({
     firmwareUpdateAvailable: !!firmwareInfo?.update_available,
     hasDoorSensor,
     doorOpen: status?.door_open,
+    isMaintenanceMode: printer.is_active === false,
+    smartPlugPoweredOff,
     labels: {
       healthy: t('printers.health.healthy', 'Healthy'),
       attentionRequired: t('printers.health.attentionRequired', 'Requires attention'),
       error: t('printers.health.error', 'Error'),
+      offline: t('printers.connection.offline', 'Offline'),
     },
   });
   const jobStatusLabel = !status
@@ -880,15 +901,9 @@ function PrinterListRow({
     ? `${formatDuration(status.remaining_time * 60)} - ${formatETA(status.remaining_time, timeFormat, t)}`
     : null;
   const location = printer.location || t('printers.location.unassigned', 'Ungrouped');
-  const printStatusClass = !status?.connected || knownHmsErrors.length > 0 || status?.state === 'FAILED'
-    ? 'bg-status-error'
-    : status?.state === 'RUNNING'
-    ? 'bg-bambu-green animate-pulse'
-    : 'bg-gray-500';
   const mobilePrintStatusLabel = activePrintName
     ? t('printers.list.printingJob', 'Printing: {{job}}', { job: activePrintName })
     : jobStatusLabel;
-  const printStatusTitle = t('printers.list.printStatus', 'Print status: {{status}}', { status: jobStatusLabel });
 
   if (hideIfDisconnected && status?.connected === false) {
     return null;
@@ -945,11 +960,6 @@ function PrinterListRow({
           <span className="min-w-0 max-w-28 truncate text-right text-xs font-medium text-white" title={mobilePrintStatusLabel}>
             {mobilePrintStatusLabel}
           </span>
-          <span
-            className={`h-2.5 w-2.5 shrink-0 rounded-full ${printStatusClass}`}
-            title={printStatusTitle}
-            aria-label={printStatusTitle}
-          />
           {etaLabel && (
             <span className="min-w-12 shrink-0 text-right text-xs font-medium tabular-nums text-white">{etaLabel}</span>
           )}
@@ -957,6 +967,7 @@ function PrinterListRow({
             printer={printer}
             status={status}
             printerHealth={printerHealth}
+            smartPlugPoweredOff={smartPlugPoweredOff}
             knownHmsErrors={knownHmsErrors}
             maintenanceInfo={maintenanceInfo}
             requirePlateClear={requirePlateClear}
@@ -1000,6 +1011,7 @@ function PrinterListRow({
               printer={printer}
               status={status}
               printerHealth={printerHealth}
+              smartPlugPoweredOff={smartPlugPoweredOff}
               knownHmsErrors={knownHmsErrors}
               maintenanceInfo={maintenanceInfo}
               requirePlateClear={requirePlateClear}
@@ -1035,6 +1047,7 @@ function SinglePrinterSwitcherItem({
   printer,
   isSelected,
   maintenanceInfo,
+  smartPlugPoweredOff = false,
   requirePlateClear,
   checkPrinterFirmware = true,
   onSelect,
@@ -1042,6 +1055,7 @@ function SinglePrinterSwitcherItem({
   printer: Printer;
   isSelected: boolean;
   maintenanceInfo?: PrinterMaintenanceInfo;
+  smartPlugPoweredOff?: boolean;
   requirePlateClear?: boolean;
   checkPrinterFirmware?: boolean;
   onSelect: (id: number) => void;
@@ -1074,10 +1088,13 @@ function SinglePrinterSwitcherItem({
     firmwareUpdateAvailable: !!firmwareInfo?.update_available,
     hasDoorSensor,
     doorOpen: status?.door_open,
+    isMaintenanceMode: printer.is_active === false,
+    smartPlugPoweredOff,
     labels: {
       healthy: t('printers.health.healthy', 'Healthy'),
       attentionRequired: t('printers.health.attentionRequired', 'Requires attention'),
       error: t('printers.health.error', 'Error'),
+      offline: t('printers.connection.offline', 'Offline'),
     },
   });
 
@@ -1361,6 +1378,7 @@ function useCurrentPrintOwner(printerId: number, isPrintingOrPaused: boolean) {
 function SinglePrinterCockpit({
   printer,
   maintenanceInfo,
+  smartPlugPoweredOff = false,
   requirePlateClear,
   checkPrinterFirmware = true,
   currencySymbol,
@@ -1383,6 +1401,7 @@ function SinglePrinterCockpit({
 }: {
   printer: Printer;
   maintenanceInfo?: PrinterMaintenanceInfo;
+  smartPlugPoweredOff?: boolean;
   requirePlateClear?: boolean;
   checkPrinterFirmware?: boolean;
   currencySymbol: string;
@@ -1785,10 +1804,13 @@ function SinglePrinterCockpit({
     firmwareUpdateAvailable: !!firmwareInfo?.update_available,
     hasDoorSensor,
     doorOpen: status?.door_open,
+    isMaintenanceMode: printer.is_active === false,
+    smartPlugPoweredOff,
     labels: {
       healthy: t('printers.health.healthy', 'Healthy'),
       attentionRequired: t('printers.health.attentionRequired', 'Requires attention'),
       error: t('printers.health.error', 'Error'),
+      offline: t('printers.connection.offline', 'Offline'),
     },
   });
 
@@ -1900,7 +1922,7 @@ function SinglePrinterCockpit({
   const showPlateStatusPill = !!cockpitPlateStatus;
   const showNetworkPill = !isMaintenanceMode && (!status?.connected || (!status?.wired_network && wifiSignal != null && wifiSignal < -60));
   const showHmsPill = !isMaintenanceMode && (!status?.connected || knownHmsErrors.length > 0);
-  const showMaintenancePill = maintenanceDueCount > 0 || maintenanceWarningCount > 0;
+  const showMaintenancePill = !isMaintenanceMode && (maintenanceDueCount > 0 || maintenanceWarningCount > 0);
   const showFirmwarePill = !!(checkPrinterFirmware && firmwareInfo?.current_version && firmwareInfo?.latest_version && firmwareInfo.update_available);
   const showDoorPill = !!(status?.connected && hasDoorSensor && status.door_open);
   const hasCockpitStatusPills = isMaintenanceMode ||
@@ -2505,6 +2527,7 @@ function SinglePrinterCockpit({
                       printer={printer}
                       status={status}
                       printerHealth={printerHealth}
+                      smartPlugPoweredOff={smartPlugPoweredOff}
                       knownHmsErrors={knownHmsErrors}
                       maintenanceInfo={maintenanceInfo}
                       requirePlateClear={requirePlateClear}
@@ -2517,9 +2540,9 @@ function SinglePrinterCockpit({
                     {hasCockpitStatusPills && (
                       <div className="absolute right-0 top-full z-20 mt-2 w-48 space-y-1.5">
                         {isMaintenanceMode && (
-                          <span className={`${cockpitStatusPillBase} border-amber-400/50 text-amber-400`}>
+                          <span className={`${cockpitStatusPillBase} border-blue-400/50 bg-blue-500/20 text-blue-400`}>
                             <Wrench className="h-3 w-3 shrink-0" />
-                            <CockpitStatusRowText title={maintenanceTitle} state={t('printers.maintenance.pillLabel', 'Maintenance')} />
+                            <CockpitStatusRowText title={maintenanceTitle} state={t('printers.maintenance.modeLabel', 'Maintenance Mode')} />
                           </span>
                         )}
                         {showConnectionPill && cockpitConnectionStatusPill}
@@ -2835,6 +2858,7 @@ function PrinterCard({
   printer,
   hideIfDisconnected,
   maintenanceInfo,
+  smartPlugPoweredOff = false,
   amsThresholds,
   spoolmanEnabled = false,
   linkedSpools,
@@ -2864,6 +2888,7 @@ function PrinterCard({
   printer: Printer;
   hideIfDisconnected?: boolean;
   maintenanceInfo?: PrinterMaintenanceInfo;
+  smartPlugPoweredOff?: boolean;
   amsThresholds?: {
     humidityGood: number;
     humidityFair: number;
@@ -3216,7 +3241,7 @@ function PrinterCard({
   const showPlateStatusPill = !!plateStatus && needsPlateClear;
   const showNetworkPill = !isMaintenanceMode && (!status?.connected || (!status?.wired_network && wifiSignal != null && wifiSignal < -60));
   const showHmsPill = !isMaintenanceMode && (!status?.connected || knownHmsErrors.length > 0);
-  const showMaintenancePill = maintenanceDueCount > 0 || maintenanceWarningCount > 0;
+  const showMaintenancePill = !isMaintenanceMode && (maintenanceDueCount > 0 || maintenanceWarningCount > 0);
   const showQueuePill = false;
   const showFirmwarePill = !!(checkPrinterFirmware && firmwareInfo?.current_version && firmwareInfo?.latest_version && firmwareInfo.update_available);
   const showFirmwareVersionPill = false;
@@ -3365,10 +3390,13 @@ function PrinterCard({
     firmwareUpdateAvailable: !!firmwareInfo?.update_available,
     hasDoorSensor,
     doorOpen: status?.door_open,
+    isMaintenanceMode: printer.is_active === false,
+    smartPlugPoweredOff,
     labels: {
       healthy: t('printers.health.healthy', 'Healthy'),
       attentionRequired: t('printers.health.attentionRequired', 'Requires attention'),
       error: t('printers.health.error', 'Error'),
+      offline: t('printers.connection.offline', 'Offline'),
     },
   });
 
@@ -4023,6 +4051,7 @@ function PrinterCard({
                 printer={printer}
                 status={status}
                 printerHealth={printerHealth}
+                smartPlugPoweredOff={smartPlugPoweredOff}
                 knownHmsErrors={knownHmsErrors}
                 maintenanceInfo={maintenanceInfo}
                 requirePlateClear={requirePlateClear}
@@ -4040,9 +4069,9 @@ function PrinterCard({
             <div className="mt-2">
               <div className="space-y-1.5">
               {isMaintenanceMode && (
-                <span className={`${statusPillBase} bg-amber-500/20 text-amber-400`}>
+                <span className={`${statusPillBase} bg-blue-500/20 text-blue-400`}>
                   <Wrench className="w-3 h-3" />
-                  <StatusRowText title={maintenanceTitle} state={t('printers.maintenance.pillLabel', 'Maintenance')} />
+                  <StatusRowText title={maintenanceTitle} state={t('printers.maintenance.modeLabel', 'Maintenance Mode')} />
                 </span>
               )}
               {/* Connection status badge */}
@@ -6513,16 +6542,23 @@ export function PrintersPage() {
     {} as Record<number, PrinterMaintenanceInfo>
   ) || {};
 
-  // Create a map of printer_id -> smart plug
-  const smartPlugByPrinter = smartPlugs?.reduce(
-    (acc, plug) => {
-      if (plug.printer_id) {
-        acc[plug.printer_id] = plug;
+  // Mirror the API's power-control selection: prefer a physical/main plug over
+  // a Home Assistant script when a printer has more than one associated entity.
+  const smartPlugByPrinter = useMemo(() => {
+    const plugsByPrinter: Record<number, SmartPlug> = {};
+    for (const plug of smartPlugs ?? []) {
+      if (!plug.printer_id) continue;
+      const isScript = plug.plug_type === 'homeassistant' && plug.ha_entity_id?.startsWith('script.');
+      const current = plugsByPrinter[plug.printer_id];
+      const currentIsScript = current?.plug_type === 'homeassistant' && current.ha_entity_id?.startsWith('script.');
+      if (!current || (currentIsScript && !isScript)) {
+        plugsByPrinter[plug.printer_id] = plug;
       }
-      return acc;
-    },
-    {} as Record<number, typeof smartPlugs[0]>
-  ) || {};
+    }
+    return plugsByPrinter;
+  }, [smartPlugs]);
+  const isSmartPlugPoweredOff = (printerId: number) =>
+    smartPlugByPrinter[printerId]?.last_state?.toUpperCase() === 'OFF';
 
   const addMutation = useMutation({
     mutationFn: api.createPrinter,
@@ -7292,6 +7328,7 @@ export function PrintersPage() {
                   printer={printer}
                   isSelected={printer.id === selectedSinglePrinter.id}
                   maintenanceInfo={maintenanceByPrinter[printer.id]}
+                  smartPlugPoweredOff={isSmartPlugPoweredOff(printer.id)}
                   requirePlateClear={settings?.require_plate_clear === true}
                   checkPrinterFirmware={settings?.check_printer_firmware !== false}
                   onSelect={(nextId) => {
@@ -7307,6 +7344,7 @@ export function PrintersPage() {
             <SinglePrinterCockpit
               printer={selectedSinglePrinter}
               maintenanceInfo={maintenanceByPrinter[selectedSinglePrinter.id]}
+              smartPlugPoweredOff={isSmartPlugPoweredOff(selectedSinglePrinter.id)}
               requirePlateClear={settings?.require_plate_clear === true}
               checkPrinterFirmware={settings?.check_printer_firmware !== false}
               currencySymbol={getCurrencySymbol(appSettings?.currency || 'USD')}
@@ -7350,6 +7388,7 @@ export function PrintersPage() {
                 printer={printer}
                 hideIfDisconnected={hideDisconnected}
                 maintenanceInfo={maintenanceByPrinter[printer.id]}
+                smartPlugPoweredOff={isSmartPlugPoweredOff(printer.id)}
                 requirePlateClear={settings?.require_plate_clear === true}
                 selectionMode={selectionMode}
                 isSelected={selectedPrinterIds.has(printer.id)}
@@ -7418,6 +7457,7 @@ export function PrintersPage() {
                       printer={printer}
                       hideIfDisconnected={hideDisconnected}
                       maintenanceInfo={maintenanceByPrinter[printer.id]}
+                      smartPlugPoweredOff={isSmartPlugPoweredOff(printer.id)}
                       amsThresholds={settings ? {
                         humidityGood: Number(settings.ams_humidity_good) || 40,
                         humidityFair: Number(settings.ams_humidity_fair) || 60,
@@ -7465,6 +7505,7 @@ export function PrintersPage() {
               printer={printer}
               hideIfDisconnected={hideDisconnected}
               maintenanceInfo={maintenanceByPrinter[printer.id]}
+              smartPlugPoweredOff={isSmartPlugPoweredOff(printer.id)}
               spoolmanEnabled={spoolmanEnabled}
               hasUnlinkedSpools={hasUnlinkedSpools}
               linkedSpools={linkedSpools}

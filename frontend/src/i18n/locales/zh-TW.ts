@@ -254,6 +254,7 @@ export default {
       title: '維護中',
       subtitle: '此印表機已暫停 — 未連接、不參與佇列調度、不發送通知。',
       pillLabel: '維護',
+      modeLabel: '維護模式',
       exitButton: '退出維護',
       menuEnter: '進入維護模式',
       menuExit: '退出維護模式',

@@ -254,6 +254,7 @@ export default {
       title: 'In manutenzione',
       subtitle: 'Questa stampante è in pausa — non connessa, non idonea per la coda, nessuna notifica inviata.',
       pillLabel: 'Manutenzione',
+      modeLabel: 'Modalità manutenzione',
       exitButton: 'Esci dalla manutenzione',
       menuEnter: 'Entra in modalità manutenzione',
       menuExit: 'Esci dalla modalità manutenzione',
