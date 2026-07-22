@@ -369,8 +369,9 @@ test('core app API smoke reaches create, edit, upload, slice, queue, and setting
 });
 
 async function expectCockpitToFitViewport(page: Page) {
-  const [layout, camera, controls, controlsContent, actions, status, currentPrint] = await Promise.all([
+  const [layout, detailGrid, camera, controls, controlsContent, actions, status, currentPrint] = await Promise.all([
     page.getByTestId('cockpit-layout').boundingBox(),
+    page.getByTestId('cockpit-detail-grid').boundingBox(),
     page.getByTestId('cockpit-camera-panel').boundingBox(),
     page.getByTestId('cockpit-machine-controls-panel').boundingBox(),
     page.getByTestId('cockpit-machine-controls-content').boundingBox(),
@@ -380,6 +381,7 @@ async function expectCockpitToFitViewport(page: Page) {
   ]);
 
   expect(layout).not.toBeNull();
+  expect(detailGrid).not.toBeNull();
   expect(camera).not.toBeNull();
   expect(controls).not.toBeNull();
   expect(controlsContent).not.toBeNull();
@@ -389,8 +391,16 @@ async function expectCockpitToFitViewport(page: Page) {
 
   expect(camera!.width / camera!.height).toBeCloseTo(16 / 9, 2);
   expect(camera!.width).toBeCloseTo(controls!.width, 1);
-  expect(Math.abs(controls!.height - controlsContent!.height)).toBeLessThanOrEqual(1);
-  expect(Math.abs((camera!.y + camera!.height) - controls!.y)).toBeLessThanOrEqual(1);
+  expect(controls!.height).toBeGreaterThanOrEqual(controlsContent!.height - 1);
+  const controlsMinimumHeight = await page.getByTestId('cockpit-detail-grid').evaluate((grid) => {
+    const styles = getComputedStyle(grid);
+    return (grid.clientHeight - parseFloat(styles.paddingTop) - parseFloat(styles.paddingBottom)) * 0.3;
+  });
+  expect(controls!.height).toBeGreaterThanOrEqual(controlsMinimumHeight - 1);
+  const cameraControlsGap = await page.getByTestId('cockpit-camera-panel').evaluate((cameraPanel) => (
+    parseFloat(getComputedStyle(cameraPanel.parentElement!).rowGap)
+  ));
+  expect(Math.abs((controls!.y - (camera!.y + camera!.height)) - cameraControlsGap)).toBeLessThanOrEqual(1);
   expect(currentPrint!.y + currentPrint!.height).toBeLessThanOrEqual(camera!.y + camera!.height - 16);
   expect(controls!.y + controls!.height).toBeLessThanOrEqual(layout!.y + layout!.height + 1);
   expect(actions!.x).toBeGreaterThanOrEqual(controls!.x + controls!.width - 1);

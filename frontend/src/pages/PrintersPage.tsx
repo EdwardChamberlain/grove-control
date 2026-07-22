@@ -2501,7 +2501,11 @@ function SinglePrinterCockpit({
       const verticalPadding = Number.parseFloat(gridStyles.paddingTop) + Number.parseFloat(gridStyles.paddingBottom);
       const columnGap = Number.parseFloat(gridStyles.columnGap) || 0;
       const cameraControlsGap = Number.parseFloat(cameraControlsStyles.rowGap) || 0;
-      const controlsHeight = Math.ceil(controlsContent.getBoundingClientRect().height);
+      const naturalControlsHeight = Math.ceil(controlsContent.getBoundingClientRect().height);
+      const controlsHeight = Math.max(
+        naturalControlsHeight,
+        Math.ceil((grid.clientHeight - verticalPadding) * 0.3),
+      );
       const availableWidth = grid.clientWidth - horizontalPadding - columnGap;
       const availableCameraHeight = grid.clientHeight - verticalPadding - controlsHeight - cameraControlsGap;
       const nextWidth = Math.max(0, Math.min(availableWidth, availableCameraHeight * (16 / 9)));
@@ -2532,8 +2536,8 @@ function SinglePrinterCockpit({
         ...(cockpitControlsHeight === null ? {} : { '--cockpit-controls-height': `${cockpitControlsHeight}px` }),
       } as CSSProperties}
     >
-      <div ref={cockpitDetailGridRef} className="cockpit-detail-grid relative grid h-full min-h-0 gap-3 p-3">
-        <div className="cockpit-camera-controls grid min-h-0 gap-0">
+      <div ref={cockpitDetailGridRef} data-testid="cockpit-detail-grid" className="cockpit-detail-grid relative grid h-full min-h-0 gap-3 p-3">
+        <div className="cockpit-camera-controls grid min-h-0 gap-3">
           <section data-testid="cockpit-camera-panel" className="relative h-full min-h-0 w-full overflow-hidden rounded-xl border border-white/10 bg-bambu-dark">
             <CameraPlaceholder
               model={printer.model}
