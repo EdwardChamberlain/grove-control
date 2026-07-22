@@ -295,11 +295,11 @@ export function PrinterHealthMenu({
                   </>
                 );
                 return row.action ? (
-                  <button key={row.key} type="button" onClick={row.action} className={className}>
+                  <button key={row.key} type="button" data-testid={`printer-health-${row.key}`} onClick={row.action} className={className}>
                     {content}
                   </button>
                 ) : (
-                  <div key={row.key} className={className}>
+                  <div key={row.key} data-testid={`printer-health-${row.key}`} className={className}>
                     {content}
                   </div>
                 );
