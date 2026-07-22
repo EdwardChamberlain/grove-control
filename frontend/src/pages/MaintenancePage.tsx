@@ -33,6 +33,7 @@ import {
   Settings,
   Filter,
   CircleDot,
+  ScanLine,
   Printer,
   ExternalLink,
 } from 'lucide-react';
@@ -70,6 +71,7 @@ const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   Settings,
   Filter,
   CircleDot,
+  ScanLine,
 };
 
 function getIcon(iconName: string | null) {
