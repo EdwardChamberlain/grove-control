@@ -7,10 +7,10 @@ modifies the live database until it has built and verified a replacement next
 to it, and it always writes a ``.backup`` copy first.
 
 The application must be stopped. The tool builds a new database using the
-current migrations, then copies every compatible non-virtual table while
-preserving IDs. It refuses to replace the original if a source table cannot be
-represented in the current schema, if row counts differ, or if foreign-key
-checks fail.
+current migrations, then restores durable compatible data while preserving
+IDs. Queue and other explicitly transient state are reset. Known
+BambuBuddy-only tables are exported beside the backup, and an unknown source
+table stops the conversion rather than being silently discarded.
 
 Docker usage (from the directory containing docker-compose.yml)::
 
@@ -24,10 +24,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
+import json
 import os
 import sqlite3
 import sys
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -48,7 +51,44 @@ _CRITICAL_TABLES = {
     "library_files",
     "filaments",
     "spool",
+    "print_log_entries",
 }
+
+# A Grove conversion starts these tables clean. They are runtime state,
+# histories, or short-lived security/notification records rather than the
+# customer's printer, user, archive, library, or inventory configuration.
+# ``print_log_entries`` is intentionally *not* listed: it is retained as requested.
+_TRANSIENT_TABLES = {
+    "active_print_spoolman",
+    "ams_sensor_history",
+    "auth_ephemeral_tokens",
+    "auth_rate_limit_events",
+    "notification_digest_queue",
+    "notification_logs",
+    "pending_uploads",
+    "print_queue",
+    "printer_sensor_history",
+    "smart_plug_energy_snapshots",
+}
+
+# These tables exist in current BambuBuddy but have no Grove Control feature
+# equivalent. They are exported to JSON and remain intact in the SQLite backup.
+# Any *other* source-only table is treated as unknown and aborts the conversion.
+_BAMBUDDY_EXPORT_TABLES = {
+    "bug_reports",
+    "pipeline_jobs",
+    "pipeline_runs",
+    "slicer_pipelines",
+    "sponsor_toast_state",
+}
+
+
+@dataclass(frozen=True)
+class CopyResult:
+    copied_counts: dict[str, int]
+    omitted_columns: dict[str, list[str]]
+    reset_counts: dict[str, int]
+    export_tables: set[str]
 
 
 def _default_database_path() -> Path:
@@ -127,26 +167,75 @@ async def _build_current_schema(staging: Path) -> None:
         await database_module.close_all_connections()
 
 
-def _copy_compatible_data(source_path: Path, destination_path: Path) -> tuple[dict[str, int], dict[str, list[str]]]:
-    """Copy every current table by its shared columns, retaining primary keys."""
+def _json_default(value: object) -> object:
+    """Encode SQLite values JSON cannot represent without losing information."""
+    if isinstance(value, bytes):
+        return {"encoding": "base64", "data": base64.b64encode(value).decode("ascii")}
+    raise TypeError(f"Cannot export value of type {type(value).__name__}")
+
+
+def _export_source_tables(source_path: Path, tables: set[str], export_path: Path) -> Path | None:
+    """Write known unsupported BambuBuddy tables to an atomic JSON sidecar."""
+    if not tables:
+        return None
+
+    temporary_path = export_path.with_name(f".{export_path.name}.{uuid.uuid4().hex}.tmp")
+    source = sqlite3.connect(str(source_path))
+    source.row_factory = sqlite3.Row
+    try:
+        exported: dict[str, object] = {
+            "format_version": 1,
+            "source_database": source_path.name,
+            "tables": {},
+        }
+        for table in sorted(tables):
+            quoted_table = _quote_identifier(table)
+            columns = _table_columns(source, table)
+            rows = [dict(row) for row in source.execute(f"SELECT * FROM {quoted_table}")]
+            exported["tables"][table] = {"columns": columns, "rows": rows}
+
+        with temporary_path.open("w", encoding="utf-8") as export_file:
+            json.dump(exported, export_file, default=_json_default, ensure_ascii=False, indent=2)
+            export_file.write("\n")
+        os.replace(temporary_path, export_path)
+        return export_path
+    finally:
+        temporary_path.unlink(missing_ok=True)
+        source.close()
+
+
+def _copy_compatible_data(source_path: Path, destination_path: Path) -> CopyResult:
+    """Restore durable shared tables and reset explicitly transient state."""
     source = sqlite3.connect(str(source_path))
     destination = sqlite3.connect(str(destination_path))
     source.row_factory = sqlite3.Row
     copied_counts: dict[str, int] = {}
     omitted_columns: dict[str, list[str]] = {}
+    reset_counts: dict[str, int] = {}
     try:
         source_tables = _regular_tables(source)
         destination_tables = _regular_tables(destination)
         unsupported = source_tables - destination_tables
-        if unsupported:
+        export_tables = unsupported & _BAMBUDDY_EXPORT_TABLES
+        unknown_tables = unsupported - export_tables
+        if unknown_tables:
             raise RuntimeError(
-                "Current schema has no replacement for source table(s): " + ", ".join(sorted(unsupported))
+                "Current schema has no replacement for source table(s): " + ", ".join(sorted(unknown_tables))
             )
+        tables_to_copy = source_tables - export_tables - _TRANSIENT_TABLES
+        tables_to_reset = _TRANSIENT_TABLES & destination_tables
 
         destination.execute("PRAGMA foreign_keys = OFF")
         try:
             destination.execute("BEGIN")
-            for table in sorted(source_tables):
+            for table in sorted(tables_to_reset):
+                if table in source_tables:
+                    reset_counts[table] = source.execute(f"SELECT COUNT(*) FROM {_quote_identifier(table)}").fetchone()[
+                        0
+                    ]
+                destination.execute(f"DELETE FROM {_quote_identifier(table)}")
+
+            for table in sorted(tables_to_copy):
                 source_columns = _table_columns(source, table)
                 destination_columns = _table_columns(destination, table)
                 common_columns = [column for column in destination_columns if column in source_columns]
@@ -196,7 +285,7 @@ def _copy_compatible_data(source_path: Path, destination_path: Path) -> tuple[di
     finally:
         destination.close()
         source.close()
-    return copied_counts, omitted_columns
+    return CopyResult(copied_counts, omitted_columns, reset_counts, export_tables)
 
 
 def _remove_wal_sidecars(database: Path) -> None:
@@ -204,26 +293,29 @@ def _remove_wal_sidecars(database: Path) -> None:
         database.with_name(database.name + suffix).unlink(missing_ok=True)
 
 
-async def rebuild(database: Path) -> tuple[Path, dict[str, int], dict[str, list[str]]]:
+async def rebuild(database: Path) -> tuple[Path, Path | None, CopyResult]:
     """Build, verify, and atomically install a replacement database."""
     backup = _timestamped_path(database, "backup")
     staging = _timestamped_path(database, "rebuild")
+    export_path = _timestamped_path(database, "bambuddy-unsupported.json")
     _create_backup(database, backup)
     _verify_sqlite_database(backup)
     _checkpoint(database)
 
     try:
         await _build_current_schema(staging)
-        copied_counts, omitted_columns = _copy_compatible_data(database, staging)
+        copy_result = _copy_compatible_data(database, staging)
+        exported_path = _export_source_tables(database, copy_result.export_tables, export_path)
         _checkpoint(staging)
         _verify_sqlite_database(staging)
         _remove_wal_sidecars(database)
         os.replace(staging, database)
         _verify_sqlite_database(database)
-        return backup, copied_counts, omitted_columns
+        return backup, exported_path, copy_result
     except Exception:
         staging.unlink(missing_ok=True)
         _remove_wal_sidecars(staging)
+        export_path.unlink(missing_ok=True)
         raise
 
 
@@ -243,18 +335,26 @@ def main() -> int:
     print(f"Database: {database}")
     print("The Grove Control service must be stopped before continuing.")
     print("A verified .backup copy is created before the live database is replaced.")
+    print("Queued and other transient runtime state is reset; print logs are retained.")
     if not args.yes:
         print("No changes made. Re-run with --yes after stopping the service.")
         return 2
 
-    backup, copied_counts, omitted_columns = asyncio.run(rebuild(database))
+    backup, exported_path, copy_result = asyncio.run(rebuild(database))
     print(f"Created verified backup: {backup}")
+    if exported_path:
+        print(f"Exported BambuBuddy-only tables: {exported_path}")
     print(
-        f"Rebuilt database successfully; restored {sum(copied_counts.values())} rows across {len(copied_counts)} tables."
+        "Rebuilt database successfully; restored "
+        f"{sum(copy_result.copied_counts.values())} rows across {len(copy_result.copied_counts)} tables."
     )
-    if omitted_columns:
+    if copy_result.reset_counts:
+        print("Reset transient rows:")
+        for table, count in sorted(copy_result.reset_counts.items()):
+            print(f"  {table}: {count}")
+    if copy_result.omitted_columns:
         print("Legacy-only columns not present in the current schema were not copied:")
-        for table, columns in sorted(omitted_columns.items()):
+        for table, columns in sorted(copy_result.omitted_columns.items()):
             print(f"  {table}: {', '.join(columns)}")
     print("You can now start Grove Control again.")
     return 0

@@ -166,11 +166,16 @@ docker compose up -d
 The command requires an image that includes this recovery tool. Do not use it
 with an external PostgreSQL database.
 
-**Full SQLite database recovery:** This last-resort tool rebuilds the entire
-database schema and copies compatible data into it, preserving IDs and rows
-for printers, users, groups and permissions, settings, archives, and library
-files. It aborts without replacing the live database if data cannot be copied
-or foreign-key validation fails.
+**BambuBuddy-to-Grove SQLite recovery:** This last-resort one-way conversion
+builds a fresh Grove Control schema and preserves IDs and rows for printers,
+users, groups and permissions, settings, archives, library files, inventory,
+and print logs. It intentionally resets queues and other transient runtime,
+sensor, notification, and auth-session data.
+
+The reset tables are `print_queue`, active-print state, pending uploads,
+sensor and smart-plug snapshots, notification logs/digests, and ephemeral auth
+and rate-limit records. Durable configuration and history outside that list is
+copied when it exists in both applications.
 
 ```bash
 docker compose down
@@ -180,7 +185,11 @@ docker compose up -d
 ```
 
 It is SQLite-only. A timestamped `.backup` is retained beside the database;
-keep it until the rebuilt installation has been verified.
+keep it until the rebuilt installation has been verified. BambuBuddy-only
+pipeline, bug-report, and sponsor UI tables are also exported to a timestamped
+`*.bambuddy-unsupported.json` file beside the backup. Any unknown source-only
+table, row-count mismatch, or foreign-key failure aborts without replacing the
+live database.
 
 **Custom Port:**
 
