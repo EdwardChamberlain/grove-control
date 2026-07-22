@@ -2496,13 +2496,14 @@ function SinglePrinterCockpit({
       }
 
       const gridStyles = window.getComputedStyle(grid);
-      const rootFontSize = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16;
+      const cameraControlsStyles = window.getComputedStyle(controls.parentElement!);
       const horizontalPadding = Number.parseFloat(gridStyles.paddingLeft) + Number.parseFloat(gridStyles.paddingRight);
       const verticalPadding = Number.parseFloat(gridStyles.paddingTop) + Number.parseFloat(gridStyles.paddingBottom);
-      const gap = Number.parseFloat(gridStyles.rowGap) || 0;
+      const columnGap = Number.parseFloat(gridStyles.columnGap) || 0;
+      const cameraControlsGap = Number.parseFloat(cameraControlsStyles.rowGap) || 0;
       const controlsHeight = Math.ceil(controlsContent.getBoundingClientRect().height);
-      const availableWidth = grid.clientWidth - horizontalPadding - (18 * rootFontSize) - gap;
-      const availableCameraHeight = grid.clientHeight - verticalPadding - controlsHeight - gap;
+      const availableWidth = grid.clientWidth - horizontalPadding - columnGap;
+      const availableCameraHeight = grid.clientHeight - verticalPadding - controlsHeight - cameraControlsGap;
       const nextWidth = Math.max(0, Math.min(availableWidth, availableCameraHeight * (16 / 9)));
 
       setCockpitCameraColumnWidth((currentWidth) => (

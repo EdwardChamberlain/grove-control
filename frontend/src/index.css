@@ -242,15 +242,14 @@ html {
 
 @container cockpit-detail (min-width: 640px) {
   .cockpit-detail-grid {
-    grid-template-columns: minmax(0, var(--cockpit-camera-column-width, 20rem)) minmax(18rem, 1fr);
+    grid-template-columns: minmax(0, var(--cockpit-camera-column-width, 20rem)) minmax(0, 1fr);
   }
 }
 
 /* The shared camera/control column derives its width from the available height.
    Controls use their natural content height so the camera receives spare space. */
 .cockpit-camera-controls {
-  align-content: start;
-  grid-template-rows: auto var(--cockpit-controls-height, 25rem);
+  grid-template-rows: minmax(0, 1fr) var(--cockpit-controls-height, 25rem);
 }
 
 .cockpit-camera-controls > [data-testid='cockpit-camera-panel'] {

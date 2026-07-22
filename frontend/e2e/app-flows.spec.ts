@@ -419,7 +419,7 @@ for (const viewport of [
   { width: 1366, height: 768 },
   { width: 1920, height: 1080 },
 ]) {
-  test(`cockpit keeps fixed controls inside the viewport at ${viewport.width}x${viewport.height} through sidebar collapse`, async ({ page }) => {
+  test(`cockpit keeps fixed controls inside the viewport at ${viewport.width}x${viewport.height} through sidebar collapse`, async ({ page }, testInfo) => {
     const calls: ApiCall[] = [];
     await page.setViewportSize(viewport);
     await page.addInitScript(() => {
@@ -431,6 +431,9 @@ for (const viewport of [
 
     await expect(page.getByTestId('cockpit-layout')).toBeVisible();
     await expectCockpitToFitViewport(page);
+    await page.getByTestId('cockpit-layout').screenshot({
+      path: testInfo.outputPath(`cockpit-${viewport.width}x${viewport.height}-expanded.png`),
+    });
 
     const collapseSidebar = page.getByTitle('Collapse sidebar');
     if (await collapseSidebar.count()) {
@@ -438,6 +441,9 @@ for (const viewport of [
       await page.waitForTimeout(150);
       await expect(page.getByTitle('Expand sidebar')).toBeVisible();
       await expectCockpitToFitViewport(page);
+      await page.getByTestId('cockpit-layout').screenshot({
+        path: testInfo.outputPath(`cockpit-${viewport.width}x${viewport.height}-collapsed.png`),
+      });
     }
   });
 }
