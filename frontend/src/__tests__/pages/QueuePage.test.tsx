@@ -198,7 +198,29 @@ describe('QueuePage', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Active Print')).toBeInTheDocument();
-        expect(screen.getByText('Currently Printing')).toBeInTheDocument();
+        expect(screen.getByText('Active jobs')).toBeInTheDocument();
+      });
+    });
+
+    it('shows dispatching items as active without calling them printing', async () => {
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json([
+          ...mockQueueItems,
+          {
+            ...mockQueueItems[1],
+            id: 4,
+            status: 'dispatching',
+            dispatched_at: '2024-01-01T10:00:00Z',
+            archive_name: 'Awaiting printer acknowledgement',
+          },
+        ])),
+      );
+      render(<QueuePage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Active jobs')).toBeInTheDocument();
+        expect(screen.getByText('Awaiting printer acknowledgement')).toBeInTheDocument();
+        expect(screen.getByText('Dispatching')).toBeInTheDocument();
       });
     });
 

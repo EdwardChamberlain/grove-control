@@ -349,6 +349,7 @@ class TestRealisticMessageFlow:
                     "gcode_state": "RUNNING",
                     "gcode_file": "/data/Metadata/test.gcode",
                     "subtask_name": "Test",
+                    "subtask_id": "123456",
                     "xcam": {"timelapse": "enable"},
                 }
             }
@@ -388,10 +389,19 @@ class TestRealisticMessageFlow:
         assert "timelapse_was_active" in complete_data
         assert complete_data["timelapse_was_active"] is True
         assert complete_data["status"] == "completed"
+        assert complete_data["subtask_id"] == "123456"
 
         # Flags should be reset after completion
         assert mqtt_client._timelapse_during_print is False
         assert mqtt_client._was_running is False
+
+    def test_terminal_zero_subtask_id_preserves_the_current_print_identity(self, mqtt_client):
+        """Firmware terminal pushes sometimes replace the job id with zero."""
+        mqtt_client.state.subtask_id = "123456"
+
+        mqtt_client._update_state({"gcode_state": "FINISH", "subtask_id": "0"})
+
+        assert mqtt_client.state.subtask_id == "123456"
 
     def test_print_failed_includes_timelapse_flag(self, mqtt_client):
         """Test that failed print also includes timelapse flag."""
@@ -4196,6 +4206,14 @@ class TestStartPrintUniqueIdentityFields:
         mqtt_client.start_print("test.3mf")
         cmd = self._get_published_command(mqtt_client)
         assert mqtt_client.last_dispatch_subtask_id == cmd["subtask_id"]
+
+    def test_scheduler_submission_id_is_used_verbatim(self, mqtt_client):
+        """Queue recovery relies on the persisted id matching terminal MQTT telemetry."""
+        mqtt_client.start_print("test.3mf", submission_id="123456")
+        cmd = self._get_published_command(mqtt_client)
+        assert cmd["task_id"] == "123456"
+        assert cmd["subtask_id"] == "123456"
+        assert mqtt_client.last_dispatch_subtask_id == "123456"
 
     def test_last_dispatch_subtask_id_updates_per_submission(self, mqtt_client):
         """Each dispatch overwrites the recorded id with the new submission's."""

@@ -1117,7 +1117,7 @@ export default {
     },
     // Bölümler
     sections: {
-      currentlyPrinting: 'Şu Anda Yazdırılan',
+      activeJobs: 'Etkin işler',
       queued: 'Kuyruktaki',
       history: 'Geçmiş',
     },
@@ -1126,6 +1126,7 @@ export default {
       pending: 'Beklemede',
       scheduled: 'Planlandı',
       waiting: 'Bekliyor',
+      dispatching: 'Gönderiliyor',
       printing: 'Yazdırılıyor',
       paused: 'Duraklatıldı',
       completed: 'Tamamlandı',

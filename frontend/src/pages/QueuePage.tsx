@@ -114,6 +114,7 @@ function StatusBadge({ status, scheduledTime, waitingReason, printerState, t }: 
 
   const config = {
     pending: { icon: Clock, color: 'text-status-warning bg-status-warning/10 border-status-warning/20', label: t('queue.status.pending') },
+    dispatching: { icon: Timer, color: 'text-purple-300 bg-purple-500/10 border-purple-500/20', label: t('queue.status.dispatching') },
     printing: { icon: Play, color: 'text-blue-400 bg-blue-400/10 border-blue-400/20', label: t('queue.status.printing') },
     completed: { icon: CheckCircle, color: 'text-status-ok bg-status-ok/10 border-status-ok/20', label: t('queue.status.completed') },
     failed: { icon: XCircle, color: 'text-status-error bg-status-error/10 border-status-error/20', label: t('queue.status.failed') },
@@ -390,6 +391,7 @@ function SortableQueueItem({
   };
 
   const isPrinting = item.status === 'printing';
+  const isDispatching = item.status === 'dispatching';
   const isPending = item.status === 'pending';
   const isHistory = ['completed', 'failed', 'skipped', 'cancelled'].includes(item.status);
 
@@ -403,6 +405,7 @@ function SortableQueueItem({
         group relative bg-bambu-dark-secondary rounded-xl border transition-all duration-200
         border-l-[3px] ${
           isPrinting ? 'border-l-blue-500' :
+          isDispatching ? 'border-l-purple-500' :
           isPending ? 'border-l-yellow-500' :
           item.status === 'completed' ? 'border-l-emerald-500' :
           item.status === 'failed' ? 'border-l-red-500' :
@@ -410,8 +413,9 @@ function SortableQueueItem({
         }
         ${isDragging ? 'opacity-50 scale-[1.02] shadow-xl z-50' : ''}
         ${isPrinting ? 'border-blue-500/30 bg-gradient-to-r from-blue-500/5 to-transparent' : ''}
+        ${isDispatching ? 'border-purple-500/30 bg-gradient-to-r from-purple-500/5 to-transparent' : ''}
         ${isSelected && isMobileSelectable ? 'sm:border-bambu-dark-tertiary border-bambu-green/40' : ''}
-        ${!isSelected && !isPrinting ? 'border-bambu-dark-tertiary hover:border-bambu-dark-tertiary/80' : ''}
+        ${!isSelected && !isPrinting && !isDispatching ? 'border-bambu-dark-tertiary hover:border-bambu-dark-tertiary/80' : ''}
         ${isMobileSelectable ? 'sm:cursor-default' : ''}
       `}
       onClick={isMobileSelectable ? () => {
@@ -1584,7 +1588,7 @@ export function QueuePage() {
   };
 
   const activeItems = useMemo(() => {
-    let items = queue?.filter(i => i.status === 'printing') || [];
+    let items = queue?.filter(i => i.status === 'dispatching' || i.status === 'printing') || [];
     if (filterLocation) {
       items = items.filter(matchesLocationFilter);
     }
@@ -2021,6 +2025,7 @@ export function QueuePage() {
           options={[
             { value: '', label: t('queue.filter.allStatus') },
             { value: 'pending', label: t('queue.status.pending') },
+            { value: 'dispatching', label: t('queue.status.dispatching') },
             { value: 'printing', label: t('queue.status.printing') },
             { value: 'completed', label: t('queue.status.completed') },
             { value: 'failed', label: t('queue.status.failed') },
@@ -2153,7 +2158,7 @@ export function QueuePage() {
             <div>
               <h2 className="text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4 flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
-                {t('queue.sections.currentlyPrinting')}
+                {t('queue.sections.activeJobs')}
               </h2>
               <div className="space-y-2 sm:space-y-3">
                 {activeItems.map((item) => (

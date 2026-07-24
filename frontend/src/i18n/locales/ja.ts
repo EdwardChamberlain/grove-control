@@ -1116,7 +1116,7 @@ export default {
     },
     // Sections
     sections: {
-      currentlyPrinting: '印刷中',
+      activeJobs: '実行中のジョブ',
       queued: 'キュー中',
       history: '履歴',
     },
@@ -1125,6 +1125,7 @@ export default {
       pending: '待機中',
       scheduled: '予定済み',
       waiting: '待機中',
+      dispatching: '送信中',
       printing: '印刷中',
       paused: '一時停止',
       completed: '完了',

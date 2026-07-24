@@ -717,6 +717,70 @@ def register_expected_print(
     )
 
 
+def unregister_expected_print(printer_id: int, filename: str | None = None) -> None:
+    """Remove a queue dispatch's expected-print association immediately.
+
+    A failed acknowledgement is a retry, not a print. Leaving this process-local
+    registration behind until its TTL expires could make a later printer event
+    claim the retried queue item. ``filename=None`` is used for restart recovery:
+    the active-printer invariant means there can be only one such registration
+    for that printer.
+    """
+    if filename is None:
+        keys = {key for key in _expected_prints if key[0] == printer_id}
+        keys.update(key for key in _expected_print_creators if key[0] == printer_id)
+        keys.update(key for key in _expected_print_registered_at if key[0] == printer_id)
+    else:
+        keys = {(printer_id, filename)}
+        if filename.endswith(".3mf"):
+            base = filename[:-4]
+            keys.update({(printer_id, base), (printer_id, f"{base}.gcode")})
+
+    removed_archive_ids: set[int] = set()
+    for key in keys:
+        archive_id = _expected_prints.pop(key, None)
+        if archive_id is not None:
+            removed_archive_ids.add(archive_id)
+        _expected_print_creators.pop(key, None)
+        _expected_print_registered_at.pop(key, None)
+
+    live_archive_ids = set(_expected_prints.values())
+    for archive_id in removed_archive_ids:
+        if archive_id not in live_archive_ids:
+            _print_ams_mappings.pop(archive_id, None)
+            _print_plate_ids.pop(archive_id, None)
+
+    if keys:
+        logging.getLogger(__name__).info(
+            "Unregistered expected print: printer=%s, filename=%s", printer_id, filename or "all"
+        )
+
+
+def _matches_dispatching_queue_completion(
+    item, possible_keys: list[tuple[int, str]], event_subtask_id: str | None
+) -> bool:
+    """Return whether a terminal event belongs to this unconfirmed dispatch.
+
+    New dispatches persist the MQTT submission id before their command is sent,
+    so this comparison works across a restart. Legacy rows without that id fall
+    back to the in-process expected-print registry.
+    """
+    if item.status != "dispatching":
+        return False
+    dispatch_subtask_id = getattr(item, "dispatch_subtask_id", None)
+    if dispatch_subtask_id is not None:
+        if event_subtask_id is not None:
+            return dispatch_subtask_id == event_subtask_id
+        # A same-process pre-print failure can arrive before firmware has
+        # echoed its submission id. The short-lived expected registry remains
+        # a safe fallback for that narrow window; restart recovery relies on
+        # the durable id above.
+        return item.archive_id is not None and any(
+            _expected_prints.get(key) == item.archive_id for key in possible_keys
+        )
+    return item.archive_id is not None and any(_expected_prints.get(key) == item.archive_id for key in possible_keys)
+
+
 def _compute_run_filament_grams(
     status: str,
     archive_filament_used_grams: float | None,
@@ -4100,6 +4164,12 @@ async def on_print_complete(printer_id: int, data: dict):
             possible_keys.append((printer_id, f"{filename}.3mf"))
             possible_keys.append((printer_id, filename))
 
+    raw_data = data.get("raw_data") or {}
+    raw_subtask_id = raw_data.get("subtask_id") or data.get("subtask_id")
+    event_subtask_id = str(raw_subtask_id).strip() if raw_subtask_id is not None else None
+    if event_subtask_id in ("", "0"):
+        event_subtask_id = None
+
     # Find the archive for this print
     logger.info("Looking for archive in _active_prints, keys to try: %s...", possible_keys[:5])
     logger.info("Current _active_prints: %s", list(_active_prints.keys()))
@@ -4269,12 +4339,21 @@ async def on_print_complete(printer_id: int, data: dict):
 
         async def _update_queue_status(db):
             nonlocal queue_item_id, queue_item_owner_id, queue_status, queue_auto_off
+            recovered_dispatch = bool(data.get("_recovered_dispatch"))
+            queue_statuses = ["dispatching", "printing"]
+            if recovered_dispatch and event_subtask_id:
+                # Scheduler recovery has already committed this exact terminal
+                # state so a process stop cannot requeue it. Include it once to
+                # run the normal completion side effects; ordinary terminal
+                # MQTT callbacks never take this path.
+                queue_statuses.extend(["completed", "failed"])
             result = await db.execute(
                 select(PrintQueueItem)
                 .where(PrintQueueItem.printer_id == printer_id)
-                .where(PrintQueueItem.status == "printing")
+                .where(PrintQueueItem.status.in_(queue_statuses))
             )
-            printing_items = list(result.scalars().all())
+            active_items = list(result.scalars().all())
+            printing_items = [item for item in active_items if item.status == "printing"]
             if len(printing_items) > 1:
                 logger.warning(
                     "BUG: Multiple queue items in 'printing' status for printer %s: %s",
@@ -4282,6 +4361,34 @@ async def on_print_complete(printer_id: int, data: dict):
                     [(i.id, i.archive_id, i.library_file_id) for i in printing_items],
                 )
             item = printing_items[0] if printing_items else None
+            if item is None:
+                # A printer can publish a terminal update before the next
+                # three-second acknowledgement poll. Accept it only when it
+                # matches the exact archive registered by this dispatch; a
+                # delayed completion for a different job must not terminalise
+                # a newly dispatching queue item.
+                matching_dispatches = [
+                    candidate
+                    for candidate in active_items
+                    if _matches_dispatching_queue_completion(candidate, possible_keys, event_subtask_id)
+                    or (
+                        recovered_dispatch
+                        and candidate.status == data.get("status")
+                        and candidate.dispatch_subtask_id == event_subtask_id
+                    )
+                ]
+                if len(matching_dispatches) == 1:
+                    item = matching_dispatches[0]
+                    logger.info(
+                        "Matched terminal printer event to dispatching queue item %s before start acknowledgement",
+                        item.id,
+                    )
+                elif len(matching_dispatches) > 1:
+                    logger.error(
+                        "Refusing ambiguous terminal event for printer %s; matching dispatches: %s",
+                        printer_id,
+                        [candidate.id for candidate in matching_dispatches],
+                    )
             if item:
                 queue_status = data.get("status", "completed")
                 # MQTT sends "aborted" for cancelled prints; normalise to
@@ -4299,6 +4406,8 @@ async def on_print_complete(printer_id: int, data: dict):
                 await _bump_library_file_usage_if_completed(db, item, queue_status)
 
                 await db.commit()
+                if item.status in ("completed", "failed", "cancelled"):
+                    unregister_expected_print(printer_id)
                 queue_item_id = item.id
                 queue_item_owner_id = item.created_by_id
                 queue_auto_off = item.auto_off_after

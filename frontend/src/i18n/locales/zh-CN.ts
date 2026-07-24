@@ -1117,7 +1117,7 @@ export default {
     },
     // Sections
     sections: {
-      currentlyPrinting: '正在打印',
+      activeJobs: '活动任务',
       queued: '排队中',
       history: '历史',
     },
@@ -1126,6 +1126,7 @@ export default {
       pending: '等待中',
       scheduled: '已排期',
       waiting: '等待中',
+      dispatching: '正在发送',
       printing: '打印中',
       paused: '已暂停',
       completed: '已完成',

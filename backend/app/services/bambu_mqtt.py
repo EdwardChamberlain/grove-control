@@ -2151,7 +2151,18 @@ class BambuMQTTClient:
             if data["subtask_name"]:
                 self.state.current_print = data["subtask_name"]
         if "subtask_id" in data:
-            self.state.subtask_id = data["subtask_id"]
+            reported_subtask_id = str(data["subtask_id"]).strip()
+            if (
+                reported_subtask_id in ("", "0")
+                and self.state.state in ("FINISH", "FAILED")
+                and self.state.subtask_id not in (None, "", 0, "0")
+            ):
+                # Some firmware replaces the terminal push's job id with 0.
+                # Keep the previously reported non-zero id so completion and
+                # restart recovery can still attribute this exact print.
+                logger.debug("[%s] Retaining subtask_id across terminal zero", self.serial_number)
+            else:
+                self.state.subtask_id = data["subtask_id"]
         if "mc_percent" in data:
             # Save last non-zero progress for usage tracking (firmware resets to 0 on cancel)
             if self.state.progress > 0:
@@ -3366,6 +3377,11 @@ class BambuMQTTClient:
                     "status": status,
                     "filename": self._previous_gcode_file or current_file,
                     "subtask_name": self.state.subtask_name,
+                    # A terminal push often omits subtask_id even though the
+                    # client retained it from earlier telemetry. Carry the
+                    # live value explicitly so restart recovery can correlate
+                    # this completion to the durable queue dispatch attempt.
+                    "subtask_id": self.state.subtask_id,
                     "raw_data": data,
                     "timelapse_was_active": timelapse_was_active,
                     "hms_errors": hms_errors_data,
@@ -3582,6 +3598,7 @@ class BambuMQTTClient:
         use_ams: bool = True,
         nozzle_offset_cali: bool = False,
         nozzle_mapping: str | None = None,
+        submission_id: str | None = None,
     ):
         """Start a print job on the printer.
 
@@ -3607,6 +3624,9 @@ class BambuMQTTClient:
                 firmware honours the user's slicer pick instead of falling
                 back to "last matching nozzle" auto-pick. Silently ignored
                 on single-nozzle printers.
+            submission_id: Optional scheduler-persisted numeric identity for
+                this exact project_file attempt. When omitted, one is minted
+                locally for direct-print callers.
         """
         if self._client and self.state.connected:
             # Bambu print command format — matches Bambu Studio's format.
@@ -3704,7 +3724,7 @@ class BambuMQTTClient:
             # as a continuation of the last FAILED job and never leaves IDLE (#1042).
             # Modulo keeps uniqueness within a ~24-day wrap window; `or 1` guards
             # the (astronomically unlikely) zero case since task_id=0 is rejected.
-            submission_id = str(int(time.time() * 1000) % 2_147_483_647 or 1)
+            submission_id = submission_id or str(int(time.time() * 1000) % 2_147_483_647 or 1)
             # Remember it so on_print_start can persist a restart-stable id on
             # the archive even before the printer echoes subtask_id back (#1485).
             self.last_dispatch_subtask_id = submission_id

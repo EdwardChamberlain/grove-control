@@ -131,6 +131,7 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
         "use_ams": item.use_ams,
         "nozzle_offset_cali": item.nozzle_offset_cali,
         "status": item.status,
+        "dispatched_at": item.dispatched_at,
         "started_at": item.started_at,
         "completed_at": item.completed_at,
         "error_message": item.error_message,
@@ -1179,8 +1180,8 @@ async def delete_queue_item(
         if item.created_by_id != user.id:
             raise HTTPException(403, "You can only delete your own queue items")
 
-    if item.status == "printing":
-        raise HTTPException(400, "Cannot delete item that is currently printing")
+    if item.status in ("dispatching", "printing"):
+        raise HTTPException(400, "Cannot delete an item that is being dispatched or is currently printing")
 
     await db.delete(item)
     await db.commit()

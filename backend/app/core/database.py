@@ -457,6 +457,8 @@ _QUEUE_INSERT_COLUMN_DEFINITIONS: dict[str, tuple[str, str]] = {
     # Lifecycle / audit fields
     "status": ("VARCHAR(20) DEFAULT 'pending'", "VARCHAR(20) DEFAULT 'pending'"),
     "gate_acknowledged": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
+    "dispatched_at": ("DATETIME", "TIMESTAMP"),
+    "dispatch_subtask_id": ("VARCHAR(32)", "VARCHAR(32)"),
     "started_at": ("DATETIME", "TIMESTAMP"),
     "completed_at": ("DATETIME", "TIMESTAMP"),
     "error_message": ("TEXT", "TEXT"),
@@ -788,6 +790,53 @@ async def _migrate_widen_spoolman_slot_ams_id_range(conn) -> None:
         raise
 
 
+async def _ensure_active_queue_printer_reservation(conn) -> None:
+    """Repair old duplicate active rows, then enforce one active row per printer.
+
+    This must run after the queue table exists but before the partial unique
+    index is created. Older releases could leave multiple optimistic
+    ``printing`` rows for a printer; failing startup on those databases would
+    turn a safety migration into an outage. Keep the most credible active row
+    (confirmed printing before dispatching, then the newest timestamp) and
+    fail the rest closed so they require an intentional retry instead of
+    risking a second physical print.
+    """
+    from sqlalchemy import text
+
+    recovery_message = (
+        "Recovered duplicate active queue reservation during startup; manual retry required to avoid a duplicate print."
+    )
+    async with conn.begin_nested():
+        result = await conn.execute(
+            text(
+                "WITH ranked_active_queue AS ("
+                " SELECT id, ROW_NUMBER() OVER ("
+                "   PARTITION BY printer_id"
+                "   ORDER BY CASE status WHEN 'printing' THEN 0 ELSE 1 END,"
+                "            COALESCE(started_at, dispatched_at, created_at) DESC, id DESC"
+                " ) AS reservation_rank"
+                " FROM print_queue"
+                " WHERE printer_id IS NOT NULL AND status IN ('dispatching', 'printing')"
+                ")"
+                " UPDATE print_queue"
+                " SET status = 'failed', dispatched_at = NULL, started_at = NULL,"
+                "     completed_at = CURRENT_TIMESTAMP, error_message = :recovery_message"
+                " WHERE id IN (SELECT id FROM ranked_active_queue WHERE reservation_rank > 1)"
+            ),
+            {"recovery_message": recovery_message},
+        )
+    recovered_count = result.rowcount
+    if isinstance(recovered_count, int) and recovered_count > 0:
+        logger.warning("Recovered %d duplicate active print_queue reservation(s)", recovered_count)
+
+    await _safe_execute(
+        conn,
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_print_queue_active_printer "
+        "ON print_queue (printer_id) "
+        "WHERE printer_id IS NOT NULL AND status IN ('dispatching', 'printing')",
+    )
+
+
 async def run_migrations(conn):
     """Run all schema migrations and data backfills on startup.
 
@@ -1047,6 +1096,18 @@ async def run_migrations(conn):
 
     # Migration: Add manual_start column to print_queue for staged prints
     await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN manual_start BOOLEAN DEFAULT 0")
+
+    # A project_file MQTT publish being accepted locally is not evidence that
+    # the printer accepted the job. Persist the unconfirmed interval so a
+    # restart can recover it safely instead of presenting it as printing.
+    if is_sqlite():
+        await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN dispatched_at DATETIME")
+    else:
+        await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN dispatched_at TIMESTAMP")
+
+    await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN dispatch_subtask_id VARCHAR(32)")
+
+    await _ensure_active_queue_printer_reservation(conn)
 
     # Migration: Add wiki_url column to maintenance_types for documentation links
     await _safe_execute(conn, "ALTER TABLE maintenance_types ADD COLUMN wiki_url VARCHAR(500)")

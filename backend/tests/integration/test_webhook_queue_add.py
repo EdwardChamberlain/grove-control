@@ -44,6 +44,7 @@ async def webhook_queue_setup(db_session, tmp_path):
         key_hash=key_hash,
         key_prefix=key_prefix,
         can_queue=True,
+        can_read_status=True,
         enabled=True,
     )
     db_session.add_all([printer, archive, api_key])
@@ -109,3 +110,32 @@ async def test_webhook_queue_rejects_cross_material_override(async_client: Async
 
     assert response.status_code == 400
     assert "cannot change material family from PLA to ABS" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_webhook_queue_status_includes_dispatching(async_client: AsyncClient, db_session, webhook_queue_setup):
+    """A sent-but-unacknowledged job remains visible as active queue work."""
+    from backend.app.models.print_queue import PrintQueueItem
+
+    api_key, printer, _archive = webhook_queue_setup
+    db_session.add_all(
+        [
+            PrintQueueItem(printer_id=printer.id, position=1, status="pending"),
+            PrintQueueItem(printer_id=printer.id, position=2, status="dispatching"),
+            PrintQueueItem(printer_id=printer.id, position=3, status="printing"),
+        ]
+    )
+    await db_session.commit()
+
+    response = await async_client.get(
+        f"/api/v1/webhook/queue?printer_id={printer.id}",
+        headers={"X-API-Key": api_key},
+    )
+
+    assert response.status_code == 200, response.text
+    queue = response.json()[0]
+    assert queue["pending"] == 1
+    assert queue["dispatching"] == 1
+    assert queue["printing"] == 1
+    assert [item["status"] for item in queue["items"]] == ["pending", "dispatching", "printing"]
