@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, func, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.core.database import Base
@@ -10,20 +10,6 @@ class PrintQueueItem(Base):
     """Print queue item for scheduled/queued prints."""
 
     __tablename__ = "print_queue"
-    __table_args__ = (
-        # A printer may have one confirmed print or one command awaiting
-        # acknowledgement, never both.  This is a database invariant rather
-        # than a scheduler-local check so overlapping scheduler workers cannot
-        # both send a project_file command while telemetry still says IDLE.
-        Index(
-            "uq_print_queue_active_printer",
-            "printer_id",
-            unique=True,
-            sqlite_where=text("printer_id IS NOT NULL AND status IN ('dispatching', 'printing')"),
-            postgresql_where=text("printer_id IS NOT NULL AND status IN ('dispatching', 'printing')"),
-        ),
-    )
-
     id: Mapped[int] = mapped_column(primary_key=True)
 
     # Links
@@ -139,6 +125,10 @@ class PrintQueueItem(Base):
     # item is only promoted from ``dispatching`` to ``printing`` once printer
     # telemetry reports an active print state.
     dispatched_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # The submission id embedded in the MQTT project_file command. It is
+    # persisted before dispatch so terminal printer telemetry can still be
+    # attributed to this exact attempt after an application restart.
+    dispatch_subtask_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -756,18 +756,29 @@ def unregister_expected_print(printer_id: int, filename: str | None = None) -> N
         )
 
 
-def _matches_dispatching_queue_completion(item, possible_keys: list[tuple[int, str]]) -> bool:
+def _matches_dispatching_queue_completion(
+    item, possible_keys: list[tuple[int, str]], event_subtask_id: str | None
+) -> bool:
     """Return whether a terminal event belongs to this unconfirmed dispatch.
 
-    The expected-print registry is added only after the database reservation
-    commits, and is removed on every retry path. It is therefore the correlation
-    token available before a print-start callback has promoted the queue row.
+    New dispatches persist the MQTT submission id before their command is sent,
+    so this comparison works across a restart. Legacy rows without that id fall
+    back to the in-process expected-print registry.
     """
-    return (
-        item.status == "dispatching"
-        and item.archive_id is not None
-        and any(_expected_prints.get(key) == item.archive_id for key in possible_keys)
-    )
+    if item.status != "dispatching":
+        return False
+    dispatch_subtask_id = getattr(item, "dispatch_subtask_id", None)
+    if dispatch_subtask_id is not None:
+        if event_subtask_id is not None:
+            return dispatch_subtask_id == event_subtask_id
+        # A same-process pre-print failure can arrive before firmware has
+        # echoed its submission id. The short-lived expected registry remains
+        # a safe fallback for that narrow window; restart recovery relies on
+        # the durable id above.
+        return item.archive_id is not None and any(
+            _expected_prints.get(key) == item.archive_id for key in possible_keys
+        )
+    return item.archive_id is not None and any(_expected_prints.get(key) == item.archive_id for key in possible_keys)
 
 
 def _compute_run_filament_grams(
@@ -4153,6 +4164,12 @@ async def on_print_complete(printer_id: int, data: dict):
             possible_keys.append((printer_id, f"{filename}.3mf"))
             possible_keys.append((printer_id, filename))
 
+    raw_data = data.get("raw_data") or {}
+    raw_subtask_id = raw_data.get("subtask_id") or data.get("subtask_id")
+    event_subtask_id = str(raw_subtask_id).strip() if raw_subtask_id is not None else None
+    if event_subtask_id in ("", "0"):
+        event_subtask_id = None
+
     # Find the archive for this print
     logger.info("Looking for archive in _active_prints, keys to try: %s...", possible_keys[:5])
     logger.info("Current _active_prints: %s", list(_active_prints.keys()))
@@ -4345,7 +4362,7 @@ async def on_print_complete(printer_id: int, data: dict):
                 matching_dispatches = [
                     candidate
                     for candidate in active_items
-                    if _matches_dispatching_queue_completion(candidate, possible_keys)
+                    if _matches_dispatching_queue_completion(candidate, possible_keys, event_subtask_id)
                 ]
                 if len(matching_dispatches) == 1:
                     item = matching_dispatches[0]

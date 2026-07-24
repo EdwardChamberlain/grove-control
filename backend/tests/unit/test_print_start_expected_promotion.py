@@ -159,11 +159,21 @@ class TestExpectedPrintDetection:
         item = SimpleNamespace(status="dispatching", archive_id=54)
         register_expected_print(1, "Box.3mf", archive_id=54)
 
-        assert _matches_dispatching_queue_completion(item, [(1, "Box.3mf")])
-        assert not _matches_dispatching_queue_completion(item, [(1, "Benchy.3mf")])
+        assert _matches_dispatching_queue_completion(item, [(1, "Box.3mf")], None)
+        assert not _matches_dispatching_queue_completion(item, [(1, "Benchy.3mf")], None)
 
         unregister_expected_print(1, "Box.3mf")
-        assert not _matches_dispatching_queue_completion(item, [(1, "Box.3mf")])
+        assert not _matches_dispatching_queue_completion(item, [(1, "Box.3mf")], None)
+
+    def test_dispatching_completion_uses_persisted_submission_id_after_restart(self):
+        from types import SimpleNamespace
+
+        item = SimpleNamespace(status="dispatching", archive_id=54, dispatch_subtask_id="12345")
+
+        assert _matches_dispatching_queue_completion(item, [], "12345")
+        register_expected_print(1, "Box.3mf", archive_id=54)
+        assert not _matches_dispatching_queue_completion(item, [(1, "Box.3mf")], "different")
+        unregister_expected_print(1, "Box.3mf")
 
     def test_empty_expected_prints_returns_false(self):
         """No detection when _expected_prints is empty."""

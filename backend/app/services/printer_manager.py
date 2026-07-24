@@ -628,6 +628,7 @@ class PrinterManager:
         use_ams: bool = True,
         nozzle_offset_cali: bool = False,
         nozzle_mapping: str | None = None,
+        submission_id: str | None = None,
     ) -> bool:
         """Start a print on a connected printer.
 
@@ -658,6 +659,7 @@ class PrinterManager:
                 use_ams=use_ams,
                 nozzle_offset_cali=nozzle_offset_cali,
                 nozzle_mapping=nozzle_mapping,
+                submission_id=submission_id,
             )
         return False
 

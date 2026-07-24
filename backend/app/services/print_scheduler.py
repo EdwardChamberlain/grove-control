@@ -138,6 +138,7 @@ class PrintScheduler:
             if is_stale:
                 item.status = "pending"
                 item.dispatched_at = None
+                item.dispatch_subtask_id = None
                 item.started_at = None
                 item.error_message = "Printer did not acknowledge print command; queued for retry."
                 changed = True
@@ -2520,8 +2521,12 @@ class PrintScheduler:
         # Persist the command-sent-but-unconfirmed state before publishing MQTT.
         # This prevents a restart from silently retrying a command that may have
         # landed, without claiming the printer is already printing.
+        # Keep the same bounded numeric submission id in the row and MQTT
+        # command so a terminal event remains attributable after restart.
+        dispatch_subtask_id = str(int(time.time() * 1000) % 2_147_483_647 or 1)
         item.status = "dispatching"
         item.dispatched_at = datetime.now(timezone.utc)
+        item.dispatch_subtask_id = dispatch_subtask_id
         item.started_at = None
         item.error_message = None
         try:
@@ -2610,6 +2615,7 @@ class PrintScheduler:
             use_ams=item.use_ams,
             nozzle_offset_cali=item.nozzle_offset_cali,
             nozzle_mapping=item.nozzle_mapping,
+            submission_id=dispatch_subtask_id,
         )
 
         if started:
@@ -2647,6 +2653,7 @@ class PrintScheduler:
             # Print command failed - revert status
             item.status = "failed"
             item.dispatched_at = None
+            item.dispatch_subtask_id = None
             item.started_at = None
             item.error_message = "Failed to send print command to printer"
             item.completed_at = datetime.now(timezone.utc)
@@ -2753,6 +2760,7 @@ class PrintScheduler:
                 return False
             item.status = "pending"
             item.dispatched_at = None
+            item.dispatch_subtask_id = None
             item.started_at = None
             item.error_message = message
             await db.commit()
