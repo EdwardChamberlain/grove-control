@@ -1057,6 +1057,16 @@ async def run_migrations(conn):
     else:
         await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN dispatched_at TIMESTAMP")
 
+    # A durable acknowledgement wait is an active printer reservation. Keep
+    # it unique in the database so concurrently running scheduler workers
+    # cannot both dispatch to a printer before its MQTT state flips from IDLE.
+    await _safe_execute(
+        conn,
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_print_queue_active_printer "
+        "ON print_queue (printer_id) "
+        "WHERE printer_id IS NOT NULL AND status IN ('dispatching', 'printing')",
+    )
+
     # Migration: Add wiki_url column to maintenance_types for documentation links
     await _safe_execute(conn, "ALTER TABLE maintenance_types ADD COLUMN wiki_url VARCHAR(500)")
 

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.core.database import Base
@@ -10,6 +10,19 @@ class PrintQueueItem(Base):
     """Print queue item for scheduled/queued prints."""
 
     __tablename__ = "print_queue"
+    __table_args__ = (
+        # A printer may have one confirmed print or one command awaiting
+        # acknowledgement, never both.  This is a database invariant rather
+        # than a scheduler-local check so overlapping scheduler workers cannot
+        # both send a project_file command while telemetry still says IDLE.
+        Index(
+            "uq_print_queue_active_printer",
+            "printer_id",
+            unique=True,
+            sqlite_where=text("printer_id IS NOT NULL AND status IN ('dispatching', 'printing')"),
+            postgresql_where=text("printer_id IS NOT NULL AND status IN ('dispatching', 'printing')"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
 

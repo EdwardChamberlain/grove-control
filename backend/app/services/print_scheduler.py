@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -113,6 +114,7 @@ class PrintScheduler:
         stale_before = now.timestamp() - 270
         changed = False
         promoted_ids: list[int] = []
+        requeued_printer_ids: set[int] = set()
         for item in dispatches:
             printer_status = printer_manager.get_status(item.printer_id) if item.printer_id is not None else None
             if printer_status and getattr(printer_status, "state", None) in _ACTIVE_PRINT_STATES:
@@ -139,10 +141,17 @@ class PrintScheduler:
                 item.started_at = None
                 item.error_message = "Printer did not acknowledge print command; queued for retry."
                 changed = True
+                if item.printer_id is not None:
+                    requeued_printer_ids.add(item.printer_id)
                 logger.warning("Recovered stale unacknowledged queue dispatch %s back to pending", item.id)
 
         if changed:
             await db.commit()
+        if requeued_printer_ids:
+            from backend.app.main import unregister_expected_print
+
+            for printer_id in requeued_printer_ids:
+                unregister_expected_print(printer_id)
         for queue_item_id in promoted_ids:
             spawn_background_task(
                 self._publish_queue_job_started(queue_item_id),
@@ -2265,28 +2274,6 @@ class PrintScheduler:
             await self._power_off_if_needed(db, item)
             return
 
-        # ``check_queue`` normally excludes busy printers, but make the state
-        # transition defensive as well. A second worker or overlapping manual
-        # trigger must not upload or send another project_file command while
-        # this printer already has an active queue job.
-        conflicting_dispatch = await db.scalar(
-            select(PrintQueueItem.id)
-            .where(PrintQueueItem.printer_id == item.printer_id)
-            .where(PrintQueueItem.id != item.id)
-            .where(PrintQueueItem.status.in_(("dispatching", "printing")))
-            .limit(1)
-        )
-        if conflicting_dispatch is not None:
-            item.error_message = "Printer already has an active queue job; waiting to retry."
-            await db.commit()
-            logger.warning(
-                "Queue item %s was not dispatched because printer %s is reserved by queue item %s",
-                item.id,
-                item.printer_id,
-                conflicting_dispatch,
-            )
-            return
-
         # Determine source: archive or library file
         archive = None
         library_file = None
@@ -2524,20 +2511,6 @@ class PrintScheduler:
             except json.JSONDecodeError:
                 logger.warning("Queue item %s: Invalid AMS mapping JSON, ignoring", item.id)
 
-        # Register as expected print so we don't create a duplicate archive
-        # Only applicable for archive-based prints
-        if archive:
-            from backend.app.main import register_expected_print
-
-            register_expected_print(
-                item.printer_id,
-                remote_filename,
-                archive.id,
-                ams_mapping=ams_mapping,
-                created_by_id=item.created_by_id,
-                plate_id=item.plate_id,
-            )
-
         # Propagate the queue item's owner into printer_manager so the
         # print-complete callback can credit the user in the PrintLogEntry
         # (#1670). `created_by_id` is set either at queue-add time (UI-added
@@ -2551,7 +2524,35 @@ class PrintScheduler:
         item.dispatched_at = datetime.now(timezone.utc)
         item.started_at = None
         item.error_message = None
-        await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError:
+            # The partial unique index on active printer rows is the
+            # authoritative single-dispatch guard. Another scheduler worker
+            # won the reservation after this worker began its upload; leave
+            # this item pending and never send the command.
+            await db.rollback()
+            logger.info(
+                "Queue item %s was not dispatched because printer %s was reserved concurrently",
+                item.id,
+                item.printer_id,
+            )
+            return
+
+        # Register only after the durable reservation succeeded. Otherwise a
+        # losing concurrent worker leaves a two-hour expected-print entry that
+        # could associate a later start event with the wrong job.
+        if archive:
+            from backend.app.main import register_expected_print
+
+            register_expected_print(
+                item.printer_id,
+                remote_filename,
+                archive.id,
+                ams_mapping=ams_mapping,
+                created_by_id=item.created_by_id,
+                plate_id=item.plate_id,
+            )
 
         for cleanup_path in cleanup_disk_paths:
             try:
@@ -2626,6 +2627,7 @@ class PrintScheduler:
             self._schedule_dispatch_confirmation(
                 queue_item_id=item.id,
                 printer_id=item.printer_id,
+                remote_filename=remote_filename,
                 pre_state=pre_state,
                 pre_subtask_id=pre_subtask_id,
                 pre_gcode_file=pre_gcode_file,
@@ -2649,6 +2651,10 @@ class PrintScheduler:
             item.error_message = "Failed to send print command to printer"
             item.completed_at = datetime.now(timezone.utc)
             await db.commit()
+            if archive:
+                from backend.app.main import unregister_expected_print
+
+                unregister_expected_print(item.printer_id, remote_filename)
             logger.error(
                 f"Queue item {item.id}: Failed to start print on {printer.name} ({printer.model}) - "
                 f"printer_manager.start_print() returned False. "
@@ -2672,6 +2678,7 @@ class PrintScheduler:
         *,
         queue_item_id: int,
         printer_id: int,
+        remote_filename: str,
         pre_state: str | None,
         pre_subtask_id: str | None,
         pre_gcode_file: str | None,
@@ -2681,6 +2688,7 @@ class PrintScheduler:
             self._confirm_dispatch(
                 queue_item_id=queue_item_id,
                 printer_id=printer_id,
+                remote_filename=remote_filename,
                 pre_state=pre_state,
                 pre_subtask_id=pre_subtask_id,
                 pre_gcode_file=pre_gcode_file,
@@ -2693,6 +2701,7 @@ class PrintScheduler:
         *,
         queue_item_id: int,
         printer_id: int,
+        remote_filename: str,
         pre_state: str | None,
         pre_subtask_id: str | None,
         pre_gcode_file: str | None,
@@ -2752,6 +2761,9 @@ class PrintScheduler:
         reverted = await run_with_retry(_return_to_pending, label=f"revert queue dispatch {queue_item_id}")
         if not reverted:
             return
+        from backend.app.main import unregister_expected_print
+
+        unregister_expected_print(printer_id, remote_filename)
         if landed_on_subtask or (current_gcode_file is not None and current_gcode_file != pre_gcode_file):
             logger.warning(
                 "Queue item %s: printer %d received project_file but did not enter an active state; reverted to pending",
@@ -2840,9 +2852,9 @@ class PrintScheduler:
         landed_on_subtask = False
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            await asyncio.sleep(poll_interval)
             status = printer_manager.get_status(printer_id)
             if not status:
+                await asyncio.sleep(poll_interval)
                 continue
             last_status = status
             if status.state in _ACTIVE_PRINT_STATES:
@@ -2850,6 +2862,7 @@ class PrintScheduler:
             if pre_subtask_id is not None and status.subtask_id is not None and status.subtask_id != pre_subtask_id:
                 landed_on_subtask = True
                 break
+            await asyncio.sleep(poll_interval)
 
         if landed_on_subtask:
             phase_b_deadline = time.monotonic() + phase_b_timeout

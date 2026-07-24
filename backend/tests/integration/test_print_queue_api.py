@@ -1852,14 +1852,15 @@ class TestAbortedStatusNormalisation:
     @pytest.mark.asyncio
     @pytest.mark.integration
     async def test_on_print_complete_does_not_complete_a_dispatching_item(self, queue_item_factory, db_session):
-        """A delayed completion event must not claim an unconfirmed dispatch."""
+        """A delayed completion for another file must not claim an unconfirmed dispatch."""
         import asyncio
         from unittest.mock import AsyncMock, MagicMock, patch
 
         item = await queue_item_factory(status="dispatching")
 
-        # The queue completion query deliberately returns only ``printing``
-        # rows. Keep the rest of the callback isolated from external services.
+        # Keep the completion lookup isolated from external services. The event
+        # has no matching expected-print registration, so the dispatch must
+        # remain untouched.
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = []
         mock_session = AsyncMock()

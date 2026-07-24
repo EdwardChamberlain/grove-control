@@ -19,9 +19,11 @@ from backend.app.main import (
     _expected_print_registered_at,
     _expected_prints,
     _get_start_plate_id,
+    _matches_dispatching_queue_completion,
     _print_ams_mappings,
     _print_plate_ids,
     register_expected_print,
+    unregister_expected_print,
 )
 
 
@@ -150,6 +152,18 @@ class TestExpectedPrintDetection:
         register_expected_print(1, "Box.3mf", archive_id=54, ams_mapping=[1])
         keys = self._build_check_keys(2, filename="Box.3mf", subtask_name="Box")
         assert not any(k in _expected_prints for k in keys)
+
+    def test_dispatching_completion_requires_the_registered_job(self):
+        from types import SimpleNamespace
+
+        item = SimpleNamespace(status="dispatching", archive_id=54)
+        register_expected_print(1, "Box.3mf", archive_id=54)
+
+        assert _matches_dispatching_queue_completion(item, [(1, "Box.3mf")])
+        assert not _matches_dispatching_queue_completion(item, [(1, "Benchy.3mf")])
+
+        unregister_expected_print(1, "Box.3mf")
+        assert not _matches_dispatching_queue_completion(item, [(1, "Box.3mf")])
 
     def test_empty_expected_prints_returns_false(self):
         """No detection when _expected_prints is empty."""
