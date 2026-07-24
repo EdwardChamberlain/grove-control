@@ -45,6 +45,13 @@ def scheduler():
     return PrintScheduler()
 
 
+@pytest.fixture(autouse=True)
+def skip_dispatch_recovery():
+    """These queue-selection tests provide only pending-item query fixtures."""
+    with patch.object(PrintScheduler, "_recover_stale_dispatches", new=AsyncMock()):
+        yield
+
+
 def test_strict_colour_mapping_never_falls_back_across_nozzles(scheduler):
     required = [{"slot_id": 1, "type": "PLA", "color": "#FF0000", "nozzle_id": 1}]
     loaded = [

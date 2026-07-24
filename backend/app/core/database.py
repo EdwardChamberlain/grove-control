@@ -825,8 +825,9 @@ async def _ensure_active_queue_printer_reservation(conn) -> None:
             ),
             {"recovery_message": recovery_message},
         )
-    if result.rowcount and result.rowcount > 0:
-        logger.warning("Recovered %d duplicate active print_queue reservation(s)", result.rowcount)
+    recovered_count = result.rowcount
+    if isinstance(recovered_count, int) and recovered_count > 0:
+        logger.warning("Recovered %d duplicate active print_queue reservation(s)", recovered_count)
 
     await _safe_execute(
         conn,
