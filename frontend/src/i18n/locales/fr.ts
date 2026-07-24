@@ -1117,7 +1117,7 @@ export default {
     },
     // Sections
     sections: {
-      currentlyPrinting: 'En cours',
+      activeJobs: 'Tâches actives',
       queued: 'En attente',
       history: 'Historique',
     },
@@ -1126,6 +1126,7 @@ export default {
       pending: 'En attente',
       scheduled: 'Planifiée',
       waiting: 'En attente',
+      dispatching: 'Envoi en cours',
       printing: 'Impression',
       paused: 'En pause',
       completed: 'Terminé',

@@ -160,7 +160,8 @@ class PrintQueueItemResponse(BaseModel):
     timelapse: bool = False
     use_ams: bool = True
     nozzle_offset_cali: bool = True
-    status: Literal["pending", "printing", "completed", "failed", "skipped", "cancelled"]
+    status: Literal["pending", "dispatching", "printing", "completed", "failed", "skipped", "cancelled"]
+    dispatched_at: UTCDatetime
     started_at: UTCDatetime
     completed_at: UTCDatetime
     error_message: str | None

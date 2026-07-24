@@ -94,7 +94,7 @@ class PrintQueueItem(Base):
     # Nozzle offset calibration — dual-nozzle printers only, MQTT-gated (#1682)
     nozzle_offset_cali: Mapped[bool] = mapped_column(Boolean, default=True)
 
-    # Status: pending, printing, completed, failed, skipped, cancelled
+    # Status: pending, dispatching, printing, completed, failed, skipped, cancelled
     status: Mapped[str] = mapped_column(String(20), default="pending")
 
     # Cleared by the per-printer "Resume after failure" action (#1818) so the
@@ -122,6 +122,10 @@ class PrintQueueItem(Base):
     skip_filament_check: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Tracking
+    # Set immediately before the MQTT project_file command is sent. A queue
+    # item is only promoted from ``dispatching`` to ``printing`` once printer
+    # telemetry reports an active print state.
+    dispatched_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

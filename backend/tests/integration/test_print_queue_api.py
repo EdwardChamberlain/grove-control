@@ -1851,6 +1851,64 @@ class TestAbortedStatusNormalisation:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_on_print_complete_does_not_complete_a_dispatching_item(self, queue_item_factory, db_session):
+        """A delayed completion event must not claim an unconfirmed dispatch."""
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        item = await queue_item_factory(status="dispatching")
+
+        # The queue completion query deliberately returns only ``printing``
+        # rows. Keep the rest of the callback isolated from external services.
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_session.commit = AsyncMock()
+        tasks_before = set(asyncio.all_tasks())
+
+        with (
+            patch("backend.app.main.async_session", return_value=mock_session),
+            patch("backend.app.core.database.async_session", return_value=mock_session),
+            patch("backend.app.main.ws_manager") as mock_ws,
+            patch("backend.app.main.mqtt_relay") as mock_relay,
+            patch("backend.app.main.notification_service") as mock_notif,
+            patch("backend.app.main.smart_plug_manager") as mock_plug,
+            patch("backend.app.main.printer_manager") as mock_pm,
+        ):
+            mock_ws.send_print_complete = AsyncMock()
+            mock_ws.broadcast = AsyncMock()
+            mock_relay.on_print_complete = AsyncMock()
+            mock_relay.on_queue_job_completed = AsyncMock()
+            mock_notif.on_print_complete = AsyncMock()
+            mock_plug.on_print_complete = AsyncMock()
+            mock_pm.get_printer.return_value = None
+
+            from backend.app.main import on_print_complete
+
+            await on_print_complete(
+                item.printer_id,
+                {
+                    "status": "completed",
+                    "filename": "previous-job.gcode",
+                    "subtask_name": "Previous job",
+                    "timelapse_was_active": False,
+                },
+            )
+
+            for task in asyncio.all_tasks() - tasks_before:
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+        assert item.status == "dispatching"
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_startup_fixup_converts_aborted_to_cancelled(self, queue_item_factory, db_session):
         """Verify the startup fixup converts existing 'aborted' rows to 'cancelled'."""
         from sqlalchemy import select

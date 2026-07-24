@@ -136,7 +136,7 @@ describe('KioskPage', () => {
       expect(screen.queryByTestId('kiosk-fleet-overflow')).not.toBeInTheDocument();
     });
 
-    const printing = screen.getByRole('heading', { name: 'Currently Printing' });
+    const printing = screen.getByRole('heading', { name: 'Active jobs' });
     const queued = screen.getByRole('heading', { name: 'Queued' });
     expect(printing.compareDocumentPosition(queued) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();

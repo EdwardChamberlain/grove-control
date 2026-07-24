@@ -1061,7 +1061,7 @@ export default {
       batch_plural: '{{name}} ({{count}}부)',
     },
     sections: {
-      currentlyPrinting: '현재 인쇄 중',
+      activeJobs: '활성 작업',
       queued: '대기 중',
       history: '기록'
     },
@@ -1069,6 +1069,7 @@ export default {
       pending: '대기 중',
       scheduled: '예약됨',
       waiting: '기다리는 중',
+      dispatching: '전송 중',
       printing: '인쇄 중',
       paused: '일시정지',
       completed: '완료',

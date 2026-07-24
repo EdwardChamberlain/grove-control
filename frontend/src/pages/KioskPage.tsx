@@ -222,6 +222,15 @@ function KioskQueueStatusPill({
     );
   }
 
+  if (item.status === 'dispatching') {
+    return (
+      <p data-testid={`kiosk-queue-status-${item.id}`} className={`${className} border-purple-500/20 bg-purple-500/10 text-purple-300`}>
+        <Clock className="h-3 w-3 shrink-0 animate-pulse" />
+        <span className="truncate">{t('queue.status.dispatching')}</span>
+      </p>
+    );
+  }
+
   return (
     <p data-testid={`kiosk-queue-status-${item.id}`} className={`${className} border-status-warning/20 bg-status-warning/10 text-status-warning`}>
       <Clock className="h-3 w-3 shrink-0" />
@@ -261,7 +270,7 @@ function KioskQueueSection({
         <span className="text-xs text-bambu-gray">({items.length})</span>
       </div>
       {items.length === 0 ? (
-        <p className="border border-dashed border-bambu-dark-tertiary px-3 py-4 text-sm text-bambu-gray">{title === t('queue.sections.currentlyPrinting') ? t('kiosk.noPrinting') : t('kiosk.noQueue')}</p>
+        <p className="border border-dashed border-bambu-dark-tertiary px-3 py-4 text-sm text-bambu-gray">{title === t('queue.sections.activeJobs') ? t('kiosk.noPrinting') : t('kiosk.noQueue')}</p>
       ) : (
         <div className={`relative min-h-0 ${fillAvailableHeight ? 'flex-1' : ''}`}>
           <div data-testid={`${testId}-list`} ref={ref} className={`${fillAvailableHeight ? 'h-full' : ''} space-y-2 overflow-hidden ${listClassName || ''}`}>
@@ -295,7 +304,10 @@ export function KioskPage() {
     })),
   });
   const statuses = useMemo(() => new Map(printers.map((printer, index) => [printer.id, printerStatusQueries[index]?.data])), [printers, printerStatusQueries]);
-  const printingItems = useMemo(() => queue.filter((item) => item.status === 'printing'), [queue]);
+  const printingItems = useMemo(
+    () => queue.filter((item) => item.status === 'dispatching' || item.status === 'printing'),
+    [queue],
+  );
   const pendingItems = useMemo(() => queue.filter((item) => item.status === 'pending').sort((a, b) => a.position - b.position), [queue]);
   const printingItemsByPrinter = useMemo(() => new Map(printingItems.filter((item) => item.printer_id != null).map((item) => [item.printer_id!, item])), [printingItems]);
 
@@ -376,7 +388,7 @@ export function KioskPage() {
         </section>
 
         <div data-testid="kiosk-queue-area" className="flex min-h-0 flex-1 flex-col border-t border-bambu-dark-tertiary pt-3">
-          <KioskQueueSection title={t('queue.sections.currentlyPrinting')} items={printingItems} statuses={statuses} timeFormat={timeFormat} t={t} testId="kiosk-printing-section" className="mb-4 shrink-0" listClassName="max-h-52" />
+          <KioskQueueSection title={t('queue.sections.activeJobs')} items={printingItems} statuses={statuses} timeFormat={timeFormat} t={t} testId="kiosk-printing-section" className="mb-4 shrink-0" listClassName="max-h-52" />
           <KioskQueueSection title={t('queue.sections.queued')} items={pendingItems} statuses={statuses} timeFormat={timeFormat} t={t} testId="kiosk-pending-section" fillAvailableHeight />
         </div>
       </main>
