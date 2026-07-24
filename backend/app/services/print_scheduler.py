@@ -78,6 +78,9 @@ class PrintScheduler:
         self._min_drying_seconds = 1800  # 30 minutes minimum before humidity re-check can stop drying
         # Track which printers are currently auto-drying (printer_id -> start timestamp)
         self._drying_in_progress: dict[int, float] = {}
+        # Recovery completion is deliberately asynchronous, so do not start a
+        # second completion chain if a slow side effect overlaps the next tick.
+        self._terminal_dispatch_recoveries: set[int] = set()
 
     async def run(self):
         """Main loop - check queue every interval."""
@@ -115,8 +118,64 @@ class PrintScheduler:
         changed = False
         promoted_ids: list[int] = []
         requeued_printer_ids: set[int] = set()
+        terminal_dispatches: list[tuple[int, int, dict]] = []
         for item in dispatches:
             printer_status = printer_manager.get_status(item.printer_id) if item.printer_id is not None else None
+            printer_subtask_id = getattr(printer_status, "subtask_id", None) if printer_status else None
+            if printer_subtask_id is not None:
+                printer_subtask_id = str(printer_subtask_id).strip() or None
+
+            # A print can reach FINISH or FAILED while Grove Control is down.
+            # BambuMQTT intentionally ignores a terminal state on its first
+            # post-restart update because it cannot safely attribute arbitrary
+            # historical printer work. This row has the submission id persisted
+            # before its command was sent, so it is the narrow exception: replay
+            # the normal completion path only when telemetry confirms it is this
+            # exact dispatch. Otherwise the stale timeout below remains the
+            # conservative retry behaviour.
+            terminal_status = getattr(printer_status, "state", None) if printer_status else None
+            if (
+                terminal_status in ("FINISH", "FAILED")
+                and item.dispatch_subtask_id
+                and item.dispatch_subtask_id == printer_subtask_id
+            ):
+                queue_status = "completed" if terminal_status == "FINISH" else "failed"
+                # Commit the terminal observation before starting the normal
+                # completion side effects. A process stop after this point must
+                # not turn a printer-confirmed terminal job back into a retry.
+                item.status = queue_status
+                item.completed_at = now
+                changed = True
+                filename = getattr(printer_status, "gcode_file", None)
+                if not filename and item.archive_id is not None:
+                    archive = await db.get(PrintArchive, item.archive_id)
+                    filename = archive.filename if archive else None
+                raw_data = dict(getattr(printer_status, "raw_data", None) or {})
+                # Use the id we just matched rather than an incomplete terminal
+                # push (some firmwares send subtask_id=0 at FINISH/FAILED).
+                raw_data["subtask_id"] = item.dispatch_subtask_id
+                terminal_dispatches.append(
+                    (
+                        item.id,
+                        item.printer_id,
+                        {
+                            "status": queue_status,
+                            "filename": filename or f"queue-dispatch-{item.id}",
+                            "subtask_name": "",
+                            "subtask_id": item.dispatch_subtask_id,
+                            "raw_data": raw_data,
+                            "_reconciled": True,
+                            "_recovered_dispatch": True,
+                        },
+                    )
+                )
+                logger.info(
+                    "Recovered terminal queue dispatch %s from %s telemetry",
+                    item.id,
+                    terminal_status,
+                )
+                continue
+
             if printer_status and getattr(printer_status, "state", None) in _ACTIVE_PRINT_STATES:
                 item.status = "printing"
                 item.started_at = now
@@ -158,6 +217,23 @@ class PrintScheduler:
                 self._publish_queue_job_started(queue_item_id),
                 name=f"publish-recovered-queue-start-{queue_item_id}",
             )
+        for queue_item_id, printer_id, completion_data in terminal_dispatches:
+            if queue_item_id in self._terminal_dispatch_recoveries:
+                continue
+            self._terminal_dispatch_recoveries.add(queue_item_id)
+            spawn_background_task(
+                self._complete_recovered_dispatch(queue_item_id, printer_id, completion_data),
+                name=f"complete-recovered-queue-dispatch-{queue_item_id}",
+            )
+
+    async def _complete_recovered_dispatch(self, queue_item_id: int, printer_id: int, completion_data: dict) -> None:
+        """Finish a terminal dispatch without delaying unrelated queue checks."""
+        try:
+            from backend.app.main import on_print_complete
+
+            await on_print_complete(printer_id, completion_data)
+        finally:
+            self._terminal_dispatch_recoveries.discard(queue_item_id)
 
     async def check_queue(self):
         """Check for prints ready to start."""

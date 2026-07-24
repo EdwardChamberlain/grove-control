@@ -4339,10 +4339,18 @@ async def on_print_complete(printer_id: int, data: dict):
 
         async def _update_queue_status(db):
             nonlocal queue_item_id, queue_item_owner_id, queue_status, queue_auto_off
+            recovered_dispatch = bool(data.get("_recovered_dispatch"))
+            queue_statuses = ["dispatching", "printing"]
+            if recovered_dispatch and event_subtask_id:
+                # Scheduler recovery has already committed this exact terminal
+                # state so a process stop cannot requeue it. Include it once to
+                # run the normal completion side effects; ordinary terminal
+                # MQTT callbacks never take this path.
+                queue_statuses.extend(["completed", "failed"])
             result = await db.execute(
                 select(PrintQueueItem)
                 .where(PrintQueueItem.printer_id == printer_id)
-                .where(PrintQueueItem.status.in_(("dispatching", "printing")))
+                .where(PrintQueueItem.status.in_(queue_statuses))
             )
             active_items = list(result.scalars().all())
             printing_items = [item for item in active_items if item.status == "printing"]
@@ -4363,6 +4371,11 @@ async def on_print_complete(printer_id: int, data: dict):
                     candidate
                     for candidate in active_items
                     if _matches_dispatching_queue_completion(candidate, possible_keys, event_subtask_id)
+                    or (
+                        recovered_dispatch
+                        and candidate.status == data.get("status")
+                        and candidate.dispatch_subtask_id == event_subtask_id
+                    )
                 ]
                 if len(matching_dispatches) == 1:
                     item = matching_dispatches[0]
