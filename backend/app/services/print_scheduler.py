@@ -118,6 +118,7 @@ class PrintScheduler:
         changed = False
         promoted_ids: list[int] = []
         requeued_printer_ids: set[int] = set()
+        terminal_plate_clear_printer_ids: set[int] = set()
         terminal_dispatches: list[tuple[int, int, dict]] = []
         for item in dispatches:
             printer_status = printer_manager.get_status(item.printer_id) if item.printer_id is not None else None
@@ -195,6 +196,26 @@ class PrintScheduler:
                 # make them retryable rather than reserving a printer forever.
                 is_stale = True
             if is_stale:
+                if terminal_status in ("FINISH", "FAILED"):
+                    # The printer has definitely reached a terminal state, but
+                    # firmware did not provide an id that proves it belongs to
+                    # this dispatch. Retrying could duplicate a physical print;
+                    # fail closed and leave an auditable row for an operator to
+                    # review instead of treating the command as unacknowledged.
+                    item.status = "failed"
+                    item.completed_at = now
+                    item.error_message = (
+                        "Printer reported a terminal state without a matching submission id; "
+                        "manual review required to avoid a duplicate print."
+                    )
+                    changed = True
+                    if item.printer_id is not None:
+                        terminal_plate_clear_printer_ids.add(item.printer_id)
+                    logger.error(
+                        "Recovered uncorrelated terminal queue dispatch %s as failed instead of retrying",
+                        item.id,
+                    )
+                    continue
                 item.status = "pending"
                 item.dispatched_at = None
                 item.dispatch_subtask_id = None
@@ -207,6 +228,11 @@ class PrintScheduler:
 
         if changed:
             await db.commit()
+        for printer_id in terminal_plate_clear_printer_ids:
+            # Unlike a correlated terminal recovery, this path cannot safely
+            # enter the normal completion handler. Preserve the plate-clear
+            # gate before an operator decides how to resolve the print.
+            printer_manager.set_awaiting_plate_clear(printer_id, True)
         if requeued_printer_ids:
             from backend.app.main import unregister_expected_print
 

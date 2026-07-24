@@ -395,6 +395,14 @@ class TestRealisticMessageFlow:
         assert mqtt_client._timelapse_during_print is False
         assert mqtt_client._was_running is False
 
+    def test_terminal_zero_subtask_id_preserves_the_current_print_identity(self, mqtt_client):
+        """Firmware terminal pushes sometimes replace the job id with zero."""
+        mqtt_client.state.subtask_id = "123456"
+
+        mqtt_client._update_state({"gcode_state": "FINISH", "subtask_id": "0"})
+
+        assert mqtt_client.state.subtask_id == "123456"
+
     def test_print_failed_includes_timelapse_flag(self, mqtt_client):
         """Test that failed print also includes timelapse flag."""
         complete_data = {}

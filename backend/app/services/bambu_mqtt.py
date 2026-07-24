@@ -2151,7 +2151,18 @@ class BambuMQTTClient:
             if data["subtask_name"]:
                 self.state.current_print = data["subtask_name"]
         if "subtask_id" in data:
-            self.state.subtask_id = data["subtask_id"]
+            reported_subtask_id = str(data["subtask_id"]).strip()
+            if (
+                reported_subtask_id in ("", "0")
+                and self.state.state in ("FINISH", "FAILED")
+                and self.state.subtask_id not in (None, "", 0, "0")
+            ):
+                # Some firmware replaces the terminal push's job id with 0.
+                # Keep the previously reported non-zero id so completion and
+                # restart recovery can still attribute this exact print.
+                logger.debug("[%s] Retaining subtask_id across terminal zero", self.serial_number)
+            else:
+                self.state.subtask_id = data["subtask_id"]
         if "mc_percent" in data:
             # Save last non-zero progress for usage tracking (firmware resets to 0 on cancel)
             if self.state.progress > 0:

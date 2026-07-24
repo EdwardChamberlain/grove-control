@@ -225,6 +225,33 @@ class TestDurableDispatchingState:
             assert item.dispatched_at is None
 
     @pytest.mark.asyncio
+    async def test_restart_recovery_fails_closed_for_terminal_dispatch_without_matching_id(self, db_session):
+        """Unknown terminal telemetry must not cause a duplicate retry."""
+        async with db_session() as db:
+            item = await db.get(PrintQueueItem, 1)
+            item.status = "dispatching"
+            item.dispatched_at = datetime.now(timezone.utc) - timedelta(seconds=300)
+            item.dispatch_subtask_id = "12345"
+            await db.commit()
+
+            # This is the shape the MQTT parser exposes when a terminal push
+            # carries subtask_id=0 after a restart.
+            status = _status("FINISH", "0", "completed-while-down.3mf")
+            status.raw_data = {"subtask_id": "0"}
+            with (
+                patch("backend.app.services.print_scheduler.printer_manager.get_status", return_value=status),
+                patch("backend.app.services.print_scheduler.printer_manager.set_awaiting_plate_clear") as plate_clear,
+            ):
+                await PrintScheduler()._recover_stale_dispatches(db)
+
+            item = await db.get(PrintQueueItem, 1)
+            assert item.status == "failed"
+            assert item.completed_at is not None
+            assert item.dispatch_subtask_id == "12345"
+            assert item.error_message and "manual review required" in item.error_message
+            plate_clear.assert_called_once_with(42, True)
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("printer_state", "expected_status"),
         [("FINISH", "completed"), ("FAILED", "failed")],
@@ -247,7 +274,7 @@ class TestDurableDispatchingState:
 
             complete = AsyncMock()
             status = _status(printer_state, "12345", "completed-while-down.3mf")
-            status.raw_data = {"subtask_id": "0"}
+            status.raw_data = {"subtask_id": "12345"}
             tasks: list[asyncio.Task] = []
 
             def spawn(coro, **_kwargs):
