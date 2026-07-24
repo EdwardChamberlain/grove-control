@@ -47,6 +47,7 @@ class TestDurableDispatchingState:
             item = await db.get(PrintQueueItem, 1)
             item.status = "dispatching"
             item.dispatched_at = datetime.now(timezone.utc)
+            item.dispatch_subtask_id = "12345"
             await db.commit()
 
         scheduler = PrintScheduler()
@@ -183,6 +184,7 @@ class TestDurableDispatchingState:
             item = await db.get(PrintQueueItem, 1)
             item.status = "dispatching"
             item.dispatched_at = datetime.now(timezone.utc)
+            item.dispatch_subtask_id = "12345"
             await db.commit()
 
             scheduler = PrintScheduler()
@@ -196,7 +198,8 @@ class TestDurableDispatchingState:
 
             with (
                 patch(
-                    "backend.app.services.print_scheduler.printer_manager.get_status", return_value=_status("RUNNING")
+                    "backend.app.services.print_scheduler.printer_manager.get_status",
+                    return_value=_status("RUNNING", "12345"),
                 ),
                 patch("backend.app.services.print_scheduler.spawn_background_task", side_effect=spawn),
                 patch.object(scheduler, "_publish_queue_job_started", new=publish),
@@ -208,6 +211,74 @@ class TestDurableDispatchingState:
             assert item.status == "printing"
             assert item.started_at is not None
         publish.assert_awaited_once_with(1)
+
+    @pytest.mark.asyncio
+    async def test_restart_recovery_does_not_promote_an_active_print_with_another_submission_id(self, db_session):
+        """An unrelated manual print must not acknowledge a durable dispatch."""
+        async with db_session() as db:
+            item = await db.get(PrintQueueItem, 1)
+            item.status = "dispatching"
+            item.dispatched_at = datetime.now(timezone.utc)
+            item.dispatch_subtask_id = "12345"
+            await db.commit()
+
+            with patch(
+                "backend.app.services.print_scheduler.printer_manager.get_status",
+                return_value=_status("RUNNING", "other-job"),
+            ):
+                await PrintScheduler()._recover_stale_dispatches(db)
+
+            item = await db.get(PrintQueueItem, 1)
+            assert item.status == "dispatching"
+            assert item.started_at is None
+
+    @pytest.mark.asyncio
+    async def test_restart_recovery_does_not_treat_missing_ids_as_a_match(self, db_session):
+        """Legacy rows without an id must not accept an uncorrelated active print."""
+        async with db_session() as db:
+            item = await db.get(PrintQueueItem, 1)
+            item.status = "dispatching"
+            item.dispatched_at = datetime.now(timezone.utc)
+            item.dispatch_subtask_id = None
+            await db.commit()
+
+            with patch(
+                "backend.app.services.print_scheduler.printer_manager.get_status",
+                return_value=_status("RUNNING"),
+            ):
+                await PrintScheduler()._recover_stale_dispatches(db)
+
+            item = await db.get(PrintQueueItem, 1)
+            assert item.status == "dispatching"
+            assert item.started_at is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("printer_subtask_id", ["other-job", None])
+    async def test_restart_recovery_fails_closed_for_stale_active_dispatch_without_matching_id(
+        self, db_session, printer_subtask_id
+    ):
+        """An uncorrelated active printer is unsafe to requeue automatically."""
+        async with db_session() as db:
+            item = await db.get(PrintQueueItem, 1)
+            item.status = "dispatching"
+            item.dispatched_at = datetime.now(timezone.utc) - timedelta(seconds=300)
+            item.dispatch_subtask_id = "12345"
+            await db.commit()
+
+            with (
+                patch(
+                    "backend.app.services.print_scheduler.printer_manager.get_status",
+                    return_value=_status("RUNNING", printer_subtask_id),
+                ),
+                patch("backend.app.services.print_scheduler.printer_manager.set_awaiting_plate_clear") as plate_clear,
+            ):
+                await PrintScheduler()._recover_stale_dispatches(db)
+
+            item = await db.get(PrintQueueItem, 1)
+            assert item.status == "failed"
+            assert item.completed_at is not None
+            assert item.error_message and "manual review required" in item.error_message
+            plate_clear.assert_called_once_with(42, True)
 
     @pytest.mark.asyncio
     async def test_restart_recovery_requeues_stale_dispatch(self, db_session):

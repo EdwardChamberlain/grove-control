@@ -104,9 +104,10 @@ class PrintScheduler:
         """Reconcile durable dispatches left behind by a restart.
 
         A printer can take a while to expose PREPARE after accepting
-        ``project_file``. Keep a recent dispatch reserved, promote it only
-        when telemetry is active, and safely return an unconfirmed attempt to
-        pending after the full acknowledgement window has elapsed.
+        ``project_file``. Keep a recent dispatch reserved and promote it only
+        when active telemetry reports that dispatch's submission id. Safely
+        return an idle, unconfirmed attempt to pending after the full
+        acknowledgement window has elapsed.
         """
         result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.status == "dispatching"))
         dispatches = list(result.scalars().all())
@@ -118,13 +119,14 @@ class PrintScheduler:
         changed = False
         promoted_ids: list[int] = []
         requeued_printer_ids: set[int] = set()
-        terminal_plate_clear_printer_ids: set[int] = set()
+        manual_review_printer_ids: set[int] = set()
         terminal_dispatches: list[tuple[int, int, dict]] = []
         for item in dispatches:
             printer_status = printer_manager.get_status(item.printer_id) if item.printer_id is not None else None
             printer_subtask_id = getattr(printer_status, "subtask_id", None) if printer_status else None
             if printer_subtask_id is not None:
                 printer_subtask_id = str(printer_subtask_id).strip() or None
+            dispatch_subtask_id = str(item.dispatch_subtask_id).strip() if item.dispatch_subtask_id else None
 
             # A print can reach FINISH or FAILED while Grove Control is down.
             # BambuMQTT intentionally ignores a terminal state on its first
@@ -137,8 +139,8 @@ class PrintScheduler:
             terminal_status = getattr(printer_status, "state", None) if printer_status else None
             if (
                 terminal_status in ("FINISH", "FAILED")
-                and item.dispatch_subtask_id
-                and item.dispatch_subtask_id == printer_subtask_id
+                and dispatch_subtask_id
+                and dispatch_subtask_id == printer_subtask_id
             ):
                 queue_status = "completed" if terminal_status == "FINISH" else "failed"
                 # Commit the terminal observation before starting the normal
@@ -154,7 +156,7 @@ class PrintScheduler:
                 raw_data = dict(getattr(printer_status, "raw_data", None) or {})
                 # Use the id we just matched rather than an incomplete terminal
                 # push (some firmwares send subtask_id=0 at FINISH/FAILED).
-                raw_data["subtask_id"] = item.dispatch_subtask_id
+                raw_data["subtask_id"] = dispatch_subtask_id
                 terminal_dispatches.append(
                     (
                         item.id,
@@ -163,7 +165,7 @@ class PrintScheduler:
                             "status": queue_status,
                             "filename": filename or f"queue-dispatch-{item.id}",
                             "subtask_name": "",
-                            "subtask_id": item.dispatch_subtask_id,
+                            "subtask_id": dispatch_subtask_id,
                             "raw_data": raw_data,
                             "_reconciled": True,
                             "_recovered_dispatch": True,
@@ -177,7 +179,8 @@ class PrintScheduler:
                 )
                 continue
 
-            if printer_status and getattr(printer_status, "state", None) in _ACTIVE_PRINT_STATES:
+            printer_is_active = bool(printer_status and getattr(printer_status, "state", None) in _ACTIVE_PRINT_STATES)
+            if printer_is_active and dispatch_subtask_id and dispatch_subtask_id == printer_subtask_id:
                 item.status = "printing"
                 item.started_at = now
                 item.error_message = None
@@ -210,9 +213,28 @@ class PrintScheduler:
                     )
                     changed = True
                     if item.printer_id is not None:
-                        terminal_plate_clear_printer_ids.add(item.printer_id)
+                        manual_review_printer_ids.add(item.printer_id)
                     logger.error(
                         "Recovered uncorrelated terminal queue dispatch %s as failed instead of retrying",
+                        item.id,
+                    )
+                    continue
+                if printer_is_active:
+                    # An active printer proves that physical work is underway,
+                    # but not that it is this queue dispatch. Retrying after
+                    # that work finishes could duplicate this file, so require
+                    # an operator to resolve the uncorrelated attempt.
+                    item.status = "failed"
+                    item.completed_at = now
+                    item.error_message = (
+                        "Printer is active but did not report this dispatch's submission id; "
+                        "manual review required to avoid a duplicate print."
+                    )
+                    changed = True
+                    if item.printer_id is not None:
+                        manual_review_printer_ids.add(item.printer_id)
+                    logger.error(
+                        "Recovered uncorrelated active queue dispatch %s as failed instead of retrying",
                         item.id,
                     )
                     continue
@@ -228,8 +250,8 @@ class PrintScheduler:
 
         if changed:
             await db.commit()
-        for printer_id in terminal_plate_clear_printer_ids:
-            # Unlike a correlated terminal recovery, this path cannot safely
+        for printer_id in manual_review_printer_ids:
+            # An uncorrelated active or terminal printer state cannot safely
             # enter the normal completion handler. Preserve the plate-clear
             # gate before an operator decides how to resolve the print.
             printer_manager.set_awaiting_plate_clear(printer_id, True)
