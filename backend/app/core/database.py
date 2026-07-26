@@ -432,6 +432,7 @@ _QUEUE_INSERT_COLUMN_DEFINITIONS: dict[str, tuple[str, str]] = {
     "position": ("INTEGER DEFAULT 0", "INTEGER DEFAULT 0"),
     "scheduled_time": ("DATETIME", "TIMESTAMP"),
     "manual_start": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
+    "wait_for_drying_complete": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
     "require_previous_success": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
     "auto_off_after": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
     "ams_mapping": ("TEXT", "TEXT"),
@@ -1097,6 +1098,17 @@ async def run_migrations(conn):
     # Migration: Add manual_start column to print_queue for staged prints
     await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN manual_start BOOLEAN DEFAULT 0")
 
+    # Per-job drying policy. Default false gives printing priority: the
+    # scheduler stops active drying and waits for firmware telemetry to clear
+    # before publishing project_file.
+    if is_sqlite():
+        await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN wait_for_drying_complete BOOLEAN DEFAULT 0")
+    else:
+        await _safe_execute(
+            conn,
+            "ALTER TABLE print_queue ADD COLUMN wait_for_drying_complete BOOLEAN DEFAULT false",
+        )
+
     # A project_file MQTT publish being accepted locally is not evidence that
     # the printer accepted the job. Persist the unconfirmed interval so a
     # restart can recover it safely instead of presenting it as printing.
@@ -1266,6 +1278,7 @@ async def run_migrations(conn):
                         position INTEGER DEFAULT 0,
                         scheduled_time DATETIME,
                         manual_start BOOLEAN DEFAULT 0,
+                        wait_for_drying_complete BOOLEAN DEFAULT 0,
                         require_previous_success BOOLEAN DEFAULT 0,
                         auto_off_after BOOLEAN DEFAULT 0,
                         ams_mapping TEXT,
@@ -1286,7 +1299,8 @@ async def run_migrations(conn):
                     text("""
                     INSERT INTO print_queue_new
                     SELECT id, printer_id, archive_id, project_id, position, scheduled_time,
-                           manual_start, require_previous_success, auto_off_after, ams_mapping,
+                           manual_start, COALESCE(wait_for_drying_complete, 0),
+                           require_previous_success, auto_off_after, ams_mapping,
                            COALESCE(filament_short, 0), COALESCE(skip_filament_check, 0),
                            COALESCE(cleanup_library_after_dispatch, 0), nozzle_mapping, nozzles_info,
                            status, started_at, completed_at, error_message, created_at
@@ -1435,6 +1449,7 @@ async def run_migrations(conn):
                         position INTEGER DEFAULT 0,
                         scheduled_time DATETIME,
                         manual_start BOOLEAN DEFAULT 0,
+                        wait_for_drying_complete BOOLEAN DEFAULT 0,
                         require_previous_success BOOLEAN DEFAULT 0,
                         auto_off_after BOOLEAN DEFAULT 0,
                         ams_mapping TEXT,
@@ -1463,7 +1478,8 @@ async def run_migrations(conn):
                     text("""
                     INSERT INTO print_queue_new2
                     SELECT id, printer_id, archive_id, NULL, project_id, position, scheduled_time,
-                           manual_start, require_previous_success, auto_off_after, ams_mapping,
+                           manual_start, COALESCE(wait_for_drying_complete, 0),
+                           require_previous_success, auto_off_after, ams_mapping,
                            COALESCE(filament_short, 0), COALESCE(skip_filament_check, 0),
                            COALESCE(cleanup_library_after_dispatch, 0), nozzle_mapping, nozzles_info,
                            plate_id,

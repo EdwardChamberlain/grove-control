@@ -4330,6 +4330,7 @@ export default {
     previousMonth: '前の月',
     nextMonth: '次の月',
     requireManualStart: '手動開始を要求',
+    waitForDryingComplete: '乾燥の完了を待つ',
     postponePrint: '印刷を延期',
     postponeTime: '印刷時刻',
     doNotStartBefore: 'この時刻より前には開始しない',

@@ -4354,6 +4354,7 @@ export default {
     previousMonth: 'Previous month',
     nextMonth: 'Next month',
     requireManualStart: 'Require manual start',
+    waitForDryingComplete: 'Wait for drying to complete',
     postponePrint: 'Postpone print',
     postponeTime: 'Postpone time',
     doNotStartBefore: 'Do not start before',

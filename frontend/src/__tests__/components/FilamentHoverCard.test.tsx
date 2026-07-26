@@ -3,7 +3,7 @@
  * Focuses on fill level display and Spoolman source indicator.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '../utils';
 import { FilamentHoverCard, EmptySlotHoverCard } from '../../components/FilamentHoverCard';
 
@@ -16,6 +16,10 @@ const baseFilamentData = {
   fillLevel: 75,
   trayUuid: 'A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4',
 };
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function renderWithHover(ui: React.ReactElement) {
   const result = render(ui);

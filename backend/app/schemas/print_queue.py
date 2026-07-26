@@ -51,6 +51,7 @@ class PrintQueueItemCreate(BaseModel):
     require_previous_success: bool = False
     auto_off_after: bool = False  # Power off printer after print completes
     manual_start: bool = False  # Requires manual trigger to start (staged)
+    wait_for_drying_complete: bool = False  # Leave active drying running and wait for it to finish
     insert_at_top: bool = False  # Insert ahead of other pending items in the same queue scope
     insert_position: int | None = None  # 1-indexed insertion position for priority queueing
     # Persistent "Print Anyway" acknowledgement (#1698-followup). When set,
@@ -108,6 +109,7 @@ class PrintQueueItemUpdate(BaseModel):
     require_previous_success: bool | None = None
     auto_off_after: bool | None = None
     manual_start: bool | None = None
+    wait_for_drying_complete: bool | None = None
     ams_mapping: list[int] | None = None
     plate_id: int | None = None
     # Print options
@@ -142,6 +144,7 @@ class PrintQueueItemResponse(BaseModel):
     require_previous_success: bool
     auto_off_after: bool
     manual_start: bool
+    wait_for_drying_complete: bool = False
     # True when the dispatch scheduler last evaluated this item and the
     # assigned spool could not satisfy at least one slot's required grams
     # (#1496). Display-only — the ▶ click recomputes deficit against live
@@ -260,6 +263,7 @@ class PrintQueueBulkUpdate(BaseModel):
     require_previous_success: bool | None = None
     auto_off_after: bool | None = None
     manual_start: bool | None = None
+    wait_for_drying_complete: bool | None = None
     # Print options
     bed_levelling: bool | None = None
     flow_cali: bool | None = None

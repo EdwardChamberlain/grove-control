@@ -43,6 +43,7 @@ export function ScheduleOptionsPanel({
     ...(canInsertAtTop ? [{ key: 'insertAtTop' as const, label: t('printModal.insertAtTop', 'Insert at top of queue') }] : []),
     { key: 'requireManualStart', label: t('printModal.requireManualStart') },
     { key: 'requirePreviousSuccess', label: t('printModal.requirePreviousSuccess') },
+    { key: 'waitForDryingComplete', label: t('printModal.waitForDryingComplete') },
     ...(showAutoOff ? [{ key: 'autoOffAfter' as const, label: t('printModal.autoOffAfter'), disabled: !canControlPrinter }] : []),
     ...(hasGcodeSnippets ? [{ key: 'gcodeInjection' as const, label: t('printModal.gcodeInjection', 'Inject auto-print G-code') }] : []),
     { key: 'postponePrint', label: t('printModal.postponePrint', 'Postpone print') },

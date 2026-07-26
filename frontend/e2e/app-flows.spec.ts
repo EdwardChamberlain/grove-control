@@ -242,15 +242,21 @@ test('print modal exposes queue-first controls', async ({ page }) => {
 
   await page.getByRole('button', { name: /Queue options/i }).click();
   await expect(page.getByRole('checkbox', { name: /Require manual start/i })).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: /Wait for drying to complete/i })).not.toBeChecked();
   await expect(page.getByText(/Power off printer when done/i)).toHaveCount(0);
 
   await page.locator('label', { hasText: 'Require manual start' }).click();
+  await page.locator('label', { hasText: 'Wait for drying to complete' }).click();
   await expect(page.getByRole('checkbox', { name: /Require manual start/i })).toBeChecked();
+  await expect(page.getByRole('checkbox', { name: /Wait for drying to complete/i })).toBeChecked();
   await page.getByRole('button', { name: /^Print$/i }).last().click();
 
   await expect.poll(() => calls.some((call) => call.method === 'POST' && call.path === '/api/v1/queue/')).toBe(true);
   const queueCall = calls.find((call) => call.method === 'POST' && call.path === '/api/v1/queue/');
-  expect(queueCall?.body).toMatchObject({ manual_start: true });
+  expect(queueCall?.body).toMatchObject({
+    manual_start: true,
+    wait_for_drying_complete: true,
+  });
   expect(queueCall?.body).not.toHaveProperty('scheduled_time');
 });
 

@@ -4308,6 +4308,7 @@ export default {
     previousMonth: 'Önceki ay',
     nextMonth: 'Sonraki ay',
     requireManualStart: 'Manuel başlatma gerektir',
+    waitForDryingComplete: 'Kurutmanın tamamlanmasını bekle',
     postponePrint: 'Yazdırmayı ertele',
     postponeTime: 'Yazdırma zamanı',
     doNotStartBefore: 'Şundan önce başlatma',

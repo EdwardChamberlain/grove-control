@@ -1917,6 +1917,7 @@ export interface PrintQueueItem {
   position: number;
   scheduled_time: string | null;
   require_previous_success: boolean;
+  wait_for_drying_complete: boolean;
   auto_off_after: boolean;
   manual_start: boolean;  // Requires manual trigger to start (staged)
   // Set by the dispatch scheduler when the assigned spool can't satisfy
@@ -2000,6 +2001,7 @@ export interface PrintQueueItemCreate {
   library_file_id?: number | null;
   scheduled_time?: string | null;
   require_previous_success?: boolean;
+  wait_for_drying_complete?: boolean;
   auto_off_after?: boolean;
   manual_start?: boolean;  // Requires manual trigger to start (staged)
   insert_at_top?: boolean;  // Insert ahead of other pending items in the same queue scope
@@ -2048,6 +2050,7 @@ export interface PrintQueueItemUpdate {
   position?: number;
   scheduled_time?: string | null;
   require_previous_success?: boolean;
+  wait_for_drying_complete?: boolean;
   auto_off_after?: boolean;
   manual_start?: boolean;
   ams_mapping?: number[];
@@ -2069,6 +2072,7 @@ export interface PrintQueueBulkUpdate {
   printer_id?: number | null;
   scheduled_time?: string | null;
   require_previous_success?: boolean;
+  wait_for_drying_complete?: boolean;
   auto_off_after?: boolean;
   manual_start?: boolean;
   // Print options

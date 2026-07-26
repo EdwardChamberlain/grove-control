@@ -4318,6 +4318,7 @@ export default {
     previousMonth: '上個月',
     nextMonth: '下個月',
     requireManualStart: '要求手動開始',
+    waitForDryingComplete: '等待烘乾完成',
     postponePrint: '延後列印',
     postponeTime: '列印時間',
     doNotStartBefore: '請勿早於此時間開始',

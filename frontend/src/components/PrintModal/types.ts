@@ -71,6 +71,7 @@ export interface ScheduleOptions {
   scheduledTime: string;
   requireManualStart: boolean;
   requirePreviousSuccess: boolean;
+  waitForDryingComplete: boolean;
   autoOffAfter: boolean;
   gcodeInjection: boolean;
 }
@@ -84,6 +85,7 @@ export const DEFAULT_SCHEDULE_OPTIONS: ScheduleOptions = {
   scheduledTime: '',
   requireManualStart: false,
   requirePreviousSuccess: false,
+  waitForDryingComplete: false,
   autoOffAfter: false,
   gcodeInjection: false,
 };
