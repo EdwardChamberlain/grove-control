@@ -4330,6 +4330,7 @@ export default {
     previousMonth: 'Vorheriger Monat',
     nextMonth: 'Nächster Monat',
     requireManualStart: 'Manuellen Start erfordern',
+    waitForDryingComplete: 'Warten, bis das Trocknen abgeschlossen ist',
     postponePrint: 'Druck verschieben',
     postponeTime: 'Druckzeit',
     doNotStartBefore: 'Nicht starten vor',

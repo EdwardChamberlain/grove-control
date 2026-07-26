@@ -52,6 +52,16 @@ logger = logging.getLogger(__name__)
 # state value did change. SLICING is included because some firmwares park
 # briefly in SLICING between PREPARE and RUNNING while parsing the g-code.
 _ACTIVE_PRINT_STATES: frozenset[str] = frozenset({"PREPARE", "SLICING", "RUNNING", "PAUSE"})
+_WAITING_FOR_DRYING_MESSAGE = "Waiting for AMS drying to complete"
+_STOPPING_DRYING_MESSAGE = "Stopping AMS drying before dispatch"
+_DRYING_STOP_FAILED_MESSAGE = "Unable to stop AMS drying; waiting to retry"
+_DRYING_WAITING_MESSAGES: frozenset[str] = frozenset(
+    {
+        _WAITING_FOR_DRYING_MESSAGE,
+        _STOPPING_DRYING_MESSAGE,
+        _DRYING_STOP_FAILED_MESSAGE,
+    }
+)
 _DISPATCH_REVIEW_MESSAGE = (
     "Printer did not provide a correlated active-state confirmation; "
     "dispatch held for manual review to avoid a duplicate print."
@@ -377,24 +387,8 @@ class PrintScheduler:
 
                     # Check if printer is idle (busy with another print)
                     if not printer_idle:
-                        # If printer is drying (not truly busy), handle based on queue_drying_block
-                        if self._drying_in_progress.get(item.printer_id):
-                            block_for_drying = await self._get_bool_setting(db, "queue_drying_block")
-                            if block_for_drying:
-                                # Drying blocks queue — skip this printer
-                                busy_printers.add(item.printer_id)
-                                continue
-                            else:
-                                # Print takes priority — stop drying
-                                await self._stop_drying(item.printer_id)
-                                # Re-check idle after stopping drying
-                                printer_idle = self._is_printer_idle(item.printer_id, require_plate_clear)
-                                if not printer_idle:
-                                    busy_printers.add(item.printer_id)
-                                    continue
-                        else:
-                            busy_printers.add(item.printer_id)
-                            continue
+                        busy_printers.add(item.printer_id)
+                        continue
 
                     # Check condition (previous print success)
                     if item.require_previous_success:
@@ -482,6 +476,14 @@ class PrintScheduler:
                     # promote the item to manual_start so the user must
                     # acknowledge via the ▶ button (which re-checks live).
                     if await self._block_on_filament_deficit(db, item):
+                        continue
+
+                    # Apply drying policy only after every other dispatch gate
+                    # has passed. Drying is orthogonal to gcode state (often
+                    # still IDLE), so this uses canonical AMS telemetry rather
+                    # than scheduler-owned auto-drying bookkeeping.
+                    if not await self._prepare_drying_for_dispatch(db, item, item.printer_id):
+                        busy_printers.add(item.printer_id)
                         continue
 
                     # Start the print
@@ -624,6 +626,10 @@ class PrintScheduler:
 
                         # Filament-deficit pre-dispatch check (#1496).
                         if await self._block_on_filament_deficit(db, item):
+                            continue
+
+                        if not await self._prepare_drying_for_dispatch(db, item, printer_id):
+                            busy_printers.add(printer_id)
                             continue
 
                         await self._start_print(db, item)
@@ -1717,6 +1723,93 @@ class PrintScheduler:
             logger.debug("Printer %d: not idle — state=%s", printer_id, state.state)
         return idle
 
+    @staticmethod
+    def _active_drying_ams_ids_from_state(state) -> tuple[int, ...]:
+        """Return AMS ids whose live telemetry reports an active dry cycle."""
+        raw_data = getattr(state, "raw_data", None)
+        if not isinstance(raw_data, dict):
+            return ()
+        ams_list = raw_data.get("ams") or []
+        if not isinstance(ams_list, list):
+            return ()
+
+        active_ids: set[int] = set()
+        for ams_data in ams_list:
+            if not isinstance(ams_data, dict):
+                continue
+            try:
+                dry_time = int(ams_data.get("dry_time") or 0)
+                ams_id = int(ams_data.get("id", 0))
+            except (TypeError, ValueError):
+                continue
+            if dry_time > 0:
+                active_ids.add(ams_id)
+        return tuple(sorted(active_ids))
+
+    def _active_drying_ams_ids(self, printer_id: int) -> tuple[int, ...]:
+        """Read canonical drying state directly from the printer status cache."""
+        state = printer_manager.get_status(printer_id)
+        return self._active_drying_ams_ids_from_state(state) if state else ()
+
+    async def _prepare_drying_for_dispatch(
+        self,
+        db: AsyncSession,
+        item: PrintQueueItem,
+        printer_id: int,
+        *,
+        active_ams_ids: tuple[int, ...] | None = None,
+        release_dispatch_reservation: bool = False,
+    ) -> bool:
+        """Apply a queue item's drying policy before any print command is sent.
+
+        Returns True only when live telemetry reports no active AMS drying.
+        With the default policy, stop commands are retried on each scheduler
+        tick until the printer confirms ``dry_time == 0``. The opt-in wait
+        policy leaves all active cycles untouched. When a final command-boundary
+        check discovers drying after the durable dispatch reservation was
+        created, ``release_dispatch_reservation`` returns the item to pending in
+        the same commit that records its drying waiting reason. A caller can
+        supply the active ids from its own just-in-time telemetry read so an
+        observed drying cycle cannot disappear between the gate and policy.
+        """
+        if active_ams_ids is None:
+            active_ams_ids = self._active_drying_ams_ids(printer_id)
+        if not active_ams_ids:
+            if item.waiting_reason in _DRYING_WAITING_MESSAGES:
+                item.waiting_reason = None
+                await db.commit()
+            return True
+
+        wait_for_natural_completion = bool(getattr(item, "wait_for_drying_complete", False))
+        if wait_for_natural_completion:
+            waiting_reason = _WAITING_FOR_DRYING_MESSAGE
+        else:
+            stopped = await self._stop_drying(printer_id)
+            waiting_reason = _STOPPING_DRYING_MESSAGE if stopped else _DRYING_STOP_FAILED_MESSAGE
+
+        needs_commit = False
+        if release_dispatch_reservation:
+            item.status = "pending"
+            item.dispatched_at = None
+            item.dispatch_subtask_id = None
+            item.started_at = None
+            item.completed_at = None
+            item.error_message = None
+            needs_commit = True
+        if item.waiting_reason != waiting_reason:
+            item.waiting_reason = waiting_reason
+            needs_commit = True
+        if needs_commit:
+            await db.commit()
+        logger.info(
+            "Queue item %s waiting on printer %s AMS drying (%s; active AMS ids=%s)",
+            item.id,
+            printer_id,
+            "natural completion" if wait_for_natural_completion else "stop requested",
+            active_ams_ids,
+        )
+        return False
+
     async def _get_setting(self, db: AsyncSession, key: str) -> str | None:
         """Read a setting value from the database."""
         result = await db.execute(select(Settings).where(Settings.key == key))
@@ -2090,25 +2183,29 @@ class PrintScheduler:
         for pid in to_remove:
             self._drying_in_progress.pop(pid, None)
 
-    async def _stop_drying(self, printer_id: int):
-        """Stop all active drying on a printer (print takes priority)."""
-        state = printer_manager.get_status(printer_id)
-        if not state:
+    async def _stop_drying(self, printer_id: int) -> bool:
+        """Stop all live drying cycles; return whether every command was queued."""
+        active_ams_ids = self._active_drying_ams_ids(printer_id)
+        if not active_ams_ids:
             self._drying_in_progress.pop(printer_id, None)
-            return
+            return True
 
-        ams_list = state.raw_data.get("ams", [])
-        for ams_data in ams_list:
-            dry_time = int(ams_data.get("dry_time") or 0)
-            if dry_time > 0:
-                ams_id = int(ams_data.get("id", 0))
-                logger.info(
-                    "Auto-drying: stopping drying on printer %d AMS %d — print takes priority",
+        all_sent = True
+        for ams_id in active_ams_ids:
+            logger.info(
+                "Drying: stopping drying on printer %d AMS %d — print takes priority",
+                printer_id,
+                ams_id,
+            )
+            if not printer_manager.send_drying_command(printer_id, ams_id, 0, 0, mode=0):
+                all_sent = False
+                logger.warning(
+                    "Could not queue drying stop for printer %d AMS %d",
                     printer_id,
                     ams_id,
                 )
-                printer_manager.send_drying_command(printer_id, ams_id, 0, 0, mode=0)
         self._drying_in_progress.pop(printer_id, None)
+        return all_sent
 
     async def _get_smart_plugs(self, db: AsyncSession, printer_id: int) -> list[SmartPlug]:
         """Get all smart plugs associated with a printer."""
@@ -2598,6 +2695,18 @@ class PrintScheduler:
             except json.JSONDecodeError:
                 logger.warning("Queue item %s: Invalid AMS mapping JSON, ignoring", item.id)
 
+        # Re-check at the final dispatch boundary. Drying may have started
+        # after the scheduler selected this printer or while the FTP upload
+        # was in progress. Never create a durable dispatch reservation until
+        # telemetry confirms every dryer is off.
+        if not await self._prepare_drying_for_dispatch(db, item, item.printer_id):
+            logger.info(
+                "Queue item %s: dispatch deferred because printer %s is drying",
+                item.id,
+                item.printer_id,
+            )
+            return
+
         # Propagate the queue item's owner into printer_manager so the
         # print-complete callback can credit the user in the PrintLogEntry
         # (#1670). `created_by_id` is set either at queue-add time (UI-added
@@ -2664,7 +2773,7 @@ class PrintScheduler:
 
         # Clear the awaiting-plate-clear flag now that we're starting a new print
         printer_manager.set_awaiting_plate_clear(item.printer_id, False)
-        logger.info("Queue item %s: Status set to 'dispatching', sending print command...", item.id)
+        logger.info("Queue item %s: Status set to 'dispatching'; performing final pre-send checks", item.id)
 
         # #1721: respect the user's explicit timelapse choice. The #1397
         # force-on at dispatch was removed because it caused per-layer nozzle
@@ -2679,6 +2788,32 @@ class PrintScheduler:
         # Bambu Studio's project_file on VP intake (#1780); the MQTT layer
         # parses + injects it only for dual-nozzle models so a null on every
         # other model is a transparent pass-through.
+        #
+        # This second live check is deliberately the final operation before
+        # project_file publish. The earlier post-upload check avoids creating a
+        # reservation for known drying, while this one closes the narrow window
+        # in which drying can begin during the reservation commit/setup above.
+        command_boundary_drying = self._active_drying_ams_ids(item.printer_id)
+        if command_boundary_drying:
+            await self._prepare_drying_for_dispatch(
+                db,
+                item,
+                item.printer_id,
+                active_ams_ids=command_boundary_drying,
+                release_dispatch_reservation=True,
+            )
+            if archive:
+                from backend.app.main import unregister_expected_print
+
+                unregister_expected_print(item.printer_id, remote_filename)
+            printer_manager.clear_current_print_user(item.printer_id)
+            logger.info(
+                "Queue item %s: released dispatch reservation because printer %s began drying",
+                item.id,
+                item.printer_id,
+            )
+            return
+
         started = printer_manager.start_print(
             item.printer_id,
             remote_filename,

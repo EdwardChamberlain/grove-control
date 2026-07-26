@@ -150,6 +150,7 @@ class TestPrintQueueAPI:
         assert result["archive_id"] == archive.id
         assert result["status"] == "pending"
         assert result["manual_start"] is False
+        assert result["wait_for_drying_complete"] is False
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -362,6 +363,27 @@ class TestPrintQueueAPI:
         assert result["archive_id"] == archive.id
         assert result["status"] == "pending"
         assert result["manual_start"] is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_add_to_queue_with_wait_for_drying_complete(
+        self, async_client: AsyncClient, printer_factory, archive_factory, db_session
+    ):
+        """The per-job drying policy is durable and defaults independently."""
+        printer = await printer_factory()
+        archive = await archive_factory()
+
+        response = await async_client.post(
+            "/api/v1/queue/",
+            json={
+                "printer_id": printer.id,
+                "archive_id": archive.id,
+                "wait_for_drying_complete": True,
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["wait_for_drying_complete"] is True
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -662,6 +684,21 @@ class TestPrintQueueAPI:
         assert response.status_code == 200
         result = response.json()
         assert result["manual_start"] is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_update_queue_item_wait_for_drying_complete(
+        self, async_client: AsyncClient, queue_item_factory, db_session
+    ):
+        item = await queue_item_factory(wait_for_drying_complete=False)
+
+        response = await async_client.patch(
+            f"/api/v1/queue/{item.id}",
+            json={"wait_for_drying_complete": True},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["wait_for_drying_complete"] is True
 
     @pytest.mark.asyncio
     @pytest.mark.integration

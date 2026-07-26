@@ -38,6 +38,10 @@ class PrintQueueItem(Base):
     position: Mapped[int] = mapped_column(Integer, default=0)  # Queue order
     scheduled_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # None = ASAP
     manual_start: Mapped[bool] = mapped_column(Boolean, default=False)  # Requires manual trigger to start
+    # Per-job drying policy. False means printing takes priority: stop every
+    # active AMS drying cycle and wait for telemetry to confirm it stopped
+    # before dispatch. True leaves drying alone and waits for natural completion.
+    wait_for_drying_complete: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     # Conditions
     require_previous_success: Mapped[bool] = mapped_column(Boolean, default=False)

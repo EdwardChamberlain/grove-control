@@ -4318,6 +4318,7 @@ export default {
     previousMonth: 'Mese precedente',
     nextMonth: 'Mese successivo',
     requireManualStart: 'Richiedi avvio manuale',
+    waitForDryingComplete: 'Attendi il completamento dell’asciugatura',
     postponePrint: 'Posticipa stampa',
     postponeTime: 'Ora di stampa',
     doNotStartBefore: 'Non avviare prima di',

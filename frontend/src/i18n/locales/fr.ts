@@ -4319,6 +4319,7 @@ export default {
     previousMonth: 'Mois précédent',
     nextMonth: 'Mois suivant',
     requireManualStart: 'Démarrage manuel requis',
+    waitForDryingComplete: 'Attendre la fin du séchage',
     postponePrint: 'Reporter l’impression',
     postponeTime: 'Heure d’impression',
     doNotStartBefore: 'Ne pas démarrer avant',

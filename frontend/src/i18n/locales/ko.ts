@@ -4107,6 +4107,7 @@ export default {
     previousMonth: '이전 달',
     nextMonth: '다음 달',
     requireManualStart: '수동 시작 필요',
+    waitForDryingComplete: '건조 완료 대기',
     postponePrint: '인쇄 연기',
     postponeTime: '인쇄 시간',
     doNotStartBefore: '다음 시간 전에는 시작하지 않음',

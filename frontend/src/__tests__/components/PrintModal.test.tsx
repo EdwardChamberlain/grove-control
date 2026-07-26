@@ -29,6 +29,7 @@ const createMockQueueItem = (overrides: Partial<PrintQueueItem> = {}): PrintQueu
   position: 1,
   scheduled_time: null,
   require_previous_success: false,
+  wait_for_drying_complete: false,
   auto_off_after: false,
   gcode_injection: false,
   manual_start: false,
@@ -582,6 +583,51 @@ describe('PrintModal', () => {
 
       await user.click(screen.getByRole('button', { name: /queue options/i }));
       expect(screen.getByRole('checkbox', { name: /insert at top of queue/i })).toBeInTheDocument();
+    });
+
+    it('offers an ungated wait-for-drying policy and defaults it off', async () => {
+      const user = userEvent.setup();
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Test Print"
+          onClose={mockOnClose}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      const waitForDrying = screen.getByRole('checkbox', { name: 'Wait for drying to complete' });
+      expect(waitForDrying).toBeInTheDocument();
+      expect(waitForDrying).not.toBeChecked();
+    });
+
+    it('submits the wait-for-drying queue policy', async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      server.use(
+        http.post('/api/v1/queue/', async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json({ id: 1, status: 'pending' });
+        }),
+      );
+      const user = userEvent.setup();
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Test Print"
+          initialSelectedPrinterIds={[1]}
+          onClose={mockOnClose}
+          onSuccess={mockOnSuccess}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      await user.click(screen.getByRole('checkbox', { name: 'Wait for drying to complete' }));
+      await user.click(screen.getByRole('button', { name: /^print$/i }));
+
+      await waitFor(() => expect(capturedBody).not.toBeNull());
+      expect(capturedBody?.wait_for_drying_complete).toBe(true);
     });
 
     it('uses a native time picker with a quarter-hour default when postponing a print', async () => {
