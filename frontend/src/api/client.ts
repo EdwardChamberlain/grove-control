@@ -1940,7 +1940,8 @@ export interface PrintQueueItem {
   timelapse: boolean;
   use_ams: boolean;
   nozzle_offset_cali: boolean;
-  status: 'pending' | 'printing' | 'completed' | 'failed' | 'skipped' | 'cancelled';
+  status: 'pending' | 'dispatching' | 'printing' | 'completed' | 'failed' | 'skipped' | 'cancelled';
+  dispatched_at: string | null;
   started_at: string | null;
   completed_at: string | null;
   error_message: string | null;

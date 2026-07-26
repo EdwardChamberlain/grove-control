@@ -946,11 +946,11 @@ async def _delete_related_queue_items(db: AsyncSession, archive_id: int) -> int:
 
 
 async def _count_related_queue_items(db: AsyncSession, archive_id: int) -> tuple[int, int]:
-    """Return ``(total, printing)`` queue items linked to *archive_id*.
+    """Return ``(total, active)`` queue items linked to *archive_id*.
 
     Used by the archive GET response so the frontend delete-confirm modal
-    can surface how much the deletion will wipe out, and by the delete
-    route so it can 409 when a related row is currently printing (#1734).
+    can surface how much the deletion will wipe out, and by the delete route
+    so it can 409 while a related row is dispatching or printing (#1734).
     """
     from sqlalchemy import func as sa_func, select as sa_select
 
@@ -961,17 +961,17 @@ async def _count_related_queue_items(db: AsyncSession, archive_id: int) -> tuple
             sa_select(sa_func.count()).select_from(PrintQueueItem).where(PrintQueueItem.archive_id == archive_id)
         )
     ).scalar_one()
-    printing = (
+    active = (
         await db.execute(
             sa_select(sa_func.count())
             .select_from(PrintQueueItem)
             .where(
                 PrintQueueItem.archive_id == archive_id,
-                PrintQueueItem.status == "printing",
+                PrintQueueItem.status.in_(["dispatching", "printing"]),
             )
         )
     ).scalar_one()
-    return int(total or 0), int(printing or 0)
+    return int(total or 0), int(active or 0)
 
 
 class ArchiveService:

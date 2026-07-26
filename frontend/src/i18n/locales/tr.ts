@@ -933,7 +933,7 @@ export default {
       deleteButton: 'Sil',
       deletePurgeStats: 'Ayrıca bu baskıyı Hızlı İstatistiklerden de kaldır (filament, süre, maliyet, enerji)',
       deleteQueueItemsWarning: 'Bu arşive bağlı {{count}} kuyruk öğesi de kaldırılacak.',
-      deleteBlockedByPrinting: 'Silinemiyor — {{count}} kuyruk öğesi şu anda yazdırılıyor. Önce yazdırmayı durdurun, ardından tekrar deneyin.',
+      deleteBlockedByPrinting: 'Silinemiyor — {{count}} kuyruk öğesi gönderiliyor veya yazdırılıyor. Önce etkin işi durdurun, ardından tekrar deneyin.',
       removeSource3mf: 'Kaynak 3MF Kaldır',
       removeSource3mfConfirm: '"{{name}}" dosyasından kaynak 3MF dosyasını kaldırmak istediğinizden emin misiniz? Bu, orijinal dilimleyici proje dosyasını silecek.',
       removeButton: 'Kaldır',
@@ -1117,7 +1117,7 @@ export default {
     },
     // Bölümler
     sections: {
-      currentlyPrinting: 'Şu Anda Yazdırılan',
+      activeJobs: 'Etkin işler',
       queued: 'Kuyruktaki',
       history: 'Geçmiş',
     },
@@ -1126,6 +1126,7 @@ export default {
       pending: 'Beklemede',
       scheduled: 'Planlandı',
       waiting: 'Bekliyor',
+      dispatching: 'Gönderiliyor',
       printing: 'Yazdırılıyor',
       paused: 'Duraklatıldı',
       completed: 'Tamamlandı',

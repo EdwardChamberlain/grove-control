@@ -131,6 +131,7 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
         "use_ams": item.use_ams,
         "nozzle_offset_cali": item.nozzle_offset_cali,
         "status": item.status,
+        "dispatched_at": item.dispatched_at,
         "started_at": item.started_at,
         "completed_at": item.completed_at,
         "error_message": item.error_message,
@@ -1179,8 +1180,8 @@ async def delete_queue_item(
         if item.created_by_id != user.id:
             raise HTTPException(403, "You can only delete your own queue items")
 
-    if item.status == "printing":
-        raise HTTPException(400, "Cannot delete item that is currently printing")
+    if item.status in ("dispatching", "printing"):
+        raise HTTPException(400, "Cannot delete an item that is being dispatched or is currently printing")
 
     await db.delete(item)
     await db.commit()
@@ -1311,7 +1312,7 @@ async def stop_queue_item(
         )
     ),
 ):
-    """Stop an actively printing queue item.
+    """Stop an actively dispatching or printing queue item.
 
     Ownership-scoped (#1625-followup): callers with QUEUE_UPDATE_OWN can stop
     their own items; callers with QUEUE_UPDATE_ALL can stop any item. Mirrors
@@ -1337,8 +1338,11 @@ async def stop_queue_item(
         if item.created_by_id is None or item.created_by_id != user.id:
             raise HTTPException(403, "You can only stop your own queue items")
 
-    if item.status != "printing":
-        raise HTTPException(400, f"Can only stop items that are printing, current status: '{item.status}'")
+    if item.status not in ("dispatching", "printing"):
+        raise HTTPException(
+            400,
+            f"Can only stop items that are dispatching or printing, current status: '{item.status}'",
+        )
 
     # Capture values we need for background task
     printer_id = item.printer_id
@@ -1369,6 +1373,10 @@ async def stop_queue_item(
     item.completed_at = datetime.now(timezone.utc)
     item.error_message = "Stopped by user" if stop_sent else "Stopped by user (printer was offline)"
     await db.commit()
+
+    from backend.app.main import unregister_expected_print
+
+    unregister_expected_print(printer_id)
 
     # Get smart plug info if auto-off is enabled
     plug_ip = None

@@ -183,7 +183,7 @@ async def test_cleanup_unlinks_library_file_and_removes_db_row(queue_factory):
     await _dispatch_library_item(ctx)
 
     item, library_file, archive = await _queue_snapshot(ctx)
-    assert item.status == "printing"
+    assert item.status == "dispatching"
     assert item.library_file_id is None
     assert item.archive_id == archive.id
     assert library_file is None
@@ -197,7 +197,7 @@ async def test_external_library_file_skips_cleanup(queue_factory):
     await _dispatch_library_item(ctx)
 
     item, library_file, archive = await _queue_snapshot(ctx)
-    assert item.status == "printing"
+    assert item.status == "dispatching"
     assert item.library_file_id == ctx.library_file_id
     assert item.archive_id == archive.id
     assert library_file is not None
@@ -230,7 +230,7 @@ async def test_cleanup_resolves_absolute_and_relative_thumbnail_paths(queue_fact
     await _dispatch_library_item(ctx)
 
     item, library_file, archive = await _queue_snapshot(ctx)
-    assert item.status == "printing"
+    assert item.status == "dispatching"
     assert item.archive_id == archive.id
     assert library_file is None
     assert not ctx.source_path.exists()
@@ -264,7 +264,7 @@ async def test_oserror_during_unlink_logs_orphan_path_and_does_not_crash_dispatc
         await _dispatch_library_item(ctx, unlink_side_effect=unlink_with_source_failure)
 
     item, library_file, archive = await _queue_snapshot(ctx)
-    assert item.status == "printing"
+    assert item.status == "dispatching"
     assert item.archive_id == archive.id
     assert item.library_file_id is None
     assert library_file is None

@@ -7,32 +7,32 @@ function formatWeight(g: number): string {
 }
 
 export function QueueStatsBar({
-  activeCount,
-  pendingCount,
+  printingCount,
+  queuedCount,
   totalTime,
   totalWeight,
   historyCount,
   t,
 }: {
-  activeCount: number;
-  pendingCount: number;
+  printingCount: number;
+  queuedCount: number;
   totalTime: number;
   totalWeight: number;
   historyCount: number;
   t: (key: string) => string;
 }) {
   const stats = [
-    { icon: Play, value: activeCount, label: t('queue.summary.printing'), color: 'text-blue-400' },
-    { icon: Clock, value: pendingCount, label: t('queue.summary.queued'), color: 'text-yellow-400' },
-    { icon: Timer, value: formatDuration(totalTime), label: t('queue.summary.totalTime'), color: 'text-bambu-green' },
-    { icon: Weight, value: formatWeight(totalWeight), label: t('queue.summary.totalWeight'), color: 'text-purple-400' },
-    { icon: CheckCircle, value: historyCount, label: t('queue.summary.history'), color: 'text-bambu-gray' },
+    { key: 'printing', icon: Play, value: printingCount, label: t('queue.summary.printing'), color: 'text-blue-400' },
+    { key: 'queued', icon: Clock, value: queuedCount, label: t('queue.summary.queued'), color: 'text-yellow-400' },
+    { key: 'time', icon: Timer, value: formatDuration(totalTime), label: t('queue.summary.totalTime'), color: 'text-bambu-green' },
+    { key: 'weight', icon: Weight, value: formatWeight(totalWeight), label: t('queue.summary.totalWeight'), color: 'text-purple-400' },
+    { key: 'history', icon: CheckCircle, value: historyCount, label: t('queue.summary.history'), color: 'text-bambu-gray' },
   ];
 
   return (
     <div className="flex items-center gap-3 sm:gap-5 flex-wrap px-4 py-3 bg-bambu-dark-secondary rounded-xl border border-bambu-dark-tertiary mb-6">
       {stats.map((stat, i) => (
-        <div key={i} className="flex items-center gap-3">
+        <div key={stat.key} data-testid={`queue-stat-${stat.key}`} className="flex items-center gap-3">
           {i > 0 && <span className="hidden sm:block text-bambu-dark-tertiary">|</span>}
           <div className="flex items-center gap-1.5">
             <stat.icon className={`w-4 h-4 ${stat.color}`} />

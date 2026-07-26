@@ -121,7 +121,8 @@ async def compute_project_stats(
     # Count in-progress items
     in_progress_result = await db.execute(
         select(func.count(PrintQueueItem.id)).where(
-            PrintQueueItem.project_id == project_id, PrintQueueItem.status == "printing"
+            PrintQueueItem.project_id == project_id,
+            PrintQueueItem.status.in_(["dispatching", "printing"]),
         )
     )
     in_progress_prints = in_progress_result.scalar() or 0
@@ -223,7 +224,7 @@ async def list_projects(
         queue_count_result = await db.execute(
             select(func.count(PrintQueueItem.id)).where(
                 PrintQueueItem.project_id == project.id,
-                PrintQueueItem.status.in_(["pending", "printing"]),
+                PrintQueueItem.status.in_(["pending", "dispatching", "printing"]),
             )
         )
         queue_count = queue_count_result.scalar() or 0

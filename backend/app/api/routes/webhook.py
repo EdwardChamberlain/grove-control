@@ -60,6 +60,7 @@ class QueueStatusResponse(BaseModel):
     printer_id: int
     printer_name: str
     pending: int
+    dispatching: int
     printing: int
     items: list[dict]
 
@@ -335,13 +336,14 @@ async def webhook_get_queue_status(
             select(PrintQueueItem)
             .where(
                 PrintQueueItem.printer_id == printer.id,
-                PrintQueueItem.status.in_(["pending", "printing"]),
+                PrintQueueItem.status.in_(["pending", "dispatching", "printing"]),
             )
             .order_by(PrintQueueItem.position)
         )
         items = result.scalars().all()
 
         pending_count = sum(1 for i in items if i.status == "pending")
+        dispatching_count = sum(1 for i in items if i.status == "dispatching")
         printing_count = sum(1 for i in items if i.status == "printing")
 
         response.append(
@@ -349,6 +351,7 @@ async def webhook_get_queue_status(
                 printer_id=printer.id,
                 printer_name=printer.name,
                 pending=pending_count,
+                dispatching=dispatching_count,
                 printing=printing_count,
                 items=[
                     {

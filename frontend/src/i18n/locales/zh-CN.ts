@@ -933,7 +933,7 @@ export default {
       deleteButton: '删除',
       deletePurgeStats: '同时从快速统计中删除此打印（耗材、时间、成本、能耗）',
       deleteQueueItemsWarning: '与此归档关联的 {{count}} 个队列项也将被移除。',
-      deleteBlockedByPrinting: '无法删除 — {{count}} 个队列项正在打印。请先停止打印再重试。',
+      deleteBlockedByPrinting: '无法删除 — {{count}} 个队列项正在发送或打印。请先停止活动作业再重试。',
       removeSource3mf: '移除源 3MF',
       removeSource3mfConfirm: '确定要从"{{name}}"中移除源 3MF 文件吗？这将删除原始切片项目文件。',
       removeButton: '移除',
@@ -1117,7 +1117,7 @@ export default {
     },
     // Sections
     sections: {
-      currentlyPrinting: '正在打印',
+      activeJobs: '活动任务',
       queued: '排队中',
       history: '历史',
     },
@@ -1126,6 +1126,7 @@ export default {
       pending: '等待中',
       scheduled: '已排期',
       waiting: '等待中',
+      dispatching: '正在发送',
       printing: '打印中',
       paused: '已暂停',
       completed: '已完成',

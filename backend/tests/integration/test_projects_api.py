@@ -53,6 +53,36 @@ class TestProjectsAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_project_queue_counts_include_dispatching(
+        self, async_client: AsyncClient, project_factory, db_session
+    ):
+        """Dispatching is active work, not an invisible gap between queue states."""
+        from backend.app.models.print_queue import PrintQueueItem
+
+        project = await project_factory(name="Dispatching queue counts")
+        db_session.add_all(
+            [
+                PrintQueueItem(project_id=project.id, position=1, status="pending"),
+                PrintQueueItem(project_id=project.id, position=2, status="dispatching"),
+                PrintQueueItem(project_id=project.id, position=3, status="printing"),
+                PrintQueueItem(project_id=project.id, position=4, status="completed"),
+            ]
+        )
+        await db_session.commit()
+
+        list_response = await async_client.get("/api/v1/projects/")
+        assert list_response.status_code == 200
+        listed_project = next(item for item in list_response.json() if item["id"] == project.id)
+        assert listed_project["queue_count"] == 3
+
+        detail_response = await async_client.get(f"/api/v1/projects/{project.id}")
+        assert detail_response.status_code == 200
+        stats = detail_response.json()["stats"]
+        assert stats["queued_prints"] == 1
+        assert stats["in_progress_prints"] == 2
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_create_project(self, async_client: AsyncClient):
         """Verify project can be created."""
         data = {

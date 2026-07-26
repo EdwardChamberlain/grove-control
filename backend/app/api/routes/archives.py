@@ -1493,8 +1493,8 @@ async def get_archive_delete_impact(
     """Pre-flight for the delete-confirm modal (#1734).
 
     Returns the number of related queue items the user is about to remove
-    AND whether any of them are currently printing (which would block the
-    delete with a 409 — surfaced to the modal so it can disable the
+    AND whether any are dispatching or printing. Active work blocks deletion
+    with a 409 — surfaced to the modal so it can disable the
     confirm button instead of failing on submit). Cheap, single endpoint —
     not folded into the archive GET response so the much larger list
     endpoint isn't forced to run the same query per row.
@@ -1504,8 +1504,10 @@ async def get_archive_delete_impact(
     archive = _ensure_archive_visible(await service.get_archive(archive_id), user, can_read_all)
     from backend.app.services.archive import _count_related_queue_items
 
-    total, printing = await _count_related_queue_items(db, archive.id)
-    return {"related_queue_items": total, "currently_printing": printing}
+    total, active = await _count_related_queue_items(db, archive.id)
+    # Keep the established response key for client compatibility; it now
+    # represents every queue row that cannot safely be deleted.
+    return {"related_queue_items": total, "currently_printing": active}
 
 
 @router.get("/{archive_id}/runs", response_model=PrintLogResponse)
@@ -1976,18 +1978,18 @@ async def delete_archive(
         if archive.created_by_id != user.id:
             raise HTTPException(403, "You can only delete your own archives")
 
-    # #1734: block delete when any related queue item is currently printing.
+    # #1734: block delete when any related queue item is dispatching or printing.
     # Both soft and hard delete are gated — an in-flight print needs its
     # backing archive to stay around for the metadata trail (filament,
     # plate, ams_mapping). The user can stop the print first, then retry.
     from backend.app.services.archive import _count_related_queue_items
 
-    _related_total, related_printing = await _count_related_queue_items(db, archive_id)
-    if related_printing > 0:
+    _related_total, related_active = await _count_related_queue_items(db, archive_id)
+    if related_active > 0:
         raise HTTPException(
             409,
-            f"Cannot delete archive — {related_printing} related queue item(s) are "
-            f"currently printing. Stop the print first, then retry.",
+            f"Cannot delete archive — {related_active} related queue item(s) are "
+            f"being dispatched or printed. Stop the active job first, then retry.",
         )
 
     service = ArchiveService(db)

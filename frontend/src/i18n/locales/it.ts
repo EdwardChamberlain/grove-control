@@ -933,7 +933,7 @@ export default {
       deleteButton: 'Elimina',
       deletePurgeStats: 'Rimuovi anche questa stampa dalle Quick Stats (filamento, tempo, costo, energia)',
       deleteQueueItemsWarning: '{{count}} elemento/i in coda collegato/i a questo archivio verrà/verranno rimosso/i.',
-      deleteBlockedByPrinting: 'Impossibile eliminare — {{count}} elemento/i in coda sono attualmente in stampa. Interrompi la stampa, poi riprova.',
+      deleteBlockedByPrinting: 'Impossibile eliminare — {{count}} elemento/i in coda sono in fase di invio o stampa. Interrompi il lavoro attivo, poi riprova.',
       removeSource3mf: 'Rimuovi Sorgente 3MF',
       removeSource3mfConfirm: 'Sei sicuro di rimuovere il file sorgente 3MF da "{{name}}"? Questo eliminerà il progetto slicer originale.',
       removeButton: 'Rimuovi',
@@ -1117,7 +1117,7 @@ export default {
     },
     // Sections
     sections: {
-      currentlyPrinting: 'In stampa',
+      activeJobs: 'Lavori attivi',
       queued: 'In coda',
       history: 'Cronologia',
     },
@@ -1126,6 +1126,7 @@ export default {
       pending: 'In attesa',
       scheduled: 'Pianificata',
       waiting: 'In attesa',
+      dispatching: 'Invio in corso',
       printing: 'In stampa',
       paused: 'In pausa',
       completed: 'Completato',

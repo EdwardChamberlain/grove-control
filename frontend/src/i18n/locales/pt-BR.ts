@@ -933,7 +933,7 @@ export default {
       deleteButton: 'Excluir',
       deletePurgeStats: 'Remover também esta impressão das Quick Stats (filamento, tempo, custo, energia)',
       deleteQueueItemsWarning: '{{count}} item(ns) de fila vinculado(s) a este arquivo também serão removidos.',
-      deleteBlockedByPrinting: 'Não é possível excluir — {{count}} item(ns) de fila estão imprimindo agora. Pare a impressão primeiro e tente novamente.',
+      deleteBlockedByPrinting: 'Não é possível excluir — {{count}} item(ns) de fila estão sendo enviados ou impressos. Pare o trabalho ativo primeiro e tente novamente.',
       removeSource3mf: 'Remover Source 3MF',
       removeSource3mfConfirm: 'Tem certeza de que deseja remover o arquivo source 3MF de "{{name}}"? Isso excluirá o arquivo original do projeto do fatiador.',
       removeButton: 'Remover',
@@ -1117,7 +1117,7 @@ export default {
     },
     // Sections
     sections: {
-      currentlyPrinting: 'Imprimindo Atualmente',
+      activeJobs: 'Trabalhos ativos',
       queued: 'Na Fila',
       history: 'Histórico',
     },
@@ -1126,6 +1126,7 @@ export default {
       pending: 'Pendente',
       scheduled: 'Agendado',
       waiting: 'Aguardando',
+      dispatching: 'Enviando',
       printing: 'Imprimindo',
       paused: 'Pausado',
       completed: 'Concluído',

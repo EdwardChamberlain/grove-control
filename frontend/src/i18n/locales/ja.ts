@@ -932,7 +932,7 @@ export default {
       deleteButton: '削除',
       deletePurgeStats: 'このプリントをQuick Statsからも削除（フィラメント、時間、コスト、電力）',
       deleteQueueItemsWarning: 'このアーカイブにリンクされた {{count}} 件のキュー項目も削除されます。',
-      deleteBlockedByPrinting: '削除できません — {{count}} 件のキュー項目が現在印刷中です。先に印刷を停止してから再試行してください。',
+      deleteBlockedByPrinting: '削除できません — {{count}} 件のキュー項目が送信中または印刷中です。先に実行中のジョブを停止してから再試行してください。',
       removeSource3mf: 'ソース3MFを削除',
       removeSource3mfConfirm: '"{{name}}"からソース3MFファイルを削除してもよろしいですか？元のスライサープロジェクトファイルが削除されます。',
       removeButton: '削除',
@@ -1116,7 +1116,7 @@ export default {
     },
     // Sections
     sections: {
-      currentlyPrinting: '印刷中',
+      activeJobs: '実行中のジョブ',
       queued: 'キュー中',
       history: '履歴',
     },
@@ -1125,6 +1125,7 @@ export default {
       pending: '待機中',
       scheduled: '予定済み',
       waiting: '待機中',
+      dispatching: '送信中',
       printing: '印刷中',
       paused: '一時停止',
       completed: '完了',
