@@ -1312,7 +1312,7 @@ async def stop_queue_item(
         )
     ),
 ):
-    """Stop an actively printing queue item.
+    """Stop an actively dispatching or printing queue item.
 
     Ownership-scoped (#1625-followup): callers with QUEUE_UPDATE_OWN can stop
     their own items; callers with QUEUE_UPDATE_ALL can stop any item. Mirrors
@@ -1338,8 +1338,11 @@ async def stop_queue_item(
         if item.created_by_id is None or item.created_by_id != user.id:
             raise HTTPException(403, "You can only stop your own queue items")
 
-    if item.status != "printing":
-        raise HTTPException(400, f"Can only stop items that are printing, current status: '{item.status}'")
+    if item.status not in ("dispatching", "printing"):
+        raise HTTPException(
+            400,
+            f"Can only stop items that are dispatching or printing, current status: '{item.status}'",
+        )
 
     # Capture values we need for background task
     printer_id = item.printer_id
@@ -1370,6 +1373,10 @@ async def stop_queue_item(
     item.completed_at = datetime.now(timezone.utc)
     item.error_message = "Stopped by user" if stop_sent else "Stopped by user (printer was offline)"
     await db.commit()
+
+    from backend.app.main import unregister_expected_print
+
+    unregister_expected_print(printer_id)
 
     # Get smart plug info if auto-off is enabled
     plug_ip = None

@@ -56,7 +56,7 @@ class TestDurableDispatchingState:
             patch.object(
                 scheduler,
                 "_wait_for_print_start_ack",
-                new=AsyncMock(return_value=(True, False, _status("PREPARE"))),
+                new=AsyncMock(return_value=("printing", _status("PREPARE", "12345"))),
             ),
             patch("backend.app.services.print_scheduler.async_session", db_session),
             patch("backend.app.core.database.async_session", db_session),
@@ -65,10 +65,7 @@ class TestDurableDispatchingState:
             await scheduler._confirm_dispatch(
                 queue_item_id=1,
                 printer_id=42,
-                remote_filename="test.3mf",
-                pre_state="IDLE",
-                pre_subtask_id="OLD_SUBTASK",
-                pre_gcode_file="/old.3mf",
+                dispatch_subtask_id="12345",
             )
 
         async with db_session() as db:
@@ -78,7 +75,20 @@ class TestDurableDispatchingState:
         publish.assert_awaited_once_with(1)
 
     @pytest.mark.asyncio
-    async def test_unacknowledged_dispatch_returns_to_pending_and_reconnects(self, db_session):
+    @pytest.mark.parametrize(
+        ("telemetry_status", "last_status", "expect_reconnect"),
+        [
+            (None, _status("IDLE", "OLD_SUBTASK"), True),
+            ("dispatching", _status("IDLE", "12345"), False),
+        ],
+    )
+    async def test_unconfirmed_dispatch_is_held_without_retry(
+        self,
+        db_session,
+        telemetry_status,
+        last_status,
+        expect_reconnect,
+    ):
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
             item.status = "dispatching"
@@ -91,7 +101,7 @@ class TestDurableDispatchingState:
             patch.object(
                 scheduler,
                 "_wait_for_print_start_ack",
-                new=AsyncMock(return_value=(False, False, _status("IDLE", "OLD_SUBTASK", "/old.3mf"))),
+                new=AsyncMock(return_value=(telemetry_status, last_status)),
             ),
             patch("backend.app.services.print_scheduler.async_session", db_session),
             patch("backend.app.core.database.async_session", db_session),
@@ -100,21 +110,22 @@ class TestDurableDispatchingState:
             await scheduler._confirm_dispatch(
                 queue_item_id=1,
                 printer_id=42,
-                remote_filename="test.3mf",
-                pre_state="IDLE",
-                pre_subtask_id="OLD_SUBTASK",
-                pre_gcode_file="/old.3mf",
+                dispatch_subtask_id="12345",
             )
 
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            assert item.status == "pending"
-            assert item.dispatched_at is None
+            assert item.status == "dispatching"
+            assert item.dispatched_at is not None
             assert item.started_at is None
-        client.force_reconnect_stale_session.assert_called_once()
+            assert item.error_message and "held for manual review" in item.error_message
+        if expect_reconnect:
+            client.force_reconnect_stale_session.assert_called_once()
+        else:
+            client.force_reconnect_stale_session.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_unacknowledged_dispatch_unregisters_its_expected_print(self, db_session):
+    async def test_unacknowledged_dispatch_keeps_its_expected_print(self, db_session):
         from backend.app.main import _expected_prints, register_expected_print, unregister_expected_print
 
         async with db_session() as db:
@@ -129,7 +140,7 @@ class TestDurableDispatchingState:
             patch.object(
                 scheduler,
                 "_wait_for_print_start_ack",
-                new=AsyncMock(return_value=(False, False, _status("IDLE", "OLD_SUBTASK", "/old.3mf"))),
+                new=AsyncMock(return_value=(None, _status("IDLE", "OLD_SUBTASK"))),
             ),
             patch("backend.app.services.print_scheduler.async_session", db_session),
             patch("backend.app.core.database.async_session", db_session),
@@ -138,21 +149,19 @@ class TestDurableDispatchingState:
             await scheduler._confirm_dispatch(
                 queue_item_id=1,
                 printer_id=42,
-                remote_filename="test.3mf",
-                pre_state="IDLE",
-                pre_subtask_id="OLD_SUBTASK",
-                pre_gcode_file="/old.3mf",
+                dispatch_subtask_id="12345",
             )
 
-        assert not any(key[0] == 42 for key in _expected_prints)
+        assert any(key[0] == 42 for key in _expected_prints)
         unregister_expected_print(42)
 
     @pytest.mark.asyncio
-    async def test_confirmation_does_not_requeue_a_terminal_dispatch(self, db_session):
+    async def test_correlated_terminal_dispatch_is_not_retried(self, db_session):
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            item.status = "failed"
+            item.status = "dispatching"
             item.dispatched_at = datetime.now(timezone.utc)
+            item.dispatch_subtask_id = "12345"
             await db.commit()
 
         scheduler = PrintScheduler()
@@ -160,7 +169,7 @@ class TestDurableDispatchingState:
             patch.object(
                 scheduler,
                 "_wait_for_print_start_ack",
-                new=AsyncMock(return_value=(False, False, _status("FAILED"))),
+                new=AsyncMock(return_value=("failed", _status("FAILED", "12345"))),
             ),
             patch("backend.app.services.print_scheduler.async_session", db_session),
             patch("backend.app.core.database.async_session", db_session),
@@ -168,15 +177,13 @@ class TestDurableDispatchingState:
             await scheduler._confirm_dispatch(
                 queue_item_id=1,
                 printer_id=42,
-                remote_filename="test.3mf",
-                pre_state="IDLE",
-                pre_subtask_id=None,
-                pre_gcode_file=None,
+                dispatch_subtask_id="12345",
             )
 
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            assert item.status == "failed"
+            assert item.status == "dispatching"
+            assert item.error_message is None
 
     @pytest.mark.asyncio
     async def test_restart_recovery_publishes_the_normal_start_event(self, db_session):
@@ -254,7 +261,7 @@ class TestDurableDispatchingState:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("printer_subtask_id", ["other-job", None])
-    async def test_restart_recovery_fails_closed_for_stale_active_dispatch_without_matching_id(
+    async def test_restart_recovery_holds_stale_active_dispatch_without_matching_id(
         self, db_session, printer_subtask_id
     ):
         """An uncorrelated active printer is unsafe to requeue automatically."""
@@ -265,38 +272,40 @@ class TestDurableDispatchingState:
             item.dispatch_subtask_id = "12345"
             await db.commit()
 
-            with (
-                patch(
-                    "backend.app.services.print_scheduler.printer_manager.get_status",
-                    return_value=_status("RUNNING", printer_subtask_id),
-                ),
-                patch("backend.app.services.print_scheduler.printer_manager.set_awaiting_plate_clear") as plate_clear,
+            with patch(
+                "backend.app.services.print_scheduler.printer_manager.get_status",
+                return_value=_status("RUNNING", printer_subtask_id),
             ):
                 await PrintScheduler()._recover_stale_dispatches(db)
 
             item = await db.get(PrintQueueItem, 1)
-            assert item.status == "failed"
-            assert item.completed_at is not None
-            assert item.error_message and "manual review required" in item.error_message
-            plate_clear.assert_called_once_with(42, True)
+            assert item.status == "dispatching"
+            assert item.completed_at is None
+            assert item.error_message and "held for manual review" in item.error_message
 
     @pytest.mark.asyncio
-    async def test_restart_recovery_requeues_stale_dispatch(self, db_session):
+    @pytest.mark.parametrize("printer_status", [_status("IDLE"), None])
+    async def test_restart_recovery_holds_stale_uncertain_dispatch(self, db_session, printer_status):
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
             item.status = "dispatching"
             item.dispatched_at = datetime.now(timezone.utc) - timedelta(seconds=300)
+            item.dispatch_subtask_id = "12345"
             await db.commit()
 
-            with patch("backend.app.services.print_scheduler.printer_manager.get_status", return_value=_status("IDLE")):
+            with patch(
+                "backend.app.services.print_scheduler.printer_manager.get_status",
+                return_value=printer_status,
+            ):
                 await PrintScheduler()._recover_stale_dispatches(db)
 
             item = await db.get(PrintQueueItem, 1)
-            assert item.status == "pending"
-            assert item.dispatched_at is None
+            assert item.status == "dispatching"
+            assert item.dispatched_at is not None
+            assert item.error_message and "held for manual review" in item.error_message
 
     @pytest.mark.asyncio
-    async def test_restart_recovery_fails_closed_for_terminal_dispatch_without_matching_id(self, db_session):
+    async def test_restart_recovery_holds_terminal_dispatch_without_matching_id(self, db_session):
         """Unknown terminal telemetry must not cause a duplicate retry."""
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
@@ -309,18 +318,14 @@ class TestDurableDispatchingState:
             # carries subtask_id=0 after a restart.
             status = _status("FINISH", "0", "completed-while-down.3mf")
             status.raw_data = {"subtask_id": "0"}
-            with (
-                patch("backend.app.services.print_scheduler.printer_manager.get_status", return_value=status),
-                patch("backend.app.services.print_scheduler.printer_manager.set_awaiting_plate_clear") as plate_clear,
-            ):
+            with patch("backend.app.services.print_scheduler.printer_manager.get_status", return_value=status):
                 await PrintScheduler()._recover_stale_dispatches(db)
 
             item = await db.get(PrintQueueItem, 1)
-            assert item.status == "failed"
-            assert item.completed_at is not None
+            assert item.status == "dispatching"
+            assert item.completed_at is None
             assert item.dispatch_subtask_id == "12345"
-            assert item.error_message and "manual review required" in item.error_message
-            plate_clear.assert_called_once_with(42, True)
+            assert item.error_message and "held for manual review" in item.error_message
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -422,10 +427,7 @@ class TestDispatchConfirmationScheduling:
                 scheduler._schedule_dispatch_confirmation(
                     queue_item_id=item.id,
                     printer_id=item.printer_id,
-                    remote_filename="first.3mf",
-                    pre_state="IDLE",
-                    pre_subtask_id=None,
-                    pre_gcode_file=None,
+                    dispatch_subtask_id="12345",
                 )
 
         def spawn(coro, **_kwargs):
@@ -470,17 +472,42 @@ class TestActivePrinterReservation:
             await db.rollback()
 
     @pytest.mark.asyncio
-    async def test_active_telemetry_is_required_even_after_subtask_advances(self):
+    async def test_terminal_telemetry_does_not_confirm_dispatch(self):
         get_status = MagicMock(return_value=_status("FINISH", "NEW_SUBTASK"))
         with patch("backend.app.services.print_scheduler.printer_manager.get_status", get_status):
-            acked, landed_on_subtask, _ = await PrintScheduler()._wait_for_print_start_ack(
+            telemetry_status, _ = await PrintScheduler()._wait_for_print_start_ack(
                 printer_id=42,
-                pre_state="FINISH",
-                pre_subtask_id="OLD_SUBTASK",
+                dispatch_subtask_id="NEW_SUBTASK",
                 timeout=0.05,
                 phase_b_timeout=0.05,
                 poll_interval=0.01,
             )
 
-        assert acked is False
-        assert landed_on_subtask is True
+        assert telemetry_status == "completed"
+
+    @pytest.mark.asyncio
+    async def test_active_telemetry_requires_this_dispatch_submission_id(self):
+        get_status = MagicMock(return_value=_status("RUNNING", "other-job"))
+        with patch("backend.app.services.print_scheduler.printer_manager.get_status", get_status):
+            telemetry_status, _ = await PrintScheduler()._wait_for_print_start_ack(
+                printer_id=42,
+                dispatch_subtask_id="12345",
+                timeout=0.05,
+                phase_b_timeout=0.05,
+                poll_interval=0.01,
+            )
+
+        assert telemetry_status is None
+
+    @pytest.mark.asyncio
+    async def test_matching_active_telemetry_confirms_this_dispatch(self):
+        get_status = MagicMock(return_value=_status("PREPARE", "12345"))
+        with patch("backend.app.services.print_scheduler.printer_manager.get_status", get_status):
+            telemetry_status, _ = await PrintScheduler()._wait_for_print_start_ack(
+                printer_id=42,
+                dispatch_subtask_id="12345",
+                timeout=0.05,
+                poll_interval=0.01,
+            )
+
+        assert telemetry_status == "printing"

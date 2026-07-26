@@ -683,7 +683,7 @@ function SortableQueueItem({
           <StatusBadge status={item.status} scheduledTime={item.scheduled_time} waitingReason={item.waiting_reason} printerState={printerState} t={t} />
 
           <div className="flex items-center gap-0.5 sm:gap-1">
-            {isPrinting && (
+            {(isDispatching || isPrinting) && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -1594,6 +1594,11 @@ export function QueuePage() {
     }
     return items;
   }, [queue, filterLocation, matchesLocationFilter]);
+  const dispatchingItems = useMemo(
+    () => activeItems.filter((item) => item.status === 'dispatching'),
+    [activeItems],
+  );
+  const printingCount = activeItems.length - dispatchingItems.length;
 
   // Get unique printer IDs from active items to fetch their statuses
   const activePrinterIds = useMemo(() => {
@@ -1664,13 +1669,19 @@ export function QueuePage() {
 
   // Calculate total queue time
   const totalQueueTime = useMemo(() => {
-    return pendingItems.reduce((acc, item) => acc + (item.print_time_seconds || 0), 0);
-  }, [pendingItems]);
+    return [...pendingItems, ...dispatchingItems].reduce(
+      (acc, item) => acc + (item.print_time_seconds || 0),
+      0,
+    );
+  }, [pendingItems, dispatchingItems]);
 
   // Calculate total material weight
   const totalWeight = useMemo(() => {
-    return pendingItems.reduce((acc, item) => acc + (item.filament_used_grams || 0), 0);
-  }, [pendingItems]);
+    return [...pendingItems, ...dispatchingItems].reduce(
+      (acc, item) => acc + (item.filament_used_grams || 0),
+      0,
+    );
+  }, [pendingItems, dispatchingItems]);
 
   const handleDragStart = (event: DragStartEvent) => {
     const id = event.active.id;
@@ -1956,8 +1967,8 @@ export function QueuePage() {
 
       {/* Summary Stats */}
       <QueueStatsBar
-        activeCount={activeItems.length}
-        pendingCount={pendingItems.length}
+        printingCount={printingCount}
+        queuedCount={pendingItems.length + dispatchingItems.length}
         totalTime={totalQueueTime}
         totalWeight={totalWeight}
         historyCount={historyItems.length}
@@ -2128,7 +2139,7 @@ export function QueuePage() {
               setRequeueItem(item);
             } else if (item.status === 'pending') {
               setEditItem(item);
-            } else if (item.status === 'printing') {
+            } else if (item.status === 'dispatching' || item.status === 'printing') {
               setConfirmAction({ type: 'stop', item });
             }
           }}

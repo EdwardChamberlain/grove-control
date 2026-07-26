@@ -7,7 +7,7 @@ import { Button } from './Button';
 
 /** Gantt-style 24h-rolling timeline. One horizontal swimlane per printer
  *  (plus one per active target_model and one for unassigned items). Each
- *  pending or printing job is rendered as a colored bar positioned by its
+ *  queued, dispatching, or printing job is rendered as a colored bar positioned by its
  *  predicted start time, width = predicted duration. A vertical NOW line
  *  marks current time. Hover a bar for details, click to edit/stop. */
 
@@ -25,7 +25,7 @@ interface ScheduleEvent {
   estimatedStart: Date;
   estimatedEnd: Date;
   progress?: number;
-  type: 'printing' | 'queued';
+  type: 'dispatching' | 'printing' | 'queued';
 }
 
 interface QueueTimelineViewProps {
@@ -81,7 +81,7 @@ export function QueueTimelineView({
   const nowMs = now.getTime();
 
   // Build schedule events. Only committed schedules are rendered:
-  //  • currently printing → always
+  //  • currently dispatching or printing → always
   //  • pending with explicit scheduled_time → at that time
   //  • pending ASAP that chain behind a print actually running on the same
   //    lane → forecast
@@ -104,14 +104,15 @@ export function QueueTimelineView({
     };
 
     for (const item of queueItems) {
-      if (item.status === 'printing') {
+      if (item.status === 'dispatching' || item.status === 'printing') {
+        const isDispatching = item.status === 'dispatching';
         const status = item.printer_id != null ? printerStatuses[item.printer_id] : undefined;
-        const start = parseUTCDate(item.started_at) || new Date();
+        const start = parseUTCDate(isDispatching ? item.dispatched_at : item.started_at) || new Date();
         let endTime: Date;
-        if (status?.remaining_time != null && status.remaining_time > 0) {
+        if (!isDispatching && status?.remaining_time != null && status.remaining_time > 0) {
           endTime = new Date(nowMs + status.remaining_time * 60 * 1000);
         } else if (item.print_time_seconds) {
-          const progress = status?.progress || 0;
+          const progress = isDispatching ? 0 : status?.progress || 0;
           const remainingFraction = Math.max(0, 1 - progress / 100);
           endTime = new Date(nowMs + item.print_time_seconds * remainingFraction * 1000);
         } else {
@@ -121,8 +122,8 @@ export function QueueTimelineView({
           item,
           estimatedStart: start,
           estimatedEnd: endTime,
-          progress: status?.progress ?? undefined,
-          type: 'printing',
+          progress: isDispatching ? undefined : status?.progress ?? undefined,
+          type: item.status,
         });
         const lk = laneKeyOf(item);
         lanesWithActive.add(lk);
@@ -399,22 +400,28 @@ export function QueueTimelineView({
                           ? api.getLibraryFileThumbnailUrl(ev.item.library_file_id!)
                           : null;
                       const isPrinting = ev.type === 'printing';
+                      const isDispatching = ev.type === 'dispatching';
                       const isBatched = ev.item.batch_id != null;
                       const tooltipParts = [
                         displayName,
                         `${formatTooltipTime(ev.estimatedStart)} → ${formatTooltipTime(ev.estimatedEnd)}`,
                         ev.item.print_time_seconds ? formatDuration(ev.item.print_time_seconds) : null,
+                        isDispatching ? t('queue.status.dispatching') : null,
                         isPrinting && ev.progress != null ? `${Math.round(ev.progress)}%` : null,
                         ev.item.batch_name ? `batch: ${ev.item.batch_name}` : null,
                       ].filter(Boolean).join(' · ');
                       return (
                         <button
                           key={ev.item.id}
+                          data-testid={`queue-timeline-item-${ev.item.id}`}
+                          data-status={ev.type}
                           onClick={() => onItemClick(ev.item)}
                           title={tooltipParts}
                           className={`absolute rounded-md transition-all hover:brightness-110 hover:z-10 overflow-hidden flex items-center gap-1.5 px-1.5 text-left ${
                             isPrinting
                               ? 'bg-blue-500/30 border border-blue-400/60'
+                              : isDispatching
+                                ? 'bg-purple-500/30 border border-purple-400/60'
                               : isBatched
                                 ? 'bg-cyan-500/20 border border-cyan-400/50'
                                 : 'bg-bambu-green/20 border border-bambu-green/40'
@@ -439,6 +446,9 @@ export function QueueTimelineView({
                             </div>
                             <div className="text-[10px] text-bambu-gray truncate leading-tight">
                               {ev.item.print_time_seconds ? formatDuration(ev.item.print_time_seconds) : ''}
+                              {isDispatching
+                                ? `${ev.item.print_time_seconds ? ' · ' : ''}${t('queue.status.dispatching')}`
+                                : ''}
                               {isPrinting && ev.progress != null ? ` · ${Math.round(ev.progress)}%` : ''}
                             </div>
                           </div>

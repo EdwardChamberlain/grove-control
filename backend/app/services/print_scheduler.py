@@ -52,6 +52,28 @@ logger = logging.getLogger(__name__)
 # state value did change. SLICING is included because some firmwares park
 # briefly in SLICING between PREPARE and RUNNING while parsing the g-code.
 _ACTIVE_PRINT_STATES: frozenset[str] = frozenset({"PREPARE", "SLICING", "RUNNING", "PAUSE"})
+_DISPATCH_REVIEW_MESSAGE = (
+    "Printer did not provide a correlated active-state confirmation; "
+    "dispatch held for manual review to avoid a duplicate print."
+)
+
+
+def _queue_status_from_dispatch_telemetry(printer_status, dispatch_subtask_id: str | None) -> str | None:
+    """Map telemetry for this exact dispatch to its queue lifecycle state."""
+    expected_id = str(dispatch_subtask_id).strip() if dispatch_subtask_id is not None else ""
+    reported_id = getattr(printer_status, "subtask_id", None) if printer_status else None
+    reported_id = str(reported_id).strip() if reported_id is not None else ""
+    if not expected_id or expected_id == "0" or reported_id != expected_id:
+        return None
+
+    state = getattr(printer_status, "state", None)
+    if state in _ACTIVE_PRINT_STATES:
+        return "printing"
+    if state == "FINISH":
+        return "completed"
+    if state == "FAILED":
+        return "failed"
+    return "dispatching"
 
 
 class PrintScheduler:
@@ -104,10 +126,10 @@ class PrintScheduler:
         """Reconcile durable dispatches left behind by a restart.
 
         A printer can take a while to expose PREPARE after accepting
-        ``project_file``. Keep a recent dispatch reserved and promote it only
-        when active telemetry reports that dispatch's submission id. Safely
-        return an idle, unconfirmed attempt to pending after the full
-        acknowledgement window has elapsed.
+        ``project_file``. Keep the dispatch reserved and promote it only when
+        active telemetry reports that dispatch's submission id. Uncorrelated
+        telemetry cannot prove rejection, so stale attempts remain held for
+        manual review rather than risking an automatic duplicate print.
         """
         result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.status == "dispatching"))
         dispatches = list(result.scalars().all())
@@ -118,15 +140,11 @@ class PrintScheduler:
         stale_before = now.timestamp() - 270
         changed = False
         promoted_ids: list[int] = []
-        requeued_printer_ids: set[int] = set()
-        manual_review_printer_ids: set[int] = set()
         terminal_dispatches: list[tuple[int, int, dict]] = []
         for item in dispatches:
             printer_status = printer_manager.get_status(item.printer_id) if item.printer_id is not None else None
-            printer_subtask_id = getattr(printer_status, "subtask_id", None) if printer_status else None
-            if printer_subtask_id is not None:
-                printer_subtask_id = str(printer_subtask_id).strip() or None
             dispatch_subtask_id = str(item.dispatch_subtask_id).strip() if item.dispatch_subtask_id else None
+            telemetry_status = _queue_status_from_dispatch_telemetry(printer_status, dispatch_subtask_id)
 
             # A print can reach FINISH or FAILED while Grove Control is down.
             # BambuMQTT intentionally ignores a terminal state on its first
@@ -135,18 +153,13 @@ class PrintScheduler:
             # before its command was sent, so it is the narrow exception: replay
             # the normal completion path only when telemetry confirms it is this
             # exact dispatch. Otherwise the stale timeout below remains the
-            # conservative retry behaviour.
+            # conservative manual-review boundary.
             terminal_status = getattr(printer_status, "state", None) if printer_status else None
-            if (
-                terminal_status in ("FINISH", "FAILED")
-                and dispatch_subtask_id
-                and dispatch_subtask_id == printer_subtask_id
-            ):
-                queue_status = "completed" if terminal_status == "FINISH" else "failed"
+            if telemetry_status in ("completed", "failed"):
                 # Commit the terminal observation before starting the normal
                 # completion side effects. A process stop after this point must
                 # not turn a printer-confirmed terminal job back into a retry.
-                item.status = queue_status
+                item.status = telemetry_status
                 item.completed_at = now
                 changed = True
                 filename = getattr(printer_status, "gcode_file", None)
@@ -162,7 +175,7 @@ class PrintScheduler:
                         item.id,
                         item.printer_id,
                         {
-                            "status": queue_status,
+                            "status": telemetry_status,
                             "filename": filename or f"queue-dispatch-{item.id}",
                             "subtask_name": "",
                             "subtask_id": dispatch_subtask_id,
@@ -179,8 +192,7 @@ class PrintScheduler:
                 )
                 continue
 
-            printer_is_active = bool(printer_status and getattr(printer_status, "state", None) in _ACTIVE_PRINT_STATES)
-            if printer_is_active and dispatch_subtask_id and dispatch_subtask_id == printer_subtask_id:
+            if telemetry_status == "printing":
                 item.status = "printing"
                 item.started_at = now
                 item.error_message = None
@@ -196,70 +208,20 @@ class PrintScheduler:
                 is_stale = dispatched_at.timestamp() <= stale_before
             else:
                 # Rows from an interrupted upgrade have no attempt timestamp;
-                # make them retryable rather than reserving a printer forever.
+                # surface them for manual review immediately.
                 is_stale = True
             if is_stale:
-                if terminal_status in ("FINISH", "FAILED"):
-                    # The printer has definitely reached a terminal state, but
-                    # firmware did not provide an id that proves it belongs to
-                    # this dispatch. Retrying could duplicate a physical print;
-                    # fail closed and leave an auditable row for an operator to
-                    # review instead of treating the command as unacknowledged.
-                    item.status = "failed"
-                    item.completed_at = now
-                    item.error_message = (
-                        "Printer reported a terminal state without a matching submission id; "
-                        "manual review required to avoid a duplicate print."
-                    )
+                if item.error_message != _DISPATCH_REVIEW_MESSAGE:
+                    item.error_message = _DISPATCH_REVIEW_MESSAGE
                     changed = True
-                    if item.printer_id is not None:
-                        manual_review_printer_ids.add(item.printer_id)
-                    logger.error(
-                        "Recovered uncorrelated terminal queue dispatch %s as failed instead of retrying",
+                    logger.warning(
+                        "Holding stale unconfirmed queue dispatch %s for manual review (printer state=%s)",
                         item.id,
+                        terminal_status,
                     )
-                    continue
-                if printer_is_active:
-                    # An active printer proves that physical work is underway,
-                    # but not that it is this queue dispatch. Retrying after
-                    # that work finishes could duplicate this file, so require
-                    # an operator to resolve the uncorrelated attempt.
-                    item.status = "failed"
-                    item.completed_at = now
-                    item.error_message = (
-                        "Printer is active but did not report this dispatch's submission id; "
-                        "manual review required to avoid a duplicate print."
-                    )
-                    changed = True
-                    if item.printer_id is not None:
-                        manual_review_printer_ids.add(item.printer_id)
-                    logger.error(
-                        "Recovered uncorrelated active queue dispatch %s as failed instead of retrying",
-                        item.id,
-                    )
-                    continue
-                item.status = "pending"
-                item.dispatched_at = None
-                item.dispatch_subtask_id = None
-                item.started_at = None
-                item.error_message = "Printer did not acknowledge print command; queued for retry."
-                changed = True
-                if item.printer_id is not None:
-                    requeued_printer_ids.add(item.printer_id)
-                logger.warning("Recovered stale unacknowledged queue dispatch %s back to pending", item.id)
 
         if changed:
             await db.commit()
-        for printer_id in manual_review_printer_ids:
-            # An uncorrelated active or terminal printer state cannot safely
-            # enter the normal completion handler. Preserve the plate-clear
-            # gate before an operator decides how to resolve the print.
-            printer_manager.set_awaiting_plate_clear(printer_id, True)
-        if requeued_printer_ids:
-            from backend.app.main import unregister_expected_print
-
-            for printer_id in requeued_printer_ids:
-                unregister_expected_print(printer_id)
         for queue_item_id in promoted_ids:
             spawn_background_task(
                 self._publish_queue_job_started(queue_item_id),
@@ -2704,15 +2666,6 @@ class PrintScheduler:
         printer_manager.set_awaiting_plate_clear(item.printer_id, False)
         logger.info("Queue item %s: Status set to 'dispatching', sending print command...", item.id)
 
-        # Capture state before dispatch so the watchdog can detect whether the
-        # printer actually transitioned (#967). Also capture subtask_id so the
-        # watchdog can recognise "command landed but state hasn't flipped yet"
-        # on slow H2D transitions (#1078).
-        pre_status = printer_manager.get_status(item.printer_id)
-        pre_state = getattr(pre_status, "state", None) if pre_status else None
-        pre_subtask_id = getattr(pre_status, "subtask_id", None) if pre_status else None
-        pre_gcode_file = getattr(pre_status, "gcode_file", None) if pre_status else None
-
         # #1721: respect the user's explicit timelapse choice. The #1397
         # force-on at dispatch was removed because it caused per-layer nozzle
         # parking on slicer profiles with Timelapse Type = Smooth. Finish-photo
@@ -2757,10 +2710,7 @@ class PrintScheduler:
             self._schedule_dispatch_confirmation(
                 queue_item_id=item.id,
                 printer_id=item.printer_id,
-                remote_filename=remote_filename,
-                pre_state=pre_state,
-                pre_subtask_id=pre_subtask_id,
-                pre_gcode_file=pre_gcode_file,
+                dispatch_subtask_id=dispatch_subtask_id,
             )
         else:
             # Clean up uploaded file from SD card to prevent phantom prints
@@ -2809,20 +2759,14 @@ class PrintScheduler:
         *,
         queue_item_id: int,
         printer_id: int,
-        remote_filename: str,
-        pre_state: str | None,
-        pre_subtask_id: str | None,
-        pre_gcode_file: str | None,
+        dispatch_subtask_id: str,
     ) -> None:
         """Run acknowledgement separately so one slow printer cannot block the queue."""
         spawn_background_task(
             self._confirm_dispatch(
                 queue_item_id=queue_item_id,
                 printer_id=printer_id,
-                remote_filename=remote_filename,
-                pre_state=pre_state,
-                pre_subtask_id=pre_subtask_id,
-                pre_gcode_file=pre_gcode_file,
+                dispatch_subtask_id=dispatch_subtask_id,
             ),
             name=f"confirm-queue-dispatch-{queue_item_id}",
         )
@@ -2832,10 +2776,7 @@ class PrintScheduler:
         *,
         queue_item_id: int,
         printer_id: int,
-        remote_filename: str,
-        pre_state: str | None,
-        pre_subtask_id: str | None,
-        pre_gcode_file: str | None,
+        dispatch_subtask_id: str,
     ) -> None:
         """Promote a durable dispatch only after printer telemetry confirms it.
 
@@ -2844,16 +2785,14 @@ class PrintScheduler:
         printer in the fleet.
         """
         try:
-            acked, landed_on_subtask, last_status = await self._wait_for_print_start_ack(
+            telemetry_status, last_status = await self._wait_for_print_start_ack(
                 printer_id,
-                pre_state,
-                pre_subtask_id=pre_subtask_id,
-                pre_gcode_file=pre_gcode_file,
+                dispatch_subtask_id=dispatch_subtask_id,
             )
         except Exception:
             logger.exception("Queue item %s: dispatch confirmation crashed", queue_item_id)
             return
-        if acked:
+        if telemetry_status == "printing":
 
             async def _promote(db: AsyncSession) -> bool:
                 item = await db.get(PrintQueueItem, queue_item_id)
@@ -2872,48 +2811,41 @@ class PrintScheduler:
             await self._publish_queue_job_started(queue_item_id)
             return
 
-        current_gcode_file = getattr(last_status, "gcode_file", None) if last_status else None
-        message = (
-            "Printer did not acknowledge print command; queued for retry. "
-            "Check the printer for a pending error, plate-clear prompt, or SD card issue."
-        )
+        if telemetry_status in ("completed", "failed"):
+            # The completion callback or the next recovery pass owns terminal
+            # side effects; never turn a correlated terminal print into a retry.
+            return
 
-        async def _return_to_pending(db: AsyncSession) -> bool:
+        async def _hold_for_review(db: AsyncSession) -> bool:
             item = await db.get(PrintQueueItem, queue_item_id)
             if not item or item.status != "dispatching":
                 return False
-            item.status = "pending"
-            item.dispatched_at = None
-            item.dispatch_subtask_id = None
-            item.started_at = None
-            item.error_message = message
+            item.error_message = _DISPATCH_REVIEW_MESSAGE
             await db.commit()
             return True
 
-        reverted = await run_with_retry(_return_to_pending, label=f"revert queue dispatch {queue_item_id}")
-        if not reverted:
+        held = await run_with_retry(_hold_for_review, label=f"hold queue dispatch {queue_item_id}")
+        if not held:
             return
-        from backend.app.main import unregister_expected_print
-
-        unregister_expected_print(printer_id, remote_filename)
-        if landed_on_subtask or (current_gcode_file is not None and current_gcode_file != pre_gcode_file):
+        if telemetry_status == "dispatching":
             logger.warning(
-                "Queue item %s: printer %d received project_file but did not enter an active state; reverted to pending",
+                "Queue item %s: printer %d received project_file but did not enter a correlated active state; "
+                "held for manual review",
                 queue_item_id,
                 printer_id,
             )
             return
 
         logger.warning(
-            "Queue item %s: printer %d did not acknowledge print command; reverted to pending",
+            "Queue item %s: printer %d did not confirm print command; held for manual review",
             queue_item_id,
             printer_id,
         )
         client = printer_manager.get_client(printer_id)
         if client and hasattr(client, "force_reconnect_stale_session"):
+            current_state = getattr(last_status, "state", None) if last_status else None
             client.force_reconnect_stale_session(
-                f"queue print command unacknowledged after dispatch "
-                f"(state still {pre_state}, gcode_file {current_gcode_file!r})"
+                f"queue print command unacknowledged after dispatch (state {current_state})"
             )
 
     async def _publish_queue_job_started(self, queue_item_id: int) -> None:
@@ -2965,20 +2897,17 @@ class PrintScheduler:
     async def _wait_for_print_start_ack(
         self,
         printer_id: int,
-        pre_state: str | None,
-        pre_subtask_id: str | None = None,
-        pre_gcode_file: str | None = None,
+        dispatch_subtask_id: str,
         timeout: float = 90.0,
         phase_b_timeout: float = 180.0,
         poll_interval: float = 3.0,
-    ) -> tuple[bool, bool, object | None]:
+    ) -> tuple[str | None, object | None]:
         """Wait until a dispatched queue print reaches an active printer state.
 
         ``printer_manager.start_print()`` returning True only means the MQTT
         command was accepted locally. Dispatch is not considered successful
-        until the printer reports PREPARE/SLICING/RUNNING/PAUSE. A subtask_id
-        advance proves the project_file landed, but still requires a later
-        active-state transition before success is returned.
+        until the printer reports PREPARE/SLICING/RUNNING/PAUSE with the exact
+        submission id persisted for this attempt.
         """
         last_status = None
         landed_on_subtask = False
@@ -2989,9 +2918,10 @@ class PrintScheduler:
                 await asyncio.sleep(poll_interval)
                 continue
             last_status = status
-            if status.state in _ACTIVE_PRINT_STATES:
-                return True, landed_on_subtask, status
-            if pre_subtask_id is not None and status.subtask_id is not None and status.subtask_id != pre_subtask_id:
+            telemetry_status = _queue_status_from_dispatch_telemetry(status, dispatch_subtask_id)
+            if telemetry_status in ("printing", "completed", "failed"):
+                return telemetry_status, status
+            if telemetry_status == "dispatching":
                 landed_on_subtask = True
                 break
             await asyncio.sleep(poll_interval)
@@ -3004,17 +2934,11 @@ class PrintScheduler:
                 if not status:
                     continue
                 last_status = status
-                if status.state in _ACTIVE_PRINT_STATES:
-                    return True, True, status
+                telemetry_status = _queue_status_from_dispatch_telemetry(status, dispatch_subtask_id)
+                if telemetry_status in ("printing", "completed", "failed"):
+                    return telemetry_status, status
 
-        current_gcode_file = getattr(last_status, "gcode_file", None) if last_status else None
-        if current_gcode_file is not None and current_gcode_file != pre_gcode_file:
-            logger.warning(
-                "Queue dispatch for printer %d changed gcode_file to %r but never reached an active state",
-                printer_id,
-                current_gcode_file,
-            )
-        return False, landed_on_subtask, last_status
+        return ("dispatching" if landed_on_subtask else None), last_status
 
 
 # Global scheduler instance

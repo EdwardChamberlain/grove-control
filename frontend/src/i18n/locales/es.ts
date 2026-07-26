@@ -933,7 +933,7 @@ export default {
       deleteButton: 'Eliminar',
       deletePurgeStats: 'Eliminar también esta impresión de las estadísticas rápidas (filamento, tiempo, coste, energía)',
       deleteQueueItemsWarning: 'También se eliminarán {{count}} elemento(s) de la cola vinculado(s) a este archivo.',
-      deleteBlockedByPrinting: 'No se puede eliminar — {{count}} elemento(s) de la cola se están imprimiendo. Detén la impresión primero y vuelve a intentarlo.',
+      deleteBlockedByPrinting: 'No se puede eliminar — {{count}} elemento(s) de la cola se están enviando o imprimiendo. Detén el trabajo activo y vuelve a intentarlo.',
       removeSource3mf: 'Eliminar 3MF de origen',
       removeSource3mfConfirm: '¿Está seguro de que desea eliminar el archivo 3MF de origen de "{{name}}"? Esto eliminará el archivo de proyecto original del laminador.',
       removeButton: 'Eliminar',

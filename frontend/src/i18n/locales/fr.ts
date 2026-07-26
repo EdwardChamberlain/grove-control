@@ -933,7 +933,7 @@ export default {
       deleteButton: 'Supprimer',
       deletePurgeStats: 'Retirer également cette impression des Quick Stats (filament, temps, coût, énergie)',
       deleteQueueItemsWarning: '{{count}} élément(s) de file d\'attente lié(s) à cette archive seront également supprimé(s).',
-      deleteBlockedByPrinting: 'Suppression impossible — {{count}} élément(s) de file d\'attente en cours d\'impression. Arrêtez l\'impression d\'abord, puis réessayez.',
+      deleteBlockedByPrinting: 'Suppression impossible — {{count}} élément(s) de file d\'attente en cours d\'envoi ou d\'impression. Arrêtez d\'abord la tâche active, puis réessayez.',
       removeSource3mf: 'Retirer Source 3MF',
       removeSource3mfConfirm: 'Retirer le fichier 3MF de "{{name}}" ?',
       removeButton: 'Retirer',

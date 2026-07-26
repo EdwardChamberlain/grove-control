@@ -203,6 +203,7 @@ describe('QueuePage', () => {
     });
 
     it('shows dispatching items as active without calling them printing', async () => {
+      const user = userEvent.setup();
       server.use(
         http.get('/api/v1/queue/', () => HttpResponse.json([
           ...mockQueueItems,
@@ -221,7 +222,15 @@ describe('QueuePage', () => {
         expect(screen.getByText('Active jobs')).toBeInTheDocument();
         expect(screen.getByText('Awaiting printer acknowledgement')).toBeInTheDocument();
         expect(screen.getByText('Dispatching')).toBeInTheDocument();
+        expect(screen.getByTestId('queue-stat-printing')).toHaveTextContent(/1\s*Printing/);
+        expect(screen.getByTestId('queue-stat-queued')).toHaveTextContent(/2\s*Queued/);
+        expect(screen.getAllByTitle('Stop Print')).toHaveLength(2);
       });
+
+      await user.click(screen.getByRole('button', { name: /Timeline/ }));
+      const timelineItem = await screen.findByTestId('queue-timeline-item-4');
+      expect(timelineItem).toHaveAttribute('data-status', 'dispatching');
+      expect(timelineItem).toHaveTextContent('Dispatching');
     });
 
     it('shows completed items in history', async () => {
