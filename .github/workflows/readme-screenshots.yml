@@ -1,0 +1,91 @@
+name: Refresh README screenshots
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-readme-screenshots
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Regenerate and commit screenshots
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Require the dev branch
+        env:
+          SELECTED_REF: ${{ github.ref }}
+        run: |
+          if [[ "$SELECTED_REF" != "refs/heads/dev" ]]; then
+            echo "::error::Run this workflow with the dev branch selected."
+            exit 1
+          fi
+
+      - name: Check out dev
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: dev
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Generate README screenshots
+        working-directory: frontend
+        run: npm run generate:readme-screenshots
+
+      - name: Verify generated change scope
+        shell: bash
+        run: |
+          unexpected=0
+          while IFS= read -r status_line; do
+            path="${status_line:3}"
+            case "$path" in
+              docs/screenshots/kiosk-mode.png|docs/screenshots/print-modal.png|docs/screenshots/printer-health.png|docs/screenshots/printers-cockpit.png|docs/screenshots/printers-list.png)
+                ;;
+              *)
+                echo "::error file=$path::Screenshot generation changed an unexpected file."
+                unexpected=1
+                ;;
+            esac
+          done < <(git status --porcelain=v1 --untracked-files=all)
+          exit "$unexpected"
+
+      - name: Commit refreshed screenshots
+        shell: bash
+        run: |
+          screenshots=(
+            docs/screenshots/kiosk-mode.png
+            docs/screenshots/print-modal.png
+            docs/screenshots/printer-health.png
+            docs/screenshots/printers-cockpit.png
+            docs/screenshots/printers-list.png
+          )
+
+          if [[ -z "$(git status --porcelain -- "${screenshots[@]}")" ]]; then
+            echo "README screenshots are already current."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- "${screenshots[@]}"
+          git commit -m "docs: refresh README screenshots"
+          git push origin HEAD:dev
