@@ -89,6 +89,8 @@ class CopyResult:
     omitted_columns: dict[str, list[str]]
     reset_counts: dict[str, int]
     export_tables: set[str]
+    nullified_foreign_keys: dict[str, int]
+    deleted_orphan_rows: dict[str, int]
 
 
 def _default_database_path() -> Path:
@@ -154,6 +156,69 @@ def _table_columns(connection: sqlite3.Connection, table: str) -> list[str]:
     return [row[1] for row in connection.execute(f"PRAGMA table_info({_quote_identifier(table)})")]
 
 
+def _repair_orphaned_foreign_keys(
+    connection: sqlite3.Connection,
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Apply the target schema's safe orphan semantics to copied legacy rows.
+
+    Older SQLite installations often ran without foreign-key enforcement, so
+    historical rows can reference parents that were later deleted. Nullable
+    references are cleared while preserving the row. A required relationship
+    is removed only when its declared ``ON DELETE CASCADE`` says the child
+    should already have disappeared. Everything else remains a hard failure.
+    """
+    violations = connection.execute("PRAGMA foreign_key_check").fetchall()
+    if not violations:
+        return {}, {}
+
+    nullified: dict[str, int] = {}
+    deleted: dict[str, int] = {}
+    try:
+        connection.execute("BEGIN")
+        for table, rowid, _parent, foreign_key_id in violations:
+            if rowid is None:
+                continue
+
+            foreign_key_rows = [
+                row
+                for row in connection.execute(f"PRAGMA foreign_key_list({_quote_identifier(table)})")
+                if row[0] == foreign_key_id
+            ]
+            if not foreign_key_rows:
+                continue
+
+            child_columns = [row[3] for row in foreign_key_rows]
+            column_nullable = {
+                row[1]: not bool(row[3]) and not bool(row[5])
+                for row in connection.execute(f"PRAGMA table_info({_quote_identifier(table)})")
+            }
+            quoted_table = _quote_identifier(table)
+
+            if all(column_nullable.get(column, False) for column in child_columns):
+                assignments = ", ".join(f"{_quote_identifier(column)} = NULL" for column in child_columns)
+                cursor = connection.execute(f"UPDATE {quoted_table} SET {assignments} WHERE rowid = ?", (rowid,))
+                if cursor.rowcount:
+                    key = f"{table}.{'+'.join(child_columns)}"
+                    nullified[key] = nullified.get(key, 0) + cursor.rowcount
+                continue
+
+            if all(str(row[6]).upper() == "CASCADE" for row in foreign_key_rows):
+                cursor = connection.execute(f"DELETE FROM {quoted_table} WHERE rowid = ?", (rowid,))
+                if cursor.rowcount:
+                    deleted[table] = deleted.get(table, 0) + cursor.rowcount
+                continue
+
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+
+    remaining = connection.execute("PRAGMA foreign_key_check").fetchall()
+    if remaining:
+        raise RuntimeError(f"Foreign-key verification failed after safe orphan repair (first rows): {remaining[:10]!r}")
+    return nullified, deleted
+
+
 async def _build_current_schema(staging: Path) -> None:
     """Run the normal current schema creation and migrations on an empty DB."""
     from backend.app.core import database as database_module
@@ -212,6 +277,8 @@ def _copy_compatible_data(source_path: Path, destination_path: Path) -> CopyResu
     copied_counts: dict[str, int] = {}
     omitted_columns: dict[str, list[str]] = {}
     reset_counts: dict[str, int] = {}
+    nullified_foreign_keys: dict[str, int] = {}
+    deleted_orphan_rows: dict[str, int] = {}
     try:
         source_tables = _regular_tables(source)
         destination_tables = _regular_tables(destination)
@@ -279,13 +346,18 @@ def _copy_compatible_data(source_path: Path, destination_path: Path) -> CopyResu
         if missing_critical:
             raise RuntimeError("Critical table(s) were not restored: " + ", ".join(sorted(missing_critical)))
 
-        foreign_key_errors = destination.execute("PRAGMA foreign_key_check").fetchmany(10)
-        if foreign_key_errors:
-            raise RuntimeError(f"Foreign-key verification failed (first rows): {foreign_key_errors!r}")
+        nullified_foreign_keys, deleted_orphan_rows = _repair_orphaned_foreign_keys(destination)
     finally:
         destination.close()
         source.close()
-    return CopyResult(copied_counts, omitted_columns, reset_counts, export_tables)
+    return CopyResult(
+        copied_counts,
+        omitted_columns,
+        reset_counts,
+        export_tables,
+        nullified_foreign_keys,
+        deleted_orphan_rows,
+    )
 
 
 def _remove_wal_sidecars(database: Path) -> None:
@@ -351,6 +423,14 @@ def main() -> int:
     if copy_result.reset_counts:
         print("Reset transient rows:")
         for table, count in sorted(copy_result.reset_counts.items()):
+            print(f"  {table}: {count}")
+    if copy_result.nullified_foreign_keys:
+        print("Cleared dangling optional references while preserving their rows:")
+        for relationship, count in sorted(copy_result.nullified_foreign_keys.items()):
+            print(f"  {relationship}: {count}")
+    if copy_result.deleted_orphan_rows:
+        print("Removed orphan rows whose schema declares ON DELETE CASCADE:")
+        for table, count in sorted(copy_result.deleted_orphan_rows.items()):
             print(f"  {table}: {count}")
     if copy_result.omitted_columns:
         print("Legacy-only columns not present in the current schema were not copied:")

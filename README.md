@@ -191,6 +191,13 @@ pipeline, bug-report, and sponsor UI tables are also exported to a timestamped
 table, row-count mismatch, or foreign-key failure aborts without replacing the
 live database.
 
+Legacy databases may contain dangling references because SQLite foreign-key
+checks were historically disabled on some connections. During conversion,
+nullable references (for example a print log whose original user was deleted)
+are cleared while retaining the record. Orphan rows are removed only when the
+current schema explicitly declares `ON DELETE CASCADE`; all other unresolved
+foreign-key problems still abort the replacement and leave the backup intact.
+
 **Custom Port:**
 
 ```yaml
