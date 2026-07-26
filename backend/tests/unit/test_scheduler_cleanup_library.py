@@ -109,7 +109,14 @@ async def queue_factory(tmp_path):
         await engine.dispose()
 
 
-async def _dispatch_library_item(ctx, *, archive_failure=False, unlink_side_effect=None, printer_status=None):
+async def _dispatch_library_item(
+    ctx,
+    *,
+    archive_failure=False,
+    unlink_side_effect=None,
+    printer_status=None,
+    printer_statuses=None,
+):
     scheduler = PrintScheduler()
 
     async def archive_print(self, *, printer_id, source_file, original_filename, created_by_id=None, project_id=None):
@@ -138,13 +145,18 @@ async def _dispatch_library_item(ctx, *, archive_failure=False, unlink_side_effe
         await self.db.flush()
         return archive
 
+    status_mock = (
+        MagicMock(side_effect=printer_statuses)
+        if printer_statuses is not None
+        else MagicMock(return_value=printer_status)
+    )
     patches = [
         patch.object(scheduler_module.settings, "base_dir", ctx.base_dir),
         patch("backend.app.services.archive.ArchiveService.archive_print", new=archive_print),
         patch("backend.app.services.print_scheduler.printer_manager.is_connected", MagicMock(return_value=True)),
         patch(
             "backend.app.services.print_scheduler.printer_manager.get_status",
-            MagicMock(return_value=printer_status),
+            status_mock,
         ),
         patch(
             "backend.app.services.print_scheduler.printer_manager.send_drying_command",
@@ -158,12 +170,12 @@ async def _dispatch_library_item(ctx, *, archive_failure=False, unlink_side_effe
         patch("backend.app.services.print_scheduler.delete_file_async", AsyncMock(return_value=True)),
         patch("backend.app.services.print_scheduler.upload_file_async", ctx.upload),
         patch("backend.app.services.print_scheduler.cache_3mf_download", MagicMock()),
-        patch("backend.app.services.print_scheduler.spawn_background_task", MagicMock()),
         patch("backend.app.services.notification_service.notification_service.on_queue_job_started", AsyncMock()),
         patch("backend.app.services.notification_service.notification_service.on_queue_job_failed", AsyncMock()),
         patch("backend.app.services.mqtt_relay.mqtt_relay.on_queue_job_started", AsyncMock()),
         patch.object(scheduler, "_propagate_owner_to_printer_manager", AsyncMock()),
         patch.object(scheduler, "_power_off_if_needed", AsyncMock()),
+        patch.object(scheduler, "_schedule_dispatch_confirmation", MagicMock()),
     ]
     if unlink_side_effect:
         patches.append(patch.object(type(ctx.source_path), "unlink", unlink_side_effect))
@@ -289,6 +301,61 @@ async def test_final_dispatch_boundary_can_wait_for_natural_drying_completion(qu
     assert library_file is not None
     assert archive is not None
     ctx.stop_drying.assert_not_called()
+    ctx.start_print.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("wait_for_drying_complete", "waiting_reason"),
+    [
+        (False, "Stopping AMS drying before dispatch"),
+        (True, "Waiting for AMS drying to complete"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_command_boundary_releases_reservation_if_drying_starts_after_final_check(
+    queue_factory,
+    wait_for_drying_complete,
+    waiting_reason,
+):
+    """Never publish project_file when drying starts during reservation setup."""
+    ctx = await queue_factory(
+        cleanup=True,
+        wait_for_drying_complete=wait_for_drying_complete,
+    )
+    clear = SimpleNamespace(raw_data={"ams": [{"id": 0, "dry_time": 0}]})
+    drying = SimpleNamespace(raw_data={"ams": [{"id": 0, "dry_time": 120}]})
+
+    with (
+        patch("backend.app.main.register_expected_print") as register_expected,
+        patch("backend.app.main.unregister_expected_print") as unregister_expected,
+        patch(
+            "backend.app.services.print_scheduler.printer_manager.clear_current_print_user"
+        ) as clear_current_print_user,
+    ):
+        await _dispatch_library_item(
+            ctx,
+            # First read: clear at the post-upload check. Second read: drying
+            # at the command boundary. Under the stop-first policy, a third
+            # read lets _stop_drying confirm which AMS still needs the command.
+            printer_statuses=[clear, drying, drying],
+        )
+
+    item, library_file, archive = await _queue_snapshot(ctx)
+    assert item.status == "pending"
+    assert item.dispatched_at is None
+    assert item.dispatch_subtask_id is None
+    assert item.waiting_reason == waiting_reason
+    assert item.library_file_id is None
+    assert item.archive_id == archive.id
+    assert library_file is None
+    assert ctx.archive_path.exists()
+    register_expected.assert_called_once()
+    unregister_expected.assert_called_once()
+    clear_current_print_user.assert_called_once_with(ctx.printer_id)
+    if wait_for_drying_complete:
+        ctx.stop_drying.assert_not_called()
+    else:
+        ctx.stop_drying.assert_called_once_with(ctx.printer_id, 0, 0, 0, mode=0)
     ctx.start_print.assert_not_called()
 
 

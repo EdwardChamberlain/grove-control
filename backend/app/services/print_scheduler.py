@@ -1756,15 +1756,24 @@ class PrintScheduler:
         db: AsyncSession,
         item: PrintQueueItem,
         printer_id: int,
+        *,
+        active_ams_ids: tuple[int, ...] | None = None,
+        release_dispatch_reservation: bool = False,
     ) -> bool:
         """Apply a queue item's drying policy before any print command is sent.
 
         Returns True only when live telemetry reports no active AMS drying.
         With the default policy, stop commands are retried on each scheduler
         tick until the printer confirms ``dry_time == 0``. The opt-in wait
-        policy leaves all active cycles untouched.
+        policy leaves all active cycles untouched. When a final command-boundary
+        check discovers drying after the durable dispatch reservation was
+        created, ``release_dispatch_reservation`` returns the item to pending in
+        the same commit that records its drying waiting reason. A caller can
+        supply the active ids from its own just-in-time telemetry read so an
+        observed drying cycle cannot disappear between the gate and policy.
         """
-        active_ams_ids = self._active_drying_ams_ids(printer_id)
+        if active_ams_ids is None:
+            active_ams_ids = self._active_drying_ams_ids(printer_id)
         if not active_ams_ids:
             if item.waiting_reason in _DRYING_WAITING_MESSAGES:
                 item.waiting_reason = None
@@ -1778,8 +1787,19 @@ class PrintScheduler:
             stopped = await self._stop_drying(printer_id)
             waiting_reason = _STOPPING_DRYING_MESSAGE if stopped else _DRYING_STOP_FAILED_MESSAGE
 
+        needs_commit = False
+        if release_dispatch_reservation:
+            item.status = "pending"
+            item.dispatched_at = None
+            item.dispatch_subtask_id = None
+            item.started_at = None
+            item.completed_at = None
+            item.error_message = None
+            needs_commit = True
         if item.waiting_reason != waiting_reason:
             item.waiting_reason = waiting_reason
+            needs_commit = True
+        if needs_commit:
             await db.commit()
         logger.info(
             "Queue item %s waiting on printer %s AMS drying (%s; active AMS ids=%s)",
@@ -2753,7 +2773,7 @@ class PrintScheduler:
 
         # Clear the awaiting-plate-clear flag now that we're starting a new print
         printer_manager.set_awaiting_plate_clear(item.printer_id, False)
-        logger.info("Queue item %s: Status set to 'dispatching', sending print command...", item.id)
+        logger.info("Queue item %s: Status set to 'dispatching'; performing final pre-send checks", item.id)
 
         # #1721: respect the user's explicit timelapse choice. The #1397
         # force-on at dispatch was removed because it caused per-layer nozzle
@@ -2768,6 +2788,32 @@ class PrintScheduler:
         # Bambu Studio's project_file on VP intake (#1780); the MQTT layer
         # parses + injects it only for dual-nozzle models so a null on every
         # other model is a transparent pass-through.
+        #
+        # This second live check is deliberately the final operation before
+        # project_file publish. The earlier post-upload check avoids creating a
+        # reservation for known drying, while this one closes the narrow window
+        # in which drying can begin during the reservation commit/setup above.
+        command_boundary_drying = self._active_drying_ams_ids(item.printer_id)
+        if command_boundary_drying:
+            await self._prepare_drying_for_dispatch(
+                db,
+                item,
+                item.printer_id,
+                active_ams_ids=command_boundary_drying,
+                release_dispatch_reservation=True,
+            )
+            if archive:
+                from backend.app.main import unregister_expected_print
+
+                unregister_expected_print(item.printer_id, remote_filename)
+            printer_manager.clear_current_print_user(item.printer_id)
+            logger.info(
+                "Queue item %s: released dispatch reservation because printer %s began drying",
+                item.id,
+                item.printer_id,
+            )
+            return
+
         started = printer_manager.start_print(
             item.printer_id,
             remote_filename,
