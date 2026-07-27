@@ -279,11 +279,11 @@ export function PrinterSelector({
     return [...new Set(models)].sort();
   }, [activePrinters]);
 
-  // Prefer the farm's P1S pool, while still keeping the default usable for
-  // installations that do not have a P1S.
+  // Keep model-based assignment aligned with the sliced file when possible.
+  // For files without a known target model, prefer the farm's P1S pool.
   const defaultModel = useMemo(() => {
-    if (uniqueModels.includes('P1S')) return 'P1S';
     if (slicedForModel && uniqueModels.includes(slicedForModel)) return slicedForModel;
+    if (uniqueModels.includes('P1S')) return 'P1S';
     return uniqueModels[0] ?? null;
   }, [slicedForModel, uniqueModels]);
 
@@ -373,6 +373,7 @@ export function PrinterSelector({
 
   const isSelected = (printerId: number) => selectedPrinterIds.includes(printerId);
   const selectedCount = selectedPrinterIds.length;
+  const selectedModelLabel = targetModel || defaultModel || slicedForModel || 'Model';
 
   const getPrinterMappingResult = (printerId: number) => {
     return printerMappingResults?.find((r) => r.printerId === printerId);
@@ -397,7 +398,7 @@ export function PrinterSelector({
             }`}
           >
             <Users className="w-4 h-4" />
-            <span className="text-sm">Any {targetModel || defaultModel || slicedForModel || 'Model'}</span>
+            <span className="text-sm">{`Print on any machine of this type (Any ${selectedModelLabel})`}</span>
           </button>
           <button
             type="button"
@@ -412,7 +413,7 @@ export function PrinterSelector({
             }`}
           >
             <PrinterIcon className="w-4 h-4" />
-            <span className="text-sm">Specific Printer</span>
+            <span className="text-sm">Print on a specific machine</span>
           </button>
         </div>
       )}

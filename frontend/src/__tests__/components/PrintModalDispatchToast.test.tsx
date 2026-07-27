@@ -66,7 +66,7 @@ describe('PrintModal dispatch toast', () => {
     );
 
     // Wait for printers to load, then select one
-    await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
+    await user.click(await screen.findByRole('button', { name: 'Print on a specific machine' }));
     await waitFor(() => {
       expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
     });
