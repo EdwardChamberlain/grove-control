@@ -358,6 +358,9 @@ export default {
     toast: {
       printerDeleted: 'Printer deleted',
       missingSpoolAssignment: 'Print started on {{printer}}. Missing spool assignment for: {{slots}}',
+      assignmentVerified: 'Filament loaded on slot {{slot}} ({{printer}})',
+      assignmentVerifiedNoKprofile: 'Slot {{slot}} on {{printer}} loaded, but the flow calibration (K-profile) was not applied',
+      assignmentNotConfirmed: 'Could not confirm the assignment for slot {{slot}} on {{printer}} — check the AMS slot',
       printerAdded: 'Printer added',
       printerUpdated: 'Printer updated',
       failedToDelete: 'Failed to delete printer',
@@ -425,6 +428,7 @@ export default {
       unload: 'Unload',
     },
     bedJog: {
+      limitWarning: 'Travel limits are not enforced during manual moves — a Bambu firmware bug ignores software endstops for remote commands. Move carefully to avoid a collision.',
       title: 'Jog Controls',
       bed: 'Bed',
       step: 'Step (mm)',
@@ -480,6 +484,8 @@ export default {
       skip: 'Skip',
       confirmTitle: 'Skip Object?',
       confirmMessage: 'Are you sure you want to skip "{{name}}"? This cannot be undone.',
+      confirmAllMessage: 'All remaining objects are selected. This will stop the print job. Continue?',
+      confirmMultipleMessage: 'Skip {{count}} selected objects? This cannot be undone.',
     },
     // Confirm modals
     confirm: {
@@ -606,6 +612,12 @@ export default {
     activeJobSlot: {
       title: 'This slot is filament {{n}} in the active print',
       ariaLabel: 'Active print slot {{n}}',
+    },
+    expectedSlot: {
+      title: 'The printer is waiting for filament in this slot',
+      ariaLabel: 'Expected filament slot {{n}}',
+      label: '{{ams}} · Slot {{slot}}',
+      external: 'External spool',
     },
     // Filaments section
     filaments: 'Filaments',
@@ -1207,6 +1219,8 @@ export default {
     history: {
       emptyTitle: 'No history yet',
       emptyDescription: 'Completed, cancelled, and failed prints will appear here.',
+      showMore: 'Show more',
+      showingCount: 'Showing {{shown}} of {{total}}',
     },
     // Drag ghost label when multi-dragging
     dragGhost: {
@@ -2094,6 +2108,10 @@ export default {
     tempFanPresetsChamber: 'Chamber temperature',
     tempFanPresetsFan: 'Fan speed',
     tempFanPresetsReset: 'Reset to defaults',
+    concurrentUploadsTitle: 'Concurrent Uploads',
+    concurrentUploadsDescription: 'How many printers the queue may send files to at the same time. Printers receive files slowly (a large print can take several minutes), and each one waits its turn — so on a bigger fleet, raising this is what stops the last printer in a batch from waiting out every transfer before it. Lower it if your network or Bambuddy host struggles with parallel transfers.',
+    concurrentUploadsLabel: 'Printers uploaded to at once',
+    concurrentUploadsHelp: '1 sends to one printer at a time (the old behaviour). Default is 4.',
     staggeredStart: 'Staggered Start',
     staggeredStartDescription: 'Default group size and interval when staggering multi-printer batch starts. Can be overridden per batch in the print modal.',
     preheatTitle: 'Preheat & Heat Soak',
@@ -2114,6 +2132,9 @@ export default {
     preheatOverride_inherit: 'Inherit',
     preheatOverride_on: 'On',
     preheatOverride_off: 'Off',
+    calibrationMode_off: 'Off',
+    calibrationMode_on: 'On',
+    calibrationMode_auto: 'Auto',
     preheatTargetOverride: 'Chamber target override (°C, blank = filament default)',
     plateClear: 'Plate-Clear Confirmation',
     requirePlateClear: 'Require plate-clear confirmation',
@@ -2829,6 +2850,9 @@ export default {
     clearFailed: 'Failed to clear HMS errors',
     actionSuccess: 'Action sent to printer',
     actionFailed: 'Failed to send action',
+    runoutExpectedSlot: 'Filament ran out in {{ranOut}}. The printer is now waiting for compatible filament in {{expected}}. Insert a spool into {{expected}}, then select Retry.',
+    runoutExpectedSlotOnly: 'The printer is waiting for compatible filament in {{expected}}. Insert a spool there, then select Retry.',
+    runoutSlotUnknown: 'Filament ran out and the print is paused. Bambuddy could not determine which slot the printer now expects — check the printer screen for the requested slot.',
     actions: {
       RESUME_PRINTING: "Resume Printing",
       RESUME_PRINTING_DEFECTS: "Resume (defects acceptable)",
@@ -3279,37 +3303,24 @@ export default {
     },
     orcaCloud: {
       connectedAs: 'Connected as',
+      connectedShort: 'Connected to Orca Cloud',
       logout: 'Disconnect',
       noLogoutPermission: 'You do not have permission to disconnect',
       noConnectPermission: 'You do not have permission to connect to Orca Cloud',
       retry: 'Retry',
-      back: 'Use a different sign-in method',
+      connectButton: 'Connect Orca Cloud',
       connect: {
         title: 'Connect to Orca Cloud',
         description: 'Sign in to your Orca Cloud account to sync your slicer profiles into Bambuddy.',
       },
-      providers: {
-        google: 'Sign in with Google',
-        apple: 'Sign in with Apple',
-        github: 'Sign in with GitHub',
-        email: 'Sign in with email and password',
-      },
-      password: {
-        title: 'Sign in with email and password',
-        email: 'Email',
-        emailPlaceholder: 'you@example.com',
-        password: 'Password',
-        submit: 'Sign in',
-      },
-      paste: {
-        title: 'Finish signing in',
-        step1: 'A new tab opened with the Orca Cloud sign-in page. Sign in with your Orca account.',
-        step2: 'Your browser will be redirected to a "localhost" URL that fails to load. That is expected — the URL is what we need.',
-        step3: 'Copy the entire URL from your browser\'s address bar and paste it below.',
-        signInUrl: 'If the sign-in tab did not open, click this URL:',
-        label: 'Paste the callback URL here',
-        placeholder: 'http://localhost:41172/callback?code=...&state=...',
-        submit: 'Finish connecting',
+      device: {
+        title: 'Approve Bambuddy in Orca Cloud',
+        instruction: 'Open Orca Cloud and approve this code. Bambuddy connects automatically once you approve.',
+        codeLabel: 'Your pairing code',
+        openButton: 'Open Orca Cloud approval page',
+        manualHint: 'Or go to {{url}} and enter the code above.',
+        waiting: 'Waiting for you to approve…',
+        cancel: 'Cancel',
       },
       profiles: {
         title: 'Your Orca Cloud profiles ({{count}})',
@@ -3317,16 +3328,13 @@ export default {
         empty: 'No profiles found in your Orca Cloud account yet.',
       },
       toast: {
-        connected: 'Connected to Orca Cloud as {{email}}',
         disconnected: 'Disconnected from Orca Cloud',
       },
       errors: {
-        startFailed: 'Could not start the Orca Cloud sign-in flow.',
-        finishFailed: 'Could not finish the Orca Cloud sign-in.',
-        passwordFailed: 'Could not sign in with that email and password.',
-        passwordEmpty: 'Please enter both your email and password.',
-        emptyPaste: 'Please paste the callback URL from your browser.',
-        noCode: 'That URL does not look like an Orca Cloud callback (no code parameter). Copy the full URL from your address bar.',
+        startFailed: 'Could not start Orca Cloud pairing.',
+        denied: 'The pairing was denied in Orca Cloud.',
+        expired: 'The pairing code expired. Click Connect to try again.',
+        pollFailed: 'Lost the connection while waiting for approval. Please try again.',
       },
     },
     localProfiles: {
@@ -3365,6 +3373,8 @@ export default {
       },
     },
     connectedAs: 'Connected as',
+    signInExpiredTitle: 'Bambu Cloud sign-in expired',
+    signInExpiredBody: 'Bambu Lab no longer accepts the stored token. Sign in again to restore cloud profiles, MakerWorld imports and firmware checks.',
     logout: 'Logout',
     noLogoutPermission: 'You do not have permission to logout',
     failedToLoad: 'Failed to load profiles',
@@ -3668,6 +3678,9 @@ export default {
     prints: 'Prints',
     ascending: 'Ascending',
     descending: 'Descending',
+    showModified: 'Show modified dates',
+    hideModified: 'Hide modified dates',
+    lastModified: 'Last modified',
     resultsCount: '{{showing}} of {{total}} files',
     selectAll: 'Select All',
     deselectAll: 'Deselect All',
@@ -3978,6 +3991,10 @@ export default {
     toastArchives: '{{count}} prints archived with Bambuddy. See who keeps it independent.',
     toastAnniversary: 'One year with Bambuddy! See who keeps the project independent.',
     toastVersionUpdate: 'Updated to v{{version}}. Bambuddy stays free thanks to its supporters.',
+    toastBusiness: "Running Bambuddy on {{count}} printers? There's a support plan for teams — priority fixes, invoicing, and a direct line to the maintainer.",
+    businessCta: 'Bambuddy for business',
+    businessTitle: 'Bambuddy for business',
+    businessTagline: "You're running {{count}} printers. Priority support, commercial licensing and invoicing are available for teams and print farms.",
   },
 
   // Library (K Profiles)
@@ -4062,6 +4079,8 @@ export default {
     refreshPresets: 'Refresh',
     refreshPresetsTitle: 'Refresh presets — fetch the latest cloud and bundled listings (use after deleting a preset in Bambu Studio or Bambu Handy)',
     allPresetsRequired: 'All presets must be selected',
+    useEmbedded: "Use the file's built-in settings",
+    useEmbeddedHint: "Slice it the way the designer set it up (walls, infill, filament) instead of the profiles above. Offered because your printer matches the file's.",
     enqueuing: 'Submitting slice job…',
     queued: 'Queued…',
     failed: 'Slicing failed. Check the slicer sidecar logs.',
@@ -4644,6 +4663,7 @@ export default {
     overrideWith: 'Override with',
     resetToOriginal: 'Reset to original',
     insufficientFilamentTitle: 'Not enough filament',
+    waitingForAmsStatus: 'Waiting for AMS status from {{printer}}…',
     insufficientFilamentMessage: 'Some assigned spools have less filament remaining than this print needs:',
     insufficientFilamentLine: '{{printer}} - {{slot}}: needs {{required}}g, remaining {{remaining}}g',
     printAnyway: 'Print anyway',
@@ -5310,6 +5330,8 @@ export default {
     autoOffDescription: 'Turn off when print completes (one-shot)',
     autoOffPersistent: 'Keep Enabled',
     autoOffPersistentDescription: 'Stay enabled between prints instead of one-shot',
+    controlsPrinterPower: 'Powers the printer',
+    controlsPrinterPowerDescription: 'Turn off if this plug only powers an accessory (filter fan, lights). Otherwise switching it off marks the printer offline.',
     autoOffAfterDrying: 'Auto Off After Drying',
     autoOffAfterDryingDescription: 'Turn off when AMS drying completes',
     delayAfterDryingMinutes: 'Drying delay (minutes)',
@@ -5595,6 +5617,8 @@ export default {
     userKey: 'User Key',
     appToken: 'App Token',
     priority: 'Priority',
+    pushoverRetry: 'Emergency Retry (s)',
+    pushoverExpire: 'Emergency Expire (s)',
     botToken: 'Bot Token',
     chatId: 'Chat ID',
     smtpServer: 'SMTP Server',
@@ -6535,6 +6559,8 @@ export default {
     resolveButton: 'Resolve',
     signInRequiredTitle: 'Bambu Cloud sign-in required to download',
     signInRequiredBody: 'You can browse model details anonymously, but MakerWorld requires a Bambu Cloud account to download 3MF files.',
+    signInExpiredTitle: 'Bambu Cloud sign-in expired',
+    signInExpiredBody: 'You are still signed in to Bambuddy, but Bambu Lab has stopped accepting the stored token, so downloads will fail. Sign in to Bambu Cloud again.',
     openCloudSettings: 'Open Cloud settings',
     untitledModel: 'Untitled model',
     byCreator: 'by {{name}}',
@@ -6711,6 +6737,7 @@ export default {
     scope: {
       camera_stream: 'Camera stream',
       camwall: 'Cam Wall',
+      overlay: 'Streaming Overlay',
     },
     title: 'Camera API Tokens',
     navTitle: 'Camera API tokens',
@@ -6729,6 +6756,8 @@ export default {
         'A camera-stream token can only fetch camera streams and snapshots. Use it for Home Assistant, Frigate, or anything embedding a single camera.',
       hintCamWall:
         "A Cam Wall token opens /camwall on a screen with no login. It can see every printer's name and state, and their camera streams. It cannot see filenames, addresses or access codes.",
+      hintOverlay:
+        "A Streaming Overlay token opens /overlay/{printerId} on a screen with no login — for OBS or any live stream. It can see one printer's camera stream plus its live print status, including the filename shown on screen. It cannot see addresses or access codes.",
       title: 'Create new token',
       nameLabel: 'Token name',
       namePlaceholder: 'e.g. Home Assistant',
@@ -6741,6 +6770,9 @@ export default {
       camWallUrlTitle: 'Cam Wall URL for this display',
       camWallUrlHint:
         'Open this on the screen. Anyone who can read the URL can watch the wall, so treat it like a key — revoke the token to cut the display off.',
+      overlayUrlTitle: 'Overlay URL for OBS',
+      overlayUrlHint:
+        "Add this as a Browser Source in OBS. Change the /overlay/1 number to your printer's number (from its URL on the Printers page). Anyone who can read the URL can watch the stream, so treat it like a key — revoke the token to cut it off.",
       title: 'Token created — copy it now',
       warning:
         'This is the only time this token will be visible. After you close this dialog you can never view it again.',

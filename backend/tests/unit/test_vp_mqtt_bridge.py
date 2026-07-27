@@ -845,46 +845,49 @@ class TestPushStatusCache:
         await bridge.stop()
 
     @pytest.mark.asyncio
-    async def test_tray_exist_bits_skips_ams_ht_units(self):
-        """AMS-HT units (id >= 128) use a separate addressing scheme and
-        must not be touched by the bitmask cleanup — bit math at
-        global_bit = ams_id * 4 + tray_id would overrun normal AMS bits.
-        Pin the skip so future AMS-HT support doesn't accidentally wipe
-        loaded HT slots.
+    async def test_tray_exist_bits_clears_empty_ams_ht_unit(self):
+        """AMS-HT (id 128-135) presence rides bit 16+(ams_id-128), so the bridge
+        cache clears an empty HT slot just like the internal AMS card — keeping
+        the slicer-facing view in sync (#1726, #2670). Loaded (bit 16 set) is
+        preserved; empty (bit 16 clear) is wiped.
         """
         server = _make_server()
         bridge = _make_bridge(server)
         await bridge.start()
 
-        bridge._on_printer_raw(
-            f"device/{H2D_SERIAL}/report",
-            json.dumps(
-                {
-                    "print": {
-                        "command": "push_status",
-                        "ams": {
-                            "ams": [
-                                {
-                                    "id": "128",
-                                    "tray": [
-                                        {"id": "0", "tray_type": "PLA", "tray_color": "FF0000FF"},
-                                    ],
-                                }
-                            ],
-                            "tray_exist_bits": "0",
-                            "power_on_flag": True,
-                        },
+        def _push(tray_exist_bits: str) -> dict:
+            bridge._on_printer_raw(
+                f"device/{H2D_SERIAL}/report",
+                json.dumps(
+                    {
+                        "print": {
+                            "command": "push_status",
+                            "ams": {
+                                "ams": [
+                                    {
+                                        "id": "128",
+                                        "tray": [
+                                            {"id": "0", "tray_type": "PLA", "tray_color": "FF0000FF"},
+                                        ],
+                                    }
+                                ],
+                                "tray_exist_bits": tray_exist_bits,
+                                "power_on_flag": True,
+                            },
+                        }
                     }
-                }
-            ).encode(),
-        )
-        await asyncio.sleep(0.01)
+                ).encode(),
+            )
 
-        cached = bridge.get_latest_print_state()
-        ht_slot = cached["ams"]["ams"][0]["tray"][0]
-        # tray_exist_bits="0" alone would normally wipe — but AMS-HT is
-        # skipped, so the HT slot keeps its loaded data.
-        assert ht_slot["tray_type"] == "PLA"
+        # Loaded: bit 16 set → HT slot preserved.
+        _push("10000")
+        await asyncio.sleep(0.01)
+        assert bridge.get_latest_print_state()["ams"]["ams"][0]["tray"][0]["tray_type"] == "PLA"
+
+        # Empty: bit 16 clear → HT slot wiped so the slicer sees no phantom spool.
+        _push("0")
+        await asyncio.sleep(0.01)
+        assert bridge.get_latest_print_state()["ams"]["ams"][0]["tray"][0]["tray_type"] == ""
 
         await bridge.stop()
 

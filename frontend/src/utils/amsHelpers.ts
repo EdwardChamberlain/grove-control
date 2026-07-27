@@ -42,6 +42,10 @@ export function getAmsLabel(amsId: number | string, trayCount: number): string {
   const id = typeof amsId === 'string' ? parseInt(amsId, 10) : amsId;
   const safeId = isNaN(id) ? 0 : id;
   if (safeId === 255) return 'External';
+  // A2L "AMS Lite": the backend normalises its physical unit id 16 to 6 at
+  // ingest (see a2l-am-unit-16). No regular AMS uses id 6, so this is a safe,
+  // self-scoping label for the Lite's 4-slot unit.
+  if (safeId === 6) return 'AMS Lite';
   const isHt = trayCount === 1;
   const normalizedId = safeId >= 128 ? safeId - 128 : safeId;
   const letter = String.fromCharCode(65 + normalizedId);
@@ -341,6 +345,32 @@ export function filterFilamentsByNozzle<T extends { extruderId?: number }>(
   return loadedFilaments.filter(
     (f) => nozzleId == null || f.extruderId === nozzleId
   );
+}
+
+/**
+ * List the distinct nozzle diameters the printer actually reports (#2618).
+ * Mirrors the backend `_installed_nozzle_diameters`: reads each
+ * `status.nozzles[].nozzle_diameter`, skips the empty-string / non-positive
+ * defaults that populate a NozzleInfo before MQTT fills it in, and dedupes.
+ *
+ * Returns e.g. `['0.4']` (single-nozzle) or `['0.4', '0.6']` (dual-nozzle). An
+ * empty array means "the printer hasn't told us its nozzle hardware" — callers
+ * that need to fetch per-nozzle should fall back to their own default rather
+ * than treating it as "no nozzles". Preserves the bare decimal string form the
+ * status carries so it can be passed straight to `getKProfiles`.
+ */
+export function installedNozzleDiameters(
+  status: { nozzles?: { nozzle_diameter?: string }[] } | null | undefined,
+): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const nozzle of status?.nozzles ?? []) {
+    const raw = (nozzle?.nozzle_diameter ?? '').trim();
+    if (!raw || !(parseFloat(raw) > 0) || seen.has(raw)) continue;
+    seen.add(raw);
+    result.push(raw);
+  }
+  return result;
 }
 
 /**

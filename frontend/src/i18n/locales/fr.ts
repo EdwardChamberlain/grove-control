@@ -355,6 +355,9 @@ export default {
     toast: {
       printerDeleted: 'Imprimante supprimée',
       missingSpoolAssignment: 'Impression démarrée sur {{printer}}. Attribution de bobine manquante pour : {{slots}}',
+      assignmentVerified: 'Filament chargé dans l\'emplacement {{slot}} ({{printer}})',
+      assignmentVerifiedNoKprofile: 'Emplacement {{slot}} sur {{printer}} chargé, mais le profil de calibration de débit (profil K) n\'a pas été appliqué',
+      assignmentNotConfirmed: 'Impossible de confirmer l\'attribution de l\'emplacement {{slot}} sur {{printer}} — vérifiez l\'emplacement AMS',
       printerAdded: 'Imprimante ajoutée',
       printerUpdated: 'Imprimante mise à jour',
       failedToDelete: 'Échec de la suppression',
@@ -422,6 +425,7 @@ export default {
       unload: 'Décharger',
     },
     bedJog: {
+      limitWarning: 'Les limites de déplacement ne sont pas appliquées lors des mouvements manuels : un bug du firmware Bambu ignore les butées logicielles pour les commandes à distance. Déplacez avec précaution pour éviter une collision.',
       title: 'Commandes de déplacement',
       bed: 'Plateau',
       step: 'Pas (mm)',
@@ -477,6 +481,8 @@ export default {
       skip: 'Sauter',
       confirmTitle: 'Sauter l\'objet ?',
       confirmMessage: 'Voulez-vous vraiment sauter "{{name}}" ? Cette action est irréversible.',
+      confirmAllMessage: 'Tous les objets restants sont sélectionnés. Cela arrêtera la tâche d’impression. Continuer ?',
+      confirmMultipleMessage: 'Sauter {{count}} objets sélectionnés ? Cette action est irréversible.',
     },
     // Confirm modals
     confirm: {
@@ -602,6 +608,12 @@ export default {
     activeJobSlot: {
       title: 'Cet emplacement est le filament {{n}} dans l\'impression active',
       ariaLabel: 'Emplacement d\'impression active {{n}}',
+    },
+    expectedSlot: {
+      title: 'L\'imprimante attend du filament dans cet emplacement',
+      ariaLabel: 'Emplacement de filament attendu {{n}}',
+      label: '{{ams}} · Emplacement {{slot}}',
+      external: 'Bobine externe',
     },
     // Filaments section
     filaments: 'Filaments',
@@ -1193,6 +1205,8 @@ export default {
     history: {
       emptyTitle: 'Aucun historique',
       emptyDescription: 'Les impressions terminées, annulées et échouées apparaîtront ici.',
+      showMore: 'Afficher plus',
+      showingCount: 'Affichage de {{shown}} sur {{total}}',
     },
     dragGhost: {
       multiCount: '{{count}} éléments',
@@ -2031,6 +2045,10 @@ export default {
     tempFanPresetsChamber: 'Température de la chambre',
     tempFanPresetsFan: 'Vitesse du ventilateur',
     tempFanPresetsReset: 'Rétablir les valeurs par défaut',
+    concurrentUploadsTitle: 'Envois simultanés',
+    concurrentUploadsDescription: "Nombre d'imprimantes auxquelles la file d'attente peut envoyer des fichiers en même temps. Les imprimantes reçoivent les fichiers lentement (une grosse impression peut prendre plusieurs minutes) et chacune attend son tour : sur un parc important, augmenter cette valeur évite que la dernière imprimante d'un lot doive attendre la fin de tous les transferts précédents. Réduisez-la si votre réseau ou votre hôte Bambuddy supporte mal les transferts parallèles.",
+    concurrentUploadsLabel: 'Imprimantes servies simultanément',
+    concurrentUploadsHelp: "1 n'envoie qu'à une imprimante à la fois (l'ancien comportement). Valeur par défaut : 4.",
     staggeredStart: 'Démarrage échelonné',
     staggeredStartDescription: 'Taille de groupe et intervalle par défaut lors de l\'échelonnement des démarrages de lots multi-imprimantes. Modifiable par lot dans la fenêtre d\'impression.',
     preheatTitle: 'Préchauffage & Heat Soak',
@@ -2051,6 +2069,9 @@ export default {
     preheatOverride_inherit: 'Hériter',
     preheatOverride_on: 'Activé',
     preheatOverride_off: 'Désactivé',
+    calibrationMode_off: 'Désactivé',
+    calibrationMode_on: 'Activé',
+    calibrationMode_auto: 'Auto',
     preheatTargetOverride: 'Surcharger la cible chambre (°C, vide = par filament)',
     plateClear: 'Confirmation de plateau libre',
     requirePlateClear: 'Exiger la confirmation de plateau libre',
@@ -2789,6 +2810,9 @@ export default {
     clearFailed: 'Échec de l\'effacement des erreurs HMS',
     actionSuccess: 'Action envoyée à l\'imprimante',
     actionFailed: 'Échec de l\'envoi de l\'action',
+    runoutExpectedSlot: 'Le filament est épuisé dans {{ranOut}}. L\'imprimante attend maintenant du filament compatible dans {{expected}}. Insérez une bobine dans {{expected}}, puis sélectionnez Réessayer.',
+    runoutExpectedSlotOnly: 'L\'imprimante attend du filament compatible dans {{expected}}. Insérez-y une bobine, puis sélectionnez Réessayer.',
+    runoutSlotUnknown: 'Le filament est épuisé et l\'impression est en pause. Bambuddy n\'a pas pu déterminer quel emplacement l\'imprimante attend désormais — vérifiez l\'écran de l\'imprimante pour l\'emplacement demandé.',
     actions: {
       RESUME_PRINTING: 'Reprendre l\'impression',
       RESUME_PRINTING_DEFECTS: 'Reprendre (défauts acceptables)',
@@ -3239,37 +3263,24 @@ export default {
     },
     orcaCloud: {
       connectedAs: 'Connecté en tant que',
+      connectedShort: 'Connecté à Orca Cloud',
       logout: 'Déconnecter',
       noLogoutPermission: 'Vous n\'avez pas la permission de vous déconnecter',
       noConnectPermission: 'Vous n\'avez pas la permission de vous connecter à Orca Cloud',
       retry: 'Réessayer',
-      back: 'Utiliser une autre méthode de connexion',
+      connectButton: 'Connecter Orca Cloud',
       connect: {
         title: 'Se connecter à Orca Cloud',
         description: 'Connectez-vous à votre compte Orca Cloud pour synchroniser vos profils de slicer dans Bambuddy.',
       },
-      providers: {
-        google: 'Se connecter avec Google',
-        apple: 'Se connecter avec Apple',
-        github: 'Se connecter avec GitHub',
-        email: 'Se connecter avec e-mail et mot de passe',
-      },
-      password: {
-        title: 'Se connecter avec e-mail et mot de passe',
-        email: 'E-mail',
-        emailPlaceholder: 'vous@exemple.fr',
-        password: 'Mot de passe',
-        submit: 'Se connecter',
-      },
-      paste: {
-        title: 'Terminer la connexion',
-        step1: 'Un nouvel onglet s\'est ouvert avec la page de connexion Orca Cloud. Connectez-vous avec votre compte Orca.',
-        step2: 'Votre navigateur sera redirigé vers une URL "localhost" qui ne se chargera pas. C\'est normal — c\'est cette URL qu\'il nous faut.',
-        step3: 'Copiez l\'URL complète depuis la barre d\'adresse de votre navigateur et collez-la ci-dessous.',
-        signInUrl: 'Si l\'onglet de connexion ne s\'est pas ouvert, cliquez sur cette URL :',
-        label: 'Collez l\'URL de rappel ici',
-        placeholder: 'http://localhost:41172/callback?code=...&state=...',
-        submit: 'Terminer la connexion',
+      device: {
+        title: 'Approuver Bambuddy dans Orca Cloud',
+        instruction: 'Ouvrez Orca Cloud et approuvez ce code. Bambuddy se connecte automatiquement dès que vous l\'approuvez.',
+        codeLabel: 'Votre code d\'appairage',
+        openButton: 'Ouvrir la page d\'approbation d\'Orca Cloud',
+        manualHint: 'Ou rendez-vous sur {{url}} et saisissez le code ci-dessus.',
+        waiting: 'En attente de votre approbation…',
+        cancel: 'Annuler',
       },
       profiles: {
         title: 'Vos profils Orca Cloud ({{count}})',
@@ -3277,16 +3288,13 @@ export default {
         empty: 'Aucun profil trouvé dans votre compte Orca Cloud pour le moment.',
       },
       toast: {
-        connected: 'Connecté à Orca Cloud en tant que {{email}}',
         disconnected: 'Déconnecté d\'Orca Cloud',
       },
       errors: {
         startFailed: 'Impossible de démarrer la connexion à Orca Cloud.',
-        finishFailed: 'Impossible de terminer la connexion à Orca Cloud.',
-        passwordFailed: 'Impossible de se connecter avec cet e-mail et ce mot de passe.',
-        passwordEmpty: 'Veuillez saisir à la fois votre e-mail et votre mot de passe.',
-        emptyPaste: 'Veuillez coller l\'URL de rappel depuis votre navigateur.',
-        noCode: 'Cette URL ne ressemble pas à un rappel Orca Cloud (aucun paramètre code). Copiez l\'URL complète depuis la barre d\'adresse.',
+        denied: 'L\'appairage a été refusé dans Orca Cloud.',
+        expired: 'Le code d\'appairage a expiré. Cliquez sur Connecter pour réessayer.',
+        pollFailed: 'La connexion a été perdue pendant l\'attente de l\'approbation. Veuillez réessayer.',
       },
     },
     localProfiles: {
@@ -3325,6 +3333,8 @@ export default {
       },
     },
     connectedAs: 'Connecté en tant que',
+    signInExpiredTitle: 'Session Bambu Cloud expirée',
+    signInExpiredBody: 'Bambu Lab n\'accepte plus le jeton enregistré. Reconnectez-vous pour rétablir les profils cloud, les imports MakerWorld et la vérification des firmwares.',
     logout: 'Déconnexion',
     noLogoutPermission: 'Pas d\'autorisation de déconnexion',
     failedToLoad: 'Échec chargement profils',
@@ -3628,6 +3638,9 @@ export default {
     prints: 'Impressions',
     ascending: 'Croissant',
     descending: 'Décroissant',
+    showModified: 'Afficher les dates de modification',
+    hideModified: 'Masquer les dates de modification',
+    lastModified: 'Dernière modification',
     resultsCount: '{{showing}} sur {{total}} fichiers',
     selectAll: 'Tout sélectionner',
     deselectAll: 'Tout désélectionner',
@@ -3938,6 +3951,10 @@ export default {
     toastArchives: '{{count}} impressions archivées avec Bambuddy. Vois qui le garde indépendant.',
     toastAnniversary: 'Un an avec Bambuddy ! Vois qui garde le projet indépendant.',
     toastVersionUpdate: 'Mis à jour vers v{{version}}. Bambuddy reste gratuit grâce à ceux qui le soutiennent.',
+    toastBusiness: "Vous utilisez Bambuddy sur {{count}} imprimantes ? Il existe une offre de support pour les équipes : corrections prioritaires, facturation et contact direct avec le mainteneur.",
+    businessCta: "Bambuddy pour les entreprises",
+    businessTitle: "Bambuddy pour les entreprises",
+    businessTagline: "Vous gérez {{count}} imprimantes. Support prioritaire, licences commerciales et facturation sont disponibles pour les équipes et les fermes d'impression.",
   },
 
   // Library (K Profiles)
@@ -4017,6 +4034,8 @@ export default {
     refreshPresets: 'Actualiser',
     refreshPresetsTitle: 'Actualiser les préréglages — récupérer les dernières listes Cloud et bundle (à utiliser après avoir supprimé un préréglage dans Bambu Studio ou Bambu Handy)',
     allPresetsRequired: 'Tous les préréglages doivent être sélectionnés',
+    useEmbedded: 'Utiliser les réglages intégrés du fichier',
+    useEmbeddedHint: "Slicer tel que le concepteur l'a configuré (parois, remplissage, filament) au lieu des profils ci-dessus. Proposé car votre imprimante correspond à celle du fichier.",
     enqueuing: 'Envoi du travail de découpage…',
     queued: 'En file d\'attente…',
     failed: 'Échec du découpage. Vérifiez les journaux du sidecar.',
@@ -4590,6 +4609,7 @@ export default {
     overrideWith: 'Remplacer par',
     resetToOriginal: 'Revenir à l\'original',
     insufficientFilamentTitle: 'Filament insuffisant',
+    waitingForAmsStatus: 'En attente de l\'état de l\'AMS de {{printer}}…',
     insufficientFilamentMessage: 'Certaines bobines assignées ont moins de filament restant que nécessaire pour cette impression :',
     insufficientFilamentLine: '{{printer}} - {{slot}} : nécessite {{required}}g, restant {{remaining}}g',
     printAnyway: 'Imprimer quand même',
@@ -5256,6 +5276,8 @@ export default {
     autoOffDescription: 'Éteindre à la fin de l\'impression (unique)',
     autoOffPersistent: 'Garder activé',
     autoOffPersistentDescription: 'Rester activé entre les impressions au lieu d\'une seule fois',
+    controlsPrinterPower: 'Alimente l\'imprimante',
+    controlsPrinterPowerDescription: 'Désactivez si cette prise n\'alimente qu\'un accessoire (ventilateur de filtre, éclairage). Sinon, l\'éteindre marque l\'imprimante hors ligne.',
     autoOffAfterDrying: 'Arrêt auto après séchage',
     autoOffAfterDryingDescription: 'Éteindre à la fin du séchage de l\'AMS',
     delayAfterDryingMinutes: 'Délai après séchage (minutes)',
@@ -5541,6 +5563,8 @@ export default {
     userKey: 'Clé utilisateur',
     appToken: 'Jeton d\'application',
     priority: 'Priorité',
+    pushoverRetry: 'Réessai urgence (s)',
+    pushoverExpire: 'Expiration urgence (s)',
     botToken: 'Jeton du bot',
     chatId: 'ID du chat',
     smtpServer: 'Serveur SMTP',
@@ -6480,6 +6504,8 @@ export default {
     resolveButton: 'Résoudre',
     signInRequiredTitle: 'Connexion Bambu Cloud requise pour télécharger',
     signInRequiredBody: 'Vous pouvez consulter les détails du modèle anonymement, mais MakerWorld nécessite un compte Bambu Cloud pour télécharger les fichiers 3MF.',
+    signInExpiredTitle: 'Session Bambu Cloud expirée',
+    signInExpiredBody: 'Vous êtes toujours connecté à Bambuddy, mais Bambu Lab n\'accepte plus le jeton enregistré : les téléchargements échoueront. Reconnectez-vous à Bambu Cloud.',
     openCloudSettings: 'Ouvrir les paramètres Cloud',
     untitledModel: 'Modèle sans titre',
     byCreator: 'par {{name}}',
@@ -6655,6 +6681,7 @@ export default {
     scope: {
       camera_stream: 'Flux de caméra',
       camwall: 'Mur de caméras',
+      overlay: 'Incrustation de streaming',
     },
     title: 'Jetons API caméra',
     navTitle: 'Jetons API caméra',
@@ -6673,6 +6700,8 @@ export default {
         'Un jeton de flux de caméra ne peut récupérer que des flux et des instantanés. À utiliser pour Home Assistant, Frigate ou tout ce qui intègre une seule caméra.',
       hintCamWall:
         "Un jeton Mur de caméras ouvre /camwall sur un écran sans connexion. Il voit le nom et l'état de chaque imprimante, ainsi que leurs flux de caméra. Il ne voit ni les noms de fichiers, ni les adresses, ni les codes d'accès.",
+      hintOverlay:
+        "Un jeton Incrustation de streaming ouvre /overlay/{printerId} sur un écran sans connexion — pour OBS ou tout autre flux en direct. Il voit le flux de caméra d'une imprimante ainsi que son état d'impression en direct, y compris le nom de fichier affiché à l'écran. Il ne voit ni les adresses ni les codes d'accès.",
       title: 'Créer un nouveau jeton',
       nameLabel: 'Nom du jeton',
       namePlaceholder: 'par ex. Home Assistant',
@@ -6685,6 +6714,9 @@ export default {
       camWallUrlTitle: 'Adresse du mur de caméras pour cet écran',
       camWallUrlHint:
         "Ouvrez cette adresse sur l'écran. Quiconque peut lire l'adresse peut regarder le mur : traitez-la comme une clé. Révoquez le jeton pour couper l'écran.",
+      overlayUrlTitle: "Adresse d'incrustation pour OBS",
+      overlayUrlHint:
+        "Ajoutez ceci comme Source navigateur dans OBS. Remplacez le numéro dans /overlay/1 par le numéro de votre imprimante (indiqué dans son adresse sur la page Imprimantes). Quiconque peut lire l'adresse peut regarder le flux : traitez-la comme une clé et révoquez le jeton pour couper l'accès.",
       title: 'Jeton créé – copiez-le maintenant',
       warning:
         'C\'est la seule fois où ce jeton sera visible. Après la fermeture de ce dialogue, vous ne pourrez plus jamais le voir.',

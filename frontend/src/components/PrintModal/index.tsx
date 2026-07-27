@@ -17,6 +17,7 @@ import {
 } from '../../hooks/useFilamentMapping';
 import { useMultiPrinterFilamentMapping, type PerPrinterConfig } from '../../hooks/useMultiPrinterFilamentMapping';
 import { getColorName } from '../../utils/colors';
+import { isGcodeCompatible } from '../../utils/printer';
 import { getCurrencySymbol } from '../../utils/currency';
 import { getBedTypeInfo } from '../../utils/bedType';
 import { toDateTimeLocalValue, parseUTCDate } from '../../utils/date';
@@ -371,7 +372,7 @@ export function PrintModal({
   });
 
   // Only fetch printer status when single printer selected (for filament mapping)
-  const { data: printerStatus } = useQuery({
+  const { data: printerStatus, isLoading: printerStatusLoading } = useQuery({
     queryKey: ['printer-status', effectivePrinterId],
     queryFn: () => api.getPrinterStatus(effectivePrinterId!),
     enabled: !!effectivePrinterId,
@@ -576,6 +577,17 @@ export function PrintModal({
     }
   }, [targetModel, selectedPlate, prevTargetModel, prevPlateForOverrides, mode]);
 
+  // The sliced-for metadata loads async. If the user switched to model mode
+  // before it arrived, the target is still empty (we never silently default
+  // to another model, #2578) — fill it with the sliced-for model once known,
+  // provided an active printer of that model exists.
+  useEffect(() => {
+    if (assignmentMode !== 'model' || targetModel || !slicedForModel) return;
+    if (printers?.some((p) => p.is_active && p.model === slicedForModel)) {
+      setTargetModel(slicedForModel);
+    }
+  }, [assignmentMode, targetModel, slicedForModel, printers]);
+
   // Auto-expand per-printer mapping when setting is enabled and multiple printers selected
   // Only applies once per printer on initial selection, not when user unchecks
   useEffect(() => {
@@ -779,6 +791,12 @@ export function PrintModal({
     }
     if (assignmentMode === 'model' && !targetModel) {
       showToast('Please select a target printer model', 'error');
+      return;
+    }
+    // Cross-model safety gate (#2578) — mirrors the backend's 400 so the user
+    // gets inline feedback instead of a failed request.
+    if (assignmentMode === 'model' && !isGcodeCompatible(slicedForModel, targetModel)) {
+      showToast(`File was sliced for ${slicedForModel} and cannot be dispatched to ${targetModel} printers`, 'error');
       return;
     }
 
@@ -1070,6 +1088,8 @@ export function PrintModal({
     // Need valid printer/model selection
     if (assignmentMode === 'printer' && selectedPrinters.length === 0) return false;
     if (assignmentMode === 'model' && !targetModel) return false;
+    // Cross-model mismatch cannot be queued (#2578)
+    if (assignmentMode === 'model' && !isGcodeCompatible(slicedForModel, targetModel)) return false;
 
     // For multi-plate files, need at least one plate selected
     if (isMultiPlate && selectedPlates.size === 0) return false;
@@ -1080,16 +1100,24 @@ export function PrintModal({
     // the rest — the banner above says which state we are in.
     if (perPlateReqsPending || perPlateReqsFailed) return false;
 
+    // A single-printer AMS job must wait for the printer's live status before it
+    // can resolve the filament mapping. Submitting mid-load matched against zero
+    // known trays and serialized an all-[-1] mapping, which dispatched the print
+    // to the empty external feed (#2589).
+    if (assignmentMode === 'printer' && selectedPrinters.length === 1 && printerStatusLoading) return false;
+
     return true;
   }, [
     selectedPrinters.length,
     assignmentMode,
     targetModel,
+    slicedForModel,
     isMultiPlate,
     selectedPlates.size,
     isPending,
     perPlateReqsPending,
     perPlateReqsFailed,
+    printerStatusLoading,
   ]);
 
   // Quantity only applies for single-printer or model-based assignment (not multi-printer)
@@ -1458,6 +1486,17 @@ export function PrintModal({
             {updateQueueMutation.isError && (
               <div className="mb-4 p-3 bg-red-100 dark:bg-red-500/20 border border-red-500/50 rounded-lg text-sm text-red-700 dark:text-red-400">
                 {(updateQueueMutation.error as Error)?.message || 'Failed to complete operation'}
+              </div>
+            )}
+
+            {/* Waiting for the printer's AMS status: submitting now would map
+                against zero known trays and dispatch to the empty external feed (#2589). */}
+            {assignmentMode === 'printer' && selectedPrinters.length === 1 && printerStatusLoading && (
+              <div className="mb-4 p-3 bg-blue-100 dark:bg-blue-500/20 border border-blue-500/50 rounded-lg text-sm text-blue-700 dark:text-blue-400 flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                {t('printModal.waitingForAmsStatus', {
+                  printer: printers?.find((p) => p.id === effectivePrinterId)?.name ?? '',
+                })}
               </div>
             )}
 

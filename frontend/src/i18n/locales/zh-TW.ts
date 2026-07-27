@@ -355,6 +355,9 @@ export default {
     toast: {
       printerDeleted: '印表機已刪除',
       missingSpoolAssignment: '已在{{printer}}上開始列印。以下料槽未分配耗材: {{slots}}',
+      assignmentVerified: '耗材已載入料槽{{slot}}（{{printer}}）',
+      assignmentVerifiedNoKprofile: '{{printer}}的料槽{{slot}}已載入，但流量校準設定檔（K設定檔）未套用',
+      assignmentNotConfirmed: '無法確認{{printer}}上料槽{{slot}}的分配，請檢查AMS料槽',
       printerAdded: '印表機已新增',
       printerUpdated: '印表機已更新',
       failedToDelete: '刪除印表機失敗',
@@ -422,6 +425,7 @@ export default {
       unload: '卸載',
     },
     bedJog: {
+      limitWarning: '手動移動時不會強制執行行程限位——Bambu 韌體存在缺陷，遠端指令會忽略軟體限位。請小心移動以避免碰撞。',
       title: '點動控制',
       bed: '熱床',
       step: '步長 (mm)',
@@ -477,6 +481,8 @@ export default {
       skip: '跳過',
       confirmTitle: '跳過物件？',
       confirmMessage: '確定要跳過"{{name}}"嗎？此操作無法復原。',
+      confirmAllMessage: '已選取所有剩餘物件。這將停止列印工作。是否繼續？',
+      confirmMultipleMessage: '跳過選取的 {{count}} 個物件？此操作無法復原。',
     },
     // Confirm modals
     confirm: {
@@ -602,6 +608,12 @@ export default {
     activeJobSlot: {
       title: '此料槽在目前列印中是耗材 {{n}}',
       ariaLabel: '目前列印料槽 {{n}}',
+    },
+    expectedSlot: {
+      title: '印表機正在等待此料槽裝入耗材',
+      ariaLabel: '需要裝料的料槽 {{n}}',
+      label: '{{ams}} · 料槽 {{slot}}',
+      external: '外部料卷',
     },
     // Filaments section
     filaments: '耗材',
@@ -1193,6 +1205,8 @@ export default {
     history: {
       emptyTitle: '目前沒有歷史記錄',
       emptyDescription: '已完成、已取消與失敗的列印將顯示於此。',
+      showMore: '顯示更多',
+      showingCount: '顯示 {{total}} 項中的 {{shown}} 項',
     },
     dragGhost: {
       multiCount: '{{count}} 項',
@@ -2076,6 +2090,10 @@ export default {
     tempFanPresetsChamber: '腔室溫度',
     tempFanPresetsFan: '風扇速度',
     tempFanPresetsReset: '還原預設值',
+    concurrentUploadsTitle: '並行上傳',
+    concurrentUploadsDescription: '佇列可同時向多少台印表機傳送檔案。印表機接收檔案的速度很慢（大型列印可能需要數分鐘），而且每台都得排隊等候——因此在印表機較多時，調高此值可避免批次中最後一台印表機等完前面所有傳輸。若網路或 Bambuddy 主機難以負荷並行傳輸，請調低此值。',
+    concurrentUploadsLabel: '同時上傳的印表機數量',
+    concurrentUploadsHelp: '設為 1 時一次只傳送給一台印表機（舊行為）。預設值為 4。',
     staggeredStart: '錯開啟動',
     staggeredStartDescription: '多台印表機批次啟動時的預設群組大小與間隔。可在列印對話框中逐批覆寫。',
     preheatTitle: '預熱與熱保溫',
@@ -2096,6 +2114,9 @@ export default {
     preheatOverride_inherit: '繼承',
     preheatOverride_on: '開啟',
     preheatOverride_off: '關閉',
+    calibrationMode_off: '關閉',
+    calibrationMode_on: '開啟',
+    calibrationMode_auto: '自動',
     preheatTargetOverride: '覆寫腔體目標 (°C，留空使用耗材預設)',
     plateClear: '熱床清空確認',
     requirePlateClear: '需要熱床清空確認',
@@ -2788,6 +2809,9 @@ export default {
     clearFailed: '清除 HMS 錯誤失敗',
     actionSuccess: '已向印表機傳送動作',
     actionFailed: '動作傳送失敗',
+    runoutExpectedSlot: '{{ranOut}} 的耗材已用盡。印表機現在正在等待 {{expected}} 裝入相容耗材。請將料卷裝入 {{expected}}，然後選擇「重試」。',
+    runoutExpectedSlotOnly: '印表機正在等待 {{expected}} 裝入相容耗材。請在該料槽裝入料卷，然後選擇「重試」。',
+    runoutSlotUnknown: '耗材已用盡，列印已暫停。Bambuddy 無法確定印表機現在需要哪個料槽——請在印表機螢幕上查看所請求的料槽。',
     actions: {
       RESUME_PRINTING: '恢復列印',
       RESUME_PRINTING_DEFECTS: '恢復 (瑕疵可接受)',
@@ -3238,37 +3262,24 @@ export default {
     },
     orcaCloud: {
       connectedAs: '已連接',
+      connectedShort: '已連接到 Orca Cloud',
       logout: '中斷連線',
       noLogoutPermission: '您沒有中斷連線的權限',
       noConnectPermission: '您沒有連接到 Orca Cloud 的權限',
       retry: '重試',
-      back: '使用其他登入方式',
+      connectButton: '連接 Orca Cloud',
       connect: {
         title: '連接到 Orca Cloud',
         description: '登入您的 Orca Cloud 帳號,將切片機設定檔同步到 Bambuddy。',
       },
-      providers: {
-        google: '使用 Google 登入',
-        apple: '使用 Apple 登入',
-        github: '使用 GitHub 登入',
-        email: '使用電子郵件和密碼登入',
-      },
-      password: {
-        title: '使用電子郵件和密碼登入',
-        email: '電子郵件',
-        emailPlaceholder: 'you@example.com',
-        password: '密碼',
-        submit: '登入',
-      },
-      paste: {
-        title: '完成登入',
-        step1: '已在新分頁中開啟 Orca Cloud 登入頁面。請使用您的 Orca 帳號登入。',
-        step2: '您的瀏覽器將被重新導向到一個 "localhost" URL,該 URL 無法載入。這是正常的 — 我們需要的就是這個 URL。',
-        step3: '從瀏覽器的網址列複製整個 URL,貼到下方。',
-        signInUrl: '若登入分頁未開啟,請點擊此 URL:',
-        label: '在此貼上回呼 URL',
-        placeholder: 'http://localhost:41172/callback?code=...&state=...',
-        submit: '完成連接',
+      device: {
+        title: '在 Orca Cloud 中核准 Bambuddy',
+        instruction: '開啟 Orca Cloud 並核准此代碼。核准後 Bambuddy 會自動連接。',
+        codeLabel: '您的配對代碼',
+        openButton: '開啟 Orca Cloud 核准頁面',
+        manualHint: '或前往 {{url}} 並輸入上方的代碼。',
+        waiting: '正在等待您核准…',
+        cancel: '取消',
       },
       profiles: {
         title: '您的 Orca Cloud 設定檔 ({{count}})',
@@ -3276,16 +3287,13 @@ export default {
         empty: '您的 Orca Cloud 帳號中尚無設定檔。',
       },
       toast: {
-        connected: '已以 {{email}} 身分連接到 Orca Cloud',
         disconnected: '已從 Orca Cloud 中斷連線',
       },
       errors: {
         startFailed: '無法啟動 Orca Cloud 登入流程。',
-        finishFailed: '無法完成 Orca Cloud 登入。',
-        passwordFailed: '無法使用該電子郵件和密碼登入。',
-        passwordEmpty: '請輸入電子郵件和密碼。',
-        emptyPaste: '請從瀏覽器貼上回呼 URL。',
-        noCode: '該 URL 不像 Orca Cloud 回呼 (缺少 code 參數)。請從網址列複製完整 URL。',
+        denied: '配對在 Orca Cloud 中被拒絕。',
+        expired: '配對代碼已過期。請點擊「連接」重試。',
+        pollFailed: '等待核准時連線中斷。請重試。',
       },
     },
     localProfiles: {
@@ -3324,6 +3332,8 @@ export default {
       },
     },
     connectedAs: '已連線為',
+    signInExpiredTitle: 'Bambu Cloud 登入已過期',
+    signInExpiredBody: 'Bambu Lab 不再接受已儲存的權杖。請重新登入以恢復雲端設定檔、MakerWorld 匯入與韌體檢查。',
     logout: '登出',
     noLogoutPermission: '您沒有登出的權限',
     failedToLoad: '載入設定檔案失敗',
@@ -3627,6 +3637,9 @@ export default {
     prints: '列印',
     ascending: '升序',
     descending: '降序',
+    showModified: '顯示修改日期',
+    hideModified: '隱藏修改日期',
+    lastModified: '最後修改',
     resultsCount: '{{showing}} / {{total}} 個檔案',
     selectAll: '全選',
     deselectAll: '取消全選',
@@ -3937,6 +3950,10 @@ export default {
     toastArchives: '用 Bambuddy 封存了 {{count}} 次列印。看看是誰讓它保持獨立。',
     toastAnniversary: '與 Bambuddy 相伴一年了！看看是誰讓專案保持獨立。',
     toastVersionUpdate: '已更新至 v{{version}}。Bambuddy 之所以免費，要感謝支持者。',
+    toastBusiness: '您正在 {{count}} 台印表機上執行 Bambuddy？我們為團隊提供支援方案：優先修復、開立發票，以及與維護者的直接聯繫管道。',
+    businessCta: 'Bambuddy 商業版',
+    businessTitle: 'Bambuddy 商業版',
+    businessTagline: '您正在管理 {{count}} 台印表機。我們為團隊和列印農場提供優先支援、商業授權與發票開立。',
   },
 
   // Library (K Profiles)
@@ -4016,6 +4033,8 @@ export default {
     refreshPresets: '重新整理',
     refreshPresetsTitle: '重新整理預設 — 擷取最新的雲端與打包設定清單（在 Bambu Studio 或 Bambu Handy 中刪除預設後使用）',
     allPresetsRequired: '必須選擇所有預設',
+    useEmbedded: '使用檔案的內建設定',
+    useEmbeddedHint: '依設計者的設定（外牆、填充、耗材）切片，而非上方的設定檔。因您的印表機與檔案相符而可用。',
     enqueuing: '提交切片任務中…',
     queued: '已排隊…',
     failed: '切片失敗。請檢查切片器 sidecar 日誌。',
@@ -4589,6 +4608,7 @@ export default {
     overrideWith: '覆蓋為',
     resetToOriginal: '恢復為原始',
     insufficientFilamentTitle: '耗材不足',
+    waitingForAmsStatus: '正在等待 {{printer}} 的 AMS 狀態…',
     insufficientFilamentMessage: '部分已分配料盤的剩餘耗材少於本次列印所需：',
     insufficientFilamentLine: '{{printer}} - {{slot}}：需要 {{required}}g，剩餘 {{remaining}}g',
     printAnyway: '仍然列印',
@@ -5255,6 +5275,8 @@ export default {
     autoOffDescription: '列印完成時關閉（一次性）',
     autoOffPersistent: '保持啟用',
     autoOffPersistentDescription: '在列印之間保持啟用而非一次性',
+    controlsPrinterPower: '為印表機供電',
+    controlsPrinterPowerDescription: '若此插座僅為配件（濾網風扇、燈光）供電，請關閉此選項；否則關閉插座會將印表機標記為離線。',
     autoOffAfterDrying: '乾燥完成後自動關閉',
     autoOffAfterDryingDescription: 'AMS 乾燥完成後關閉',
     delayAfterDryingMinutes: '乾燥後延遲（分鐘）',
@@ -5540,6 +5562,8 @@ export default {
     userKey: '使用者金鑰',
     appToken: '應用程式權杖',
     priority: '優先順序',
+    pushoverRetry: '緊急重試 (秒)',
+    pushoverExpire: '緊急逾時 (秒)',
     botToken: '機器人權杖',
     chatId: '聊天 ID',
     smtpServer: 'SMTP 伺服器',
@@ -6478,6 +6502,8 @@ export default {
     resolveButton: '解析',
     signInRequiredTitle: '下載需要登入 Bambu Cloud',
     signInRequiredBody: '您可以匿名瀏覽模型詳情，但下載 3MF 檔案需要 Bambu Cloud 帳戶。',
+    signInExpiredTitle: 'Bambu Cloud 登入已過期',
+    signInExpiredBody: '您仍處於 Bambuddy 的登入狀態，但 Bambu Lab 已不再接受已儲存的權杖，因此下載會失敗。請重新登入 Bambu Cloud。',
     openCloudSettings: '開啟雲端設定',
     untitledModel: '無標題模型',
     byCreator: '作者: {{name}}',
@@ -6653,6 +6679,7 @@ export default {
     scope: {
       camera_stream: '攝影機串流',
       camwall: '攝影機牆',
+      overlay: '直播疊加層',
     },
     title: '攝影機 API 權杖',
     navTitle: '攝影機 API 權杖',
@@ -6671,6 +6698,8 @@ export default {
         '攝影機串流權杖只能取得攝影機串流與快照。適用於 Home Assistant、Frigate 或任何嵌入單一攝影機的情境。',
       hintCamWall:
         '攝影機牆權杖可在無須登入的螢幕上開啟 /camwall，能看到每台印表機的名稱與狀態以及攝影機串流，但看不到檔案名稱、位址或存取碼。',
+      hintOverlay:
+        '直播疊加層權杖可在無須登入的螢幕上開啟 /overlay/{printerId}——供 OBS 或任何直播使用。它能看到一台印表機的攝影機串流以及即時列印狀態，包括螢幕上顯示的檔案名稱，但看不到位址或存取碼。',
       title: '建立新權杖',
       nameLabel: '權杖名稱',
       namePlaceholder: '例如 Home Assistant',
@@ -6683,6 +6712,9 @@ export default {
       camWallUrlTitle: '此螢幕的攝影機牆網址',
       camWallUrlHint:
         '在螢幕上開啟此網址。任何能看到該網址的人都能觀看攝影機牆，請像對待鑰匙一樣對待它——撤銷權杖即可切斷該螢幕的存取。',
+      overlayUrlTitle: '用於 OBS 的疊加層網址',
+      overlayUrlHint:
+        '在 OBS 中將其新增為「瀏覽器」來源（Browser Source）。將 /overlay/1 中的數字改為您印表機的編號（可在「印表機」頁面的網址中查看）。任何能看到該網址的人都能觀看直播，請像對待鑰匙一樣對待它——撤銷權杖即可切斷存取。',
       title: '權杖已建立 — 立即複製',
       warning:
         '這是此權杖唯一一次可見。關閉此對話框後您將無法再次查看。',
