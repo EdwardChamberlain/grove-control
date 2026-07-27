@@ -1835,7 +1835,6 @@ function PrinterCard({
   const [showBedJogMenu, setShowBedJogMenu] = useState<number | null>(null);
   const [statusControlMenu, setStatusControlMenu] = useState<string | null>(null);
   const [bedJogStep, setBedJogStep] = useState<number>(10);
-  const [showNotHomedModal, setShowNotHomedModal] = useState<null | { distance: number }>(null);
   const [showResumeConfirm, setShowResumeConfirm] = useState(false);
   const [showSkipObjectsModal, setShowSkipObjectsModal] = useState(false);
   const [showUploadForPrint, setShowUploadForPrint] = useState(false);
@@ -1991,6 +1990,30 @@ function PrinterCard({
     return filaments;
   }, [status?.ams, status?.vt_tray]);
 
+  // Collect loaded type+color+tray_info_idx triples for variant-aware force-color
+  // matching. Format: "TYPE:rrggbb:idx" (idx "" for custom/third-party spools) —
+  // distinguishes Bambu PLA sub-variants that share a base type+colour (#2650).
+  const loadedVariants = useMemo(() => {
+    const variants = new Set<string>();
+    if (status?.ams) {
+      for (const ams of status.ams) {
+        for (const tray of ams.tray || []) {
+          if (tray.tray_type && tray.tray_color) {
+            const color = tray.tray_color.replace('#', '').toLowerCase().slice(0, 6);
+            variants.add(`${tray.tray_type.toUpperCase()}:${color}:${tray.tray_info_idx || ''}`);
+          }
+        }
+      }
+    }
+    for (const vt of status?.vt_tray ?? []) {
+      if (vt.tray_type && vt.tray_color) {
+        const color = vt.tray_color.replace('#', '').toLowerCase().slice(0, 6);
+        variants.add(`${vt.tray_type.toUpperCase()}:${color}:${vt.tray_info_idx || ''}`);
+      }
+    }
+    return variants;
+  }, [status?.ams, status?.vt_tray]);
+
   // Fetch cloud filament info for tooltips (name includes color, also has K value)
   const { data: filamentInfo } = useQuery({
     queryKey: ['filamentInfo', trayInfoIds],
@@ -2106,6 +2129,34 @@ function PrinterCard({
     ? currentTrayNow
     : cachedTrayNow.current;
 
+  // Runout / filament-replacement guidance (#2587). The backend fills these only
+  // while the print is PAUSED (global tray IDs, or null when idle/unresolvable):
+  //   expectedTray = the slot the firmware now expects filament in
+  //   previousTray = the slot that ran out
+  // With AMS Filament Backup the firmware advances to the next compatible slot,
+  // so these are often different — the graphic highlights the expected one.
+  const expectedTray = status?.expected_tray ?? null;
+  const previousTray = status?.previous_tray ?? null;
+  // Pre-format the runout slot labels (honoring user AMS friendly names) for the
+  // HMS modal (#2587). null when the slot can't be placed → honest fallback copy.
+  const formatRunoutSlotLabel = (globalId: number | null): string | null => {
+    if (globalId === null) return null;
+    if (globalId === 254) return t('printers.expectedSlot.external');
+    if (globalId >= 128 && globalId <= 135) {
+      return amsLabels?.[globalId] || getAmsLabel(globalId, 1);
+    }
+    const amsId = Math.floor(globalId / 4);
+    const slot = globalId % 4;
+    const amsName = amsLabels?.[amsId] || getAmsLabel(amsId, 4);
+    return t('printers.expectedSlot.label', { ams: amsName, slot: slot + 1 });
+  };
+  const runoutGuidance = status?.state === 'PAUSE'
+    ? {
+        expectedSlotLabel: formatRunoutSlotLabel(expectedTray),
+        ranOutSlotLabel: formatRunoutSlotLabel(previousTray),
+      }
+    : null;
+
   // Fetch smart plug for this printer
   const { data: smartPlug } = useQuery({
     queryKey: ['smartPlugByPrinter', printer.id],
@@ -2136,8 +2187,8 @@ function PrinterCard({
   // An empty Set means no filaments are loaded — jobs requiring specific types are incompatible.
   const queueCount = useMemo(() => {
     if (!queueItems?.length) return 0;
-    return filterCompatibleQueueItems(queueItems, loadedFilamentTypes, loadedFilaments).length;
-  }, [queueItems, loadedFilamentTypes, loadedFilaments]);
+    return filterCompatibleQueueItems(queueItems, loadedFilamentTypes, loadedFilaments, loadedVariants).length;
+  }, [queueItems, loadedFilamentTypes, loadedFilaments, loadedVariants]);
 
   // Fetch currently printing queue item to show who started it (Issue #206)
   const { data: printingQueueItems } = useQuery({
@@ -2506,8 +2557,8 @@ function PrinterCard({
   });
 
   const bedJogMutation = useMutation({
-    mutationFn: ({ distance, force }: { distance: number; force?: boolean }) =>
-      api.bedJog(printer.id, distance, force ?? false),
+    mutationFn: ({ distance }: { distance: number }) =>
+      api.bedJog(printer.id, distance),
     onError: (error: Error) =>
       showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
   });
@@ -2529,11 +2580,6 @@ function PrinterCard({
   const homeAxesMutation = useMutation({
     mutationFn: (axes: 'z' | 'xy' | 'all') => api.homeAxes(printer.id, axes),
     onSuccess: () => {
-      // Flip the session-scoped "warned" flag so the next bed-jog click doesn't re-prompt
-      // the not-homed modal. The flag is the same one "Move anyway" sets; after a successful
-      // auto-home request the printer is (or will shortly be) in a known-homed state, so
-      // prompting again in the same session is noise — #1052 follow-up.
-      try { sessionStorage.setItem(`bambuddy.bedJog.warned.${printer.id}`, '1'); } catch { /* ignore */ }
       showToast(t('printers.bedJog.homingStarted'));
     },
     onError: (error: Error) =>
@@ -3718,6 +3764,7 @@ function PrinterCard({
                         printerModel={printer.model}
                         loadedFilamentTypes={loadedFilamentTypes}
                         loadedFilaments={loadedFilaments}
+                        loadedVariants={loadedVariants}
                         variant="panelExtension"
                       />
                     </div>
@@ -4150,16 +4197,10 @@ function PrinterCard({
                         const jogButtonClass = 'flex h-8 w-8 items-center justify-center rounded bg-indigo-100 dark:bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 transition-colors hover:bg-indigo-200 dark:hover:bg-indigo-500/30 disabled:cursor-not-allowed disabled:opacity-50';
                         const requestZJog = (direction: 1 | -1) => {
                           const signed = direction * bedJogStep * (bambuIsPlateBelow ? 1 : -1);
-                          const warnedKey = `bambuddy.bedJog.warned.${printer.id}`;
-                          const warned = (() => {
-                            try { return sessionStorage.getItem(warnedKey) === '1'; }
-                            catch { return false; }
-                          })();
-                          if (warned) {
-                            bedJogMutation.mutate({ distance: signed, force: true });
-                          } else {
-                            setShowNotHomedModal({ distance: signed });
-                          }
+                          // The jog never disables the soft endstops (#2579), so it's always
+                          // safe: the firmware clamps the move at the travel limit, or refuses
+                          // it if the printer isn't homed. No not-homed bypass to gate.
+                          bedJogMutation.mutate({ distance: signed });
                         };
                         const requestXyJog = (x: number, y: number) => {
                           xyJogMutation.mutate({ x, y });
@@ -4187,6 +4228,15 @@ function PrinterCard({
                                 <div className="absolute bottom-full left-0 mb-1 z-50 flex w-[216px] flex-col overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary shadow-2xl">
                                   <div className="shrink-0 px-3 py-2.5 text-center text-sm font-medium text-white">
                                     {t('printers.bedJog.title')}
+                                  </div>
+                                  <div className="h-px bg-bambu-dark-tertiary" />
+                                  {/* #2579: Bambu firmware does not enforce soft endstops on
+                                      G-code sent over MQTT, so manual moves can drive past the
+                                      travel limits and cause a collision. Not fixable from our
+                                      side — warn prominently. */}
+                                  <div className="flex items-start gap-1.5 bg-yellow-500/10 px-3 py-2 text-[11px] leading-snug text-yellow-700 dark:text-yellow-400">
+                                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                                    <span>{t('printers.bedJog.limitWarning')}</span>
                                   </div>
                                   <div className="h-px bg-bambu-dark-tertiary" />
                                   <div className="flex justify-center px-3 py-2.5">
@@ -4636,6 +4686,10 @@ function PrinterCard({
                                 // Global tray ID = ams.id * 4 + slot index (for standard AMS)
                                 const globalTrayId = ams.id * 4 + slotIdx;
                                 const isActive = effectiveTrayNow === globalTrayId;
+                                // Runout guidance (#2587): the slot the paused print now
+                                // expects filament in, and the slot that ran out.
+                                const isExpectedSlot = expectedTray !== null && expectedTray === globalTrayId;
+                                const isRanOutSlot = previousTray !== null && previousTray === globalTrayId;
                                 // Get cloud preset info if available
                                 const cloudInfo = tray?.tray_info_idx ? filamentInfo?.[tray.tray_info_idx] : null;
                                 // Get saved slot preset mapping (for user-configured slots)
@@ -4707,8 +4761,25 @@ function PrinterCard({
                                 // Slot visual content (goes inside hover card)
                                 const slotVisual = (
                                   <div
-                                    className={`relative w-full bg-bambu-dark-secondary rounded-lg p-1 text-center ${isEmpty ? 'opacity-50' : ''} ${isActive ? 'ring-2 ring-bambu-green ring-offset-1 ring-offset-bambu-dark' : ''}`}
+                                    className={`relative w-full bg-bambu-dark-secondary rounded-lg p-1 text-center ${isEmpty ? 'opacity-50' : ''} ${
+                                      isExpectedSlot
+                                        ? 'ring-2 ring-amber-400 ring-offset-1 ring-offset-bambu-dark animate-pulse'
+                                        : isRanOutSlot
+                                          ? 'ring-2 ring-red-500/60 ring-offset-1 ring-offset-bambu-dark'
+                                          : isActive
+                                            ? 'ring-2 ring-bambu-green ring-offset-1 ring-offset-bambu-dark'
+                                            : ''
+                                    }`}
                                   >
+                                    {isExpectedSlot && (
+                                      <span
+                                        aria-label={t('printers.expectedSlot.ariaLabel', { n: slotIdx + 1 })}
+                                        title={t('printers.expectedSlot.title')}
+                                        className="absolute top-0.5 left-0.5 px-1 py-px text-[8px] font-bold text-bambu-dark bg-amber-400 rounded pointer-events-none leading-none"
+                                      >
+                                        ↓
+                                      </span>
+                                    )}
                                     {activePrintSlotLabel && (
                                       <span
                                         aria-label={t('printers.activeJobSlot.ariaLabel', { n: activePrintSlotIdx + 1 })}
@@ -4917,6 +4988,9 @@ function PrinterCard({
                       // Check if this is the currently loaded tray
                       const globalTrayId = getGlobalTrayId(ams.id, tray?.id ?? 0, false);
                       const isActive = effectiveTrayNow === globalTrayId;
+                      // Runout guidance (#2587): expected / ran-out slot on this HT unit.
+                      const isExpectedSlot = expectedTray !== null && expectedTray === globalTrayId;
+                      const isRanOutSlot = previousTray !== null && previousTray === globalTrayId;
                       // Get cloud preset info if available
                       const cloudInfo = tray?.tray_info_idx ? filamentInfo?.[tray.tray_info_idx] : null;
                       // Get saved slot preset mapping (for user-configured slots)
@@ -4979,8 +5053,25 @@ function PrinterCard({
                         // Slot visual content (goes inside hover card)
                         const slotVisual = (
                           <div
-                            className={`relative w-full bg-bambu-dark-secondary rounded-lg p-1 text-center ${isEmpty ? 'opacity-50' : ''} ${isActive ? 'ring-2 ring-bambu-green ring-offset-1 ring-offset-bambu-dark' : ''}`}
+                            className={`relative w-full bg-bambu-dark-secondary rounded-lg p-1 text-center ${isEmpty ? 'opacity-50' : ''} ${
+                              isExpectedSlot
+                                ? 'ring-2 ring-amber-400 ring-offset-1 ring-offset-bambu-dark animate-pulse'
+                                : isRanOutSlot
+                                  ? 'ring-2 ring-red-500/60 ring-offset-1 ring-offset-bambu-dark'
+                                  : isActive
+                                    ? 'ring-2 ring-bambu-green ring-offset-1 ring-offset-bambu-dark'
+                                    : ''
+                            }`}
                           >
+                            {isExpectedSlot && (
+                              <span
+                                aria-label={t('printers.expectedSlot.ariaLabel', { n: 1 })}
+                                title={t('printers.expectedSlot.title')}
+                                className="absolute top-0.5 left-0.5 px-1 py-px text-[8px] font-bold text-bambu-dark bg-amber-400 rounded pointer-events-none leading-none"
+                              >
+                                ↓
+                              </span>
+                            )}
                             {htActivePrintSlotLabel && (
                               <span
                                 aria-label={t('printers.activeJobSlot.ariaLabel', { n: htActivePrintSlotIdx + 1 })}
@@ -6176,53 +6267,6 @@ function PrinterCard({
         />
       )}
 
-      {/* Bed Jog — not-homed warning (Studio-style) */}
-      {showNotHomedModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg shadow-xl w-full max-w-sm p-5">
-            <div className="flex items-start gap-3 mb-4">
-              <AlertTriangle className="w-5 h-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
-              <div>
-                <h3 className="text-sm font-semibold text-white mb-1">
-                  {t('printers.bedJog.notHomedTitle')}
-                </h3>
-                <p className="text-xs text-bambu-gray leading-relaxed">
-                  {t('printers.bedJog.notHomedMessage')}
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-col gap-2">
-              <button
-                onClick={() => {
-                  homeAxesMutation.mutate('all');
-                  setShowNotHomedModal(null);
-                }}
-                className="w-full px-3 py-2 rounded-lg text-xs font-medium bg-bambu-green/20 text-bambu-green hover:bg-bambu-green/30 transition-colors"
-              >
-                {t('printers.bedJog.homeZ')}
-              </button>
-              <button
-                onClick={() => {
-                  const d = showNotHomedModal.distance;
-                  try { sessionStorage.setItem(`bambuddy.bedJog.warned.${printer.id}`, '1'); } catch { /* ignore */ }
-                  bedJogMutation.mutate({ distance: d, force: true });
-                  setShowNotHomedModal(null);
-                }}
-                className="w-full px-3 py-2 rounded-lg text-xs font-medium bg-yellow-100 dark:bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-500/30 transition-colors"
-              >
-                {t('printers.bedJog.moveAnyway')}
-              </button>
-              <button
-                onClick={() => setShowNotHomedModal(null)}
-                className="w-full px-3 py-2 rounded-lg text-xs font-medium bg-bambu-dark text-bambu-gray hover:bg-bambu-dark-tertiary transition-colors"
-              >
-                {t('common.cancel')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Skip Objects Modal */}
       <SkipObjectsModal
         printerId={printer.id}
@@ -6238,6 +6282,7 @@ function PrinterCard({
           onClose={() => setShowHMSModal(false)}
           printerId={printer.id}
           hasPermission={hasPermission}
+          runoutGuidance={runoutGuidance}
         />
       )}
 

@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { api, type PrinterStatus } from '../../api/client';
 import { getColorName } from '../../utils/colors';
+import { isGcodeCompatible } from '../../utils/printer';
 import {
   normalizeColorForCompare,
   colorsAreSimilar,
@@ -160,8 +161,11 @@ function InlineMappingEditor({
           <span title={`Required: ${req.type} - ${getColorName(req.color)}`}>
             <Circle className="w-3 h-3" fill={req.color} stroke={req.color} />
           </span>
-          <span className="text-white truncate">
-            {req.type} <span className="text-bambu-gray">({req.used_grams}g)</span>
+          {/* Only the name truncates; the gram usage is pinned (shrink-0) so
+              it never clips on narrow/mobile widths (#2669). */}
+          <span className="text-white flex items-center gap-1 min-w-0">
+            <span className="truncate min-w-0" title={req.type}>{req.type}</span>
+            <span className="text-bambu-gray shrink-0 whitespace-nowrap">({req.used_grams}g)</span>
           </span>
           <span className="text-bambu-gray">→</span>
           <select
@@ -409,10 +413,15 @@ export function PrinterSelector({
             onClick={() => {
               onAssignmentModeChange!('model');
               onMultiSelect([]);
-              // Pre-select the sliced-for model if available, otherwise first model
+              // Pre-select the sliced-for model when it has printers. NEVER
+              // silently fall back to another model (#2578): uniqueModels is
+              // alphabetically sorted, so the old `uniqueModels[0]` default
+              // quietly targeted e.g. H2D for an X1C-sliced file whenever the
+              // metadata hadn't loaded yet. Leave it unset and let the user
+              // pick from the dropdown instead.
               const defaultModel = slicedForModel && uniqueModels.includes(slicedForModel)
                 ? slicedForModel
-                : uniqueModels[0];
+                : null;
               onTargetModelChange!(defaultModel);
             }}
             className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
@@ -422,7 +431,12 @@ export function PrinterSelector({
             }`}
           >
             <Users className="w-4 h-4" />
-            <span className="text-sm">Any {slicedForModel || 'Model'}</span>
+            {/* In model mode the label must reflect the ACTUAL scheduler
+                target, not the slice metadata — an edited queue item can
+                target a different model than the file was sliced for (#2578). */}
+            <span className="text-sm">
+              Any {(assignmentMode === 'model' ? targetModel : null) || slicedForModel || 'Model'}
+            </span>
           </button>
         </div>
       )}
@@ -430,29 +444,58 @@ export function PrinterSelector({
       {/* Model selection and location filter (when in model mode) */}
       {assignmentMode === 'model' && modelAssignmentAvailable && (
         <div className="space-y-3 mb-4">
-          {/* Model selector — only show when sliced model is unknown */}
-          {!slicedForModel && (
-            <div>
-              <label className="block text-xs text-bambu-gray mb-1">Target Model</label>
-              <select
-                value={targetModel || ''}
-                onChange={(e) => {
-                  onTargetModelChange!(e.target.value || null);
-                  // Clear location when model changes
-                  if (onTargetLocationChange) {
-                    onTargetLocationChange(null);
-                  }
-                }}
-                className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
-              >
-                <option value="">Select a model...</option>
-                {uniqueModels.map((model) => (
-                  <option key={model} value={model}>
+          {/* Model selector — always visible in model mode so a wrong target
+              on an existing queue item can be seen and fixed (#2578).
+              Incompatible models are disabled: G-code sliced for one model
+              must only go to that model or its interchange family. */}
+          <div>
+            <label className="block text-xs text-bambu-gray mb-1">
+              Target Model
+              {slicedForModel && <span className="ml-2 text-bambu-gray/70">(sliced for {slicedForModel})</span>}
+            </label>
+            <select
+              value={targetModel || ''}
+              onChange={(e) => {
+                onTargetModelChange!(e.target.value || null);
+                // Clear location when model changes
+                if (onTargetLocationChange) {
+                  onTargetLocationChange(null);
+                }
+              }}
+              className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
+            >
+              <option value="">Select a model...</option>
+              {uniqueModels.map((model) => {
+                const compatible = isGcodeCompatible(slicedForModel, model);
+                return (
+                  <option key={model} value={model} disabled={!compatible}>
                     {model}
+                    {!compatible ? ` — incompatible with ${slicedForModel} G-code` : ''}
                   </option>
-                ))}
-              </select>
-            </div>
+                );
+              })}
+            </select>
+          </div>
+
+          {/* Cross-model state on an existing row: same file/target mismatch
+              the specific-printer path already warns about (#2578). */}
+          {slicedForModel && targetModel && targetModel !== slicedForModel && (
+            isGcodeCompatible(slicedForModel, targetModel) ? (
+              <div className="p-3 bg-yellow-50 dark:bg-yellow-500/10 border border-yellow-300 dark:border-yellow-500/30 rounded-lg flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-yellow-600 dark:text-yellow-400 flex-shrink-0" />
+                <span className="text-sm text-yellow-700 dark:text-yellow-400">
+                  File was sliced for {slicedForModel}, but will be dispatched to a {targetModel} printer
+                </span>
+              </div>
+            ) : (
+              <div className="p-3 bg-red-50 dark:bg-red-500/10 border border-red-300 dark:border-red-500/30 rounded-lg flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 flex-shrink-0" />
+                <span className="text-sm text-red-700 dark:text-red-400">
+                  File was sliced for {slicedForModel} and cannot be dispatched to {targetModel} printers —
+                  select a compatible model
+                </span>
+              </div>
+            )
           )}
 
           {/* Location filter (only show when target model is selected and locations exist) */}
