@@ -115,6 +115,7 @@ describe('PrintModal', () => {
     });
 
     it('shows printer selection with checkboxes for multi-select', async () => {
+      const user = userEvent.setup();
       render(
         <PrintModal
           mode="create"
@@ -125,10 +126,29 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
         expect(screen.getByText('P1S')).toBeInTheDocument();
       });
+    });
+
+    it('defaults to Any P1S as the leftmost assignment option', async () => {
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Benchy"
+          onClose={mockOnClose}
+          onSuccess={mockOnSuccess}
+        />
+      );
+
+      const anyP1S = await screen.findByRole('button', { name: 'Any P1S' });
+      const specificPrinter = screen.getByRole('button', { name: 'Specific Printer' });
+
+      expect(anyP1S).toHaveClass('border-bambu-green');
+      expect(anyP1S.compareDocumentPosition(specificPrinter) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
     it('has print button', () => {
@@ -260,7 +280,7 @@ describe('PrintModal', () => {
         />
       );
 
-      await user.click(await screen.findByRole('button', { name: 'Any Model' }));
+      await user.click(await screen.findByRole('button', { name: 'Any P1S' }));
       await waitFor(() => expect(filamentRequirementsRequested).toBe(true));
 
       const filamentOptions = await screen.findByRole('button', { name: 'Filament Requirements' });
@@ -322,13 +342,13 @@ describe('PrintModal', () => {
 
       render(<PrintModal mode="create" archiveId={1} archiveName="Benchy" onClose={mockOnClose} />);
 
-      await user.click(await screen.findByRole('button', { name: 'Any Model' }));
+      await user.click(await screen.findByRole('button', { name: 'Any P1S' }));
       await user.click(screen.getByRole('button', { name: /queue options/i }));
       await user.click(screen.getByRole('checkbox', { name: 'Postpone print' }));
       await user.click(screen.getByRole('button', { name: /^print$/i }));
 
       await waitFor(() => expect(capturedBody).not.toBeNull());
-      expect(capturedBody).toMatchObject({ target_model: 'A1M' });
+      expect(capturedBody).toMatchObject({ target_model: 'P1S' });
       expect(capturedBody?.scheduled_time).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00\.000Z$/);
     });
 
@@ -350,7 +370,7 @@ describe('PrintModal', () => {
 
       render(<PrintModal mode="create" archiveId={1} archiveName="Benchy" onClose={mockOnClose} />);
 
-      await user.click(await screen.findByRole('button', { name: 'Any Model' }));
+      await user.click(await screen.findByRole('button', { name: 'Any P1S' }));
       await user.click(await screen.findByRole('button', { name: 'Filament Requirements' }));
       await user.click(screen.getByLabelText(/Match colour/i));
       await user.click(await screen.findByRole('combobox', { name: /PLA filament profile/i }));
@@ -1021,6 +1041,7 @@ describe('PrintModal', () => {
 
   describe('multi-printer selection', () => {
     it('shows select all button when multiple printers available', async () => {
+      const user = userEvent.setup();
       render(
         <PrintModal
           mode="create"
@@ -1030,6 +1051,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('Select all')).toBeInTheDocument();
       });
@@ -1046,6 +1068,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('Select all')).toBeInTheDocument();
       });
@@ -1068,6 +1091,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('Select all')).toBeInTheDocument();
       });
@@ -1128,6 +1152,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await user.click((await screen.findByText('X1 Carbon')).closest('button')!);
       await user.click((await screen.findByText('P1S')).closest('button')!);
       const customMapping = await screen.findAllByLabelText('Customise this printer');
@@ -1189,6 +1214,7 @@ describe('PrintModal', () => {
     });
 
     it('shows state badges on printers in create mode', async () => {
+      const user = userEvent.setup();
       render(
         <PrintModal
           mode="create"
@@ -1198,6 +1224,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('Printing')).toBeInTheDocument();
         expect(screen.getByText('Idle')).toBeInTheDocument();
@@ -1216,6 +1243,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('Printing')).toBeInTheDocument();
       }, { timeout: 5000 });
@@ -1240,6 +1268,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('Select all')).toBeInTheDocument();
         expect(screen.getByText('Printing')).toBeInTheDocument();
@@ -1263,6 +1292,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('Printing')).toBeInTheDocument();
       }, { timeout: 5000 });
@@ -1279,6 +1309,7 @@ describe('PrintModal', () => {
     });
 
     it('shows Offline badge for disconnected printers', async () => {
+      const user = userEvent.setup();
       server.use(
         http.get('/api/v1/printers/:id/status', () => {
           return HttpResponse.json({
@@ -1297,6 +1328,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         const offlineBadges = screen.getAllByText('Offline');
         expect(offlineBadges.length).toBeGreaterThanOrEqual(1);
@@ -1304,6 +1336,7 @@ describe('PrintModal', () => {
     });
 
     it('shows calibration stage name when printer is calibrating', async () => {
+      const user = userEvent.setup();
       server.use(
         http.get('/api/v1/printers/:id/status', () => {
           return HttpResponse.json({
@@ -1322,6 +1355,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         const badges = screen.getAllByText('Auto bed leveling');
         expect(badges.length).toBeGreaterThanOrEqual(1);
@@ -1341,6 +1375,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
       });
@@ -1362,6 +1397,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('Select all')).toBeInTheDocument();
       });
@@ -1382,6 +1418,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('Select all')).toBeInTheDocument();
       });
@@ -1406,6 +1443,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('Select all')).toBeInTheDocument();
       });
@@ -1427,6 +1465,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
       });
@@ -1448,6 +1487,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('Select all')).toBeInTheDocument();
       });
@@ -1470,6 +1510,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('Select all')).toBeInTheDocument();
       });
@@ -1577,6 +1618,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       // Wait for plates and select a printer
       await waitFor(() => {
         expect(screen.getByText('Select All 3 Plates')).toBeInTheDocument();
@@ -1622,6 +1664,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       // Wait for plates and select a printer
       await waitFor(() => {
         expect(screen.getByText('Select All 3 Plates')).toBeInTheDocument();

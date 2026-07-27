@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient, useQueries } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
@@ -279,6 +279,20 @@ export function PrinterSelector({
     return [...new Set(models)].sort();
   }, [activePrinters]);
 
+  // Prefer the farm's P1S pool, while still keeping the default usable for
+  // installations that do not have a P1S.
+  const defaultModel = useMemo(() => {
+    if (uniqueModels.includes('P1S')) return 'P1S';
+    if (slicedForModel && uniqueModels.includes(slicedForModel)) return slicedForModel;
+    return uniqueModels[0] ?? null;
+  }, [slicedForModel, uniqueModels]);
+
+  useEffect(() => {
+    if (assignmentMode === 'model' && !targetModel && defaultModel && onTargetModelChange) {
+      onTargetModelChange(defaultModel);
+    }
+  }, [assignmentMode, defaultModel, onTargetModelChange, targetModel]);
+
   // Get unique locations for the selected target model (for location filtering)
   const uniqueLocations = useMemo(() => {
     if (!targetModel) return [];
@@ -372,6 +386,22 @@ export function PrinterSelector({
           <button
             type="button"
             onClick={() => {
+              onAssignmentModeChange!('model');
+              onMultiSelect([]);
+              onTargetModelChange!(defaultModel);
+            }}
+            className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
+              assignmentMode === 'model'
+                ? 'border-bambu-green bg-bambu-green/10 text-white'
+                : 'border-bambu-dark-tertiary bg-bambu-dark text-bambu-gray hover:border-bambu-gray'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span className="text-sm">Any {targetModel || defaultModel || slicedForModel || 'Model'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
               onAssignmentModeChange!('printer');
               onTargetModelChange!(null);
             }}
@@ -383,26 +413,6 @@ export function PrinterSelector({
           >
             <PrinterIcon className="w-4 h-4" />
             <span className="text-sm">Specific Printer</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              onAssignmentModeChange!('model');
-              onMultiSelect([]);
-              // Pre-select the sliced-for model if available, otherwise first model
-              const defaultModel = slicedForModel && uniqueModels.includes(slicedForModel)
-                ? slicedForModel
-                : uniqueModels[0];
-              onTargetModelChange!(defaultModel);
-            }}
-            className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
-              assignmentMode === 'model'
-                ? 'border-bambu-green bg-bambu-green/10 text-white'
-                : 'border-bambu-dark-tertiary bg-bambu-dark text-bambu-gray hover:border-bambu-gray'
-            }`}
-          >
-            <Users className="w-4 h-4" />
-            <span className="text-sm">Any {slicedForModel || 'Model'}</span>
           </button>
         </div>
       )}

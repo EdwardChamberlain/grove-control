@@ -148,6 +148,12 @@ export function PrintModal({
     if (mode === 'edit-queue-item' && queueItem?.target_model) {
       return 'model';
     }
+    // Farm-wide printing is the default for new jobs unless a caller has
+    // explicitly pre-selected a printer (for example, direct print from a
+    // printer page).
+    if (mode === 'create' && !initialSelectedPrinterIds?.length) {
+      return 'model';
+    }
     return 'printer';
   });
 
