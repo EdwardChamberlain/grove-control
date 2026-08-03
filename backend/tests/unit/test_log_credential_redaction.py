@@ -10,6 +10,7 @@ into the log.
 """
 
 import asyncio
+import time
 
 from backend.app.api.routes.camera import _read_ffmpeg_stderr, _summarize_ffmpeg_stderr
 from backend.app.core.logging_filters import redact_url_credentials
@@ -70,6 +71,43 @@ class TestRedactUrlCredentials:
     def test_tolerates_empty_and_none(self):
         assert redact_url_credentials("") == ""
         assert redact_url_credentials(None) is None
+
+    def test_a_long_scheme_like_run_does_not_blow_up(self):
+        """The scheme repetition is capped so the match stays linear.
+
+        Unbounded, the engine restarted at every offset of a run of
+        scheme-legal characters and consumed to the end each time before
+        failing to find ``://`` — quadratic in the length of the line, and
+        ffmpeg echoes the operator's camera URL into the subject. An absolute
+        timing bound would be flaky, so this pins the growth rate instead:
+        doubling the input must not quadruple the work. Measured against the
+        unbounded pattern, these two inputs took 550ms and 2187ms (ratio 3.97,
+        so the assertion fails); bounded, 2.8ms and 5.4ms (ratio 1.98).
+        """
+        small = "A" * 32_000 + "://@"
+        large = "A" * 64_000 + "://@"
+
+        start = time.perf_counter()
+        assert redact_url_credentials(small) == small
+        small_elapsed = time.perf_counter() - start
+
+        start = time.perf_counter()
+        assert redact_url_credentials(large) == large
+        large_elapsed = time.perf_counter() - start
+
+        # Linear would be ~2x. Allow generous slack for a loaded CI box while
+        # still failing the ~4x of a quadratic match.
+        assert large_elapsed < max(small_elapsed * 3, 0.5)
+
+    def test_a_scheme_longer_than_the_cap_still_gets_its_secret_masked(self):
+        """The cap bounds backtracking; it must not create a redaction hole.
+
+        A pseudo-scheme longer than the cap simply matches from a later
+        offset, so the password is still replaced.
+        """
+        result = redact_url_credentials("Z" * 100 + "://user:hunter2@host/path")
+        assert "hunter2" not in result
+        assert result.endswith("://user:[REDACTED]@host/path")
 
 
 class TestFfmpegStderrFunnel:

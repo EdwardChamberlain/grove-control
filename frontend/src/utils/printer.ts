@@ -18,6 +18,14 @@ export function getPrinterImage(model: string | null | undefined): string {
   return '/img/printers/default.png';
 }
 
+// Ceiling for every chamber-temperature target the UI accepts (manual set,
+// preheat filament map, per-item preheat override, chamber quick-select
+// presets). Mirrors backend MAX_CHAMBER_TEMP_C in
+// backend/app/utils/printer_models.py — keep the two in sync. The H2 series
+// (H2C / H2D / H2D Pro / H2S) and X2D heat the chamber to 65 °C; X1E tops out
+// at 60 and its firmware clamps anything higher.
+export const MAX_CHAMBER_TEMP_C = 65;
+
 // G-code interchange families (#2578). Mirrors backend GCODE_COMPAT_FAMILIES
 // in backend/app/utils/printer_models.py — keep the two in sync. A sliced 3MF
 // may target a different model ONLY within its family; everything else is

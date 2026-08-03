@@ -33,6 +33,7 @@ export default {
 
   // Common
   common: {
+    plusNMore: '+{{count}} outros',
     save: 'Salvar',
     saving: 'Salvando...',
     cancel: 'Cancelar',
@@ -1029,6 +1030,13 @@ export default {
       status: 'Status',
       duration: 'Duração',
       filament: 'Filamento',
+      filamentUsed: 'Filamento usado',
+      cost: 'Custo',
+      energy: 'Energia',
+      energyCost: 'Custo de energia',
+      completedAt: 'Concluído',
+      columns: 'Colunas',
+      sortBy: 'Ordenar por {{column}}',
       allPrinters: 'Todas as Impressoras',
       allUsers: 'Todos os Usuários',
       allStatuses: 'Todos os Status',
@@ -1293,6 +1301,7 @@ export default {
     },
     // Time
     time: {
+      etaIfStartedNow: 'Horário de conclusão se este trabalho começasse agora',
       asap: 'ASAP',
       overdue: 'Atrasado',
       now: 'Agora',
@@ -2448,6 +2457,9 @@ export default {
     updateAvailableVersion: 'Atualização disponível: v{{version}}',
     releaseNotes: 'Notas da versão',
     updateViaDocker: 'Atualizar via Docker Compose:',
+    composeDirectory: 'Diretório do Compose',
+    composeDirectoryHint: 'Diretório que contém seu docker-compose.yml. Deixe em branco para omitir o cd.',
+    copyUpdateCommand: 'Copiar comando de atualização',
     updateViaHomeAssistant: 'As atualizações são gerenciadas pelo Supervisor do Home Assistant. Abra Configurações → Complementos → Bambuddy no Home Assistant para instalar a nova versão.',
     updateViaWindowsInstaller: 'Instalações no Windows são atualizadas executando o instalador novamente. Baixe a nova versão abaixo — seus dados, configurações e impressoras são preservados.',
     downloadWindowsInstaller: 'Baixar instalador da v{{version}}',
@@ -3549,6 +3561,13 @@ export default {
 
   // File manager
   fileManager: {
+    variants: {
+      badge: '{{count}} versões',
+      groupAction: 'Agrupar como versões',
+      groupTooltip: 'Marcar estes arquivos como o mesmo trabalho fatiado para impressoras diferentes',
+      grouped: '{{count}} arquivos agrupados como versões',
+      printAlternatives: 'Imprimir ({{count}} alternativas)',
+    },
     title: 'Gerenciador de Arquivos',
     subtitle: 'Organize e gerencie seus arquivos de impressão',
     uploadFiles: 'Enviar Arquivos',
@@ -4077,6 +4096,10 @@ export default {
     allPresetsRequired: 'Todas as predefinições devem ser selecionadas',
     useEmbedded: 'Usar as configurações incorporadas do arquivo',
     useEmbeddedHint: 'Fatiar como o designer configurou (paredes, preenchimento, filamento) em vez dos perfis acima. Disponível porque sua impressora corresponde à do arquivo.',
+    autoOrient: 'Orientar os objetos automaticamente',
+    autoOrientHint: 'O fatiador gira cada objeto para o lado que imprime melhor antes de fatiar. Substitui a orientação salva no arquivo.',
+    autoArrange: 'Organizar automaticamente na mesa',
+    autoArrangeHint: 'O fatiador posiciona os objetos para que não se sobreponham. Substitui a disposição do arquivo.',
     designSettings: 'Manter as configurações do designer',
     designSettingsHint: 'Este arquivo altera {{count}} configuração(ões) de impressão em relação ao perfil padrão.',
     designSettingsSelected: '{{selected}} de {{total}} selecionadas',
@@ -4615,6 +4638,16 @@ export default {
 
   // Print modal
   printModal: {
+    variants: {
+      editNote: 'Estas alternativas foram definidas ao enfileirar o trabalho. Cancele e enfileire de novo para alterá-las.',
+      title: 'Alternativas de impressora',
+      help: 'Um trabalho, uma vaga na fila. A primeira impressora compatível que ficar livre imprime o arquivo dela.',
+      unknownModel: 'Modelo desconhecido',
+      plateFor: 'Mesa para {{filename}}',
+      moveUp: 'Mover para cima',
+      moveDown: 'Mover para baixo',
+      queued: 'Na fila com {{count}} alternativas',
+    },
     selectPrinter: 'Selecionar Impressora',
     selectPlate: 'Selecionar Placa',
     filamentMapping: 'Mapeamento de Filamento',
@@ -5023,7 +5056,15 @@ export default {
       kValueHelp: 'Faixa típica: 0.01 - 0.06 para PLA, 0.02 - 0.10 para PETG',
       filament: 'Filamento',
       selectFilament: 'Selecionar filamento...',
-      noFilamentsHelp: 'Nenhum filamento encontrado. Crie um K-profile no Bambu Studio primeiro.',
+      source: {
+        local: 'Importado',
+        orcaCloud: 'Orca Cloud',
+        bambuCloud: 'Bambu Cloud',
+        builtin: 'Integrado',
+      },
+      noFilamentsHelp: 'Nenhum filamento disponível. Entre na Bambu Cloud ou importe predefinições em Perfis → Perfis Locais.',
+      searchFilaments: 'Buscar filamentos...',
+      noFilamentMatches: 'Nenhum filamento corresponde a essa busca',
       flowType: 'Tipo de Fluxo',
       highFlow: 'Alto Fluxo',
       standard: 'Padrão',
@@ -5056,6 +5097,8 @@ export default {
       profileSaved: 'K-profile salvo',
       profilesSaved: 'K-profile salvo em {{count}} extrusores',
       selectAtLeastOneExtruder: 'Por favor, selecione pelo menos um extrusor',
+      selectFilament: 'Selecione um filamento primeiro',
+      filamentNotResolvable: 'Sem ID de filamento Bambu para {{name}} — a impressora não consegue armazenar um perfil',
       profileDeleted: 'K-profile excluído',
       profilesDeleted: '{{count}} perfis excluídos',
       exportedProfiles: '{{count}} perfis exportados',

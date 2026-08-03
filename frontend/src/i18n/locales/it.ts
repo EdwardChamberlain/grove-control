@@ -33,6 +33,7 @@ export default {
 
   // Common
   common: {
+    plusNMore: '+{{count}} altri',
     save: 'Salva',
     saving: 'Salvataggio...',
     cancel: 'Annulla',
@@ -1029,6 +1030,13 @@ export default {
       status: 'Stato',
       duration: 'Durata',
       filament: 'Filamento',
+      filamentUsed: 'Filamento usato',
+      cost: 'Costo',
+      energy: 'Energia',
+      energyCost: 'Costo energia',
+      completedAt: 'Completato',
+      columns: 'Colonne',
+      sortBy: 'Ordina per {{column}}',
       allPrinters: 'Tutte le stampanti',
       allUsers: 'Tutti gli utenti',
       allStatuses: 'Tutti gli stati',
@@ -1293,6 +1301,7 @@ export default {
     },
     // Time
     time: {
+      etaIfStartedNow: 'Orario di completamento se questo lavoro iniziasse ora',
       asap: 'ASAP',
       overdue: 'Scaduto',
       now: 'Ora',
@@ -2448,6 +2457,9 @@ export default {
     updateAvailableVersion: 'Aggiornamento disponibile: v{{version}}',
     releaseNotes: 'Note di rilascio',
     updateViaDocker: 'Aggiorna tramite Docker Compose:',
+    composeDirectory: 'Cartella Compose',
+    composeDirectoryHint: 'Cartella che contiene il tuo docker-compose.yml. Lascia vuoto per omettere il cd.',
+    copyUpdateCommand: 'Copia comando di aggiornamento',
     updateViaHomeAssistant: 'Gli aggiornamenti sono gestiti dal Supervisor di Home Assistant. Apri Impostazioni → Add-on → Bambuddy in Home Assistant per installare la nuova versione.',
     updateViaWindowsInstaller: 'Le installazioni Windows si aggiornano rieseguendo l\'installer. Scarica la nuova versione qui sotto — i tuoi dati, le impostazioni e le stampanti vengono mantenuti.',
     downloadWindowsInstaller: 'Scarica installer per v{{version}}',
@@ -3549,6 +3561,13 @@ export default {
 
   // File manager
   fileManager: {
+    variants: {
+      badge: '{{count}} versioni',
+      groupAction: 'Raggruppa come versioni',
+      groupTooltip: 'Segna questi file come lo stesso lavoro elaborato per stampanti diverse',
+      grouped: '{{count}} file raggruppati come versioni',
+      printAlternatives: 'Stampa ({{count}} alternative)',
+    },
     title: 'Gestore file',
     subtitle: 'Organizza e gestisci i tuoi file di stampa',
     uploadFiles: 'Carica file',
@@ -4077,6 +4096,10 @@ export default {
     allPresetsRequired: 'Tutti i preset devono essere selezionati',
     useEmbedded: 'Usa le impostazioni integrate del file',
     useEmbeddedHint: 'Slicia come impostato dal designer (pareti, riempimento, filamento) invece dei profili sopra. Disponibile perché la tua stampante corrisponde a quella del file.',
+    autoOrient: 'Orienta automaticamente gli oggetti',
+    autoOrientHint: "Lo slicer ruota ogni oggetto sul lato che si stampa meglio prima di affettare. Sostituisce l'orientamento salvato nel file.",
+    autoArrange: 'Disponi automaticamente sul piatto',
+    autoArrangeHint: 'Lo slicer dispone gli oggetti in modo che non si sovrappongano più. Sostituisce la disposizione del file.',
     designSettings: 'Mantieni le impostazioni del progettista',
     designSettingsHint: 'Questo file modifica {{count}} impostazione/i di stampa rispetto al profilo standard.',
     designSettingsSelected: '{{selected}} di {{total}} selezionate',
@@ -4615,6 +4638,16 @@ export default {
 
   // Print modal
   printModal: {
+    variants: {
+      editNote: 'Queste alternative sono state definite al momento dell\'accodamento. Annulla e riaccoda per modificarle.',
+      title: 'Alternative di stampante',
+      help: 'Un lavoro, un posto in coda. La prima stampante compatibile che si libera stampa il suo file.',
+      unknownModel: 'Modello sconosciuto',
+      plateFor: 'Piatto per {{filename}}',
+      moveUp: 'Sposta su',
+      moveDown: 'Sposta giù',
+      queued: 'In coda con {{count}} alternative',
+    },
     selectPrinter: 'Seleziona stampante',
     selectPlate: 'Seleziona piatto',
     filamentMapping: 'Mappatura filamento',
@@ -5023,7 +5056,15 @@ export default {
       kValueHelp: 'Intervallo tipico: 0.01 - 0.06 per PLA, 0.02 - 0.10 per PETG',
       filament: 'Filamento',
       selectFilament: 'Seleziona filamento...',
-      noFilamentsHelp: 'Nessun filamento trovato. Crea prima un K-profile in Bambu Studio.',
+      source: {
+        local: 'Importato',
+        orcaCloud: 'Orca Cloud',
+        bambuCloud: 'Bambu Cloud',
+        builtin: 'Integrato',
+      },
+      noFilamentsHelp: 'Nessun filamento disponibile. Accedi a Bambu Cloud o importa i preset da Profili → Profili locali.',
+      searchFilaments: 'Cerca filamenti...',
+      noFilamentMatches: 'Nessun filamento corrisponde alla ricerca',
       flowType: 'Tipo flow',
       highFlow: 'Alto flusso',
       standard: 'Standard',
@@ -5056,6 +5097,8 @@ export default {
       profileSaved: 'K-profile salvato',
       profilesSaved: 'K-profile salvato su {{count}} estrusori',
       selectAtLeastOneExtruder: 'Seleziona almeno un estrusore',
+      selectFilament: 'Seleziona prima un filamento',
+      filamentNotResolvable: 'Nessun ID filamento Bambu per {{name}}: la stampante non può salvare un profilo',
       profileDeleted: 'K-profile eliminato',
       profilesDeleted: 'Eliminati {{count}} profili',
       exportedProfiles: 'Esportati {{count}} profili',

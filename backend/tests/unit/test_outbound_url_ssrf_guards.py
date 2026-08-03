@@ -436,7 +436,16 @@ def test_ha_guard_keeps_ipv6_literals_bracketed():
     assert HomeAssistantService._validate_url("http://[fd00::1]:8123/api") == "http://[fd00::1]:8123/api"
 
 
-@pytest.mark.parametrize("ip", ["169.254.169.254", "100.100.100.200", "fd00:ec2::254", "0.0.0.0", "239.255.255.250"])
+@pytest.mark.parametrize(
+    "ip",
+    [
+        "169.254.169.254",
+        "100.100.100.200",
+        "fd00:ec2::254",
+        "0.0.0.0",  # nosec B104 — rejection fixture, not a bind address: the assertion below is that the guard refuses it
+        "239.255.255.250",
+    ],
+)
 def test_tasmota_guard_rejects_metadata_and_misuse_addresses(ip: str):
     """Tasmota keeps its own stricter rule (bare IP literals only, loopback
     rejected — a plug is always a separate LAN device), but must not miss the

@@ -33,6 +33,7 @@ export default {
 
   // Common
   common: {
+    plusNMore: '他{{count}}件',
     save: '保存',
     saving: '保存中...',
     cancel: 'キャンセル',
@@ -1028,6 +1029,13 @@ export default {
       status: 'ステータス',
       duration: '所要時間',
       filament: 'フィラメント',
+      filamentUsed: '使用フィラメント量',
+      cost: 'コスト',
+      energy: '電力量',
+      energyCost: '電力コスト',
+      completedAt: '終了',
+      columns: '列',
+      sortBy: '{{column}} で並べ替え',
       allPrinters: '全プリンター',
       allUsers: '全ユーザー',
       allStatuses: '全ステータス',
@@ -1292,6 +1300,7 @@ export default {
     },
     // Time
     time: {
+      etaIfStartedNow: 'このジョブを今開始した場合の完了予定時刻',
       asap: '即時',
       overdue: '期限超過',
       now: '今すぐ',
@@ -2498,6 +2507,9 @@ export default {
     updateAvailableVersion: 'アップデート利用可能: v{{version}}',
     releaseNotes: 'リリースノート',
     updateViaDocker: 'Docker Composeでアップデート:',
+    composeDirectory: 'Compose ディレクトリ',
+    composeDirectoryHint: 'docker-compose.yml があるディレクトリ。空欄にすると cd を省略します。',
+    copyUpdateCommand: '更新コマンドをコピー',
     updateViaHomeAssistant: 'アップデートはHome Assistant Supervisorによって管理されます。Home Assistantの設定→アドオン→Bambuddyを開いて新しいバージョンをインストールしてください。',
     updateViaWindowsInstaller: 'Windowsインストールはインストーラーを再実行して更新します。下のリンクから新しいバージョンをダウンロードしてください — データ、設定、プリンターは保持されます。',
     downloadWindowsInstaller: 'v{{version}} のインストーラーをダウンロード',
@@ -3561,6 +3573,13 @@ export default {
 
   // File manager
   fileManager: {
+    variants: {
+      badge: '{{count}}個のバージョン',
+      groupAction: 'バージョンとしてグループ化',
+      groupTooltip: 'これらのファイルを、異なるプリンター向けにスライスした同一ジョブとして扱います',
+      grouped: '{{count}}個のファイルをバージョンとしてグループ化しました',
+      printAlternatives: '印刷（{{count}}件の候補）',
+    },
     title: 'ファイル管理',
     subtitle: '印刷ファイルの整理と管理',
     uploadFiles: 'ファイルをアップロード',
@@ -4089,6 +4108,10 @@ export default {
     allPresetsRequired: 'すべてのプリセットを選択する必要があります',
     useEmbedded: 'ファイルに埋め込まれた設定を使用',
     useEmbeddedHint: '上のプロファイルではなく、設計者が設定したとおり（ウォール、インフィル、フィラメント）にスライスします。お使いのプリンターがファイルと一致するため利用できます。',
+    autoOrient: 'オブジェクトの向きを自動で調整',
+    autoOrientHint: 'スライスする前に、各オブジェクトを印刷に適した面へ自動で回転させます。ファイルに保存された向きは上書きされます。',
+    autoArrange: 'プレート上に自動配置',
+    autoArrangeHint: 'オブジェクトが重ならないようにスライサーが並べ直します。ファイルの配置は置き換えられます。',
     designSettings: '設計者の設定を保持',
     designSettingsHint: 'このファイルは標準プロファイルから {{count}} 個の印刷設定を変更しています。',
     designSettingsSelected: '{{total}} 個中 {{selected}} 個を選択',
@@ -4627,6 +4650,16 @@ export default {
 
   // Print modal
   printModal: {
+    variants: {
+      editNote: 'これらの候補はキュー追加時に決まります。変更するにはキャンセルして追加し直してください。',
+      title: 'プリンターの候補',
+      help: '1つのジョブ、キューは1枠。条件に合う最初に空いたプリンターがそのファイルを印刷します。',
+      unknownModel: '不明なモデル',
+      plateFor: '{{filename}} のプレート',
+      moveUp: '上へ',
+      moveDown: '下へ',
+      queued: '{{count}}件の候補付きでキューに追加しました',
+    },
     selectPrinter: 'プリンターを選択',
     selectPlate: 'プレートを選択',
     filamentMapping: 'フィラメントマッピング',
@@ -5035,7 +5068,15 @@ export default {
       kValueHelp: '一般的な範囲: PLA 0.01〜0.06、PETG 0.02〜0.10',
       filament: 'フィラメント',
       selectFilament: 'フィラメントを選択...',
-      noFilamentsHelp: 'フィラメントが見つかりません。Bambu Studioでまずプロファイルを作成してください。',
+      source: {
+        local: 'インポート済み',
+        orcaCloud: 'Orca Cloud',
+        bambuCloud: 'Bambu Cloud',
+        builtin: '内蔵',
+      },
+      noFilamentsHelp: '利用できるフィラメントがありません。Bambu Cloud にログインするか、プロファイル → ローカルプロファイル でプリセットをインポートしてください。',
+      searchFilaments: 'フィラメントを検索...',
+      noFilamentMatches: '検索に一致するフィラメントはありません',
       flowType: 'フロータイプ',
       highFlow: 'ハイフロー',
       standard: 'スタンダード',
@@ -5068,6 +5109,8 @@ export default {
       profileSaved: 'Kプロファイルを保存しました',
       profilesSaved: 'Kプロファイルを{{count}}台のエクストルーダーに保存しました',
       selectAtLeastOneExtruder: 'エクストルーダーを1つ以上選択してください',
+      selectFilament: '先にフィラメントを選択してください',
+      filamentNotResolvable: '{{name}} に対応する Bambu フィラメント ID がないため、プリンターはプロファイルを保存できません',
       profileDeleted: 'Kプロファイルを削除しました',
       profilesDeleted: '{{count}}件のプロファイルを削除しました',
       exportedProfiles: '{{count}}件のプロファイルをエクスポートしました',

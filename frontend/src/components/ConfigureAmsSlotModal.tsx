@@ -8,6 +8,7 @@ import { matchesPrinterModelSuffix, presetCompatibility, buildCompatibilityIndex
 import { toFilamentId } from './spool-form/utils';
 import { Button } from './Button';
 import { getAmsLabel } from '../utils/amsHelpers';
+import { useCancellableTimeout } from '../hooks/useCancellableTimeout';
 
 interface SlotInfo {
   amsId: number;
@@ -305,6 +306,9 @@ export function ConfigureAmsSlotModal({
   const [showSuccess, setShowSuccess] = useState(false);
   const [showExtendedColors, setShowExtendedColors] = useState(false);
   const scrolledToRef = useRef<string>('');
+  // The success state is held briefly before the modal closes itself; that
+  // timer must not outlive the modal.
+  const { schedule: scheduleClose } = useCancellableTimeout();
 
   // Fetch cloud settings (gracefully handle 401 when logged out)
   const { data: cloudSettings, isLoading: settingsLoading, isError: cloudError } = useQuery({
@@ -614,7 +618,7 @@ export function ConfigureAmsSlotModal({
       setShowSuccess(true);
       onSuccess?.();
       // Close after showing success briefly
-      setTimeout(() => {
+      scheduleClose(() => {
         setShowSuccess(false);
         onClose();
       }, 1500);
@@ -629,7 +633,7 @@ export function ConfigureAmsSlotModal({
     onSuccess: () => {
       setShowSuccess(true);
       onSuccess?.();
-      setTimeout(() => {
+      scheduleClose(() => {
         setShowSuccess(false);
         onClose();
       }, 1500);

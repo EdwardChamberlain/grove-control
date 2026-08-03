@@ -33,6 +33,7 @@ export default {
 
   // Common
   common: {
+    plusNMore: '+{{count}} autres',
     save: 'Enregistrer',
     saving: 'Enregistrement...',
     cancel: 'Annuler',
@@ -1029,6 +1030,13 @@ export default {
       status: 'Statut',
       duration: 'Durée',
       filament: 'Filament',
+      filamentUsed: 'Filament utilisé',
+      cost: 'Coût',
+      energy: 'Énergie',
+      energyCost: 'Coût énergétique',
+      completedAt: 'Terminé',
+      columns: 'Colonnes',
+      sortBy: 'Trier par {{column}}',
       allPrinters: 'Toutes les imprimantes',
       allUsers: 'Tous les utilisateurs',
       allStatuses: 'Tous les statuts',
@@ -1293,6 +1301,7 @@ export default {
     },
     // Time
     time: {
+      etaIfStartedNow: 'Heure de fin si cette tâche démarrait maintenant',
       asap: 'Dès que possible',
       overdue: 'En retard',
       now: 'Maintenant',
@@ -2449,6 +2458,9 @@ export default {
     updateAvailableVersion: 'Mise à jour disponible : v{{version}}',
     releaseNotes: 'Notes de version',
     updateViaDocker: 'Mettre à jour via Docker Compose :',
+    composeDirectory: 'Répertoire Compose',
+    composeDirectoryHint: 'Répertoire contenant votre docker-compose.yml. Laissez vide pour omettre le cd.',
+    copyUpdateCommand: 'Copier la commande de mise à jour',
     updateViaHomeAssistant: 'Les mises à jour sont gérées par le superviseur Home Assistant. Ouvrez Paramètres → Modules complémentaires → Bambuddy dans Home Assistant pour installer la nouvelle version.',
     updateViaWindowsInstaller: "Les installations Windows se mettent à jour en relançant l'installateur. Téléchargez la nouvelle version ci-dessous — vos données, paramètres et imprimantes sont préservés.",
     downloadWindowsInstaller: "Télécharger l'installateur pour la v{{version}}",
@@ -3550,6 +3562,13 @@ export default {
 
   // File manager
   fileManager: {
+    variants: {
+      badge: 'Versions : {{count}}',
+      groupAction: 'Grouper comme versions',
+      groupTooltip: 'Marquer ces fichiers comme le même travail tranché pour différentes imprimantes',
+      grouped: '{{count}} fichiers groupés comme versions',
+      printAlternatives: 'Imprimer ({{count}} alternatives)',
+    },
     title: 'Gestionnaire de fichiers',
     subtitle: 'Organisez vos fichiers d\'impression',
     uploadFiles: 'Téléverser fichiers',
@@ -4078,6 +4097,10 @@ export default {
     allPresetsRequired: 'Tous les préréglages doivent être sélectionnés',
     useEmbedded: 'Utiliser les réglages intégrés du fichier',
     useEmbeddedHint: "Slicer tel que le concepteur l'a configuré (parois, remplissage, filament) au lieu des profils ci-dessus. Proposé car votre imprimante correspond à celle du fichier.",
+    autoOrient: 'Orienter les objets automatiquement',
+    autoOrientHint: "Le trancheur fait pivoter chaque objet sur sa meilleure face d'impression avant de trancher. Remplace l'orientation enregistrée dans le fichier.",
+    autoArrange: 'Disposer automatiquement sur le plateau',
+    autoArrangeHint: "Le trancheur place les objets pour qu'ils ne se chevauchent plus. Remplace la disposition du fichier.",
     designSettings: 'Conserver les réglages du concepteur',
     designSettingsHint: 'Ce fichier modifie {{count}} réglage(s) d\'impression par rapport au profil standard.',
     designSettingsSelected: '{{selected}} sur {{total}} sélectionnés',
@@ -4616,6 +4639,16 @@ export default {
 
   // Print modal
   printModal: {
+    variants: {
+      editNote: 'Ces alternatives ont été définies lors de la mise en file. Annulez et remettez en file pour les modifier.',
+      title: 'Alternatives d\'imprimante',
+      help: 'Un travail, une place dans la file. La première imprimante compatible qui se libère imprime son fichier.',
+      unknownModel: 'Modèle inconnu',
+      plateFor: 'Plateau pour {{filename}}',
+      moveUp: 'Monter',
+      moveDown: 'Descendre',
+      queued: 'Mis en file avec {{count}} alternatives',
+    },
     selectPrinter: 'Choisir l\'imprimante',
     selectPlate: 'Choisir le plateau',
     filamentMapping: 'Mapping Filament',
@@ -5024,7 +5057,15 @@ export default {
       kValueHelp: 'Plage type : 0.01-0.06 (PLA), 0.02-0.10 (PETG)',
       filament: 'Filament',
       selectFilament: 'Choisir filament...',
-      noFilamentsHelp: 'Créez d\'abord un profil dans Bambu Studio.',
+      source: {
+        local: 'Importé',
+        orcaCloud: 'Orca Cloud',
+        bambuCloud: 'Bambu Cloud',
+        builtin: 'Inclus',
+      },
+      noFilamentsHelp: 'Aucun filament disponible. Connectez-vous à Bambu Cloud ou importez des préréglages dans Profils → Profils locaux.',
+      searchFilaments: 'Rechercher des filaments...',
+      noFilamentMatches: 'Aucun filament ne correspond à cette recherche',
       flowType: 'Type de débit',
       highFlow: 'Haut Débit (HF)',
       standard: 'Standard',
@@ -5057,6 +5098,8 @@ export default {
       profileSaved: 'Profil K enregistré',
       profilesSaved: 'Profil K enregistré sur {{count}} extrudeur(s)',
       selectAtLeastOneExtruder: 'Sélectionnez un extrudeur',
+      selectFilament: 'Sélectionnez d’abord un filament',
+      filamentNotResolvable: 'Aucun identifiant de filament Bambu pour {{name}} — l’imprimante ne peut pas enregistrer de profil',
       profileDeleted: 'Profil K supprimé',
       profilesDeleted: '{{count}} profils supprimés',
       exportedProfiles: '{{count}} profils exportés',

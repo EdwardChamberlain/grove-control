@@ -33,6 +33,7 @@ export default {
 
   // Ortak
   common: {
+    plusNMore: '+{{count}} tane daha',
     save: 'Kaydet',
     saving: 'Kaydediliyor...',
     cancel: 'İptal',
@@ -1029,6 +1030,13 @@ export default {
       status: 'Durum',
       duration: 'Süre',
       filament: 'Filament',
+      filamentUsed: 'Kullanılan filament',
+      cost: 'Maliyet',
+      energy: 'Enerji',
+      energyCost: 'Enerji maliyeti',
+      completedAt: 'Bitti',
+      columns: 'Sütunlar',
+      sortBy: '{{column}} ölçütüne göre sırala',
       allPrinters: 'Tüm Yazıcılar',
       allUsers: 'Tüm Kullanıcılar',
       allStatuses: 'Tüm Durumlar',
@@ -1293,6 +1301,7 @@ export default {
     },
     // Zaman
     time: {
+      etaIfStartedNow: 'Bu iş şimdi başlatılırsa tamamlanma saati',
       asap: 'ASAP',
       overdue: 'Gecikmiş',
       now: 'Şimdi',
@@ -2503,6 +2512,9 @@ export default {
     updateAvailableVersion: 'Güncelleme mevcut: v{{version}}',
     releaseNotes: 'Sürüm Notları',
     updateViaDocker: 'Docker Compose ile güncelle:',
+    composeDirectory: 'Compose dizini',
+    composeDirectoryHint: 'docker-compose.yml dosyanızın bulunduğu dizin. cd eklenmemesi için boş bırakın.',
+    copyUpdateCommand: 'Güncelleme komutunu kopyala',
     updateViaHomeAssistant: "Güncellemeler Home Assistant Supervisor tarafından yönetilir. Yeni sürümü yüklemek için Home Assistant'ta Ayarlar → Eklentiler → Bambuddy'ye gidin.",
     updateViaWindowsInstaller: 'Windows kurulumları, kurucu yeniden çalıştırılarak güncellenir. Yeni sürümü aşağıdan indirin — verileriniz, ayarlarınız ve yazıcılarınız korunur.',
     downloadWindowsInstaller: 'v{{version}} için kurucuyu indir',
@@ -3557,6 +3569,13 @@ export default {
 
   // Dosya yöneticisi
   fileManager: {
+    variants: {
+      badge: '{{count}} sürüm',
+      groupAction: 'Sürüm olarak grupla',
+      groupTooltip: 'Bu dosyaları farklı yazıcılar için dilimlenmiş aynı iş olarak işaretle',
+      grouped: '{{count}} dosya sürüm olarak gruplandı',
+      printAlternatives: 'Yazdır ({{count}} alternatif)',
+    },
     title: 'Dosya Yöneticisi',
     subtitle: 'Baskı dosyalarınızı organize edin ve yönetin',
     uploadFiles: 'Dosya Yükle',
@@ -4079,6 +4098,10 @@ export default {
     allPresetsRequired: 'Tüm ön ayarlar seçilmelidir',
     useEmbedded: 'Dosyanın yerleşik ayarlarını kullan',
     useEmbeddedHint: 'Yukarıdaki profiller yerine tasarımcının ayarladığı gibi (duvarlar, dolgu, filament) dilimle. Yazıcınız dosyayla eşleştiği için sunuluyor.',
+    autoOrient: 'Nesneleri otomatik yönlendir',
+    autoOrientHint: 'Dilimleyici, dilimlemeden önce her nesneyi en iyi basılan yüzüne çevirir. Dosyada kayıtlı yönlendirmenin yerini alır.',
+    autoArrange: 'Tablaya otomatik yerleştir',
+    autoArrangeHint: 'Dilimleyici nesneleri üst üste binmeyecek şekilde yerleştirir. Dosyadaki yerleşimin yerini alır.',
     designSettings: 'Tasarımcının ayarlarını koru',
     designSettingsHint: 'Bu dosya standart profile göre {{count}} baskı ayarını değiştiriyor.',
     designSettingsSelected: '{{total}} ayardan {{selected}} tanesi seçili',
@@ -4605,6 +4628,16 @@ export default {
 
   // Baskı modali
   printModal: {
+    variants: {
+      editNote: 'Bu alternatifler iş kuyruğa alınırken belirlendi. Değiştirmek için iptal edip yeniden kuyruğa alın.',
+      title: 'Yazıcı alternatifleri',
+      help: 'Tek iş, tek kuyruk yeri. Uygun olan ilk boşalan yazıcı kendi dosyasını yazdırır.',
+      unknownModel: 'Bilinmeyen model',
+      plateFor: '{{filename}} için tabla',
+      moveUp: 'Yukarı taşı',
+      moveDown: 'Aşağı taşı',
+      queued: '{{count}} alternatifle kuyruğa alındı',
+    },
     selectPrinter: 'Yazıcı Seç',
     selectPlate: 'Plaka Seç',
     filamentMapping: 'Filament Eşlemesi',
@@ -5003,7 +5036,15 @@ export default {
       kValueHelp: 'Tipik aralık: PLA için 0.01 - 0.06, PETG için 0.02 - 0.10',
       filament: 'Filament',
       selectFilament: 'Filament seç...',
-      noFilamentsHelp: 'Filament bulunamadı. Önce Bambu Studio\'da bir K-profili oluşturun.',
+      source: {
+        local: 'İçe aktarılmış',
+        orcaCloud: 'Orca Cloud',
+        bambuCloud: 'Bambu Cloud',
+        builtin: 'Yerleşik',
+      },
+      noFilamentsHelp: 'Kullanılabilir filament yok. Bambu Cloud’a giriş yapın veya Profiller → Yerel Profiller altından hızır ayarları içe aktarın.',
+      searchFilaments: 'Filament ara...',
+      noFilamentMatches: 'Bu aramayla eşleşen filament yok',
       flowType: 'Akış Türü',
       highFlow: 'Yüksek Akış',
       standard: 'Standart',
@@ -5033,6 +5074,8 @@ export default {
       profileSaved: 'K-profili kaydedildi',
       profilesSaved: '{{count}} ekstrüdere K-profili kaydedildi',
       selectAtLeastOneExtruder: 'Lütfen en az bir ekstrüder seçin',
+      selectFilament: 'Önce bir filament seçin',
+      filamentNotResolvable: '{{name}} için Bambu filament kimliği yok — yazıcı bunun için profil saklayamaz',
       profileDeleted: 'K-profili silindi',
       profilesDeleted: '{{count}} profil silindi',
       exportedProfiles: '{{count}} profil dışa aktarıldı',

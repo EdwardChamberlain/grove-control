@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Your printers. No cloud. Your rules.</strong><br>
-  Self-hosted command center for Bambu Lab &mdash; from one A1 to a 40-printer farm.
+  Self-hosted command center for Bambu Lab &mdash; from one A1 to an entire print farm.
 </p>
 
 <p align="center">

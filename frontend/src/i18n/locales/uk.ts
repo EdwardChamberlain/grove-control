@@ -33,6 +33,7 @@ export default {
 
   // Common
   common: {
+    plusNMore: 'ще {{count}}',
     save: "Зберегти",
     saving: "Збереження...",
     cancel: "Скасувати",
@@ -1033,6 +1034,13 @@ export default {
       status: "Статус",
       duration: "Тривалість",
       filament: "Філамент",
+      filamentUsed: 'Витрачено філаменту',
+      cost: 'Вартість',
+      energy: 'Енергія',
+      energyCost: 'Вартість енергії',
+      completedAt: 'Завершено',
+      columns: 'Стовпці',
+      sortBy: 'Сортувати за: {{column}}',
       allPrinters: "Усі принтери",
       allUsers: "Усі користувачі",
       allStatuses: "Усі статуси",
@@ -1308,6 +1316,7 @@ export default {
     },
     // Time
     time: {
+      etaIfStartedNow: "Час завершення, якщо запустити це завдання зараз",
       asap: "Якнайшвидше",
       overdue: "Прострочено",
       now: "Зараз",
@@ -2518,6 +2527,9 @@ export default {
     updateAvailableVersion: "Доступне оновлення: v{{version}}",
     releaseNotes: "Примітки до випуску",
     updateViaDocker: "Оновити через Docker Написати:",
+    composeDirectory: "Каталог Compose",
+    composeDirectoryHint: "Каталог із вашим docker-compose.yml. Залиште порожнім, щоб не додавати cd.",
+    copyUpdateCommand: "Скопіювати команду оновлення",
     updateViaHomeAssistant: "Оновленнями керує супервізор Home Assistant. Відкрийте «Налаштування» → «Додатки» → Bambuddy у Home Assistant, щоб установити нову версію.",
     updateViaWindowsInstaller: "Інсталяції Windows оновлюються шляхом повторного запуску інсталятора. Завантажте нову версію нижче — ваші дані, налаштування та принтери збережуться.",
     downloadWindowsInstaller: "Завантажити інсталятор для v{{version}}",
@@ -3590,6 +3602,13 @@ export default {
 
   // File manager
   fileManager: {
+    variants: {
+      badge: 'Версій: {{count}}',
+      groupAction: 'Згрупувати як версії',
+      groupTooltip: 'Позначити ці файли як одне завдання, нарізане для різних принтерів',
+      grouped: 'Файлів згруповано як версії: {{count}}',
+      printAlternatives: 'Друк (варіантів: {{count}})',
+    },
     title: "Менеджер файлів",
     subtitle: "Упорядковуйте файли друку та керуйте ними",
     uploadFiles: "Вивантажити файли",
@@ -4123,6 +4142,10 @@ export default {
     allPresetsRequired: "Потрібно вибрати всі профілі",
     useEmbedded: "Використати вбудовані налаштування файлу",
     useEmbeddedHint: "Нарізати модель із налаштуваннями автора файлу — стінками, заповненням і філаментом — замість профілів вище. Ця можливість доступна, оскільки модель принтера відповідає файлу.",
+    autoOrient: "Автоматично орієнтувати об'єкти",
+    autoOrientHint: "Слайсер поверне кожен об'єкт на бік, який друкується найкраще. Орієнтацію з файлу буде замінено.",
+    autoArrange: 'Автоматично розмістити на столі',
+    autoArrangeHint: "Слайсер розставить об'єкти так, щоб вони не перекривалися. Розташування з файлу буде замінено.",
     designSettings: "Зберегти налаштування автора",
     designSettingsHint: "Цей файл змінює {{count}} налаштувань друку порівняно зі стандартним профілем.",
     designSettingsSelected: "Вибрано {{selected}} із {{total}}",
@@ -4670,6 +4693,16 @@ export default {
 
   // Print modal
   printModal: {
+    variants: {
+      editNote: 'Ці варіанти задано під час додавання в чергу. Щоб змінити, скасуйте та додайте знову.',
+      title: 'Варіанти принтера',
+      help: 'Одне завдання, одне місце в черзі. Перший відповідний принтер, що звільниться, надрукує свій файл.',
+      unknownModel: 'Невідома модель',
+      plateFor: 'Стіл для {{filename}}',
+      moveUp: 'Вгору',
+      moveDown: 'Вниз',
+      queued: 'У черзі, варіантів: {{count}}',
+    },
     selectPrinter: "Вибрати принтер",
     selectPlate: "Вибрати пластину",
     filamentMapping: "Зіставлення філаментів",
@@ -5078,7 +5111,15 @@ export default {
       kValueHelp: "Типовий діапазон: 0,01–0,06 для PLA, 0,02–0,10 для PETG",
       filament: "Філамент",
       selectFilament: "Виберіть філамент...",
-      noFilamentsHelp: "Філаменти не знайдено. Спочатку створіть K-профіль у Bambu Studio.",
+      source: {
+        local: "Імпортовані",
+        orcaCloud: "Orca Cloud",
+        bambuCloud: "Bambu Cloud",
+        builtin: "Вбудований",
+      },
+      noFilamentsHelp: "Немає доступних філаментів. Увійдіть у Bambu Cloud або імпортуйте пресети в розділі Профілі → Локальні профілі.",
+      searchFilaments: "Пошук філаментів...",
+      noFilamentMatches: "Немає філаментів, що відповідають запиту",
       flowType: "Тип потоку",
       highFlow: "Сопло з високим потоком",
       standard: "Стандартний",
@@ -5111,6 +5152,8 @@ export default {
       profileSaved: "K-профіль збережено",
       profilesSaved: "K-профіль збережено в екструдери {{count}}.",
       selectAtLeastOneExtruder: "Виберіть принаймні один екструдер",
+      selectFilament: "Спочатку виберіть філамент",
+      filamentNotResolvable: "Немає ідентифікатора філаменту Bambu для {{name}} — принтер не зможе зберегти профіль",
       profileDeleted: "K-профіль видалено",
       profilesDeleted: "Видалені профілі {{count}}.",
       exportedProfiles: "Експортовані профілі {{count}}.",

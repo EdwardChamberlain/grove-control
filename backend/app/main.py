@@ -39,6 +39,7 @@ from backend.app.api.routes import (
     library,
     library_tags,
     library_trash,
+    library_variants,
     local_backup,
     local_presets,
     maintenance,
@@ -6995,6 +6996,14 @@ async def lifespan(app: FastAPI):
 
     await init_db()
 
+    # After migrations, so the is_env_managed column exists. Never raises --
+    # a bad BAMBUDDY_OIDC_* value is logged and skipped rather than blocking
+    # startup (see apply_env_oidc_provider).
+    from backend.app.core.oidc_env import apply_env_oidc_provider
+
+    async with async_session() as oidc_db:
+        await apply_env_oidc_provider(oidc_db)
+
     # Register an app-scoped httpx client for Bambu Cloud services so
     # per-request BambuCloudService instances reuse the same connection pool
     # (important for routes like /cloud/filament-info that chain many
@@ -7892,6 +7901,7 @@ app.include_router(projects.router, prefix=app_settings.api_prefix)
 app.include_router(library.router, prefix=app_settings.api_prefix)
 app.include_router(library_tags.router, prefix=app_settings.api_prefix)
 app.include_router(library_trash.router, prefix=app_settings.api_prefix)
+app.include_router(library_variants.router, prefix=app_settings.api_prefix)
 app.include_router(slice_jobs.router, prefix=app_settings.api_prefix)
 app.include_router(slicer_pipelines.router, prefix=app_settings.api_prefix)
 app.include_router(pipeline_runs.pipeline_run_create_router, prefix=app_settings.api_prefix)

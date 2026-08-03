@@ -1,8 +1,10 @@
 import json
+import re
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 from backend.app.schemas.print_queue import TriState
+from backend.app.utils.printer_models import MAX_CHAMBER_TEMP_C
 
 # Outbound service URLs validated on save, so a bad value is rejected at
 # configuration time with a clear message rather than failing opaquely at
@@ -17,6 +19,18 @@ from backend.app.schemas.print_queue import TriState
 # cannot drift from it. Any new outbound-URL setting belongs here (or, if it
 # must be reachable on the public internet, on the stricter OIDC guard).
 LAN_SERVICE_URL_SETTINGS = ("ha_url", "obico_ml_url", "orcaslicer_api_url", "bambu_studio_api_url")
+
+# ``docker_compose_dir`` is unusual among the string settings: it is not
+# consumed by Bambuddy at all, it is interpolated into a shell command that
+# the Settings page invites the user to copy and paste into a root-capable
+# terminal (#2664). A value like ``/opt/bambuddy; rm -rf /`` would render as a
+# perfectly plausible-looking update command, so anyone with settings:update
+# could hand every admin a destructive one-liner to run. Restricting the field
+# to characters that occur in real paths removes that entirely; the frontend
+# double-quotes the value when it contains a space, which is safe precisely
+# because quotes, ``$`` and backticks cannot survive this pattern.
+_COMPOSE_DIR_ALLOWED = re.compile(r"^[\w \-./\\:~]+$", re.UNICODE)
+_COMPOSE_DIR_MAX_LEN = 512
 
 
 class AppSettings(BaseModel):
@@ -217,6 +231,14 @@ class AppSettings(BaseModel):
     # External URL for notifications
     external_url: str = Field(
         default="", description="External URL where Bambuddy is accessible (for notification images)"
+    )
+
+    # Directory holding the user's docker-compose.yml, shown in the update
+    # instructions so the printed command can be pasted from anywhere (#2664).
+    # Empty means "omit the cd" — which is also the correct rendering when
+    # nothing could be detected, rather than guessing a path that fails.
+    docker_compose_dir: str = Field(
+        default="", description="Host directory containing docker-compose.yml, used in the update instructions"
     )
 
     # Home Assistant integration for smart plug control
@@ -430,7 +452,7 @@ class AppSettings(BaseModel):
     )
     chamber_temp_presets: str = Field(
         default="",
-        description="JSON array of 3 chamber-temperature preset values in C (0-60). Empty = use defaults [35, 45, 60]",
+        description="JSON array of 3 chamber-temperature preset values in C (0-65). Empty = use defaults [35, 45, 60]",
     )
     fan_speed_presets: str = Field(
         default="",
@@ -587,6 +609,7 @@ class AppSettingsUpdate(BaseModel):
     mqtt_topic_prefix: str | None = None
     mqtt_use_tls: bool | None = None
     external_url: str | None = None
+    docker_compose_dir: str | None = None
     ha_enabled: bool | None = None
     ha_url: str | None = None
     ha_token: str | None = None
@@ -690,6 +713,36 @@ class AppSettingsUpdate(BaseModel):
             raise ValueError(str(exc)) from exc
         return v
 
+    @field_validator("docker_compose_dir")
+    @classmethod
+    def validate_docker_compose_dir(cls, v: str | None) -> str | None:
+        """Keep the copy-and-paste update command free of shell injection (#2664).
+
+        Validated on the write path only. Doing it on ``AppSettings`` as well
+        would mean a single bad row — however it got there — 500s the entire
+        settings GET and takes the app down with it, which is a worse outcome
+        than rendering a string that has to be pasted into a shell by hand to
+        do anything at all.
+        """
+        if v is None or not v.strip():
+            return v
+        candidate = v.strip()
+        if len(candidate) > _COMPOSE_DIR_MAX_LEN:
+            raise ValueError(f"Compose directory must be at most {_COMPOSE_DIR_MAX_LEN} characters")
+        if not _COMPOSE_DIR_ALLOWED.match(candidate):
+            raise ValueError(
+                "Compose directory may only contain path characters (letters, digits, space, and - _ . / \\ : ~)"
+            )
+        # A trailing backslash is the one survivor that would still break the
+        # frontend's double-quoting: `cd "/opt/bam buddy\"` escapes the closing
+        # quote and swallows the rest of the line. Harmless (the shell just
+        # waits for a terminator rather than running anything) but the user
+        # would be left staring at a continuation prompt, so refuse it here
+        # instead of shipping a command that cannot work.
+        if candidate.endswith("\\"):
+            raise ValueError("Compose directory must not end with a backslash")
+        return candidate
+
     @field_validator("gcode_snippets")
     @classmethod
     def validate_gcode_snippets(cls, v: str | None) -> str | None:
@@ -759,7 +812,7 @@ class AppSettingsUpdate(BaseModel):
     @field_validator("chamber_temp_presets")
     @classmethod
     def validate_chamber_temp_presets(cls, v: str | None) -> str | None:
-        return cls._validate_preset_triple(v, "chamber_temp_presets", 0, 60)
+        return cls._validate_preset_triple(v, "chamber_temp_presets", 0, MAX_CHAMBER_TEMP_C)
 
     @field_validator("fan_speed_presets")
     @classmethod

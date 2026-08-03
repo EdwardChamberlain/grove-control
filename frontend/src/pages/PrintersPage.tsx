@@ -120,7 +120,7 @@ import { FileUploadModal } from '../components/FileUploadModal';
 import { PrintModal } from '../components/PrintModal';
 import { PrinterInfoModal } from '../components/PrinterInfoModal';
 import { getAmsLabel, getGlobalTrayId, getFillBarColor, getSpoolmanFillLevel, getFallbackSpoolTag, isBambuLabSpool, resolveSlotNozzleDiameter } from '../utils/amsHelpers';
-import { getPrinterImage, getWifiStrength, filterCompatibleQueueItems } from '../utils/printer';
+import { MAX_CHAMBER_TEMP_C, getPrinterImage, getWifiStrength, filterCompatibleQueueItems } from '../utils/printer';
 import { FilamentSlotCircle } from '../components/FilamentSlotCircle';
 import { Collapsible } from '../components/Collapsible';
 import { ConnectionDiagnosticModal, DiagnosticChecklist } from '../components/ConnectionDiagnostic';
@@ -4124,7 +4124,7 @@ function PrinterCard({
                               title="Set Chamber Temperature"
                               unit="°C"
                               customMin={0}
-                              customMax={60}
+                              customMax={MAX_CHAMBER_TEMP_C}
                               isPending={chamberTemperatureMutation.isPending}
                               options={buildPresetOptions(chamberTempPresets, 'C')}
                               onClose={() => setStatusControlMenu(null)}
@@ -7982,7 +7982,7 @@ export function PrintersPage() {
     [settings?.bed_temp_presets],
   );
   const effectiveChamberTempPresets = useMemo(
-    () => parsePresetTriple(settings?.chamber_temp_presets, CHAMBER_TEMP_DEFAULTS, 0, 60),
+    () => parsePresetTriple(settings?.chamber_temp_presets, CHAMBER_TEMP_DEFAULTS, 0, MAX_CHAMBER_TEMP_C),
     [settings?.chamber_temp_presets],
   );
   const effectiveFanSpeedPresets = useMemo(

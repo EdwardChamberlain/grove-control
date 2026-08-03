@@ -3842,6 +3842,24 @@ class TestSetChamberTemperatureAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_ceiling_is_65_not_60(self, async_client: AsyncClient, printer_factory):
+        """The H2 series heats the chamber to 65 °C — 65 must be accepted and
+        66 rejected. The route used to cap at 60, which put the top of the H2D
+        range out of reach."""
+        printer = await printer_factory(name="P", model="H2D")
+        mock_client = MagicMock()
+        mock_client.set_chamber_temperature.return_value = True
+        with patch("backend.app.api.routes.printers.printer_manager") as mock_pm:
+            mock_pm.get_client.return_value = mock_client
+            accepted = await async_client.post(f"/api/v1/printers/{printer.id}/temperature/chamber?target=65")
+        assert accepted.status_code == 200
+        mock_client.set_chamber_temperature.assert_called_once_with(65)
+
+        rejected = await async_client.post(f"/api/v1/printers/{printer.id}/temperature/chamber?target=66")
+        assert rejected.status_code == 422
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_client_failure_returns_500(self, async_client: AsyncClient, printer_factory):
         printer = await printer_factory(name="P", model="H2D")
         mock_client = MagicMock()

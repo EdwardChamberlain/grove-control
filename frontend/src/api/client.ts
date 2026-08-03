@@ -357,6 +357,10 @@ export interface Printer {
   model: string | null;
   location: string | null;  // Group/location name
   nozzle_count: number;  // 1 or 2, auto-detected from MQTT
+  // Model is sold with both Standard and High Flow nozzles, so a K-profile's
+  // flow type is a real choice. Derived from the model, not the nozzle count —
+  // only the A-series has a single variant.
+  supports_nozzle_flow_type: boolean;
   is_active: boolean;
   auto_archive: boolean;
   external_camera_url: string | null;
@@ -1256,6 +1260,8 @@ export interface AppSettings {
   mqtt_use_tls: boolean;
   // External URL for notifications
   external_url: string;
+  // Directory holding docker-compose.yml, shown in the update instructions (#2664)
+  docker_compose_dir: string;
   // Home Assistant integration
   ha_enabled: boolean;
   ha_url: string;
@@ -1600,6 +1606,12 @@ export interface SliceRequest {
   // instead of the picked profile triplet. The preset refs above are still
   // required by the backend validator but go unused on this path.
   use_embedded_settings?: boolean;
+  // Layout passes the slicer runs before slicing (#2548), both off by
+  // default because they move or rotate the objects the user laid out.
+  // Unlike the fields above these are CLI actions rather than profile
+  // values, so they apply on the embedded-settings path too.
+  auto_orient?: boolean;
+  auto_arrange?: boolean;
 }
 
 // GET /api/v1/slicer/presets — unified listing across cloud / local / standard.
@@ -2199,6 +2211,15 @@ export interface PrintQueueItem {
   target_location: string | null;  // Target location filter for model-based assignment
   required_filament_types: string[] | null;  // Required filament types for model-based assignment
   waiting_reason: string | null;  // Why a model-based job hasn't started yet
+  // Cross-model alternatives (#671), in priority order. Empty for ordinary
+  // items. Present until dispatch resolves one, after which library_file_id and
+  // target_model name the candidate that actually ran.
+  variants?: Array<{
+    library_file_id: number;
+    filename: string;
+    target_model: string;
+    position: number;
+  }>;
   // Either archive_id OR library_file_id must be set (archive created at print start)
   archive_id: number | null;
   library_file_id: number | null;
@@ -2320,6 +2341,22 @@ export interface PrintQueueItemCreate {
   project_id?: number;
   // Delete transient uploaded library file after scheduler creates the archive
   cleanup_library_after_dispatch?: boolean;
+  // Cross-model alternatives (#671): several sliced files, one job, whichever
+  // printer frees up first. Mutually exclusive with printer_id (a named printer
+  // defeats the point) and with archive_id/library_file_id (these ARE the files).
+  // Order is priority — index 0 wins when several printers are idle at once.
+  variants?: QueueVariantCreate[];
+}
+
+/** One candidate file for a cross-model queue item (#671). */
+export interface QueueVariantCreate {
+  library_file_id: number;
+  /** Read from the file's own sliced_for_model unless it declares none. */
+  target_model?: string | null;
+  plate_id?: number | null;
+  ams_mapping?: number[] | null;
+  nozzle_mapping?: number[] | null;
+  filament_overrides?: Array<{ slot_id: number; type: string; color: string; color_name?: string; force_color_match?: boolean }> | null;
 }
 
 export interface PrintBatchCreate {
@@ -3194,6 +3231,10 @@ export interface UpdateCheckResult {
   is_windows_installer?: boolean;
   update_method?: 'docker' | 'git' | 'ha_addon' | 'windows_installer';
   installer_download_url?: string | null;
+  // Best-effort guess at the compose directory (#2664). Prefill only — the
+  // value the user saved lives on AppSettings.docker_compose_dir, so clearing
+  // that field falls back to this guess instead of resurrecting the old value.
+  compose_dir_detected?: string | null;
 }
 
 export interface UpdateStatus {
@@ -3542,6 +3583,11 @@ export interface OIDCProvider {
   // #1589: when true, the LoginPage redirects unauthenticated visitors
   // straight to this provider on mount. At most one provider may carry this.
   is_autologin: boolean;
+  // #2593: defined by BAMBUDDY_OIDC_* and rewritten from the environment on
+  // every boot. The API answers 409 to any write, so the settings UI must not
+  // offer edit/delete controls that cannot succeed. Optional so a response
+  // from an older backend still type-checks.
+  is_env_managed?: boolean;
 }
 
 export interface OIDCProviderCreate {
@@ -4794,6 +4840,10 @@ export const api = {
     dateTo?: string;
     limit?: number;
     offset?: number;
+    // Sorting is server-side because paging is: ordering only the rows the
+    // client holds would sort one page, not the log (#2636).
+    sortBy?: string;
+    sortDir?: 'asc' | 'desc';
   }) => {
     const searchParams = new URLSearchParams();
     if (params?.search) searchParams.set('search', params.search);
@@ -4804,6 +4854,8 @@ export const api = {
     if (params?.dateTo) searchParams.set('date_to', params.dateTo);
     if (params?.limit) searchParams.set('limit', String(params.limit));
     if (params?.offset !== undefined) searchParams.set('offset', String(params.offset));
+    if (params?.sortBy) searchParams.set('sort_by', params.sortBy);
+    if (params?.sortDir) searchParams.set('sort_dir', params.sortDir);
     return request<PrintLogResponse>(`/print-log/?${searchParams}`);
   },
   getPrintLogThumbnail: (id: number) => withStreamToken(`${API_BASE}/print-log/${id}/thumbnail`),
@@ -6278,6 +6330,50 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ file_ids: fileIds, tag_ids: tagIds, action }),
     }),
+  // ============ Variant groups (#671 / #2570) ============
+  // "These files are the same job sliced for different printers." Consumed from
+  // both ends: the queue picks a printer and needs the matching file, the File
+  // Manager's print action has the printer and needs the same match.
+  createVariantGroup: (
+    members: { library_file_id: number; target_model?: string }[],
+    name?: string,
+  ) =>
+    request<VariantGroup>('/library/variant-groups', {
+      method: 'POST',
+      body: JSON.stringify({ members, ...(name ? { name } : {}) }),
+    }),
+  getVariantGroup: (groupId: number) =>
+    request<VariantGroup>(`/library/variant-groups/${groupId}`),
+  /** Returns null when the file is not grouped, rather than throwing on the 404. */
+  getVariantGroupForFile: async (fileId: number): Promise<VariantGroup | null> => {
+    try {
+      return await request<VariantGroup>(`/library/variant-groups/by-file/${fileId}`);
+    } catch {
+      return null;
+    }
+  },
+  updateVariantGroup: (groupId: number, body: { name?: string; member_file_ids?: number[] }) =>
+    request<VariantGroup>(`/library/variant-groups/${groupId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  addVariantGroupMember: (
+    groupId: number,
+    libraryFileId: number,
+    targetModel?: string,
+  ) =>
+    request<VariantGroup>(`/library/variant-groups/${groupId}/members`, {
+      method: 'POST',
+      body: JSON.stringify({
+        library_file_id: libraryFileId,
+        ...(targetModel ? { target_model: targetModel } : {}),
+      }),
+    }),
+  removeVariantGroupMember: (groupId: number, fileId: number) =>
+    request<void>(`/library/variant-groups/${groupId}/members/${fileId}`, { method: 'DELETE' }),
+  deleteVariantGroup: (groupId: number) =>
+    request<void>(`/library/variant-groups/${groupId}`, { method: 'DELETE' }),
+
   getLibraryFile: (id: number) => request<LibraryFile>(`/library/files/${id}`),
   uploadLibraryFile: async (
     file: File,
@@ -6977,6 +7073,26 @@ export interface LibraryFileListItem {
   // legacy code path (or mock) that constructs a LibraryFileListItem without
   // it doesn't crash the renderer. Read sites use `file.tags ?? []`.
   tags?: LibraryTagSummary[];
+  // Variant grouping (#671 / #2570). `variant_count` is the size of the whole
+  // group, which may include files in other folders — never the number of
+  // matching rows on screen. 0 when the file is not grouped.
+  variant_group_id?: number | null;
+  variant_count?: number;
+}
+
+// Variant groups (#671 / #2570): the same job sliced for different printers.
+export interface VariantGroupMember {
+  library_file_id: number;
+  filename: string;
+  target_model: string;
+  position: number;
+}
+
+export interface VariantGroup {
+  id: number;
+  name: string;
+  /** In priority order — index 0 wins when several printers are free at once. */
+  members: VariantGroupMember[];
 }
 
 // Library tag catalog (#1268)

@@ -237,6 +237,15 @@ export function SliceModal({ source, onClose }: SliceModalProps) {
   // see canUseEmbedded below.
   const [useEmbedded, setUseEmbedded] = useState(false);
 
+  // Auto-orient / auto-arrange (#2548) — the GUI's two layout buttons,
+  // forwarded as the slicer's --orient / --arrange CLI actions. Per-slice
+  // and off by default: both rewrite the object placement the file came
+  // with, so they are something the user asks for, never a default. Kept
+  // enabled in embedded mode, unlike the process-level options around
+  // them — these act on the geometry, whichever config drives the slice.
+  const [autoOrient, setAutoOrient] = useState(false);
+  const [autoArrange, setAutoArrange] = useState(false);
+
   // #2622: process settings the designer changed away from the stock preset,
   // carried onto the picked process profile so a cross-printer re-slice keeps
   // the model's intended wall count / infill / first layer instead of losing
@@ -544,6 +553,10 @@ export function SliceModal({ source, onClose }: SliceModalProps) {
       // which the embedded-settings path never sends — so they are mutually
       // exclusive by construction (#2622).
       ...(!useEmbedded && designKeys.size > 0 ? { design_overrides: [...designKeys] } : {}),
+      // Sent only when on. The backend defaults both to false, so omitting
+      // them keeps the request identical to what older clients send.
+      ...(autoOrient ? { auto_orient: true } : {}),
+      ...(autoArrange ? { auto_arrange: true } : {}),
     };
   }
 
@@ -888,6 +901,42 @@ export function SliceModal({ source, onClose }: SliceModalProps) {
                 onChange={setBedType}
                 disabled={isEnqueuing || useEmbedded}
               />
+              {/* Layout passes (#2548) — the GUI's "Auto orient" / "Auto
+                  arrange". Not disabled in embedded mode: these are CLI
+                  actions on the geometry, so they work regardless of where
+                  the print config comes from. */}
+              <div className="flex flex-col gap-2">
+                <label className="flex items-start gap-2 text-sm text-bambu-gray cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={autoOrient}
+                    onChange={(e) => setAutoOrient(e.target.checked)}
+                    disabled={isEnqueuing}
+                    className="mt-0.5 cursor-pointer"
+                  />
+                  <span>
+                    {t('slice.autoOrient')}
+                    <span className="block text-xs text-bambu-gray/70">
+                      {t('slice.autoOrientHint')}
+                    </span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 text-sm text-bambu-gray cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={autoArrange}
+                    onChange={(e) => setAutoArrange(e.target.checked)}
+                    disabled={isEnqueuing}
+                    className="mt-0.5 cursor-pointer"
+                  />
+                  <span>
+                    {t('slice.autoArrange')}
+                    <span className="block text-xs text-bambu-gray/70">
+                      {t('slice.autoArrangeHint')}
+                    </span>
+                  </span>
+                </label>
+              </div>
               {/* Filament reqs may need a server-side preview-slice for
                   unsliced project files (single-pass, then cached). Show a
                   scoped spinner so the user sees the printer/process

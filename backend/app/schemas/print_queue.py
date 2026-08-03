@@ -3,6 +3,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, BeforeValidator, Field, PlainSerializer, model_validator
 
+from backend.app.utils.printer_models import MAX_CHAMBER_TEMP_C
+
 
 # Custom serializer to ensure UTC datetimes have Z suffix
 def serialize_utc_datetime(dt: datetime | None) -> str | None:
@@ -40,6 +42,25 @@ def _coerce_tristate(v: object) -> object:
 # Tri-state calibration option: "auto" (printer decides / skip if recent),
 # "on" (force every print), "off" (never). Mirrors BambuStudio's ops_auto.
 TriState = Annotated[Literal["off", "on", "auto"], BeforeValidator(_coerce_tristate)]
+
+
+class QueueVariantCreate(BaseModel):
+    """One candidate file for a cross-model queue item (#671).
+
+    Per-file rather than per-item because the settings genuinely differ between
+    candidates: an H2C slice is dual-nozzle and will not share slot count, AMS
+    mapping or nozzle mapping with the H2S slice of the same model.
+
+    ``target_model`` is normally omitted and read from the file's own
+    ``sliced_for_model``; supply it only for a legacy 3MF that declares none.
+    """
+
+    library_file_id: int
+    target_model: str | None = None
+    plate_id: int | None = None
+    ams_mapping: list[int] | None = None
+    nozzle_mapping: list[int] | None = None
+    filament_overrides: list[dict] | None = None
 
 
 class PrintQueueItemCreate(BaseModel):
@@ -82,7 +103,7 @@ class PrintQueueItemCreate(BaseModel):
     # preheat_enabled setting; 'on' / 'off' force the decision. The chamber
     # target falls through: this override → max(filament-map[loaded tray]) → 0.
     preheat_override: Literal["inherit", "on", "off"] = "inherit"
-    preheat_chamber_target_override: int | None = Field(default=None, ge=0, le=60)
+    preheat_chamber_target_override: int | None = Field(default=None, ge=0, le=MAX_CHAMBER_TEMP_C)
     # Auto-print G-code injection
     gcode_injection: bool = False
     # Batch: create multiple copies (creates a batch if > 1)
@@ -96,6 +117,12 @@ class PrintQueueItemCreate(BaseModel):
     # Direct printer-card uploads are temporary library files. The scheduler
     # deletes them after creating the durable archive copy.
     cleanup_library_after_dispatch: bool = False
+    # Cross-model alternatives (#671): several sliced files, one job, whichever
+    # printer frees up first. Mutually exclusive with printer_id (a specific
+    # printer defeats the purpose) and with archive_id/library_file_id (the
+    # candidates ARE the files). The scheduler resolves one onto the row at
+    # dispatch, after which the item is an ordinary single-file job.
+    variants: list[QueueVariantCreate] | None = None
 
 
 class PrintQueueItemUpdate(BaseModel):
@@ -119,13 +146,22 @@ class PrintQueueItemUpdate(BaseModel):
     use_ams: bool | None = None
     nozzle_offset_cali: TriState | None = None
     preheat_override: Literal["inherit", "on", "off"] | None = None
-    preheat_chamber_target_override: int | None = Field(default=None, ge=0, le=60)
+    preheat_chamber_target_override: int | None = Field(default=None, ge=0, le=MAX_CHAMBER_TEMP_C)
     # Auto-print G-code injection
     gcode_injection: bool | None = None
     # H2C dual-nozzle-rack slicer pick (#1780). list[int] per-filament
     # physical nozzle position IDs from BambuStudio's project_file MQTT
     # body; sent back to the printer verbatim on dispatch.
     nozzle_mapping: list[int] | None = None
+
+
+class QueueVariantSummary(BaseModel):
+    """One candidate on a cross-model queue item, for display (#671)."""
+
+    library_file_id: int
+    filename: str
+    target_model: str
+    position: int
 
 
 class PrintQueueItemResponse(BaseModel):
@@ -209,6 +245,11 @@ class PrintQueueItemResponse(BaseModel):
     batch_id: int | None = None
     batch_name: str | None = None
 
+    # Cross-model alternatives (#671), in priority order. Empty for every
+    # ordinary item. Present until dispatch resolves one onto the row, after
+    # which library_file_id / target_model name the candidate that actually ran.
+    variants: list[QueueVariantSummary] = []
+
     # Shortest-job-first scheduling
     been_jumped: bool = False
 
@@ -277,7 +318,7 @@ class PrintQueueBulkUpdate(BaseModel):
     use_ams: bool | None = None
     nozzle_offset_cali: TriState | None = None
     preheat_override: Literal["inherit", "on", "off"] | None = None
-    preheat_chamber_target_override: int | None = Field(default=None, ge=0, le=60)
+    preheat_chamber_target_override: int | None = Field(default=None, ge=0, le=MAX_CHAMBER_TEMP_C)
     # Auto-print G-code injection
     gcode_injection: bool | None = None
 

@@ -27,7 +27,20 @@ import re
 # external camera URL) from leaving its tail in the log. Named groups let
 # callers choose how much to mask: the log pipeline keeps the username, the
 # support-bundle sanitizer drops it (see ``log_reader.sanitize_log_content``).
-URL_CREDENTIALS_PATTERN = re.compile(r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.\-]*://)(?P<user>[^/:@\s]+):(?P<secret>[^/\s]+)@")
+#
+# The scheme's repetition is bounded deliberately. As an unbounded ``*`` the
+# match was quadratic in the length of the subject (CodeQL py/polynomial-redos):
+# on a long run of scheme-legal characters the engine restarts at every offset
+# and consumes to the end each time before failing to find ``://``. Measured at
+# 557ms for a 32KB line, quadrupling per doubling. ffmpeg echoes the operator's
+# camera URL back in its stderr, and that whole string reaches this pattern
+# before any truncation, so the subject length is attacker-influenced. A cap
+# makes the work per offset constant. 63 is far above any real scheme (the
+# longest registered one is under 20 characters), and a longer pseudo-scheme
+# still gets its secret masked — the match simply starts from a later offset.
+URL_CREDENTIALS_PATTERN = re.compile(
+    r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.\-]{0,63}://)(?P<user>[^/:@\s]+):(?P<secret>[^/\s]+)@"
+)
 
 
 def redact_url_credentials(text: str | None) -> str | None:

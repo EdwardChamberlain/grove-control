@@ -33,6 +33,7 @@ export default {
 
   // Common
   common: {
+    plusNMore: '另 {{count}} 個',
     save: '儲存',
     saving: '儲存中...',
     cancel: '取消',
@@ -1029,6 +1030,13 @@ export default {
       status: '狀態',
       duration: '時長',
       filament: '耗材',
+      filamentUsed: '耗材用量',
+      cost: '成本',
+      energy: '電量',
+      energyCost: '電費',
+      completedAt: '完成時間',
+      columns: '欄位',
+      sortBy: '依{{column}}排序',
       allPrinters: '所有印表機',
       allUsers: '所有使用者',
       allStatuses: '所有狀態',
@@ -1293,6 +1301,7 @@ export default {
     },
     // Time
     time: {
+      etaIfStartedNow: '若此工作現在開始的預計完成時間',
       asap: '儘快',
       overdue: '已逾期',
       now: '現在',
@@ -2493,6 +2502,9 @@ export default {
     updateAvailableVersion: '可用更新：v{{version}}',
     releaseNotes: '發布說明',
     updateViaDocker: '透過 Docker Compose 更新：',
+    composeDirectory: 'Compose 目錄',
+    composeDirectoryHint: '存放 docker-compose.yml 的目錄。留空則不加入 cd。',
+    copyUpdateCommand: '複製更新指令',
     updateViaHomeAssistant: '更新由 Home Assistant Supervisor 管理。請在 Home Assistant 中開啟 設定 → 附加元件 → Bambuddy 以安裝新版本。',
     updateViaWindowsInstaller: 'Windows 安裝可透過重新執行安裝程式來更新。請在下方下載新版本 — 您的資料、設定和印表機都會保留。',
     downloadWindowsInstaller: '下載 v{{version}} 安裝程式',
@@ -3549,6 +3561,13 @@ export default {
 
   // File manager
   fileManager: {
+    variants: {
+      badge: '{{count}} 個版本',
+      groupAction: '歸為版本群組',
+      groupTooltip: '將這些檔案標記為針對不同印表機切片的同一工作',
+      grouped: '已將 {{count}} 個檔案歸為版本群組',
+      printAlternatives: '列印（{{count}} 個備選）',
+    },
     title: '檔案管理器',
     subtitle: '組織和管理您的列印檔案',
     uploadFiles: '上傳檔案',
@@ -4077,6 +4096,10 @@ export default {
     allPresetsRequired: '必須選擇所有預設',
     useEmbedded: '使用檔案的內建設定',
     useEmbeddedHint: '依設計者的設定（外牆、填充、耗材）切片，而非上方的設定檔。因您的印表機與檔案相符而可用。',
+    autoOrient: '自動擺正模型',
+    autoOrientHint: '切片前由切片器將每個模型轉到最適合列印的一面，會覆蓋檔案中儲存的朝向。',
+    autoArrange: '自動排列在熱床上',
+    autoArrangeHint: '由切片器重新擺放模型，使其不再重疊，會取代檔案自帶的版面配置。',
     designSettings: '保留設計者的設定',
     designSettingsHint: '此檔案相對標準設定檔修改了 {{count}} 項列印設定。',
     designSettingsSelected: '已選擇 {{selected}} / {{total}}',
@@ -4615,6 +4638,16 @@ export default {
 
   // Print modal
   printModal: {
+    variants: {
+      editNote: '這些備選在工作加入佇列時確定。如需變更，請取消後重新加入佇列。',
+      title: '印表機備選',
+      help: '一項工作，佔一個佇列位。第一台空閒且相符的印表機會列印它對應的檔案。',
+      unknownModel: '未知型號',
+      plateFor: '{{filename}} 的列印板',
+      moveUp: '上移',
+      moveDown: '下移',
+      queued: '已加入佇列，含 {{count}} 個備選',
+    },
     selectPrinter: '選擇印表機',
     selectPlate: '選擇板',
     filamentMapping: '耗材對應',
@@ -5023,7 +5056,15 @@ export default {
       kValueHelp: '典型範圍：PLA 0.01 - 0.06，PETG 0.02 - 0.10',
       filament: '耗材',
       selectFilament: '選擇耗材...',
-      noFilamentsHelp: '未找到耗材。請先在 Bambu Studio 中建立 K 值設定。',
+      source: {
+        local: '已匯入',
+        orcaCloud: 'Orca Cloud',
+        bambuCloud: 'Bambu Cloud',
+        builtin: '內建',
+      },
+      noFilamentsHelp: '沒有可用的耗材。請登入 Bambu Cloud，或在「設定檔 → 本地設定檔」中匯入預設。',
+      searchFilaments: '搜尋耗材...',
+      noFilamentMatches: '沒有符合搜尋條件的耗材',
       flowType: '流量類型',
       highFlow: '高流量',
       standard: '標準',
@@ -5056,6 +5097,8 @@ export default {
       profileSaved: 'K 值設定已儲存',
       profilesSaved: 'K 值設定已儲存到 {{count}} 個擠出機',
       selectAtLeastOneExtruder: '請至少選擇一個擠出機',
+      selectFilament: '請先選擇耗材',
+      filamentNotResolvable: '沒有與 {{name}} 對應的 Bambu 耗材 ID，印表機無法儲存該設定檔',
       profileDeleted: 'K 值設定已刪除',
       profilesDeleted: '已刪除 {{count}} 個設定',
       exportedProfiles: '已匯出 {{count}} 個設定',

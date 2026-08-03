@@ -33,6 +33,7 @@ export default {
 
   // Common
   common: {
+    plusNMore: '+{{count}} more',
     save: 'Save',
     saving: 'Saving...',
     cancel: 'Cancel',
@@ -1033,6 +1034,13 @@ export default {
       status: 'Status',
       duration: 'Duration',
       filament: 'Filament',
+      filamentUsed: 'Filament Used',
+      cost: 'Cost',
+      energy: 'Energy',
+      energyCost: 'Energy Cost',
+      completedAt: 'Finished',
+      columns: 'Columns',
+      sortBy: 'Sort by {{column}}',
       allPrinters: 'All Printers',
       allUsers: 'All Users',
       allStatuses: 'All Statuses',
@@ -1308,6 +1316,7 @@ export default {
     },
     // Time
     time: {
+      etaIfStartedNow: 'Completion time if this job started now',
       asap: 'ASAP',
       overdue: 'Overdue',
       now: 'Now',
@@ -2518,6 +2527,9 @@ export default {
     updateAvailableVersion: 'Update available: v{{version}}',
     releaseNotes: 'Release Notes',
     updateViaDocker: 'Update via Docker Compose:',
+    composeDirectory: 'Compose directory',
+    composeDirectoryHint: 'Directory containing your docker-compose.yml. Leave blank to omit the cd.',
+    copyUpdateCommand: 'Copy update command',
     updateViaHomeAssistant: 'Updates are managed by the Home Assistant Supervisor. Open Settings → Add-ons → Bambuddy in Home Assistant to install the new version.',
     updateViaWindowsInstaller: 'Windows installations are updated by re-running the installer. Download the new version below — your data, settings and printers are preserved.',
     downloadWindowsInstaller: 'Download installer for v{{version}}',
@@ -3590,6 +3602,13 @@ export default {
 
   // File manager
   fileManager: {
+    variants: {
+      badge: '{{count}} versions',
+      groupAction: 'Group as versions',
+      groupTooltip: 'Mark these files as the same job sliced for different printers',
+      grouped: 'Grouped {{count}} files as versions',
+      printAlternatives: 'Print ({{count}} alternatives)',
+    },
     title: 'File Manager',
     subtitle: 'Organize and manage your print files',
     uploadFiles: 'Upload Files',
@@ -4123,6 +4142,10 @@ export default {
     allPresetsRequired: 'All presets must be selected',
     useEmbedded: "Use the file's built-in settings",
     useEmbeddedHint: "Slice it the way the designer set it up (walls, infill, filament) instead of the profiles above. Offered because your printer matches the file's.",
+    autoOrient: 'Auto-orient objects',
+    autoOrientHint: 'Let the slicer turn each object onto its best printing side first. Overrides the way the model was laid down in the file.',
+    autoArrange: 'Auto-arrange on the plate',
+    autoArrangeHint: 'Let the slicer position the objects so they no longer overlap. Replaces the layout the file came with.',
     designSettings: 'Keep the designer\'s settings',
     designSettingsHint: 'This file changes {{count}} print setting(s) from the stock profile.',
     designSettingsSelected: '{{selected}} of {{total}} selected',
@@ -4670,6 +4693,16 @@ export default {
 
   // Print modal
   printModal: {
+    variants: {
+      editNote: 'These alternatives were set when the job was queued. Cancel and re-queue to change them.',
+      title: 'Printer alternatives',
+      help: 'One job, one queue slot. The first matching printer to free up runs its file.',
+      unknownModel: 'Unknown model',
+      plateFor: 'Plate for {{filename}}',
+      moveUp: 'Move up',
+      moveDown: 'Move down',
+      queued: 'Queued with {{count}} alternatives',
+    },
     selectPrinter: 'Select Printer',
     selectPlate: 'Select Plate',
     filamentMapping: 'Filament Mapping',
@@ -5078,7 +5111,15 @@ export default {
       kValueHelp: 'Typical range: 0.01 - 0.06 for PLA, 0.02 - 0.10 for PETG',
       filament: 'Filament',
       selectFilament: 'Select filament...',
-      noFilamentsHelp: 'No filaments found. Create a K-profile in Bambu Studio first.',
+      source: {
+        local: 'Imported',
+        orcaCloud: 'Orca Cloud',
+        bambuCloud: 'Bambu Cloud',
+        builtin: 'Built-in',
+      },
+      noFilamentsHelp: 'No filaments available. Sign in to Bambu Cloud, or import presets under Profiles → Local Profiles.',
+      searchFilaments: 'Search filaments...',
+      noFilamentMatches: 'No filament matches that search',
       flowType: 'Flow Type',
       highFlow: 'High Flow',
       standard: 'Standard',
@@ -5111,6 +5152,8 @@ export default {
       profileSaved: 'K-profile saved',
       profilesSaved: 'K-profile saved to {{count}} extruders',
       selectAtLeastOneExtruder: 'Please select at least one extruder',
+      selectFilament: 'Select a filament first',
+      filamentNotResolvable: 'No Bambu filament ID for {{name}} — the printer cannot store a profile for it',
       profileDeleted: 'K-profile deleted',
       profilesDeleted: 'Deleted {{count}} profiles',
       exportedProfiles: 'Exported {{count}} profiles',
