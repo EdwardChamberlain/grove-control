@@ -482,16 +482,47 @@ class TestUsersAPI:
         )
         user_id = create_response.json()["id"]
 
-        # Role is deprecated/inert and ignored on update.
+        # The legacy role field is no longer part of the write API.
         response = await async_client.patch(
             f"/api/v1/users/{user_id}",
             headers={"Authorization": f"Bearer {auth_token}"},
-            json={"role": "admin"},
+            json={"email": "updated@example.com"},
         )
 
         assert response.status_code == 200
-        assert response.json()["role"] == "user"
+        assert response.json()["email"] == "updated@example.com"
         assert response.json()["is_admin"] is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_user_write_rejects_legacy_role_field(self, async_client: AsyncClient, auth_token: str):
+        """Removed role inputs fail validation instead of being silently ignored."""
+        create_response = await async_client.post(
+            "/api/v1/users/",
+            headers={"Authorization": f"Bearer {auth_token}"},
+            json={
+                "username": "legacyrolecreate",
+                "password": "Password123!",
+                "role": "admin",
+            },
+        )
+        assert create_response.status_code == 422
+        assert any(error["loc"][-1] == "role" for error in create_response.json()["detail"])
+
+        valid_create = await async_client.post(
+            "/api/v1/users/",
+            headers={"Authorization": f"Bearer {auth_token}"},
+            json={"username": "legacyroleupdate", "password": "Password123!"},
+        )
+        assert valid_create.status_code == 201
+
+        update_response = await async_client.patch(
+            f"/api/v1/users/{valid_create.json()['id']}",
+            headers={"Authorization": f"Bearer {auth_token}"},
+            json={"role": "admin"},
+        )
+        assert update_response.status_code == 422
+        assert any(error["loc"][-1] == "role" for error in update_response.json()["detail"])
 
     @pytest.mark.asyncio
     @pytest.mark.integration
