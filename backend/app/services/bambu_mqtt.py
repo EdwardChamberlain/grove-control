@@ -1642,6 +1642,44 @@ class BambuMQTTClient:
                         self._pending_cali_acks[ack_seq] = print_data
                 elif cmd in ("extrusion_cali_sel", "ams_filament_setting"):
                     logger.debug("[%s] %s response: %s", self.serial_number, cmd, print_data)
+                    # A refused ams_filament_setting is the printer's verdict on
+                    # a write the user just made, and at DEBUG it never reached
+                    # a support bundle: #2756 reported six manual Configure Slot
+                    # attempts on an X1C, each returning HTTP 200 with the
+                    # read-back still showing the previous profile, and no
+                    # record of what the printer said about any of them. Same
+                    # promotion as extrusion_cali_set (#2718) and
+                    # ams_filament_drying (#1447) — but only on a non-success,
+                    # because unlike those two this command is not rare: every
+                    # spool assignment and every K-profile re-apply sends one,
+                    # so promoting each ack would bury the interesting line.
+                    #
+                    # The developer-mode probe is excluded. It sends this exact
+                    # command to the external slot precisely to see it refused
+                    # on P1 firmware, so its failure is a normal reading rather
+                    # than a fault. Its response is still matched below (this
+                    # runs before _handle_dev_mode_probe_response clears the
+                    # seq), and user-initiated commands can't be mistaken for
+                    # it — they publish a hardcoded sequence_id of "0".
+                    result = print_data.get("result")
+                    is_dev_mode_probe = (
+                        self._dev_mode_probe_seq is not None
+                        and print_data.get("sequence_id") == self._dev_mode_probe_seq
+                    )
+                    if (
+                        cmd == "ams_filament_setting"
+                        and not is_dev_mode_probe
+                        and isinstance(result, str)
+                        and result.lower() != "success"
+                    ):
+                        logger.info(
+                            "[%s] ams_filament_setting refused: result=%s reason=%s ams_id=%s tray_id=%s",
+                            self.serial_number,
+                            result,
+                            print_data.get("reason", ""),
+                            print_data.get("ams_id"),
+                            print_data.get("tray_id"),
+                        )
                 # AMS drying responses are rare (user-initiated only) and the
                 # full payload — including `result` and any `reason` code —
                 # is the only way to diagnose silent rejections like #1447.

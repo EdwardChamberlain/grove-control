@@ -324,6 +324,34 @@ def _mqtt_commands_rejected(status) -> bool:
     return False
 
 
+def _drying_ams_ids(status) -> list[int]:
+    """AMS unit ids currently running a drying cycle, per firmware telemetry.
+
+    ``dry_time`` is minutes remaining, so >0 is the firmware's own statement that
+    a cycle is active. Used by the dispatch watchdog to say *why* a print never
+    started (#2758) — it is a diagnostic, not a gate.
+
+    Deliberately not used to block or stop drying before dispatch. This printer
+    class supports drying concurrently with an active print
+    (``supports_drying_while_printing``), so drying is not incompatible with
+    printing in general; what #2758 shows is one X2D refusing to *begin* a print
+    while two AMS units were drying, one of them without its external PSU. Until
+    it is known whether the blocker is drying itself or the power budget
+    (``dry_sf_reason`` 1 / 8), acting on this would tear down drying that the
+    hardware is perfectly happy to continue.
+    """
+    ids: list[int] = []
+    for unit in (getattr(status, "raw_data", None) or {}).get("ams") or []:
+        if not isinstance(unit, dict):
+            continue
+        try:
+            if int(unit.get("dry_time") or 0) > 0:
+                ids.append(int(unit.get("id", 0)))
+        except (TypeError, ValueError):
+            continue
+    return ids
+
+
 def _installed_nozzle_diameters(status) -> list[float]:
     """Parse the installed nozzle diameters from a PrinterState (#1899).
 
@@ -2713,10 +2741,18 @@ class PrintScheduler:
                     self._drying_in_progress[pid] = time.monotonic()
 
     def _sync_drying_state(self):
-        """Sync in-memory drying state with actual printer status.
+        """Drop printers from ``_drying_in_progress`` that are no longer drying.
 
-        Handles backend restart — if a printer is drying but we don't know about it,
-        update our state. If we think it's drying but it's not, clear it.
+        One direction only: it prunes, it never adds. A printer drying without an
+        entry here — because the user started the cycle from Studio, the printer's
+        screen or Bambuddy's own manual Dry button, or because Bambuddy restarted
+        mid-cycle — stays unknown to the scheduler, so the "print takes priority"
+        stop at ``check_queue`` only ever applies to cycles Bambuddy itself began.
+
+        That is deliberate for now rather than an oversight: populating this from
+        telemetry would hand the scheduler authority to stop drying a user started
+        by hand. It also means the backend-restart case this used to claim to
+        handle is not handled.
         """
         to_remove = []
         for pid in self._drying_in_progress:
@@ -4122,6 +4158,11 @@ class PrintScheduler:
         # every push carrying an `hms` key, so the fault can come and go between
         # 3-second polls. Seeing it once inside the dispatch window is enough.
         command_rejected = False
+        # Latched for the same reason as command_rejected: drying can finish, or
+        # be stopped by the user, part-way through the dispatch window. Seeing it
+        # once is what matters — it is the state the printer was in when it
+        # declined to start (#2758).
+        drying_ams_ids: list[int] = []
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             await asyncio.sleep(poll_interval)
@@ -4152,6 +4193,7 @@ class PrintScheduler:
                 except Exception:
                     pass
                 return
+            drying_ams_ids = drying_ams_ids or _drying_ams_ids(status)
             # Checked only after the active-state exit above: a stale HMS left
             # over from an earlier job must never abort a print that is visibly
             # running. An actually-refused command leaves the printer idle, so
@@ -4188,6 +4230,7 @@ class PrintScheduler:
                     except Exception:
                         pass
                     return
+                drying_ams_ids = drying_ams_ids or _drying_ams_ids(status)
                 # Same ordering rule as Phase A: a running print wins over a
                 # lingering HMS.
                 if _mqtt_commands_rejected(status):
@@ -4197,6 +4240,17 @@ class PrintScheduler:
         # No active-state transition. Revert the item so the scheduler can retry.
         # Drop the in-memory hold so the retry isn't blocked by it.
         scheduler._release_dispatch_hold(printer_id)
+
+        # Logged on every failed dispatch window, not just the last one, so a
+        # support bundle shows the correlation from the first attempt rather than
+        # only after the retry budget is spent (#2758).
+        if drying_ams_ids:
+            logger.info(
+                "Queue item %s: printer %d never started while AMS %s drying — this may be why, see #2758",
+                queue_item_id,
+                printer_id,
+                ", ".join(str(i) for i in drying_ams_ids),
+            )
 
         # Four outcomes from the revert attempt, each routed differently:
         #   "reverted":          row flipped from printing -> pending, run recovery
@@ -4249,11 +4303,29 @@ class PrintScheduler:
                 return "command_rejected"
             if item.dispatch_attempts >= DISPATCH_MAX_ATTEMPTS:
                 item.status = "failed"
-                item.error_message = (
-                    f"The printer accepted the file but never started printing, after "
-                    f"{item.dispatch_attempts} attempts. Check the printer's screen for a "
-                    f"prompt or error, confirm its SD card is readable, and start the job again."
-                )
+                if drying_ams_ids:
+                    # #2758: the generic message below sent the reporter looking
+                    # at the SD card while the actual obstacle — AMS units in a
+                    # drying cycle — was on screen the whole time. Name what we
+                    # observed and let the user judge it; Bambuddy does not stop
+                    # the cycle itself, because on this hardware drying can run
+                    # alongside a print and stopping it may not be the fix.
+                    units = ", ".join(f"AMS {i}" for i in drying_ams_ids)
+                    item.error_message = (
+                        f"The printer accepted the file but never started printing, after "
+                        f"{item.dispatch_attempts} attempts. {units} "
+                        f"{'was' if len(drying_ams_ids) == 1 else 'were'} drying throughout — "
+                        f"some printers refuse to begin a print while an AMS is in a drying "
+                        f"cycle, and an AMS drying without its external power supply can also "
+                        f"leave too little power for the start-of-print calibration. Stop the "
+                        f"drying, or connect the AMS power supply, and start the job again."
+                    )
+                else:
+                    item.error_message = (
+                        f"The printer accepted the file but never started printing, after "
+                        f"{item.dispatch_attempts} attempts. Check the printer's screen for a "
+                        f"prompt or error, confirm its SD card is readable, and start the job again."
+                    )
                 item.completed_at = datetime.now(timezone.utc)
                 await db.commit()
                 return "gave_up"

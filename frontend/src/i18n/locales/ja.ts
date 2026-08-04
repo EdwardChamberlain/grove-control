@@ -6539,6 +6539,10 @@ export default {
         title: '検出サービス（ポート {{port}}）',
         fail: 'バインド IP のポート {{port}} で待ち受けているものがないため、スライサーの検出ハンドシェイクが失敗します。',
       },
+      privileged_ports: {
+        title: '特権ポートへのバインド',
+        fail: 'ポート {{port}} は 1024 未満で、このサービスにはバインドする権限がありません。上で何も待ち受けていないのはこのためです。/etc/systemd/system/bambuddy.service に AmbientCapabilities=CAP_NET_BIND_SERVICE を追加して再起動するか、"sudo setcap cap_net_bind_service=+ep $(readlink -f $(which python3))" を実行してください。Docker の場合は cap_add: [NET_BIND_SERVICE] を追加します。',
+      },
       certificate: {
         title: 'TLS 証明書',
         pass: '証明書の準備ができています。Bambuddy CA 証明書（上記）がスライサーの信頼ストアにインポートされていることを確認してください。',

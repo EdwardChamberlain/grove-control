@@ -6527,6 +6527,10 @@ export default {
         title: 'Serviço de descoberta (porta {{port}})',
         fail: 'Nada está escutando na porta {{port}} do IP de vínculo, então a negociação de descoberta do slicer falha.',
       },
+      privileged_ports: {
+        title: 'Vinculação a portas privilegiadas',
+        fail: 'A porta {{port}} está abaixo de 1024 e este serviço não tem permissão para vinculá-la, por isso nada está escutando acima. Adicione AmbientCapabilities=CAP_NET_BIND_SERVICE em /etc/systemd/system/bambuddy.service e reinicie, ou execute "sudo setcap cap_net_bind_service=+ep $(readlink -f $(which python3))". No Docker, adicione cap_add: [NET_BIND_SERVICE].',
+      },
       certificate: {
         title: 'Certificado TLS',
         pass: 'Certificado pronto. Verifique se o certificado CA do Bambuddy (acima) está importado no armazenamento de confiança do seu slicer.',

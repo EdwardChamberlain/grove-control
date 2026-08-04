@@ -6538,6 +6538,10 @@ export default {
         title: 'Erkennungsdienst (Port {{port}})',
         fail: 'Auf Port {{port}} der Bind-IP lauscht nichts, daher schlägt der Erkennungs-Handshake des Slicers fehl.',
       },
+      privileged_ports: {
+        title: 'Bindung an privilegierte Ports',
+        fail: 'Port {{port}} liegt unter 1024 und dieser Dienst darf ihn nicht belegen — deshalb lauscht oben nichts. Fügen Sie AmbientCapabilities=CAP_NET_BIND_SERVICE in /etc/systemd/system/bambuddy.service ein und starten Sie neu, oder führen Sie "sudo setcap cap_net_bind_service=+ep $(readlink -f $(which python3))" aus. Unter Docker ergänzen Sie cap_add: [NET_BIND_SERVICE].',
+      },
       certificate: {
         title: 'TLS-Zertifikat',
         pass: 'Zertifikat bereit. Stellen Sie sicher, dass das Bambuddy-CA-Zertifikat (oben) in den Vertrauensspeicher Ihres Slicers importiert ist.',

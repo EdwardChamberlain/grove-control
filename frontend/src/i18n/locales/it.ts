@@ -6527,6 +6527,10 @@ export default {
         title: 'Servizio di rilevamento (porta {{port}})',
         fail: 'Nulla è in ascolto sulla porta {{port}} dell\'IP di binding, quindi l\'handshake di rilevamento dello slicer fallisce.',
       },
+      privileged_ports: {
+        title: 'Binding sulle porte privilegiate',
+        fail: 'La porta {{port}} è sotto 1024 e questo servizio non è autorizzato ad associarla: per questo sopra non risulta nulla in ascolto. Aggiungi AmbientCapabilities=CAP_NET_BIND_SERVICE in /etc/systemd/system/bambuddy.service e riavvia, oppure esegui "sudo setcap cap_net_bind_service=+ep $(readlink -f $(which python3))". Con Docker aggiungi cap_add: [NET_BIND_SERVICE].',
+      },
       certificate: {
         title: 'Certificato TLS',
         pass: 'Certificato pronto. Assicurati che il certificato CA di Bambuddy (sopra) sia importato nell\'archivio attendibile del tuo slicer.',

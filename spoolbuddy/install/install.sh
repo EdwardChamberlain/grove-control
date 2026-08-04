@@ -808,6 +808,13 @@ TimeoutStopSec=30
 StandardOutput=journal
 StandardError=journal
 
+# Allow binding to privileged ports (322 RTSP, 990 FTPS) for Virtual Printer
+# mode. The Bambuddy-only installer has had this since #757; this unit did not,
+# so a full-mode install produced a virtual printer whose sockets never opened
+# (#2549). Compatible with NoNewPrivileges below — systemd raises the ambient
+# set at exec, which is not the escalation that setting forbids.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

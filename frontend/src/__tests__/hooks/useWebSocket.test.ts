@@ -321,10 +321,6 @@ describe('useWebSocket hook', () => {
 
     it('invalidates archives on print_complete message', async () => {
       vi.useFakeTimers();
-      vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
-        cb(0);
-        return 0;
-      });
       const { useWebSocket } = await import('../../hooks/useWebSocket');
 
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
@@ -363,10 +359,6 @@ describe('useWebSocket hook', () => {
 
     it('invalidates archives on archive_created message', async () => {
       vi.useFakeTimers();
-      vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
-        cb(0);
-        return 0;
-      });
       const { useWebSocket } = await import('../../hooks/useWebSocket');
 
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
@@ -404,10 +396,6 @@ describe('useWebSocket hook', () => {
 
     it('invalidates archives on archive_updated message', async () => {
       vi.useFakeTimers();
-      vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
-        cb(0);
-        return 0;
-      });
       const { useWebSocket } = await import('../../hooks/useWebSocket');
 
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
@@ -444,10 +432,6 @@ describe('useWebSocket hook', () => {
 
     it('invalidates inventory queries on inventory_changed message', async () => {
       vi.useFakeTimers();
-      vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
-        cb(0);
-        return 0;
-      });
       const { useWebSocket } = await import('../../hooks/useWebSocket');
 
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
@@ -479,10 +463,6 @@ describe('useWebSocket hook', () => {
     });
 
     it('handles missing_spool_assignment message without error', async () => {
-      vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
-        cb(0);
-        return 0;
-      });
       const { useWebSocket } = await import('../../hooks/useWebSocket');
 
       renderHook(() => useWebSocket(), {
@@ -511,10 +491,6 @@ describe('useWebSocket hook', () => {
     });
 
     it('handles spool_assignment_verified messages (success and failure) without error', async () => {
-      vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
-        cb(0);
-        return 0;
-      });
       const { useWebSocket } = await import('../../hooks/useWebSocket');
 
       renderHook(() => useWebSocket(), {
@@ -642,6 +618,100 @@ describe('useWebSocket hook', () => {
       }).not.toThrow();
 
       expect(invalidateSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * #2754 (reporter @mic4rd): live updates froze whenever the tab wasn't in
+   * front, and caught up all at once on switching back. The cache writes ran
+   * inside requestAnimationFrame, and a hidden tab gets no rendering
+   * opportunities — so the browser holds queued frame callbacks indefinitely
+   * rather than merely throttling them.
+   *
+   * The stub below is what makes these tests meaningful: it hands back a
+   * handle and never invokes the callback, which is what a real hidden tab
+   * does. `document.hidden` is set alongside it to name the scenario, but the
+   * production code doesn't branch on visibility — it simply no longer defers
+   * to a frame. Reintroduce a rAF wrapper on either path and these fail.
+   */
+  describe('hidden tab (#2754)', () => {
+    let rafSpy: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      // The shared test client sets gcTime: 0, which collects a query the
+      // moment it has no observers — advancing timers past the 100ms
+      // coalescing window would drop the entry we just wrote before we could
+      // read it back. Nothing observes ['printerStatus', 1] here, so this
+      // block needs a client that keeps unobserved data.
+      queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+      });
+      Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+      // Order matters: vi.useFakeTimers() fakes requestAnimationFrame as well
+      // (backing it with the mock clock, so advanceTimersByTime would run it
+      // and hide the very defect under test). Stub it afterwards so the
+      // never-firing version is the one the hook sees.
+      vi.useFakeTimers();
+      rafSpy = vi.fn(() => 1);
+      vi.stubGlobal('requestAnimationFrame', rafSpy);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    });
+
+    it('applies printer status to the query cache', async () => {
+      const { useWebSocket } = await import('../../hooks/useWebSocket');
+
+      renderHook(() => useWebSocket(), { wrapper: createWrapper(queryClient) });
+      const ws = await waitForWs();
+      act(() => ws.open());
+
+      act(() => {
+        ws.simulateMessage({
+          type: 'printer_status',
+          printer_id: 1,
+          data: { state: 'RUNNING', progress: 42 },
+        });
+      });
+
+      // Past the 100ms coalescing window.
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+      });
+
+      // This is the key the tab-title/favicon progress reads
+      // (usePrintProgressTitle) and nothing else.
+      expect(queryClient.getQueryData(['printerStatus', 1])).toMatchObject({
+        state: 'RUNNING',
+        progress: 42,
+      });
+      expect(rafSpy).not.toHaveBeenCalled();
+    });
+
+    it('drains queued messages instead of wedging the queue', async () => {
+      const { useWebSocket } = await import('../../hooks/useWebSocket');
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+      renderHook(() => useWebSocket(), { wrapper: createWrapper(queryClient) });
+      const ws = await waitForWs();
+      act(() => ws.open());
+
+      // Everything other than printer_status goes through the message queue,
+      // which used to stall with processingRef stuck true — messages then
+      // piled up unbounded until the tab was shown again.
+      act(() => {
+        ws.simulateMessage({ type: 'print_complete', printer_id: 1, data: {} });
+      });
+
+      // 3s debounce, then the 500ms-apart stagger.
+      await act(async () => {
+        vi.advanceTimersByTime(4000);
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['archives'] });
+      expect(rafSpy).not.toHaveBeenCalled();
     });
   });
 

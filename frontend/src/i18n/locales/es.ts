@@ -6547,6 +6547,10 @@ export default {
         title: 'Servicio de detección (puerto {{port}})',
         fail: 'No hay nada escuchando en el puerto {{port}} de la IP de enlace, por lo que falla el protocolo de detección del laminador.',
       },
+      privileged_ports: {
+        title: 'Vinculación a puertos privilegiados',
+        fail: 'El puerto {{port}} está por debajo de 1024 y este servicio no tiene permiso para vincularlo, por eso no hay nada escuchando arriba. Añade AmbientCapabilities=CAP_NET_BIND_SERVICE a /etc/systemd/system/bambuddy.service y reinicia, o ejecuta "sudo setcap cap_net_bind_service=+ep $(readlink -f $(which python3))". En Docker, añade cap_add: [NET_BIND_SERVICE].',
+      },
       certificate: {
         title: 'Certificado TLS',
         pass: 'Certificado listo. Asegúrese de que el certificado de CA de Bambuddy (arriba) esté importado en el almacén de confianza de su laminador.',

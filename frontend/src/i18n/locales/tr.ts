@@ -6478,6 +6478,10 @@ export default {
         title: 'Keşif servisi (port {{port}})',
         fail: 'Bind IP\'sinin {{port}} portunda hiçbir şey dinlemiyor, bu nedenle dilimleyicinin keşif el sıkışması başarısız oluyor.',
       },
+      privileged_ports: {
+        title: 'Ayrıcalıklı bağlantı noktası bağlama',
+        fail: '{{port}} numaralı bağlantı noktası 1024 altındadır ve bu hizmetin onu bağlama izni yoktur; yukarıda hiçbir şeyin dinlememesinin nedeni budur. /etc/systemd/system/bambuddy.service dosyasına AmbientCapabilities=CAP_NET_BIND_SERVICE ekleyip yeniden başlatın veya "sudo setcap cap_net_bind_service=+ep $(readlink -f $(which python3))" komutunu çalıştırın. Docker kullanıyorsanız cap_add: [NET_BIND_SERVICE] ekleyin.',
+      },
       certificate: {
         title: 'TLS sertifikası',
         pass: 'Sertifika hazır. Bambuddy CA sertifikasının (yukarıda) dilimleyicinizin güven deposuna içe aktarıldığından emin olun.',

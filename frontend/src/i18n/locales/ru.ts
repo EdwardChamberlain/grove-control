@@ -6167,6 +6167,10 @@ export default {
         title: "Служба обнаружения (порт {{port}})",
         fail: "На порту {{port}} выбранного IP-адреса никто не слушает, поэтому сетевое обнаружение слайсером не работает.",
       },
+      privileged_ports: {
+        title: 'Привязка к привилегированным портам',
+        fail: 'Порт {{port}} ниже 1024, и этой службе не разрешено его занимать — поэтому выше ничего не слушает. Добавьте AmbientCapabilities=CAP_NET_BIND_SERVICE в /etc/systemd/system/bambuddy.service и перезапустите либо выполните "sudo setcap cap_net_bind_service=+ep $(readlink -f $(which python3))". В Docker добавьте cap_add: [NET_BIND_SERVICE].',
+      },
       certificate: {
         title: "Сертификат TLS",
         pass: "Сертификат готов. Убедитесь, что сертификат центра сертификации Bambuddy, указанный выше, импортирован в доверенное хранилище слайсера.",

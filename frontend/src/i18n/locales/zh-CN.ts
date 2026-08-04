@@ -6526,6 +6526,10 @@ export default {
         title: '发现服务（端口 {{port}}）',
         fail: '绑定 IP 的端口 {{port}} 上没有任何监听，因此切片软件的发现握手会失败。',
       },
+      privileged_ports: {
+        title: '特权端口绑定',
+        fail: '端口 {{port}} 低于 1024，而此服务没有绑定它的权限，这正是上面没有任何监听的原因。请在 /etc/systemd/system/bambuddy.service 中添加 AmbientCapabilities=CAP_NET_BIND_SERVICE 并重启，或运行 "sudo setcap cap_net_bind_service=+ep $(readlink -f $(which python3))"。使用 Docker 时请添加 cap_add: [NET_BIND_SERVICE]。',
+      },
       certificate: {
         title: 'TLS 证书',
         pass: '证书已就绪。请确保已将 Bambuddy CA 证书（上方）导入切片软件的信任库。',

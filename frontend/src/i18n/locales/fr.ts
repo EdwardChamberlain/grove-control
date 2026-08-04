@@ -6528,6 +6528,10 @@ export default {
         title: 'Service de détection (port {{port}})',
         fail: 'Rien n\'écoute sur le port {{port}} de l\'IP de liaison, la poignée de main de détection du slicer échoue donc.',
       },
+      privileged_ports: {
+        title: 'Liaison aux ports privilégiés',
+        fail: 'Le port {{port}} est inférieur à 1024 et ce service n\'est pas autorisé à s\'y lier — c\'est pourquoi rien n\'écoute ci-dessus. Ajoutez AmbientCapabilities=CAP_NET_BIND_SERVICE dans /etc/systemd/system/bambuddy.service puis redémarrez, ou exécutez "sudo setcap cap_net_bind_service=+ep $(readlink -f $(which python3))". Sous Docker, ajoutez cap_add: [NET_BIND_SERVICE].',
+      },
       certificate: {
         title: 'Certificat TLS',
         pass: 'Certificat prêt. Assurez-vous que le certificat CA Bambuddy (ci-dessus) est importé dans le magasin de confiance de votre slicer.',

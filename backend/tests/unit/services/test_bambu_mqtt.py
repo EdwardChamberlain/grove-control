@@ -7451,3 +7451,122 @@ class TestEndOfPrintProbe:
         probe_lines = [line for line in caplog.text.splitlines() if "EOP-PROBE" in line]
         assert probe_lines
         assert not any("12345678" in line for line in probe_lines)
+
+
+class TestAmsFilamentSettingRefusalLogging:
+    """A refused `ams_filament_setting` reaches the log at INFO (#2756).
+
+    The reporter configured a slot on an X1C six times. Every request returned
+    HTTP 200, every publish carried the complete `GFG99`/`GFSG99` pair, and
+    every #2582 read-back showed the previous profile still in place — with no
+    record anywhere of what the printer answered, because the response sat at
+    DEBUG and support bundles are collected at INFO.
+
+    Only a non-success is promoted. This command is not rare — every spool
+    assignment and every K-profile re-apply sends one — so logging each ack
+    would bury the one line worth reading.
+    """
+
+    @pytest.fixture
+    def mqtt_client(self):
+        from backend.app.services.bambu_mqtt import BambuMQTTClient
+
+        return BambuMQTTClient(
+            ip_address="192.168.1.100",
+            serial_number="TEST123",
+            access_code="12345678",
+        )
+
+    def _refusals(self, caplog):
+        return [line for line in caplog.text.splitlines() if "ams_filament_setting refused" in line]
+
+    def test_refusal_is_logged_at_info_with_result_and_reason(self, mqtt_client, caplog):
+        caplog.set_level(logging.INFO, logger="backend.app.services.bambu_mqtt")
+
+        mqtt_client._process_message(
+            {
+                "print": {
+                    "command": "ams_filament_setting",
+                    "result": "fail",
+                    "reason": "invalid tray_id",
+                    "ams_id": 0,
+                    "tray_id": 1,
+                    "sequence_id": "0",
+                }
+            }
+        )
+
+        refusals = self._refusals(caplog)
+        assert len(refusals) == 1
+        # The reason is the whole point of the promotion — a bare "fail" would
+        # not have told the reporter anything the read-back hadn't already.
+        assert "result=fail" in refusals[0]
+        assert "invalid tray_id" in refusals[0]
+        assert "ams_id=0" in refusals[0]
+        assert "tray_id=1" in refusals[0]
+
+    def test_success_stays_quiet(self, mqtt_client, caplog):
+        caplog.set_level(logging.INFO, logger="backend.app.services.bambu_mqtt")
+
+        mqtt_client._process_message(
+            {"print": {"command": "ams_filament_setting", "result": "success", "sequence_id": "0"}}
+        )
+
+        assert self._refusals(caplog) == []
+
+    def test_response_without_a_result_field_stays_quiet(self, mqtt_client, caplog):
+        """Firmware that omits `result` tells us nothing — don't invent a refusal."""
+        caplog.set_level(logging.INFO, logger="backend.app.services.bambu_mqtt")
+
+        mqtt_client._process_message({"print": {"command": "ams_filament_setting", "sequence_id": "0"}})
+
+        assert self._refusals(caplog) == []
+
+    def test_developer_mode_probe_failure_is_not_reported_as_a_refusal(self, mqtt_client, caplog):
+        """The probe sends this command to the external slot *expecting* a
+        refusal on P1 firmware — that is a reading, not a fault, and promoting
+        it would put an alarming line in every P1 bundle on every reconnect."""
+        caplog.set_level(logging.INFO, logger="backend.app.services.bambu_mqtt")
+        mqtt_client._dev_mode_probe_seq = "7"
+
+        mqtt_client._process_message(
+            {
+                "print": {
+                    "command": "ams_filament_setting",
+                    "result": "failed",
+                    "reason": "mqtt message verify failed",
+                    "sequence_id": "7",
+                }
+            }
+        )
+
+        assert self._refusals(caplog) == []
+
+    def test_user_command_is_not_mistaken_for_the_probe(self, mqtt_client, caplog):
+        """User-initiated publishes hardcode sequence_id "0", so a refusal is
+        still reported while a probe is outstanding under a different seq."""
+        caplog.set_level(logging.INFO, logger="backend.app.services.bambu_mqtt")
+        mqtt_client._dev_mode_probe_seq = "7"
+
+        mqtt_client._process_message(
+            {
+                "print": {
+                    "command": "ams_filament_setting",
+                    "result": "fail",
+                    "reason": "",
+                    "sequence_id": "0",
+                }
+            }
+        )
+
+        assert len(self._refusals(caplog)) == 1
+
+    def test_extrusion_cali_sel_is_untouched(self, mqtt_client, caplog):
+        """The sibling in the same branch keeps its DEBUG-only handling; this
+        change is scoped to the write #2756 is about."""
+        caplog.set_level(logging.INFO, logger="backend.app.services.bambu_mqtt")
+
+        mqtt_client._process_message({"print": {"command": "extrusion_cali_sel", "result": "fail", "sequence_id": "0"}})
+
+        assert self._refusals(caplog) == []
+        assert "extrusion_cali_sel" not in caplog.text

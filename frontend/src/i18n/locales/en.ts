@@ -6582,6 +6582,10 @@ export default {
         title: 'Discovery service (port {{port}})',
         fail: 'Nothing is listening on port {{port}} of the bind IP, so the slicer\'s discovery handshake fails.',
       },
+      privileged_ports: {
+        title: 'Privileged port binding',
+        fail: 'Port {{port}} is below 1024, and this service is not permitted to bind it — which is why nothing is listening above. Add AmbientCapabilities=CAP_NET_BIND_SERVICE to /etc/systemd/system/bambuddy.service and restart, or run "sudo setcap cap_net_bind_service=+ep $(readlink -f $(which python3))". On Docker, add cap_add: [NET_BIND_SERVICE].',
+      },
       certificate: {
         title: 'TLS certificate',
         pass: 'Certificate ready. Make sure the Bambuddy CA certificate (above) is imported into your slicer\'s trust store.',

@@ -6610,6 +6610,10 @@ export default {
         title: '검색 서비스 (포트 {{port}})',
         fail: '바인드 IP의 포트 {{port}}에서 수신 중인 서비스가 없어 슬라이서의 검색 핸드셰이크가 실패합니다.'
       },
+      privileged_ports: {
+        title: '특권 포트 바인딩',
+        fail: '포트 {{port}}은(는) 1024 미만이며 이 서비스에는 바인딩 권한이 없습니다. 위에서 아무것도 수신 대기하지 않는 이유입니다. /etc/systemd/system/bambuddy.service에 AmbientCapabilities=CAP_NET_BIND_SERVICE를 추가하고 재시작하거나 "sudo setcap cap_net_bind_service=+ep $(readlink -f $(which python3))"를 실행하세요. Docker에서는 cap_add: [NET_BIND_SERVICE]를 추가합니다.',
+      },
       certificate: {
         title: 'TLS 인증서',
         pass: '인증서가 준비됐습니다. Bambuddy CA 인증서(위)가 슬라이서의 신뢰 저장소에 가져와져 있는지 확인하세요.',

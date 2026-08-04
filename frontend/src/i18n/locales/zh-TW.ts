@@ -6526,6 +6526,10 @@ export default {
         title: '探索服務（連接埠 {{port}}）',
         fail: '繫結 IP 的連接埠 {{port}} 上沒有任何監聽，因此切片軟體的探索交握會失敗。',
       },
+      privileged_ports: {
+        title: '特權連接埠繫結',
+        fail: '連接埠 {{port}} 低於 1024，而此服務沒有繫結它的權限，這正是上面沒有任何項目在接聽的原因。請在 /etc/systemd/system/bambuddy.service 中加入 AmbientCapabilities=CAP_NET_BIND_SERVICE 並重新啟動，或執行 "sudo setcap cap_net_bind_service=+ep $(readlink -f $(which python3))"。使用 Docker 時請加入 cap_add: [NET_BIND_SERVICE]。',
+      },
       certificate: {
         title: 'TLS 憑證',
         pass: '憑證已就緒。請確保已將 Bambuddy CA 憑證（上方）匯入切片軟體的信任庫。',
