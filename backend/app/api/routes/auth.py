@@ -8,7 +8,7 @@ import jwt as _jwt
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials
 from jwt.exceptions import PyJWTError
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -37,7 +37,7 @@ from backend.app.core.auth import (
 from backend.app.core.database import async_session, get_db
 from backend.app.core.permissions import ALL_PERMISSIONS
 from backend.app.models.auth_ephemeral import AuthEphemeralToken, AuthRateLimitEvent, EventType, TokenType
-from backend.app.models.group import Group
+from backend.app.models.group import Group, user_groups
 from backend.app.models.settings import Settings
 from backend.app.models.user import User
 from backend.app.schemas.auth import (
@@ -1360,6 +1360,29 @@ async def _sync_ldap_user(db: AsyncSession, user: User, ldap_user, ldap_config) 
 
     current_group_ids = {g.id for g in user.groups}
     new_group_ids = {g.id for g in new_groups}
+
+    # LDAP may manage the Administrators mapping, but it must not remove the
+    # final active administrator. Keep that membership in place so an external
+    # group revocation cannot lock the instance out of admin-only operations.
+    admin_group = next((group for group in user.groups if group.name == "Administrators"), None)
+    if admin_group is not None and user.is_active and admin_group.id not in new_group_ids:
+        active_admin_count = await db.scalar(
+            select(func.count(User.id))
+            .select_from(User)
+            .join(user_groups, user_groups.c.user_id == User.id)
+            .where(
+                user_groups.c.group_id == admin_group.id,
+                User.is_active.is_(True),
+            )
+        )
+        if (active_admin_count or 0) <= 1:
+            new_groups.append(admin_group)
+            new_group_ids.add(admin_group.id)
+            logger.warning(
+                "Preserved the last active Administrators membership for LDAP user %s",
+                user.username,
+            )
+
     if current_group_ids != new_group_ids:
         user.groups = new_groups
         changed = True

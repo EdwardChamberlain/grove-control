@@ -26,8 +26,8 @@ class Permission(StrEnum):
 
     # Archives
     # ARCHIVES_READ kept for backward-compat with legacy custom roles, but new
-    # role bootstraps use the ownership-split variants below. seed_default_groups
-    # migrates pre-existing role rows: Administrators → ALL, everyone else → OWN.
+    # group bootstraps use the ownership-split variants below. seed_default_groups
+    # migrates pre-existing groups: Administrators → ALL, everyone else → OWN.
     ARCHIVES_READ = "archives:read"
     ARCHIVES_READ_OWN = "archives:read_own"
     ARCHIVES_READ_ALL = "archives:read_all"

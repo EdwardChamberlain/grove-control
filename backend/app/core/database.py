@@ -3598,9 +3598,9 @@ async def seed_default_groups():
     """Seed default groups and migrate existing users to appropriate groups.
 
     Creates the default system groups (Administrators, Operators, Viewers) if they
-    don't exist, then migrates existing users:
-    - Users with role='admin' -> Administrators group
-    - Users with role='user' -> Operators group
+    don't exist, then migrates existing users without group membership into the
+    Operators group. Legacy role-admin users are handled by the one-time
+    migration below; the role column has no continuing authorization authority.
 
     Also migrates old permissions to new ownership-based permissions (Issue #205).
     """
@@ -3900,10 +3900,6 @@ async def seed_default_groups():
 
         # Migrate existing users to groups if they're not already in any group
         if groups_created:
-            # Refresh to get newly created groups
-            admin_result = await session.execute(select(Group).where(Group.name == "Administrators"))
-            admin_group = admin_result.scalar_one_or_none()
-
             operators_result = await session.execute(select(Group).where(Group.name == "Operators"))
             operators_group = operators_result.scalar_one_or_none()
 
@@ -3916,10 +3912,7 @@ async def seed_default_groups():
                 if user.groups:
                     continue
 
-                if user.role == "admin" and admin_group:
-                    user.groups.append(admin_group)
-                    logger.info("Migrated admin user '%s' to Administrators group", user.username)
-                elif operators_group:
+                if operators_group:
                     user.groups.append(operators_group)
                     logger.info("Migrated user '%s' to Operators group", user.username)
 

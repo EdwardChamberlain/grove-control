@@ -1053,20 +1053,6 @@ async def require_auth_if_enabled(
         )
 
 
-def require_role(required_role: str):
-    """Deprecated dependency factory for legacy role-based access control."""
-
-    async def role_checker(current_user: Annotated[User, Depends(get_current_user)]) -> User:
-        if current_user.role != required_role:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Requires {required_role} role",
-            )
-        return current_user
-
-    return role_checker
-
-
 def require_admin():
     """Dependency factory that requires Administrators-group membership."""
 
@@ -1074,7 +1060,7 @@ def require_admin():
         if not current_user.is_admin:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Requires admin role",
+                detail="Requires Administrators group membership",
             )
         return current_user
 
@@ -1106,20 +1092,20 @@ def require_admin_if_auth_enabled():
     ) -> User | None:
         async with async_session() as db:
             if not await is_auth_enabled(db):
-                return None  # Auth disabled — no role to check.
+                return None  # Auth disabled — no group membership to check.
 
             # Reject API-keyed requests up front: admin is a user-group
             # concept, not a key-scope concept. The right path for
             # admin-equivalent API-key access is a specific Permission
             # (e.g. SETTINGS_UPDATE) gated by the allowlist, not the
-            # admin role.
+            # Administrators group membership.
             if x_api_key or (credentials and credentials.credentials.startswith("bb_")):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Admin operations require a user identity; API keys cannot be admins",
                 )
 
-            # Standard JWT path: validate and require admin role.
+            # Standard JWT path: validate and require Administrators membership.
             if credentials is None:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -1166,7 +1152,7 @@ def require_admin_if_auth_enabled():
             if not user.is_admin:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Requires admin role",
+                    detail="Requires Administrators group membership",
                 )
             return user
 

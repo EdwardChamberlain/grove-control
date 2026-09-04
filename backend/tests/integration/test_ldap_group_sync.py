@@ -160,6 +160,23 @@ class TestLdapGroupSyncPreservesManualAssignments:
         )
 
     @pytest.mark.asyncio
+    async def test_ldap_revocation_cannot_remove_last_active_administrator(self, db_session: AsyncSession):
+        """LDAP group revocation must not lock out the final active administrator."""
+        admins = await _make_group(db_session, "Administrators")
+        user = await _make_ldap_user(db_session, "solo-admin", [admins])
+
+        ldap_user = _FakeLdapUser(username="solo-admin", email=user.email, groups=[])
+        ldap_config = _FakeLdapConfig(
+            group_mapping={"cn=admins,ou=groups,dc=example,dc=com": "Administrators"},
+            default_group="",
+        )
+
+        await _sync_ldap_user(db_session, user, ldap_user, ldap_config)
+        await db_session.refresh(user, attribute_names=["groups"])
+
+        assert {group.name for group in user.groups} == {"Administrators"}
+
+    @pytest.mark.asyncio
     async def test_mixed_manual_and_ldap_groups(self, db_session: AsyncSession):
         """Most realistic scenario: user has multiple manual assignments AND LDAP
         mapped groups. Manual groups survive; LDAP-managed slice gets rebuilt."""
