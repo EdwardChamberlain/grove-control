@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient, useQueries } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
@@ -287,10 +287,22 @@ export function PrinterSelector({
     return uniqueModels[0] ?? null;
   }, [slicedForModel, uniqueModels]);
 
+  const previousDefaultModel = useRef<string | null>(null);
+
   useEffect(() => {
-    if (assignmentMode === 'model' && !targetModel && defaultModel && onTargetModelChange) {
+    if (assignmentMode !== 'model' || !onTargetModelChange) {
+      previousDefaultModel.current = defaultModel;
+      return;
+    }
+
+    // Replace a fallback if sliced metadata arrives after the printer list,
+    // but preserve a model the user selected explicitly in the meantime.
+    const canUpdateSelection = !targetModel || targetModel === previousDefaultModel.current;
+    if (defaultModel && canUpdateSelection) {
       onTargetModelChange(defaultModel);
     }
+
+    previousDefaultModel.current = defaultModel;
   }, [assignmentMode, defaultModel, onTargetModelChange, targetModel]);
 
   // Get unique locations for the selected target model (for location filtering)

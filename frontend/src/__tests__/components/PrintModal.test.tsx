@@ -184,6 +184,84 @@ describe('PrintModal', () => {
       expect(capturedBody).toMatchObject({ printer_id: null, target_model: 'X2D' });
     });
 
+    it('updates the archive model assignment when sliced metadata loads after printers', async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      const user = userEvent.setup();
+      server.use(
+        http.get('/api/v1/archives/:id', async () => {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          return HttpResponse.json({ sliced_for_model: 'X2D' });
+        }),
+        http.get('/api/v1/printers/', () => HttpResponse.json([
+          ...mockPrinters,
+          { id: 4, name: 'X2D', model: 'X2D', ip_address: '192.168.1.103', enabled: true, is_active: true },
+        ])),
+        http.post('/api/v1/queue/', async ({ request }) => {
+          capturedBody = await request.json() as Record<string, unknown>;
+          return HttpResponse.json({ id: 1, status: 'pending' });
+        }),
+      );
+
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Benchy"
+          onClose={mockOnClose}
+        />
+      );
+
+      expect(await screen.findByRole('button', { name: 'Any A1M' })).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: 'Any X2D' })).toHaveClass('border-bambu-green');
+
+      await user.click(screen.getByRole('button', { name: /^print$/i }));
+
+      await waitFor(() => expect(capturedBody).not.toBeNull());
+      expect(capturedBody).toMatchObject({ printer_id: null, target_model: 'X2D' });
+    });
+
+    it('updates the library-file model assignment when sliced metadata loads after printers', async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      const user = userEvent.setup();
+      server.use(
+        http.get('/api/v1/library/files/:id', async () => {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          return HttpResponse.json({ sliced_for_model: 'X2D' });
+        }),
+        http.get('/api/v1/library/files/:id/plates', () => {
+          return HttpResponse.json({ is_multi_plate: false, plates: [] });
+        }),
+        http.get('/api/v1/library/files/:id/filament-requirements', () => {
+          return HttpResponse.json({ file_id: 5, filename: 'benchy.gcode.3mf', filaments: [] });
+        }),
+        http.get('/api/v1/printers/', () => HttpResponse.json([
+          ...mockPrinters,
+          { id: 4, name: 'X2D', model: 'X2D', ip_address: '192.168.1.103', enabled: true, is_active: true },
+        ])),
+        http.post('/api/v1/queue/', async ({ request }) => {
+          capturedBody = await request.json() as Record<string, unknown>;
+          return HttpResponse.json({ id: 1, status: 'pending' });
+        }),
+      );
+
+      render(
+        <PrintModal
+          mode="create"
+          libraryFileId={5}
+          archiveName="Benchy"
+          onClose={mockOnClose}
+        />
+      );
+
+      expect(await screen.findByRole('button', { name: 'Any A1M' })).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: 'Any X2D' })).toHaveClass('border-bambu-green');
+
+      await user.click(screen.getByRole('button', { name: /^print$/i }));
+
+      await waitFor(() => expect(capturedBody).not.toBeNull());
+      expect(capturedBody).toMatchObject({ printer_id: null, target_model: 'X2D', library_file_id: 5 });
+    });
+
     it('keeps direct-print flows assigned to their preselected printer', async () => {
       let capturedBody: Record<string, unknown> | null = null;
       const user = userEvent.setup();
