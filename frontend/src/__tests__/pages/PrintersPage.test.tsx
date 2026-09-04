@@ -621,6 +621,15 @@ describe('PrintersPage', () => {
       expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
     });
 
+    it('opens the cockpit when the printer image is clicked', async () => {
+      localStorage.setItem('printerViewMode', 'detail');
+      render(<PrintersPage />);
+
+      fireEvent.click((await screen.findAllByRole('button', { name: 'View single printer' }))[0]);
+
+      expect(await screen.findByTestId('cockpit-layout')).toBeInTheDocument();
+    });
+
     it('keeps the hero placeholder visible until the single-printer camera loads', async () => {
       const { container } = render(<PrintersPage />);
 
