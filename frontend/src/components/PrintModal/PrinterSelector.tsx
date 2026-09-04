@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient, useQueries } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
@@ -279,6 +279,46 @@ export function PrinterSelector({
     return [...new Set(models)].sort();
   }, [activePrinters]);
 
+  // Keep model-based assignment aligned with the sliced file when possible.
+  // For files without a known target model, preserve the existing first-model
+  // fallback used when users select model assignment manually.
+  const defaultModel = useMemo(() => {
+    if (slicedForModel && uniqueModels.includes(slicedForModel)) return slicedForModel;
+    return uniqueModels[0] ?? null;
+  }, [slicedForModel, uniqueModels]);
+
+  const previousDefaultModel = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (assignmentMode !== 'model' || !onTargetModelChange) {
+      previousDefaultModel.current = defaultModel;
+      return;
+    }
+
+    // Replace a fallback if sliced metadata arrives after the printer list,
+    // but preserve a model the user selected explicitly in the meantime.
+    const canUpdateSelection = !targetModel || targetModel === previousDefaultModel.current;
+    if (defaultModel && canUpdateSelection) {
+      onTargetModelChange(defaultModel);
+    }
+
+    previousDefaultModel.current = defaultModel;
+  }, [assignmentMode, defaultModel, onTargetModelChange, targetModel]);
+
+  // A printer may not have a model until it has reported one. Keep those
+  // printers selectable instead of leaving a new job in an unusable model
+  // assignment state with no available target model.
+  useEffect(() => {
+    if (
+      assignmentMode === 'model'
+      && activePrinters.length > 0
+      && uniqueModels.length === 0
+      && onAssignmentModeChange
+    ) {
+      onAssignmentModeChange('printer');
+    }
+  }, [activePrinters.length, assignmentMode, onAssignmentModeChange, uniqueModels.length]);
+
   // Get unique locations for the selected target model (for location filtering)
   const uniqueLocations = useMemo(() => {
     if (!targetModel) return [];
@@ -359,6 +399,7 @@ export function PrinterSelector({
 
   const isSelected = (printerId: number) => selectedPrinterIds.includes(printerId);
   const selectedCount = selectedPrinterIds.length;
+  const selectedModelLabel = targetModel || defaultModel || slicedForModel || 'Model';
 
   const getPrinterMappingResult = (printerId: number) => {
     return printerMappingResults?.find((r) => r.printerId === printerId);
@@ -369,6 +410,22 @@ export function PrinterSelector({
       {/* Assignment mode toggle (model vs specific printer) */}
       {modelAssignmentAvailable && (
         <div className="flex gap-2 mb-4">
+          <button
+            type="button"
+            onClick={() => {
+              onAssignmentModeChange!('model');
+              onMultiSelect([]);
+              onTargetModelChange!(defaultModel);
+            }}
+            className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
+              assignmentMode === 'model'
+                ? 'border-bambu-green bg-bambu-green/10 text-white'
+                : 'border-bambu-dark-tertiary bg-bambu-dark text-bambu-gray hover:border-bambu-gray'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span className="text-sm">{`Any ${selectedModelLabel}`}</span>
+          </button>
           <button
             type="button"
             onClick={() => {
@@ -383,26 +440,6 @@ export function PrinterSelector({
           >
             <PrinterIcon className="w-4 h-4" />
             <span className="text-sm">Specific Printer</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              onAssignmentModeChange!('model');
-              onMultiSelect([]);
-              // Pre-select the sliced-for model if available, otherwise first model
-              const defaultModel = slicedForModel && uniqueModels.includes(slicedForModel)
-                ? slicedForModel
-                : uniqueModels[0];
-              onTargetModelChange!(defaultModel);
-            }}
-            className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
-              assignmentMode === 'model'
-                ? 'border-bambu-green bg-bambu-green/10 text-white'
-                : 'border-bambu-dark-tertiary bg-bambu-dark text-bambu-gray hover:border-bambu-gray'
-            }`}
-          >
-            <Users className="w-4 h-4" />
-            <span className="text-sm">Any {slicedForModel || 'Model'}</span>
           </button>
         </div>
       )}

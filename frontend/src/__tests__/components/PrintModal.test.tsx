@@ -115,6 +115,7 @@ describe('PrintModal', () => {
     });
 
     it('shows printer selection with checkboxes for multi-select', async () => {
+      const user = userEvent.setup();
       render(
         <PrintModal
           mode="create"
@@ -125,10 +126,196 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
         expect(screen.getByText('P1S')).toBeInTheDocument();
       });
+    });
+
+    it('defaults to the existing first-model fallback', async () => {
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Benchy"
+          onClose={mockOnClose}
+          onSuccess={mockOnSuccess}
+        />
+      );
+
+      const anyModel = await screen.findByRole('button', { name: 'Any A1M' });
+      const specificPrinter = screen.getByRole('button', { name: 'Specific Printer' });
+
+      expect(anyModel).toHaveClass('border-bambu-green');
+      expect(anyModel.compareDocumentPosition(specificPrinter) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('defaults farm assignment to the model the file was sliced for', async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      const user = userEvent.setup();
+      server.use(
+        http.get('/api/v1/archives/:id', () => HttpResponse.json({ sliced_for_model: 'X2D' })),
+        http.get('/api/v1/printers/', () => HttpResponse.json([
+          ...mockPrinters,
+          { id: 4, name: 'X2D', model: 'X2D', ip_address: '192.168.1.103', enabled: true, is_active: true },
+        ])),
+        http.post('/api/v1/queue/', async ({ request }) => {
+          capturedBody = await request.json() as Record<string, unknown>;
+          return HttpResponse.json({ id: 1, status: 'pending' });
+        }),
+      );
+
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Benchy"
+          onClose={mockOnClose}
+        />
+      );
+
+      const anyX2D = await screen.findByRole('button', { name: 'Any X2D' });
+      expect(anyX2D).toHaveClass('border-bambu-green');
+
+      await user.click(screen.getByRole('button', { name: /^print$/i }));
+
+      await waitFor(() => expect(capturedBody).not.toBeNull());
+      expect(capturedBody).toMatchObject({ printer_id: null, target_model: 'X2D' });
+    });
+
+    it('updates the archive model assignment when sliced metadata loads after printers', async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      const user = userEvent.setup();
+      server.use(
+        http.get('/api/v1/archives/:id', async () => {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          return HttpResponse.json({ sliced_for_model: 'X2D' });
+        }),
+        http.get('/api/v1/printers/', () => HttpResponse.json([
+          ...mockPrinters,
+          { id: 4, name: 'X2D', model: 'X2D', ip_address: '192.168.1.103', enabled: true, is_active: true },
+        ])),
+        http.post('/api/v1/queue/', async ({ request }) => {
+          capturedBody = await request.json() as Record<string, unknown>;
+          return HttpResponse.json({ id: 1, status: 'pending' });
+        }),
+      );
+
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Benchy"
+          onClose={mockOnClose}
+        />
+      );
+
+      expect(await screen.findByRole('button', { name: 'Any A1M' })).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: 'Any X2D' })).toHaveClass('border-bambu-green');
+
+      await user.click(screen.getByRole('button', { name: /^print$/i }));
+
+      await waitFor(() => expect(capturedBody).not.toBeNull());
+      expect(capturedBody).toMatchObject({ printer_id: null, target_model: 'X2D' });
+    });
+
+    it('updates the library-file model assignment when sliced metadata loads after printers', async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      const user = userEvent.setup();
+      server.use(
+        http.get('/api/v1/library/files/:id', async () => {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          return HttpResponse.json({ sliced_for_model: 'X2D' });
+        }),
+        http.get('/api/v1/library/files/:id/plates', () => {
+          return HttpResponse.json({ is_multi_plate: false, plates: [] });
+        }),
+        http.get('/api/v1/library/files/:id/filament-requirements', () => {
+          return HttpResponse.json({ file_id: 5, filename: 'benchy.gcode.3mf', filaments: [] });
+        }),
+        http.get('/api/v1/printers/', () => HttpResponse.json([
+          ...mockPrinters,
+          { id: 4, name: 'X2D', model: 'X2D', ip_address: '192.168.1.103', enabled: true, is_active: true },
+        ])),
+        http.post('/api/v1/queue/', async ({ request }) => {
+          capturedBody = await request.json() as Record<string, unknown>;
+          return HttpResponse.json({ id: 1, status: 'pending' });
+        }),
+      );
+
+      render(
+        <PrintModal
+          mode="create"
+          libraryFileId={5}
+          archiveName="Benchy"
+          onClose={mockOnClose}
+        />
+      );
+
+      expect(await screen.findByRole('button', { name: 'Any A1M' })).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: 'Any X2D' })).toHaveClass('border-bambu-green');
+
+      await user.click(screen.getByRole('button', { name: /^print$/i }));
+
+      await waitFor(() => expect(capturedBody).not.toBeNull());
+      expect(capturedBody).toMatchObject({ printer_id: null, target_model: 'X2D', library_file_id: 5 });
+    });
+
+    it('falls back to specific-printer assignment when printer models are unknown', async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      const user = userEvent.setup();
+      server.use(
+        http.get('/api/v1/printers/', () => HttpResponse.json([
+          { ...mockPrinters[0], model: null },
+        ])),
+        http.post('/api/v1/queue/', async ({ request }) => {
+          capturedBody = await request.json() as Record<string, unknown>;
+          return HttpResponse.json({ id: 1, status: 'pending' });
+        }),
+      );
+
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Benchy"
+          onClose={mockOnClose}
+        />
+      );
+
+      const printer = await screen.findByRole('button', { name: /X1 Carbon/ });
+      await user.click(printer);
+      await user.click(screen.getByRole('button', { name: /^print$/i }));
+
+      await waitFor(() => expect(capturedBody).not.toBeNull());
+      expect(capturedBody).toMatchObject({ printer_id: 1, target_model: null });
+    });
+
+    it('keeps direct-print flows assigned to their preselected printer', async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      const user = userEvent.setup();
+      server.use(
+        http.post('/api/v1/queue/', async ({ request }) => {
+          capturedBody = await request.json() as Record<string, unknown>;
+          return HttpResponse.json({ id: 1, status: 'pending' });
+        }),
+      );
+
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Benchy"
+          initialSelectedPrinterIds={[1]}
+          onClose={mockOnClose}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /^print$/i }));
+
+      await waitFor(() => expect(capturedBody).not.toBeNull());
+      expect(capturedBody).toMatchObject({ printer_id: 1, target_model: null });
     });
 
     it('has print button', () => {
@@ -260,7 +447,7 @@ describe('PrintModal', () => {
         />
       );
 
-      await user.click(await screen.findByRole('button', { name: 'Any Model' }));
+      await user.click(await screen.findByRole('button', { name: 'Any A1M' }));
       await waitFor(() => expect(filamentRequirementsRequested).toBe(true));
 
       const filamentOptions = await screen.findByRole('button', { name: 'Filament Requirements' });
@@ -322,7 +509,7 @@ describe('PrintModal', () => {
 
       render(<PrintModal mode="create" archiveId={1} archiveName="Benchy" onClose={mockOnClose} />);
 
-      await user.click(await screen.findByRole('button', { name: 'Any Model' }));
+      await user.click(await screen.findByRole('button', { name: 'Any A1M' }));
       await user.click(screen.getByRole('button', { name: /queue options/i }));
       await user.click(screen.getByRole('checkbox', { name: 'Postpone print' }));
       await user.click(screen.getByRole('button', { name: /^print$/i }));
@@ -350,7 +537,7 @@ describe('PrintModal', () => {
 
       render(<PrintModal mode="create" archiveId={1} archiveName="Benchy" onClose={mockOnClose} />);
 
-      await user.click(await screen.findByRole('button', { name: 'Any Model' }));
+      await user.click(await screen.findByRole('button', { name: 'Any A1M' }));
       await user.click(await screen.findByRole('button', { name: 'Filament Requirements' }));
       await user.click(screen.getByLabelText(/Match colour/i));
       await user.click(await screen.findByRole('combobox', { name: /PLA filament profile/i }));
@@ -886,7 +1073,27 @@ describe('PrintModal', () => {
       await user.click(screen.getByRole('button', { name: /^save$/i }));
 
       await waitFor(() => expect(capturedBody).not.toBeNull());
+      expect(capturedBody).toMatchObject({ printer_id: 1, target_model: null });
       expect(capturedBody?.scheduled_time).toBe(scheduledTime.toISOString());
+    });
+
+    it('preserves an existing model assignment when editing a queue item', async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      server.use(
+        http.patch('/api/v1/queue/:id', async ({ request }) => {
+          capturedBody = await request.json() as Record<string, unknown>;
+          return HttpResponse.json({ id: 1, status: 'pending' });
+        }),
+      );
+      const user = userEvent.setup();
+      const item = createMockQueueItem({ printer_id: null, target_model: 'P1S', target_location: null });
+
+      render(<PrintModal mode="edit-queue-item" archiveId={1} archiveName="Test Print" queueItem={item} onClose={mockOnClose} />);
+
+      await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+      await waitFor(() => expect(capturedBody).not.toBeNull());
+      expect(capturedBody).toMatchObject({ printer_id: null, target_model: 'P1S' });
     });
 
     it('clears a scheduled time when postponing is disabled during edit', async () => {
@@ -1021,6 +1228,7 @@ describe('PrintModal', () => {
 
   describe('multi-printer selection', () => {
     it('shows select all button when multiple printers available', async () => {
+      const user = userEvent.setup();
       render(
         <PrintModal
           mode="create"
@@ -1030,6 +1238,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('Select all')).toBeInTheDocument();
       });
@@ -1046,6 +1255,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('Select all')).toBeInTheDocument();
       });
@@ -1068,6 +1278,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('Select all')).toBeInTheDocument();
       });
@@ -1128,6 +1339,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await user.click((await screen.findByText('X1 Carbon')).closest('button')!);
       await user.click((await screen.findByText('P1S')).closest('button')!);
       const customMapping = await screen.findAllByLabelText('Customise this printer');
@@ -1189,6 +1401,7 @@ describe('PrintModal', () => {
     });
 
     it('shows state badges on printers in create mode', async () => {
+      const user = userEvent.setup();
       render(
         <PrintModal
           mode="create"
@@ -1198,6 +1411,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('Printing')).toBeInTheDocument();
         expect(screen.getByText('Idle')).toBeInTheDocument();
@@ -1216,6 +1430,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('Printing')).toBeInTheDocument();
       }, { timeout: 5000 });
@@ -1240,6 +1455,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('Select all')).toBeInTheDocument();
         expect(screen.getByText('Printing')).toBeInTheDocument();
@@ -1263,6 +1479,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('Printing')).toBeInTheDocument();
       }, { timeout: 5000 });
@@ -1279,6 +1496,7 @@ describe('PrintModal', () => {
     });
 
     it('shows Offline badge for disconnected printers', async () => {
+      const user = userEvent.setup();
       server.use(
         http.get('/api/v1/printers/:id/status', () => {
           return HttpResponse.json({
@@ -1297,6 +1515,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         const offlineBadges = screen.getAllByText('Offline');
         expect(offlineBadges.length).toBeGreaterThanOrEqual(1);
@@ -1304,6 +1523,7 @@ describe('PrintModal', () => {
     });
 
     it('shows calibration stage name when printer is calibrating', async () => {
+      const user = userEvent.setup();
       server.use(
         http.get('/api/v1/printers/:id/status', () => {
           return HttpResponse.json({
@@ -1322,6 +1542,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         const badges = screen.getAllByText('Auto bed leveling');
         expect(badges.length).toBeGreaterThanOrEqual(1);
@@ -1341,6 +1562,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
       });
@@ -1362,6 +1584,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('Select all')).toBeInTheDocument();
       });
@@ -1382,6 +1605,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('Select all')).toBeInTheDocument();
       });
@@ -1406,6 +1630,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('Select all')).toBeInTheDocument();
       });
@@ -1427,6 +1652,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
       });
@@ -1448,6 +1674,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('Select all')).toBeInTheDocument();
       });
@@ -1470,6 +1697,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       await waitFor(() => {
         expect(screen.getByText('Select all')).toBeInTheDocument();
       });
@@ -1577,6 +1805,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       // Wait for plates and select a printer
       await waitFor(() => {
         expect(screen.getByText('Select All 3 Plates')).toBeInTheDocument();
@@ -1622,6 +1851,7 @@ describe('PrintModal', () => {
         />
       );
 
+      await user.click(await screen.findByRole('button', { name: 'Specific Printer' }));
       // Wait for plates and select a printer
       await waitFor(() => {
         expect(screen.getByText('Select All 3 Plates')).toBeInTheDocument();
