@@ -44,13 +44,28 @@ For detailed feature documentation, see the project documentation.
 <summary><strong>Click to expand screenshots</strong></summary>
 
 <p align="center">
-  <img src="docs/screenshots/printers-cockpit.png" alt="Printers" width="800">
+  <img src="docs/screenshots/printers-cockpit.png" alt="Grove Control single-printer cockpit" width="800">
   <br><em>Real-time printer monitoring</em>
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/printers-list.png" alt="Archives" width="800">
+  <img src="docs/screenshots/printers-list.png" alt="Grove Control printer list" width="800">
   <br><em>List view of all connected machines</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/printer-health.png" alt="Grove Control machine health details" width="800">
+  <br><em>At-a-glance machine health with actionable status details</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/print-modal.png" alt="Grove Control streamlined print modal" width="800">
+  <br><em>Streamlined queue-first print setup with model targeting and scheduling</em>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/kiosk-mode.png" alt="Grove Control fleet kiosk mode" width="800">
+  <br><em>Read-only fleet and queue view for workshop displays</em>
 </p>
 
 </details>
