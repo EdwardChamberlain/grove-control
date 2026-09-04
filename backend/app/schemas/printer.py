@@ -279,6 +279,16 @@ class PrintOptionsResponse(BaseModel):
     filament_tangle_detect: bool = False
 
 
+class PlateClearPrintSummary(BaseModel):
+    """The exact print that is holding the plate-clear gate."""
+
+    archive_id: int
+    print_name: str | None = None
+    filename: str
+    thumbnail_path: str | None = None
+    created_by_username: str | None = None
+
+
 class PrinterStatus(BaseModel):
     id: int
     name: str
@@ -356,6 +366,9 @@ class PrinterStatus(BaseModel):
     # Queue: printer is awaiting the user to acknowledge the build plate is cleared
     # after a finished/failed print. Persisted across restarts (#961).
     awaiting_plate_clear: bool = False
+    # Exact terminal print associated with the gate (#43). This is resolved by
+    # the printer-status endpoint, independently of archive ownership filters.
+    awaiting_plate_clear_print: PlateClearPrintSummary | None = None
     # AMS drying support
     supports_drying: bool = False
     # AMS "Print While Drying" — drying mid-print. Verified per Bambu wiki release notes;
@@ -367,6 +380,9 @@ class PrinterStatus(BaseModel):
     # this to fetch plate metadata and show the plate name when the source 3MF is
     # multi-plate (#881 follow-up).
     current_archive_id: int | None = None
+    # Printer-assigned identity for the active print. Used to scope transient UI
+    # state such as the current print owner across back-to-back jobs (#43).
+    current_print_identity: str | None = None
     # 1-indexed plate number parsed from gcode_file (e.g. /Metadata/plate_2.gcode).
     # Set for every active print regardless of plate count; the frontend decides
     # whether to render it based on current_archive_id's is_multi_plate flag.

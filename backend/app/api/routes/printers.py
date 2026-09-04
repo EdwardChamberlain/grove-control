@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from backend.app.core.auth import (
     RequireCameraStreamTokenIfAuthEnabled,
@@ -18,6 +19,7 @@ from backend.app.core.database import get_db
 from backend.app.core.permissions import Permission
 from backend.app.core.tasks import spawn_background_task
 from backend.app.models.ams_label import AmsLabel
+from backend.app.models.archive import PrintArchive
 from backend.app.models.printer import Printer
 from backend.app.models.slot_preset import SlotPresetMapping
 from backend.app.models.user import User
@@ -31,6 +33,7 @@ from backend.app.schemas.printer import (
     HMSErrorResponse,
     NozzleInfoResponse,
     NozzleRackSlot,
+    PlateClearPrintSummary,
     PrinterCreate,
     PrinterDiagnosticResult,
     PrinterResponse,
@@ -710,12 +713,14 @@ async def get_printer_status(
     # just the 3MF filename. Only attempted for active prints, since subtask_id
     # is only meaningful then.
     current_archive_id: int | None = None
+    current_print_identity: str | None = None
     current_plate_id: int | None = None
     if state.state in ("RUNNING", "PAUSE"):
         current_plate_id = resolve_plate_id(state)
         if state.subtask_id:
-            from backend.app.models.archive import PrintArchive
-
+            normalized_subtask_id = str(state.subtask_id).strip()
+            if normalized_subtask_id not in ("", "0"):
+                current_print_identity = normalized_subtask_id
             archive_row = await db.execute(
                 select(PrintArchive.id)
                 .where(PrintArchive.subtask_id == state.subtask_id)
@@ -724,6 +729,35 @@ async def get_printer_status(
                 .limit(1)
             )
             current_archive_id = archive_row.scalar_one_or_none()
+
+    # Resolve the exact terminal print holding the plate-clear gate. Do not use
+    # the regular archives listing here: that endpoint is intentionally scoped
+    # to the current user's ownership permissions, while printer viewers still
+    # need the card to describe the physical plate that must be cleared (#43).
+    awaiting_plate_clear_print: PlateClearPrintSummary | None = None
+    if printer_manager.is_awaiting_plate_clear(printer_id):
+        awaiting_archive_id = printer_manager.get_awaiting_plate_clear_archive_id(printer_id)
+        archive = None
+        if awaiting_archive_id is not None:
+            archive_result = await db.execute(
+                select(PrintArchive)
+                .options(selectinload(PrintArchive.created_by))
+                .where(PrintArchive.id == awaiting_archive_id)
+                .where(PrintArchive.printer_id == printer_id)
+                .where(PrintArchive.deleted_at.is_(None))
+            )
+            archive = archive_result.scalar_one_or_none()
+        # Never guess from the archive history when the exact ID is missing.
+        # A viewer may not be allowed to see the completed archive, and an
+        # older visible archive is worse than omitting the completion details.
+        if archive is not None:
+            awaiting_plate_clear_print = PlateClearPrintSummary(
+                archive_id=archive.id,
+                print_name=archive.print_name,
+                filename=archive.filename,
+                thumbnail_path=archive.thumbnail_path,
+                created_by_username=archive.created_by.username if archive.created_by else None,
+            )
 
     return PrinterStatus(
         id=printer_id,
@@ -776,10 +810,12 @@ async def get_printer_status(
         developer_mode=state.developer_mode if state else None,
         ams_filament_backup=state.ams_filament_backup if state else None,
         awaiting_plate_clear=printer_manager.is_awaiting_plate_clear(printer_id),
+        awaiting_plate_clear_print=awaiting_plate_clear_print,
         supports_drying=supports_drying(printer.model, state.firmware_version),
         supports_drying_while_printing=supports_drying_while_printing(printer.model, state.firmware_version),
         supports_chamber_heater=supports_chamber_heater(printer.model),
         current_archive_id=current_archive_id,
+        current_print_identity=current_print_identity,
         current_plate_id=current_plate_id,
         fila_switch=(
             FilaSwitchResponse(

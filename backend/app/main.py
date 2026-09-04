@@ -4123,6 +4123,8 @@ async def on_print_complete(printer_id: int, data: dict):
 
     if not filename and not subtask_name:
         logger.warning("Print complete without filename or subtask_name")
+        if _final_status in ("completed", "failed", "aborted", "cancelled"):
+            printer_manager.set_awaiting_plate_clear_archive_id(printer_id, None)
         return
 
     logger.info("Print complete - filename: %s, subtask: %s, status: %s", filename, subtask_name, data.get("status"))
@@ -4222,6 +4224,12 @@ async def on_print_complete(printer_id: int, data: dict):
                 archive = result.scalar_one_or_none()
                 if archive:
                     archive_id = archive.id
+
+    # Keep the plate-clear gate tied to this exact archive. This is intentionally
+    # updated after matching because the initial gate is raised before the longer
+    # completion/cleanup work begins.
+    if _final_status in ("completed", "failed", "aborted", "cancelled"):
+        printer_manager.set_awaiting_plate_clear_archive_id(printer_id, archive_id)
 
     # Cleanup: delete uploaded file from printer SD card to prevent phantom prints (Issue #374, #1542)
     # The print scheduler uploads files to the SD card root (/). Some printers (e.g. P1S, A1)

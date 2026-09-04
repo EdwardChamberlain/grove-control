@@ -355,6 +355,48 @@ class TestPrintersAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_get_printer_status_uses_exact_awaiting_plate_clear_archive(
+        self, async_client: AsyncClient, printer_factory, archive_factory, db_session
+    ):
+        """The completion card must not fall back to another visible archive."""
+        from unittest.mock import MagicMock, patch
+
+        from backend.app.services.bambu_mqtt import PrinterState
+
+        printer = await printer_factory(awaiting_plate_clear=True)
+        await archive_factory(printer.id, print_name="Older Visible Print")
+        target = await archive_factory(
+            printer.id,
+            print_name="Completed Widget",
+            filename="completed-widget.3mf",
+            thumbnail_path="completed-widget.png",
+        )
+        printer.awaiting_plate_clear_archive_id = target.id
+        await db_session.commit()
+
+        state = PrinterState()
+        state.connected = True
+        state.state = "IDLE"
+
+        with patch("backend.app.api.routes.printers.printer_manager") as mock_pm:
+            mock_pm.get_status = MagicMock(return_value=state)
+            mock_pm.is_awaiting_plate_clear = MagicMock(return_value=True)
+            mock_pm.get_awaiting_plate_clear_archive_id = MagicMock(return_value=target.id)
+
+            response = await async_client.get(f"/api/v1/printers/{printer.id}/status")
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result["awaiting_plate_clear_print"] == {
+            "archive_id": target.id,
+            "print_name": "Completed Widget",
+            "filename": "completed-widget.3mf",
+            "thumbnail_path": "completed-widget.png",
+            "created_by_username": None,
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_get_printer_status_not_found(self, async_client: AsyncClient):
         """Verify 404 for status of non-existent printer."""
         response = await async_client.get("/api/v1/printers/9999/status")
