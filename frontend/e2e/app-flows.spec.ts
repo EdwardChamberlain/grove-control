@@ -466,6 +466,8 @@ async function expectCockpitToFitViewport(page: Page) {
   // The compact AMS card has a 15rem intrinsic width for its header controls
   // and four tray slots; it must never be clipped by the status column.
   expect(amsHeader!.width).toBeGreaterThanOrEqual(15 * 16 - 24);
+  expect(amsHeader!.x).toBeGreaterThanOrEqual(status!.x - 1);
+  expect(amsHeader!.x + amsHeader!.width).toBeLessThanOrEqual(status!.x + status!.width + 1);
   const cameraControlsGap = await page.getByTestId('cockpit-camera-panel').evaluate((cameraPanel) => (
     parseFloat(getComputedStyle(cameraPanel.parentElement!).rowGap)
   ));
@@ -492,18 +494,27 @@ async function expectCockpitToFitViewport(page: Page) {
   expect(documentSize.scrollHeight).toBeLessThanOrEqual(documentSize.clientHeight + 1);
 }
 
-for (const viewport of [
-  { width: 1024, height: 768 },
-  { width: 1280, height: 720 },
-  { width: 1366, height: 768 },
-  { width: 1920, height: 1080 },
-]) {
-  test(`cockpit keeps fixed controls inside the viewport at ${viewport.width}x${viewport.height} through sidebar collapse`, async ({ page }, testInfo) => {
+const cockpitViewports = [
+  { name: 'tablet portrait', width: 768, height: 1024 },
+  { name: 'tablet compact', width: 800, height: 600 },
+  { name: 'tablet landscape', width: 1024, height: 768 },
+  { name: 'short desktop', width: 1024, height: 600 },
+  { name: 'just below the sidebar breakpoint', width: 1143, height: 768 },
+  { name: 'at the sidebar breakpoint', width: 1144, height: 768 },
+  { name: 'wide short desktop', width: 1280, height: 600 },
+  { name: 'desktop', width: 1280, height: 720 },
+  { name: 'large desktop', width: 1366, height: 768 },
+  { name: 'full HD desktop', width: 1920, height: 1080 },
+] as const;
+
+for (const viewport of cockpitViewports) {
+  test(`cockpit fits at ${viewport.name} (${viewport.width}x${viewport.height}) through sidebar collapse`, async ({ page }, testInfo) => {
     const calls: ApiCall[] = [];
     await page.setViewportSize(viewport);
     await page.addInitScript(() => {
       localStorage.setItem('printerViewMode', 'single');
       localStorage.setItem('singlePrinterViewId', '1');
+      localStorage.setItem('sidebarExpanded', 'true');
     });
     await mockApi(page, calls, { printerState: 'RUNNING' });
     await page.goto('/');
