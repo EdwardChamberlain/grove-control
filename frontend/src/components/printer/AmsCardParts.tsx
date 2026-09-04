@@ -96,7 +96,7 @@ export function AmsSlotGrid({ ams, variant, renderSlot }: { ams: AMSUnit; varian
   const slotCount = ams.tray.length === 1 ? 1 : 4;
   const className = variant === 'expanded'
     ? 'grid w-full grid-cols-[repeat(4,minmax(3.5rem,1fr))] gap-1'
-    : `grid gap-1 ${slotCount === 1 ? 'grid-cols-1' : 'grid-cols-4'}`;
+    : `cockpit-ams-compact-slot-grid grid min-w-0 gap-1 ${slotCount === 1 ? 'grid-cols-1' : 'grid-cols-2'}`;
   return <div className={className}>{Array.from({ length: slotCount }, (_, index) => renderSlot(ams.tray[index] || ams.tray.find(tray => tray.id === index), index))}</div>;
 }
 
@@ -385,7 +385,7 @@ export function AmsNameHoverCard({
 }
 
 function AmsCardLayout({ amsId, variant, style, children }: { amsId: number; variant: AmsCardVariant; style?: CSSProperties; children: ReactNode }) {
-  const variantClass = variant === 'compact' ? 'min-w-[15rem] flex-1 rounded-lg' : 'min-w-0 rounded-[10px] space-y-1';
+  const variantClass = variant === 'compact' ? 'cockpit-ams-compact-card flex-1 rounded-lg' : 'min-w-0 rounded-[10px] space-y-1';
   return <div data-testid={`ams-unit-card-${variant}-${amsId}`} style={style} className={`${variantClass} bg-bambu-dark p-2`}>{children}</div>;
 }
 

@@ -453,31 +453,78 @@ async function expectCockpitToFitViewport(page: Page) {
   expect(status).not.toBeNull();
   expect(currentPrint).not.toBeNull();
 
+  const layoutShape = await page.getByTestId('cockpit-layout').evaluate((layout) => ({
+    outerColumnCount: getComputedStyle(layout).gridTemplateColumns.trim().split(/\s+/).length,
+    detailColumnCount: getComputedStyle(layout.querySelector('[data-testid="cockpit-detail-grid"]')!).gridTemplateColumns.trim().split(/\s+/).length,
+    isShortViewport: window.matchMedia('(max-height: 700px)').matches,
+  }));
+  const usesFlowLayout = layoutShape.outerColumnCount === 1 || layoutShape.isShortViewport;
   expect(camera!.width / camera!.height).toBeCloseTo(16 / 9, 2);
   expect(camera!.width).toBeCloseTo(controls!.width, 1);
   expect(Math.abs(controls!.height - controlsContent!.height)).toBeLessThanOrEqual(1);
-  const controlsMinimumHeight = await page.getByTestId('cockpit-detail-grid').evaluate((grid) => {
-    const styles = getComputedStyle(grid);
-    return (grid.clientHeight - parseFloat(styles.paddingTop) - parseFloat(styles.paddingBottom)) * 0.3;
-  });
-  expect(controls!.height).toBeGreaterThanOrEqual(controlsMinimumHeight - 1);
+  if (!usesFlowLayout) {
+    const controlsMinimumHeight = await page.getByTestId('cockpit-detail-grid').evaluate((grid) => {
+      const styles = getComputedStyle(grid);
+      return (grid.clientHeight - parseFloat(styles.paddingTop) - parseFloat(styles.paddingBottom)) * 0.3;
+    });
+    expect(controls!.height).toBeGreaterThanOrEqual(controlsMinimumHeight - 1);
+  } else {
+    expect(controls!.height).toBeGreaterThan(0);
+  }
   const amsHeader = await page.getByTestId('cockpit-ams-header-0').boundingBox();
+  const amsCard = await page.getByTestId('ams-unit-card-compact-0').boundingBox();
   expect(amsHeader).not.toBeNull();
-  // The compact AMS card has a 15rem intrinsic width for its header controls
-  // and four tray slots; it must never be clipped by the status column.
-  expect(amsHeader!.width).toBeGreaterThanOrEqual(15 * 16 - 24);
+  expect(amsCard).not.toBeNull();
+  expect(amsHeader!.width).toBeGreaterThan(0);
   expect(amsHeader!.x).toBeGreaterThanOrEqual(status!.x - 1);
   expect(amsHeader!.x + amsHeader!.width).toBeLessThanOrEqual(status!.x + status!.width + 1);
+  expect(amsCard!.x).toBeGreaterThanOrEqual(status!.x - 1);
+  expect(amsCard!.x + amsCard!.width).toBeLessThanOrEqual(status!.x + status!.width + 1);
+  const amsCardOverflow = await page.getByTestId('ams-unit-card-compact-0').evaluate((card) => ({
+    clientWidth: card.clientWidth,
+    scrollWidth: card.scrollWidth,
+  }));
+  expect(amsCardOverflow.scrollWidth).toBeLessThanOrEqual(amsCardOverflow.clientWidth + 1);
+  const jogButtons = page.getByTestId('cockpit-jog-xy-grid').locator('button');
+  expect(await jogButtons.count()).toBe(5);
+  const [jogLeft, jogHome, jogRight] = await Promise.all([
+    jogButtons.nth(1).boundingBox(),
+    jogButtons.nth(2).boundingBox(),
+    jogButtons.nth(3).boundingBox(),
+  ]);
+  expect(jogLeft).not.toBeNull();
+  expect(jogHome).not.toBeNull();
+  expect(jogRight).not.toBeNull();
+  expect(jogLeft!.width).toBeGreaterThan(0);
+  expect(jogHome!.width).toBeGreaterThan(0);
+  expect(jogRight!.width).toBeGreaterThan(0);
+  expect(jogLeft!.x + jogLeft!.width).toBeLessThanOrEqual(jogHome!.x + 1);
+  expect(jogHome!.x + jogHome!.width).toBeLessThanOrEqual(jogRight!.x + 1);
+  const jogContentOverflow = await page.getByTestId('cockpit-jog-content').evaluate((content) => ({
+    clientWidth: content.clientWidth,
+    scrollWidth: content.scrollWidth,
+    flexWrap: getComputedStyle(content).flexWrap,
+  }));
+  expect(jogContentOverflow.scrollWidth).toBeLessThanOrEqual(jogContentOverflow.clientWidth + 1);
+  if (jogContentOverflow.clientWidth <= 220) {
+    expect(jogContentOverflow.flexWrap).toBe('wrap');
+  }
   const cameraControlsGap = await page.getByTestId('cockpit-camera-panel').evaluate((cameraPanel) => (
     parseFloat(getComputedStyle(cameraPanel.parentElement!).rowGap)
   ));
   expect(Math.abs((controls!.y - (camera!.y + camera!.height)) - cameraControlsGap)).toBeLessThanOrEqual(1);
   expect(currentPrint!.y + currentPrint!.height).toBeLessThanOrEqual(camera!.y + camera!.height - 16);
   expect(controls!.y + controls!.height).toBeLessThanOrEqual(layout!.y + layout!.height + 1);
-  expect(actions!.x).toBeGreaterThanOrEqual(controls!.x + controls!.width - 1);
+  if (layoutShape.detailColumnCount > 1) {
+    expect(actions!.x).toBeGreaterThanOrEqual(controls!.x + controls!.width - 1);
+  } else {
+    expect(actions!.x).toBeGreaterThanOrEqual(detailGrid!.x - 1);
+    expect(actions!.x + actions!.width).toBeLessThanOrEqual(detailGrid!.x + detailGrid!.width + 1);
+    expect(actions!.y).toBeGreaterThanOrEqual(controls!.y + controls!.height + cameraControlsGap - 1);
+  }
   expect(actions!.y + actions!.height).toBeLessThanOrEqual(status!.y + 1);
   expect(status!.y + status!.height).toBeLessThanOrEqual(layout!.y + layout!.height + 1);
-  await expect(page.getByTestId('cockpit-status-pane')).toHaveCSS('overflow-y', 'auto');
+  await expect(page.getByTestId('cockpit-status-pane')).toHaveCSS('overflow-y', usesFlowLayout ? 'visible' : 'auto');
 
   const fixedPanelHeights = await page.locator('[data-testid="cockpit-machine-controls-panel"], [data-testid="cockpit-actions-panel"]').evaluateAll((panels) => panels.map((panel) => ({
     clientHeight: panel.clientHeight,
@@ -490,8 +537,13 @@ async function expectCockpitToFitViewport(page: Page) {
   const documentSize = await page.evaluate(() => ({
     clientHeight: document.scrollingElement?.clientHeight ?? 0,
     scrollHeight: document.scrollingElement?.scrollHeight ?? 0,
+    clientWidth: document.scrollingElement?.clientWidth ?? 0,
+    scrollWidth: document.scrollingElement?.scrollWidth ?? 0,
   }));
-  expect(documentSize.scrollHeight).toBeLessThanOrEqual(documentSize.clientHeight + 1);
+  expect(documentSize.scrollWidth).toBeLessThanOrEqual(documentSize.clientWidth + 1);
+  if (!usesFlowLayout) {
+    expect(documentSize.scrollHeight).toBeLessThanOrEqual(documentSize.clientHeight + 1);
+  }
 }
 
 const cockpitViewports = [
@@ -499,8 +551,12 @@ const cockpitViewports = [
   { name: 'tablet compact', width: 800, height: 600 },
   { name: 'tablet landscape', width: 1024, height: 768 },
   { name: 'short desktop', width: 1024, height: 600 },
+  { name: 'just before cockpit wraps', width: 977, height: 768 },
+  { name: 'at cockpit wrap boundary', width: 978, height: 768 },
   { name: 'just below the sidebar breakpoint', width: 1143, height: 768 },
   { name: 'at the sidebar breakpoint', width: 1144, height: 768 },
+  { name: 'just before the expanded sidebar boundary', width: 1207, height: 768 },
+  { name: 'at the expanded sidebar boundary', width: 1208, height: 768 },
   { name: 'wide short desktop', width: 1280, height: 600 },
   { name: 'desktop', width: 1280, height: 720 },
   { name: 'large desktop', width: 1366, height: 768 },
