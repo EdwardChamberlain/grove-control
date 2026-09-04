@@ -4157,11 +4157,30 @@ function PrinterCard({
           <div className="flex items-stretch justify-between gap-2">
             <div className="flex items-center gap-3 min-w-0 flex-1">
               {/* Printer Model Image */}
-              <img
-                src={getPrinterImage(printer.model)}
-                alt={printer.model || t('common.printer')}
-                className="h-14 w-14 flex-shrink-0 rounded-lg object-contain"
-              />
+              {onOpenSinglePrinter ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenSinglePrinter(printer.id);
+                  }}
+                  className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-bambu-green"
+                  title={t('printers.viewSinglePrinter', 'View single printer')}
+                  aria-label={t('printers.viewSinglePrinter', 'View single printer')}
+                >
+                  <img
+                    src={getPrinterImage(printer.model)}
+                    alt={printer.model || t('common.printer')}
+                    className="h-14 w-14 rounded-lg object-contain"
+                  />
+                </button>
+              ) : (
+                <img
+                  src={getPrinterImage(printer.model)}
+                  alt={printer.model || t('common.printer')}
+                  className="h-14 w-14 flex-shrink-0 rounded-lg object-contain"
+                />
+              )}
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2">
