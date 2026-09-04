@@ -4,7 +4,7 @@ import logging
 from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, selectinload
 
 from backend.app.core.config import settings
 from backend.app.core.db_dialect import is_sqlite
@@ -3598,9 +3598,9 @@ async def seed_default_groups():
     """Seed default groups and migrate existing users to appropriate groups.
 
     Creates the default system groups (Administrators, Operators, Viewers) if they
-    don't exist, then migrates existing users:
-    - Users with role='admin' -> Administrators group
-    - Users with role='user' -> Operators group
+    don't exist, then migrates existing users without group membership into the
+    Operators group. Legacy role-admin users are handled by the one-time
+    migration below; the role column has no continuing authorization authority.
 
     Also migrates old permissions to new ownership-based permissions (Issue #205).
     """
@@ -3608,8 +3608,10 @@ async def seed_default_groups():
 
     from sqlalchemy import select
 
+    from backend.app.core.db_dialect import upsert_setting
     from backend.app.core.permissions import DEFAULT_GROUPS
     from backend.app.models.group import Group
+    from backend.app.models.settings import Settings
     from backend.app.models.user import User
 
     logger = logging.getLogger(__name__)
@@ -3876,12 +3878,28 @@ async def seed_default_groups():
                 group.permissions = perms
         await session.commit()
 
+        # Canonical admin migration: import historical role-admin users once,
+        # then neutralize the legacy field so group membership is the only
+        # continuing source of administrative authority.
+        admin_role_migration_key = "migration_role_admin_to_administrators_v1"
+        migration_result = await session.execute(select(Settings).where(Settings.key == admin_role_migration_key))
+        migration_completed = migration_result.scalar_one_or_none() is not None
+        admin_result = await session.execute(select(Group).where(Group.name == "Administrators"))
+        admin_group = admin_result.scalar_one_or_none()
+        if admin_group is not None and not migration_completed:
+            users_result = await session.execute(
+                select(User).where(User.role == "admin").options(selectinload(User.groups))
+            )
+            for user in users_result.scalars().all():
+                if all(group.name != "Administrators" for group in user.groups):
+                    user.groups.append(admin_group)
+                user.role = "user"
+                logger.info("Migrated legacy role-admin user '%s' to Administrators group", user.username)
+            await upsert_setting(session, Settings, admin_role_migration_key, "complete")
+            await session.commit()
+
         # Migrate existing users to groups if they're not already in any group
         if groups_created:
-            # Refresh to get newly created groups
-            admin_result = await session.execute(select(Group).where(Group.name == "Administrators"))
-            admin_group = admin_result.scalar_one_or_none()
-
             operators_result = await session.execute(select(Group).where(Group.name == "Operators"))
             operators_group = operators_result.scalar_one_or_none()
 
@@ -3894,10 +3912,7 @@ async def seed_default_groups():
                 if user.groups:
                     continue
 
-                if user.role == "admin" and admin_group:
-                    user.groups.append(admin_group)
-                    logger.info("Migrated admin user '%s' to Administrators group", user.username)
-                elif operators_group:
+                if operators_group:
                     user.groups.append(operators_group)
                     logger.info("Migrated user '%s' to Operators group", user.username)
 

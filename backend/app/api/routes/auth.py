@@ -8,7 +8,7 @@ import jwt as _jwt
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials
 from jwt.exceptions import PyJWTError
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -37,7 +37,7 @@ from backend.app.core.auth import (
 from backend.app.core.database import async_session, get_db
 from backend.app.core.permissions import ALL_PERMISSIONS
 from backend.app.models.auth_ephemeral import AuthEphemeralToken, AuthRateLimitEvent, EventType, TokenType
-from backend.app.models.group import Group
+from backend.app.models.group import Group, user_groups
 from backend.app.models.settings import Settings
 from backend.app.models.user import User
 from backend.app.schemas.auth import (
@@ -88,18 +88,35 @@ def _user_to_response(user: User) -> UserResponse:
 
 
 def _api_key_to_user_response(api_key) -> UserResponse:
-    """Create a synthetic admin UserResponse for a valid API key."""
+    """Create a synthetic API-key identity without user-group admin status."""
     return UserResponse(
         id=0,
         username=f"api-key:{api_key.key_prefix}",
         email=None,
-        role="admin",
+        role="user",
         is_active=True,
-        is_admin=True,
+        is_admin=False,
         groups=[],
         permissions=sorted(ALL_PERMISSIONS),
         created_at=api_key.created_at.isoformat(),
     )
+
+
+async def _ensure_administrators_group(db: AsyncSession) -> Group:
+    result = await db.execute(select(Group).where(Group.name == "Administrators").options(selectinload(Group.users)))
+    admin_group = result.scalar_one_or_none()
+    if admin_group is not None:
+        return admin_group
+
+    admin_group = Group(
+        name="Administrators",
+        description="Full access to all features",
+        permissions=ALL_PERMISSIONS,
+        is_system=True,
+    )
+    db.add(admin_group)
+    await db.flush()
+    return admin_group
 
 
 # ---------------------------------------------------------------------------
@@ -229,9 +246,8 @@ async def setup_auth(request: SetupRequest, db: AsyncSession = Depends(get_db)):
         admin_created = False
 
         if request.auth_enabled:
-            # Check if admin users already exist
-            admin_users_result = await db.execute(select(User).where(User.role == "admin"))
-            existing_admin_users = list(admin_users_result.scalars().all())
+            admin_group = await _ensure_administrators_group(db)
+            existing_admin_users = [u for u in admin_group.users if u.is_active]
             has_admin_users = len(existing_admin_users) > 0
 
             if has_admin_users:
@@ -273,16 +289,12 @@ async def setup_auth(request: SetupRequest, db: AsyncSession = Depends(get_db)):
                     admin_user = User(
                         username=request.admin_username,
                         password_hash=get_password_hash(request.admin_password),
-                        role="admin",
+                        role="user",
                         is_active=True,
                     )
 
-                    # Try to add user to Administrators group if it exists
-                    admin_group_result = await db.execute(select(Group).where(Group.name == "Administrators"))
-                    admin_group = admin_group_result.scalar_one_or_none()
-                    if admin_group:
-                        admin_user.groups.append(admin_group)
-                        logger.info("Added new admin user to Administrators group")
+                    admin_user.groups.append(admin_group)
+                    logger.info("Added new admin user to Administrators group")
 
                     db.add(admin_user)
                     logger.info("Admin user added to session: %s", request.admin_username)
@@ -1348,6 +1360,29 @@ async def _sync_ldap_user(db: AsyncSession, user: User, ldap_user, ldap_config) 
 
     current_group_ids = {g.id for g in user.groups}
     new_group_ids = {g.id for g in new_groups}
+
+    # LDAP may manage the Administrators mapping, but it must not remove the
+    # final active administrator. Keep that membership in place so an external
+    # group revocation cannot lock the instance out of admin-only operations.
+    admin_group = next((group for group in user.groups if group.name == "Administrators"), None)
+    if admin_group is not None and user.is_active and admin_group.id not in new_group_ids:
+        active_admin_count = await db.scalar(
+            select(func.count(User.id))
+            .select_from(User)
+            .join(user_groups, user_groups.c.user_id == User.id)
+            .where(
+                user_groups.c.group_id == admin_group.id,
+                User.is_active.is_(True),
+            )
+        )
+        if (active_admin_count or 0) <= 1:
+            new_groups.append(admin_group)
+            new_group_ids.add(admin_group.id)
+            logger.warning(
+                "Preserved the last active Administrators membership for LDAP user %s",
+                user.username,
+            )
+
     if current_group_ids != new_group_ids:
         user.groups = new_groups
         changed = True
