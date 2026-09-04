@@ -32,7 +32,6 @@ body:
       label: Alternatives Considered
       description: Have you considered any alternative solutions or workarounds?
       placeholder: I've tried...
-      required: false
 
   - type: dropdown
     id: category
