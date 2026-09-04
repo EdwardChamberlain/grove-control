@@ -280,10 +280,10 @@ export function PrinterSelector({
   }, [activePrinters]);
 
   // Keep model-based assignment aligned with the sliced file when possible.
-  // For files without a known target model, prefer the farm's P1S pool.
+  // For files without a known target model, preserve the existing first-model
+  // fallback used when users select model assignment manually.
   const defaultModel = useMemo(() => {
     if (slicedForModel && uniqueModels.includes(slicedForModel)) return slicedForModel;
-    if (uniqueModels.includes('P1S')) return 'P1S';
     return uniqueModels[0] ?? null;
   }, [slicedForModel, uniqueModels]);
 
@@ -398,7 +398,7 @@ export function PrinterSelector({
             }`}
           >
             <Users className="w-4 h-4" />
-            <span className="text-sm">{`Print on any machine of this type (Any ${selectedModelLabel})`}</span>
+            <span className="text-sm">{`Any ${selectedModelLabel}`}</span>
           </button>
           <button
             type="button"
@@ -413,7 +413,7 @@ export function PrinterSelector({
             }`}
           >
             <PrinterIcon className="w-4 h-4" />
-            <span className="text-sm">Print on a specific machine</span>
+            <span className="text-sm">Specific Printer</span>
           </button>
         </div>
       )}
