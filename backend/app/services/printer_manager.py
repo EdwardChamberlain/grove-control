@@ -268,6 +268,9 @@ class PrinterManager:
         # Persisted to DB (printers.awaiting_plate_clear) so the gate survives restarts/power
         # cycles — see issue #961. Loaded into this set at startup via load_awaiting_plate_clear_from_db().
         self._awaiting_plate_clear: set[int] = set()
+        # Exact archive associated with each awaiting plate-clear gate (#43).
+        # This is persisted on Printer so the completion card survives restarts.
+        self._awaiting_plate_clear_archive_id: dict[int, int] = {}
 
     def get_printer(self, printer_id: int) -> PrinterInfo | None:
         """Get printer info by ID."""
@@ -291,6 +294,10 @@ class PrinterManager:
         """
         return printer_id in self._awaiting_plate_clear
 
+    def get_awaiting_plate_clear_archive_id(self, printer_id: int) -> int | None:
+        """Return the archive associated with the outstanding plate-clear gate."""
+        return self._awaiting_plate_clear_archive_id.get(printer_id)
+
     def set_awaiting_plate_clear(self, printer_id: int, awaiting: bool):
         """Set/clear the awaiting-plate-clear gate and persist it to DB.
 
@@ -312,12 +319,28 @@ class PrinterManager:
         """
         if awaiting:
             self._awaiting_plate_clear.add(printer_id)
+            # A new terminal event starts a new gate. The exact archive is
+            # attached after the completion handler resolves it.
+            self._awaiting_plate_clear_archive_id.pop(printer_id, None)
         else:
             self._awaiting_plate_clear.discard(printer_id)
+            self._awaiting_plate_clear_archive_id.pop(printer_id, None)
         # Only create the coroutine when there is a loop to run it on — otherwise Python
         # emits "coroutine was never awaited" warnings (e.g. in sync unit tests).
         if self._loop and self._loop.is_running():
             self._schedule_async(self._persist_awaiting_plate_clear(printer_id, awaiting))
+            self._schedule_async(self._broadcast_status_change(printer_id))
+
+    def set_awaiting_plate_clear_archive_id(self, printer_id: int, archive_id: int | None) -> None:
+        """Associate the exact completed archive with an outstanding plate-clear gate."""
+        if archive_id is not None and not self.is_awaiting_plate_clear(printer_id):
+            return
+        if archive_id is None:
+            self._awaiting_plate_clear_archive_id.pop(printer_id, None)
+        else:
+            self._awaiting_plate_clear_archive_id[printer_id] = archive_id
+        if self._loop and self._loop.is_running():
+            self._schedule_async(self._persist_awaiting_plate_clear_archive_id(printer_id, archive_id))
             self._schedule_async(self._broadcast_status_change(printer_id))
 
     async def _broadcast_status_change(self, printer_id: int) -> None:
@@ -365,9 +388,16 @@ class PrinterManager:
         from backend.app.core.database import run_with_retry
 
         async def _do(db):
+            # A queued write can be overtaken by a later in-memory transition.
+            # Persist only if this task still represents the current gate state.
+            if self.is_awaiting_plate_clear(printer_id) is not awaiting:
+                return
             printer = await db.get(Printer, printer_id)
             if printer is not None:
                 printer.awaiting_plate_clear = awaiting
+                printer.awaiting_plate_clear_archive_id = (
+                    self._awaiting_plate_clear_archive_id.get(printer_id) if awaiting else None
+                )
                 await db.commit()
 
         try:
@@ -375,15 +405,43 @@ class PrinterManager:
         except Exception as e:
             logger.warning("Failed to persist awaiting_plate_clear for printer %d: %s", printer_id, e)
 
+    async def _persist_awaiting_plate_clear_archive_id(self, printer_id: int, archive_id: int | None):
+        from backend.app.core.database import run_with_retry
+
+        async def _do(db):
+            # Do not let a late archive write revive details after the gate was
+            # cleared or overwrite a newer print's archive identity.
+            if (
+                not self.is_awaiting_plate_clear(printer_id)
+                or self._awaiting_plate_clear_archive_id.get(printer_id) != archive_id
+            ):
+                return
+            printer = await db.get(Printer, printer_id)
+            if printer is not None:
+                printer.awaiting_plate_clear = True
+                printer.awaiting_plate_clear_archive_id = archive_id
+                await db.commit()
+
+        try:
+            await run_with_retry(_do, label=f"persist awaiting_plate_clear archive printer={printer_id}")
+        except Exception as e:
+            logger.warning("Failed to persist awaiting_plate_clear archive for printer %d: %s", printer_id, e)
+
     async def load_awaiting_plate_clear_from_db(self):
         """Rehydrate the awaiting-plate-clear set from the printers table on startup."""
         from backend.app.core.database import async_session
 
         try:
             async with async_session() as db:
-                result = await db.execute(select(Printer.id).where(Printer.awaiting_plate_clear.is_(True)))
-                ids = {row[0] for row in result.all()}
+                result = await db.execute(
+                    select(Printer.id, Printer.awaiting_plate_clear_archive_id).where(
+                        Printer.awaiting_plate_clear.is_(True)
+                    )
+                )
+                rows = result.all()
+                ids = {row[0] for row in rows}
                 self._awaiting_plate_clear = ids
+                self._awaiting_plate_clear_archive_id = {row[0]: row[1] for row in rows if row[1] is not None}
                 if ids:
                     logger.info("Loaded %d printer(s) awaiting plate-clear acknowledgment: %s", len(ids), sorted(ids))
         except Exception as e:
@@ -1208,10 +1266,22 @@ def printer_state_to_dict(
         # current_archive_id is intentionally REST-only — it's stable for the life
         # of a print and needs a DB lookup the WebSocket path shouldn't pay for.
         "current_plate_id": resolve_plate_id(state),
+        # Bambu's subtask ID is the unique identity for an active print and lets
+        # clients scope transient state across same-named back-to-back jobs (#43).
+        "current_print_identity": (
+            str(state.subtask_id).strip()
+            if state.state in ("RUNNING", "PAUSE") and state.subtask_id not in (None, "", 0, "0")
+            else None
+        ),
         # Plate-clear gate (#939). Lives on the PrinterManager rather than PrinterState,
         # so surface it here — without this, WebSocket merges drop the flag and the
         # "Clear Plate" button only appears when the 30 s REST fallback poll runs.
         "awaiting_plate_clear": printer_manager.is_awaiting_plate_clear(printer_id) if printer_id else False,
+        # Let clients refetch the exact completion summary when the completion
+        # handler finishes matching the archive after the initial gate event (#43).
+        "awaiting_plate_clear_archive_id": (
+            printer_manager.get_awaiting_plate_clear_archive_id(printer_id) if printer_id else None
+        ),
     }
     # Add cover URL if there's an active print and printer_id is provided
     # Include PAUSE state so skip objects modal can show cover

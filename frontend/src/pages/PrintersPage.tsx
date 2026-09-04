@@ -73,6 +73,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, discoveryApi, firmwareApi, getAuthToken, withStreamToken, ApiError } from '../api/client';
 import { formatDateOnly, formatETA, formatDuration } from '../utils/date';
 import { getCurrencySymbol } from '../utils/currency';
+import { getActivePrintIdentity } from '../utils/printIdentity';
 import type { Printer, PrinterCreate, PrinterStatus, AMSUnit, DiscoveredPrinter, LinkedSpoolInfo, SpoolAssignment, HMSError, InventorySpool, PrinterDiagnosticResult, PrintLogEntry, SmartPlug } from '../api/client';
 import { Card, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
@@ -847,7 +848,7 @@ function PrinterListRow({
     onSuccess: () => {
       showToast(t('queue.clearPlateSuccess'));
       queryClient.setQueryData(['printerStatus', printer.id], (old: PrinterStatus | undefined) =>
-        old ? { ...old, awaiting_plate_clear: false } : old
+        old ? { ...old, awaiting_plate_clear: false, awaiting_plate_clear_print: null } : old
       );
       queryClient.invalidateQueries({ queryKey: ['printerStatus', printer.id] });
       queryClient.invalidateQueries({ queryKey: ['queue', printer.id] });
@@ -1360,16 +1361,20 @@ function PrinterDeleteConfirmModal({
   );
 }
 
-function useCurrentPrintOwner(printerId: number, isPrintingOrPaused: boolean) {
+function useCurrentPrintOwner(
+  printerId: number,
+  isPrintingOrPaused: boolean,
+  printIdentity: string | null,
+) {
   const { data: printingQueueItems } = useQuery({
-    queryKey: ['queue', printerId, 'printing'],
+    queryKey: ['queue', printerId, 'printing', printIdentity],
     queryFn: () => api.getQueue(printerId, 'printing'),
-    enabled: isPrintingOrPaused,
+    enabled: isPrintingOrPaused && printIdentity !== null,
   });
   const { data: reprintUser } = useQuery({
-    queryKey: ['currentPrintUser', printerId],
+    queryKey: ['currentPrintUser', printerId, printIdentity],
     queryFn: () => api.getCurrentPrintUser(printerId),
-    enabled: isPrintingOrPaused,
+    enabled: isPrintingOrPaused && printIdentity !== null,
   });
 
   return printingQueueItems?.[0]?.created_by_username || reprintUser?.username;
@@ -1824,10 +1829,11 @@ function SinglePrinterCockpit({
     },
   });
 
+  const activePrintIdentity = getActivePrintIdentity(status);
   const activePrintName = status?.current_print && isPrintingOrPaused
     ? formatPrintName(status.subtask_name || status.current_print || null, status.gcode_file, t)
     : null;
-  const currentPrintUser = useCurrentPrintOwner(printer.id, isPrintingOrPaused);
+  const currentPrintUser = useCurrentPrintOwner(printer.id, isPrintingOrPaused, activePrintIdentity);
   const printEntries = useMemo(() => printLog?.items ?? [], [printLog?.items]);
   const printerStats = useMemo(() => {
     const completed = printEntries.filter(entry => entry.status === 'completed').length;
@@ -3069,7 +3075,7 @@ function PrinterCard({
   } | null>(null);
   const [showFirmwareModal, setShowFirmwareModal] = useState(false);
 
-  const { data: status } = useQuery({
+  const { data: status, refetch: refetchStatus } = useQuery({
     queryKey: ['printerStatus', printer.id],
     queryFn: () => api.getPrinterStatus(printer.id),
     refetchInterval: 30000, // Fallback polling, WebSocket handles real-time
@@ -3266,13 +3272,28 @@ function PrinterCard({
   });
   const lastPrint = lastPrints?.[0];
   const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
-  const currentPrintUser = useCurrentPrintOwner(printer.id, isPrintingOrPaused);
   const needsPlateClear = requirePlateClear && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
   const showClearPlateButton = status?.connected && needsPlateClear && !isPrintingOrPaused;
+  // A live WebSocket status update carries the plate-clear flag, but the exact
+  // archive summary is resolved by the REST status endpoint. Fetch it promptly
+  // for tabs that were already open when the print completed.
+  useEffect(() => {
+    if (needsPlateClear && !status?.awaiting_plate_clear_print) {
+      void refetchStatus();
+    }
+  }, [
+    needsPlateClear,
+    refetchStatus,
+    status?.awaiting_plate_clear_archive_id,
+    status?.awaiting_plate_clear_print,
+  ]);
+  const activePrintIdentity = getActivePrintIdentity(status);
+  const currentPrintUser = useCurrentPrintOwner(printer.id, isPrintingOrPaused, activePrintIdentity);
   const activePrintName = status?.current_print && isPrintingOrPaused
     ? formatPrintName(status.subtask_name || status.current_print || null, status.gcode_file, t, activePlateLabel)
     : null;
   const [retainedPrintJob, setRetainedPrintJob] = useState<{
+    identity: string;
     name: string;
     coverUrl: string | null;
     owner: string | null;
@@ -3280,13 +3301,15 @@ function PrinterCard({
   useEffect(() => {
     setRetainedPrintJob((previous) => {
       if (activePrintName) {
+        const sameJob = previous?.identity === activePrintIdentity;
         return {
+          identity: activePrintIdentity || activePrintName,
           name: activePrintName,
           // Keep the last live cover URL if a status update briefly omits it.
-          coverUrl: status?.cover_url ?? previous?.coverUrl ?? null,
+          coverUrl: status?.cover_url ?? (sameJob ? previous?.coverUrl : null),
           // The owner query can resolve after the printer has already reported
           // FINISH, so preserve an owner captured on either side of the edge.
-          owner: currentPrintUser ?? previous?.owner ?? null,
+          owner: currentPrintUser ?? (sameJob ? previous?.owner : null),
         };
       }
       if (needsPlateClear && currentPrintUser && previous) {
@@ -3296,10 +3319,11 @@ function PrinterCard({
       }
       return needsPlateClear ? previous : null;
     });
-  }, [activePrintName, currentPrintUser, needsPlateClear, status?.cover_url]);
+  }, [activePrintIdentity, activePrintName, currentPrintUser, needsPlateClear, status?.cover_url]);
+  const plateClearPrint = status?.awaiting_plate_clear_print;
   const retainedArchiveCoverUrl = useMemo(
-    () => lastPrint?.thumbnail_path ? api.getArchiveThumbnail(lastPrint.id) : null,
-    [lastPrint?.id, lastPrint?.thumbnail_path],
+    () => plateClearPrint?.thumbnail_path ? api.getArchiveThumbnail(plateClearPrint.archive_id) : null,
+    [plateClearPrint?.archive_id, plateClearPrint?.thumbnail_path],
   );
   const plateStatus = (() => {
     if (!requirePlateClear || !status?.connected) return null;
@@ -3633,7 +3657,7 @@ function PrinterCard({
     onSuccess: () => {
       showToast(t('queue.clearPlateSuccess'));
       queryClient.setQueryData(['printerStatus', printer.id], (old: PrinterStatus | undefined) =>
-        old ? { ...old, awaiting_plate_clear: false } : old
+        old ? { ...old, awaiting_plate_clear: false, awaiting_plate_clear_print: null } : old
       );
       queryClient.invalidateQueries({ queryKey: ['printerStatus', printer.id] });
       queryClient.invalidateQueries({ queryKey: ['queue', printer.id] });
@@ -4294,9 +4318,11 @@ function PrinterCard({
                 {/* Current Print or Idle Placeholder */}
                 {(() => {
                   const isActivePrint = !!(status.current_print && (status.state === 'RUNNING' || status.state === 'PAUSE'));
-                  const retainedPrintName = retainedPrintJob?.name || lastPrint?.print_name || lastPrint?.filename || null;
-                  const retainedPrintOwner = retainedPrintJob?.owner || lastPrint?.created_by_username || null;
-                  const retainedPrintCoverUrl = retainedPrintJob?.coverUrl || retainedArchiveCoverUrl;
+                  const retainedPrintName = plateClearPrint?.print_name || plateClearPrint?.filename || retainedPrintJob?.name || null;
+                  const retainedPrintOwner = plateClearPrint
+                    ? plateClearPrint.created_by_username
+                    : retainedPrintJob?.owner ?? null;
+                  const retainedPrintCoverUrl = retainedArchiveCoverUrl || retainedPrintJob?.coverUrl || null;
                   const showRetainedPrint = !isActivePrint && needsPlateClear && !!(
                     retainedPrintName || retainedPrintOwner || retainedPrintCoverUrl
                   );
@@ -4390,7 +4416,7 @@ function PrinterCard({
                                   {printOwner}
                                 </span>
                               )
-                            ) : lastPrint ? (
+                            ) : !needsPlateClear && lastPrint ? (
                               <p className="truncate" title={lastPrint.print_name || lastPrint.filename}>
                                 Last: {lastPrint.print_name || lastPrint.filename}
                                 {lastPrint.completed_at && (

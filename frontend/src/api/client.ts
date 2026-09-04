@@ -441,6 +441,7 @@ export interface PrinterStatus {
   subtask_name: string | null;
   current_archive_id: number | null;
   current_plate_id: number | null;
+  current_print_identity?: string | null;
   gcode_file: string | null;
   progress: number | null;
   remaining_time: number | null;
@@ -523,6 +524,14 @@ export interface PrinterStatus {
   // Queue: printer is awaiting user ack that the build plate was cleared after a
   // finished/failed print. Persisted across restarts (#961).
   awaiting_plate_clear: boolean;
+  awaiting_plate_clear_archive_id?: number | null;
+  awaiting_plate_clear_print?: {
+    archive_id: number;
+    print_name: string | null;
+    filename: string;
+    thumbnail_path: string | null;
+    created_by_username: string | null;
+  } | null;
   // AMS drying support
   supports_drying: boolean;
   // Active chamber heater (responds to M141). True only for H2C/H2D/H2DPro/H2S/X2D.

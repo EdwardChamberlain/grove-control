@@ -372,13 +372,20 @@ describe('PrintersPage', () => {
           ...mockPrinterStatus,
           state: 'FINISH',
           awaiting_plate_clear: true,
+          awaiting_plate_clear_print: {
+            archive_id: 17,
+            print_name: 'Completed Widget',
+            filename: 'completed-widget.3mf',
+            thumbnail_path: 'completed-widget.png',
+            created_by_username: 'Avery',
+          },
         })),
         http.get('/api/v1/archives/', () => HttpResponse.json([{
-          id: 17,
-          print_name: 'Completed Widget',
-          filename: 'completed-widget.3mf',
-          thumbnail_path: 'completed-widget.png',
-          created_by_username: 'Avery',
+          id: 99,
+          print_name: 'Viewer Previous Job',
+          filename: 'viewer-previous-job.3mf',
+          thumbnail_path: 'viewer-previous-job.png',
+          created_by_username: 'Viewer',
         }])),
       );
 
@@ -393,6 +400,8 @@ describe('PrintersPage', () => {
       });
 
       expect(card!.querySelector('img[src*="/api/v1/archives/17/thumbnail"]')).toBeInTheDocument();
+      expect(within(card!).queryByText('Viewer Previous Job', { exact: true })).not.toBeInTheDocument();
+      expect(card!.querySelector('img[src*="/api/v1/archives/99/thumbnail"]')).not.toBeInTheDocument();
     });
 
     it('shows plate clear status and action on failed printers when not cleared', async () => {

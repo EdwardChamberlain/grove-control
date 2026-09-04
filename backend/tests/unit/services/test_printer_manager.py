@@ -780,6 +780,7 @@ class TestPrinterStateToDict:
         state.state = "RUNNING"
         state.current_print = "test.3mf"
         state.subtask_name = "Test Print"
+        state.subtask_id = None
         state.gcode_file = "/sdcard/test.gcode"
         state.progress = 50
         state.remaining_time = 3600
@@ -1152,11 +1153,25 @@ class TestPrinterStateToDict:
         from backend.app.services.printer_manager import printer_manager
 
         printer_manager.set_awaiting_plate_clear(12345, True)
+        printer_manager.set_awaiting_plate_clear_archive_id(12345, 17)
         try:
             result = printer_state_to_dict(mock_state, printer_id=12345)
             assert result["awaiting_plate_clear"] is True
+            assert result["awaiting_plate_clear_archive_id"] == 17
         finally:
             printer_manager.set_awaiting_plate_clear(12345, False)
+
+    def test_active_print_identity_uses_subtask_id(self, mock_state):
+        """The WS payload must distinguish same-named back-to-back jobs (#43)."""
+        mock_state.subtask_id = "job-2"
+
+        result = printer_state_to_dict(mock_state)
+
+        assert result["current_print_identity"] == "job-2"
+
+        mock_state.state = "FINISH"
+        result = printer_state_to_dict(mock_state)
+        assert result["current_print_identity"] is None
 
     def test_name_and_model_surfaced_when_registered(self, mock_state):
         """Registered PrinterInfo name + model arg should land in the WS payload.
