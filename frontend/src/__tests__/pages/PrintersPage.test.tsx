@@ -366,6 +366,35 @@ describe('PrintersPage', () => {
       expect(screen.getAllByRole('button', { name: 'Mark plate as cleared' }).length).toBeGreaterThan(0);
     });
 
+    it('keeps the completed job details on the printer card until the plate is cleared', async () => {
+      server.use(
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+          ...mockPrinterStatus,
+          state: 'FINISH',
+          awaiting_plate_clear: true,
+        })),
+        http.get('/api/v1/archives/', () => HttpResponse.json([{
+          id: 17,
+          print_name: 'Completed Widget',
+          filename: 'completed-widget.3mf',
+          thumbnail_path: 'completed-widget.png',
+          created_by_username: 'Avery',
+        }])),
+      );
+
+      render(<PrintersPage />);
+
+      const card = (await screen.findByText('X1 Carbon')).closest('[id="printer-card-1"]');
+      expect(card).toBeInTheDocument();
+
+      await waitFor(() => {
+        expect(within(card!).getByText('Completed Widget', { exact: true })).toBeInTheDocument();
+        expect(within(card!).getByText('Avery', { exact: true })).toBeInTheDocument();
+      });
+
+      expect(card!.querySelector('img[src*="/api/v1/archives/17/thumbnail"]')).toBeInTheDocument();
+    });
+
     it('shows plate clear status and action on failed printers when not cleared', async () => {
       server.use(
         http.get('/api/v1/printers/:id/status', () => {

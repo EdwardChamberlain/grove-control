@@ -3272,14 +3272,35 @@ function PrinterCard({
   const activePrintName = status?.current_print && isPrintingOrPaused
     ? formatPrintName(status.subtask_name || status.current_print || null, status.gcode_file, t, activePlateLabel)
     : null;
-  const [retainedPrintJob, setRetainedPrintJob] = useState<{ name: string; coverUrl: string | null } | null>(null);
+  const [retainedPrintJob, setRetainedPrintJob] = useState<{
+    name: string;
+    coverUrl: string | null;
+    owner: string | null;
+  } | null>(null);
   useEffect(() => {
-    if (activePrintName) {
-      setRetainedPrintJob({ name: activePrintName, coverUrl: status?.cover_url ?? null });
-    } else if (!needsPlateClear) {
-      setRetainedPrintJob(null);
-    }
-  }, [activePrintName, needsPlateClear, status?.cover_url]);
+    setRetainedPrintJob((previous) => {
+      if (activePrintName) {
+        return {
+          name: activePrintName,
+          // Keep the last live cover URL if a status update briefly omits it.
+          coverUrl: status?.cover_url ?? previous?.coverUrl ?? null,
+          // The owner query can resolve after the printer has already reported
+          // FINISH, so preserve an owner captured on either side of the edge.
+          owner: currentPrintUser ?? previous?.owner ?? null,
+        };
+      }
+      if (needsPlateClear && currentPrintUser && previous) {
+        return previous.owner === currentPrintUser
+          ? previous
+          : { ...previous, owner: currentPrintUser };
+      }
+      return needsPlateClear ? previous : null;
+    });
+  }, [activePrintName, currentPrintUser, needsPlateClear, status?.cover_url]);
+  const retainedArchiveCoverUrl = useMemo(
+    () => lastPrint?.thumbnail_path ? api.getArchiveThumbnail(lastPrint.id) : null,
+    [lastPrint?.id, lastPrint?.thumbnail_path],
+  );
   const plateStatus = (() => {
     if (!requirePlateClear || !status?.connected) return null;
     if (isPrintingOrPaused) {
@@ -4273,9 +4294,15 @@ function PrinterCard({
                 {/* Current Print or Idle Placeholder */}
                 {(() => {
                   const isActivePrint = !!(status.current_print && (status.state === 'RUNNING' || status.state === 'PAUSE'));
-                  const showRetainedPrint = !isActivePrint && needsPlateClear && retainedPrintJob;
-                  const printName = isActivePrint ? activePrintName : showRetainedPrint ? retainedPrintJob.name : null;
-                  const coverUrl = isActivePrint ? status.cover_url : showRetainedPrint ? retainedPrintJob.coverUrl : null;
+                  const retainedPrintName = retainedPrintJob?.name || lastPrint?.print_name || lastPrint?.filename || null;
+                  const retainedPrintOwner = retainedPrintJob?.owner || lastPrint?.created_by_username || null;
+                  const retainedPrintCoverUrl = retainedPrintJob?.coverUrl || retainedArchiveCoverUrl;
+                  const showRetainedPrint = !isActivePrint && needsPlateClear && !!(
+                    retainedPrintName || retainedPrintOwner || retainedPrintCoverUrl
+                  );
+                  const printName = isActivePrint ? activePrintName : showRetainedPrint ? retainedPrintName : null;
+                  const coverUrl = isActivePrint ? status.cover_url : showRetainedPrint ? retainedPrintCoverUrl : null;
+                  const printOwner = isActivePrint ? currentPrintUser : showRetainedPrint ? retainedPrintOwner : null;
                   const progress = isActivePrint ? (status.progress || 0) : showRetainedPrint ? 100 : 0;
 
                   return (
@@ -4356,6 +4383,13 @@ function PrinterCard({
                                   </span>
                                 )}
                               </>
+                            ) : showRetainedPrint ? (
+                              printOwner && (
+                                <span className="flex items-center gap-1" title={`Started by ${printOwner}`}>
+                                  <User className="w-3 h-3" />
+                                  {printOwner}
+                                </span>
+                              )
                             ) : lastPrint ? (
                               <p className="truncate" title={lastPrint.print_name || lastPrint.filename}>
                                 Last: {lastPrint.print_name || lastPrint.filename}
