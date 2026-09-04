@@ -145,6 +145,17 @@ async function mockApi(page: Page, calls: ApiCall[], options: {
         remaining_time: 0,
         awaiting_plate_clear: false,
         temperatures: { nozzle: 25, bed: 25, chamber: 25 },
+        ams: [{
+          id: 0,
+          humidity: 35,
+          temp: 25,
+          tray: [
+            { id: 0, tray_type: 'PLA', tray_color: 'FF0000FF', remain: 85 },
+            { id: 1, tray_type: 'PETG', tray_color: '00AEEF', remain: 60 },
+            { id: 2, tray_type: 'ABS', tray_color: '1F2937', remain: 40 },
+            { id: 3, tray_type: 'PLA', tray_color: 'F5F5F5', remain: 95 },
+          ],
+        }],
         vt_tray: [],
       } });
     } else if (pathname === '/api/v1/smart-plugs/') {
@@ -420,3 +431,166 @@ test('core app API smoke reaches create, edit, upload, slice, queue, and setting
     expect(calls.some((call) => call.method === expected[0] && call.path === expected[1])).toBe(true);
   }
 });
+
+async function expectCockpitToFitViewport(page: Page) {
+  const [layout, detailGrid, camera, controls, controlsContent, actions, status, currentPrint] = await Promise.all([
+    page.getByTestId('cockpit-layout').boundingBox(),
+    page.getByTestId('cockpit-detail-grid').boundingBox(),
+    page.getByTestId('cockpit-camera-panel').boundingBox(),
+    page.getByTestId('cockpit-machine-controls-panel').boundingBox(),
+    page.getByTestId('cockpit-machine-controls-content').boundingBox(),
+    page.getByTestId('cockpit-actions-panel').boundingBox(),
+    page.getByTestId('cockpit-status-pane').boundingBox(),
+    page.getByTestId('cockpit-current-print').boundingBox(),
+  ]);
+
+  expect(layout).not.toBeNull();
+  expect(detailGrid).not.toBeNull();
+  expect(camera).not.toBeNull();
+  expect(controls).not.toBeNull();
+  expect(controlsContent).not.toBeNull();
+  expect(actions).not.toBeNull();
+  expect(status).not.toBeNull();
+  expect(currentPrint).not.toBeNull();
+
+  const layoutShape = await page.getByTestId('cockpit-layout').evaluate((layout) => ({
+    outerColumnCount: getComputedStyle(layout).gridTemplateColumns.trim().split(/\s+/).length,
+    detailColumnCount: getComputedStyle(layout.querySelector('[data-testid="cockpit-detail-grid"]')!).gridTemplateColumns.trim().split(/\s+/).length,
+    isShortViewport: window.matchMedia('(max-height: 700px)').matches,
+  }));
+  const usesFlowLayout = layoutShape.outerColumnCount === 1 || layoutShape.isShortViewport;
+  expect(camera!.width / camera!.height).toBeCloseTo(16 / 9, 2);
+  expect(camera!.width).toBeCloseTo(controls!.width, 1);
+  expect(Math.abs(controls!.height - controlsContent!.height)).toBeLessThanOrEqual(1);
+  if (!usesFlowLayout) {
+    const controlsMinimumHeight = await page.getByTestId('cockpit-detail-grid').evaluate((grid) => {
+      const styles = getComputedStyle(grid);
+      return (grid.clientHeight - parseFloat(styles.paddingTop) - parseFloat(styles.paddingBottom)) * 0.3;
+    });
+    expect(controls!.height).toBeGreaterThanOrEqual(controlsMinimumHeight - 1);
+  } else {
+    expect(controls!.height).toBeGreaterThan(0);
+  }
+  const amsHeader = await page.getByTestId('cockpit-ams-header-0').boundingBox();
+  const amsCard = await page.getByTestId('ams-unit-card-compact-0').boundingBox();
+  expect(amsHeader).not.toBeNull();
+  expect(amsCard).not.toBeNull();
+  expect(amsHeader!.width).toBeGreaterThan(0);
+  expect(amsHeader!.x).toBeGreaterThanOrEqual(status!.x - 1);
+  expect(amsHeader!.x + amsHeader!.width).toBeLessThanOrEqual(status!.x + status!.width + 1);
+  expect(amsCard!.x).toBeGreaterThanOrEqual(status!.x - 1);
+  expect(amsCard!.x + amsCard!.width).toBeLessThanOrEqual(status!.x + status!.width + 1);
+  const amsCardOverflow = await page.getByTestId('ams-unit-card-compact-0').evaluate((card) => ({
+    clientWidth: card.clientWidth,
+    scrollWidth: card.scrollWidth,
+  }));
+  expect(amsCardOverflow.scrollWidth).toBeLessThanOrEqual(amsCardOverflow.clientWidth + 1);
+  const jogButtons = page.getByTestId('cockpit-jog-xy-grid').locator('button');
+  expect(await jogButtons.count()).toBe(5);
+  const [jogLeft, jogHome, jogRight] = await Promise.all([
+    jogButtons.nth(1).boundingBox(),
+    jogButtons.nth(2).boundingBox(),
+    jogButtons.nth(3).boundingBox(),
+  ]);
+  expect(jogLeft).not.toBeNull();
+  expect(jogHome).not.toBeNull();
+  expect(jogRight).not.toBeNull();
+  expect(jogLeft!.width).toBeGreaterThan(0);
+  expect(jogHome!.width).toBeGreaterThan(0);
+  expect(jogRight!.width).toBeGreaterThan(0);
+  expect(jogLeft!.x + jogLeft!.width).toBeLessThanOrEqual(jogHome!.x + 1);
+  expect(jogHome!.x + jogHome!.width).toBeLessThanOrEqual(jogRight!.x + 1);
+  const jogContentOverflow = await page.getByTestId('cockpit-jog-content').evaluate((content) => ({
+    clientWidth: content.clientWidth,
+    scrollWidth: content.scrollWidth,
+    flexWrap: getComputedStyle(content).flexWrap,
+  }));
+  expect(jogContentOverflow.scrollWidth).toBeLessThanOrEqual(jogContentOverflow.clientWidth + 1);
+  if (jogContentOverflow.clientWidth <= 220) {
+    expect(jogContentOverflow.flexWrap).toBe('wrap');
+  }
+  const cameraControlsGap = await page.getByTestId('cockpit-camera-panel').evaluate((cameraPanel) => (
+    parseFloat(getComputedStyle(cameraPanel.parentElement!).rowGap)
+  ));
+  expect(Math.abs((controls!.y - (camera!.y + camera!.height)) - cameraControlsGap)).toBeLessThanOrEqual(1);
+  expect(currentPrint!.y + currentPrint!.height).toBeLessThanOrEqual(camera!.y + camera!.height - 16);
+  expect(controls!.y + controls!.height).toBeLessThanOrEqual(layout!.y + layout!.height + 1);
+  if (layoutShape.detailColumnCount > 1) {
+    expect(actions!.x).toBeGreaterThanOrEqual(controls!.x + controls!.width - 1);
+  } else {
+    expect(actions!.x).toBeGreaterThanOrEqual(detailGrid!.x - 1);
+    expect(actions!.x + actions!.width).toBeLessThanOrEqual(detailGrid!.x + detailGrid!.width + 1);
+    expect(actions!.y).toBeGreaterThanOrEqual(controls!.y + controls!.height + cameraControlsGap - 1);
+  }
+  expect(actions!.y + actions!.height).toBeLessThanOrEqual(status!.y + 1);
+  expect(status!.y + status!.height).toBeLessThanOrEqual(layout!.y + layout!.height + 1);
+  await expect(page.getByTestId('cockpit-status-pane')).toHaveCSS('overflow-y', usesFlowLayout ? 'visible' : 'auto');
+
+  const fixedPanelHeights = await page.locator('[data-testid="cockpit-machine-controls-panel"], [data-testid="cockpit-actions-panel"]').evaluateAll((panels) => panels.map((panel) => ({
+    clientHeight: panel.clientHeight,
+    scrollHeight: panel.scrollHeight,
+  })));
+  for (const panel of fixedPanelHeights) {
+    expect(panel.scrollHeight).toBeLessThanOrEqual(panel.clientHeight + 1);
+  }
+
+  const documentSize = await page.evaluate(() => ({
+    clientHeight: document.scrollingElement?.clientHeight ?? 0,
+    scrollHeight: document.scrollingElement?.scrollHeight ?? 0,
+    clientWidth: document.scrollingElement?.clientWidth ?? 0,
+    scrollWidth: document.scrollingElement?.scrollWidth ?? 0,
+  }));
+  expect(documentSize.scrollWidth).toBeLessThanOrEqual(documentSize.clientWidth + 1);
+  if (!usesFlowLayout) {
+    expect(documentSize.scrollHeight).toBeLessThanOrEqual(documentSize.clientHeight + 1);
+  }
+}
+
+const cockpitViewports = [
+  { name: 'tablet portrait', width: 768, height: 1024 },
+  { name: 'tablet compact', width: 800, height: 600 },
+  { name: 'tablet landscape', width: 1024, height: 768 },
+  { name: 'short desktop', width: 1024, height: 600 },
+  { name: 'just before cockpit wraps', width: 977, height: 768 },
+  { name: 'at cockpit wrap boundary', width: 978, height: 768 },
+  { name: 'just below the sidebar breakpoint', width: 1143, height: 768 },
+  { name: 'at the sidebar breakpoint', width: 1144, height: 768 },
+  { name: 'just before the expanded sidebar boundary', width: 1207, height: 768 },
+  { name: 'at the expanded sidebar boundary', width: 1208, height: 768 },
+  { name: 'wide short desktop', width: 1280, height: 600 },
+  { name: 'desktop', width: 1280, height: 720 },
+  { name: 'large desktop', width: 1366, height: 768 },
+  { name: 'full HD desktop', width: 1920, height: 1080 },
+] as const;
+
+for (const viewport of cockpitViewports) {
+  test(`cockpit fits at ${viewport.name} (${viewport.width}x${viewport.height}) through sidebar collapse`, async ({ page }, testInfo) => {
+    const calls: ApiCall[] = [];
+    await page.setViewportSize(viewport);
+    await page.addInitScript(() => {
+      localStorage.setItem('printerViewMode', 'single');
+      localStorage.setItem('singlePrinterViewId', '1');
+      localStorage.setItem('sidebarExpanded', 'true');
+    });
+    await mockApi(page, calls, { printerState: 'RUNNING' });
+    await page.goto('/');
+
+    await expect(page.getByTestId('cockpit-layout')).toBeVisible();
+    await expect(page.getByTestId('cockpit-ams-header-0')).toBeVisible();
+    await expectCockpitToFitViewport(page);
+    await page.getByTestId('cockpit-layout').screenshot({
+      path: testInfo.outputPath(`cockpit-${viewport.width}x${viewport.height}-expanded.png`),
+    });
+
+    const collapseSidebar = page.getByTitle('Collapse sidebar');
+    if (await collapseSidebar.count()) {
+      await collapseSidebar.click();
+      await page.waitForTimeout(150);
+      await expect(page.getByTitle('Expand sidebar')).toBeVisible();
+      await expectCockpitToFitViewport(page);
+      await page.getByTestId('cockpit-layout').screenshot({
+        path: testInfo.outputPath(`cockpit-${viewport.width}x${viewport.height}-collapsed.png`),
+      });
+    }
+  });
+}

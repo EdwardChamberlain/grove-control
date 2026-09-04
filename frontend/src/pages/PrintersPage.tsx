@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { formatPrintName } from '../utils/printName';
 import { computePopoverPosition } from '../utils/popoverPosition';
@@ -1428,6 +1428,16 @@ function SinglePrinterCockpit({
   onUnassignSpoolmanSpool?: (spoolmanSpoolId: number) => void;
 }) {
   const { t } = useTranslation();
+  const cockpitDetailRef = useRef<HTMLDivElement>(null);
+  const cockpitDetailGridRef = useRef<HTMLDivElement>(null);
+  const cockpitMachineControlsRef = useRef<HTMLDivElement>(null);
+  const cockpitMachineControlsContentRef = useRef<HTMLElement>(null);
+  const cockpitMachineControlsInnerRef = useRef<HTMLDivElement>(null);
+  const cockpitMachineControlsPrimaryRef = useRef<HTMLDivElement>(null);
+  const cockpitJogControlsRef = useRef<HTMLDivElement>(null);
+  const [cockpitCameraColumnWidth, setCockpitCameraColumnWidth] = useState<number | null>(null);
+  const [cockpitControlsHeight, setCockpitControlsHeight] = useState<number | null>(null);
+  const [cockpitFlowLayout, setCockpitFlowLayout] = useState(false);
   const { hasPermission } = useAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
@@ -2069,9 +2079,9 @@ function SinglePrinterCockpit({
         <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">{t('printers.single.jog')}</span>
         <div className="h-[2px] flex-1 bg-bambu-dark-tertiary" />
       </div>
-      <div className="flex flex-1 items-center justify-center gap-3 px-3 py-2">
-        <div className="flex items-center justify-center gap-3">
-          <div className="grid grid-cols-3 gap-1">
+      <div data-testid="cockpit-jog-content" className="cockpit-jog-content flex min-w-0 flex-1 items-center justify-center gap-3 px-3 py-2">
+        <div className="cockpit-jog-axis-group flex items-center justify-center gap-3">
+          <div data-testid="cockpit-jog-xy-grid" className="cockpit-jog-xy-grid grid grid-cols-3 gap-1">
             <div />
             <button type="button" className={jogButtonClass} disabled={!canJog || xyJogMutation.isPending} onClick={() => xyJogMutation.mutate({ x: 0, y: jogStep })} aria-label={t('printers.single.moveYForward')}><ArrowUp className="h-4 w-4" /></button>
             <div />
@@ -2093,8 +2103,8 @@ function SinglePrinterCockpit({
             <button type="button" className={jogButtonClass} disabled={!canJog || extruderJogMutation.isPending} onClick={() => extruderJogMutation.mutate(jogStep)} aria-label={t('printers.single.extrudeFilament')}><ArrowDown className="h-4 w-4" /></button>
           </div>
         </div>
-        <div className="self-stretch border-l border-bambu-dark-tertiary" />
-        <div className="flex min-w-20 flex-col gap-1">
+        <div className="cockpit-jog-divider self-stretch border-l border-bambu-dark-tertiary" />
+        <div className="cockpit-jog-step-controls flex min-w-20 flex-col gap-1">
           <div className="text-center text-[10px] font-semibold uppercase leading-tight tracking-wider text-white">{t('printers.bedJog.step')}</div>
           <div className="grid gap-1">
             {[1, 10, 50, 100].map((step) => (
@@ -2144,7 +2154,7 @@ function SinglePrinterCockpit({
       onUnload={() => unloadAmsMutation.mutate()}
     />;
     return (
-      <div key={trayId} className="relative min-w-14">
+      <div key={trayId} className="relative min-w-0">
         {isRefreshing && <div className="absolute inset-0 z-20 flex items-center justify-center rounded bg-bambu-dark-tertiary/80"><RefreshCw className="h-4 w-4 animate-spin text-bambu-green" /></div>}
         <AmsSlot
           controller={amsSlotController}
@@ -2448,9 +2458,9 @@ function SinglePrinterCockpit({
   );
 
   const machineControlsPanel = (
-    <section className="h-full min-h-0 rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
-      <div className="grid h-full min-h-0 gap-3 xl:grid-cols-[minmax(0,3fr)_1px_minmax(0,2fr)]">
-        <div className="min-w-0">
+    <section ref={cockpitMachineControlsContentRef} data-testid="cockpit-machine-controls-content" className={`cockpit-machine-controls-content ${cockpitFlowLayout ? '' : 'h-full'} min-h-0 rounded-xl border border-white/10 bg-bambu-dark/80 p-3`}>
+      <div ref={cockpitMachineControlsInnerRef} className={`cockpit-machine-controls-inner grid ${cockpitFlowLayout ? '' : 'h-full'} min-h-0 gap-3`}>
+        <div ref={cockpitMachineControlsPrimaryRef} className="min-w-0 self-start">
           <div className="mb-2 flex items-center gap-2">
             <span className="text-[10px] font-medium uppercase tracking-wider text-bambu-gray">
               {t('printers.status.title', 'Status')}
@@ -2468,8 +2478,10 @@ function SinglePrinterCockpit({
           />
           {quickControlsPanel}
         </div>
-        <div className="hidden self-stretch bg-bambu-dark-tertiary xl:block" />
-        <div className="min-w-0">{jogPanel}</div>
+        <div className="cockpit-machine-controls-divider self-stretch bg-bambu-dark-tertiary" />
+        <div className="min-w-0">
+          <div ref={cockpitJogControlsRef} className="cockpit-jog-container w-full">{jogPanel}</div>
+        </div>
       </div>
     </section>
   );
@@ -2493,12 +2505,108 @@ function SinglePrinterCockpit({
     </section>
   );
 
+  useLayoutEffect(() => {
+    const detail = cockpitDetailRef.current;
+    const grid = cockpitDetailGridRef.current;
+    const controls = cockpitMachineControlsRef.current;
+    const controlsContent = cockpitMachineControlsContentRef.current;
+    const controlsInner = cockpitMachineControlsInnerRef.current;
+    const controlsPrimary = cockpitMachineControlsPrimaryRef.current;
+    const jogControls = cockpitJogControlsRef.current;
+    const layoutContainer = detail?.closest('.cockpit-layout-container');
+    if (!detail || !grid || !controls || !controlsContent || !controlsInner || !controlsPrimary || !jogControls) return;
+    if (typeof ResizeObserver === 'undefined') return;
+
+    const measureCameraColumn = () => {
+      // The camera and controls share one column in fixed desktop mode. At
+      // narrow or short sizes they return to normal flow so the page can grow
+      // and scroll rather than forcing either panel into an unusable size.
+      const isFlowLayout = detail.clientWidth < 640
+        || (layoutContainer?.clientWidth ?? 0) < 920
+        || window.matchMedia('(max-height: 700px)').matches;
+      setCockpitFlowLayout((current) => current === isFlowLayout ? current : isFlowLayout);
+      if (isFlowLayout) {
+        setCockpitCameraColumnWidth(null);
+        setCockpitControlsHeight(null);
+        return;
+      }
+
+      const gridStyles = window.getComputedStyle(grid);
+      const cameraControlsStyles = window.getComputedStyle(controls.parentElement!);
+      const rootFontSize = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16;
+      const horizontalPadding = Number.parseFloat(gridStyles.paddingLeft) + Number.parseFloat(gridStyles.paddingRight);
+      const verticalPadding = Number.parseFloat(gridStyles.paddingTop) + Number.parseFloat(gridStyles.paddingBottom);
+      const columnGap = Number.parseFloat(gridStyles.columnGap) || 0;
+      const cameraControlsGap = Number.parseFloat(cameraControlsStyles.rowGap) || 0;
+      const controlsContentStyles = window.getComputedStyle(controlsContent);
+      const controlsInnerStyles = window.getComputedStyle(controlsInner);
+      const isTwoColumnControls = controlsInnerStyles.gridTemplateColumns.trim().split(/\s+/).length > 1;
+      const primaryControlsHeight = controlsPrimary.getBoundingClientRect().height;
+      const jogControlsHeight = Math.max(jogControls.getBoundingClientRect().height, jogControls.scrollHeight);
+      const naturalInnerHeight = isTwoColumnControls
+        ? Math.max(primaryControlsHeight, jogControlsHeight)
+        : primaryControlsHeight + jogControlsHeight + (Number.parseFloat(controlsInnerStyles.rowGap) || 0);
+      const naturalControlsHeight = Math.ceil(
+        naturalInnerHeight
+        + Number.parseFloat(controlsContentStyles.paddingTop)
+        + Number.parseFloat(controlsContentStyles.paddingBottom)
+        + Number.parseFloat(controlsContentStyles.borderTopWidth)
+        + Number.parseFloat(controlsContentStyles.borderBottomWidth),
+      );
+      const cockpitContentHeight = grid.clientHeight - verticalPadding;
+      const availableWidth = grid.clientWidth - horizontalPadding - columnGap;
+      // The AMS unit needs enough room for its four spool slots and the
+      // humidity/temperature controls to remain legible. Protect this width
+      // before giving any extra space to the 16:9 camera column.
+      const desiredRightColumnWidth = 22 * rootFontSize;
+      const controlsHeightToProtectRightColumn = cockpitContentHeight
+        - Math.max(0, availableWidth - desiredRightColumnWidth) * (9 / 16);
+      const controlsHeight = Math.max(
+        naturalControlsHeight,
+        Math.ceil(Math.min(
+          cockpitContentHeight * 0.55,
+          Math.max(cockpitContentHeight * 0.3, controlsHeightToProtectRightColumn),
+        )),
+      );
+      const availableCameraHeight = grid.clientHeight - verticalPadding - controlsHeight - cameraControlsGap;
+      const nextWidth = Math.max(0, Math.min(availableWidth, availableCameraHeight * (16 / 9)));
+
+      setCockpitCameraColumnWidth((currentWidth) => (
+        currentWidth !== null && Math.abs(currentWidth - nextWidth) < 1 ? currentWidth : nextWidth
+      ));
+      setCockpitControlsHeight((currentHeight) => (
+        currentHeight !== null && Math.abs(currentHeight - controlsHeight) < 1 ? currentHeight : controlsHeight
+      ));
+    };
+
+    const observer = new ResizeObserver(measureCameraColumn);
+    observer.observe(detail);
+    observer.observe(controls);
+    observer.observe(controlsContent);
+    observer.observe(controlsInner);
+    observer.observe(controlsPrimary);
+    observer.observe(jogControls);
+    window.addEventListener('resize', measureCameraColumn);
+    measureCameraColumn();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', measureCameraColumn);
+    };
+  }, []);
+
   return (
     <>
-    <div className="relative h-full min-h-0 overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-gradient-to-br from-bambu-dark-secondary via-bambu-dark to-bambu-dark-secondary shadow-xl">
-      <div className="relative grid h-full min-h-0 gap-3 p-3 xl:grid-cols-[minmax(0,1.5fr)_minmax(21rem,0.72fr)]">
-        <div className="grid min-h-0 gap-3 xl:grid-rows-[auto_minmax(0,1fr)]">
-          <section className="relative aspect-video w-full min-h-0 overflow-hidden rounded-xl border border-white/10 bg-bambu-dark">
+    <div
+      ref={cockpitDetailRef}
+      className={`cockpit-detail-container relative ${cockpitFlowLayout ? 'cockpit-detail-flow' : 'h-full'} min-h-0 overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-gradient-to-br from-bambu-dark-secondary via-bambu-dark to-bambu-dark-secondary shadow-xl`}
+      style={{
+        ...(cockpitCameraColumnWidth === null ? {} : { '--cockpit-camera-column-width': `${cockpitCameraColumnWidth}px` }),
+        ...(cockpitControlsHeight === null ? {} : { '--cockpit-controls-height': `${cockpitControlsHeight}px` }),
+      } as CSSProperties}
+    >
+      <div ref={cockpitDetailGridRef} data-testid="cockpit-detail-grid" className={`cockpit-detail-grid relative grid ${cockpitFlowLayout ? '' : 'h-full'} min-h-0 gap-3 p-3`}>
+        <div className="cockpit-camera-controls grid min-h-0 gap-3">
+          <section data-testid="cockpit-camera-panel" className="relative h-full min-h-0 w-full overflow-hidden rounded-xl border border-white/10 bg-bambu-dark">
             <CameraPlaceholder
               model={printer.model}
               className="absolute inset-0 h-full w-full object-cover"
@@ -2595,13 +2703,13 @@ function SinglePrinterCockpit({
             </div>
           </section>
 
-          <div className="min-h-0 h-full">
+          <div ref={cockpitMachineControlsRef} data-testid="cockpit-machine-controls-panel" className={`min-h-0 ${cockpitFlowLayout ? '' : 'h-full'}`}>
             {machineControlsPanel}
           </div>
         </div>
 
-        <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3">
-          <section className="rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
+        <div className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-3">
+          <section data-testid="cockpit-actions-panel" className="rounded-xl border border-white/10 bg-bambu-dark/80 p-3">
             {primaryActionPanel}
             <PrinterQueueWidget
               printerId={printer.id}
@@ -7180,7 +7288,7 @@ export function PrintersPage() {
       data-testid="printers-page"
       className={`p-4 md:p-8 ${
         printerPageViewMode === 'single' && !isMobilePrinterView
-          ? 'flex h-[calc(100dvh-3.5rem)] flex-col overflow-hidden min-[1144px]:h-dvh'
+          ? 'cockpit-page flex h-[calc(100dvh-3.5rem)] flex-col min-[1144px]:h-dvh'
           : ''
       }`}
     >
@@ -7309,7 +7417,8 @@ export function PrintersPage() {
         />
 
       ) : printerPageViewMode === 'single' && !isMobilePrinterView && selectedSinglePrinter ? (
-        <div data-testid="cockpit-layout" className="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[17.5rem_minmax(0,1fr)]">
+        <div className="cockpit-layout-container min-h-0 flex-1">
+        <div data-testid="cockpit-layout" className="cockpit-layout grid h-full min-h-0 flex-1 gap-4 overflow-hidden">
           <aside className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary p-3">
             <div className="mb-3 text-center">
               <div className="min-w-0">
@@ -7371,6 +7480,7 @@ export function PrintersPage() {
               onUnassignSpoolmanSpool={(id) => unassignSpoolmanMutation.mutate(id)}
             />
           </div>
+        </div>
         </div>
       ) : printerPageViewMode === 'list' ? (
         <div className="overflow-hidden rounded-xl border border-bambu-dark-tertiary bg-bambu-dark-secondary">
