@@ -305,6 +305,20 @@ export function PrinterSelector({
     previousDefaultModel.current = defaultModel;
   }, [assignmentMode, defaultModel, onTargetModelChange, targetModel]);
 
+  // A printer may not have a model until it has reported one. Keep those
+  // printers selectable instead of leaving a new job in an unusable model
+  // assignment state with no available target model.
+  useEffect(() => {
+    if (
+      assignmentMode === 'model'
+      && activePrinters.length > 0
+      && uniqueModels.length === 0
+      && onAssignmentModeChange
+    ) {
+      onAssignmentModeChange('printer');
+    }
+  }, [activePrinters.length, assignmentMode, onAssignmentModeChange, uniqueModels.length]);
+
   // Get unique locations for the selected target model (for location filtering)
   const uniqueLocations = useMemo(() => {
     if (!targetModel) return [];

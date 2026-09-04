@@ -262,6 +262,36 @@ describe('PrintModal', () => {
       expect(capturedBody).toMatchObject({ printer_id: null, target_model: 'X2D', library_file_id: 5 });
     });
 
+    it('falls back to specific-printer assignment when printer models are unknown', async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      const user = userEvent.setup();
+      server.use(
+        http.get('/api/v1/printers/', () => HttpResponse.json([
+          { ...mockPrinters[0], model: null },
+        ])),
+        http.post('/api/v1/queue/', async ({ request }) => {
+          capturedBody = await request.json() as Record<string, unknown>;
+          return HttpResponse.json({ id: 1, status: 'pending' });
+        }),
+      );
+
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Benchy"
+          onClose={mockOnClose}
+        />
+      );
+
+      const printer = await screen.findByRole('button', { name: /X1 Carbon/ });
+      await user.click(printer);
+      await user.click(screen.getByRole('button', { name: /^print$/i }));
+
+      await waitFor(() => expect(capturedBody).not.toBeNull());
+      expect(capturedBody).toMatchObject({ printer_id: 1, target_model: null });
+    });
+
     it('keeps direct-print flows assigned to their preselected printer', async () => {
       let capturedBody: Record<string, unknown> | null = null;
       const user = userEvent.setup();
