@@ -5,6 +5,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: refresh-readme-screenshots
@@ -12,7 +13,7 @@ concurrency:
 
 jobs:
   refresh:
-    name: Regenerate and commit screenshots
+    name: Regenerate and open screenshot PR
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -68,7 +69,18 @@ jobs:
           done < <(git status --porcelain=v1 --untracked-files=all)
           exit "$unexpected"
 
-      - name: Commit refreshed screenshots
+      - name: Open or update screenshot PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTOMATION_BRANCH: automation/readme-screenshots
+          PR_TITLE: 'docs: refresh README screenshots'
+          PR_BODY: |
+            Automated README screenshot refresh generated from the latest dev UI.
+
+            This PR contains only the generated files under `docs/screenshots/`.
+            Review the images before merging into `dev`.
+
+            This PR was created by the `Refresh README screenshots` workflow.
         shell: bash
         run: |
           screenshots=(
@@ -86,6 +98,25 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch --create "$AUTOMATION_BRANCH"
           git add -- "${screenshots[@]}"
           git commit -m "docs: refresh README screenshots"
-          git push origin HEAD:dev
+          git push --force-with-lease origin "HEAD:$AUTOMATION_BRANCH"
+
+          pr_number="$(gh pr list \
+            --base dev \
+            --head "$AUTOMATION_BRANCH" \
+            --state open \
+            --json number \
+            --jq '.[0].number')"
+
+          if [[ -n "$pr_number" ]]; then
+            gh pr edit "$pr_number" --title "$PR_TITLE" --body "$PR_BODY"
+            gh pr view "$pr_number" --json url --jq .url
+          else
+            gh pr create \
+              --base dev \
+              --head "$AUTOMATION_BRANCH" \
+              --title "$PR_TITLE" \
+              --body "$PR_BODY"
+          fi

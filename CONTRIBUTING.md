@@ -390,8 +390,9 @@ set, captions, or asset names change.
 
 The GitHub Actions workflow at `.github/workflows/readme-screenshots.yml` is
 intentionally restricted to the `dev` branch. It checks out `dev`, verifies that
-only the five screenshot assets changed, and pushes refreshed assets back to
-`dev`. It must never be run with `main` selected.
+only the five screenshot assets changed, and opens or updates a PR from the
+`automation/readme-screenshots` branch into `dev`. It must never be run with
+`main` selected.
 
 GitHub only exposes manually dispatched workflows after the workflow file has
 reached the repository's default branch. Therefore, the first release is a
@@ -399,11 +400,15 @@ bootstrap release:
 
 1. Before merging `dev` into `main` for v1.0.0, run the local generation command
    above against the final `dev` state.
-2. Review and commit any changed screenshot assets to `dev`.
-3. Merge `dev` into `main`.
+2. Review the generated images, commit the changed screenshot assets to a branch,
+   and open a PR targeting `dev`.
+3. Merge the screenshot PR into `dev`.
+4. Merge `dev` into `main`.
 
 After v1.0.0, maintainers can refresh the assets from the Actions tab by
-selecting `Refresh README screenshots` and choosing `dev` as the branch.
+selecting `Refresh README screenshots` and choosing `dev` as the branch. The
+workflow will open or update an asset-only PR targeting `dev`; merge that PR
+before the next release.
 
 ## CI Pipeline
 
