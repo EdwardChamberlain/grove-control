@@ -1,7 +1,7 @@
 name: Bug Report
 description: Report a bug or unexpected behavior
 title: "[Bug]: "
-labels: ["bug", "triage"]
+labels: ["bug"]
 body:
   - type: markdown
     attributes:
@@ -12,17 +12,6 @@ body:
         1. Search [existing issues](https://github.com/EdwardChamberlain/grove-control/issues?q=is%3Aissue) — your problem may already be reported or resolved.
         2. If your printer won't connect / won't print / camera won't load, run the in-app **Connection Diagnostic** (printer card or System → Diagnostics) FIRST. Most connection bugs are diagnosed in 30 seconds by the diagnostic and need no GitHub issue.
         3. Generate a **Support Package** from System → Download Support Package — without it, most bugs cannot be investigated.
-
-  - type: dropdown
-    id: product
-    attributes:
-      label: Product
-      description: Which product is affected?
-      options:
-        - Grove Control
-        - SpoolBuddy
-    validations:
-      required: true
 
   - type: dropdown
     id: area
@@ -47,7 +36,7 @@ body:
         - SpoolBuddy kiosk / display
         - Other / not sure
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: description
@@ -77,7 +66,7 @@ body:
         2. Click on '...'
         3. See error
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: troubleshooting_tried
@@ -93,7 +82,7 @@ body:
         - Tried restarting / re-adding the printer
         - Searched closed issues for: "<keywords>"
     validations:
-      required: true
+      required: false
 
   - type: dropdown
     id: printer
@@ -129,51 +118,17 @@ body:
       required: true
 
   - type: input
-    id: spoolbuddy_version
-    attributes:
-      label: SpoolBuddy Version
-      description: If SpoolBuddy-related, which version is running? (Check SpoolBuddy Settings → Updates)
-      placeholder: e.g., 0.1.0
-
-  - type: input
     id: firmware
     attributes:
       label: Printer Firmware Version
       description: Which firmware version is your printer running? (Check printer screen or Bambu Handy app). Leave blank if not printer-related.
       placeholder: e.g., 01.08.00.00
 
-  - type: dropdown
-    id: installation
-    attributes:
-      label: Installation Method
-      description: How did you install Grove Control?
-      options:
-        - Manual (git clone)
-        - Docker
-        - Other
-    validations:
-      required: true
-
-  - type: dropdown
-    id: os
-    attributes:
-      label: Operating System
-      description: What OS is Grove Control running on?
-      options:
-        - Linux (Ubuntu/Debian)
-        - Linux (Other)
-        - macOS
-        - Windows
-        - Docker
-        - Other
-    validations:
-      required: true
-
   - type: markdown
     attributes:
       value: |
         ---
-        ### 📦 Support Package — REQUIRED
+        ### 📦 Support Package
 
         Create and attach a **Support Package** from **System → Download Support Package**.
         It bundles logs, system info, and configuration (sensitive data redacted) — without it, most bugs cannot be reproduced or investigated.
@@ -189,7 +144,7 @@ body:
       placeholder: |
         Drag and drop your support package .zip file here, or paste logs / explain why you cannot attach one...
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: screenshots
