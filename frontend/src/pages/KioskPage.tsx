@@ -325,7 +325,12 @@ export function KioskPage() {
     const status = statuses.get(printer.id);
     const queueOwner = printingItemsByPrinter.get(printer.id)?.created_by_username ?? undefined;
     const plateClearOwner = status?.awaiting_plate_clear_print?.created_by_username ?? undefined;
-    return [printer.id, status?.current_queue_owner || queueOwner || plateClearOwner];
+    const owner = isActivePrint(status)
+      ? status?.current_queue_owner || queueOwner
+      : status?.awaiting_plate_clear
+        ? plateClearOwner
+        : undefined;
+    return [printer.id, owner];
   })), [printers, printingItemsByPrinter, statuses]);
 
   const prioritizedPrinters = useMemo(() => [...printers].sort((a, b) => {

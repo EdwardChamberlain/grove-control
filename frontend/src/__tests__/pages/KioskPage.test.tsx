@@ -240,12 +240,53 @@ describe('KioskPage', () => {
         created_by_username: null,
       },
     ] as never);
+    vi.mocked(api.getPrinterStatus).mockImplementation(async (printerId) => {
+      if (printerId === 1) return { ...statusFor('1'), current_queue_owner: null } as never;
+      return statusFor(String(printerId)) as never;
+    });
 
     render(<KioskPage />);
 
     await waitFor(() => {
+      expect(within(screen.getByTestId('kiosk-printer-1')).getByText('42%')).toBeInTheDocument();
       expect(screen.queryByText('Owner unavailable')).not.toBeInTheDocument();
       expect(within(screen.getByTestId('kiosk-printer-1')).queryByTitle(/Added by/)).not.toBeInTheDocument();
+    });
+  });
+
+  it('does not retain an active owner after a print completes without plate clearance', async () => {
+    vi.mocked(api.getQueue).mockResolvedValue([
+      {
+        id: 10,
+        printer_id: 1,
+        archive_id: 1,
+        library_file_id: null,
+        archive_name: 'Widget batch',
+        printer_name: 'Atlas',
+        position: 1,
+        status: 'printing',
+        created_by_username: null,
+      },
+    ] as never);
+    vi.mocked(api.getPrinterStatus).mockImplementation(async (printerId) => {
+      if (printerId === 1) {
+        return {
+          ...statusFor('1'),
+          state: 'FINISH',
+          current_queue_owner: 'Morgan',
+          progress: 100,
+          awaiting_plate_clear: false,
+        } as never;
+      }
+      return statusFor(String(printerId)) as never;
+    });
+
+    render(<KioskPage />);
+
+    await waitFor(() => {
+      const printerTile = screen.getByTestId('kiosk-printer-1');
+      expect(within(printerTile).getByText('Completed')).toBeInTheDocument();
+      expect(within(printerTile).queryByTitle(/Added by/)).not.toBeInTheDocument();
     });
   });
 
