@@ -249,43 +249,6 @@ describe('PrintersPage', () => {
         expect(temperatureRequests).toContainEqual({ target: '260', nozzle: '0' });
       });
     });
-
-    it.each(['RUNNING', 'PAUSE'])('disables nozzle selection while the printer is %s', async (state) => {
-      localStorage.setItem('printerCardSize', '2');
-      const dualNozzlePrinter = { ...mockPrinters[0], model: 'H2D', nozzle_count: 2 };
-      const dualNozzleStatus = {
-        ...mockPrinterStatus,
-        state,
-        active_extruder: 0,
-        current_print: 'active-print.3mf',
-        temperatures: {
-          ...mockPrinterStatus.temperatures,
-          nozzle_2: 32,
-        },
-        nozzle_rack: [
-          { id: 0, nozzle_type: 'HS', nozzle_diameter: '0.4', wear: 5, stat: 1, max_temp: 300, serial_number: '', filament_color: '', filament_id: '', filament_type: '' },
-          { id: 1, nozzle_type: 'HS', nozzle_diameter: '0.4', wear: 3, stat: 1, max_temp: 300, serial_number: '', filament_color: '', filament_id: '', filament_type: '' },
-        ],
-      };
-
-      server.use(
-        http.get('/api/v1/printers/', () => HttpResponse.json([dualNozzlePrinter])),
-        http.get('/api/v1/printers/:id/status', () => HttpResponse.json(dualNozzleStatus)),
-      );
-
-      render(<PrintersPage />);
-
-      await waitFor(() => {
-        expect(screen.getByText('L / R')).toBeInTheDocument();
-      });
-
-      const nozzleSelector = screen.getAllByTitle('Disabled while printing')
-        .find(element => element.textContent?.includes('Nozzle'));
-      expect(nozzleSelector).toBeDefined();
-      expect(nozzleSelector).toBeDisabled();
-      fireEvent.click(nozzleSelector!);
-      expect(screen.queryByText('Set Nozzle Selection')).not.toBeInTheDocument();
-    });
   });
 
   describe('fan badges', () => {

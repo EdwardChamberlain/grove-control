@@ -3848,11 +3848,6 @@ function PrinterCard({
   });
   const lastPrint = lastPrints?.[0];
   const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
-  useEffect(() => {
-    if (isPrintingOrPaused) {
-      setStatusControlMenu(menu => menu === 'nozzle-select' ? null : menu);
-    }
-  }, [isPrintingOrPaused]);
   const needsPlateClear = requirePlateClear && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
   const showClearPlateButton = status?.connected && needsPlateClear && !isPrintingOrPaused;
   const activePrintName = status?.current_print && isPrintingOrPaused
@@ -5646,22 +5641,12 @@ function PrinterCard({
                         activeNozzle={activeNozzle}
                         filamentInfo={filamentInfo}
                       >
-                        <button
-                          type="button"
-                          disabled={!canUseStatusControls || isPrintingOrPaused}
+                        <div
                           className={`relative text-center px-3 py-1.5 bg-bambu-dark rounded-lg h-full flex flex-col justify-center items-center transition-colors ${
-                            canUseStatusControls && !isPrintingOrPaused
-                              ? 'cursor-pointer hover:bg-bambu-dark-tertiary'
-                              : 'cursor-not-allowed opacity-80'
+                            canUseStatusControls ? 'cursor-pointer hover:bg-bambu-dark-tertiary' : 'cursor-default opacity-80'
                           }`}
-                          title={
-                            !canUseStatusControls
-                              ? statusControlTitle
-                              : isPrintingOrPaused
-                                ? t('printers.bedJog.disabledWhilePrinting')
-                                : t('printers.activeNozzle', { nozzle: activeNozzle === 'L' ? t('common.left') : t('common.right') })
-                          }
-                          onClick={() => canUseStatusControls && !isPrintingOrPaused && setStatusControlMenu(statusControlMenu === 'nozzle-select' ? null : 'nozzle-select')}
+                          title={canUseStatusControls ? t('printers.activeNozzle', { nozzle: activeNozzle === 'L' ? t('common.left') : t('common.right') }) : statusControlTitle}
+                          onClick={() => canUseStatusControls && setStatusControlMenu(statusControlMenu === 'nozzle-select' ? null : 'nozzle-select')}
                         >
                           <NozzleIcon className="w-3.5 h-3.5 mb-0.5 text-amber-400" />
                           <div className="flex items-center gap-2">
@@ -5689,7 +5674,7 @@ function PrinterCard({
                               onSubmit={(extruder) => selectExtruderMutation.mutate(extruder)}
                             />
                           )}
-                        </button>
+                        </div>
                       </DualNozzleHoverCard>
                     )}
                     {/* H2C nozzle rack (tool-changer dock) — only show when rack nozzles exist (IDs >= 2) */}
