@@ -893,7 +893,7 @@ function PrinterListRow({
     ? t('common.loading', 'Loading')
     : !status.connected
     ? t('printers.connection.offline')
-    : getStatusDisplay(status.state, status.stg_cur_name);
+    : status.preheating ? t('heatSoak.status') : getStatusDisplay(status.state, status.stg_cur_name);
   const activePrintName = status?.current_print && isPrintingOrPaused
     ? formatPrintName(status.subtask_name || status.current_print || null, status.gcode_file, t)
     : null;
@@ -4385,7 +4385,7 @@ function PrinterCard({
                         />
                         <div className="flex h-24 max-[520px]:h-20 min-w-0 flex-1 flex-col justify-between pt-1">
                           <div className="flex min-h-[18px] items-center gap-2 pr-8">
-                            <p className="min-w-0 truncate text-sm text-bambu-gray">{getStatusDisplay(status.state, status.stg_cur_name)}</p>
+                            <p className="min-w-0 truncate text-sm text-bambu-gray">{status.preheating ? t('heatSoak.status') : getStatusDisplay(status.state, status.stg_cur_name)}</p>
                           </div>
                           <p className={`min-h-[18px] truncate pr-8 text-sm ${printName ? 'text-white' : 'text-bambu-gray/70'}`}>
                             {printName || t('printers.noActiveJob', 'No active job')}

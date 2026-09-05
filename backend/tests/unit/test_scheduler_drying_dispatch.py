@@ -144,6 +144,7 @@ async def test_printer_targeted_route_applies_drying_gate_before_dispatch():
     with (
         patch("backend.app.services.print_scheduler.async_session") as session_ctx,
         patch.object(scheduler, "_recover_stale_dispatches", new=AsyncMock()),
+        patch.object(scheduler, "_check_heat_soaks", new=AsyncMock(return_value=set())),
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
         patch.object(scheduler, "_is_printer_idle", return_value=True),
         patch.object(scheduler, "_ams_mapping_uses_compatible_materials", return_value=True),
@@ -174,6 +175,7 @@ async def test_model_selected_route_applies_drying_gate_after_assignment_before_
     with (
         patch("backend.app.services.print_scheduler.async_session") as session_ctx,
         patch.object(scheduler, "_recover_stale_dispatches", new=AsyncMock()),
+        patch.object(scheduler, "_check_heat_soaks", new=AsyncMock(return_value=set())),
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
         patch.object(
             scheduler,

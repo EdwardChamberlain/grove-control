@@ -1,4 +1,12 @@
 export default {
+  heatSoak: {
+    option: "チャンバー予熱",
+    temperature: "目標温度 (°C)",
+    duration: "保持時間（分）",
+    status: "予熱中",
+    hint: "30～60°C、1～120分。プリンターがヒーターの目標値を確認するとタイマーが開始します。",
+    bedOnly: "!! この機種にはチャンバーヒーターがありません。ベッドのみで加熱します。",
+  },
   // Navigation
   nav: {
     printers: 'プリンター',

@@ -1,4 +1,12 @@
 export default {
+  heatSoak: {
+    option: "Préchauffage de la chambre",
+    temperature: "Température cible (°C)",
+    duration: "Durée (minutes)",
+    status: "Préchauffage",
+    hint: "30–60°C, 1–120 minutes. Le minuteur démarre après confirmation des consignes par l’imprimante.",
+    bedOnly: "!! Chauffage de chambre indisponible sur cette machine. Seul le plateau sera utilisé pour chauffer.",
+  },
   // Navigation
   nav: {
     printers: 'Imprimantes',

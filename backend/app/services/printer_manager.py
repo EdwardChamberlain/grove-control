@@ -1276,6 +1276,7 @@ def printer_state_to_dict(
         # Plate-clear gate (#939). Lives on the PrinterManager rather than PrinterState,
         # so surface it here — without this, WebSocket merges drop the flag and the
         # "Clear Plate" button only appears when the 30 s REST fallback poll runs.
+        "preheating": bool(state.preheating),
         "awaiting_plate_clear": printer_manager.is_awaiting_plate_clear(printer_id) if printer_id else False,
         # Let clients refetch the exact completion summary when the completion
         # handler finishes matching the archive after the initial gate event (#43).

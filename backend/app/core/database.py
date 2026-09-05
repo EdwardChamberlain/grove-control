@@ -432,6 +432,13 @@ _QUEUE_INSERT_COLUMN_DEFINITIONS: dict[str, tuple[str, str]] = {
     "position": ("INTEGER DEFAULT 0", "INTEGER DEFAULT 0"),
     "scheduled_time": ("DATETIME", "TIMESTAMP"),
     "manual_start": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
+    "chamber_heat_soak": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
+    "heat_soak_temperature": ("INTEGER DEFAULT 60", "INTEGER DEFAULT 60"),
+    "heat_soak_minutes": ("INTEGER DEFAULT 30", "INTEGER DEFAULT 30"),
+    "preheat_owner": ("VARCHAR(36)", "VARCHAR(36)"),
+    "preheat_requested_at": ("DATETIME", "TIMESTAMP"),
+    "preheat_checked_at": ("DATETIME", "TIMESTAMP"),
+    "preheat_started_at": ("DATETIME", "TIMESTAMP"),
     "wait_for_drying_complete": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
     "require_previous_success": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
     "auto_off_after": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
@@ -813,11 +820,11 @@ async def _ensure_active_queue_printer_reservation(conn) -> None:
                 "WITH ranked_active_queue AS ("
                 " SELECT id, ROW_NUMBER() OVER ("
                 "   PARTITION BY printer_id"
-                "   ORDER BY CASE status WHEN 'printing' THEN 0 ELSE 1 END,"
+                "   ORDER BY CASE status WHEN 'printing' THEN 0 WHEN 'dispatching' THEN 1 ELSE 2 END,"
                 "            COALESCE(started_at, dispatched_at, created_at) DESC, id DESC"
                 " ) AS reservation_rank"
                 " FROM print_queue"
-                " WHERE printer_id IS NOT NULL AND status IN ('dispatching', 'printing')"
+                " WHERE printer_id IS NOT NULL AND status IN ('preheating', 'dispatching', 'printing')"
                 ")"
                 " UPDATE print_queue"
                 " SET status = 'failed', dispatched_at = NULL, started_at = NULL,"
@@ -830,11 +837,12 @@ async def _ensure_active_queue_printer_reservation(conn) -> None:
     if isinstance(recovered_count, int) and recovered_count > 0:
         logger.warning("Recovered %d duplicate active print_queue reservation(s)", recovered_count)
 
+    # A new name upgrades the old predicate without dropping the existing guard.
     await _safe_execute(
         conn,
-        "CREATE UNIQUE INDEX IF NOT EXISTS uq_print_queue_active_printer "
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_print_queue_active_printer_heat_soak "
         "ON print_queue (printer_id) "
-        "WHERE printer_id IS NOT NULL AND status IN ('dispatching', 'printing')",
+        "WHERE printer_id IS NOT NULL AND status IN ('preheating', 'dispatching', 'printing')",
     )
 
 
@@ -1118,6 +1126,25 @@ async def run_migrations(conn):
         await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN dispatched_at TIMESTAMP")
 
     await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN dispatch_subtask_id VARCHAR(32)")
+
+    for column in (
+        "chamber_heat_soak",
+        "heat_soak_temperature",
+        "heat_soak_minutes",
+        "preheat_owner",
+        "preheat_requested_at",
+        "preheat_checked_at",
+        "preheat_started_at",
+    ):
+        sql_type = _QUEUE_INSERT_COLUMN_DEFINITIONS[column][0 if is_sqlite() else 1]
+        await _safe_execute(conn, f"ALTER TABLE print_queue ADD COLUMN {column} {sql_type}")
+    boolean_default = "0" if is_sqlite() else "false"
+    await _safe_execute(
+        conn, f"ALTER TABLE printers ADD COLUMN heat_soak_shutdown_pending BOOLEAN DEFAULT {boolean_default}"
+    )
+
+    timestamp_type = "DATETIME" if is_sqlite() else "TIMESTAMP"
+    await _safe_execute(conn, f"ALTER TABLE printers ADD COLUMN heat_soak_shutdown_at {timestamp_type}")
 
     await _ensure_active_queue_printer_reservation(conn)
 

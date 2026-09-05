@@ -1,4 +1,12 @@
 export default {
+  heatSoak: {
+    option: "Pré-aquecimento da câmara",
+    temperature: "Temperatura alvo (°C)",
+    duration: "Duração (minutos)",
+    status: "Pré-aquecendo",
+    hint: "30–60°C, 1–120 minutos. O temporizador começa quando a impressora confirma as temperaturas alvo.",
+    bedOnly: "!! Aquecedor de câmara indisponível nesta máquina. O aquecimento será feito somente pela mesa.",
+  },
   // Navigation
   nav: {
     printers: 'Impressoras',

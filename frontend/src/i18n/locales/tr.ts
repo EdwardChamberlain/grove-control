@@ -1,4 +1,12 @@
 export default {
+  heatSoak: {
+    option: "Hazne ön ısıtma",
+    temperature: "Hedef sıcaklık (°C)",
+    duration: "Bekletme süresi (dakika)",
+    status: "Ön ısıtılıyor",
+    hint: "30–60°C, 1–120 dakika. Zamanlayıcı, yazıcı ısıtıcı hedeflerini doğruladığında başlar.",
+    bedOnly: "!! Bu makinede hazne ısıtıcısı yok. Isıtma yalnızca tabla ile yapılacaktır.",
+  },
   // Navigasyon
   nav: {
     printers: 'Yazıcılar',

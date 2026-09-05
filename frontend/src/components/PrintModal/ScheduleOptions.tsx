@@ -11,7 +11,7 @@ import {
   type DateFormat,
 } from '../../utils/date';
 
-type ToggleKey = Exclude<keyof ScheduleOptions, 'scheduledTime'>;
+type ToggleKey = Exclude<keyof ScheduleOptions, 'scheduledTime' | 'heatSoakTemperature' | 'heatSoakMinutes'>;
 
 /** Collapsible queue controls, including an optional do-not-start-before time. */
 export function ScheduleOptionsPanel({
@@ -22,6 +22,7 @@ export function ScheduleOptionsPanel({
   canInsertAtTop = false,
   showAutoOff = false,
   hasGcodeSnippets = false,
+  hasChamberHeater = false,
 }: ScheduleOptionsProps) {
   const { t, i18n } = useTranslation();
   const [isExpanded, setIsExpanded] = useState(false);
@@ -43,6 +44,7 @@ export function ScheduleOptionsPanel({
     ...(canInsertAtTop ? [{ key: 'insertAtTop' as const, label: t('printModal.insertAtTop', 'Insert at top of queue') }] : []),
     { key: 'requireManualStart', label: t('printModal.requireManualStart') },
     { key: 'requirePreviousSuccess', label: t('printModal.requirePreviousSuccess') },
+    { key: 'chamberHeatSoak', label: t('heatSoak.option') },
     { key: 'waitForDryingComplete', label: t('printModal.waitForDryingComplete') },
     ...(showAutoOff ? [{ key: 'autoOffAfter' as const, label: t('printModal.autoOffAfter'), disabled: !canControlPrinter }] : []),
     ...(hasGcodeSnippets ? [{ key: 'gcodeInjection' as const, label: t('printModal.gcodeInjection', 'Inject auto-print G-code') }] : []),
@@ -194,6 +196,27 @@ export function ScheduleOptionsPanel({
               </div>
             </label>
           ))}
+
+          {options.chamberHeatSoak && (
+            <div className="space-y-2 rounded-lg border border-amber-500/20 p-3">
+              <div className="grid grid-cols-2 gap-3">
+                <label className="text-sm text-bambu-gray">
+                  {t('heatSoak.temperature')}
+                  <input type="number" min={30} max={60} step={1} value={Number.isNaN(options.heatSoakTemperature) ? '' : options.heatSoakTemperature}
+                    onChange={(event) => onChange({ ...options, heatSoakTemperature: event.target.valueAsNumber })}
+                    className="mt-1 w-full rounded-lg border border-bambu-dark-tertiary bg-bambu-dark px-3 py-2 text-white" />
+                </label>
+                <label className="text-sm text-bambu-gray">
+                  {t('heatSoak.duration')}
+                  <input type="number" min={1} max={120} step={1} value={Number.isNaN(options.heatSoakMinutes) ? '' : options.heatSoakMinutes}
+                    onChange={(event) => onChange({ ...options, heatSoakMinutes: event.target.valueAsNumber })}
+                    className="mt-1 w-full rounded-lg border border-bambu-dark-tertiary bg-bambu-dark px-3 py-2 text-white" />
+                </label>
+              </div>
+              <p className="text-xs text-bambu-gray">{t('heatSoak.hint')}</p>
+              {!hasChamberHeater && <p className="text-xs text-amber-300">{t('heatSoak.bedOnly')}</p>}
+            </div>
+          )}
 
           {options.postponePrint && (
             <div>

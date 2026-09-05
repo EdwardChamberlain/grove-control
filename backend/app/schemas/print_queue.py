@@ -51,6 +51,9 @@ class PrintQueueItemCreate(BaseModel):
     require_previous_success: bool = False
     auto_off_after: bool = False  # Power off printer after print completes
     manual_start: bool = False  # Requires manual trigger to start (staged)
+    chamber_heat_soak: bool = False
+    heat_soak_temperature: int = Field(default=60, ge=30, le=60, strict=True)
+    heat_soak_minutes: int = Field(default=30, ge=1, le=120, strict=True)
     wait_for_drying_complete: bool = False  # Leave active drying running and wait for it to finish
     insert_at_top: bool = False  # Insert ahead of other pending items in the same queue scope
     insert_position: int | None = None  # 1-indexed insertion position for priority queueing
@@ -109,6 +112,9 @@ class PrintQueueItemUpdate(BaseModel):
     require_previous_success: bool | None = None
     auto_off_after: bool | None = None
     manual_start: bool | None = None
+    chamber_heat_soak: bool = False
+    heat_soak_temperature: int = Field(default=60, ge=30, le=60, strict=True)
+    heat_soak_minutes: int = Field(default=30, ge=1, le=120, strict=True)
     wait_for_drying_complete: bool | None = None
     ams_mapping: list[int] | None = None
     plate_id: int | None = None
@@ -144,6 +150,9 @@ class PrintQueueItemResponse(BaseModel):
     require_previous_success: bool
     auto_off_after: bool
     manual_start: bool
+    chamber_heat_soak: bool = False
+    heat_soak_temperature: int = Field(default=60, ge=30, le=60, strict=True)
+    heat_soak_minutes: int = Field(default=30, ge=1, le=120, strict=True)
     wait_for_drying_complete: bool = False
     # True when the dispatch scheduler last evaluated this item and the
     # assigned spool could not satisfy at least one slot's required grams
@@ -163,7 +172,8 @@ class PrintQueueItemResponse(BaseModel):
     timelapse: bool = False
     use_ams: bool = True
     nozzle_offset_cali: bool = True
-    status: Literal["pending", "dispatching", "printing", "completed", "failed", "skipped", "cancelled"]
+    status: Literal["pending", "preheating", "dispatching", "printing", "completed", "failed", "skipped", "cancelled"]
+    preheat_started_at: UTCDatetime = None
     dispatched_at: UTCDatetime
     started_at: UTCDatetime
     completed_at: UTCDatetime
@@ -263,6 +273,9 @@ class PrintQueueBulkUpdate(BaseModel):
     require_previous_success: bool | None = None
     auto_off_after: bool | None = None
     manual_start: bool | None = None
+    chamber_heat_soak: bool = False
+    heat_soak_temperature: int = Field(default=60, ge=30, le=60, strict=True)
+    heat_soak_minutes: int = Field(default=30, ge=1, le=120, strict=True)
     wait_for_drying_complete: bool | None = None
     # Print options
     bed_levelling: bool | None = None

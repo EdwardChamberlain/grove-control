@@ -43,6 +43,15 @@ class PrintQueueItem(Base):
     # before dispatch. True leaves drying alone and waits for natural completion.
     wait_for_drying_complete: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
+    # Explicit queue-only heat soak. Timer begins after firmware target confirmation.
+    chamber_heat_soak: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    heat_soak_temperature: Mapped[int] = mapped_column(Integer, default=60, server_default="60")
+    heat_soak_minutes: Mapped[int] = mapped_column(Integer, default=30, server_default="30")
+    preheat_owner: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    preheat_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    preheat_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    preheat_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     # Conditions
     require_previous_success: Mapped[bool] = mapped_column(Boolean, default=False)
 
@@ -97,7 +106,7 @@ class PrintQueueItem(Base):
     # Nozzle offset calibration — dual-nozzle printers only, MQTT-gated (#1682)
     nozzle_offset_cali: Mapped[bool] = mapped_column(Boolean, default=True)
 
-    # Status: pending, dispatching, printing, completed, failed, skipped, cancelled
+    # Status: pending, preheating, dispatching, printing, completed, failed, skipped, cancelled
     status: Mapped[str] = mapped_column(String(20), default="pending")
 
     # Cleared by the per-printer "Resume after failure" action (#1818) so the

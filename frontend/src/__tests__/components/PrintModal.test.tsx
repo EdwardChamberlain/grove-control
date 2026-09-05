@@ -772,6 +772,45 @@ describe('PrintModal', () => {
       expect(screen.getByRole('checkbox', { name: /insert at top of queue/i })).toBeInTheDocument();
     });
 
+    it('defaults heat soak off, shows bed-only guidance, and submits explicit settings', async () => {
+      let body: Record<string, unknown> | undefined;
+      server.use(http.post('/api/v1/queue/', async ({ request }) => {
+        body = await request.json() as Record<string, unknown>;
+        return HttpResponse.json({ id: 1, status: 'pending' });
+      }));
+      const user = userEvent.setup();
+      render(<PrintModal mode="create" archiveId={1} initialSelectedPrinterIds={[1]} onClose={mockOnClose} />);
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      const toggle = screen.getByRole('checkbox', { name: 'Chamber heat-soak' });
+      expect(toggle).not.toBeChecked();
+      expect(screen.queryByRole('spinbutton', { name: 'Target temperature (°C)' })).not.toBeInTheDocument();
+      await user.click(toggle);
+      expect(screen.getByRole('spinbutton', { name: 'Target temperature (°C)' })).toHaveValue(60);
+      expect(screen.getByRole('spinbutton', { name: 'Soak duration (minutes)' })).toHaveValue(30);
+      expect(screen.getByText(/Chamber Heater not available on this machine/)).toBeInTheDocument();
+      fireEvent.change(screen.getByRole('spinbutton', { name: 'Target temperature (°C)' }), { target: { value: '55' } });
+      fireEvent.change(screen.getByRole('spinbutton', { name: 'Soak duration (minutes)' }), { target: { value: '15' } });
+      await user.click(screen.getByRole('button', { name: /^print$/i }));
+      await waitFor(() => expect(body).toMatchObject({ chamber_heat_soak: true, heat_soak_temperature: 55, heat_soak_minutes: 15 }));
+    });
+
+    it('restores heat-soak settings when editing and rejects invalid ranges', async () => {
+      const user = userEvent.setup();
+      render(<PrintModal mode="edit-queue-item" queueItem={createMockQueueItem({ chamber_heat_soak: true, heat_soak_temperature: 50, heat_soak_minutes: 10 })} onClose={mockOnClose} />);
+      await user.click(screen.getByRole('button', { name: /queue options/i }));
+      expect(screen.getByRole('checkbox', { name: 'Chamber heat-soak' })).toBeChecked();
+      const temperature = screen.getByRole('spinbutton', { name: 'Target temperature (°C)' });
+      expect(temperature).toHaveValue(50);
+      expect(screen.getByRole('spinbutton', { name: 'Soak duration (minutes)' })).toHaveValue(10);
+      fireEvent.change(temperature, { target: { value: '61' } });
+      expect(screen.getByRole('button', { name: /save/i })).toBeDisabled();
+      fireEvent.change(temperature, { target: { value: '' } });
+      expect(screen.getByRole('button', { name: /save/i })).toBeDisabled();
+      fireEvent.change(temperature, { target: { value: '60' } });
+      fireEvent.change(screen.getByRole('spinbutton', { name: 'Soak duration (minutes)' }), { target: { value: '0' } });
+      expect(screen.getByRole('button', { name: /save/i })).toBeDisabled();
+    });
+
     it('offers an ungated wait-for-drying policy and defaults it off', async () => {
       const user = userEvent.setup();
       render(

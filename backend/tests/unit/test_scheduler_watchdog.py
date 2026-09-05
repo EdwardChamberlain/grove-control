@@ -440,6 +440,7 @@ class TestDispatchConfirmationScheduling:
             patch("backend.app.services.print_scheduler.spawn_background_task", side_effect=spawn),
             patch("backend.app.services.print_scheduler.async_session") as session_factory,
             patch.object(scheduler, "_recover_stale_dispatches", new=AsyncMock()),
+            patch.object(scheduler, "_check_heat_soaks", new=AsyncMock(return_value=set())),
             patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
             patch.object(scheduler, "_is_printer_idle", return_value=True),
             patch("backend.app.services.print_scheduler.printer_manager.is_connected", return_value=True),

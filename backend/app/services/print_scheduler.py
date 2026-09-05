@@ -30,6 +30,7 @@ from backend.app.services.bambu_ftp import (
     upload_file_async,
     with_ftp_retry,
 )
+from backend.app.services.chamber_heat_soak import ChamberHeatSoak, abort_heat_soak, lock_queue_item
 from backend.app.services.filament_deficit import compute_deficit_for_queue_item
 from backend.app.services.filament_requirements import canonical_filament_type
 from backend.app.services.notification_service import notification_service
@@ -104,6 +105,7 @@ class PrintScheduler:
 
     def __init__(self):
         self._running = False
+        self._heat_soak = ChamberHeatSoak()
         self._check_interval = 30  # seconds
         self._power_on_wait_time = 180  # seconds to wait for printer after power on (3 min)
         self._power_on_check_interval = 10  # seconds between connection checks
@@ -255,9 +257,16 @@ class PrintScheduler:
         finally:
             self._terminal_dispatch_recoveries.discard(queue_item_id)
 
+    async def _check_heat_soaks(self, db: AsyncSession) -> set[int]:
+        ready = await self._heat_soak.check(db)
+        for item_id in ready:
+            spawn_background_task(self._dispatch_after_heat_soak(item_id), name=f"heat-soak-dispatch-{item_id}")
+        return set((await db.scalars(select(Printer.id).where(Printer.heat_soak_shutdown_pending.is_(True)))).all())
+
     async def check_queue(self):
         """Check for prints ready to start."""
         async with async_session() as db:
+            shutdown_printers = await self._check_heat_soaks(db)
             await self._recover_stale_dispatches(db)
 
             # Check if shortest-job-first scheduling is enabled
@@ -290,9 +299,18 @@ class PrintScheduler:
             # Read plate-clear setting once per queue check
             require_plate_clear = await self._get_bool_setting(db, "require_plate_clear", default=True)
 
+            busy_result = await db.execute(
+                select(PrintQueueItem.printer_id)
+                .where(PrintQueueItem.status.in_(("preheating", "dispatching", "printing")))
+                .where(PrintQueueItem.printer_id.is_not(None))
+            )
+            busy_printers: set[int] = {pid for (pid,) in busy_result.all() if pid is not None}
+
+            busy_printers.update(shutdown_printers)
+
             if not items:
                 # No pending items — still check auto-drying on idle printers
-                await self._check_auto_drying(db, [], set(), require_plate_clear=require_plate_clear)
+                await self._check_auto_drying(db, [], busy_printers, require_plate_clear=require_plate_clear)
                 return
 
             logger.info(
@@ -310,12 +328,6 @@ class PrintScheduler:
             # Without this guard, two pending items targeting the same printer
             # (e.g. a batch with quantity>1) both end up on the same printer —
             # surfaced via the "BUG: Multiple queue items" warning in on_print_complete.
-            busy_result = await db.execute(
-                select(PrintQueueItem.printer_id)
-                .where(PrintQueueItem.status.in_(("dispatching", "printing")))
-                .where(PrintQueueItem.printer_id.is_not(None))
-            )
-            busy_printers: set[int] = {pid for (pid,) in busy_result.all() if pid is not None}
 
             # Log skip reasons once per queue check (not per item)
             skip_reasons: dict[str, int] = {}
@@ -580,6 +592,14 @@ class PrintScheduler:
                                     reason="Previous print failed or was aborted",
                                     db=db,
                                 )
+                                continue
+
+                        # Re-read under a write lock before assigning a model job.
+                        # A different scheduler may already have reserved this row.
+                        if getattr(item, "chamber_heat_soak", False) is True:
+                            item = await lock_queue_item(db, item.id)
+                            if not item or item.status != "pending":
+                                await db.rollback()
                                 continue
 
                         # Assign printer and start - clear waiting reason
@@ -2003,6 +2023,8 @@ class PrintScheduler:
             if not state:
                 logger.debug("Auto-drying: printer %d skipped — no state", pid)
                 continue
+            if getattr(state, "preheating", False) is True or printer.heat_soak_shutdown_pending is True:
+                continue
             model = printer_manager.get_model(pid)
             firmware = state.firmware_version
 
@@ -2427,7 +2449,34 @@ class PrintScheduler:
         if owner:
             printer_manager.set_current_print_user(item.printer_id, owner.id, owner.username)
 
-    async def _start_print(self, db: AsyncSession, item: PrintQueueItem):
+    async def _dispatch_after_heat_soak(self, item_id: int):
+        async with async_session() as db:
+            item = await lock_queue_item(db, item_id)
+            if not item or item.status != "dispatching" or item.preheat_owner != self._heat_soak.owner:
+                await db.rollback()
+                return
+            # Consume the handoff exactly once before yielding to file preparation.
+            item.preheat_owner = None
+            await db.commit()
+            try:
+                await self._start_print(db, item, heat_soak_complete=True)
+            finally:
+                # Any failure/defer before project_file must turn the heaters off.
+                await db.rollback()
+                item = await lock_queue_item(db, item_id)
+                if (
+                    item
+                    and item.status not in ("printing", "completed")
+                    and (item.status != "dispatching" or not item.dispatch_subtask_id)
+                ):
+                    await abort_heat_soak(
+                        db,
+                        item,
+                        item.error_message or "Heat-soak dispatch interrupted; retry required",
+                        status="cancelled" if item.status == "cancelled" else "pending",
+                    )
+
+    async def _start_print(self, db: AsyncSession, item: PrintQueueItem, *, heat_soak_complete: bool = False):
         """Upload file and start print for a queue item.
 
         Supports two sources:
@@ -2435,6 +2484,21 @@ class PrintScheduler:
         - library_file_id: Print from a library file (file manager)
         """
         logger.info("Starting queue item %s", item.id)
+
+        if getattr(item, "chamber_heat_soak", False) is True and not heat_soak_complete:
+            await self._heat_soak.stage(db, item)
+            return
+
+        if heat_soak_complete:
+            item = await lock_queue_item(db, item.id)
+            if (
+                not item
+                or item.status != "dispatching"
+                or item.preheat_owner is not None
+                or item.dispatch_subtask_id is not None
+            ):
+                await db.rollback()
+                return
 
         # Get printer first (needed for both paths)
         result = await db.execute(select(Printer).where(Printer.id == item.printer_id))
@@ -2707,6 +2771,12 @@ class PrintScheduler:
             )
             return
 
+        if heat_soak_complete:
+            item = await lock_queue_item(db, item.id)
+            if not item or item.status != "dispatching" or not printer_manager.is_connected(item.printer_id):
+                await db.rollback()
+                return
+
         # Propagate the queue item's owner into printer_manager so the
         # print-complete callback can credit the user in the PrintLogEntry
         # (#1670). `created_by_id` is set either at queue-add time (UI-added
@@ -2814,6 +2884,12 @@ class PrintScheduler:
             )
             return
 
+        if heat_soak_complete:
+            item = await lock_queue_item(db, item.id)
+            if not item or item.status != "dispatching" or not printer_manager.is_connected(item.printer_id):
+                await db.rollback()
+                return
+
         started = printer_manager.start_print(
             item.printer_id,
             remote_filename,
@@ -2829,6 +2905,9 @@ class PrintScheduler:
             nozzle_mapping=item.nozzle_mapping,
             submission_id=dispatch_subtask_id,
         )
+
+        if heat_soak_complete:
+            await db.commit()
 
         if started:
             logger.info("Queue item %s: Print command sent successfully - %s", item.id, filename)

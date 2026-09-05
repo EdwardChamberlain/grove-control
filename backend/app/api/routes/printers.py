@@ -406,6 +406,14 @@ async def delete_printer(
     if not printer:
         raise HTTPException(404, "Printer not found")
 
+    active_preheat = await db.scalar(
+        select(PrintQueueItem.id)
+        .where(PrintQueueItem.printer_id == printer_id, PrintQueueItem.status == "preheating")
+        .limit(1)
+    )
+    if active_preheat or printer.heat_soak_shutdown_pending:
+        raise HTTPException(409, "Stop chamber heat soak and wait for heater shutdown before deleting this printer")
+
     printer_manager.disconnect_printer(printer_id)
 
     if delete_archives:
@@ -739,11 +747,18 @@ async def get_printer_status(
         select(User.username)
         .join(PrintQueueItem, PrintQueueItem.created_by_id == User.id)
         .where(PrintQueueItem.printer_id == printer_id)
-        .where(PrintQueueItem.status.in_(["dispatching", "printing"]))
+        .where(PrintQueueItem.status.in_(["preheating", "dispatching", "printing"]))
         .order_by(PrintQueueItem.position, PrintQueueItem.id)
         .limit(1)
     )
     current_queue_owner = current_queue_owner_result.scalar_one_or_none()
+    preheating = bool(
+        await db.scalar(
+            select(PrintQueueItem.id)
+            .where(PrintQueueItem.printer_id == printer_id, PrintQueueItem.status == "preheating")
+            .limit(1)
+        )
+    )
 
     # Resolve the exact terminal print holding the plate-clear gate. Do not use
     # the regular archives listing here: that endpoint is intentionally scoped
@@ -807,6 +822,7 @@ async def get_printer_status(
         stg_cur_name=get_derived_status_name(state, printer.model),
         stg=state.stg,
         airduct_mode=state.airduct_mode,
+        preheating=preheating,
         speed_level=state.speed_level,
         chamber_light=state.chamber_light,
         active_extruder=state.active_extruder,
