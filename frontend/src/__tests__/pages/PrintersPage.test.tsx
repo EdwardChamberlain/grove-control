@@ -1059,6 +1059,53 @@ describe('PrintersPage', () => {
       expect(screen.getByText('Left Temp')).toBeInTheDocument();
       expect(screen.getByText('Right Temp')).toBeInTheDocument();
       expect(screen.getByTitle('Active: Right nozzle')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByTitle('Active: Right nozzle'));
+      expect(await screen.findByText('Set Nozzle Selection')).toBeInTheDocument();
+    });
+
+    it.each(['RUNNING', 'PAUSE'])('disables dual-nozzle selection while the printer is %s', async (state) => {
+      localStorage.setItem('printerCardSize', '2');
+      const dualNozzlePrinter = { ...mockPrinters[0], model: 'H2D', nozzle_count: 2 };
+      const dualNozzleStatus = {
+        ...mockPrinterStatus,
+        state,
+        active_extruder: 0,
+        current_print: 'active-print.3mf',
+        temperatures: {
+          ...mockPrinterStatus.temperatures,
+          nozzle_2: 32,
+        },
+        nozzle_rack: [
+          { id: 0, nozzle_type: 'HS', nozzle_diameter: '0.4', wear: 5, stat: 1, max_temp: 300, serial_number: '', filament_color: '', filament_id: '', filament_type: '' },
+          { id: 1, nozzle_type: 'HS', nozzle_diameter: '0.4', wear: 3, stat: 1, max_temp: 300, serial_number: '', filament_color: '', filament_id: '', filament_type: '' },
+        ],
+      };
+      let selectionRequests = 0;
+
+      server.use(
+        http.get('/api/v1/printers/', () => HttpResponse.json([dualNozzlePrinter])),
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json(dualNozzleStatus)),
+        http.post('/api/v1/printers/:id/select-extruder', () => {
+          selectionRequests += 1;
+          return HttpResponse.json({ success: true, message: 'Nozzle selected' });
+        }),
+      );
+
+      render(<PrintersPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('L / R')).toBeInTheDocument();
+      });
+
+      const nozzleSelector = screen.getByText('Nozzle').closest('button');
+      expect(nozzleSelector).not.toBeNull();
+      expect(nozzleSelector).toBeDisabled();
+      expect(nozzleSelector).toHaveAttribute('title', 'Disabled while printing');
+      fireEvent.click(nozzleSelector!);
+
+      expect(selectionRequests).toBe(0);
+      expect(screen.queryByText('Set Nozzle Selection')).not.toBeInTheDocument();
     });
 
     it('opens heater history from the shared cockpit thermal controls', async () => {
