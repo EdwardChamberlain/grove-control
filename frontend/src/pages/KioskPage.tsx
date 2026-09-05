@@ -96,10 +96,12 @@ function KioskPrinterTile({
 
       <div className="mt-3 min-w-0">
         <p className="truncate text-sm text-white" title={jobName}>{jobName}</p>
-        <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-bambu-gray" title={owner || t('kiosk.unknownOwner')}>
-          <User className="h-3 w-3 shrink-0" />
-          {owner || t('kiosk.unknownOwner')}
-        </p>
+        {owner && (
+          <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-bambu-gray" title={t('queue.addedBy', { name: owner })}>
+            <User className="h-3 w-3 shrink-0" />
+            {owner}
+          </p>
+        )}
       </div>
 
       <div className="mt-3 flex items-center gap-2">
@@ -274,7 +276,15 @@ function KioskQueueSection({
       ) : (
         <div className={`relative min-h-0 ${fillAvailableHeight ? 'flex-1' : ''}`}>
           <div data-testid={`${testId}-list`} ref={ref} className={`${fillAvailableHeight ? 'h-full' : ''} space-y-2 overflow-hidden ${listClassName || ''}`}>
-            {items.map((item) => <KioskQueueCard key={item.id} item={item} status={item.printer_id ? statuses.get(item.printer_id) : undefined} timeFormat={timeFormat} t={t} />)}
+            {items.map((item) => (
+              <KioskQueueCard
+                key={item.id}
+                item={item}
+                status={item.printer_id ? statuses.get(item.printer_id) : undefined}
+                timeFormat={timeFormat}
+                t={t}
+              />
+            ))}
           </div>
           {hiddenItemCount > 0 && (
             <div data-testid={`${testId}-overflow`} className="pointer-events-none absolute inset-x-0 bottom-0 flex h-12 items-end justify-center bg-gradient-to-t from-bambu-dark to-transparent pb-1" aria-label={t('kiosk.moreJobs', { count: hiddenItemCount })}>
@@ -311,22 +321,17 @@ export function KioskPage() {
   const pendingItems = useMemo(() => queue.filter((item) => item.status === 'pending').sort((a, b) => a.position - b.position), [queue]);
   const printingItemsByPrinter = useMemo(() => new Map(printingItems.filter((item) => item.printer_id != null).map((item) => [item.printer_id!, item])), [printingItems]);
 
-  const ownerQueries = useQueries({
-    queries: printers.map((printer) => {
-      const status = statuses.get(printer.id);
-      const queueItem = printingItemsByPrinter.get(printer.id);
-      return {
-        queryKey: ['currentPrintUser', printer.id],
-        queryFn: () => api.getCurrentPrintUser(printer.id),
-        enabled: isActivePrint(status) && !queueItem?.created_by_username,
-        staleTime: 30_000,
-      };
-    }),
-  });
-  const owners = useMemo(() => new Map(printers.map((printer, index) => {
-    const queueOwner = printingItemsByPrinter.get(printer.id)?.created_by_username;
-    return [printer.id, queueOwner || ownerQueries[index]?.data?.username];
-  })), [ownerQueries, printers, printingItemsByPrinter]);
+  const owners = useMemo(() => new Map(printers.map((printer) => {
+    const status = statuses.get(printer.id);
+    const queueOwner = printingItemsByPrinter.get(printer.id)?.created_by_username ?? undefined;
+    const plateClearOwner = status?.awaiting_plate_clear_print?.created_by_username ?? undefined;
+    const owner = isActivePrint(status)
+      ? status?.current_queue_owner || queueOwner
+      : status?.awaiting_plate_clear
+        ? plateClearOwner
+        : undefined;
+    return [printer.id, owner];
+  })), [printers, printingItemsByPrinter, statuses]);
 
   const prioritizedPrinters = useMemo(() => [...printers].sort((a, b) => {
     const priority = (printer: PrinterRecord) => {

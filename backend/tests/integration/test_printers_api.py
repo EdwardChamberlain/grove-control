@@ -355,6 +355,41 @@ class TestPrintersAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_get_printer_status_includes_active_queue_owner(
+        self, async_client: AsyncClient, printer_factory, db_session
+    ):
+        """The status projection includes the active queue owner's username."""
+        from backend.app.models.print_queue import PrintQueueItem
+        from backend.app.models.user import User
+        from backend.app.services.bambu_mqtt import PrinterState
+
+        printer = await printer_factory()
+        owner = User(username="status_queue_owner", password_hash="test-hash")
+        db_session.add(owner)
+        await db_session.flush()
+        db_session.add(
+            PrintQueueItem(
+                printer_id=printer.id,
+                position=1,
+                status="printing",
+                created_by_id=owner.id,
+            )
+        )
+        await db_session.commit()
+
+        state = PrinterState()
+        state.connected = True
+        state.state = "RUNNING"
+        with patch("backend.app.api.routes.printers.printer_manager") as mock_pm:
+            mock_pm.get_status.return_value = state
+            mock_pm.is_awaiting_plate_clear.return_value = False
+            response = await async_client.get(f"/api/v1/printers/{printer.id}/status")
+
+        assert response.status_code == 200
+        assert response.json()["current_queue_owner"] == "status_queue_owner"
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_get_printer_status_uses_exact_awaiting_plate_clear_archive(
         self, async_client: AsyncClient, printer_factory, archive_factory, db_session
     ):

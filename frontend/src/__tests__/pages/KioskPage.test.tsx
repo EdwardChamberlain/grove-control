@@ -26,6 +26,13 @@ function statusFor(id: string) {
       progress: 100,
       remaining_time: 0,
       awaiting_plate_clear: true,
+      awaiting_plate_clear_print: {
+        archive_id: 2,
+        print_name: 'Plate-clear job',
+        filename: 'plate-clear-job.3mf',
+        thumbnail_path: null,
+        created_by_username: 'Taylor',
+      },
     };
   }
 
@@ -35,6 +42,7 @@ function statusFor(id: string) {
     connected: true,
     state: 'RUNNING',
     current_print: 'Widget batch',
+    current_queue_owner: 'Morgan',
     subtask_name: null,
     gcode_file: null,
     progress: 42,
@@ -58,7 +66,6 @@ describe('KioskPage', () => {
         const printerId = new URL(request.url).pathname.split('/')[4];
         return HttpResponse.json(statusFor(printerId));
       }),
-      http.get('/api/v1/printers/:id/current-print-user', () => HttpResponse.json({ username: 'Morgan' })),
       http.get('/api/v1/queue/', () => HttpResponse.json([
         {
           id: 10,
@@ -69,7 +76,7 @@ describe('KioskPage', () => {
           printer_name: 'Atlas',
           position: 1,
           status: 'printing',
-          created_by_username: null,
+          created_by_username: 'Morgan',
         },
         {
           id: 11,
@@ -98,7 +105,7 @@ describe('KioskPage', () => {
         printer_name: 'Atlas',
         position: 1,
         status: 'printing',
-        created_by_username: null,
+        created_by_username: 'Morgan',
       },
       {
         id: 11,
@@ -115,7 +122,6 @@ describe('KioskPage', () => {
       },
     ] as never);
     vi.spyOn(api, 'getPrinterStatus').mockImplementation(async (printerId) => statusFor(String(printerId)) as never);
-    vi.spyOn(api, 'getCurrentPrintUser').mockResolvedValue({ username: 'Morgan' });
   });
 
   it('shows compact fleet status and a vertically ordered read-only queue', async () => {
@@ -126,7 +132,9 @@ describe('KioskPage', () => {
       expect(within(screen.getByTestId('kiosk-printer-1')).getByText('Atlas')).toBeInTheDocument();
       expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
       expect(screen.getAllByText('Widget batch').length).toBeGreaterThan(0);
-      expect(screen.getByText('Morgan')).toBeInTheDocument();
+      expect(screen.getAllByText('Morgan')).toHaveLength(2);
+      expect(within(screen.getByTestId('kiosk-printer-1')).getByTitle('Added by Morgan')).toBeInTheDocument();
+      expect(within(screen.getByTestId('kiosk-printer-2')).getByText('Taylor')).toBeInTheDocument();
       expect(screen.getAllByText('42%')).toHaveLength(2);
       expect(screen.getAllByText('Plate clear required')).toHaveLength(2);
       expect(screen.getByTestId('kiosk-queue-status-10')).toHaveTextContent('Printing');
@@ -216,5 +224,80 @@ describe('KioskPage', () => {
     expect(await screen.findByText('No printers configured')).toBeInTheDocument();
     expect(screen.getByText('No jobs are currently printing')).toBeInTheDocument();
     expect(screen.getByText('No jobs are queued')).toBeInTheDocument();
+  });
+
+  it('omits owner details when no owner is available', async () => {
+    vi.mocked(api.getQueue).mockResolvedValue([
+      {
+        id: 10,
+        printer_id: 1,
+        archive_id: 1,
+        library_file_id: null,
+        archive_name: 'Widget batch',
+        printer_name: 'Atlas',
+        position: 1,
+        status: 'printing',
+        created_by_username: null,
+      },
+    ] as never);
+    vi.mocked(api.getPrinterStatus).mockImplementation(async (printerId) => {
+      if (printerId === 1) return { ...statusFor('1'), current_queue_owner: null } as never;
+      return statusFor(String(printerId)) as never;
+    });
+
+    render(<KioskPage />);
+
+    await waitFor(() => {
+      expect(within(screen.getByTestId('kiosk-printer-1')).getByText('42%')).toBeInTheDocument();
+      expect(screen.queryByText('Owner unavailable')).not.toBeInTheDocument();
+      expect(within(screen.getByTestId('kiosk-printer-1')).queryByTitle(/Added by/)).not.toBeInTheDocument();
+    });
+  });
+
+  it('does not retain an active owner after a print completes without plate clearance', async () => {
+    vi.mocked(api.getQueue).mockResolvedValue([
+      {
+        id: 10,
+        printer_id: 1,
+        archive_id: 1,
+        library_file_id: null,
+        archive_name: 'Widget batch',
+        printer_name: 'Atlas',
+        position: 1,
+        status: 'printing',
+        created_by_username: null,
+      },
+    ] as never);
+    vi.mocked(api.getPrinterStatus).mockImplementation(async (printerId) => {
+      if (printerId === 1) {
+        return {
+          ...statusFor('1'),
+          state: 'FINISH',
+          current_queue_owner: 'Morgan',
+          progress: 100,
+          awaiting_plate_clear: false,
+        } as never;
+      }
+      return statusFor(String(printerId)) as never;
+    });
+
+    render(<KioskPage />);
+
+    await waitFor(() => {
+      const printerTile = screen.getByTestId('kiosk-printer-1');
+      expect(within(printerTile).getByText('Completed')).toBeInTheDocument();
+      expect(within(printerTile).queryByTitle(/Added by/)).not.toBeInTheDocument();
+    });
+  });
+
+  it('uses the status owner when the viewer cannot see another user\'s queue row', async () => {
+    vi.mocked(api.getQueue).mockResolvedValue([] as never);
+
+    render(<KioskPage />);
+
+    await waitFor(() => {
+      expect(within(screen.getByTestId('kiosk-printer-1')).getByText('Morgan')).toBeInTheDocument();
+      expect(within(screen.getByTestId('kiosk-printer-1')).getByTitle('Added by Morgan')).toBeInTheDocument();
+    });
   });
 });
