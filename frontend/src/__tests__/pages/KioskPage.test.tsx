@@ -42,6 +42,7 @@ function statusFor(id: string) {
     connected: true,
     state: 'RUNNING',
     current_print: 'Widget batch',
+    current_queue_owner: 'Morgan',
     subtask_name: null,
     gcode_file: null,
     progress: 42,
@@ -245,6 +246,17 @@ describe('KioskPage', () => {
     await waitFor(() => {
       expect(screen.queryByText('Owner unavailable')).not.toBeInTheDocument();
       expect(within(screen.getByTestId('kiosk-printer-1')).queryByTitle(/Added by/)).not.toBeInTheDocument();
+    });
+  });
+
+  it('uses the status owner when the viewer cannot see another user\'s queue row', async () => {
+    vi.mocked(api.getQueue).mockResolvedValue([] as never);
+
+    render(<KioskPage />);
+
+    await waitFor(() => {
+      expect(within(screen.getByTestId('kiosk-printer-1')).getByText('Morgan')).toBeInTheDocument();
+      expect(within(screen.getByTestId('kiosk-printer-1')).getByTitle('Added by Morgan')).toBeInTheDocument();
     });
   });
 });

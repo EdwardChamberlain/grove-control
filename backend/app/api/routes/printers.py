@@ -20,6 +20,7 @@ from backend.app.core.permissions import Permission
 from backend.app.core.tasks import spawn_background_task
 from backend.app.models.ams_label import AmsLabel
 from backend.app.models.archive import PrintArchive
+from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.models.slot_preset import SlotPresetMapping
 from backend.app.models.user import User
@@ -730,6 +731,20 @@ async def get_printer_status(
             )
             current_archive_id = archive_row.scalar_one_or_none()
 
+    # Resolve the owner of the active queue item independently of the caller's
+    # queue ownership scope. Printer viewers need this for shared kiosk cards,
+    # while GET /queue intentionally returns only their own rows unless they
+    # have queue:read_all.
+    current_queue_owner_result = await db.execute(
+        select(User.username)
+        .join(PrintQueueItem, PrintQueueItem.created_by_id == User.id)
+        .where(PrintQueueItem.printer_id == printer_id)
+        .where(PrintQueueItem.status.in_(["dispatching", "printing"]))
+        .order_by(PrintQueueItem.position, PrintQueueItem.id)
+        .limit(1)
+    )
+    current_queue_owner = current_queue_owner_result.scalar_one_or_none()
+
     # Resolve the exact terminal print holding the plate-clear gate. Do not use
     # the regular archives listing here: that endpoint is intentionally scoped
     # to the current user's ownership permissions, while printer viewers still
@@ -765,6 +780,7 @@ async def get_printer_status(
         connected=state.connected,
         state=state.state,
         current_print=state.current_print,
+        current_queue_owner=current_queue_owner,
         subtask_name=state.subtask_name,
         gcode_file=state.gcode_file,
         progress=state.progress,

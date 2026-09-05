@@ -295,6 +295,10 @@ class PrinterStatus(BaseModel):
     connected: bool
     state: str | None = None
     current_print: str | None = None
+    # Username recorded on the active queue item. This is resolved outside the
+    # caller's queue ownership scope so shared printer/kiosk views can identify
+    # another user's active job without exposing the rest of their queue.
+    current_queue_owner: str | None = None
     subtask_name: str | None = None
     gcode_file: str | None = None
     progress: float | None = None

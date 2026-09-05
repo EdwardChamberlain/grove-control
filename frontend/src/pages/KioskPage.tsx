@@ -322,9 +322,10 @@ export function KioskPage() {
   const printingItemsByPrinter = useMemo(() => new Map(printingItems.filter((item) => item.printer_id != null).map((item) => [item.printer_id!, item])), [printingItems]);
 
   const owners = useMemo(() => new Map(printers.map((printer) => {
+    const status = statuses.get(printer.id);
     const queueOwner = printingItemsByPrinter.get(printer.id)?.created_by_username ?? undefined;
-    const plateClearOwner = statuses.get(printer.id)?.awaiting_plate_clear_print?.created_by_username ?? undefined;
-    return [printer.id, queueOwner || plateClearOwner];
+    const plateClearOwner = status?.awaiting_plate_clear_print?.created_by_username ?? undefined;
+    return [printer.id, status?.current_queue_owner || queueOwner || plateClearOwner];
   })), [printers, printingItemsByPrinter, statuses]);
 
   const prioritizedPrinters = useMemo(() => [...printers].sort((a, b) => {
