@@ -829,10 +829,18 @@ export function PrinterThermalControls({
     },
   });
 
+  const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
+  useEffect(() => {
+    if (isPrintingOrPaused) {
+      setControlMenu(menu => menu === 'nozzle-select' ? null : menu);
+    }
+  }, [isPrintingOrPaused]);
+
   const temperatures = status?.temperatures;
   if (!temperatures) return null;
 
   const canControl = status.connected && hasPermission('printers:control');
+  const canSelectNozzle = canControl && !isPrintingOrPaused;
   const controlTitle = canControl ? undefined : t('printers.permission.noControl');
   const controlSurfaceClass = variant === 'elevated'
     ? 'border border-white/10 bg-bambu-dark-secondary/95 shadow-sm shadow-black/25 ring-1 ring-black/10'
@@ -846,7 +854,7 @@ export function PrinterThermalControls({
   }`;
   const staticControlClass = `${controlBaseClass} cursor-default`;
   const activeNozzleClass = `relative flex h-full flex-col items-center justify-center rounded-lg px-3 py-1.5 text-center transition-colors ${controlSurfaceClass} ${
-    canControl ? `cursor-pointer ${controlHoverClass}` : 'cursor-default opacity-80'
+    canSelectNozzle ? `cursor-pointer ${controlHoverClass}` : 'cursor-not-allowed opacity-80'
   }`;
   const fanControlClass = `relative flex min-w-0 flex-1 items-center justify-center gap-1 rounded-lg px-2 py-1.5 transition-colors ${controlSurfaceClass} ${
     canControl ? `cursor-pointer ${controlHoverClass}` : 'cursor-default opacity-80'
@@ -930,12 +938,24 @@ export function PrinterThermalControls({
 
           {isDualNozzle && (
             <DualNozzleHoverCard leftSlot={leftNozzleSlot} rightSlot={rightNozzleSlot} activeNozzle={activeNozzle} filamentInfo={filamentInfo}>
-              <div className={activeNozzleClass} title={canControl ? t('printers.activeNozzle', { nozzle: activeNozzle === 'L' ? t('common.left') : t('common.right') }) : controlTitle} onClick={() => canControl && setControlMenu(controlMenu === 'nozzle-select' ? null : 'nozzle-select')}>
+              <button
+                type="button"
+                disabled={!canSelectNozzle}
+                className={`${activeNozzleClass} disabled:cursor-not-allowed disabled:opacity-80`}
+                title={
+                  !canControl
+                    ? controlTitle
+                    : isPrintingOrPaused
+                      ? t('printers.bedJog.disabledWhilePrinting')
+                      : t('printers.activeNozzle', { nozzle: activeNozzle === 'L' ? t('common.left') : t('common.right') })
+                }
+                onClick={() => canSelectNozzle && setControlMenu(controlMenu === 'nozzle-select' ? null : 'nozzle-select')}
+              >
                 <NozzleIcon className="mb-0.5 h-3.5 w-3.5 text-amber-400" />
                 <div className="flex items-center gap-2"><span className={`text-[11px] font-bold ${activeNozzle === 'L' ? 'text-amber-400' : 'text-gray-500'}`}>L{leftNozzleSlot?.nozzle_diameter ? ` ${leftNozzleSlot.nozzle_diameter}` : ''}</span><span className="text-[9px] text-bambu-gray/40">·</span><span className={`text-[11px] font-bold ${activeNozzle === 'R' ? 'text-amber-400' : 'text-gray-500'}`}>R{rightNozzleSlot?.nozzle_diameter ? ` ${rightNozzleSlot.nozzle_diameter}` : ''}</span></div>
                 <p className="text-[9px] text-bambu-gray">{t('printers.temperatures.nozzle')}</p>
-                {controlMenu === 'nozzle-select' && <IndicatorControlPopover title={t('printers.single.setNozzleSelection', 'Set Nozzle Selection')} widthClass="w-[300px]" popoverWidth={300} popoverHeight={140} isPending={selectExtruderMutation.isPending} options={[{ label: t('common.left'), value: 1 }, { label: t('common.right'), value: 0 }]} onClose={() => setControlMenu(null)} onSubmit={extruder => selectExtruderMutation.mutate(extruder)} />}
-              </div>
+                {canSelectNozzle && controlMenu === 'nozzle-select' && <IndicatorControlPopover title={t('printers.single.setNozzleSelection', 'Set Nozzle Selection')} widthClass="w-[300px]" popoverWidth={300} popoverHeight={140} isPending={selectExtruderMutation.isPending} options={[{ label: t('common.left'), value: 1 }, { label: t('common.right'), value: 0 }]} onClose={() => setControlMenu(null)} onSubmit={extruder => canSelectNozzle && selectExtruderMutation.mutate(extruder)} />}
+              </button>
             </DualNozzleHoverCard>
           )}
           {status.nozzle_rack?.some(slot => slot.id >= 2) && <NozzleRackCard slots={status.nozzle_rack} filamentInfo={filamentInfo} />}
