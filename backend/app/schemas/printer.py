@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
+from backend.app.utils.printer_models import supports_nozzle_flow_type
+
 
 class PrinterBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
@@ -81,6 +83,11 @@ class PrinterResponse(PrinterBase):
     id: int
     is_active: bool
     nozzle_count: int = 1  # 1 or 2, auto-detected from MQTT
+    # Whether the model is sold with both Standard and High Flow nozzles, so a
+    # K-profile's flow type is a real choice rather than a meaningless field.
+    # Derived from the model, not from nozzle_count — see
+    # printer_models.supports_nozzle_flow_type.
+    supports_nozzle_flow_type: bool = True
     print_hours_offset: float = 0.0
     external_camera_url: str | None = None
     external_camera_type: str | None = None
@@ -113,6 +120,7 @@ class PrinterResponse(PrinterBase):
             "camera_rotation": printer.camera_rotation,
             "is_active": printer.is_active,
             "nozzle_count": printer.nozzle_count,
+            "supports_nozzle_flow_type": supports_nozzle_flow_type(printer.model),
             "print_hours_offset": printer.print_hours_offset,
             "plate_detection_enabled": printer.plate_detection_enabled,
             "created_at": printer.created_at,
