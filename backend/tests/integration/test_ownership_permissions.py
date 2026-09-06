@@ -1442,6 +1442,25 @@ class TestSliceOwnershipPermissions(TestOwnershipPermissionsSetup):
     _SLICE_BODY = {"printer_preset_id": 1, "process_preset_id": 2, "filament_preset_id": 3}
 
     @pytest.fixture
+    async def owner_api_key(self, db_session, auth_setup):
+        from backend.app.core.auth import generate_api_key
+        from backend.app.models.api_key import APIKey
+
+        full_key, key_hash, key_prefix = generate_api_key()
+        db_session.add(
+            APIKey(
+                name="slice-owner-key",
+                key_hash=key_hash,
+                key_prefix=key_prefix,
+                user_id=auth_setup["operator_user"]["id"],
+                can_read_status=True,
+                can_manage_library=True,
+            )
+        )
+        await db_session.commit()
+        return full_key
+
+    @pytest.fixture
     async def library_file_factory(self, db_session):
         _counter = [0]
 
@@ -1504,6 +1523,20 @@ class TestSliceOwnershipPermissions(TestOwnershipPermissionsSetup):
         # READ_ALL passes the gate even on another user's file.
         assert resp.status_code == 404
         assert resp.json()["detail"] == "Source file missing on disk"
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_api_key_cannot_slice_another_users_library_file(
+        self, async_client, auth_setup, library_file_factory, owner_api_key
+    ):
+        file = await library_file_factory(created_by_id=auth_setup["operator2_user"]["id"])
+        resp = await async_client.post(
+            f"/api/v1/library/files/{file.id}/slice",
+            headers={"X-API-Key": owner_api_key},
+            json=self._SLICE_BODY,
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "File not found"
 
     # --- archive slice -----------------------------------------------------
 

@@ -3948,6 +3948,12 @@ async def slice_archive(
     request: SliceRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User | None = RequirePermissionIfAuthEnabled(Permission.LIBRARY_UPLOAD),
+    auth_result: tuple[User | None, bool] = Depends(
+        require_ownership_permission(
+            Permission.ARCHIVES_READ_ALL,
+            Permission.ARCHIVES_READ_OWN,
+        )
+    ),
 ):
     """Enqueue a slice job for an archive's source. Returns 202 + job_id;
     the slice runs in the background, the caller polls `GET /slice-jobs/{id}`.
@@ -3966,10 +3972,10 @@ async def slice_archive(
     archive = await db.get(PrintArchive, archive_id)
     # Per-row ownership gate — mirror the archive read routes. LIBRARY_UPLOAD
     # alone let a READ_OWN caller slice another user's archive by raw id even
-    # though GET on that id returned 404. API-key / auth-disabled callers
-    # (current_user is None) keep can_read_all=True — no per-row identity.
-    can_read_all = current_user is None or current_user.has_permission(Permission.ARCHIVES_READ_ALL.value)
-    archive = _ensure_archive_visible(archive, current_user, can_read_all)
+    # though GET on that id returned 404. The ownership dependency also
+    # resolves an API-key owner instead of treating a key as an all-row caller.
+    owner_user, can_read_all = auth_result
+    archive = _ensure_archive_visible(archive, owner_user, can_read_all)
 
     src_relative = archive.source_3mf_path or archive.file_path
     if not src_relative:
@@ -4007,12 +4013,12 @@ async def slice_archive(
 
     model_bytes = src_path.read_bytes()
     archive_id_local = archive.id
-    user_id = current_user.id if current_user else None
+    user_id = (current_user or owner_user).id if (current_user or owner_user) else None
 
     # Block a cross-nozzle-class re-slice (single-nozzle <-> H2D) up front —
     # BambuStudio's multi-extruder validator would otherwise reject it with a
     # cryptic error. No-op for same-class or un-sliced sources.
-    await guard_nozzle_class_reslice(db, current_user, request, archive.sliced_for_model)
+    await guard_nozzle_class_reslice(db, current_user or owner_user, request, archive.sliced_for_model)
 
     async def _run(job_id: int):
         async with async_session() as task_db:

@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import inspect
 import re
+import socket
 
 import httpx
 import pytest
@@ -131,6 +132,17 @@ def test_public_tier_rejects_universally_dangerous_targets(url: str):
 def test_public_tier_additionally_rejects_private_and_plain_http(url: str):
     with pytest.raises(ValueError):
         assert_safe_public_https_url(url)
+
+
+def test_public_tier_rejects_hostname_resolving_to_private_address(monkeypatch):
+    """A symbolic hostname must not bypass the public-address policy."""
+
+    def fake_getaddrinfo(*_args, **_kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", 443))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    with pytest.raises(ValueError, match="loopback"):
+        assert_safe_public_https_url("https://attacker.example/")
 
 
 # ---------------------------------------------------------------------------

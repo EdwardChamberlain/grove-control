@@ -1424,13 +1424,13 @@ class TestLibraryPermissions:
         from backend.app.core.auth import generate_api_key
         from backend.app.models.api_key import APIKey
 
-        admin = auth_setup["admin_user"]
+        owner = auth_setup["operator_user"]
         full_key, key_hash, key_prefix = generate_api_key()
         row = APIKey(
             name="lib-curation",
             key_hash=key_hash,
             key_prefix=key_prefix,
-            user_id=admin.id,
+            user_id=owner.id,
             can_manage_library=True,
         )
         db_session.add(row)
