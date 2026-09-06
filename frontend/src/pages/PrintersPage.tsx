@@ -3413,6 +3413,7 @@ function PrinterCard({
   const showFirmwareVersionPill = false;
   const showDoorPill = !!(status?.connected && hasDoorSensor && status.door_open);
   const hasVisibleStatusPills = isMaintenanceMode ||
+    aiDetectionEnabled ||
     showConnectionPill ||
     showPlateStatusPill ||
     !status?.connected ||
