@@ -27,7 +27,7 @@ from backend.app.core.config import settings as app_settings
 from backend.app.models.library import LibraryFile
 from backend.app.models.local_preset import LocalPreset
 from backend.app.models.settings import Settings as SettingsModel
-from backend.app.services import slicer_api as slicer_api_module
+from backend.app.services import plate_thumbnail as plate_thumbnail_module, slicer_api as slicer_api_module
 from backend.app.services.slice_dispatch import slice_dispatch
 
 # ---------------------------------------------------------------------------
@@ -35,7 +35,7 @@ from backend.app.services.slice_dispatch import slice_dispatch
 # ---------------------------------------------------------------------------
 
 
-def _make_3mf_with_settings(settings_payload: dict | None = None) -> bytes:
+def _make_3mf_with_settings(settings_payload: dict | None = None, *, sliced_output: bool = False) -> bytes:
     """Build a tiny in-memory 3MF zip with all the embedded-config files
     that real-world Bambu Studio / OrcaSlicer 3MFs ship with.
 
@@ -57,6 +57,11 @@ def _make_3mf_with_settings(settings_payload: dict | None = None) -> bytes:
             "<config><plate><metadata key='filament' value='GFL00'/></plate></config>",
         )
         zf.writestr("Metadata/cut_information.xml", "<cut><part id='1'/></cut>")
+        if sliced_output:
+            zf.writestr("Metadata/plate_1.gcode", b"G1 X1")
+            zf.writestr("Metadata/plate_1.gcode.md5", b"deadbeef")
+            zf.writestr("Metadata/plate_1.json", b"{}")
+            zf.writestr("Metadata/plate_1.png", b"PLATE_RENDER")
     return buf.getvalue()
 
 
@@ -67,6 +72,11 @@ def _install_mock_sidecar(handler: Callable[[httpx.Request], httpx.Response]) ->
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler), timeout=10.0)
     slicer_api_module.set_shared_http_client(client)
     return client
+
+
+def _is_slice_post(request: httpx.Request) -> bool:
+    """Ignore progress-poll requests when asserting sidecar slice calls."""
+    return request.method == "POST" and request.url.path.endswith("/slice")
 
 
 async def _wait_for_job(client: AsyncClient, job_id: int, timeout: float = 5.0) -> dict:
@@ -231,7 +241,7 @@ class TestSliceLibraryFile:
             captured["url"] = str(request.url)
             return httpx.Response(
                 status_code=200,
-                content=b"PK\x03\x04 fake-3mf",
+                content=_make_3mf_with_settings(sliced_output=True),
                 headers={
                     "x-print-time-seconds": "656",
                     "x-filament-used-g": "0.94",
@@ -274,7 +284,7 @@ class TestSliceLibraryFile:
             captured["body"] = bytes(request.content)
             return httpx.Response(
                 status_code=200,
-                content=b"PK\x03\x04 fake",
+                content=_make_3mf_with_settings(sliced_output=True),
                 headers={
                     "x-print-time-seconds": "10",
                     "x-filament-used-g": "0.1",
@@ -316,7 +326,7 @@ class TestSliceLibraryFile:
             captured["body"] = bytes(request.content)
             return httpx.Response(
                 status_code=200,
-                content=b"PK\x03\x04 fake",
+                content=_make_3mf_with_settings(sliced_output=True),
                 headers={
                     "x-print-time-seconds": "10",
                     "x-filament-used-g": "0.1",
@@ -431,6 +441,8 @@ class TestSliceLibraryFile:
         call_count = {"n": 0}
 
         def handler(request: httpx.Request) -> httpx.Response:
+            if not _is_slice_post(request):
+                return httpx.Response(404)
             call_count["n"] += 1
             # First call: profile triplet present → simulate CLI 5xx
             if call_count["n"] == 1:
@@ -441,7 +453,7 @@ class TestSliceLibraryFile:
             # Retry: no profile triplet → succeed with embedded settings
             return httpx.Response(
                 status_code=200,
-                content=b"PK\x03\x04 fake-3mf",
+                content=_make_3mf_with_settings(sliced_output=True),
                 headers={
                     "x-print-time-seconds": "100",
                     "x-filament-used-g": "1.0",
@@ -471,7 +483,9 @@ class TestSliceLibraryFile:
         # STL has no embedded settings — the CLI 5xx is terminal.
         call_count = {"n": 0}
 
-        def handler(_: httpx.Request) -> httpx.Response:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if not _is_slice_post(request):
+                return httpx.Response(404)
             call_count["n"] += 1
             return httpx.Response(
                 status_code=500,
@@ -524,7 +538,7 @@ class TestSliceLibraryFile:
             captured["body"] = request.content
             return httpx.Response(
                 status_code=200,
-                content=b"PK\x03\x04 fake-3mf",
+                content=_make_3mf_with_settings(sliced_output=True),
                 headers={
                     "x-print-time-seconds": "1",
                     "x-filament-used-g": "0",
@@ -600,6 +614,10 @@ def _make_sliced_3mf(printer_model_id: str, bed_type: str | None = None) -> byte
                 "</plate></config>"
             ),
         )
+        zf.writestr("Metadata/plate_1.gcode", b"G1 X1")
+        zf.writestr("Metadata/plate_1.gcode.md5", b"deadbeef")
+        zf.writestr("Metadata/plate_1.json", b"{}")
+        zf.writestr("Metadata/plate_1.png", b"PLATE_RENDER")
     return buf.getvalue()
 
 
@@ -697,6 +715,8 @@ class TestCrossClassSliceAllLoop:
         captured_requests: list[dict] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
+            if not _is_slice_post(request):
+                return httpx.Response(404)
             # Multipart bodies aren't trivially parseable here; pull
             # the plate field by string search since the helper sends
             # ``name="plate"`` immediately followed by the value.
@@ -1047,6 +1067,10 @@ class TestSliceArchiveReslicedThumbnail:
 
         tmp_path = slice_test_setup["tmp_path"]
         monkeypatch.setattr(app_settings, "archive_dir", tmp_path / "archive")
+        # Thumbnail rendering is not part of this precedence test. Keep the
+        # fixture fast and deterministic while preserving the missing-PNG
+        # output shape being exercised.
+        monkeypatch.setattr(plate_thumbnail_module, "_render_model_thumbnails", lambda _bytes: (None, None))
 
         # Source has its own plate_1.png AND a project-wide cover.
         source_plate_marker = b"SOURCE_PLATE_RENDER"
@@ -1070,6 +1094,9 @@ class TestSliceArchiveReslicedThumbnail:
             with zipfile.ZipFile(sliced_buf, "w") as zf:
                 zf.writestr("3D/3dmodel.model", "<model/>")
                 zf.writestr("Metadata/slice_info.config", "<config/>")
+                zf.writestr("Metadata/plate_1.gcode", b"G1 X1")
+                zf.writestr("Metadata/plate_1.gcode.md5", b"deadbeef")
+                zf.writestr("Metadata/plate_1.json", b"{}")
                 zf.writestr("Auxiliaries/.thumbnails/thumbnail_middle.png", b"SLICED_COVER_ART")
             return httpx.Response(
                 status_code=200,
@@ -1110,6 +1137,10 @@ class TestSliceArchiveReslicedThumbnail:
 
         tmp_path = slice_test_setup["tmp_path"]
         monkeypatch.setattr(app_settings, "archive_dir", tmp_path / "archive")
+        # Thumbnail rendering is not part of this precedence test. Keep the
+        # fixture fast and deterministic while preserving the missing-PNG
+        # output shape being exercised.
+        monkeypatch.setattr(plate_thumbnail_module, "_render_model_thumbnails", lambda _bytes: (None, None))
 
         # Source has no Metadata/plate_1.png at all.
         bare_buf = io.BytesIO()
@@ -1133,6 +1164,9 @@ class TestSliceArchiveReslicedThumbnail:
             with zipfile.ZipFile(sliced_buf, "w") as zf:
                 zf.writestr("3D/3dmodel.model", "<model/>")
                 zf.writestr("Metadata/slice_info.config", "<config/>")
+                zf.writestr("Metadata/plate_1.gcode", b"G1 X1")
+                zf.writestr("Metadata/plate_1.gcode.md5", b"deadbeef")
+                zf.writestr("Metadata/plate_1.json", b"{}")
                 zf.writestr("Auxiliaries/.thumbnails/thumbnail_middle.png", b"COVER_ART_FALLBACK")
             return httpx.Response(
                 status_code=200,
@@ -1315,6 +1349,50 @@ class TestSlicerRejectionMessage:
         assert _slicer_rejection_message("") is None
         assert _slicer_rejection_message("Slicer sidecar unreachable: connection reset") is None
 
+    def test_replaces_input_preset_invalid_placeholder_with_cli_error_line(self):
+        # #1851: the CLI emits its catch-all "input preset file is invalid"
+        # placeholder for every -5 exit, including real preset-vs-printer
+        # compatibility rejections. The actual diagnostic only appears in the
+        # stdout `[error] run NNNN:` line; the function must prefer that.
+        text = (
+            "Slicer CLI failed (500): Slicing failed with error from slicer: "
+            "The input preset file is invalid and can not be parsed.: "
+            "Slicer process failed (exit code 251)\n"
+            "stdout: [2026-06-29 04:12:11.952784] [trace] Initializing StaticPrintConfigs\n"
+            "[2026-06-29 04:12:12.175810] [error] run 3008: filament preset "
+            "Generic PLA @BBL H2C (slot 1) is not compatible with printer "
+            "Bambu Lab A1 0.4 nozzle.\n"
+            "run found error, return -5, exit..."
+        )
+        assert (
+            _slicer_rejection_message(text) == "filament preset Generic PLA @BBL H2C (slot 1) is not compatible with "
+            "printer Bambu Lab A1 0.4 nozzle."
+        )
+
+    def test_keeps_meaningful_reason_even_when_cli_error_line_present(self):
+        # When the headline error_string is already a useful reason (here:
+        # the bed-boundary rejection), don't override it with a generic
+        # `[error]` line that may just be the same message restated. Avoids
+        # double-text duplication in the user-facing detail.
+        text = (
+            "Slicer CLI failed (500): Slicing failed with error from slicer: "
+            "Some objects are located over the boundary of the heated bed.: "
+            "Slicer process failed (exit code 204)\n"
+            "stdout: [error] some unrelated stdout chatter"
+        )
+        assert _slicer_rejection_message(text) == "Some objects are located over the boundary of the heated bed."
+
+    def test_cli_error_line_without_run_prefix(self):
+        # The CLI sometimes logs `[error] <msg>` without the `run NNNN:`
+        # prefix (different code paths). The regex must still pick it up.
+        text = (
+            "Slicer CLI failed (500): Slicing failed with error from slicer: "
+            "The input preset file is invalid and can not be parsed.: "
+            "Slicer process failed (exit code 251)\n"
+            "stdout: [2026-06-29 12:00:00.000000] [error] Configuration parse failed: missing key 'printer_settings_id'"
+        )
+        assert _slicer_rejection_message(text) == "Configuration parse failed: missing key 'printer_settings_id'"
+
 
 class TestSliceSlicerRejection:
     @pytest.mark.asyncio
@@ -1341,6 +1419,8 @@ class TestSliceSlicerRejection:
         call_count = {"n": 0}
 
         def handler(request: httpx.Request) -> httpx.Response:
+            if not _is_slice_post(request):
+                return httpx.Response(404)
             call_count["n"] += 1
             return httpx.Response(
                 status_code=500,

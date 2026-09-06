@@ -226,9 +226,11 @@ class TestSliceWithProfiles:
 
         def handler(request: httpx.Request) -> httpx.Response:
             captured["body"] = request.content
+            # export_3mf=True → the response body must be a valid 3MF zip, or the
+            # #2671 output validation rejects it. This test is about the request.
             return httpx.Response(
                 status_code=200,
-                content=b"3MF-BYTES",
+                content=_valid_3mf_zip(plate_num=2),
                 headers={"x-print-time-seconds": "0", "x-filament-used-g": "0", "x-filament-used-mm": "0"},
             )
 
@@ -360,6 +362,184 @@ class TestSliceWithProfiles:
         assert result.print_time_seconds == 0
         assert result.filament_used_g == 0.0
         assert result.filament_used_mm == 0.0
+
+
+def _valid_3mf_zip(*, plate_num: int = 1) -> bytes:
+    """Minimal sliced 3MF with the sidecars required by the slice contract."""
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("[Content_Types].xml", "<Types/>")
+        zf.writestr(f"Metadata/plate_{plate_num}.gcode", "; G-CODE\nG28\n")
+        zf.writestr(f"Metadata/plate_{plate_num}.gcode.md5", "deadbeef")
+        zf.writestr(f"Metadata/plate_{plate_num}.json", "{}")
+    return buf.getvalue()
+
+
+def _zip_with_members(*members: tuple[str, bytes]) -> bytes:
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, content in members:
+            zf.writestr(name, content)
+    return buf.getvalue()
+
+
+class TestSliceOutputValidation:
+    """#2671: a 200 with a non-3MF body must not be persisted as a slice."""
+
+    _SLICE_KW = {
+        "model_bytes": b"solid Cube\n",
+        "model_filename": "Cube.stl",
+        "printer_profile_json": "{}",
+        "process_profile_json": "{}",
+        "filament_profile_jsons": ["{}"],
+    }
+
+    @pytest.mark.asyncio
+    async def test_413_gives_actionable_reverse_proxy_message(self):
+        # A 413 is a proxy/CDN body-size cap, not the slicer — the message must
+        # point at the right layer so the user stops editing the wrong one.
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(status_code=413, content=b"<html>413 Request Entity Too Large</html>")
+
+        service = SlicerApiService("http://sidecar:3000", client=_mock_client(handler))
+        with pytest.raises(SlicerInputError) as exc_info:
+            await service.slice_with_profiles(export_3mf=True, **self._SLICE_KW)
+        msg = str(exc_info.value)
+        assert "413" in msg
+        assert "client_max_body_size" in msg
+        assert "proxy" in msg.lower()
+
+    @pytest.mark.asyncio
+    async def test_export_3mf_rejects_non_zip_200_body(self):
+        # The exact failure from #2671: sidecar/proxy returns 200 with a tiny
+        # garbage body; Bambuddy must NOT accept it as a sliced 3MF.
+        body = b'{"detail":"Not Found"}xxxxxx'  # 28 bytes, not a zip
+        assert len(body) == 28
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(status_code=200, content=body)
+
+        service = SlicerApiService("http://sidecar:3000", client=_mock_client(handler))
+        with pytest.raises(SlicerApiServerError) as exc_info:
+            await service.slice_with_profiles(export_3mf=True, **self._SLICE_KW)
+        msg = str(exc_info.value)
+        assert "not a valid" in msg.lower()
+        assert "28 bytes" in msg
+
+    @pytest.mark.asyncio
+    async def test_export_3mf_rejects_empty_zip(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(status_code=200, content=_zip_with_members())
+
+        service = SlicerApiService("http://sidecar:3000", client=_mock_client(handler))
+        with pytest.raises(SlicerApiServerError, match="no Metadata/plate_N.gcode"):
+            await service.slice_with_profiles(plate=1, export_3mf=True, **self._SLICE_KW)
+
+    @pytest.mark.asyncio
+    async def test_export_3mf_rejects_missing_requested_plate_gcode(self):
+        content = _zip_with_members(
+            ("Metadata/plate_2.gcode", b"G28\n"),
+            ("Metadata/plate_2.gcode.md5", b"deadbeef"),
+            ("Metadata/plate_2.json", b"{}"),
+        )
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(status_code=200, content=content)
+
+        service = SlicerApiService("http://sidecar:3000", client=_mock_client(handler))
+        with pytest.raises(SlicerApiServerError, match="plate_1.gcode"):
+            await service.slice_with_profiles(plate=1, export_3mf=True, **self._SLICE_KW)
+
+    @pytest.mark.asyncio
+    async def test_export_3mf_rejects_missing_gcode_checksum_sidecar(self):
+        content = _zip_with_members(
+            ("Metadata/plate_1.gcode", b"G28\n"),
+            ("Metadata/plate_1.json", b"{}"),
+        )
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(status_code=200, content=content)
+
+        service = SlicerApiService("http://sidecar:3000", client=_mock_client(handler))
+        with pytest.raises(SlicerApiServerError, match="plate_1.gcode.md5"):
+            await service.slice_with_profiles(plate=1, export_3mf=True, **self._SLICE_KW)
+
+    @pytest.mark.asyncio
+    async def test_export_3mf_rejects_missing_plate_metadata_sidecar(self):
+        content = _zip_with_members(
+            ("Metadata/plate_1.gcode", b"G28\n"),
+            ("Metadata/plate_1.gcode.md5", b"deadbeef"),
+        )
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(status_code=200, content=content)
+
+        service = SlicerApiService("http://sidecar:3000", client=_mock_client(handler))
+        with pytest.raises(SlicerApiServerError, match="plate_1.json"):
+            await service.slice_with_profiles(plate=1, export_3mf=True, **self._SLICE_KW)
+
+    @pytest.mark.asyncio
+    async def test_export_3mf_rejects_crc_corrupt_member(self):
+        content = bytearray(_valid_3mf_zip())
+        central_directory_offset = content.find(b"PK\x01\x02")
+        assert central_directory_offset >= 0
+        # CRC-32 starts 16 bytes after the central-directory signature.
+        content[central_directory_offset + 16] ^= 0xFF
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(status_code=200, content=bytes(content))
+
+        service = SlicerApiService("http://sidecar:3000", client=_mock_client(handler))
+        with pytest.raises(SlicerApiServerError, match="CRC check failed"):
+            await service.slice_with_profiles(plate=1, export_3mf=True, **self._SLICE_KW)
+
+    @pytest.mark.asyncio
+    async def test_export_3mf_accepts_valid_zip_body(self):
+        zip_bytes = _valid_3mf_zip()
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                status_code=200,
+                content=zip_bytes,
+                headers={"x-print-time-seconds": "656"},
+            )
+
+        service = SlicerApiService("http://sidecar:3000", client=_mock_client(handler))
+        result = await service.slice_with_profiles(export_3mf=True, **self._SLICE_KW)
+        assert result.content == zip_bytes
+        assert result.print_time_seconds == 656
+
+    @pytest.mark.asyncio
+    async def test_raw_gcode_body_not_zip_validated(self):
+        # export_3mf defaults False (preview / raw-gcode callers): the body is
+        # legitimately not a zip, so the validation must NOT fire.
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(status_code=200, content=b"; G-CODE\nG28\n")
+
+        service = SlicerApiService("http://sidecar:3000", client=_mock_client(handler))
+        result = await service.slice_with_profiles(**self._SLICE_KW)
+        assert result.content == b"; G-CODE\nG28\n"
+
+    @pytest.mark.asyncio
+    async def test_without_profiles_also_rejects_non_zip_200_body(self):
+        # The validation lives in the shared response handler, so the
+        # embedded-settings path (slice_without_profiles) is covered too.
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(status_code=200, content=b"nope")
+
+        service = SlicerApiService("http://sidecar:3000", client=_mock_client(handler))
+        with pytest.raises(SlicerApiServerError):
+            await service.slice_without_profiles(
+                model_bytes=b"solid Cube\n",
+                model_filename="Cube.stl",
+                export_3mf=True,
+            )
 
 
 class TestHealth:

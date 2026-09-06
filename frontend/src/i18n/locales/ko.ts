@@ -1981,6 +1981,8 @@ export default {
     slicerCard: '슬라이서',
     orcaslicerApiUrl: 'OrcaSlicer 사이드카 URL',
     bambuStudioApiUrl: 'Bambu Studio 사이드카 URL',
+    slicerStallTimeout: '슬라이서 정지 시간 제한(분)',
+    slicerStallTimeoutDescription: '사이드카에서 이 시간 동안 진행 상황이 없으면 슬라이싱을 중단합니다. 진행 상황을 계속 보고하는 무거운 모델은 아무리 오래 걸려도 중단되지 않습니다. 진행 상황을 보고하지 않는 사이드카에서는 이 값이 전체 시간 제한으로 사용됩니다.',
     slicerApiUrlDescription: '슬라이서 API 사이드카 컨테이너의 URL. SLICER_API_URL / BAMBU_STUDIO_API_URL 환경 변수 기본값을 사용하려면 비워두세요.',
     slicerBundlesRemoved: {
       title: '슬라이서 번들 (제거됨)',

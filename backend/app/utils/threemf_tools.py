@@ -842,6 +842,30 @@ def extract_project_filaments_from_3mf(zf: zipfile.ZipFile) -> list[dict]:
     return out
 
 
+def extract_support_filament_slots_from_3mf(zf: zipfile.ZipFile) -> set[int]:
+    """Return dedicated support-filament slots from embedded project settings."""
+    if "Metadata/project_settings.config" not in zf.namelist():
+        return set()
+    try:
+        config = json.loads(zf.read("Metadata/project_settings.config").decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+        return set()
+    if not isinstance(config, dict):
+        return set()
+    if config.get("enable_support") in (False, 0, "0", "false", "False", "", None):
+        return set()
+
+    slots: set[int] = set()
+    for key in ("support_filament", "support_interface_filament"):
+        try:
+            slot = int(config.get(key))
+        except (TypeError, ValueError):
+            continue
+        if slot > 0:
+            slots.add(slot)
+    return slots
+
+
 _PAINT_COLOR_ATTR_RE = re.compile(rb'paint_color="([0-9A-Fa-f]+)"')
 
 # Painted-face quadtree leaves include both real filament assignments and

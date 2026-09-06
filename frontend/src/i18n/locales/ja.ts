@@ -2104,6 +2104,8 @@ export default {
     slicerCard: 'スライサー',
     orcaslicerApiUrl: 'OrcaSlicer sidecar URL',
     bambuStudioApiUrl: 'Bambu Studio sidecar URL',
+    slicerStallTimeout: 'スライサー停止タイムアウト（分）',
+    slicerStallTimeoutDescription: 'サイドカーからの進捗がこの時間なければスライスを中止します。進捗を報告し続ける重いモデルは、どれだけ時間がかかっても中断されません。進捗を報告しないサイドカーでは、この値が合計時間の上限になります。',
     slicerApiUrlDescription: 'slicer-APIサイドカーコンテナのURL。空のままにすると SLICER_API_URL / BAMBU_STUDIO_API_URL 環境変数のデフォルト値が使用されます。',
     slicerBundlesRemoved: {
       title: 'スライサーバンドル（削除済み）',

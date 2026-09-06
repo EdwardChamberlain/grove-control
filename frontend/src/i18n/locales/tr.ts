@@ -2109,6 +2109,8 @@ export default {
     slicerCard: 'Dilimleyici',
     orcaslicerApiUrl: 'OrcaSlicer yardımcı bileşen URL',
     bambuStudioApiUrl: 'Bambu Studio yardımcı bileşen URL',
+    slicerStallTimeout: 'Dilimleyici duraklama zaman asimi (dakika)',
+    slicerStallTimeoutDescription: 'Sidecar bu sure boyunca ilerleme bildirmezse dilimleme iptal edilir. Ilerleme bildirmeye devam eden agir modeller ne kadar surerse sursun kesilmez. Ilerleme bildirmeyen sidecar surumleri bu degeri toplam sure siniri olarak kullanir.',
     slicerApiUrlDescription: 'Dilimleyici-API yardımcı bileşen konteynerinin URL\'si. SLICER_API_URL / BAMBU_STUDIO_API_URL ortam değişkeni varsayılanlarını kullanmak için boş bırakın.',
     slicerBundlesRemoved: {
       title: 'Dilimleyici Paketleri (kaldırıldı)',
