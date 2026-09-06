@@ -1829,6 +1829,12 @@ export default {
     manageInventoryDescription: '스풀 및 재고 레코드 생성, 업데이트 및 삭제. SpoolBuddy 키오스크(NFC 스캔, 저울 측정값, 키오스크 시스템 명령)에 필요합니다.',
     libraryBadge: '라이브러리',
     inventoryBadge: '재고',
+    manageProjects: 'Manage Projects',
+    manageProjectsDescription: 'Create, update, and delete projects, and add archives to them. Suited to automations that organize prints into projects.',
+    projectsBadge: 'Projects',
+    manageArchives: 'Manage Archives',
+    manageArchivesDescription: 'Edit and delete print archives, including removing old prints. Does not include purging their statistics contribution.',
+    archivesBadge: 'Archives',
     cloudAccess: '클라우드 접근 허용',
     cloudAccessDescription: '사용자를 대신하여 Bambu Cloud 프리셋 및 필라멘트를 읽습니다. Bambu Cloud에 로그인되어 있어야 합니다.',
     cloudBadge: '클라우드',
@@ -6030,7 +6036,8 @@ export default {
         title: '전송된 파일을 외부 저장소에 저장 (설치 단계 4)',
         pass: '프린터가 이 옵션이 켜져 있다고 보고합니다 — 전송된 파일이 SD 카드에 저장되며 아카이브에 썸네일과 슬라이서 메타데이터가 포함됩니다.',
         fail: '프린터가 이 옵션이 꺼져 있다고 보고합니다. "전송된 파일을 외부 저장소에 저장"을 활성화하세요 — 최신 펌웨어 (P2S 01.02 / Bambu Studio 2.6 이상)에서는 프린터의 인쇄 설정에 토글이 있고, 이전 버전에서는 Bambu Studio / OrcaSlicer의 장치 탭에 있습니다. 이 옵션이 없으면 아카이브된 모든 인쇄물에 썸네일과 슬라이서 메타데이터가 없습니다.',
-        skip: '확인되지 않음 — 활성 MQTT 연결이 필요합니다. 이 설정이 슬라이서에만 존재하는 이전 슬라이서에서는 프린터가 보고하지 않으므로, 옵션이 꺼져 있어도 이 검사는 통과합니다 — 설치 단계 4를 수동으로 확인하세요.'
+        skip: '확인되지 않음 — 활성 MQTT 연결이 필요합니다. 이 설정이 슬라이서에만 존재하는 이전 슬라이서에서는 프린터가 보고하지 않으므로, 옵션이 꺼져 있어도 이 검사는 통과합니다 — 설치 단계 4를 수동으로 확인하세요.',
+        skip_unsupported_model: 'Not checked — this printer model has no way to turn the option on. Verify install step 4 manually.',
       },
       port_rtsps: {
         title: '카메라 포트 ({{protocol}} {{port}})',
