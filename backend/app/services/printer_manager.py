@@ -1133,6 +1133,13 @@ def printer_state_to_dict(
                         "drying_temp": tray.get("drying_temp"),
                         "drying_time": tray.get("drying_time"),
                         "state": state_val,
+                        # Firmware's authoritative presence bit (tray_exist_bits),
+                        # set by apply_tray_exist_bits. The REST serializer already
+                        # emits it (routes/printers.py); without it here the WS
+                        # shallow-merge drops `exists` after the first frame and
+                        # getEmptySlotKind falls back to the firmware-variant state
+                        # 9/10 heuristic — wrong for AMS-HT in both directions (#2670).
+                        "exists": tray.get("exists"),
                     }
                 )
             # Prefer humidity_raw (actual percentage) over humidity (index 1-5)

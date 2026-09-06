@@ -132,8 +132,16 @@ def apply_tray_exist_bits(
     is valid idle-printer state (#1365 — X1C between prints) and MUST be applied
     so spool removal is detected without requiring a manual reconnect.
 
-    AMS-HT units (``id >= 128``) use a separate addressing scheme and are
-    skipped here.
+    AMS-HT units (``id`` 128-135) are single-tray dry boxes whose presence bit
+    is packed as ONE consecutive bit starting at 16 (``16 + (ams_id - 128)``),
+    NOT ``ams_id * 4`` (which would overflow to bit 512+). This is the firmware's
+    authoritative empty signal for the HT — the only working clear path, since
+    the HT keeps echoing stale ``tray_type`` and its ``state`` is firmware-variant
+    (#2670). Verified against OrcaSlicer ``DevFilaSystem.cpp``
+    (``is_exists = tray_exist_bits >> (16 + (ams_id-128))``) and a live H2D
+    capture (HT-A → bit 16). The A2L-Lite (normalised to id 6 upstream) lands at
+    bits 24-27 via the regular ``ams_id * 4`` formula, matching OrcaSlicer's
+    ``AMS_LITE_MIXED`` offset, so it needs no special case here.
 
     `tray_exist_bits_str` is expected as a hex string (firmware sends it that
     way). Ints are tolerated for defensive symmetry but typically not seen
@@ -166,8 +174,13 @@ def apply_tray_exist_bits(
             ams_id = int(ams_id_raw) if isinstance(ams_id_raw, str) else ams_id_raw
         except (ValueError, TypeError):
             continue
-        if not isinstance(ams_id, int) or ams_id >= 128:
-            # Skip AMS-HT (id >= 128) — separate addressing scheme.
+        if not isinstance(ams_id, int):
+            continue
+        # AMS-HT (n3s, id 128-135): single tray, presence bit at 16+(ams_id-128).
+        # Regular AMS (and the A2L-Lite normalised to id 6): ams_id*4 + tray_id.
+        # Anything outside those ranges has no known bit layout — don't guess it.
+        is_ht = 128 <= ams_id <= 135
+        if not is_ht and not (0 <= ams_id <= 15):
             continue
         for tray in ams_unit.get("tray", []):
             if not isinstance(tray, dict):
@@ -181,7 +194,7 @@ def apply_tray_exist_bits(
                 continue
             if not isinstance(tray_id, int):
                 continue
-            global_bit = ams_id * 4 + tray_id
+            global_bit = (16 + (ams_id - 128)) if is_ht else (ams_id * 4 + tray_id)
             slot_exists = (tray_exist_bits >> global_bit) & 1
             if slot_exists:
                 continue
@@ -2285,9 +2298,17 @@ class BambuMQTTClient:
                 if self.on_drying_complete:
                     self.on_drying_complete(ams_id)
 
-        # Create a hash of relevant AMS data to detect changes
+        # Create a hash of relevant AMS data to detect changes.
+        # Hash the MERGED state, not the raw incoming ams_list: a removal signalled
+        # only by tray_exist_bits (firmware still echoing the old tray_type in the
+        # payload, unchanged remain) clears merged_ams via apply_tray_exist_bits
+        # above but leaves the raw payload's tracked fields untouched — so a
+        # raw-based hash never flips and on_ams_change never fires, leaving the
+        # spool_assignment row bound to an emptied slot (#2670). merged_ams also
+        # always spans every unit, so a partial single-unit update can't produce a
+        # spuriously different hash from a full pushall.
         ams_hash_data = []
-        for ams_unit in ams_list:
+        for ams_unit in merged_ams:
             for tray in ams_unit.get("tray", []):
                 # Include fields that matter for filament tracking
                 ams_hash_data.append(

@@ -935,6 +935,39 @@ class TestPrinterStateToDict:
 
         assert result["ams"][0]["tray"][0]["tag_uid"] is None
 
+    def test_exists_bit_is_serialized_for_websocket(self, mock_state):
+        """#2670: the WS status payload must carry the firmware presence bit
+        `exists` (set by apply_tray_exist_bits) — the REST serializer already
+        does. Without it the frontend shallow-merge drops `exists` after the
+        first WS frame and getEmptySlotKind falls back to the firmware-variant
+        state 9/10 heuristic, which is wrong for AMS-HT in both directions.
+        """
+        mock_state.raw_data = {
+            "ams": [
+                {
+                    "id": 128,
+                    "tray": [
+                        # Empty HT: apply_tray_exist_bits cleared it and set exists=False.
+                        {"id": 0, "state": 9, "tray_type": "", "exists": False},
+                    ],
+                },
+                {
+                    "id": 0,
+                    "tray": [
+                        # Present non-RFID spool: exists=True, no tray_type ("?").
+                        {"id": 0, "state": 10, "tray_type": "", "exists": True},
+                    ],
+                },
+            ]
+        }
+
+        result = printer_state_to_dict(mock_state)
+
+        ht_tray = result["ams"][0]["tray"][0]
+        reg_tray = result["ams"][1]["tray"][0]
+        assert ht_tray["exists"] is False
+        assert reg_tray["exists"] is True
+
     def test_vt_tray_parsing(self, mock_state):
         """Verify virtual tray is parsed correctly as a list."""
         mock_state.raw_data = {
