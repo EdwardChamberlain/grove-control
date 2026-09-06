@@ -2387,6 +2387,7 @@ async def scan_timelapse(
             max_retries=ftp_retry_count,
             retry_delay=ftp_retry_delay,
             operation_name=f"Download timelapse {matching_file['name']}",
+            cooloff_ip=printer.ip_address,
         )
     else:
         timelapse_data = await download_file_bytes_async(
@@ -2476,6 +2477,7 @@ async def select_timelapse(
             max_retries=ftp_retry_count,
             retry_delay=ftp_retry_delay,
             operation_name=f"Download timelapse {filename}",
+            cooloff_ip=printer.ip_address,
         )
     else:
         timelapse_data = await download_file_bytes_async(
