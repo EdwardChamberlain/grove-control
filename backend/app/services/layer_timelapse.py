@@ -67,7 +67,26 @@ class TimelapseSession:
         self.last_layer = layer_num
 
         try:
-            frame_data = await capture_frame(self.camera_url, self.camera_type, snapshot_url=self.snapshot_url)
+            # Reuse the live view's frame instead of opening a second handle on
+            # a single-reader device (#2707). Unguarded, a print watched from
+            # start to finish recorded zero successful layer captures, and the
+            # stitched video came out empty or badly truncated.
+            from backend.app.api.routes.camera import live_frame_for_capture
+
+            defer, buffered = live_frame_for_capture(self.printer_id)
+            if defer:
+                if not buffered:
+                    # Viewer attached but nothing buffered yet: skip this layer
+                    # rather than compete and kick them off (#1348).
+                    logger.debug(
+                        "Skipping layer %s for printer %s: viewer attached, no buffered frame yet",
+                        layer_num,
+                        self.printer_id,
+                    )
+                    return False
+                frame_data = buffered
+            else:
+                frame_data = await capture_frame(self.camera_url, self.camera_type, snapshot_url=self.snapshot_url)
             if frame_data:
                 frame_path = self.frames_dir / f"layer_{layer_num:05d}.jpg"
                 await asyncio.to_thread(frame_path.write_bytes, frame_data)
