@@ -611,7 +611,7 @@ export default {
       chamber: '챔버 팬'
     },
     clickToViewHmsErrors: 'HMS 오류 보기 클릭',
-    aiDetection: { safe: 'Safe', warning: 'Warning', failure: 'Failure', idle: 'Idle', error: 'Not checking', unknown: 'Starting', tooltipError: 'AI Failure Detection is not checking this print: {{reason}}', tooltipUnknown: 'AI Failure Detection is waiting for the first result', errorHint: 'This print is not being checked.', tooltip: 'AI Failure Detection: {{status}} (score {{score}})', tooltipIdle: 'AI Failure Detection enabled', modalTitle: 'AI Failure Detection - {{name}}', currentStatus: 'Status', score: 'Score', framesAnalyzed: 'Frames analyzed', idleHint: 'No print is being monitored.', lastError: 'Last error', openSettings: 'Open settings' },
+    aiDetection: { safe: '안전', warning: '경고', failure: '실패', idle: '유휴', error: '확인 안 함', unknown: '시작 중', tooltipError: 'AI 장애 감지가 이 인쇄물을 확인하지 않습니다: {{reason}}', tooltipUnknown: 'AI 장애 감지: 첫 결과를 기다리는 중', errorHint: '이 인쇄물은 확인되지 않습니다.', tooltip: 'AI 장애 감지: {{status}} (점수 {{score}})', tooltipIdle: 'AI 장애 감지 사용', modalTitle: 'AI 장애 감지 - {{name}}', currentStatus: '상태', score: '점수', framesAnalyzed: '분석한 프레임', idleHint: '모니터링 중인 인쇄물이 없습니다.', lastError: '마지막 오류', openSettings: '설정 열기' },
     estimatedCompletion: '예상 완료 시간',
     plateNumber: '플레이트 {{number}}',
     slotOptions: '슬롯 옵션',

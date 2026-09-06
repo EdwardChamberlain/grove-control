@@ -654,7 +654,7 @@ export default {
     },
     // HMS hataları
     clickToViewHmsErrors: 'HMS hatalarını görüntülemek için tıklayın',
-    aiDetection: { safe: 'Safe', warning: 'Warning', failure: 'Failure', idle: 'Idle', error: 'Not checking', unknown: 'Starting', tooltipError: 'AI Failure Detection is not checking this print: {{reason}}', tooltipUnknown: 'AI Failure Detection is waiting for the first result', errorHint: 'This print is not being checked.', tooltip: 'AI Failure Detection: {{status}} (score {{score}})', tooltipIdle: 'AI Failure Detection enabled', modalTitle: 'AI Failure Detection - {{name}}', currentStatus: 'Status', score: 'Score', framesAnalyzed: 'Frames analyzed', idleHint: 'No print is being monitored.', lastError: 'Last error', openSettings: 'Open settings' },
+    aiDetection: { safe: 'Güvenli', warning: 'Uyarı', failure: 'Hata', idle: 'Boşta', error: 'Kontrol edilmiyor', unknown: 'Başlatılıyor', tooltipError: 'Yapay zekâ hata algılama bu baskıyı kontrol etmiyor: {{reason}}', tooltipUnknown: 'Yapay zekâ hata algılama ilk sonucu bekliyor', errorHint: 'Bu baskı kontrol edilmiyor.', tooltip: 'Yapay zekâ hata algılama: {{status}} (puan {{score}})', tooltipIdle: 'Yapay zekâ hata algılama etkin', modalTitle: 'Yapay zekâ hata algılama - {{name}}', currentStatus: 'Durum', score: 'Puan', framesAnalyzed: 'Analiz edilen kareler', idleHint: 'İzlenen baskı yok.', lastError: 'Son hata', openSettings: 'Ayarları aç' },
     estimatedCompletion: 'Tahmini tamamlanma süresi',
     plateNumber: 'Plaka {{number}}',
     slotOptions: 'Yuva seçenekleri',

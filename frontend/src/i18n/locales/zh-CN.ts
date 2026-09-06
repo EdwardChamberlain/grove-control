@@ -654,7 +654,7 @@ export default {
     },
     // HMS errors
     clickToViewHmsErrors: '点击查看 HMS 错误',
-    aiDetection: { safe: 'Safe', warning: 'Warning', failure: 'Failure', idle: 'Idle', error: 'Not checking', unknown: 'Starting', tooltipError: 'AI Failure Detection is not checking this print: {{reason}}', tooltipUnknown: 'AI Failure Detection is waiting for the first result', errorHint: 'This print is not being checked.', tooltip: 'AI Failure Detection: {{status}} (score {{score}})', tooltipIdle: 'AI Failure Detection enabled', modalTitle: 'AI Failure Detection - {{name}}', currentStatus: 'Status', score: 'Score', framesAnalyzed: 'Frames analyzed', idleHint: 'No print is being monitored.', lastError: 'Last error', openSettings: 'Open settings' },
+    aiDetection: { safe: '安全', warning: '警告', failure: '失败', idle: '空闲', error: '未检查', unknown: '正在启动', tooltipError: 'AI 故障检测未检查此打印：{{reason}}', tooltipUnknown: 'AI 故障检测正在等待第一个结果', errorHint: '此打印未在检查。', tooltip: 'AI 故障检测：{{status}}（得分 {{score}}）', tooltipIdle: '已启用 AI 故障检测', modalTitle: 'AI 故障检测 - {{name}}', currentStatus: '状态', score: '得分', framesAnalyzed: '已分析帧数', idleHint: '当前没有监控中的打印。', lastError: '上次错误', openSettings: '打开设置' },
     estimatedCompletion: '预计完成时间',
     plateNumber: '板 {{number}}',
     slotOptions: '槽位选项',

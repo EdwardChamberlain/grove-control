@@ -654,7 +654,7 @@ export default {
     },
     // HMS errors
     clickToViewHmsErrors: 'Cliquez pour voir les erreurs HMS',
-    aiDetection: { safe: 'Safe', warning: 'Warning', failure: 'Failure', idle: 'Idle', error: 'Not checking', unknown: 'Starting', tooltipError: 'AI Failure Detection is not checking this print: {{reason}}', tooltipUnknown: 'AI Failure Detection is waiting for the first result', errorHint: 'This print is not being checked.', tooltip: 'AI Failure Detection: {{status}} (score {{score}})', tooltipIdle: 'AI Failure Detection enabled', modalTitle: 'AI Failure Detection - {{name}}', currentStatus: 'Status', score: 'Score', framesAnalyzed: 'Frames analyzed', idleHint: 'No print is being monitored.', lastError: 'Last error', openSettings: 'Open settings' },
+    aiDetection: { safe: 'Sûr', warning: 'Avertissement', failure: 'Échec', idle: 'Inactif', error: 'Pas de vérification', unknown: 'Démarrage', tooltipError: 'La détection des échecs par IA ne vérifie pas cette impression : {{reason}}', tooltipUnknown: 'La détection des échecs par IA attend le premier résultat', errorHint: 'Cette impression n’est pas vérifiée.', tooltip: 'Détection des échecs par IA : {{status}} (évaluation {{score}})', tooltipIdle: 'Détection des échecs par IA activée', modalTitle: 'Détection des échecs par IA - {{name}}', currentStatus: 'État', score: 'Évaluation', framesAnalyzed: 'Images analysées', idleHint: 'Aucune impression n’est surveillée.', lastError: 'Dernière erreur', openSettings: 'Ouvrir les paramètres' },
     estimatedCompletion: 'Fin estimée',
     plateNumber: 'Plaque {{number}}',
     slotOptions: 'Options du slot',

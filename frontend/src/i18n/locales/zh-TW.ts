@@ -654,7 +654,7 @@ export default {
     },
     // HMS errors
     clickToViewHmsErrors: '點選檢視 HMS 錯誤',
-    aiDetection: { safe: 'Safe', warning: 'Warning', failure: 'Failure', idle: 'Idle', error: 'Not checking', unknown: 'Starting', tooltipError: 'AI Failure Detection is not checking this print: {{reason}}', tooltipUnknown: 'AI Failure Detection is waiting for the first result', errorHint: 'This print is not being checked.', tooltip: 'AI Failure Detection: {{status}} (score {{score}})', tooltipIdle: 'AI Failure Detection enabled', modalTitle: 'AI Failure Detection - {{name}}', currentStatus: 'Status', score: 'Score', framesAnalyzed: 'Frames analyzed', idleHint: 'No print is being monitored.', lastError: 'Last error', openSettings: 'Open settings' },
+    aiDetection: { safe: '安全', warning: '警告', failure: '失敗', idle: '閒置', error: '未檢查', unknown: '啟動中', tooltipError: 'AI 故障偵測未檢查此列印：{{reason}}', tooltipUnknown: 'AI 故障偵測正在等待第一個結果', errorHint: '此列印未進行檢查。', tooltip: 'AI 故障偵測：{{status}}（分數 {{score}}）', tooltipIdle: '已啟用 AI 故障偵測', modalTitle: 'AI 故障偵測 - {{name}}', currentStatus: '狀態', score: '分數', framesAnalyzed: '已分析影格', idleHint: '目前沒有監控中的列印。', lastError: '上次錯誤', openSettings: '開啟設定' },
     estimatedCompletion: '預計完成時間',
     plateNumber: '板 {{number}}',
     slotOptions: '槽位選項',

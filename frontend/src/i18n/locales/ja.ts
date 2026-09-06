@@ -653,7 +653,7 @@ export default {
     },
     // HMS errors
     clickToViewHmsErrors: 'クリックしてHMSエラーを表示',
-    aiDetection: { safe: 'Safe', warning: 'Warning', failure: 'Failure', idle: 'Idle', error: 'Not checking', unknown: 'Starting', tooltipError: 'AI Failure Detection is not checking this print: {{reason}}', tooltipUnknown: 'AI Failure Detection is waiting for the first result', errorHint: 'This print is not being checked.', tooltip: 'AI Failure Detection: {{status}} (score {{score}})', tooltipIdle: 'AI Failure Detection enabled', modalTitle: 'AI Failure Detection - {{name}}', currentStatus: 'Status', score: 'Score', framesAnalyzed: 'Frames analyzed', idleHint: 'No print is being monitored.', lastError: 'Last error', openSettings: 'Open settings' },
+    aiDetection: { safe: '安全', warning: '警告', failure: '失敗', idle: 'アイドル', error: '未確認', unknown: '開始中', tooltipError: 'AI失敗検出はこの印刷を確認していません: {{reason}}', tooltipUnknown: 'AI失敗検出: 最初の結果を待機中', errorHint: 'この印刷は確認されていません。', tooltip: 'AI失敗検出: {{status}}（スコア {{score}}）', tooltipIdle: 'AI失敗検出を有効化', modalTitle: 'AI失敗検出 - {{name}}', currentStatus: 'ステータス', score: 'スコア', framesAnalyzed: '分析したフレーム', idleHint: '監視中の印刷はありません。', lastError: '最後のエラー', openSettings: '設定を開く' },
     estimatedCompletion: '完了予定時刻',
     plateNumber: 'プレート {{number}}',
     slotOptions: 'スロットオプション',

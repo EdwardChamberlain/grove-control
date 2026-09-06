@@ -654,7 +654,7 @@ export default {
     },
     // HMS errors
     clickToViewHmsErrors: 'Haga clic para ver los errores HMS',
-    aiDetection: { safe: 'Safe', warning: 'Warning', failure: 'Failure', idle: 'Idle', error: 'Not checking', unknown: 'Starting', tooltipError: 'AI Failure Detection is not checking this print: {{reason}}', tooltipUnknown: 'AI Failure Detection is waiting for the first result', errorHint: 'This print is not being checked.', tooltip: 'AI Failure Detection: {{status}} (score {{score}})', tooltipIdle: 'AI Failure Detection enabled', modalTitle: 'AI Failure Detection - {{name}}', currentStatus: 'Status', score: 'Score', framesAnalyzed: 'Frames analyzed', idleHint: 'No print is being monitored.', lastError: 'Last error', openSettings: 'Open settings' },
+    aiDetection: { safe: 'Segura', warning: 'Advertencia', failure: 'Fallo', idle: 'Inactiva', error: 'No se comprueba', unknown: 'Iniciando', tooltipError: 'La detección de fallos por IA no está comprobando esta impresión: {{reason}}', tooltipUnknown: 'La detección de fallos por IA está esperando el primer resultado', errorHint: 'Esta impresión no se está comprobando.', tooltip: 'Detección de fallos por IA: {{status}} (puntuación {{score}})', tooltipIdle: 'Detección de fallos por IA activada', modalTitle: 'Detección de fallos por IA - {{name}}', currentStatus: 'Estado', score: 'Puntuación', framesAnalyzed: 'Fotogramas analizados', idleHint: 'No se está supervisando ninguna impresión.', lastError: 'Último error', openSettings: 'Abrir ajustes' },
     estimatedCompletion: 'Hora estimada de finalización',
     plateNumber: 'Cama {{number}}',
     slotOptions: 'Opciones de la ranura',
