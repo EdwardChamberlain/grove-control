@@ -77,7 +77,7 @@ function KioskPrinterTile({
   const preheating = status?.preheating === true;
   const plateClearRequired = status?.awaiting_plate_clear === true && !active;
   const progress = plateClearRequired ? 100 : Math.max(0, Math.min(100, active && !preheating ? status?.progress ?? 0 : 0));
-  const jobName = active || plateClearRequired
+  const jobName = !preheating && (active || plateClearRequired)
     ? formatPrintName(status?.subtask_name || status?.current_print || status?.gcode_file || null, status?.gcode_file, t) || t('kiosk.noJob')
     : t('kiosk.noJob');
   const eta = active && status?.remaining_time != null && status.remaining_time > 0
@@ -137,7 +137,7 @@ function KioskQueueCard({
   t: Translate;
 }) {
   const printing = item.status === 'printing' || item.status === 'preheating';
-  const active = printing && isActivePrint(status);
+  const active = item.status === 'printing' && isActivePrint(status);
   const progress = active ? Math.max(0, Math.min(100, status?.progress ?? 0)) : 0;
   const title = item.archive_name || item.library_file_name || `${t('common.print')} #${item.id}`;
   const thumbnail = item.archive_thumbnail && item.archive_id
