@@ -846,6 +846,47 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_bulk_delete_nested_folder_releases_queue_reference(
+        self, async_client: AsyncClient, auth_setup, db_session
+    ):
+        """Nested files must be detached/cancelled before folder cascade."""
+        from backend.app.models.library import LibraryFile, LibraryFolder
+        from backend.app.models.print_queue import PrintQueueItem
+
+        parent = LibraryFolder(name="bulk-parent")
+        db_session.add(parent)
+        await db_session.flush()
+        child = LibraryFolder(name="bulk-child", parent_id=parent.id)
+        db_session.add(child)
+        await db_session.flush()
+        nested_file = LibraryFile(
+            folder_id=child.id,
+            filename="nested.3mf",
+            file_path="library/nested.3mf",
+            file_type="3mf",
+            file_size=10,
+            created_by_id=auth_setup["admin_user"]["id"],
+        )
+        db_session.add(nested_file)
+        await db_session.flush()
+        queue_item = PrintQueueItem(library_file_id=nested_file.id, status="pending", position=1)
+        db_session.add(queue_item)
+        await db_session.commit()
+        await db_session.refresh(queue_item)
+
+        response = await async_client.post(
+            "/api/v1/library/bulk-delete",
+            headers={"Authorization": f"Bearer {auth_setup['admin_token']}"},
+            json={"file_ids": [], "folder_ids": [parent.id]},
+        )
+
+        assert response.status_code == 200
+        await db_session.refresh(queue_item)
+        assert queue_item.status == "cancelled"
+        assert queue_item.library_file_id is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_bulk_delete_skips_non_owned_files(self, async_client: AsyncClient, auth_setup, library_file_factory):
         """Bulk delete only deletes files the user owns."""
         own_file = await library_file_factory(
