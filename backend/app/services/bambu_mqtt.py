@@ -4614,11 +4614,11 @@ class BambuMQTTClient:
     async def await_cali_ack(self, seq_id: str, timeout: float = 6.0) -> tuple[bool, str]:
         """Wait for the printer's verdict on a K-profile write.
 
-        Returns ``(ok, detail)``. ``ok`` is False only when the printer
-        explicitly said ``result: "fail"`` — a timeout returns True with a
-        detail string, because "no answer" is not evidence of rejection and
-        older firmware may not answer at all. Callers that need certainty read
-        the calibration table back.
+        Returns ``(ok, detail)``. ``ok`` is False when the printer explicitly
+        rejects the write or does not acknowledge it before the timeout. An
+        unconfirmed write must not be reported as saved; callers can retry or
+        read the calibration table back when firmware does not provide a
+        response.
 
         Polled rather than event-driven on purpose: the ack is filled in by the
         MQTT callback thread, and polling a dict costs one lookup every 50ms
@@ -4639,7 +4639,7 @@ class BambuMQTTClient:
         finally:
             self._pending_cali_acks.pop(seq_id, None)
         logger.warning("[%s] No ack for K-profile write seq=%s within %.1fs", self.serial_number, seq_id, timeout)
-        return (True, "no acknowledgement from printer")
+        return (False, "no acknowledgement from printer")
 
     def set_kprofile(
         self,

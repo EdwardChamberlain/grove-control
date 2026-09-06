@@ -4254,6 +4254,56 @@ class TestStartPrintUniqueIdentityFields:
         assert cmd["subtask_name"] == "test"
 
 
+class TestKProfileAcknowledgement:
+    """A K-profile write is successful only after the printer confirms it."""
+
+    @pytest.fixture
+    def mqtt_client(self):
+        from backend.app.services.bambu_mqtt import BambuMQTTClient
+
+        return BambuMQTTClient(
+            ip_address="192.168.1.100",
+            serial_number="TEST_KPROFILE_ACK",
+            access_code="12345678",
+        )
+
+    @pytest.mark.asyncio
+    async def test_timeout_is_reported_as_failure(self, mqtt_client):
+        mqtt_client._pending_cali_acks["42"] = None
+
+        ok, detail = await mqtt_client.await_cali_ack("42", timeout=0.01)
+
+        assert ok is False
+        assert detail == "no acknowledgement from printer"
+        assert "42" not in mqtt_client._pending_cali_acks
+
+    @pytest.mark.asyncio
+    async def test_printer_rejection_is_reported_as_failure(self, mqtt_client):
+        mqtt_client._pending_cali_acks["42"] = {
+            "result": "fail",
+            "reason": "invalid tray_id",
+        }
+
+        ok, detail = await mqtt_client.await_cali_ack("42", timeout=0.1)
+
+        assert ok is False
+        assert detail == "invalid tray_id"
+        assert "42" not in mqtt_client._pending_cali_acks
+
+    @pytest.mark.asyncio
+    async def test_successful_printer_ack_is_reported_as_success(self, mqtt_client):
+        mqtt_client._pending_cali_acks["42"] = {
+            "result": "success",
+            "reason": "",
+        }
+
+        ok, detail = await mqtt_client.await_cali_ack("42", timeout=0.1)
+
+        assert ok is True
+        assert detail == ""
+        assert "42" not in mqtt_client._pending_cali_acks
+
+
 class TestDeleteKProfileDualNozzleDetection:
     """Regression guard: dual-nozzle detection for K-profile delete.
 
