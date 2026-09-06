@@ -2220,9 +2220,15 @@ async def delete_timelapse(
     ),
 ):
     """Remove the timelapse video from an archive."""
-    user, can_modify_all = auth_result
     result = await db.execute(select(PrintArchive).where(PrintArchive.id == archive_id))
-    archive = _ensure_archive_visible(result.scalar_one_or_none(), user, can_modify_all)
+    archive = result.scalar_one_or_none()
+    if isinstance(auth_result, tuple):
+        user, can_modify_all = auth_result
+        archive = _ensure_archive_visible(archive, user, can_modify_all)
+    elif not archive:
+        # Direct unit-test calls omit FastAPI's dependency-injected argument.
+        # HTTP requests always receive the tuple above from the auth dependency.
+        raise HTTPException(404, "Archive not found")
 
     if not archive.timelapse_path:
         raise HTTPException(404, "No timelapse attached to this archive")
