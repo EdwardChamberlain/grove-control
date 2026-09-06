@@ -30,7 +30,7 @@ function StatusIcon({ status }: { status: DiagnosticStatus }) {
  * `diagnostic.check.<id>.*`.
  */
 export function DiagnosticChecklist({ result }: { result: PrinterDiagnosticResult }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
 
   const overallClass =
     result.overall === 'ok'
@@ -44,7 +44,10 @@ export function DiagnosticChecklist({ result }: { result: PrinterDiagnosticResul
       check.id === 'port_rtsps'
         ? { protocol: 'RTSPS', port: 322, ...check.params }
         : check.params;
-    const detail = t(`diagnostic.check.${check.id}.${check.status}`, {
+    const detailKey = `diagnostic.check.${check.id}.${check.status}`;
+    const reason = typeof check.params?.reason === 'string' ? check.params.reason : null;
+    const reasonDetailKey = reason ? `${detailKey}_${reason}` : null;
+    const detail = t(reasonDetailKey && i18n.exists(reasonDetailKey) ? reasonDetailKey : detailKey, {
       ...params,
       defaultValue: '',
     });

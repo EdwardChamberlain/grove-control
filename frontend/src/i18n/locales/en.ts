@@ -6047,6 +6047,7 @@ export default {
         pass: 'The printer reports this option is on — sent files will be stored on the SD card and archives will have thumbnails and slicer metadata.',
         fail: 'The printer reports this option is off. Enable "Store sent files on external storage" — on newer firmware (P2S 01.02 / Bambu Studio 2.6+) the toggle lives on the printer\'s Print Settings; on older versions it\'s in Bambu Studio / OrcaSlicer\'s Device tab. Without it, every archived print is missing its thumbnail and slicer metadata.',
         skip: 'Not checked — needs a live MQTT connection. On older slicers where this setting lives only in the slicer the printer never reports it, so this check will pass even when the option is off — verify install step 4 manually.',
+        skip_unsupported_model: 'Not checked — this printer model has no way to turn the option on. Verify install step 4 manually.',
       },
       port_rtsps: {
         title: 'Camera port ({{protocol}} {{port}})',
