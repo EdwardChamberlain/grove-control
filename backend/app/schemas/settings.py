@@ -1,6 +1,12 @@
 import json
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
+
+# These integrations may legitimately target services on the same host or LAN.
+# Validate unsafe destinations while preserving Grove's local-first deployment
+# model; the shared guard rejects metadata, encoded-IP, multicast, unspecified,
+# and non-HTTP targets without banning private LAN addresses.
+LAN_SERVICE_URL_SETTINGS = ("ha_url", "obico_ml_url", "orcaslicer_api_url", "bambu_studio_api_url")
 
 
 class AppSettings(BaseModel):
@@ -527,6 +533,20 @@ class AppSettingsUpdate(BaseModel):
     obico_enabled_printers: str | None = None
     default_sidebar_order: str | None = None
     forecast_global_lead_time_days: int | None = Field(default=None, ge=0)
+
+    @field_validator(*LAN_SERVICE_URL_SETTINGS)
+    @classmethod
+    def validate_lan_service_url(cls, v: str | None, info: ValidationInfo) -> str | None:
+        """Reject SSRF-unsafe absolute URLs while allowing legacy host values."""
+        if v is None or not v.strip() or "://" not in v:
+            return v
+        from backend.app.api.routes._url_safety import assert_safe_lan_service_url
+
+        try:
+            assert_safe_lan_service_url(v.strip(), label=info.field_name or "URL")
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+        return v
 
     @field_validator("gcode_snippets")
     @classmethod

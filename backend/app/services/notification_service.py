@@ -64,6 +64,55 @@ def _looks_like_cloudflare_challenge(response: httpx.Response) -> bool:
     return "just a moment" in body or "cf-chl-bypass" in body or "cf-chl-opt" in body or "challenge-platform" in body
 
 
+def _assert_safe_provider_url(url: str, *, label: str) -> str | None:
+    """Validate a provider URL taken from user-supplied config.
+
+    Returns an error message on rejection, or None when the URL is
+    acceptable — the ``_send_*`` methods return ``tuple[bool, str]`` rather
+    than raising, so a message is more useful here than an exception.
+
+    Uses the LAN-service policy: self-hosting ntfy, Bark, Gotify or a webhook
+    receiver on the home LAN is normal and must keep working, so loopback and
+    RFC-1918 stay permitted. Cloud-metadata endpoints, numeric-encoded IPs and
+    non-HTTP schemes are rejected.
+    """
+    from backend.app.api.routes._url_safety import assert_safe_lan_service_url
+
+    try:
+        assert_safe_lan_service_url(url, label=label)
+    except ValueError as exc:
+        return str(exc)
+    return None
+
+
+def _opaque_http_failure(response: httpx.Response, *, label: str) -> str:
+    """Failure message for a provider whose destination host the user supplies.
+
+    The response body is deliberately **not** returned to the caller. Provider
+    URLs are configurable by anyone holding ``NOTIFICATIONS_CREATE`` — which
+    the default Operators group carries and which does not imply
+    ``SETTINGS_UPDATE`` — and ``POST /notifications/test-config`` accepts a URL
+    straight from the request body without persisting anything. Echoing the
+    response body there turned an intended "does my webhook work?" check into
+    an authenticated read primitive against any host the Bambuddy process can
+    reach, including services that are not exposed to the network at all.
+
+    Providers whose host Bambuddy hardcodes (Pushover, Telegram, CallMeBot)
+    keep returning the upstream body — there is no trust boundary to cross
+    when the destination cannot be influenced.
+
+    The body is logged at debug level, where it stays available to whoever
+    already administers the host without being handed back over the API.
+    """
+    logger.debug(
+        "%s delivery failed with HTTP %s; body: %s",
+        label,
+        response.status_code,
+        (response.text or "")[:200],
+    )
+    return f"HTTP {response.status_code} from the configured {label} (see server logs at debug level for details)"
+
+
 class NotificationService:
     """Service for sending notifications through various providers."""
 
@@ -291,6 +340,10 @@ class NotificationService:
         if not topic:
             return False, "Topic is required"
 
+        url_error = _assert_safe_provider_url(server, label="ntfy server URL")
+        if url_error:
+            return False, url_error
+
         url = f"{server}/{topic}"
         # ntfy reads Title/Message from HTTP headers. httpx enforces ASCII
         # for str header values, but printer names and filenames can contain
@@ -343,7 +396,7 @@ class NotificationService:
                 "Fight Mode, or front the server with Cloudflare Access using a "
                 "service token. (#1534)"
             )
-        return False, f"HTTP {response.status_code}: {response.text[:200]}"
+        return False, _opaque_http_failure(response, label="ntfy server")
 
     async def _send_pushover(
         self, config: dict, title: str, message: str, image_data: bytes | None = None
@@ -605,6 +658,10 @@ class NotificationService:
         if not webhook_url:
             return False, "Webhook URL is required"
 
+        url_error = _assert_safe_provider_url(webhook_url, label="Webhook URL")
+        if url_error:
+            return False, url_error
+
         # Build payload based on format
         if payload_format == "slack":
             # Slack/Mattermost format - just text field
@@ -650,7 +707,7 @@ class NotificationService:
             if response.status_code in (200, 201, 202, 204):
                 return True, "Webhook delivered successfully"
             else:
-                return False, f"HTTP {response.status_code}: {response.text[:200]}"
+                return False, _opaque_http_failure(response, label="webhook endpoint")
         except Exception as e:
             return False, f"Webhook error: {str(e)}"
 
@@ -733,7 +790,11 @@ class NotificationService:
         elif response.status_code == 401:
             return False, "Home Assistant authentication failed - check your token"
         else:
-            return False, f"HTTP {response.status_code}: {response.text[:200]}"
+            # ha_url comes from global settings (SETTINGS_UPDATE, admin-only), so
+            # this is a narrower channel than the per-request provider URLs — but
+            # it lands in the same NOTIFICATIONS_CREATE-gated test response, so it
+            # gets the same treatment.
+            return False, _opaque_http_failure(response, label="Home Assistant endpoint")
 
     async def _send_to_provider(
         self,
