@@ -863,7 +863,6 @@ async def stop_camera_stream(
 @router.get("/{printer_id}/camera/snapshot")
 async def camera_snapshot(
     printer_id: int,
-    db: AsyncSession = Depends(get_db),
     _: None = RequireCameraStreamTokenIfAuthEnabled,
 ):
     """Capture a single frame from the printer camera.
@@ -875,7 +874,12 @@ async def camera_snapshot(
     import tempfile
     from pathlib import Path
 
-    printer = await get_printer_or_404(printer_id, db)
+    from backend.app.core.database import async_session
+
+    # Release the read connection before the camera capture, which can wait up
+    # to 15 seconds and is polled per tile by the farm dashboard.
+    async with async_session() as db:
+        printer = await get_printer_or_404(printer_id, db)
 
     # Check for external camera first
     if printer.external_camera_enabled and printer.external_camera_url:

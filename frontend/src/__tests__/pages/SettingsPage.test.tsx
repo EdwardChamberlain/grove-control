@@ -167,6 +167,38 @@ describe('SettingsPage', () => {
       });
     });
 
+    it('autosaves only the setting changed on this page', async () => {
+      let updatePayload: Record<string, unknown> | null = null;
+      server.use(
+        http.get('/api/v1/settings/', () =>
+          HttpResponse.json({ ...mockSettings, external_url: window.location.origin }),
+        ),
+        http.put('/api/v1/settings/', async ({ request }) => {
+          updatePayload = await request.json() as Record<string, unknown>;
+          return HttpResponse.json({
+            ...mockSettings,
+            external_url: window.location.origin,
+            ...updatePayload,
+          });
+        }),
+      );
+
+      const user = userEvent.setup();
+      render(<SettingsPage />);
+
+      const autoArchiveLabel = await screen.findByText('Auto-archive prints');
+      const archiveRow = autoArchiveLabel.parentElement?.parentElement;
+      expect(archiveRow).not.toBeNull();
+
+      // Allow the initial-load guard to clear before editing.
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      await user.click(within(archiveRow as HTMLElement).getByRole('checkbox'));
+
+      await waitFor(() => {
+        expect(updatePayload).toEqual({ auto_archive: false });
+      }, { timeout: 2000 });
+    });
+
     it('shows default printer setting', async () => {
       render(<SettingsPage />);
 
