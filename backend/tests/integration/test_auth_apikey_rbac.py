@@ -137,6 +137,14 @@ class TestApiKeyDenylistIntegrity:
             Permission.GITHUB_BACKUP,
             Permission.GITHUB_RESTORE,
             Permission.FIRMWARE_UPDATE,
+            Permission.ARCHIVES_CREATE,
+            Permission.ARCHIVES_UPDATE_ALL,
+            Permission.ARCHIVES_DELETE_ALL,
+            Permission.LIBRARY_UPDATE_ALL,
+            Permission.LIBRARY_DELETE_ALL,
+            Permission.PROJECTS_CREATE,
+            Permission.PROJECTS_UPDATE,
+            Permission.PROJECTS_DELETE,
         }
         missing = expected_denied - _APIKEY_DENIED_PERMISSIONS
         assert not missing, (
@@ -216,7 +224,6 @@ class TestApiKeyScopeAllowlist:
             "can_manage_library",
             "can_manage_inventory",
             "can_manage_archives",
-            "can_manage_projects",
             "can_access_cloud",
         }
         used_flags = set(_APIKEY_SCOPE_BY_PERMISSION.values())
@@ -244,7 +251,6 @@ class TestApiKeyScopeAllowlist:
             "can_manage_library",
             "can_manage_inventory",
             "can_manage_archives",
-            "can_manage_projects",
             "can_access_cloud",
         ],
     )
@@ -302,21 +308,17 @@ class TestCheckApiKeyPermissionsMatrix:
         ("WEBSOCKET_CONNECT", "can_read_status", "websocket subscribe"),
         # can_queue
         ("QUEUE_CREATE", "can_queue", "add queue item"),
-        ("QUEUE_DELETE_ALL", "can_queue", "delete any queue item"),
-        ("ARCHIVES_REPRINT_ALL", "can_queue", "reprint an archive"),
+        ("QUEUE_DELETE_OWN", "can_queue", "delete own queue item"),
+        ("ARCHIVES_REPRINT_OWN", "can_queue", "reprint own archive"),
         # can_control_printer
         ("PRINTERS_CONTROL", "can_control_printer", "start/stop print"),
         ("PRINTERS_FILES", "can_control_printer", "send file to printer"),
         ("SMART_PLUGS_CONTROL", "can_control_printer", "smart plug on/off"),
-        # can_manage_library — OWN and ALL ownership variants both fold into
-        # the same scope (#1832): API keys have no per-row ownership identity,
-        # so splitting OWN/ALL across allowlist/denylist made the curation
-        # surface unreachable. PURGE stays admin-only.
+        # can_manage_library — API keys are restricted to their owner's rows;
+        # ALL-ownership operations stay admin/JWT-only.
         ("LIBRARY_UPLOAD", "can_manage_library", "upload library file"),
         ("LIBRARY_UPDATE_OWN", "can_manage_library", "rename own library file"),
-        ("LIBRARY_UPDATE_ALL", "can_manage_library", "rename any library file"),
         ("LIBRARY_DELETE_OWN", "can_manage_library", "delete own library file"),
-        ("LIBRARY_DELETE_ALL", "can_manage_library", "delete any library file"),
         ("MAKERWORLD_IMPORT", "can_manage_library", "import from MakerWorld"),
         # can_manage_inventory
         ("INVENTORY_CREATE", "can_manage_inventory", "create spool record"),
@@ -324,15 +326,8 @@ class TestCheckApiKeyPermissionsMatrix:
         ("INVENTORY_DELETE", "can_manage_inventory", "delete spool record"),
         ("INVENTORY_FORECAST_WRITE", "can_manage_inventory", "update forecast SKU settings"),
         # can_manage_archives — archive CRUD, excluding destructive purge.
-        ("ARCHIVES_CREATE", "can_manage_archives", "create an archive"),
         ("ARCHIVES_UPDATE_OWN", "can_manage_archives", "edit own archive"),
-        ("ARCHIVES_UPDATE_ALL", "can_manage_archives", "edit any archive"),
         ("ARCHIVES_DELETE_OWN", "can_manage_archives", "delete own archive"),
-        ("ARCHIVES_DELETE_ALL", "can_manage_archives", "delete any archive"),
-        # can_manage_projects — project CRUD and membership writes.
-        ("PROJECTS_CREATE", "can_manage_projects", "create a project"),
-        ("PROJECTS_UPDATE", "can_manage_projects", "update a project / add archives"),
-        ("PROJECTS_DELETE", "can_manage_projects", "delete a project"),
     ]
 
     _ADMIN_CASES = [
@@ -345,8 +340,18 @@ class TestCheckApiKeyPermissionsMatrix:
         "FIRMWARE_UPDATE",
         # Unmapped administrative (allowlist fail-closed catches these too)
         "PRINTERS_CREATE",
-        # LIBRARY_DELETE_ALL / LIBRARY_UPDATE_ALL moved to can_manage_library
-        # under #1832 — covered by the _SCOPE_CASES matrix above.
+        # Ownership ALL variants remain JWT/admin-only; API keys are own-only.
+        "QUEUE_UPDATE_ALL",
+        "QUEUE_DELETE_ALL",
+        "ARCHIVES_REPRINT_ALL",
+        "LIBRARY_UPDATE_ALL",
+        "LIBRARY_DELETE_ALL",
+        "ARCHIVES_CREATE",
+        "ARCHIVES_UPDATE_ALL",
+        "ARCHIVES_DELETE_ALL",
+        "PROJECTS_CREATE",
+        "PROJECTS_UPDATE",
+        "PROJECTS_DELETE",
         "LIBRARY_PURGE",
         "DISCOVERY_SCAN",
     ]
@@ -379,7 +384,6 @@ class TestCheckApiKeyPermissionsMatrix:
                 "can_manage_library",
                 "can_manage_inventory",
                 "can_manage_archives",
-                "can_manage_projects",
             )
             if f != required_flag
         }

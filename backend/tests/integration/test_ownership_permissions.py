@@ -111,6 +111,84 @@ class TestOwnershipPermissionsSetup:
 class TestArchiveOwnershipPermissions(TestOwnershipPermissionsSetup):
     """Tests for archive ownership-based permissions."""
 
+    @pytest.fixture
+    async def operator_api_key(self, db_session, auth_setup):
+        """Create a fully-scoped API key owned by operator1."""
+        from backend.app.core.auth import generate_api_key
+        from backend.app.models.api_key import APIKey
+
+        full_key, key_hash, key_prefix = generate_api_key()
+        db_session.add(
+            APIKey(
+                name="operator-archive-key",
+                key_hash=key_hash,
+                key_prefix=key_prefix,
+                user_id=auth_setup["operator_user"]["id"],
+                can_read_status=True,
+                can_manage_archives=True,
+            )
+        )
+        await db_session.commit()
+        return full_key
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_api_key_cannot_read_another_users_archive(
+        self, async_client: AsyncClient, auth_setup, archive_factory, printer_factory, operator_api_key
+    ):
+        printer = await printer_factory()
+        archive = await archive_factory(
+            printer.id,
+            print_name="Operator 2 archive",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+
+        response = await async_client.get(
+            f"/api/v1/archives/{archive.id}",
+            headers={"X-API-Key": operator_api_key},
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_api_key_cannot_update_another_users_archive(
+        self, async_client: AsyncClient, auth_setup, archive_factory, printer_factory, operator_api_key
+    ):
+        printer = await printer_factory()
+        archive = await archive_factory(
+            printer.id,
+            print_name="Operator 2 archive",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+
+        response = await async_client.patch(
+            f"/api/v1/archives/{archive.id}",
+            headers={"X-API-Key": operator_api_key},
+            json={"print_name": "Should remain unchanged"},
+        )
+
+        assert response.status_code == 403
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_api_key_cannot_delete_another_users_archive(
+        self, async_client: AsyncClient, auth_setup, archive_factory, printer_factory, operator_api_key
+    ):
+        printer = await printer_factory()
+        archive = await archive_factory(
+            printer.id,
+            print_name="Operator 2 archive",
+            created_by_id=auth_setup["operator2_user"]["id"],
+        )
+
+        response = await async_client.delete(
+            f"/api/v1/archives/{archive.id}",
+            headers={"X-API-Key": operator_api_key},
+        )
+
+        assert response.status_code == 403
+
     # ========================================================================
     # DELETE permissions
     # ========================================================================
