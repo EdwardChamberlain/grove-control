@@ -1059,6 +1059,8 @@ export interface APIKey {
   can_read_status: boolean;
   can_manage_library: boolean;
   can_manage_inventory: boolean;
+  can_manage_archives: boolean;
+  can_manage_projects: boolean;
   can_access_cloud: boolean;
   can_update_energy_cost: boolean;
   printer_ids: number[] | null;
@@ -1075,6 +1077,8 @@ export interface APIKeyCreate {
   can_read_status?: boolean;
   can_manage_library?: boolean;
   can_manage_inventory?: boolean;
+  can_manage_archives?: boolean;
+  can_manage_projects?: boolean;
   can_access_cloud?: boolean;
   can_update_energy_cost?: boolean;
   printer_ids?: number[] | null;
@@ -1092,6 +1096,8 @@ export interface APIKeyUpdate {
   can_read_status?: boolean;
   can_manage_library?: boolean;
   can_manage_inventory?: boolean;
+  can_manage_archives?: boolean;
+  can_manage_projects?: boolean;
   can_access_cloud?: boolean;
   can_update_energy_cost?: boolean;
   printer_ids?: number[] | null;
@@ -1262,6 +1268,8 @@ export interface CloudAuthStatus {
   is_authenticated: boolean;
   email: string | null;
   region?: 'global' | 'china' | null;
+  /** A token is stored but Bambu no longer accepts it — tell the user why the login form is back. */
+  sign_in_expired?: boolean;
 }
 
 export interface CloudLoginResponse {
@@ -1323,6 +1331,8 @@ export interface OrcaProfileDetail {
 export interface MakerworldStatus {
   has_cloud_token: boolean;
   can_download: boolean;
+  /** A token is stored but Bambu rejected it — downloads will fail until the user signs in again. */
+  sign_in_expired?: boolean;
 }
 
 export interface MakerworldResolvedModel {

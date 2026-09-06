@@ -2787,7 +2787,8 @@ export default {
       selectAll: '모두 선택',
       clearAll: '모두 해제',
       permissionsSelected: '{{count}}개 선택됨',
-      noResults: '검색과 일치하는 권한이 없습니다'
+      noResults: '검색과 일치하는 권한이 없습니다',
+      websocketHint: '실시간 업데이트에 필요합니다. 이 권한이 없으면 인터페이스는 주기적 폴링으로 대체됩니다.'
     }
   },
   users: {
@@ -2982,6 +2983,8 @@ export default {
       noSearchResults: '검색어와 일치하는 프리셋이 없습니다'
     },
     connectedAs: '연결된 계정',
+    signInExpiredTitle: 'Bambu 클라우드 로그인이 만료되었습니다',
+    signInExpiredBody: 'Bambu Lab이 저장된 토큰을 더 이상 허용하지 않습니다. 클라우드 프로필, MakerWorld 가져오기, 펌웨어 확인을 복구하려면 다시 로그인하세요.',
     logout: '로그아웃',
     noLogoutPermission: '로그아웃 권한이 없습니다',
     failedToLoad: '프로필 불러오기 실패',
@@ -5669,6 +5672,8 @@ export default {
     resolveButton: '확인',
     signInRequiredTitle: '다운로드하려면 Bambu 클라우드 로그인 필요',
     signInRequiredBody: '익명으로 모델 세부 정보를 탐색할 수 있지만 MakerWorld는 3MF 파일을 다운로드하려면 Bambu 클라우드 계정이 필요합니다.',
+    signInExpiredTitle: 'Bambu 클라우드 로그인이 만료되었습니다',
+    signInExpiredBody: 'Bambuddy에는 여전히 로그인되어 있지만 Bambu Lab이 저장된 토큰을 더 이상 허용하지 않아 다운로드가 실패합니다. Bambu 클라우드에 다시 로그인하세요.',
     openCloudSettings: '클라우드 설정 열기',
     untitledModel: '제목 없는 모델',
     byCreator: '{{name}} 제작',
@@ -6047,7 +6052,8 @@ export default {
       mqtt_auth: {
         title: '프린터 자격증명',
         pass: '프린터가 연결을 수락했습니다.',
-        fail: '프린터에 연결됐지만 연결을 거부했습니다. 액세스 코드 또는 시리얼 번호가 잘못됐을 가능성이 높습니다. 개발자 모드를 토글할 때마다 액세스 코드가 변경됩니다 — 프린터 화면에서 다시 복사하세요.',
+        fail: '프린터에 도달할 수 있지만 Bambuddy가 연결되지 않았습니다. 액세스 코드 또는 시리얼 번호가 잘못됐을 가능성이 높습니다 — LAN 전용 모드나 개발자 모드를 토글할 때마다 액세스 코드가 변경되므로 프린터 화면에서 다시 복사하세요. 재부팅 중이거나 이미 동시 연결 한도에 도달한 프린터도 똑같이 보입니다.',
+        fail_auth_rejected: '프린터가 Bambuddy의 자격증명을 거부했습니다. 액세스 코드 또는 시리얼 번호가 잘못됐습니다 — LAN 전용 모드나 개발자 모드를 토글할 때마다 액세스 코드가 변경됩니다. 프린터 화면에서 다시 복사한 뒤 프린터 설정에 저장하세요.',
         skip: '확인하지 않음 — 프린터에 연결할 수 없었습니다.'
       },
       developer_mode: {

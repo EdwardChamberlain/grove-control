@@ -2954,6 +2954,7 @@ export default {
       clearAll: 'すべて解除',
       permissionsSelected: '{{count}}件選択',
       noResults: '検索に一致する権限がありません',
+      websocketHint: 'ライブ更新に必要です。この権限がないと、インターフェースは定期的なポーリングに切り替わります。',
     },
   },
 
@@ -3155,6 +3156,8 @@ export default {
       },
     },
     connectedAs: '接続中:',
+    signInExpiredTitle: 'Bambu Cloud のサインインの有効期限が切れました',
+    signInExpiredBody: '保存されたトークンは Bambu Lab に受け付けられなくなりました。クラウドプロファイル、MakerWorld のインポート、ファームウェア確認を復元するには、再度サインインしてください。',
     logout: 'ログアウト',
     noLogoutPermission: 'ログアウトする権限がありません',
     failedToLoad: 'ファイルの読み込みに失敗しました',
@@ -6035,7 +6038,8 @@ export default {
       mqtt_auth: {
         title: 'プリンター認証情報',
         pass: 'プリンターが接続を受け入れました。',
-        fail: 'プリンターには到達できますが、接続を拒否されました。アクセスコードまたはシリアル番号が間違っている可能性が高いです。アクセスコードは開発者モードを切り替えるたびに変わります — プリンター画面から再度コピーしてください。',
+        fail: 'プリンターには到達できますが、Bambuddy は接続されていません。アクセスコードまたはシリアル番号が間違っている可能性が高いです — アクセスコードは LAN のみモードや開発者モードを切り替えるたびに変わるため、プリンター画面から再度コピーしてください。再起動中のプリンターや、同時接続数の上限に達しているプリンターでも同じ表示になります。',
+        fail_auth_rejected: 'プリンターが Bambuddy の認証情報を拒否しました。アクセスコードまたはシリアル番号が間違っています — アクセスコードは LAN のみモードや開発者モードを切り替えるたびに変わります。プリンター画面から再度コピーし、プリンター設定に保存してください。',
         skip: '未確認 — プリンターに到達できませんでした。',
       },
       developer_mode: {
@@ -6193,6 +6197,8 @@ export default {
     resolveButton: '読み込む',
     signInRequiredTitle: 'ダウンロードには Bambu Cloud へのサインインが必要です',
     signInRequiredBody: 'モデルの詳細は匿名で閲覧できますが、3MF ファイルをダウンロードするには Bambu Cloud アカウントが必要です。',
+    signInExpiredTitle: 'Bambu Cloud のサインインの有効期限が切れました',
+    signInExpiredBody: 'Bambuddy にはサインインしたままですが、Bambu Lab が保存されたトークンを受け付けなくなったため、ダウンロードは失敗します。Bambu Cloud に再度サインインしてください。',
     openCloudSettings: 'Cloud 設定を開く',
     untitledModel: '無題のモデル',
     byCreator: '作成者: {{name}}',

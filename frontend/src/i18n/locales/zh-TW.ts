@@ -2942,6 +2942,7 @@ export default {
       clearAll: '清除全部',
       permissionsSelected: '已選 {{count}} 個',
       noResults: '沒有權限匹配您的搜尋',
+      websocketHint: '即時更新所需。缺少此權限時，介面將回退到定期輪詢。',
     },
   },
 
@@ -3143,6 +3144,8 @@ export default {
       },
     },
     connectedAs: '已連線為',
+    signInExpiredTitle: 'Bambu Cloud 登入已過期',
+    signInExpiredBody: 'Bambu Lab 不再接受已儲存的權杖。請重新登入以恢復雲端設定檔、MakerWorld 匯入與韌體檢查。',
     logout: '登出',
     noLogoutPermission: '您沒有登出的權限',
     failedToLoad: '載入設定檔案失敗',
@@ -6022,7 +6025,8 @@ export default {
       mqtt_auth: {
         title: '印表機認證資訊',
         pass: '印表機已接受連線。',
-        fail: '印表機可達，但拒絕了連線。存取碼或序號很可能有誤。每次切換開發者模式時存取碼都會變更 — 請從印表機螢幕重新複製。',
+        fail: '印表機可達，但 Bambuddy 未與其建立連線。存取碼或序號很可能有誤 — 每次切換僅區域網路模式或開發者模式時存取碼都會變更，請從印表機螢幕重新複製。正在重新啟動或已達到同時連線數上限的印表機看起來也是這樣。',
+        fail_auth_rejected: '印表機拒絕了 Bambuddy 的認證資訊。存取碼或序號有誤 — 每次切換僅區域網路模式或開發者模式時存取碼都會變更。請從印表機螢幕重新複製，並儲存到印表機設定中。',
         skip: '未檢查 — 無法連線到印表機。',
       },
       developer_mode: {
@@ -6180,6 +6184,8 @@ export default {
     resolveButton: '解析',
     signInRequiredTitle: '下載需要登入 Bambu Cloud',
     signInRequiredBody: '您可以匿名瀏覽模型詳情，但下載 3MF 檔案需要 Bambu Cloud 帳戶。',
+    signInExpiredTitle: 'Bambu Cloud 登入已過期',
+    signInExpiredBody: '您仍處於 Bambuddy 的登入狀態，但 Bambu Lab 已不再接受已儲存的權杖，因此下載會失敗。請重新登入 Bambu Cloud。',
     openCloudSettings: '開啟雲端設定',
     untitledModel: '無標題模型',
     byCreator: '作者: {{name}}',

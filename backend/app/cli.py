@@ -70,6 +70,10 @@ async def kiosk_bootstrap(
             # commands via the /spoolbuddy/* routes — all gated by
             # can_manage_inventory now, so the bundled key must opt in.
             can_manage_inventory=True,
+            # The kiosk does not manage projects.
+            can_manage_projects=False,
+            # The kiosk does not manage print archives.
+            can_manage_archives=False,
             printer_ids=None,
             enabled=True,
             expires_at=None,

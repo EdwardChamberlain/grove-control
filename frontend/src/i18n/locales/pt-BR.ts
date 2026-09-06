@@ -2942,6 +2942,7 @@ export default {
       clearAll: 'Limpar Tudo',
       permissionsSelected: '{{count}} selecionada(s)',
       noResults: 'Nenhuma permissão corresponde à sua pesquisa',
+      websocketHint: 'Necessário para atualizações em tempo real. Sem esta permissão, a interface recorre à sondagem periódica.',
     },
   },
 
@@ -3143,6 +3144,8 @@ export default {
       },
     },
     connectedAs: 'Conectado como',
+    signInExpiredTitle: 'Sessão do Bambu Cloud expirada',
+    signInExpiredBody: 'A Bambu Lab não aceita mais o token armazenado. Entre novamente para restaurar os perfis na nuvem, as importações do MakerWorld e a verificação de firmware.',
     logout: 'Sair',
     noLogoutPermission: 'Você não tem permissão para sair',
     failedToLoad: 'Falha ao carregar perfis',
@@ -6023,7 +6026,8 @@ export default {
       mqtt_auth: {
         title: 'Credenciais da impressora',
         pass: 'A impressora aceitou a conexão.',
-        fail: 'A impressora está acessível mas recusou a conexão. O código de acesso ou o número de série provavelmente está incorreto. O código de acesso muda toda vez que o Modo Desenvolvedor é alternado — copie-o novamente da tela da impressora.',
+        fail: 'A impressora está acessível mas o Bambuddy não está conectado a ela. O código de acesso ou o número de série provavelmente está incorreto — o código de acesso muda toda vez que o modo Somente LAN ou o Modo Desenvolvedor é alternado, então copie-o novamente da tela da impressora. Uma impressora reiniciando, ou que já atingiu seu limite de conexões simultâneas, aparece do mesmo jeito.',
+        fail_auth_rejected: 'A impressora recusou as credenciais do Bambuddy. O código de acesso ou o número de série está incorreto — o código de acesso muda toda vez que o modo Somente LAN ou o Modo Desenvolvedor é alternado. Copie-o novamente da tela da impressora e salve-o nas configurações da impressora.',
         skip: 'Não verificado — não foi possível alcançar a impressora.',
       },
       developer_mode: {
@@ -6181,6 +6185,8 @@ export default {
     resolveButton: 'Resolver',
     signInRequiredTitle: 'Login no Bambu Cloud necessário para baixar',
     signInRequiredBody: 'Você pode navegar pelos detalhes do modelo anonimamente, mas o MakerWorld exige uma conta Bambu Cloud para baixar arquivos 3MF.',
+    signInExpiredTitle: 'Sessão do Bambu Cloud expirada',
+    signInExpiredBody: 'Você continua conectado ao Bambuddy, mas a Bambu Lab deixou de aceitar o token armazenado, então os downloads vão falhar. Entre novamente no Bambu Cloud.',
     openCloudSettings: 'Abrir configurações do Cloud',
     untitledModel: 'Modelo sem título',
     byCreator: 'por {{name}}',

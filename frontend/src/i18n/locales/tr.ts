@@ -2958,6 +2958,7 @@ export default {
       clearAll: 'Tümünü Temizle',
       permissionsSelected: '{{count}} seçildi',
       noResults: 'Aramanızla eşleşen izin yok',
+      websocketHint: 'Canlı güncellemeler için gereklidir. Bu izin olmadan arayüz düzenli yoklamaya geri döner.',
     },
   },
 
@@ -3159,6 +3160,8 @@ export default {
       },
     },
     connectedAs: 'Bağlı kullanıcı',
+    signInExpiredTitle: 'Bambu Cloud oturumu sona erdi',
+    signInExpiredBody: 'Bambu Lab kayıtlı belirteci artık kabul etmiyor. Bulut profillerini, MakerWorld içe aktarmalarını ve donanım yazılımı denetimlerini geri yüklemek için yeniden oturum açın.',
     logout: 'Çıkış',
     noLogoutPermission: 'Çıkış yapma izniniz yok',
     failedToLoad: 'Profiller yüklenemedi',
@@ -5974,7 +5977,8 @@ export default {
       mqtt_auth: {
         title: 'Yazıcı kimlik bilgileri',
         pass: 'Yazıcı bağlantıyı kabul etti.',
-        fail: 'Yazıcı erişilebilir ancak bağlantıyı reddetti. Büyük olasılıkla erişim kodu veya seri numarası yanlış. Erişim kodu, Geliştirici Modu her açılıp kapatıldığında değişir — yazıcı ekranından yeniden kopyalayın.',
+        fail: 'Yazıcıya erişilebiliyor ancak Bambuddy ona bağlı değil. Büyük olasılıkla erişim kodu veya seri numarası yanlış — erişim kodu, Yalnızca LAN veya Geliştirici Modu her açılıp kapatıldığında değişir, bu yüzden yazıcı ekranından yeniden kopyalayın. Yeniden başlamakta olan veya eşzamanlı bağlantı sınırına ulaşmış bir yazıcı da aynı görünür.',
+        fail_auth_rejected: 'Yazıcı, Bambuddy\'nin kimlik bilgilerini reddetti. Erişim kodu veya seri numarası yanlış — erişim kodu, Yalnızca LAN veya Geliştirici Modu her açılıp kapatıldığında değişir. Yazıcı ekranından yeniden kopyalayın ve yazıcı ayarlarına kaydedin.',
         skip: 'Kontrol edilmedi — yazıcıya erişilemedi.',
       },
       developer_mode: {
@@ -6133,6 +6137,8 @@ export default {
     resolveButton: 'Çöz',
     signInRequiredTitle: 'İndirme için Bambu Cloud girişi gerekli',
     signInRequiredBody: 'Model ayrıntılarına anonim olarak göz atabilirsiniz, ancak MakerWorld 3MF dosyalarını indirmek için bir Bambu Cloud hesabı gerektirir.',
+    signInExpiredTitle: 'Bambu Cloud oturumu sona erdi',
+    signInExpiredBody: 'Bambuddy oturumunuz açık kalmaya devam ediyor, ancak Bambu Lab kayıtlı belirteci artık kabul etmediği için indirmeler başarısız olacak. Bambu Cloud oturumunu yeniden açın.',
     openCloudSettings: 'Bulut ayarlarını aç',
     untitledModel: 'Adsız model',
     byCreator: '{{name}} tarafından',

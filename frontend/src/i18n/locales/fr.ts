@@ -2943,6 +2943,7 @@ export default {
       clearAll: 'Tout désélectionner',
       permissionsSelected: '{{count}} sélectionnée(s)',
       noResults: 'Aucune permission ne correspond à votre recherche',
+      websocketHint: "Requis pour les mises à jour en direct. Sans cette permission, l'interface bascule sur une actualisation périodique.",
     },
   },
 
@@ -3144,6 +3145,8 @@ export default {
       },
     },
     connectedAs: 'Connecté en tant que',
+    signInExpiredTitle: 'Session Bambu Cloud expirée',
+    signInExpiredBody: 'Bambu Lab n\'accepte plus le jeton enregistré. Reconnectez-vous pour rétablir les profils cloud, les imports MakerWorld et la vérification des firmwares.',
     logout: 'Déconnexion',
     noLogoutPermission: 'Pas d\'autorisation de déconnexion',
     failedToLoad: 'Échec chargement profils',
@@ -6024,7 +6027,8 @@ export default {
       mqtt_auth: {
         title: 'Identifiants de l\'imprimante',
         pass: 'L\'imprimante a accepté la connexion.',
-        fail: 'L\'imprimante est accessible mais a refusé la connexion. Le code d\'accès ou le numéro de série est très probablement incorrect. Le code d\'accès change chaque fois que le mode développeur est activé/désactivé — recopiez-le depuis l\'écran de l\'imprimante.',
+        fail: 'L\'imprimante est accessible mais Bambuddy n\'y est pas connecté. Le code d\'accès ou le numéro de série est très probablement incorrect — le code d\'accès change chaque fois que le mode LAN uniquement ou le mode développeur est activé/désactivé, recopiez-le donc depuis l\'écran de l\'imprimante. Une imprimante en cours de redémarrage, ou ayant déjà atteint sa limite de connexions simultanées, produit le même résultat.',
+        fail_auth_rejected: 'L\'imprimante a refusé les identifiants de Bambuddy. Le code d\'accès ou le numéro de série est incorrect — le code d\'accès change chaque fois que le mode LAN uniquement ou le mode développeur est activé/désactivé. Recopiez-le depuis l\'écran de l\'imprimante et enregistrez-le dans les paramètres de l\'imprimante.',
         skip: 'Non vérifié — l\'imprimante n\'a pas pu être jointe.',
       },
       developer_mode: {
@@ -6182,6 +6186,8 @@ export default {
     resolveButton: 'Résoudre',
     signInRequiredTitle: 'Connexion Bambu Cloud requise pour télécharger',
     signInRequiredBody: 'Vous pouvez consulter les détails du modèle anonymement, mais MakerWorld nécessite un compte Bambu Cloud pour télécharger les fichiers 3MF.',
+    signInExpiredTitle: 'Session Bambu Cloud expirée',
+    signInExpiredBody: 'Vous êtes toujours connecté à Bambuddy, mais Bambu Lab n\'accepte plus le jeton enregistré : les téléchargements échoueront. Reconnectez-vous à Bambu Cloud.',
     openCloudSettings: 'Ouvrir les paramètres Cloud',
     untitledModel: 'Modèle sans titre',
     byCreator: 'par {{name}}',

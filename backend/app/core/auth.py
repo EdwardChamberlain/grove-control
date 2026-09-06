@@ -139,6 +139,18 @@ _APIKEY_SCOPE_BY_PERMISSION: dict[Permission, str] = {
     Permission.INVENTORY_UPDATE: "can_manage_inventory",
     Permission.INVENTORY_DELETE: "can_manage_inventory",
     Permission.INVENTORY_FORECAST_WRITE: "can_manage_inventory",
+    # Print-history curation is an explicit API-key scope. Purge remains
+    # administrative because it removes the statistics contribution (#1888).
+    Permission.ARCHIVES_CREATE: "can_manage_archives",
+    Permission.ARCHIVES_UPDATE_OWN: "can_manage_archives",
+    Permission.ARCHIVES_UPDATE_ALL: "can_manage_archives",
+    Permission.ARCHIVES_DELETE_OWN: "can_manage_archives",
+    Permission.ARCHIVES_DELETE_ALL: "can_manage_archives",
+    # Project CRUD and membership changes are an explicit API-key scope. Read
+    # access remains covered by can_read_status (#1893).
+    Permission.PROJECTS_CREATE: "can_manage_projects",
+    Permission.PROJECTS_UPDATE: "can_manage_projects",
+    Permission.PROJECTS_DELETE: "can_manage_projects",
     # can_access_cloud — narrow opt-in scope, gated by the router-level
     # ``_cloud_api_key_gate`` and additionally enforced here so the route-
     # level ``cloud_caller(Permission.CLOUD_AUTH)`` dep also fails closed
@@ -186,11 +198,6 @@ _APIKEY_DENIED_PERMISSIONS: frozenset[Permission] = frozenset(
         Permission.PRINTERS_CREATE,
         Permission.PRINTERS_UPDATE,
         Permission.PRINTERS_DELETE,
-        Permission.ARCHIVES_CREATE,
-        Permission.ARCHIVES_UPDATE_OWN,
-        Permission.ARCHIVES_UPDATE_ALL,
-        Permission.ARCHIVES_DELETE_OWN,
-        Permission.ARCHIVES_DELETE_ALL,
         Permission.ARCHIVES_PURGE,
         # LIBRARY_UPDATE_ALL / LIBRARY_DELETE_ALL moved to the allowlist
         # under `can_manage_library` (#1832) — split between allow/deny made
@@ -198,9 +205,6 @@ _APIKEY_DENIED_PERMISSIONS: frozenset[Permission] = frozenset(
         # `require_ownership_permission`. Purge stays denied as a genuinely
         # destructive op.
         Permission.LIBRARY_PURGE,
-        Permission.PROJECTS_CREATE,
-        Permission.PROJECTS_UPDATE,
-        Permission.PROJECTS_DELETE,
         Permission.FILAMENTS_CREATE,
         Permission.FILAMENTS_UPDATE,
         Permission.FILAMENTS_DELETE,

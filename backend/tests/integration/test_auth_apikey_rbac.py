@@ -215,6 +215,8 @@ class TestApiKeyScopeAllowlist:
             "can_control_printer",
             "can_manage_library",
             "can_manage_inventory",
+            "can_manage_archives",
+            "can_manage_projects",
             "can_access_cloud",
         }
         used_flags = set(_APIKEY_SCOPE_BY_PERMISSION.values())
@@ -241,6 +243,8 @@ class TestApiKeyScopeAllowlist:
             "can_control_printer",
             "can_manage_library",
             "can_manage_inventory",
+            "can_manage_archives",
+            "can_manage_projects",
             "can_access_cloud",
         ],
     )
@@ -268,12 +272,16 @@ class _FakeApiKey:
         can_control_printer=False,
         can_manage_library=False,
         can_manage_inventory=False,
+        can_manage_archives=False,
+        can_manage_projects=False,
     ):
         self.can_read_status = can_read_status
         self.can_queue = can_queue
         self.can_control_printer = can_control_printer
         self.can_manage_library = can_manage_library
         self.can_manage_inventory = can_manage_inventory
+        self.can_manage_archives = can_manage_archives
+        self.can_manage_projects = can_manage_projects
 
 
 class TestCheckApiKeyPermissionsMatrix:
@@ -315,6 +323,16 @@ class TestCheckApiKeyPermissionsMatrix:
         ("INVENTORY_UPDATE", "can_manage_inventory", "update spool / SpoolBuddy kiosk write"),
         ("INVENTORY_DELETE", "can_manage_inventory", "delete spool record"),
         ("INVENTORY_FORECAST_WRITE", "can_manage_inventory", "update forecast SKU settings"),
+        # can_manage_archives — archive CRUD, excluding destructive purge.
+        ("ARCHIVES_CREATE", "can_manage_archives", "create an archive"),
+        ("ARCHIVES_UPDATE_OWN", "can_manage_archives", "edit own archive"),
+        ("ARCHIVES_UPDATE_ALL", "can_manage_archives", "edit any archive"),
+        ("ARCHIVES_DELETE_OWN", "can_manage_archives", "delete own archive"),
+        ("ARCHIVES_DELETE_ALL", "can_manage_archives", "delete any archive"),
+        # can_manage_projects — project CRUD and membership writes.
+        ("PROJECTS_CREATE", "can_manage_projects", "create a project"),
+        ("PROJECTS_UPDATE", "can_manage_projects", "update a project / add archives"),
+        ("PROJECTS_DELETE", "can_manage_projects", "delete a project"),
     ]
 
     _ADMIN_CASES = [
@@ -354,7 +372,15 @@ class TestCheckApiKeyPermissionsMatrix:
         # Wrong flag set, required flag off → 403 (no cross-scope leakage)
         other_flags = {
             f
-            for f in ("can_read_status", "can_queue", "can_control_printer", "can_manage_library")
+            for f in (
+                "can_read_status",
+                "can_queue",
+                "can_control_printer",
+                "can_manage_library",
+                "can_manage_inventory",
+                "can_manage_archives",
+                "can_manage_projects",
+            )
             if f != required_flag
         }
         for other in other_flags:

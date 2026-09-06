@@ -2790,6 +2790,27 @@ async def run_migrations(conn):
         async with conn.begin_nested():
             await conn.execute(text("UPDATE api_keys SET can_manage_inventory = can_queue"))
 
+    # Print archive CRUD is opt-in for API keys; purge remains admin-only.
+    column_existed = await _api_keys_column_exists(conn, "can_manage_archives")
+    await _safe_execute(
+        conn,
+        "ALTER TABLE api_keys ADD COLUMN can_manage_archives BOOLEAN DEFAULT TRUE",
+    )
+    if not column_existed:
+        async with conn.begin_nested():
+            await conn.execute(text("UPDATE api_keys SET can_manage_archives = FALSE"))
+
+    # Project CRUD and membership writes are opt-in for API keys. Existing keys
+    # retain their previous effective scope until an operator enables it.
+    column_existed = await _api_keys_column_exists(conn, "can_manage_projects")
+    await _safe_execute(
+        conn,
+        "ALTER TABLE api_keys ADD COLUMN can_manage_projects BOOLEAN DEFAULT TRUE",
+    )
+    if not column_existed:
+        async with conn.begin_nested():
+            await conn.execute(text("UPDATE api_keys SET can_manage_projects = FALSE"))
+
     # Migration: Soft-delete column for trash bin (Issue #1008). Indexed so the
     # sweeper's "SELECT ... WHERE deleted_at < cutoff" and the trash list's
     # "WHERE deleted_at IS NOT NULL" stay cheap as the table grows.
@@ -3376,6 +3397,16 @@ async def run_migrations(conn):
         await _safe_execute(conn, "ALTER TABLE users ADD COLUMN orca_cloud_pending_at DATETIME")
     else:
         await _safe_execute(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS orca_cloud_pending_at TIMESTAMP")
+
+    # Migration: record when Bambu rejects a stored cloud token. Until now the
+    # only state we kept was the token string itself, so a dead credential was
+    # indistinguishable from a live one and the UI reported "connected" forever
+    # while every cloud call 401'd. DATETIME is SQLite-only — Postgres uses
+    # TIMESTAMP, so the column is dialect-branched per project convention.
+    if is_sqlite():
+        await _safe_execute(conn, "ALTER TABLE users ADD COLUMN cloud_token_invalid_at DATETIME")
+    else:
+        await _safe_execute(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS cloud_token_invalid_at TIMESTAMP")
 
     # Data migration: drop the embedded 3MF Title (`print_name`) from library
     # file metadata so the FileManager displays the filename, not the title (#1489).
