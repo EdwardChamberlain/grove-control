@@ -7,7 +7,7 @@ import { ConfigureAmsSlotModal } from '../components/ConfigureAmsSlotModal';
 import { LinkSpoolModal } from '../components/LinkSpoolModal';
 import { AmsSlotControl } from '../components/printer/AmsCardParts';
 import { buildAmsInventoryConfig, type AmsSlotModel } from '../components/printer/amsSlotModel';
-import { getAmsSlotExtruderId } from '../utils/amsHelpers';
+import { getAmsSlotExtruderId, resolveSlotNozzleDiameter } from '../utils/amsHelpers';
 
 interface LinkSlotModalState {
   tagUid: string;
@@ -61,6 +61,7 @@ interface AmsSlotControllerOptions {
   canConfigure: boolean;
   isDualNozzle: boolean;
   amsExtruderMap?: Record<string, number>;
+  nozzles?: { nozzle_diameter?: string }[];
   onUnlinkSpool: (spoolId: number) => void;
   onUnassignSpoolmanSpool?: (spoolId: number) => void;
   onUnassignInventorySpool?: (amsId: number, trayId: number) => void;
@@ -69,6 +70,8 @@ interface AmsSlotControllerOptions {
 export interface AmsSlotController {
   printerId: number;
   printerModel?: string;
+  nozzles?: { nozzle_diameter?: string }[];
+  amsExtruderMap?: Record<string, number>;
   spoolmanEnabled: boolean;
   linkModal: LinkSlotModalState | null;
   assignModal: AssignSlotModalState | null;
@@ -156,6 +159,8 @@ export function useAmsSlotController(options: AmsSlotControllerOptions): AmsSlot
   return {
     printerId: options.printerId,
     printerModel: options.printerModel,
+    nozzles: options.nozzles,
+    amsExtruderMap: options.amsExtruderMap,
     spoolmanEnabled: options.spoolmanEnabled,
     linkModal,
     assignModal,
@@ -226,6 +231,10 @@ export function AmsSlotControllerModals({ controller }: { controller: AmsSlotCon
           printerId={controller.printerId}
           slotInfo={controller.configureModal}
           printerModel={controller.printerModel}
+          nozzleDiameter={resolveSlotNozzleDiameter(
+            { nozzles: controller.nozzles, ams_extruder_map: controller.amsExtruderMap },
+            controller.configureModal.amsId,
+          )}
           onSuccess={() => {
             queryClient.invalidateQueries({ queryKey: ['slotPresets', controller.printerId] });
             queryClient.invalidateQueries({ queryKey: ['printerStatus', controller.printerId] });
