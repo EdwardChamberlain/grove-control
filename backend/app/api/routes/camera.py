@@ -71,8 +71,10 @@ _last_frame_times: dict[int, float] = {}
 # Track stream start times for each printer
 _stream_start_times: dict[int, float] = {}
 
-# Track active external camera streams by printer ID
-_active_external_streams: set[int] = set()
+# Track active external camera viewer counts by printer ID. External MJPEG and
+# HTTP-snapshot streams may have no ffmpeg process in ``_active_streams``, so
+# this registry is the single source of truth for their camera ownership.
+_active_external_streams: dict[int, int] = {}
 
 # Track ALL spawned ffmpeg PIDs (persists even if _active_streams entries are removed)
 # Maps PID -> spawn timestamp — used by cleanup to find truly orphaned OS processes
@@ -142,7 +144,7 @@ def is_stream_active(printer_id: int) -> bool:
     in the buffer yet, or the upstream is mid-reconnect).
     """
     return (
-        printer_id in _active_external_streams
+        _active_external_streams.get(printer_id, 0) > 0
         or any(k.startswith(f"{printer_id}-") for k in _active_streams)
         or any(k.startswith(f"{printer_id}-") for k in _active_chamber_streams)
     )
@@ -314,6 +316,7 @@ def _release_printer_frame_state(printer_id: int | None) -> None:
 async def _terminate_ffmpeg(process: asyncio.subprocess.Process, stream_id: str | None = None) -> None:
     """Terminate an ffmpeg process gracefully, then kill if needed."""
     if process.returncode is not None:
+        _spawned_ffmpeg_pids.pop(process.pid, None)
         return  # Already dead
 
     drainers = [asyncio.create_task(_drain_pipe(getattr(process, "stdout", None)))]
@@ -345,7 +348,18 @@ async def _terminate_ffmpeg(process: asyncio.subprocess.Process, stream_id: str 
         pass  # Already dead
     except OSError as e:
         logger.warning("Error terminating ffmpeg: %s", e)
-    _spawned_ffmpeg_pids.pop(process.pid, None)
+    finally:
+        # A timeout means the OS has not confirmed that the process exited.
+        # Cancel and await the pipe readers before returning, but keep the PID
+        # tracked so the janitor can retry cleanup instead of losing a live
+        # ffmpeg after the stream coroutine has moved on.
+        for drainer in drainers:
+            if not drainer.done():
+                drainer.cancel()
+        if drainers:
+            await asyncio.gather(*drainers, return_exceptions=True)
+        if process.returncode is not None:
+            _spawned_ffmpeg_pids.pop(process.pid, None)
 
 
 def _summarize_ffmpeg_stderr(text: str | None) -> str:
@@ -857,7 +871,7 @@ async def camera_stream(
         _disconnect_events[stream_id] = stop_event
         # Track stream start
         _stream_start_times[printer_id] = time.time()
-        _active_external_streams.add(printer_id)
+        _active_external_streams[printer_id] = _active_external_streams.get(printer_id, 0) + 1
 
         # Mutable holder so the wrapper's finally can unregister whatever process
         # is currently registered (the RTSP path may respawn across reconnects).
@@ -906,7 +920,12 @@ async def camera_stream(
                 _active_streams.pop(stream_id, None)
                 _disconnect_events.pop(stream_id, None)
                 _stream_last_frame_times.pop(stream_id, None)
-                _active_external_streams.discard(printer_id)
+                viewer_count = _active_external_streams.get(printer_id, 0) - 1
+                if viewer_count > 0:
+                    _active_external_streams[printer_id] = viewer_count
+                else:
+                    _active_external_streams.pop(printer_id, None)
+                _release_printer_frame_state(printer_id)
                 logger.info("External camera stream ended for printer %s", printer_id)
 
         return StreamingResponse(
@@ -1267,7 +1286,7 @@ async def camera_status(
     has_active_stream = False
 
     # Check external camera streams
-    if printer_id in _active_external_streams:
+    if _active_external_streams.get(printer_id, 0) > 0:
         has_active_stream = True
 
     # Check ffmpeg/RTSP streams

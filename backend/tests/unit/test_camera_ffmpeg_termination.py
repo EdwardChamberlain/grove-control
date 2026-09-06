@@ -114,13 +114,17 @@ class _FrameProcess:
 async def test_terminate_ffmpeg_abandons_unreaped_kill(monkeypatch):
     monkeypatch.setattr(camera, "_FFMPEG_KILL_TIMEOUT", 0.05)
     proc = _StuckPostKillProcess()
+    camera._spawned_ffmpeg_pids[proc.pid] = time.time()
 
     # Must return promptly instead of hanging on the post-kill wait.
     await asyncio.wait_for(camera._terminate_ffmpeg(proc, "test"), timeout=1.0)
 
     assert proc.killed is True
     assert proc.post_kill_wait_cancelled.is_set()
-    assert proc.pid not in camera._spawned_ffmpeg_pids
+    # The process never confirmed exit, so the orphan janitor must retain its
+    # PID for a later cleanup pass.
+    assert proc.pid in camera._spawned_ffmpeg_pids
+    camera._spawned_ffmpeg_pids.pop(proc.pid, None)
 
 
 # ---------------------------------------------------------------------------

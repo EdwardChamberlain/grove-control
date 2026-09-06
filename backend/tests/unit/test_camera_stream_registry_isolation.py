@@ -105,6 +105,19 @@ async def test_fanout_stream_id_keeps_the_printer_prefix():
     assert camera.is_stream_active(PRINTER_ID) is True
 
 
+async def test_external_stream_registry_is_reference_counted():
+    """One external viewer disconnecting must not hide a second viewer."""
+    camera._active_external_streams[PRINTER_ID] = 2
+    try:
+        assert camera.is_stream_active(PRINTER_ID) is True
+        camera._active_external_streams[PRINTER_ID] -= 1
+        assert camera.is_stream_active(PRINTER_ID) is True
+        camera._active_external_streams.pop(PRINTER_ID, None)
+        assert camera.is_stream_active(PRINTER_ID) is False
+    finally:
+        camera._active_external_streams.pop(PRINTER_ID, None)
+
+
 # ---------------------------------------------------------------------------
 # _release_printer_frame_state — the ownership check itself
 # ---------------------------------------------------------------------------
