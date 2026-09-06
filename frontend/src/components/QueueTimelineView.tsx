@@ -25,7 +25,7 @@ interface ScheduleEvent {
   estimatedStart: Date;
   estimatedEnd: Date;
   progress?: number;
-  type: 'dispatching' | 'printing' | 'queued';
+  type: 'preheating' | 'dispatching' | 'printing' | 'queued';
 }
 
 interface QueueTimelineViewProps {
@@ -104,8 +104,8 @@ export function QueueTimelineView({
     };
 
     for (const item of queueItems) {
-      if (item.status === 'dispatching' || item.status === 'printing') {
-        const isDispatching = item.status === 'dispatching';
+      if (item.status === 'preheating' || item.status === 'dispatching' || item.status === 'printing') {
+        const isDispatching = item.status === 'preheating' || item.status === 'dispatching';
         const status = item.printer_id != null ? printerStatuses[item.printer_id] : undefined;
         const start = parseUTCDate(isDispatching ? item.dispatched_at : item.started_at) || new Date();
         let endTime: Date;
@@ -400,13 +400,13 @@ export function QueueTimelineView({
                           ? api.getLibraryFileThumbnailUrl(ev.item.library_file_id!)
                           : null;
                       const isPrinting = ev.type === 'printing';
-                      const isDispatching = ev.type === 'dispatching';
+                      const isDispatching = ev.type === 'preheating' || ev.type === 'dispatching';
                       const isBatched = ev.item.batch_id != null;
                       const tooltipParts = [
                         displayName,
                         `${formatTooltipTime(ev.estimatedStart)} → ${formatTooltipTime(ev.estimatedEnd)}`,
                         ev.item.print_time_seconds ? formatDuration(ev.item.print_time_seconds) : null,
-                        isDispatching ? t('queue.status.dispatching') : null,
+                        isDispatching ? t(ev.type === 'preheating' ? 'heatSoak.status' : 'queue.status.dispatching') : null,
                         isPrinting && ev.progress != null ? `${Math.round(ev.progress)}%` : null,
                         ev.item.batch_name ? `batch: ${ev.item.batch_name}` : null,
                       ].filter(Boolean).join(' · ');
@@ -447,7 +447,7 @@ export function QueueTimelineView({
                             <div className="text-[10px] text-bambu-gray truncate leading-tight">
                               {ev.item.print_time_seconds ? formatDuration(ev.item.print_time_seconds) : ''}
                               {isDispatching
-                                ? `${ev.item.print_time_seconds ? ' · ' : ''}${t('queue.status.dispatching')}`
+                                ? `${ev.item.print_time_seconds ? ' · ' : ''}${t(ev.type === 'preheating' ? 'heatSoak.status' : 'queue.status.dispatching')}`
                                 : ''}
                               {isPrinting && ev.progress != null ? ` · ${Math.round(ev.progress)}%` : ''}
                             </div>

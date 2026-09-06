@@ -809,6 +809,22 @@ describe('PrintersPage', () => {
       expect(owner.compareDocumentPosition(jobName) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
+    it('shows the heat-soak status as the active cockpit job', async () => {
+      server.use(
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+          ...mockPrinterStatus,
+          state: 'IDLE',
+          current_print: null,
+          preheating: true,
+        })),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+
+      expect(await screen.findByTestId('cockpit-current-print')).toHaveTextContent('Preheating');
+    });
+
     it('provides AMS filament backup and skip objects controls in the single-printer cockpit', async () => {
       server.use(
         http.get('/api/v1/printers/:id/status', () => {

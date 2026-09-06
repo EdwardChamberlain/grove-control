@@ -18,6 +18,9 @@ class Printer(Base):
     location: Mapped[str | None] = mapped_column(String(100))  # Group/location name
     nozzle_count: Mapped[int] = mapped_column(default=1)  # 1 or 2, auto-detected from MQTT
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Survives queue deletion/disconnect; prevents dispatch until heater-off telemetry.
+    heat_soak_shutdown_pending: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    heat_soak_shutdown_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     auto_archive: Mapped[bool] = mapped_column(Boolean, default=True)
     print_hours_offset: Mapped[float] = mapped_column(Float, default=0.0)  # Baseline hours to add
     runtime_seconds: Mapped[int] = mapped_column(

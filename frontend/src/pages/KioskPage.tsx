@@ -11,12 +11,13 @@ import { formatPrintName } from '../utils/printName';
 type Translate = TFunction;
 
 function isActivePrint(status: PrinterStatus | undefined): boolean {
-  return status?.state === 'RUNNING' || status?.state === 'PAUSE';
+  return status?.preheating === true || status?.state === 'RUNNING' || status?.state === 'PAUSE';
 }
 
 function getPrinterStateLabel(status: PrinterStatus | undefined, t: Translate): string {
   if (!status) return t('common.loading');
   if (!status.connected) return t('printers.connection.offline');
+  if (status.preheating) return t('heatSoak.status');
   if (status.awaiting_plate_clear && !isActivePrint(status)) return t('kiosk.plateClearRequired');
 
   switch (status.state) {
@@ -73,9 +74,10 @@ function KioskPrinterTile({
   style?: CSSProperties;
 }) {
   const active = isActivePrint(status);
+  const preheating = status?.preheating === true;
   const plateClearRequired = status?.awaiting_plate_clear === true && !active;
-  const progress = plateClearRequired ? 100 : Math.max(0, Math.min(100, active ? status?.progress ?? 0 : 0));
-  const jobName = active || plateClearRequired
+  const progress = plateClearRequired ? 100 : Math.max(0, Math.min(100, active && !preheating ? status?.progress ?? 0 : 0));
+  const jobName = !preheating && (active || plateClearRequired)
     ? formatPrintName(status?.subtask_name || status?.current_print || status?.gcode_file || null, status?.gcode_file, t) || t('kiosk.noJob')
     : t('kiosk.noJob');
   const eta = active && status?.remaining_time != null && status.remaining_time > 0
@@ -134,8 +136,8 @@ function KioskQueueCard({
   timeFormat: TimeFormat;
   t: Translate;
 }) {
-  const printing = item.status === 'printing';
-  const active = printing && isActivePrint(status);
+  const printing = item.status === 'printing' || item.status === 'preheating';
+  const active = item.status === 'printing' && isActivePrint(status);
   const progress = active ? Math.max(0, Math.min(100, status?.progress ?? 0)) : 0;
   const title = item.archive_name || item.library_file_name || `${t('common.print')} #${item.id}`;
   const thumbnail = item.archive_thumbnail && item.archive_id
@@ -214,7 +216,15 @@ function KioskQueueStatusPill({
     );
   }
 
-  if (item.status === 'printing') {
+  if (item.status === 'printing' || item.status === 'preheating') {
+    if (item.status === 'preheating') {
+      return (
+        <p data-testid={`kiosk-queue-status-${item.id}`} className={`${className} border-amber-400/20 bg-amber-400/10 text-amber-300`}>
+          <Clock className="h-3 w-3 shrink-0 animate-pulse" />
+          <span className="truncate">{t('heatSoak.status')}</span>
+        </p>
+      );
+    }
     const paused = status?.state === 'PAUSE';
     return (
       <p data-testid={`kiosk-queue-status-${item.id}`} className={`${className} ${paused ? 'border-yellow-400/20 bg-yellow-400/10 text-yellow-400' : 'border-blue-400/20 bg-blue-400/10 text-blue-400'}`}>
@@ -315,7 +325,7 @@ export function KioskPage() {
   });
   const statuses = useMemo(() => new Map(printers.map((printer, index) => [printer.id, printerStatusQueries[index]?.data])), [printers, printerStatusQueries]);
   const printingItems = useMemo(
-    () => queue.filter((item) => item.status === 'dispatching' || item.status === 'printing'),
+    () => queue.filter((item) => item.status === 'preheating' || item.status === 'dispatching' || item.status === 'printing'),
     [queue],
   );
   const pendingItems = useMemo(() => queue.filter((item) => item.status === 'pending').sort((a, b) => a.position - b.position), [queue]);

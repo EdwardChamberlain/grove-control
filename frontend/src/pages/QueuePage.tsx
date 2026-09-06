@@ -114,6 +114,7 @@ function StatusBadge({ status, scheduledTime, waitingReason, printerState, t }: 
 
   const config = {
     pending: { icon: Clock, color: 'text-status-warning bg-status-warning/10 border-status-warning/20', label: t('queue.status.pending') },
+    preheating: { icon: Timer, color: 'text-amber-300 bg-amber-500/10 border-amber-500/20', label: t('heatSoak.status') },
     dispatching: { icon: Timer, color: 'text-purple-300 bg-purple-500/10 border-purple-500/20', label: t('queue.status.dispatching') },
     printing: { icon: Play, color: 'text-blue-400 bg-blue-400/10 border-blue-400/20', label: t('queue.status.printing') },
     completed: { icon: CheckCircle, color: 'text-status-ok bg-status-ok/10 border-status-ok/20', label: t('queue.status.completed') },
@@ -390,7 +391,7 @@ function SortableQueueItem({
     transition,
   };
 
-  const isPrinting = item.status === 'printing';
+  const isPrinting = item.status === 'printing' || item.status === 'preheating';
   const isDispatching = item.status === 'dispatching';
   const isPending = item.status === 'pending';
   const isHistory = ['completed', 'failed', 'skipped', 'cancelled'].includes(item.status);
@@ -1588,7 +1589,7 @@ export function QueuePage() {
   };
 
   const activeItems = useMemo(() => {
-    let items = queue?.filter(i => i.status === 'dispatching' || i.status === 'printing') || [];
+    let items = queue?.filter(i => i.status === 'preheating' || i.status === 'dispatching' || i.status === 'printing') || [];
     if (filterLocation) {
       items = items.filter(matchesLocationFilter);
     }
@@ -2036,6 +2037,7 @@ export function QueuePage() {
           options={[
             { value: '', label: t('queue.filter.allStatus') },
             { value: 'pending', label: t('queue.status.pending') },
+            { value: 'preheating', label: t('heatSoak.status') },
             { value: 'dispatching', label: t('queue.status.dispatching') },
             { value: 'printing', label: t('queue.status.printing') },
             { value: 'completed', label: t('queue.status.completed') },
@@ -2139,7 +2141,7 @@ export function QueuePage() {
               setRequeueItem(item);
             } else if (item.status === 'pending') {
               setEditItem(item);
-            } else if (item.status === 'dispatching' || item.status === 'printing') {
+            } else if (item.status === 'preheating' || item.status === 'dispatching' || item.status === 'printing') {
               setConfirmAction({ type: 'stop', item });
             }
           }}

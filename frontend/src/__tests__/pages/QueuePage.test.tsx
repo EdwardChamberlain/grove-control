@@ -233,6 +233,29 @@ describe('QueuePage', () => {
       expect(timelineItem).toHaveTextContent('Dispatching');
     });
 
+    it('counts preheating items as printing and excludes them from queued work', async () => {
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json([
+          ...mockQueueItems,
+          {
+            ...mockQueueItems[0],
+            id: 4,
+            status: 'preheating',
+            archive_name: 'Warming chamber',
+          },
+        ])),
+      );
+      render(<QueuePage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Warming chamber')).toBeInTheDocument();
+        expect(screen.getByText('Preheating')).toBeInTheDocument();
+        expect(screen.getByTestId('queue-stat-printing')).toHaveTextContent(/2\s*Printing/);
+        expect(screen.getByTestId('queue-stat-queued')).toHaveTextContent(/1\s*Queued/);
+        expect(screen.getAllByTitle('Stop Print')).toHaveLength(2);
+      });
+    });
+
     it('shows completed items in history', async () => {
       const user = userEvent.setup();
       render(<QueuePage />);

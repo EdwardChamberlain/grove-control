@@ -282,6 +282,9 @@ class PrinterState:
     total_layers: int = 0
     temperatures: dict = field(default_factory=dict)
     raw_data: dict = field(default_factory=dict)
+    preheating: bool = False
+    heat_soak_reports: dict = field(default_factory=dict)
+    heat_soak_disconnected_at: float = 0.0
     gcode_file: str | None = None
     subtask_id: str | None = None
     hms_errors: list = field(default_factory=list)  # List of HMSError
@@ -683,6 +686,7 @@ class BambuMQTTClient:
                 )
             self._last_stale_reconnect = now
             self.state.connected = False
+            self.state.heat_soak_disconnected_at = time.time()
             if self.on_state_change:
                 self.on_state_change(self.state)
             # Route based on caller thread — see force_reconnect_stale_session.
@@ -717,6 +721,7 @@ class BambuMQTTClient:
         logger.warning("[%s] Forcing MQTT reconnect: %s", self.serial_number, reason)
         self._stale_reconnecting = True
         self.state.connected = False
+        self.state.heat_soak_disconnected_at = time.time()
         if self.on_state_change:
             self.on_state_change(self.state)
         self._reset_client_for_reconnect()
@@ -832,6 +837,7 @@ class BambuMQTTClient:
                 self.on_state_change(self.state)
         else:
             self.state.connected = False
+            self.state.heat_soak_disconnected_at = time.time()
 
     def _on_subscribe(self, client, userdata, mid, reason_code_list, properties=None):
         """Handle SUBACK responses to detect request topic subscription rejection."""
@@ -908,6 +914,7 @@ class BambuMQTTClient:
         self._request_topic_sub_time = 0.0
 
         self.state.connected = False
+        self.state.heat_soak_disconnected_at = time.time()
         if self.on_state_change:
             self.on_state_change(self.state)
 
@@ -2137,6 +2144,9 @@ class BambuMQTTClient:
 
     def _update_state(self, data: dict):
         """Update printer state from message data."""
+        from backend.app.services.heat_soak_telemetry import record_heat_soak_reports
+
+        record_heat_soak_reports(self.state, data)
         _previous_state = self.state.state
 
         # Update state fields
@@ -4062,6 +4072,7 @@ class BambuMQTTClient:
             self._client.loop_stop()
             self._client = None
             self.state.connected = False
+            self.state.heat_soak_disconnected_at = time.time()
 
     def send_command(self, command: dict):
         """Send a command to the printer."""

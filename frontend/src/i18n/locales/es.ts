@@ -1,4 +1,12 @@
 export default {
+  heatSoak: {
+    option: "Precalentamiento de cámara",
+    temperature: "Temperatura objetivo (°C)",
+    duration: "Duración (minutos)",
+    status: "Precalentando",
+    hint: "30–60°C, 1–120 minutos. El temporizador empieza cuando la impresora confirma las temperaturas objetivo.",
+    bedOnly: "!! Esta máquina no tiene calefactor de cámara. Solo se utilizará la cama para calentar.",
+  },
   // Navigation
   nav: {
     printers: 'Impresoras',

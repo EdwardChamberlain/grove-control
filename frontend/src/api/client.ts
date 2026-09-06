@@ -482,6 +482,7 @@ export interface PrinterStatus {
   stg: number[];  // List of stage numbers in calibration sequence
   // Air conditioning mode (0=cooling, 1=heating)
   airduct_mode: number;
+  preheating?: boolean;
   // Print speed level (1=silent, 2=standard, 3=sport, 4=ludicrous)
   speed_level: number;
   // Chamber light on/off
@@ -1928,6 +1929,10 @@ export interface PrintQueueItem {
   scheduled_time: string | null;
   require_previous_success: boolean;
   wait_for_drying_complete: boolean;
+  chamber_heat_soak?: boolean;
+  heat_soak_temperature?: number;
+  heat_soak_minutes?: number;
+  preheat_started_at?: string | null;
   auto_off_after: boolean;
   manual_start: boolean;  // Requires manual trigger to start (staged)
   // Set by the dispatch scheduler when the assigned spool can't satisfy
@@ -1951,7 +1956,7 @@ export interface PrintQueueItem {
   timelapse: boolean;
   use_ams: boolean;
   nozzle_offset_cali: boolean;
-  status: 'pending' | 'dispatching' | 'printing' | 'completed' | 'failed' | 'skipped' | 'cancelled';
+  status: 'pending' | 'preheating' | 'dispatching' | 'printing' | 'completed' | 'failed' | 'skipped' | 'cancelled';
   dispatched_at: string | null;
   started_at: string | null;
   completed_at: string | null;
@@ -2012,6 +2017,9 @@ export interface PrintQueueItemCreate {
   scheduled_time?: string | null;
   require_previous_success?: boolean;
   wait_for_drying_complete?: boolean;
+  chamber_heat_soak?: boolean;
+  heat_soak_temperature?: number;
+  heat_soak_minutes?: number;
   auto_off_after?: boolean;
   manual_start?: boolean;  // Requires manual trigger to start (staged)
   insert_at_top?: boolean;  // Insert ahead of other pending items in the same queue scope
@@ -2061,6 +2069,9 @@ export interface PrintQueueItemUpdate {
   scheduled_time?: string | null;
   require_previous_success?: boolean;
   wait_for_drying_complete?: boolean;
+  chamber_heat_soak?: boolean;
+  heat_soak_temperature?: number;
+  heat_soak_minutes?: number;
   auto_off_after?: boolean;
   manual_start?: boolean;
   ams_mapping?: number[];
@@ -2083,6 +2094,9 @@ export interface PrintQueueBulkUpdate {
   scheduled_time?: string | null;
   require_previous_success?: boolean;
   wait_for_drying_complete?: boolean;
+  chamber_heat_soak?: boolean;
+  heat_soak_temperature?: number;
+  heat_soak_minutes?: number;
   auto_off_after?: boolean;
   manual_start?: boolean;
   // Print options

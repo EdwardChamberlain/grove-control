@@ -967,7 +967,7 @@ async def _count_related_queue_items(db: AsyncSession, archive_id: int) -> tuple
             .select_from(PrintQueueItem)
             .where(
                 PrintQueueItem.archive_id == archive_id,
-                PrintQueueItem.status.in_(["dispatching", "printing"]),
+                PrintQueueItem.status.in_(["preheating", "dispatching", "printing"]),
             )
         )
     ).scalar_one()

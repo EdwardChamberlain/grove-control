@@ -72,6 +72,9 @@ export interface ScheduleOptions {
   requireManualStart: boolean;
   requirePreviousSuccess: boolean;
   waitForDryingComplete: boolean;
+  chamberHeatSoak: boolean;
+  heatSoakTemperature: number;
+  heatSoakMinutes: number;
   autoOffAfter: boolean;
   gcodeInjection: boolean;
 }
@@ -86,6 +89,9 @@ export const DEFAULT_SCHEDULE_OPTIONS: ScheduleOptions = {
   requireManualStart: false,
   requirePreviousSuccess: false,
   waitForDryingComplete: false,
+  chamberHeatSoak: false,
+  heatSoakTemperature: 60,
+  heatSoakMinutes: 30,
   autoOffAfter: false,
   gcodeInjection: false,
 };
@@ -217,6 +223,7 @@ export interface PrintOptionsProps {
  * Props for the queue options component.
  */
 export interface ScheduleOptionsProps {
+  hasChamberHeater?: boolean;
   options: ScheduleOptions;
   onChange: (options: ScheduleOptions) => void;
   dateFormat?: 'system' | 'us' | 'eu' | 'iso';

@@ -182,6 +182,42 @@ describe('KioskPage', () => {
     });
   });
 
+  it('shows preheating jobs as active heat-soak work', async () => {
+    vi.mocked(api.getQueue).mockResolvedValue([
+      {
+        id: 12,
+        printer_id: 1,
+        archive_id: 1,
+        library_file_id: null,
+        archive_name: 'Warm chamber assembly',
+        printer_name: 'Atlas',
+        position: 1,
+        status: 'preheating',
+        created_by_username: 'Morgan',
+      },
+    ] as never);
+    vi.mocked(api.getPrinterStatus).mockImplementation(async (printerId) => {
+      if (printerId === 1) {
+        return {
+          ...statusFor('1'),
+          state: 'IDLE',
+          current_print: null,
+          preheating: true,
+          progress: 0,
+        } as never;
+      }
+      return statusFor(String(printerId)) as never;
+    });
+
+    render(<KioskPage />);
+
+    await waitFor(() => {
+      expect(within(screen.getByTestId('kiosk-printer-1')).getByText('Preheating')).toBeInTheDocument();
+      expect(screen.getByTestId('kiosk-queue-status-12')).toHaveTextContent('Preheating');
+      expect(screen.getByText('Warm chamber assembly')).toBeInTheDocument();
+    });
+  });
+
   it('shows three prioritised printers and a faded fourth card when the fleet overflows', async () => {
     vi.mocked(api.getPrinters).mockResolvedValue([
       { id: 1, name: 'Printing printer', model: 'X1 Carbon', is_active: true },

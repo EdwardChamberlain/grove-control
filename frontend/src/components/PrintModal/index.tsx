@@ -118,6 +118,9 @@ export function PrintModal({
         requireManualStart: queueItem.manual_start,
         requirePreviousSuccess: queueItem.require_previous_success,
         waitForDryingComplete: queueItem.wait_for_drying_complete ?? false,
+        chamberHeatSoak: queueItem.chamber_heat_soak ?? false,
+        heatSoakTemperature: queueItem.heat_soak_temperature ?? 60,
+        heatSoakMinutes: queueItem.heat_soak_minutes ?? 30,
         autoOffAfter: queueItem.auto_off_after,
         gcodeInjection: queueItem.gcode_injection ?? false,
       };
@@ -792,6 +795,9 @@ export function PrintModal({
         library_file_id: isLibraryFile ? libraryFileId : undefined,
         require_previous_success: scheduleOptions.requirePreviousSuccess,
         wait_for_drying_complete: scheduleOptions.waitForDryingComplete,
+        chamber_heat_soak: scheduleOptions.chamberHeatSoak,
+        heat_soak_temperature: scheduleOptions.chamberHeatSoak ? scheduleOptions.heatSoakTemperature : 60,
+        heat_soak_minutes: scheduleOptions.chamberHeatSoak ? scheduleOptions.heatSoakMinutes : 30,
         auto_off_after: canAutoOffAfterPrint ? scheduleOptions.autoOffAfter : false,
         gcode_injection: scheduleOptions.gcodeInjection,
         manual_start: scheduleOptions.requireManualStart,
@@ -830,6 +836,9 @@ export function PrintModal({
               force_color_match: forceColorMatch,
               require_previous_success: scheduleOptions.requirePreviousSuccess,
               wait_for_drying_complete: scheduleOptions.waitForDryingComplete,
+              chamber_heat_soak: scheduleOptions.chamberHeatSoak,
+              heat_soak_temperature: scheduleOptions.chamberHeatSoak ? scheduleOptions.heatSoakTemperature : 60,
+              heat_soak_minutes: scheduleOptions.chamberHeatSoak ? scheduleOptions.heatSoakMinutes : 30,
               auto_off_after: scheduleOptions.autoOffAfter,
               gcode_injection: scheduleOptions.gcodeInjection,
               manual_start: scheduleOptions.requireManualStart,
@@ -879,6 +888,9 @@ export function PrintModal({
                 force_color_match: forceColorMatch,
                 require_previous_success: scheduleOptions.requirePreviousSuccess,
                 wait_for_drying_complete: scheduleOptions.waitForDryingComplete,
+                chamber_heat_soak: scheduleOptions.chamberHeatSoak,
+                heat_soak_temperature: scheduleOptions.chamberHeatSoak ? scheduleOptions.heatSoakTemperature : 60,
+                heat_soak_minutes: scheduleOptions.chamberHeatSoak ? scheduleOptions.heatSoakMinutes : 30,
                 auto_off_after: scheduleOptions.autoOffAfter,
                 gcode_injection: scheduleOptions.gcodeInjection,
                 manual_start: scheduleOptions.requireManualStart,
@@ -951,13 +963,18 @@ export function PrintModal({
     // For multi-plate files, need at least one plate selected
     if (isMultiPlate && selectedPlates.size === 0) return false;
 
+    if (scheduleOptions.chamberHeatSoak && (
+      !Number.isInteger(scheduleOptions.heatSoakTemperature) || scheduleOptions.heatSoakTemperature < 30 || scheduleOptions.heatSoakTemperature > 60 ||
+      !Number.isInteger(scheduleOptions.heatSoakMinutes) || scheduleOptions.heatSoakMinutes < 1 || scheduleOptions.heatSoakMinutes > 120
+    )) return false;
+
     if (scheduleOptions.postponePrint) {
       const scheduledTime = new Date(scheduleOptions.scheduledTime);
       if (!scheduleOptions.scheduledTime || scheduledTime <= new Date()) return false;
     }
 
     return true;
-  }, [selectedPrinters.length, assignmentMode, targetModel, isMultiPlate, selectedPlates.size, isPending, scheduleOptions.postponePrint, scheduleOptions.scheduledTime]);
+  }, [selectedPrinters.length, assignmentMode, targetModel, isMultiPlate, selectedPlates.size, isPending, scheduleOptions.postponePrint, scheduleOptions.scheduledTime, scheduleOptions.chamberHeatSoak, scheduleOptions.heatSoakTemperature, scheduleOptions.heatSoakMinutes]);
 
   // Quantity only applies for single-printer or model-based assignment (not multi-printer)
   const effectiveQuantity = (assignmentMode === 'printer' && selectedPrinters.length > 1) ? 1 : quantity;
@@ -1249,6 +1266,8 @@ export function PrintModal({
             )}
 
             <ScheduleOptionsPanel
+              hasChamberHeater={(assignmentMode === 'model' ? [targetModel] : selectedPrinters.map(id => printers?.find(printer => printer.id === id)?.model))
+                .every(model => ['H2C', 'H2D', 'H2DPRO', 'H2S', 'X2D', 'O1C', 'O1C2', 'O1D', 'O1E', 'O2D', 'O1S', 'N6'].includes((model || '').replace(/\s/g, '').toUpperCase()))}
               options={scheduleOptions}
               onChange={setScheduleOptions}
               dateFormat={settings?.date_format || 'system'}

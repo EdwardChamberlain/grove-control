@@ -893,7 +893,7 @@ function PrinterListRow({
     ? t('common.loading', 'Loading')
     : !status.connected
     ? t('printers.connection.offline')
-    : getStatusDisplay(status.state, status.stg_cur_name);
+    : status.preheating ? t('heatSoak.status') : getStatusDisplay(status.state, status.stg_cur_name);
   const activePrintName = status?.current_print && isPrintingOrPaused
     ? formatPrintName(status.subtask_name || status.current_print || null, status.gcode_file, t)
     : null;
@@ -2061,7 +2061,9 @@ function SinglePrinterCockpit({
   ];
   const iconControlClass = 'relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50';
   const jogButtonClass = 'flex h-7 w-7 shrink-0 items-center justify-center rounded bg-indigo-500/15 text-indigo-300 transition-colors hover:bg-indigo-500/30 disabled:cursor-not-allowed disabled:opacity-50';
-  const currentPrintLabel = activePrintName || t('printers.noActiveJob', 'No active job');
+  const currentPrintLabel = status?.preheating
+    ? t('heatSoak.status')
+    : activePrintName || t('printers.noActiveJob', 'No active job');
   const plateDetectionEnabled = plateDetectionMutation.isPending && plateDetectionMutation.variables != null
     ? plateDetectionMutation.variables
     : printer.plate_detection_enabled;
@@ -4385,7 +4387,7 @@ function PrinterCard({
                         />
                         <div className="flex h-24 max-[520px]:h-20 min-w-0 flex-1 flex-col justify-between pt-1">
                           <div className="flex min-h-[18px] items-center gap-2 pr-8">
-                            <p className="min-w-0 truncate text-sm text-bambu-gray">{getStatusDisplay(status.state, status.stg_cur_name)}</p>
+                            <p className="min-w-0 truncate text-sm text-bambu-gray">{status.preheating ? t('heatSoak.status') : getStatusDisplay(status.state, status.stg_cur_name)}</p>
                           </div>
                           <p className={`min-h-[18px] truncate pr-8 text-sm ${printName ? 'text-white' : 'text-bambu-gray/70'}`}>
                             {printName || t('printers.noActiveJob', 'No active job')}

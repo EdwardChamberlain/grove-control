@@ -716,6 +716,52 @@ class TestPrintQueueAPI:
         response = await async_client.delete("/api/v1/queue/9999")
         assert response.status_code == 404
 
+    async def test_heat_soak_create_read_and_patch(self, async_client, printer_factory, archive_factory):
+        printer = await printer_factory()
+        archive = await archive_factory()
+        response = await async_client.post(
+            "/api/v1/queue/",
+            json={
+                "printer_id": printer.id,
+                "archive_id": archive.id,
+                "chamber_heat_soak": True,
+                "heat_soak_temperature": 55,
+                "heat_soak_minutes": 15,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert (data["chamber_heat_soak"], data["heat_soak_temperature"], data["heat_soak_minutes"]) == (True, 55, 15)
+        response = await async_client.patch(f"/api/v1/queue/{data['id']}", json={"heat_soak_minutes": 20})
+        assert response.status_code == 200
+        data = response.json()
+        assert (data["chamber_heat_soak"], data["heat_soak_temperature"], data["heat_soak_minutes"]) == (True, 55, 20)
+
+    @pytest.mark.parametrize("action", ["cancel", "stop", "edit", "delete"])
+    async def test_preheating_api_interruptions_release_reservation(
+        self, async_client, queue_item_factory, db_session, action
+    ):
+        from backend.app.models.printer import Printer
+
+        item = await queue_item_factory(status="preheating", chamber_heat_soak=True, preheat_owner="test-worker")
+        printer_id = item.printer_id
+        url = f"/api/v1/queue/{item.id}"
+        if action == "edit":
+            response = await async_client.patch(url, json={"heat_soak_minutes": 45})
+        elif action == "delete":
+            response = await async_client.delete(url)
+        else:
+            response = await async_client.post(f"{url}/{action}")
+        assert response.status_code == 200, response.text
+        if action != "delete":
+            await db_session.refresh(item)
+            assert item.status == ("pending" if action == "edit" else "cancelled")
+            assert item.preheat_owner is None
+            assert item.manual_start
+        printer = await db_session.get(Printer, printer_id, populate_existing=True)
+        assert printer.heat_soak_shutdown_pending
+        assert printer.heat_soak_shutdown_at
+
 
 class TestQueueStartEndpoint:
     """Tests for the /queue/{item_id}/start endpoint."""

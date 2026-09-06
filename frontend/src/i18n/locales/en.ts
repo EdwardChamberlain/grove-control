@@ -1,4 +1,12 @@
 export default {
+  heatSoak: {
+    option: "Chamber heat-soak",
+    temperature: "Target temperature (°C)",
+    duration: "Soak duration (minutes)",
+    status: "Preheating",
+    hint: "30–60°C, 1–120 minutes. The timer starts when the printer confirms its heater targets.",
+    bedOnly: "!! Chamber Heater not available on this machine. Heating will be completed using only the bed",
+  },
   // Navigation
   nav: {
     printers: 'Printers',

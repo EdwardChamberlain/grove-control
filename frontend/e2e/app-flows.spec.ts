@@ -58,6 +58,7 @@ const archive = {
 async function mockApi(page: Page, calls: ApiCall[], options: {
   authEnabled?: boolean;
   printerState?: string;
+  preheating?: boolean;
   connected?: boolean;
   maintenanceMode?: boolean;
   smartPlugState?: 'ON' | 'OFF';
@@ -67,7 +68,7 @@ async function mockApi(page: Page, calls: ApiCall[], options: {
     is_active: options.maintenanceMode ? false : printer.is_active,
   };
   const queueItems: Array<Record<string, unknown>> = [
-    { id: 1, archive_id: 1, archive_name: 'Benchy', printer_id: 1, printer_name: printer.name, status: 'pending', position: 1 },
+    { id: 1, archive_id: 1, archive_name: 'Benchy', printer_id: 1, printer_name: printer.name, status: options.preheating ? 'preheating' : 'pending', position: 1 },
   ];
 
   await page.route('**/*', async (route) => {
@@ -138,6 +139,7 @@ async function mockApi(page: Page, calls: ApiCall[], options: {
         name: printer.name,
         connected: options.connected ?? true,
         state: options.printerState ?? 'IDLE',
+        preheating: options.preheating ?? false,
         current_print: options.printerState === 'RUNNING' ? 'active-print.gcode.3mf' : null,
         progress: 0,
         layer_num: 0,
@@ -594,3 +596,29 @@ for (const viewport of cockpitViewports) {
     }
   });
 }
+
+
+test('chamber heat-soak submits explicit queue settings and explains bed-only heating', async ({ page }) => {
+  const calls: ApiCall[] = [];
+  await mockApi(page, calls);
+  await page.goto('/archives');
+  await page.getByRole('button', { name: /^Print$/i }).first().click();
+  await page.getByRole('button', { name: /Queue options/i }).click();
+  await expect(page.getByRole('checkbox', { name: 'Chamber heat-soak' })).not.toBeChecked();
+  await page.locator('label', { hasText: 'Chamber heat-soak' }).click();
+  await expect(page.getByRole('spinbutton', { name: 'Target temperature (°C)' })).toHaveValue('60');
+  await expect(page.getByRole('spinbutton', { name: 'Soak duration (minutes)' })).toHaveValue('30');
+  await expect(page.getByText(/Chamber Heater not available on this machine/)).toBeVisible();
+  await page.getByRole('button', { name: /^Print$/i }).last().click();
+  await expect.poll(() => calls.some(call => call.method === 'POST' && call.path === '/api/v1/queue/')).toBe(true);
+  expect(calls.find(call => call.method === 'POST' && call.path === '/api/v1/queue/')?.body).toMatchObject({
+    chamber_heat_soak: true, heat_soak_temperature: 60, heat_soak_minutes: 30,
+  });
+});
+
+test('preheating is visible in the queue with a stop action', async ({ page }) => {
+  await mockApi(page, [], { preheating: true });
+  await page.goto('/queue');
+  await expect(page.getByText('Preheating', { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: /stop/i }).first()).toBeVisible();
+});

@@ -69,6 +69,7 @@ def _fake_state(**overrides):
         # State the existing test bodies explicitly set / read
         "connected": True,
         "state": "FINISH",
+        "preheating": False,
         "raw_data": {},
         "progress": 100.0,
         # Iterables — must be iterable for the loops inside printer_state_to_dict

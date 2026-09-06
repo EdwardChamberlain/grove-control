@@ -1,4 +1,12 @@
 export default {
+  heatSoak: {
+    option: "Preriscaldamento camera",
+    temperature: "Temperatura obiettivo (°C)",
+    duration: "Durata (minuti)",
+    status: "Preriscaldamento",
+    hint: "30–60°C, 1–120 minuti. Il timer parte quando la stampante conferma le temperature impostate.",
+    bedOnly: "!! Riscaldatore della camera non disponibile su questa macchina. Il riscaldamento utilizzerà solo il piano.",
+  },
   // Navigation
   nav: {
     printers: 'Stampanti',

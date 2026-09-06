@@ -1,4 +1,12 @@
 export default {
+  heatSoak: {
+    option: "Kammer vorheizen",
+    temperature: "Zieltemperatur (°C)",
+    duration: "Haltezeit (Minuten)",
+    status: "Vorheizen",
+    hint: "30–60°C, 1–120 Minuten. Der Timer startet nach Bestätigung der Heizungsziele durch den Drucker.",
+    bedOnly: "!! Kammerheizung an diesem Gerät nicht verfügbar. Es wird nur über das Druckbett geheizt.",
+  },
   // Navigation
   nav: {
     printers: 'Drucker',

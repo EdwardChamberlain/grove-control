@@ -375,6 +375,7 @@ class TestSchedulerQueueCheckLogging:
         with (
             patch("backend.app.services.print_scheduler.async_session") as mock_session_ctx,
             patch.object(scheduler, "_recover_stale_dispatches", new=AsyncMock()),
+            patch.object(scheduler, "_check_heat_soaks", new=AsyncMock(return_value=set())),
             caplog.at_level(logging.INFO, logger="backend.app.services.print_scheduler"),
         ):
             mock_db = AsyncMock()
@@ -398,6 +399,7 @@ class TestSchedulerQueueCheckLogging:
         with (
             patch("backend.app.services.print_scheduler.async_session") as mock_session_ctx,
             patch.object(scheduler, "_recover_stale_dispatches", new=AsyncMock()),
+            patch.object(scheduler, "_check_heat_soaks", new=AsyncMock(return_value=set())),
             caplog.at_level(logging.INFO, logger="backend.app.services.print_scheduler"),
         ):
             mock_db = AsyncMock()

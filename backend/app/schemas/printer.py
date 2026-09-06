@@ -327,6 +327,7 @@ class PrinterStatus(BaseModel):
     stg: list[int] = []  # List of stage numbers in calibration sequence
     # Air conditioning mode (0=cooling, 1=heating)
     airduct_mode: int = 0
+    preheating: bool = False
     # Print speed level (1=silent, 2=standard, 3=sport, 4=ludicrous)
     speed_level: int = 2
     # Chamber light on/off
