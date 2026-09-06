@@ -66,6 +66,9 @@ const mockPrinterStatus = {
 describe('PrintersPage AI detection badge (#1546)', () => {
   beforeEach(() => {
     localStorage.removeItem('printerCardSize');
+    localStorage.removeItem('printerViewMode');
+    localStorage.removeItem('printerPageView');
+    localStorage.removeItem('singlePrinterViewId');
 
     server.use(
       http.get('/api/v1/printers/', () => HttpResponse.json(mockPrinters)),
@@ -177,6 +180,9 @@ describe('PrintersPage AI detection badge (#1546)', () => {
 describe('PrintersPage AI detection badge — no verdict is not Safe (#2952)', () => {
   beforeEach(() => {
     localStorage.removeItem('printerCardSize');
+    localStorage.removeItem('printerViewMode');
+    localStorage.removeItem('printerPageView');
+    localStorage.removeItem('singlePrinterViewId');
     server.use(
       http.get('/api/v1/printers/', () => HttpResponse.json(mockPrinters)),
       http.get('/api/v1/printers/:id/status', () => HttpResponse.json(mockPrinterStatus)),
