@@ -11,6 +11,7 @@ under the hood, response body is raw G-code or 3MF with metadata in the
 import asyncio
 import io
 import logging
+import re
 import time
 import zipfile
 from collections.abc import Callable
@@ -119,7 +120,50 @@ def _format_sidecar_error(response: httpx.Response) -> str:
     return (message or details or response.text)[:500]
 
 
-def _handle_slice_response(response: httpx.Response, *, export_3mf: bool) -> SliceResult:
+def _validate_sliced_3mf(content: bytes, *, plate: int | None) -> None:
+    """Validate the files the sidecar promises for an exported 3MF.
+
+    ``is_zipfile`` only checks the container directory. A model-only 3MF,
+    empty archive, truncated member, or incomplete plate output can still pass
+    that check and would otherwise be persisted as queueable G-code.
+    """
+    try:
+        with zipfile.ZipFile(io.BytesIO(content), "r") as archive:
+            corrupt_member = archive.testzip()
+            if corrupt_member is not None:
+                raise ValueError(f"CRC check failed for {corrupt_member}")
+
+            names = set(archive.namelist())
+            plate_ids = sorted(
+                int(match.group(1)) for name in names if (match := re.fullmatch(r"Metadata/plate_(\d+)\.gcode", name))
+            )
+            if not plate_ids:
+                raise ValueError("no Metadata/plate_N.gcode member")
+            if plate is not None and plate > 0:
+                required_plate_ids = [plate]
+            else:
+                required_plate_ids = plate_ids
+
+            for plate_id in required_plate_ids:
+                prefix = f"Metadata/plate_{plate_id}"
+                required_members = (
+                    f"{prefix}.gcode",
+                    f"{prefix}.gcode.md5",
+                    f"{prefix}.json",
+                )
+                missing = [name for name in required_members if name not in names]
+                if missing:
+                    raise ValueError(f"missing {', '.join(missing)}")
+                if not archive.read(required_members[0]).strip():
+                    raise ValueError(f"empty {required_members[0]}")
+                for member in required_members[1:]:
+                    if not archive.read(member).strip():
+                        raise ValueError(f"empty {member}")
+    except (OSError, ValueError, zipfile.BadZipFile) as exc:
+        raise SlicerApiServerError(f"Slicer sidecar returned an incomplete or corrupt 3MF: {exc}") from exc
+
+
+def _handle_slice_response(response: httpx.Response, *, export_3mf: bool, plate: int | None = None) -> SliceResult:
     """Turn a sidecar ``/slice`` HTTP response into a validated ``SliceResult``.
 
     Shared by ``slice_with_profiles`` / ``slice_without_profiles`` so the status
@@ -131,12 +175,13 @@ def _handle_slice_response(response: httpx.Response, *, export_3mf: bool) -> Sli
     response, or an OrcaSlicer/BambuStudio CLI crash that produces empty output.
     Without this check Bambuddy would store that tiny blob as a ``.gcode.3mf``,
     let it be queued, and FTP it to the printer — a silently-broken print. When
-    a 3MF export was requested the body must be a valid ZIP (3MF container);
-    anything else is treated as a sidecar failure.
+    a 3MF export was requested the body must be a valid, CRC-clean sliced
+    output containing the requested plate G-code and its ``.gcode.md5`` and
+    ``.json`` sidecars; anything else is treated as a sidecar failure.
 
     Raises:
         SlicerInputError: 4xx from the sidecar (bad input / proxy body limit).
-        SlicerApiServerError: 5xx, or a 2xx whose body is not a valid 3MF.
+        SlicerApiServerError: 5xx, or a 2xx whose body is not a complete 3MF.
     """
     if response.status_code == 413:
         # A 413 almost never comes from the slicer itself — it's a reverse proxy
@@ -155,17 +200,20 @@ def _handle_slice_response(response: httpx.Response, *, export_3mf: bool) -> Sli
         raise SlicerInputError(f"Slicer rejected input ({response.status_code}): {_format_sidecar_error(response)}")
 
     content = response.content
-    if export_3mf and not zipfile.is_zipfile(io.BytesIO(content)):
-        # 200 OK but the body is not a 3MF zip → the sidecar did not produce a
-        # usable slice. Surface it loudly instead of persisting a corrupt file.
-        detail = _format_sidecar_error(response) if len(content) <= 500 else ""
-        raise SlicerApiServerError(
-            f"Slicer sidecar returned HTTP {response.status_code} but the body is not a valid "
-            f"3MF ({len(content)} bytes). This usually means a misconfigured sidecar, an "
-            f"OrcaSlicer/BambuStudio CLI crash producing no output, or a reverse proxy returning "
-            f"an error page or truncating the response — verify the sidecar URL and any proxy in "
-            f"front of it." + (f" Body: {detail}" if detail else "")
-        )
+    if export_3mf:
+        if not zipfile.is_zipfile(io.BytesIO(content)):
+            # 200 OK but the body is not a 3MF zip → the sidecar did not
+            # produce a usable slice. Surface it loudly instead of persisting a
+            # corrupt file.
+            detail = _format_sidecar_error(response) if len(content) <= 500 else ""
+            raise SlicerApiServerError(
+                f"Slicer sidecar returned HTTP {response.status_code} but the body is not a valid "
+                f"3MF ({len(content)} bytes). This usually means a misconfigured sidecar, an "
+                f"OrcaSlicer/BambuStudio CLI crash producing no output, or a reverse proxy returning "
+                f"an error page or truncating the response — verify the sidecar URL and any proxy in "
+                f"front of it." + (f" Body: {detail}" if detail else "")
+            )
+        _validate_sliced_3mf(content, plate=plate)
 
     return SliceResult(
         content=content,
@@ -536,7 +584,7 @@ class SlicerApiService:
         # short-tick poll (1s) since the slicer emits stage changes
         # several times per minute on complex models.
         response = await self._post_slice(files=files, data=data, request_id=request_id, on_progress=on_progress)
-        return _handle_slice_response(response, export_3mf=export_3mf)
+        return _handle_slice_response(response, export_3mf=export_3mf, plate=plate)
 
     async def slice_without_profiles(
         self,
@@ -581,7 +629,7 @@ class SlicerApiService:
         # segfault on complex H2D models — both want to keep updating
         # the user's toast through the slow operation.
         response = await self._post_slice(files=files, data=data, request_id=request_id, on_progress=on_progress)
-        return _handle_slice_response(response, export_3mf=export_3mf)
+        return _handle_slice_response(response, export_3mf=export_3mf, plate=plate)
 
 
 def _safe_int(value: str | None) -> int:

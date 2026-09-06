@@ -27,7 +27,7 @@ from backend.app.core.config import settings as app_settings
 from backend.app.models.library import LibraryFile
 from backend.app.models.local_preset import LocalPreset
 from backend.app.models.settings import Settings as SettingsModel
-from backend.app.services import slicer_api as slicer_api_module
+from backend.app.services import plate_thumbnail as plate_thumbnail_module, slicer_api as slicer_api_module
 from backend.app.services.slice_dispatch import slice_dispatch
 
 # ---------------------------------------------------------------------------
@@ -35,7 +35,7 @@ from backend.app.services.slice_dispatch import slice_dispatch
 # ---------------------------------------------------------------------------
 
 
-def _make_3mf_with_settings(settings_payload: dict | None = None) -> bytes:
+def _make_3mf_with_settings(settings_payload: dict | None = None, *, sliced_output: bool = False) -> bytes:
     """Build a tiny in-memory 3MF zip with all the embedded-config files
     that real-world Bambu Studio / OrcaSlicer 3MFs ship with.
 
@@ -57,6 +57,11 @@ def _make_3mf_with_settings(settings_payload: dict | None = None) -> bytes:
             "<config><plate><metadata key='filament' value='GFL00'/></plate></config>",
         )
         zf.writestr("Metadata/cut_information.xml", "<cut><part id='1'/></cut>")
+        if sliced_output:
+            zf.writestr("Metadata/plate_1.gcode", b"G1 X1")
+            zf.writestr("Metadata/plate_1.gcode.md5", b"deadbeef")
+            zf.writestr("Metadata/plate_1.json", b"{}")
+            zf.writestr("Metadata/plate_1.png", b"PLATE_RENDER")
     return buf.getvalue()
 
 
@@ -236,7 +241,7 @@ class TestSliceLibraryFile:
             captured["url"] = str(request.url)
             return httpx.Response(
                 status_code=200,
-                content=_make_3mf_with_settings(),  # #2671: real zip; validation rejects non-3MF bodies
+                content=_make_3mf_with_settings(sliced_output=True),
                 headers={
                     "x-print-time-seconds": "656",
                     "x-filament-used-g": "0.94",
@@ -279,7 +284,7 @@ class TestSliceLibraryFile:
             captured["body"] = bytes(request.content)
             return httpx.Response(
                 status_code=200,
-                content=_make_3mf_with_settings(),  # #2671: real zip; validation rejects non-3MF bodies
+                content=_make_3mf_with_settings(sliced_output=True),
                 headers={
                     "x-print-time-seconds": "10",
                     "x-filament-used-g": "0.1",
@@ -321,7 +326,7 @@ class TestSliceLibraryFile:
             captured["body"] = bytes(request.content)
             return httpx.Response(
                 status_code=200,
-                content=_make_3mf_with_settings(),  # #2671: real zip; validation rejects non-3MF bodies
+                content=_make_3mf_with_settings(sliced_output=True),
                 headers={
                     "x-print-time-seconds": "10",
                     "x-filament-used-g": "0.1",
@@ -448,7 +453,7 @@ class TestSliceLibraryFile:
             # Retry: no profile triplet → succeed with embedded settings
             return httpx.Response(
                 status_code=200,
-                content=_make_3mf_with_settings(),  # #2671: real zip; validation rejects non-3MF bodies
+                content=_make_3mf_with_settings(sliced_output=True),
                 headers={
                     "x-print-time-seconds": "100",
                     "x-filament-used-g": "1.0",
@@ -533,7 +538,7 @@ class TestSliceLibraryFile:
             captured["body"] = request.content
             return httpx.Response(
                 status_code=200,
-                content=_make_3mf_with_settings(),  # #2671: real zip; validation rejects non-3MF bodies
+                content=_make_3mf_with_settings(sliced_output=True),
                 headers={
                     "x-print-time-seconds": "1",
                     "x-filament-used-g": "0",
@@ -609,6 +614,10 @@ def _make_sliced_3mf(printer_model_id: str, bed_type: str | None = None) -> byte
                 "</plate></config>"
             ),
         )
+        zf.writestr("Metadata/plate_1.gcode", b"G1 X1")
+        zf.writestr("Metadata/plate_1.gcode.md5", b"deadbeef")
+        zf.writestr("Metadata/plate_1.json", b"{}")
+        zf.writestr("Metadata/plate_1.png", b"PLATE_RENDER")
     return buf.getvalue()
 
 
@@ -1058,6 +1067,10 @@ class TestSliceArchiveReslicedThumbnail:
 
         tmp_path = slice_test_setup["tmp_path"]
         monkeypatch.setattr(app_settings, "archive_dir", tmp_path / "archive")
+        # Thumbnail rendering is not part of this precedence test. Keep the
+        # fixture fast and deterministic while preserving the missing-PNG
+        # output shape being exercised.
+        monkeypatch.setattr(plate_thumbnail_module, "_render_model_thumbnails", lambda _bytes: (None, None))
 
         # Source has its own plate_1.png AND a project-wide cover.
         source_plate_marker = b"SOURCE_PLATE_RENDER"
@@ -1081,6 +1094,9 @@ class TestSliceArchiveReslicedThumbnail:
             with zipfile.ZipFile(sliced_buf, "w") as zf:
                 zf.writestr("3D/3dmodel.model", "<model/>")
                 zf.writestr("Metadata/slice_info.config", "<config/>")
+                zf.writestr("Metadata/plate_1.gcode", b"G1 X1")
+                zf.writestr("Metadata/plate_1.gcode.md5", b"deadbeef")
+                zf.writestr("Metadata/plate_1.json", b"{}")
                 zf.writestr("Auxiliaries/.thumbnails/thumbnail_middle.png", b"SLICED_COVER_ART")
             return httpx.Response(
                 status_code=200,
@@ -1121,6 +1137,10 @@ class TestSliceArchiveReslicedThumbnail:
 
         tmp_path = slice_test_setup["tmp_path"]
         monkeypatch.setattr(app_settings, "archive_dir", tmp_path / "archive")
+        # Thumbnail rendering is not part of this precedence test. Keep the
+        # fixture fast and deterministic while preserving the missing-PNG
+        # output shape being exercised.
+        monkeypatch.setattr(plate_thumbnail_module, "_render_model_thumbnails", lambda _bytes: (None, None))
 
         # Source has no Metadata/plate_1.png at all.
         bare_buf = io.BytesIO()
@@ -1144,6 +1164,9 @@ class TestSliceArchiveReslicedThumbnail:
             with zipfile.ZipFile(sliced_buf, "w") as zf:
                 zf.writestr("3D/3dmodel.model", "<model/>")
                 zf.writestr("Metadata/slice_info.config", "<config/>")
+                zf.writestr("Metadata/plate_1.gcode", b"G1 X1")
+                zf.writestr("Metadata/plate_1.gcode.md5", b"deadbeef")
+                zf.writestr("Metadata/plate_1.json", b"{}")
                 zf.writestr("Auxiliaries/.thumbnails/thumbnail_middle.png", b"COVER_ART_FALLBACK")
             return httpx.Response(
                 status_code=200,
