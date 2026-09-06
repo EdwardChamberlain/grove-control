@@ -971,6 +971,7 @@ export function SettingsPage() {
       (settings.open_in_slicer ?? null) !== (localSettings.open_in_slicer ?? null) ||
       (settings.use_slicer_api ?? false) !== (localSettings.use_slicer_api ?? false) ||
       (settings.orcaslicer_api_url ?? '') !== (localSettings.orcaslicer_api_url ?? '') ||
+      (settings.slicer_stall_timeout_minutes ?? 15) !== (localSettings.slicer_stall_timeout_minutes ?? 15) ||
       (settings.bambu_studio_api_url ?? '') !== (localSettings.bambu_studio_api_url ?? '') ||
       settings.prometheus_enabled !== localSettings.prometheus_enabled ||
       settings.prometheus_token !== localSettings.prometheus_token ||
@@ -1062,6 +1063,7 @@ export function SettingsPage() {
         open_in_slicer: localSettings.open_in_slicer,
         use_slicer_api: localSettings.use_slicer_api,
         orcaslicer_api_url: localSettings.orcaslicer_api_url,
+        slicer_stall_timeout_minutes: localSettings.slicer_stall_timeout_minutes,
         bambu_studio_api_url: localSettings.bambu_studio_api_url,
         prometheus_enabled: localSettings.prometheus_enabled,
         prometheus_token: localSettings.prometheus_token,
@@ -4394,6 +4396,26 @@ export function SettingsPage() {
                       'settings.slicerApiUrlDescription',
                       'URL of the slicer-API sidecar container. Leave blank to use the SLICER_API_URL / BAMBU_STUDIO_API_URL env var defaults.',
                     )}
+                  </p>
+                </div>
+              )}
+              {(localSettings.use_slicer_api ?? false) && (
+                <div>
+                  <label className="block text-sm text-bambu-gray mb-1">
+                    {t('settings.slicerStallTimeout')}
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={240}
+                    value={localSettings.slicer_stall_timeout_minutes ?? 15}
+                    onChange={(e) =>
+                      updateSetting('slicer_stall_timeout_minutes', Number(e.target.value))
+                    }
+                    className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+                  />
+                  <p className="text-xs text-bambu-gray mt-1">
+                    {t('settings.slicerStallTimeoutDescription')}
                   </p>
                 </div>
               )}

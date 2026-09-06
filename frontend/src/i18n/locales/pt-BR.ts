@@ -2053,6 +2053,8 @@ export default {
     slicerCard: 'Fatiador',
     orcaslicerApiUrl: 'OrcaSlicer sidecar URL',
     bambuStudioApiUrl: 'Bambu Studio sidecar URL',
+    slicerStallTimeout: 'Tempo limite de inatividade do fatiador (minutos)',
+    slicerStallTimeoutDescription: 'Desiste de um fatiamento apos esse tempo sem progresso do sidecar. Modelos pesados que continuam relatando progresso nunca sao interrompidos, por mais que demorem. Sidecars que nao relatam progresso usam este valor como limite de tempo total.',
     slicerApiUrlDescription: 'URL do contêiner sidecar slicer-API. Deixe em branco para usar SLICER_API_URL / BAMBU_STUDIO_API_URL.',
     slicerBundlesRemoved: {
       title: 'Bundles do fatiador (removido)',

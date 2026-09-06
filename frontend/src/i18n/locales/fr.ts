@@ -2053,6 +2053,8 @@ export default {
     slicerCard: 'Slicer',
     orcaslicerApiUrl: 'OrcaSlicer sidecar URL',
     bambuStudioApiUrl: 'Bambu Studio sidecar URL',
+    slicerStallTimeout: "Delai d'inactivite du trancheur (minutes)",
+    slicerStallTimeoutDescription: 'Abandonne un decoupage apres cette duree sans progression du sidecar. Les modeles lourds qui continuent a signaler leur progression ne sont jamais interrompus, quel que soit le temps necessaire. Les sidecars qui ne signalent pas de progression utilisent cette valeur comme limite de duree totale.',
     slicerApiUrlDescription: 'URL du conteneur sidecar slicer-API. Laisser vide pour utiliser les variables d\'environnement SLICER_API_URL / BAMBU_STUDIO_API_URL.',
     slicerBundlesRemoved: {
       title: 'Bundles de slicer (supprimé)',

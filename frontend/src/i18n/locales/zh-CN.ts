@@ -2098,6 +2098,8 @@ export default {
     slicerCard: '切片器',
     orcaslicerApiUrl: 'OrcaSlicer sidecar URL',
     bambuStudioApiUrl: 'Bambu Studio sidecar URL',
+    slicerStallTimeout: '切片器停滞超时（分钟）',
+    slicerStallTimeoutDescription: '若 sidecar 在此时长内没有任何进度，则放弃本次切片。持续报告进度的复杂模型无论耗时多久都不会被中断。不报告进度的 sidecar 则将此值作为总时长上限。',
     slicerApiUrlDescription: 'slicer-API sidecar 容器的 URL。留空以使用 SLICER_API_URL / BAMBU_STUDIO_API_URL 环境变量默认值。',
     slicerBundlesRemoved: {
       title: '切片器捆绑包（已移除）',

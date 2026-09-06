@@ -2097,6 +2097,8 @@ export default {
     slicerCard: 'Slicer',
     orcaslicerApiUrl: 'OrcaSlicer Sidecar-URL',
     bambuStudioApiUrl: 'Bambu Studio Sidecar-URL',
+    slicerStallTimeout: 'Zeitlimit bei Slicer-Stillstand (Minuten)',
+    slicerStallTimeoutDescription: 'Bricht einen Slice-Vorgang ab, wenn der Sidecar so lange keinen Fortschritt meldet. Aufwendige Modelle, die weiter Fortschritt melden, werden nie abgebrochen, egal wie lange sie brauchen. Sidecars ohne Fortschrittsmeldung nutzen diesen Wert stattdessen als Gesamtzeitlimit.',
     slicerApiUrlDescription: 'URL des Slicer-API-Sidecar-Containers. Leer lassen, um die SLICER_API_URL- bzw. BAMBU_STUDIO_API_URL-Umgebungsvariablen zu nutzen.',
     slicerBundlesRemoved: {
       title: 'Slicer-Bundles (entfernt)',
