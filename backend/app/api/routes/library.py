@@ -25,6 +25,7 @@ from backend.app.core.auth import (
     RequireCameraStreamTokenIfAuthEnabled,
     require_ownership_permission,
     require_permission_if_auth_enabled,
+    resolve_api_key_owner,
 )
 from backend.app.core.config import settings as app_settings
 from backend.app.core.database import async_session, get_db
@@ -1942,6 +1943,7 @@ async def upload_file(
     generate_stl_thumbnails: bool = Query(default=True),
     db: AsyncSession = Depends(get_db),
     current_user: User | None = Depends(require_permission_if_auth_enabled(Permission.LIBRARY_UPLOAD)),
+    api_key_owner: User | None = Depends(resolve_api_key_owner),
 ):
     """Upload a file to the library."""
     try:
@@ -2081,7 +2083,7 @@ async def upload_file(
             file_hash=file_hash,
             thumbnail_path=to_relative_path(thumbnail_path) if thumbnail_path else None,
             file_metadata=_without_print_name(metadata) if metadata else None,
-            created_by_id=current_user.id if current_user else None,
+            created_by_id=(current_user or api_key_owner).id if (current_user or api_key_owner) else None,
         )
         db.add(library_file)
         await db.commit()
@@ -2112,6 +2114,7 @@ async def extract_zip_file(
     generate_stl_thumbnails: bool = Query(default=True),
     db: AsyncSession = Depends(get_db),
     current_user: User | None = Depends(require_permission_if_auth_enabled(Permission.LIBRARY_UPLOAD)),
+    api_key_owner: User | None = Depends(resolve_api_key_owner),
 ):
     """Upload and extract a ZIP file to the library.
 
@@ -2344,7 +2347,7 @@ async def extract_zip_file(
                         file_hash=file_hash,
                         thumbnail_path=to_relative_path(thumbnail_path) if thumbnail_path else None,
                         file_metadata=_without_print_name(metadata) if metadata else None,
-                        created_by_id=current_user.id if current_user else None,
+                        created_by_id=(current_user or api_key_owner).id if (current_user or api_key_owner) else None,
                     )
                     db.add(library_file)
                     await db.flush()
@@ -4027,6 +4030,12 @@ async def slice_library_file(
     request: SliceRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User | None = Depends(require_permission_if_auth_enabled(Permission.LIBRARY_UPLOAD)),
+    auth_result: tuple[User | None, bool] = Depends(
+        require_ownership_permission(
+            Permission.LIBRARY_READ_ALL,
+            Permission.LIBRARY_READ_OWN,
+        )
+    ),
     api_key_cloud_owner: User | None = Depends(resolve_api_key_cloud_owner),
 ):
     """Enqueue a slice job for a library file. Returns 202 + job_id; the
@@ -4040,8 +4049,14 @@ async def slice_library_file(
 
     src_result = await db.execute(LibraryFile.active().where(LibraryFile.id == file_id))
     lib_file = src_result.scalar_one_or_none()
-    if not lib_file:
-        raise HTTPException(status_code=404, detail="File not found")
+    # Per-row ownership gate. LIBRARY_UPLOAD alone let a READ_OWN caller (e.g. the
+    # built-in Operators group) slice another user's model by raw id even though
+    # GET on that id returned 404 — the sliced output was then attributed to and
+    # downloadable by the requester. Enforce the same visibility the read routes
+    # use before reading the source off disk. The ownership dependency also
+    # resolves an API-key owner instead of treating a key as an all-row caller.
+    owner_user, can_read_all = auth_result
+    lib_file = _ensure_library_file_visible(lib_file, owner_user, can_read_all)
 
     src_lower = (lib_file.filename or "").lower()
     if not (
@@ -4065,7 +4080,7 @@ async def slice_library_file(
     # behaviour to avoid a wider scope expansion). Fall back to the API
     # key's owner so cloud-preset resolution can read the stored
     # cloud_token (#1182 follow-up).
-    cloud_token_user = current_user or api_key_cloud_owner
+    cloud_token_user = current_user or owner_user or api_key_cloud_owner
     user_id = cloud_token_user.id if cloud_token_user else None
 
     # If the source has a `print_name` in its metadata (BambuStudio always
@@ -4113,6 +4128,7 @@ async def slice_library_file(
         kind="library_file",
         source_id=lib_file.id,
         source_name=lib_file.filename,
+        owner_id=user_id,
         run=_run,
     )
     return {

@@ -1,25 +1,56 @@
 """Pure helper functions for OIDC routes.
 
-Hosts the SSRF guard for admin-supplied icon URLs. Stricter than
-``_spoolman_helpers.assert_safe_spoolman_url`` — Spoolman intentionally allows
-loopback/RFC-1918 (same-LAN topology) while OIDC icons must be reachable on
-the public internet (IdP-hosted), so private addresses there are SSRF probes.
+Hosts the public-internet SSRF guard, used for both admin-supplied icon URLs
+and OIDC issuer URLs (via ``schemas.auth._validate_issuer_url``). Stricter
+than ``_url_safety.assert_safe_lan_service_url`` — LAN services intentionally
+allow loopback/RFC-1918 (same-host/same-LAN topology) while an IdP must be
+reachable on the public internet, so a private address there is an SSRF probe
+rather than a configuration.
 """
 
 from __future__ import annotations
 
 import ipaddress
+import socket
 from urllib.parse import urlparse
 
-from backend.app.api.routes._url_safety import CLOUD_METADATA_IPS, NUMERIC_IP_RE, unwrap_ipv4_mapped
+from backend.app.api.routes._url_safety import (
+    CLOUD_METADATA_HOSTNAMES,
+    CLOUD_METADATA_IPS,
+    NUMERIC_IP_RE,
+    unwrap_ipv4_mapped,
+)
 
 
-def assert_safe_public_https_url(url: str) -> None:
+def _assert_safe_public_address(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> None:
+    """Reject an address that must never be used for a public OIDC resource."""
+    effective = unwrap_ipv4_mapped(addr)
+
+    if effective in CLOUD_METADATA_IPS:
+        raise ValueError("icon URL must not point to a cloud metadata endpoint")
+
+    # Order matters: 0.0.0.0 sets BOTH is_private and is_unspecified — check
+    # the more-specific is_unspecified first so the error message points at
+    # the actual misuse. Similarly 127.0.0.1 sets is_loopback and is_private.
+    if effective.is_unspecified:
+        raise ValueError("icon URL must not point to an unspecified address")
+    if effective.is_loopback:
+        raise ValueError("icon URL must not point to a loopback address")
+    if effective.is_link_local:
+        raise ValueError("icon URL must not point to a link-local address")
+    if effective.is_multicast:
+        raise ValueError("icon URL must not point to a multicast address")
+    if effective.is_private:
+        raise ValueError("icon URL must not point to a private (RFC-1918) address")
+
+
+def assert_safe_public_https_url(url: str, *, resolve_hostname: bool = True) -> None:
     """Raise ValueError if *url* is unsafe to fetch as a public HTTPS resource.
 
-    Used for OIDC provider icon URLs (#1333). Stricter than the Spoolman SSRF
-    guard: also rejects loopback, private (RFC-1918), and link-local addresses
-    because an OIDC icon legitimately lives only on the public internet.
+    Used for OIDC provider icon URLs (#1333) and OIDC issuer URLs. Stricter
+    than the LAN-service SSRF guard: also rejects loopback, private
+    (RFC-1918), and link-local addresses because an IdP and its icon
+    legitimately live only on the public internet.
 
     Checks performed:
     - Scheme must be ``https`` (no ``http://``, ``file://``, ``gopher://``, …).
@@ -35,9 +66,12 @@ def assert_safe_public_https_url(url: str) -> None:
     - IPv4-mapped IPv6 (``::ffff:127.0.0.1``) — unwrapped before the IP-class
       check so an attacker can't bypass via IPv6 encoding.
 
-    Hostname-based addresses are accepted without DNS resolution (consistent
-    with ``_validate_issuer_url`` policy — the operator is trusted to
-    configure a sensible IdP host).
+    Symbolic hostnames are resolved when this guard protects an outbound
+    request. Every returned address must be public. A temporary DNS failure is
+    not treated as a policy violation because the request will fail closed at
+    connection time; a private answer is always rejected. Schema validation
+    can pass ``resolve_hostname=False`` to remain deterministic and
+    network-free, while the fetch path must retain the default.
     """
     parsed = urlparse(url)
     if parsed.scheme.lower() != "https":
@@ -45,30 +79,41 @@ def assert_safe_public_https_url(url: str) -> None:
 
     hostname = (parsed.hostname or "").lower()
 
+    # "https:///path" parses to an empty hostname; without this it reaches the
+    # ip_address() ValueError branch and is accepted as a symbolic hostname.
+    if not hostname:
+        raise ValueError("icon URL must include a hostname")
+
+    normalized_hostname = hostname.rstrip(".")
+    if normalized_hostname in CLOUD_METADATA_HOSTNAMES:
+        raise ValueError("icon URL must not point to a cloud metadata endpoint")
+
     if NUMERIC_IP_RE.match(hostname):
         raise ValueError("icon URL must not use numeric-encoded IP addresses")
 
     try:
         addr = ipaddress.ip_address(hostname)
     except ValueError:
-        return  # hostname — out of scope (no DNS check by design)
+        if not resolve_hostname:
+            return
 
-    effective = unwrap_ipv4_mapped(addr)
+        # Validate every address returned by DNS. Do not fail open when a
+        # resolver returns a mixed public/private answer. If the name is
+        # temporarily unresolvable, httpx will fail the eventual request;
+        # there is no safe address to connect to in that case.
+        try:
+            port = parsed.port or 443
+            addresses = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+        except (OSError, ValueError):
+            return
+        for address_info in addresses:
+            sockaddr = address_info[4]
+            address_text = sockaddr[0] if sockaddr else ""
+            try:
+                resolved = ipaddress.ip_address(address_text.split("%", 1)[0])
+            except ValueError:
+                raise ValueError("icon URL hostname resolved to an invalid address") from None
+            _assert_safe_public_address(resolved)
+        return
 
-    if effective in CLOUD_METADATA_IPS:
-        raise ValueError("icon URL must not point to a cloud metadata endpoint")
-
-    # Order matters: 0.0.0.0 sets BOTH is_private and is_unspecified — check
-    # the more-specific is_unspecified first so the error message points at
-    # the actual misuse. Similarly 127.0.0.1 sets is_loopback and is_private
-    # (private under IANA's reservation); is_loopback first is clearer.
-    if effective.is_unspecified:
-        raise ValueError("icon URL must not point to an unspecified address")
-    if effective.is_loopback:
-        raise ValueError("icon URL must not point to a loopback address")
-    if effective.is_link_local:
-        raise ValueError("icon URL must not point to a link-local address")
-    if effective.is_multicast:
-        raise ValueError("icon URL must not point to a multicast address")
-    if effective.is_private:
-        raise ValueError("icon URL must not point to a private (RFC-1918) address")
+    _assert_safe_public_address(addr)

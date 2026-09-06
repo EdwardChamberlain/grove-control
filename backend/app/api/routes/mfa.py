@@ -1634,6 +1634,7 @@ async def oidc_authorize(
     # Fetch discovery document
     discovery_url = f"{provider.issuer_url.rstrip('/')}/.well-known/openid-configuration"
     try:
+        assert_safe_public_https_url(discovery_url)
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(discovery_url)
             resp.raise_for_status()
@@ -1756,6 +1757,7 @@ async def oidc_callback(
         # ── Step 1: Fetch discovery document ────────────────────────────────
         discovery_url = f"{provider.issuer_url.rstrip('/')}/.well-known/openid-configuration"
         try:
+            assert_safe_public_https_url(discovery_url)
             async with httpx.AsyncClient(timeout=10) as client:
                 disc_resp = await client.get(discovery_url)
                 disc_resp.raise_for_status()
@@ -1774,6 +1776,16 @@ async def oidc_callback(
             logger.warning(
                 "OIDC discovery document contains non-HTTP URL(s): token=%s jwks=%s", token_endpoint, jwks_uri
             )
+            return RedirectResponse(url=f"{frontend_error_url}invalid_discovery_document", status_code=302)
+
+        # Discovery documents are untrusted input. Apply the public-tier SSRF
+        # policy to every URL that the callback will request, not only to the
+        # originally configured issuer.
+        try:
+            assert_safe_public_https_url(token_endpoint)
+            assert_safe_public_https_url(jwks_uri)
+        except ValueError as exc:
+            logger.warning("OIDC discovery document contains unsafe endpoint: %s", exc)
             return RedirectResponse(url=f"{frontend_error_url}invalid_discovery_document", status_code=302)
 
         # ── Step 2: Exchange authorization code for tokens ───────────────────
@@ -1847,6 +1859,7 @@ async def oidc_callback(
         # are inconsistent between the discovery issuer and the JWT iss claim.
         discovery_issuer: str = discovery.get("issuer", provider.issuer_url).rstrip("/")
         try:
+            assert_safe_public_https_url(jwks_uri)
             async with httpx.AsyncClient(timeout=10) as jwks_http:
                 jwks_resp = await jwks_http.get(jwks_uri)
                 jwks_resp.raise_for_status()

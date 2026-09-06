@@ -49,7 +49,21 @@ async def _enforce_private_repo(repo_url: str, token: str, provider: str) -> Non
 
     Used by POST and PATCH /config so a backup configuration can never be
     saved against a public repository.
+
+    The URL is policy-checked first: the Gitea and Forgejo backends derive
+    their API base from this value (``get_api_base``) and then request it with
+    the supplied token, so an unchecked repository_url is an outbound fetch to
+    an operator-supplied host. A self-hosted Gitea on the LAN is the normal
+    case, so the LAN-service tier applies — this only rules out the targets
+    that are wrong under any topology.
     """
+    from backend.app.api.routes._url_safety import assert_safe_lan_service_url
+
+    try:
+        assert_safe_lan_service_url(repo_url, label="Repository URL")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     result = await github_backup_service.test_connection(repo_url, token, provider=provider)
     if not result.get("success"):
         message = result.get("message") or "Connection test failed"
