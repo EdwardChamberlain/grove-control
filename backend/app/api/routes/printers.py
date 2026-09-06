@@ -54,6 +54,7 @@ from backend.app.services.bambu_ftp import (
 )
 from backend.app.services.printer_diagnostic import run_connection_diagnostic
 from backend.app.services.printer_manager import (
+    drying_screen_only,
     get_derived_status_name,
     printer_manager,
     resolve_plate_id,
@@ -855,6 +856,7 @@ async def get_printer_status(
         awaiting_plate_clear_print=awaiting_plate_clear_print,
         supports_drying=supports_drying(printer.model, state.firmware_version),
         supports_drying_while_printing=supports_drying_while_printing(printer.model, state.firmware_version),
+        drying_screen_only=drying_screen_only(printer.model),
         supports_chamber_heater=supports_chamber_heater(printer.model),
         current_archive_id=current_archive_id,
         current_print_identity=current_print_identity,
@@ -1833,6 +1835,11 @@ async def clear_mqtt_logs(
 # AMS Drying Endpoints
 # ============================================
 
+# The P1 firmware acks `ams_filament_drying` with result: success and then ignores it
+# — Bambu's own P1 manual says drying "may only be controlled from the P1S screen"
+# (#2533). Refuse the command rather than let the caller believe it landed.
+_DRYING_SCREEN_ONLY_DETAIL = "This printer only supports AMS drying from its own screen"
+
 
 @router.post("/{printer_id}/drying/start")
 async def start_drying(
@@ -1854,6 +1861,8 @@ async def start_drying(
     # Server-side guard: reject if this model/firmware doesn't support drying
     live_state = printer_manager.get_status(printer_id)
     firmware = live_state.firmware_version if live_state else None
+    if drying_screen_only(printer.model):
+        raise HTTPException(400, _DRYING_SCREEN_ONLY_DETAIL)
     if not supports_drying(printer.model, firmware):
         raise HTTPException(400, "Drying not supported for this printer model or firmware version")
 
@@ -1925,6 +1934,11 @@ async def stop_drying(
     printer = result.scalar_one_or_none()
     if not printer:
         raise HTTPException(404, "Printer not found")
+
+    # Screen-only models ignore stop just as they ignore start — a cycle running on a
+    # P1S was started at the printer and has to be ended there too (#2533).
+    if drying_screen_only(printer.model):
+        raise HTTPException(400, _DRYING_SCREEN_ONLY_DETAIL)
 
     success = printer_manager.send_drying_command(printer_id, ams_id, temp=0, duration=0, mode=0)
     if not success:
@@ -3799,8 +3813,12 @@ async def ams_load(
     - 254: external spool (single-external printers, or Ext-L on dual-nozzle H2D)
     - 255: Ext-R on dual-nozzle H2D
     """
-    if tray_id not in range(16) and tray_id not in (254, 255):
-        raise HTTPException(400, "tray_id must be 0..15 (AMS slot), 254 (external / Ext-L), or 255 (Ext-R)")
+    # 24-27 are the A2L AMS-Lite slots (normalised unit 6 = 6*4+slot); see
+    # a2l-am-unit-16. They are valid global tray ids alongside the regular 0-15.
+    if tray_id not in range(16) and tray_id not in range(24, 28) and tray_id not in (254, 255):
+        raise HTTPException(
+            400, "tray_id must be 0..15 (AMS slot), 24..27 (A2L AMS-Lite), 254 (external / Ext-L), or 255 (Ext-R)"
+        )
 
     result = await db.execute(select(Printer).where(Printer.id == printer_id))
     printer = result.scalar_one_or_none()

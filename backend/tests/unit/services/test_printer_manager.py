@@ -10,6 +10,7 @@ import pytest
 
 from backend.app.services.printer_manager import (
     PrinterManager,
+    drying_screen_only,
     get_derived_status_name,
     has_stg_cur_idle_bug,
     init_printer_connections,
@@ -934,6 +935,39 @@ class TestPrinterStateToDict:
 
         assert result["ams"][0]["tray"][0]["tag_uid"] is None
 
+    def test_exists_bit_is_serialized_for_websocket(self, mock_state):
+        """#2670: the WS status payload must carry the firmware presence bit
+        `exists` (set by apply_tray_exist_bits) — the REST serializer already
+        does. Without it the frontend shallow-merge drops `exists` after the
+        first WS frame and getEmptySlotKind falls back to the firmware-variant
+        state 9/10 heuristic, which is wrong for AMS-HT in both directions.
+        """
+        mock_state.raw_data = {
+            "ams": [
+                {
+                    "id": 128,
+                    "tray": [
+                        # Empty HT: apply_tray_exist_bits cleared it and set exists=False.
+                        {"id": 0, "state": 9, "tray_type": "", "exists": False},
+                    ],
+                },
+                {
+                    "id": 0,
+                    "tray": [
+                        # Present non-RFID spool: exists=True, no tray_type ("?").
+                        {"id": 0, "state": 10, "tray_type": "", "exists": True},
+                    ],
+                },
+            ]
+        }
+
+        result = printer_state_to_dict(mock_state)
+
+        ht_tray = result["ams"][0]["tray"][0]
+        reg_tray = result["ams"][1]["tray"][0]
+        assert ht_tray["exists"] is False
+        assert reg_tray["exists"] is True
+
     def test_vt_tray_parsing(self, mock_state):
         """Verify virtual tray is parsed correctly as a list."""
         mock_state.raw_data = {
@@ -1466,7 +1500,6 @@ class TestSupportsDrying:
     def test_known_supported_with_firmware(self):
         """Verify known models with sufficient firmware return True."""
         assert supports_drying("X1C", "01.09.00.00") is True
-        assert supports_drying("P1S", "01.08.00.00") is True
         assert supports_drying("H2D", "01.02.30.00") is True
         assert supports_drying("H2S", "01.02.00.00") is True
         assert supports_drying("H2C", "01.02.00.00") is True
@@ -1478,7 +1511,6 @@ class TestSupportsDrying:
     def test_known_supported_old_firmware(self):
         """Verify known models with old firmware return False."""
         assert supports_drying("X1C", "01.08.00.00") is False
-        assert supports_drying("P1S", "01.07.00.00") is False
         assert supports_drying("H2S", "01.01.00.00") is False
         assert supports_drying("H2C", "01.01.99.99") is False
         assert supports_drying("O1C", "01.01.99.99") is False
@@ -1519,6 +1551,32 @@ class TestSupportsDrying:
         assert supports_drying("x1c", "01.09.00.00") is True
         assert supports_drying("p2s", "01.02.00.00") is True
         assert supports_drying("a1", "99.99.99.99") is False
+
+
+class TestDryingScreenOnly:
+    """P1-series AMS drying is screen-only (#2533).
+
+    Bambu's P1 manual: "P1S connected AMS drying functions may only be controlled
+    from the P1S screen." The firmware acks `ams_filament_drying` with
+    result: success and then does nothing — so no command we send can ever start a
+    cycle, whatever the firmware version.
+    """
+
+    @pytest.mark.parametrize("model", ["P1S", "P1P", "p1s", " p1p "])
+    def test_screen_only_models_reject_remote_drying(self, model):
+        assert drying_screen_only(model) is True
+        # Not firmware-gated: even the newest firmware won't take the command.
+        assert supports_drying(model, "99.99.99.99") is False
+
+    @pytest.mark.parametrize("model", ["X1C", "P2S", "H2D", "A1", None])
+    def test_other_models_are_not_screen_only(self, model):
+        assert drying_screen_only(model) is False
+
+    def test_screen_only_is_not_the_same_as_unsupported(self):
+        # The A1 has no drying-capable AMS at all; the P1S does, it just can't be
+        # driven remotely. The UI needs to tell those two apart.
+        assert drying_screen_only("A1") is False
+        assert supports_drying("A1", "99.99.99.99") is False
 
 
 class TestSupportsDryingWhilePrinting:

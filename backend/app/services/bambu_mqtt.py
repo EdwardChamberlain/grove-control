@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 #   "n3f/<id>"  – AMS 2 Pro (H2D Pro and similar)
 #   "n3s/<id>"  – AMS HT (H2D Pro and similar; IDs typically start at 128)
 _AMS_MODULE_PREFIXES = ("ams/", "n3f/", "n3s/")
+_EARLY_DRY_END_MINUTES = 5
 
 
 def parse_ams_filament_backup_from_cfg(cfg_raw: object) -> bool | None:
@@ -48,6 +49,57 @@ def parse_ams_filament_backup_from_cfg(cfg_raw: object) -> bool | None:
         return bool((int(cfg_raw, 16) >> 18) & 1)
     except ValueError:
         return None
+
+
+# ── A2L "AMS Lite" unit-id normalisation (issue capture 2026-07-20) ──────────
+# The A2L reports its 4-slot AMS Lite as physical unit **id 16**, but the
+# firmware is internally inconsistent about it:
+#   - its tray bitmasks (tray_exist_bits etc.) sit at **bit base 24**, i.e. the
+#     position for id 6 (6*4), NOT id 16 (which would be bit 64);
+#   - it reports `tray_now` as a **local** 0-3 slot, not a global id;
+#   - `ams_mapping2` and per-unit commands use the **physical** id 16.
+# So we normalise 16 -> 6 at the MQTT ingest boundary. Global tray ids then land
+# at 24-27, which every `ams_id*4+slot` consumer handles unchanged, collides with
+# nothing (regular AMS 0-15, AMS-HT 128-135, external 254/255) and passes the
+# `ams_id <= 7` DB constraint. We translate 6 -> 16 (and the local slot) back to
+# the physical form ONLY on the outbound wire. See memory a2l-am-unit-16.
+A2L_LITE_PHYSICAL_AMS_ID = 16
+A2L_LITE_NORMALIZED_AMS_ID = 6
+A2L_LITE_GLOBAL_BASE = A2L_LITE_NORMALIZED_AMS_ID * 4  # 24
+
+
+def normalize_am_unit_id(ams_id: int) -> int:
+    """Map the A2L AMS-Lite's physical unit id (16) to its normalised id (6).
+
+    Self-scoping: only id 16 is remapped, and no other Bambu device reports an
+    AMS unit at id 16 (regular AMS 0-3, AMS-HT 128-135). All other ids pass
+    through untouched.
+    """
+    return A2L_LITE_NORMALIZED_AMS_ID if ams_id == A2L_LITE_PHYSICAL_AMS_ID else ams_id
+
+
+def a2l_lite_wire_ids(ams_id: int, tray_id: int) -> tuple[int, int, int] | None:
+    """Translate a normalised A2L slot back to the physical wire form.
+
+    Returns ``(wire_ams_id, wire_slot_id, wire_global_tray)`` for the AMS-Lite
+    (normalised id 6), else ``None`` for every other unit.
+
+    CONFIRMED from the firmware's own `ams_mapping2` ({ams_id:16, slot_id:0-3}):
+    the wire uses the physical unit id 16 with a **local** 0-3 slot. NOT yet
+    confirmed by capture: the physical **global** tray value some commands put on
+    the wire (load `target`, extrusion_cali `tray_id`) — we extrapolate it as
+    16*4+slot = 64-67 to stay consistent with the physical unit id. This is the
+    single unverified encoding; a BambuStudio->A2L capture of a load or cali
+    command would settle it, and it lives only here.
+    """
+    if ams_id != A2L_LITE_NORMALIZED_AMS_ID:
+        return None
+    local_slot = tray_id % 4
+    return (
+        A2L_LITE_PHYSICAL_AMS_ID,
+        local_slot,
+        A2L_LITE_PHYSICAL_AMS_ID * 4 + local_slot,
+    )
 
 
 def apply_tray_exist_bits(
@@ -80,8 +132,16 @@ def apply_tray_exist_bits(
     is valid idle-printer state (#1365 — X1C between prints) and MUST be applied
     so spool removal is detected without requiring a manual reconnect.
 
-    AMS-HT units (``id >= 128``) use a separate addressing scheme and are
-    skipped here.
+    AMS-HT units (``id`` 128-135) are single-tray dry boxes whose presence bit
+    is packed as ONE consecutive bit starting at 16 (``16 + (ams_id - 128)``),
+    NOT ``ams_id * 4`` (which would overflow to bit 512+). This is the firmware's
+    authoritative empty signal for the HT — the only working clear path, since
+    the HT keeps echoing stale ``tray_type`` and its ``state`` is firmware-variant
+    (#2670). Verified against OrcaSlicer ``DevFilaSystem.cpp``
+    (``is_exists = tray_exist_bits >> (16 + (ams_id-128))``) and a live H2D
+    capture (HT-A → bit 16). The A2L-Lite (normalised to id 6 upstream) lands at
+    bits 24-27 via the regular ``ams_id * 4`` formula, matching OrcaSlicer's
+    ``AMS_LITE_MIXED`` offset, so it needs no special case here.
 
     `tray_exist_bits_str` is expected as a hex string (firmware sends it that
     way). Ints are tolerated for defensive symmetry but typically not seen
@@ -114,8 +174,13 @@ def apply_tray_exist_bits(
             ams_id = int(ams_id_raw) if isinstance(ams_id_raw, str) else ams_id_raw
         except (ValueError, TypeError):
             continue
-        if not isinstance(ams_id, int) or ams_id >= 128:
-            # Skip AMS-HT (id >= 128) — separate addressing scheme.
+        if not isinstance(ams_id, int):
+            continue
+        # AMS-HT (n3s, id 128-135): single tray, presence bit at 16+(ams_id-128).
+        # Regular AMS (and the A2L-Lite normalised to id 6): ams_id*4 + tray_id.
+        # Anything outside those ranges has no known bit layout — don't guess it.
+        is_ht = 128 <= ams_id <= 135
+        if not is_ht and not (0 <= ams_id <= 15):
             continue
         for tray in ams_unit.get("tray", []):
             if not isinstance(tray, dict):
@@ -129,7 +194,7 @@ def apply_tray_exist_bits(
                 continue
             if not isinstance(tray_id, int):
                 continue
-            global_bit = ams_id * 4 + tray_id
+            global_bit = (16 + (ams_id - 128)) if is_ht else (ams_id * 4 + tray_id)
             slot_exists = (tray_exist_bits >> global_bit) & 1
             if slot_exists:
                 continue
@@ -522,6 +587,7 @@ class BambuMQTTClient:
         # — only the dry_time countdown — so we cache what we sent to drive
         # the UI badge. Cleared on stop or on the dry_time falling edge to 0.
         self._drying_targets: dict[int, dict[str, object]] = {}
+        self._drying_stops_sent: set[int] = set()
 
         self.state = PrinterState()
         self._client: mqtt.Client | None = None
@@ -573,6 +639,12 @@ class BambuMQTTClient:
         self._sequence_id: int = 0
         self._pending_kprofile_response: asyncio.Event | None = None
         self._kprofile_response_data: list | None = None
+        self._pending_kprofile_requests: dict[str, dict] = {}
+        # Acks for K-profile *writes* (extrusion_cali_set / extrusion_cali_del),
+        # keyed by the sequence_id we sent. The printer echoes it back, measured
+        # on both an X1C and an H2D (#2718). Filled by the MQTT thread, drained
+        # by await_cali_ack.
+        self._pending_cali_acks: dict[str, dict | None] = {}
 
         # Xcam hold timers - OrcaSlicer pattern: ignore incoming data for 3 seconds after command
         # Key: module_name, Value: timestamp when command was sent
@@ -587,6 +659,11 @@ class BambuMQTTClient:
         # Captured ams_mapping from print commands on the request topic
         # Intercepts slicer/Grove Control print commands to get the slot-to-tray mapping
         self._captured_ams_mapping: list[int] | None = None
+
+        # True once we've seen (and normalised 16->6) an A2L AMS-Lite unit in the
+        # AMS telemetry. Used to globalise the Lite's local `tray_now` to 24+slot.
+        # See normalize_am_unit_id / a2l_lite_wire_ids and memory a2l-am-unit-16.
+        self._has_a2l_am_unit: bool = False
 
         # Request topic subscription tracking
         # Some printer MQTT brokers (e.g. P1S, A1) reject subscriptions to the request
@@ -1170,7 +1247,24 @@ class BambuMQTTClient:
             if "command" in print_data:
                 cmd = print_data.get("command")
                 logger.debug("[%s] Received command response: %s", self.serial_number, cmd)
-                if cmd in ("extrusion_cali_sel", "extrusion_cali_set", "extrusion_cali_del", "ams_filament_setting"):
+                if cmd in ("extrusion_cali_set", "extrusion_cali_del"):
+                    # INFO, not debug: this is the printer's verdict on a write
+                    # the user just made, and it was invisible in support
+                    # bundles for as long as it sat at DEBUG (#2718). Same
+                    # reasoning as ams_filament_drying below.
+                    logger.info(
+                        "[%s] %s response: result=%s reason=%s seq=%s",
+                        self.serial_number,
+                        cmd,
+                        print_data.get("result"),
+                        print_data.get("reason", ""),
+                        print_data.get("sequence_id"),
+                    )
+                    logger.debug("[%s] %s full response: %s", self.serial_number, cmd, print_data)
+                    ack_seq = str(print_data.get("sequence_id", ""))
+                    if ack_seq in self._pending_cali_acks:
+                        self._pending_cali_acks[ack_seq] = print_data
+                elif cmd in ("extrusion_cali_sel", "ams_filament_setting"):
                     logger.debug("[%s] %s response: %s", self.serial_number, cmd, print_data)
                 # AMS drying responses are rare (user-initiated only) and the
                 # full payload — including `result` and any `reason` code —
@@ -1201,10 +1295,19 @@ class BambuMQTTClient:
                 elif cmd == "ams_filament_setting":
                     self._last_ams_cmd_time = 0.0
                     self._ams_cmd_unanswered = 0
-            if "command" in print_data and print_data.get("command") == "extrusion_cali_get":
+            is_kprofile_response = "command" in print_data and print_data.get("command") == "extrusion_cali_get"
+            if is_kprofile_response:
                 self._handle_kprofile_response(print_data)
 
-            self._update_state(print_data)
+            # An extrusion_cali_get response echoes the *requested* nozzle
+            # diameter (get_kprofiles probes 0.2/0.4/0.6/0.8 in turn), not the
+            # installed hardware. Feeding it to _update_state clobbered the real
+            # nozzle size (#2663) — typically leaving 0.8, the last size probed,
+            # which then failed the #1899 dispatch guard. The response carries no
+            # status telemetry, so skip it; the true nozzle comes from pushall.
+            # (Same reasoning as get_accessories in _handle_system_response.)
+            if not is_kprofile_response:
+                self._update_state(print_data)
 
     def _handle_system_response(self, data: dict):
         """Handle system responses including accessories info.
@@ -1618,6 +1721,67 @@ class BambuMQTTClient:
             return candidates.pop()
         return None
 
+    def _maybe_trigger_external_spool_change(self):
+        """Fire on_ams_change when the external spool (vt_tray) identity changes.
+
+        The AMS change-hash in _handle_ams_data is built only from AMS units, so
+        an external-spool-only filament swap would otherwise never re-run the
+        inventory reconciliation that unlinks a stale ams_id=255 assignment
+        (#2575). The reconciliation reads vt_tray from live status itself, so we
+        just need to re-fire the callback with the current merged AMS data.
+        """
+        import hashlib
+
+        vt_tray = self.state.raw_data.get("vt_tray")
+        if not isinstance(vt_tray, list):
+            return
+        # Identity fields only — deliberately exclude `remain` so a print's
+        # steadily-dropping fill percentage doesn't fire on every MQTT push.
+        fp_parts = [
+            f"{vt.get('id')}:{vt.get('tray_type')}:{vt.get('tray_color')}:"
+            f"{vt.get('tag_uid')}:{vt.get('tray_uuid')}:{vt.get('tray_info_idx')}"
+            for vt in vt_tray
+            if isinstance(vt, dict)
+        ]
+        vt_hash = hashlib.md5(":".join(fp_parts).encode(), usedforsecurity=False).hexdigest()
+        if vt_hash == self._previous_vt_tray_hash:
+            return
+        self._previous_vt_tray_hash = vt_hash
+        if self.on_ams_change:
+            logger.debug(
+                "[%s] External spool (vt_tray) changed, triggering sync callback",
+                self.serial_number,
+            )
+            self.on_ams_change(self.state.raw_data.get("ams") or [])
+
+    def _normalize_a2l_am_units(self, ams_list) -> None:
+        """A2L AMS-Lite normalisation (#a2l-am-unit-16): rewrite the physical unit
+        id 16 -> 6 in place, as early as possible, so every downstream reader —
+        the merge, apply_tray_exist_bits (bit base 24), the API, usage tracking,
+        the DB constraint — sees the normalised id and needs no special-casing.
+        ``tray_now`` (local) and the outbound wire are handled separately. Only id
+        16 is ever touched, so every other printer/AMS type is untouched. Runs on
+        both the dict-wrapped and bare-list AMS shapes.
+        """
+        if not isinstance(ams_list, list):
+            return
+        for unit in ams_list:
+            if not isinstance(unit, dict):
+                continue
+            try:
+                uid = int(unit.get("id"))
+            except (TypeError, ValueError):
+                continue
+            if uid == A2L_LITE_PHYSICAL_AMS_ID:
+                unit["id"] = A2L_LITE_NORMALIZED_AMS_ID
+                if not self._has_a2l_am_unit:
+                    logger.info(
+                        "[%s] A2L AMS-Lite detected (unit id 16) — normalising to id %d",
+                        self.serial_number,
+                        A2L_LITE_NORMALIZED_AMS_ID,
+                    )
+                self._has_a2l_am_unit = True
+
     def _handle_ams_data(self, ams_data):
         """Handle AMS data changes for Spoolman integration.
 
@@ -1632,6 +1796,7 @@ class BambuMQTTClient:
         if isinstance(ams_data, dict):
             if "ams" in ams_data:
                 ams_list = ams_data["ams"]
+                self._normalize_a2l_am_units(ams_list)
             # Log all AMS dict fields to debug tray_now for H2D dual-nozzle
             non_list_fields = {k: v for k, v in ams_data.items() if k != "ams"}
             if non_list_fields:
@@ -1826,9 +1991,26 @@ class BambuMQTTClient:
                             ams_exist = 0
                         num_ams = bin(ams_exist).count("1")
 
-                        if num_ams > 1:
+                        if self._has_a2l_am_unit and num_ams <= 1:
+                            # A2L AMS-Lite (normalised unit 6): the firmware reports
+                            # tray_now as a LOCAL 0-3 slot, so globalise to 24+slot —
+                            # otherwise usage tracking keys the wrong spool (it would
+                            # deduct from AMS 0's slot). Confirmed by capture:
+                            # tray_now="2" while printing physical slot 3.
+                            self.state.tray_now = A2L_LITE_GLOBAL_BASE + parsed_tray_now
+                        elif num_ams > 1:
                             # Multiple AMS on single-nozzle — tray_now is likely a local slot ID.
                             # Cross-reference with MQTT mapping field to find the correct AMS unit.
+                            if self._has_a2l_am_unit:
+                                # A2L Lite + a regular AMS attached together is out of
+                                # scope: the flat mapping ids are unknown for that combo
+                                # and could collide with AMS 0. Fall through to the
+                                # mapping-based resolve, but warn — a capture is needed.
+                                logger.warning(
+                                    "[%s] A2L AMS-Lite alongside another AMS unit is unsupported — "
+                                    "tray_now resolution may be wrong (needs a mixed-setup capture)",
+                                    self.serial_number,
+                                )
                             mapping_raw = self.state.raw_data.get("mapping")
                             resolved = self._resolve_local_slot_from_mapping(parsed_tray_now, mapping_raw)
                             if resolved is not None:
@@ -1854,9 +2036,15 @@ class BambuMQTTClient:
                     self.state.tray_now = parsed_tray_now
 
                 # Track last valid tray for usage tracking (survives retract → 255 at print end)
-                # Valid physical trays: 0-15 (regular AMS), 128-135 (AMS-HT), 254 (external spool)
+                # Valid physical trays: 0-15 (regular AMS), 24-27 (A2L AMS-Lite,
+                # normalised unit 6), 128-135 (AMS-HT), 254 (external spool)
                 tn = self.state.tray_now
-                if (0 <= tn <= 15) or (128 <= tn <= 135) or tn == 254:
+                if (
+                    (0 <= tn <= 15)
+                    or (A2L_LITE_GLOBAL_BASE <= tn <= A2L_LITE_GLOBAL_BASE + 3)
+                    or (128 <= tn <= 135)
+                    or tn == 254
+                ):
                     # Log tray change for mid-print usage splitting. Gate on the
                     # print-lifecycle flags (`_was_running` set on first RUNNING /
                     # new print, `_completion_triggered` set when on_print_complete
@@ -1886,6 +2074,7 @@ class BambuMQTTClient:
                 return
         elif isinstance(ams_data, list):
             ams_list = ams_data
+            self._normalize_a2l_am_units(ams_list)
         else:
             logger.warning("[%s] Unexpected AMS data format: %s", self.serial_number, type(ams_data))
             return
@@ -2112,19 +2301,21 @@ class BambuMQTTClient:
             previous = self._previous_dry_times.get(ams_id, 0)
             self._previous_dry_times[ams_id] = current
             if previous > 0 and current == 0:
-                logger.info(
-                    "[%s] AMS %d drying complete (dry_time %d → 0)",
-                    self.serial_number,
-                    ams_id,
-                    previous,
-                )
-                self._drying_targets.pop(ams_id, None)
+                self._log_drying_cycle_end(ams_id, previous, ams_unit, self._drying_targets.pop(ams_id, None))
                 if self.on_drying_complete:
                     self.on_drying_complete(ams_id)
 
-        # Create a hash of relevant AMS data to detect changes
+        # Create a hash of relevant AMS data to detect changes.
+        # Hash the MERGED state, not the raw incoming ams_list: a removal signalled
+        # only by tray_exist_bits (firmware still echoing the old tray_type in the
+        # payload, unchanged remain) clears merged_ams via apply_tray_exist_bits
+        # above but leaves the raw payload's tracked fields untouched — so a
+        # raw-based hash never flips and on_ams_change never fires, leaving the
+        # spool_assignment row bound to an emptied slot (#2670). merged_ams also
+        # always spans every unit, so a partial single-unit update can't produce a
+        # spuriously different hash from a full pushall.
         ams_hash_data = []
-        for ams_unit in ams_list:
+        for ams_unit in merged_ams:
             for tray in ams_unit.get("tray", []):
                 # Include fields that matter for filament tracking
                 ams_hash_data.append(
@@ -3245,7 +3436,12 @@ class BambuMQTTClient:
             # Clear and seed tray change log for mid-print usage splitting
             self.state.tray_change_log.clear()
             tn = self.state.tray_now
-            if (0 <= tn <= 15) or (128 <= tn <= 135) or tn == 254:
+            if (
+                (0 <= tn <= 15)
+                or (A2L_LITE_GLOBAL_BASE <= tn <= A2L_LITE_GLOBAL_BASE + 3)
+                or (128 <= tn <= 135)
+                or tn == 254
+            ):
                 self.state.tray_change_log.append((tn, 0))
             # Initialize timelapse tracking based on current state
             # NOTE: xcam data is parsed BEFORE this code runs in _process_message,
@@ -3695,6 +3891,14 @@ class BambuMQTTClient:
                         # AMS-HT: global tray ID IS the ams_id (single tray per unit)
                         flat_ams_mapping.append(tray_id)
                         ams_mapping2.append({"ams_id": tray_id, "slot_id": 0})
+                    elif (_a2l := a2l_lite_wire_ids(tray_id // 4, tray_id)) is not None:
+                        # A2L AMS-Lite (normalised global 24-27): flat mapping is the
+                        # LOCAL slot 0-3 and ams_mapping2 carries {ams_id:16, slot_id:0-3}
+                        # — both CONFIRMED against the firmware's own mapping
+                        # (flat [1], ams_mapping2 {ams_id:16, slot_id:1}).
+                        _wire_ams, _wire_slot, _ = _a2l
+                        flat_ams_mapping.append(_wire_slot)
+                        ams_mapping2.append({"ams_id": _wire_ams, "slot_id": _wire_slot})
                     else:
                         # Regular AMS tray: Global tray ID = (ams_id * 4) + slot_id
                         ams_id = tray_id // 4
@@ -4140,6 +4344,42 @@ class BambuMQTTClient:
             logger.exception("[%s] publish_raw failed for topic=%s", self.serial_number, topic)
             return False
 
+    def _log_drying_cycle_end(
+        self,
+        ams_id: int,
+        remaining: int,
+        ams_unit: dict,
+        target: dict[str, object] | None,
+    ) -> None:
+        """Explain firmware-ended drying cycles without misattributing our stop."""
+        if ams_id in self._drying_stops_sent:
+            self._drying_stops_sent.discard(ams_id)
+            logger.info(
+                "[%s] AMS %d drying stopped by Grove Control (dry_time %d → 0)", self.serial_number, ams_id, remaining
+            )
+            return
+        if remaining <= _EARLY_DRY_END_MINUTES:
+            logger.info("[%s] AMS %d drying complete (dry_time %d → 0)", self.serial_number, ams_id, remaining)
+            return
+        requested_minutes = None
+        if target is not None:
+            try:
+                requested_minutes = int(target.get("duration_hours") or 0) * 60 or None
+            except (TypeError, ValueError):
+                pass
+        logger.info(
+            "[%s] AMS %d drying ended early — %d of %s minutes remained; "
+            "firmware ended the cycle: dry_status=%s dry_sub_status=%s dry_sf_reason=%s hms=%s",
+            self.serial_number,
+            ams_id,
+            remaining,
+            requested_minutes if requested_minutes is not None else "?",
+            ams_unit.get("dry_status"),
+            ams_unit.get("dry_sub_status"),
+            ams_unit.get("dry_sf_reason") or [],
+            [e.full_code for e in self.state.hms_errors] or "none",
+        )
+
     def send_drying_command(
         self, ams_id: int, temp: int, duration: int, mode: int = 1, filament: str = "", rotate_tray: bool = False
     ):
@@ -4156,11 +4396,16 @@ class BambuMQTTClient:
         if not self._client:
             return False
         self._sequence_id += 1
+        # A2L AMS-Lite: normalised id 6 -> physical 16 on the wire (the Lite does
+        # not actually support drying, but keep the translation consistent). The
+        # _drying_targets dict below stays keyed by the normalised id so the
+        # on_drying_complete callback matches the telemetry.
+        wire_ams_id = a2l_lite_wire_ids(ams_id, 0)[0] if ams_id == A2L_LITE_NORMALIZED_AMS_ID else ams_id
         command = {
             "print": {
                 "sequence_id": str(self._sequence_id),
                 "command": "ams_filament_drying",
-                "ams_id": ams_id,
+                "ams_id": wire_ams_id,
                 "temp": temp,
                 "cooling_temp": 20 if mode == 1 else 0,
                 "duration": duration,
@@ -4189,9 +4434,12 @@ class BambuMQTTClient:
             self._drying_targets[ams_id] = {
                 "filament": filament or "",
                 "temp": int(temp),
+                "duration_hours": int(duration),
             }
+            self._drying_stops_sent.discard(ams_id)
         else:
             self._drying_targets.pop(ams_id, None)
+            self._drying_stops_sent.add(ams_id)
         return True
 
     def _handle_kprofile_response(self, data: dict):
@@ -4359,6 +4607,51 @@ class BambuMQTTClient:
         logger.error("[%s] Failed to get K-profiles after %s attempts", self.serial_number, max_retries)
         return []
 
+    def _publish_cali_write(self, command: dict, seq_id: str) -> bool:
+        """Publish a K-profile write and arm its ack slot.
+
+        Registration happens before the publish because the printer answers in
+        well under a second — measured at 70-150ms — which is comfortably
+        before an async caller gets back to awaiting.
+        """
+        self._pending_cali_acks[seq_id] = None
+        try:
+            self._client.publish(self.topic_publish, json.dumps(command), qos=1)
+        except Exception:
+            self._pending_cali_acks.pop(seq_id, None)
+            raise
+        return True
+
+    async def await_cali_ack(self, seq_id: str, timeout: float = 6.0) -> tuple[bool, str]:
+        """Wait for the printer's verdict on a K-profile write.
+
+        Returns ``(ok, detail)``. ``ok`` is False when the printer explicitly
+        rejects the write or does not acknowledge it before the timeout. An
+        unconfirmed write must not be reported as saved; callers can retry or
+        read the calibration table back when firmware does not provide a
+        response.
+
+        Polled rather than event-driven on purpose: the ack is filled in by the
+        MQTT callback thread, and polling a dict costs one lookup every 50ms
+        for at most a few hundred milliseconds, against the cross-thread
+        event plumbing it would otherwise take.
+        """
+        deadline = time.monotonic() + timeout
+        try:
+            while time.monotonic() < deadline:
+                ack = self._pending_cali_acks.get(seq_id)
+                if ack is not None:
+                    result = str(ack.get("result", "")).lower()
+                    reason = str(ack.get("reason", "") or "")
+                    if result == "fail":
+                        return (False, reason or "printer reported failure")
+                    return (True, reason)
+                await asyncio.sleep(0.05)
+        finally:
+            self._pending_cali_acks.pop(seq_id, None)
+        logger.warning("[%s] No ack for K-profile write seq=%s within %.1fs", self.serial_number, seq_id, timeout)
+        return (False, "no acknowledgement from printer")
+
     def set_kprofile(
         self,
         filament_id: str,
@@ -4370,7 +4663,7 @@ class BambuMQTTClient:
         setting_id: str | None = None,
         slot_id: int = 0,
         cali_idx: int | None = None,
-    ) -> bool:
+    ) -> str | None:
         """Set/update a K-profile on the printer.
 
         Args:
@@ -4385,13 +4678,16 @@ class BambuMQTTClient:
             cali_idx: For edits, the existing slot being edited (enables in-place edit)
 
         Returns:
-            True if command was sent, False otherwise
+            The sequence_id the command was sent under, so the caller can
+            await the printer's verdict via await_cali_ack. None if the
+            command could not be sent.
         """
         if not self._client or not self.state.connected:
             logger.warning("[%s] Cannot set K-profile: not connected", self.serial_number)
-            return False
+            return None
 
         self._sequence_id += 1
+        seq_id = str(self._sequence_id)
 
         # Build the filament entry - printer uses cali_idx for profile identification
         # For new profiles (slot_id=0), use cali_idx=-1 to tell printer to create new slot
@@ -4419,7 +4715,13 @@ class BambuMQTTClient:
             "nozzle_diameter": nozzle_diameter,
             "nozzle_id": nozzle_id,
             "setting_id": setting_id if setting_id else "",
-            "tray_id": -1,
+            # 0, not -1. Single-nozzle firmware validates this field and
+            # answers `result: "fail", reason: "invalid tray_id"` to -1 — while
+            # applying the write anyway, so the rejection looked like noise.
+            # Measured on an X1C: flipping only this value turns the ack into
+            # `success` (#2718). BambuStudio always sends a real tray_id and
+            # defaults it to 0 for a manually entered profile.
+            "tray_id": 0,
         }
 
         command = {
@@ -4427,7 +4729,7 @@ class BambuMQTTClient:
                 "command": "extrusion_cali_set",
                 "filaments": [filament_entry],
                 "nozzle_diameter": nozzle_diameter,
-                "sequence_id": str(self._sequence_id),
+                "sequence_id": seq_id,
             }
         }
 
@@ -4436,14 +4738,14 @@ class BambuMQTTClient:
             f"[{self.serial_number}] Setting K-profile: {name} = {k_value} (cali_idx={effective_cali_idx}, new={slot_id == 0})"
         )
         logger.debug("[%s] K-profile SET command: %s", self.serial_number, command_json)
-        self._client.publish(self.topic_publish, command_json, qos=1)
-        return True
+        self._publish_cali_write(command, seq_id)
+        return seq_id
 
     def set_kprofiles_batch(
         self,
         profiles: list[dict],
         nozzle_diameter: str = "0.4",
-    ) -> bool:
+    ) -> str | None:
         """Set multiple K-profiles in a single command (for dual-nozzle).
 
         Args:
@@ -4452,15 +4754,17 @@ class BambuMQTTClient:
             nozzle_diameter: Common nozzle diameter for all profiles
 
         Returns:
-            True if command was sent, False otherwise
+            The sequence_id the command was sent under (see set_kprofile),
+            or None if it could not be sent.
         """
         if not self._client or not self.state.connected:
             logger.warning("[%s] Cannot set K-profiles batch: not connected", self.serial_number)
-            return False
+            return None
 
         import random
 
         self._sequence_id += 1
+        seq_id = str(self._sequence_id)
 
         filament_entries = []
         for p in profiles:
@@ -4488,7 +4792,9 @@ class BambuMQTTClient:
                     "nozzle_diameter": nozzle_diameter,
                     "nozzle_id": p.get("nozzle_id", f"HS00-{nozzle_diameter}"),
                     "setting_id": setting_id if setting_id else "",
-                    "tray_id": -1,
+                    # See set_kprofile: -1 is rejected as "invalid tray_id" by
+                    # single-nozzle firmware even though the write lands (#2718).
+                    "tray_id": 0,
                 }
             )
 
@@ -4497,15 +4803,15 @@ class BambuMQTTClient:
                 "command": "extrusion_cali_set",
                 "filaments": filament_entries,
                 "nozzle_diameter": nozzle_diameter,
-                "sequence_id": str(self._sequence_id),
+                "sequence_id": seq_id,
             }
         }
 
         command_json = json.dumps(command)
         logger.info("[%s] Setting %s K-profiles in batch", self.serial_number, len(filament_entries))
         logger.debug("[%s] K-profile SET batch command: %s", self.serial_number, command_json)
-        self._client.publish(self.topic_publish, command_json, qos=1)
-        return True
+        self._publish_cali_write(command, seq_id)
+        return seq_id
 
     def delete_kprofile(
         self,
@@ -4515,7 +4821,7 @@ class BambuMQTTClient:
         nozzle_diameter: str = "0.4",
         extruder_id: int = 0,
         setting_id: str | None = None,
-    ) -> bool:
+    ) -> str | None:
         """Delete a K-profile from the printer.
 
         Args:
@@ -4527,13 +4833,15 @@ class BambuMQTTClient:
             setting_id: Unique setting identifier (for X1C series)
 
         Returns:
-            True if command was sent, False otherwise
+            The sequence_id the command was sent under (see set_kprofile),
+            or None if it could not be sent.
         """
         if not self._client or not self.state.connected:
             logger.warning("[%s] Cannot delete K-profile: not connected", self.serial_number)
-            return False
+            return None
 
         self._sequence_id += 1
+        seq_id = str(self._sequence_id)
 
         # Dual-nozzle K-profile delete uses the extruder_id/nozzle_id format;
         # single-nozzle printers (X1C/P1/A1/P2S/H2S) need the setting_id form.
@@ -4549,7 +4857,7 @@ class BambuMQTTClient:
             command = {
                 "print": {
                     "command": "extrusion_cali_del",
-                    "sequence_id": str(self._sequence_id),
+                    "sequence_id": seq_id,
                     "extruder_id": extruder_id,
                     "nozzle_id": nozzle_id,
                     "filament_id": filament_id,
@@ -4563,7 +4871,7 @@ class BambuMQTTClient:
             command = {
                 "print": {
                     "command": "extrusion_cali_del",
-                    "sequence_id": str(self._sequence_id),
+                    "sequence_id": seq_id,
                     "filament_id": filament_id,
                     "cali_idx": cali_idx,
                     "setting_id": setting_id if setting_id else "",
@@ -4578,9 +4886,9 @@ class BambuMQTTClient:
             f"[{self.serial_number}] Deleting K-profile: cali_idx={cali_idx}, filament={filament_id}, setting_id={setting_id}, dual={is_dual_nozzle}"
         )
         logger.debug("[%s] K-profile DELETE command: %s", self.serial_number, command_json)
-        # Use QoS 1 for reliable delivery (at least once)
-        self._client.publish(self.topic_publish, command_json, qos=1)
-        return True
+        # QoS 1 for reliable delivery (at least once)
+        self._publish_cali_write(command, seq_id)
+        return seq_id
 
     # =========================================================================
     # Printer Control Commands
@@ -4959,6 +5267,7 @@ class BambuMQTTClient:
         #     BambuStudio uses slot_id=0 (extruder index, 0=right), and
         #     curr_temp/tar_temp = the actual right-nozzle temp.  See #891.
         self._sequence_id += 1
+        wire_target = tray_id
         if tray_id == 255:
             ams_id = 255
             slot_id = 0  # extruder index for the right nozzle
@@ -4970,6 +5279,13 @@ class BambuMQTTClient:
         elif tray_id == 254:
             ams_id = 255
             slot_id = 254
+            curr_temp = -1
+            tar_temp = -1
+        elif (_a2l := a2l_lite_wire_ids(tray_id // 4, tray_id)) is not None:
+            # A2L AMS-Lite: physical unit 16 + local slot confirmed; the wire
+            # `target` (physical global 64-67) is extrapolated (no A2L load
+            # capture yet). See a2l_lite_wire_ids.
+            ams_id, slot_id, wire_target = _a2l
             curr_temp = -1
             tar_temp = -1
         else:
@@ -4984,7 +5300,7 @@ class BambuMQTTClient:
                 "sequence_id": str(self._sequence_id),
                 "ams_id": ams_id,
                 "slot_id": slot_id,
-                "target": tray_id,
+                "target": wire_target,
                 "curr_temp": curr_temp,
                 "tar_temp": tar_temp,
             }
@@ -5020,6 +5336,8 @@ class BambuMQTTClient:
         # Determine source ams_id for the unload command
         if tray_now == 255 or tray_now == 254:
             ams_id = 255  # No filament or external spool
+        elif (_a2l := a2l_lite_wire_ids(tray_now // 4, tray_now)) is not None:
+            ams_id = _a2l[0]  # A2L AMS-Lite: normalised 6 -> physical 16
         else:
             ams_id = tray_now // 4  # Source AMS
 
@@ -5109,9 +5427,16 @@ class BambuMQTTClient:
             logger.warning("[%s] Cannot refresh AMS tray: filament loaded from %s", self.serial_number, loaded_tray)
             return False, f"Please unload filament first. Currently loaded: {loaded_tray}"
 
+        # A2L AMS-Lite: physical unit 16 + local slot (matches ams_mapping2).
+        wire_ams_id, wire_slot_id = ams_id, tray_id
+        if (_a2l := a2l_lite_wire_ids(ams_id, tray_id)) is not None:
+            wire_ams_id, wire_slot_id, _ = _a2l
+
         # Use ams_get_rfid command to trigger RFID re-read
         # This command is used by Bambu Studio to re-read the RFID tag
-        command = {"print": {"command": "ams_get_rfid", "ams_id": ams_id, "slot_id": tray_id, "sequence_id": "0"}}
+        command = {
+            "print": {"command": "ams_get_rfid", "ams_id": wire_ams_id, "slot_id": wire_slot_id, "sequence_id": "0"}
+        }
         self._client.publish(self.topic_publish, json.dumps(command), qos=1)
         logger.info("[%s] Triggering RFID re-read: AMS %s, slot %s", self.serial_number, ams_id, tray_id)
 
@@ -5173,6 +5498,11 @@ class BambuMQTTClient:
                 mqtt_ams_id = 255
                 mqtt_tray_id = 254
             slot_id = 0
+        elif (_a2l := a2l_lite_wire_ids(ams_id, tray_id)) is not None:
+            # A2L AMS-Lite: physical unit 16, local 0-3 slot (matches the
+            # firmware's own ams_mapping2 {ams_id:16, slot_id:0-3}).
+            mqtt_ams_id, slot_id, _ = _a2l
+            mqtt_tray_id = slot_id
         elif ams_id <= 3:
             mqtt_ams_id = ams_id
             mqtt_tray_id = tray_id
@@ -5239,6 +5569,10 @@ class BambuMQTTClient:
                 mqtt_ams_id = 255
                 mqtt_tray_id = 254
             slot_id = 0
+        elif (_a2l := a2l_lite_wire_ids(ams_id, tray_id)) is not None:
+            # A2L AMS-Lite: physical unit 16, local 0-3 slot (matches ams_mapping2).
+            mqtt_ams_id, slot_id, _ = _a2l
+            mqtt_tray_id = slot_id
         elif ams_id <= 3:
             mqtt_ams_id = ams_id
             mqtt_tray_id = tray_id
@@ -5323,6 +5657,11 @@ class BambuMQTTClient:
             mqtt_ams_id = ams_id
             mqtt_tray_id = ams_id * 4 + tray_id
             slot_id = tray_id
+        elif (_a2l := a2l_lite_wire_ids(ams_id, tray_id)) is not None:
+            # A2L AMS-Lite: physical unit 16 + local slot are confirmed; the GLOBAL
+            # tray_id this command wants (physical 16*4+slot) is extrapolated (no
+            # A2L cali_sel capture yet) — see a2l_lite_wire_ids.
+            mqtt_ams_id, slot_id, mqtt_tray_id = _a2l
         elif ams_id >= 128 and ams_id <= 135:
             mqtt_ams_id = ams_id
             mqtt_tray_id = tray_id
@@ -5385,7 +5724,19 @@ class BambuMQTTClient:
             logger.warning("[%s] Cannot set K value: not connected", self.serial_number)
             return False
 
+        # Was reusing the previous command's id — harmless while nothing
+        # correlated on it, but the printer echoes sequence_id back and the
+        # K-profile write path now matches acks by it (#2718).
+        self._sequence_id += 1
+
         nozzle_id = f"HS00-{nozzle_diameter}"
+
+        # A2L AMS-Lite: a normalised global tray (24-27) must go out as the
+        # physical global (extrapolated 64-67; see a2l_lite_wire_ids). ams_id
+        # stays 0 (hardcoded, as for every other unit here).
+        wire_tray_id = tray_id
+        if 0 <= tray_id <= 253 and (_a2l := a2l_lite_wire_ids(tray_id // 4, tray_id)) is not None:
+            wire_tray_id = _a2l[2]
 
         filament_entry = {
             "ams_id": 0,
@@ -5398,7 +5749,7 @@ class BambuMQTTClient:
             "nozzle_diameter": nozzle_diameter,
             "nozzle_id": nozzle_id,
             "setting_id": setting_id,
-            "tray_id": tray_id,
+            "tray_id": wire_tray_id,
         }
 
         command = {

@@ -164,27 +164,48 @@ _DRYING_MIN_FIRMWARE: dict[str, str] = {
     "O1C2": "01.02.00.00",  # H2C dual-nozzle SSDP model code
     "X1": "01.09.00.00",
     "X1C": "01.09.00.00",
-    "P1P": "01.08.00.00",
-    "P1S": "01.08.00.00",
     "P2S": "01.02.00.00",
     "N7": "01.02.00.00",  # P2S internal model code
 }
 # Models that definitely don't support AMS drying (no AMS 2 Pro / AMS-HT compatibility)
 _DRYING_UNSUPPORTED_MODELS = frozenset({"A1", "A1MINI", "A1-MINI", "A1 MINI", "O1S", "N1", "N2S"})
 
+# Models whose AMS can dry, but only from the printer's own touchscreen. Bambu's P1
+# manual is explicit: "P1S connected AMS drying functions may only be controlled from
+# the P1S screen." The firmware still answers `ams_filament_drying` with
+# result: success and then does nothing — the reporter of #2533 sent it three times
+# on an idle P1S with an AMS 2 Pro and the unit never left dry_status 0. Bambuddy
+# originally listed P1P/P1S here as fw-gated (01.08+, #292); that version is when P1
+# firmware gained AMS 2 Pro *support*, not remote drying, and it was never verified
+# against a live P1. Nothing we can send will start a cycle, so we don't offer to.
+_DRYING_SCREEN_ONLY_MODELS = frozenset({"P1P", "P1S"})
+
+
+def drying_screen_only(model: str | None) -> bool:
+    """True when the model's AMS dries only via the printer's own screen (#2533).
+
+    Distinct from "unsupported": these printers *can* dry, and Bambuddy still shows
+    a cycle started on the printer. They just can't be commanded to start or stop
+    one remotely, so the UI explains that instead of silently dropping the control.
+    """
+    if not model:
+        return False
+    return model.strip().upper() in _DRYING_SCREEN_ONLY_MODELS
+
 
 def supports_drying(model: str | None, firmware: str | None) -> bool:
-    """Check if a printer model supports AMS drying commands.
+    """Check if a printer model accepts remote AMS drying commands.
 
     Known models with confirmed min firmware get version-gated.
-    Known unsupported models are blocked.
+    Known unsupported models, and models that only dry from their own screen,
+    are blocked.
     All other models (H2D Pro, X1E, future models) are allowed —
     the command fails gracefully with result: "fail" if unsupported.
     """
     if not model:
         return False
     model_upper = model.strip().upper()
-    if model_upper in _DRYING_UNSUPPORTED_MODELS:
+    if model_upper in _DRYING_UNSUPPORTED_MODELS or model_upper in _DRYING_SCREEN_ONLY_MODELS:
         return False
     if model_upper in _DRYING_MIN_FIRMWARE:
         return bool(firmware and firmware >= _DRYING_MIN_FIRMWARE[model_upper])
@@ -973,6 +994,67 @@ def resolve_plate_id(state) -> int | None:
     return parse_plate_id(state.gcode_file)
 
 
+def resolve_expected_tray(
+    raw_slot: int | None,
+    ams_layout: list[tuple[int, bool]],
+    mapping_raw: object,
+) -> int | None:
+    """Globalise a raw firmware ``tray_tar``/``tray_pre`` value for the runout UI (#2587).
+
+    The firmware reports the target/previous slot as a bare number whose meaning
+    depends on the AMS layout (see ``PrinterState.tray_tar``). This mirrors the
+    ``tray_now`` handling so the resolved ID lines up with what the AMS graphic
+    already highlights via ``ams_id*4 + slot``.
+
+    ``ams_layout`` is a list of ``(ams_id, is_ams_ht)`` for the connected units.
+
+    - ``255``/``-1`` (none/idle) -> ``None``
+    - ``254`` (external spool) -> ``254``
+    - ``128``-``135`` (AMS-HT) -> already global, returned as-is
+    - ``0``-``3`` local slot:
+        * exactly one regular AMS -> ``ams_id*4 + slot``
+        * several regular AMS -> resolved via the snow-encoded ``mapping`` field
+          (each entry = ``ams_hw_id*256 + slot``; ``65535`` = unmapped), or
+          ``None`` when it stays ambiguous (honest "can't determine")
+        * no regular AMS -> ``None``
+    - ``4``-``15`` -> already a global regular-AMS ID, returned as-is
+
+    Returns ``None`` for anything it can't place, so the caller surfaces a
+    "check the printer" message instead of pointing at the wrong slot.
+    """
+    if raw_slot is None or raw_slot in (255, -1):
+        return None
+    if raw_slot == 254:
+        return 254
+    if 128 <= raw_slot <= 135:
+        return raw_slot
+    if 0 <= raw_slot <= 3:
+        regular = [ams_id for ams_id, is_ht in ams_layout if not is_ht]
+        if len(regular) == 1:
+            return regular[0] * 4 + raw_slot
+        if len(regular) > 1:
+            if not isinstance(mapping_raw, list):
+                return None
+            candidates: set[int] = set()
+            for value in mapping_raw:
+                if not isinstance(value, int) or value >= 65535:
+                    continue
+                ams_hw_id = value >> 8
+                slot = value & 0xFF
+                if 0 <= ams_hw_id <= 3 and (slot & 0x03) == raw_slot:
+                    candidates.add(ams_hw_id * 4 + raw_slot)
+                elif 128 <= ams_hw_id <= 135 and raw_slot == 0:
+                    candidates.add(ams_hw_id)
+            return candidates.pop() if len(candidates) == 1 else None
+        return None
+    if 4 <= raw_slot <= 15:
+        return raw_slot
+    # 24-27 = A2L AMS-Lite (normalised unit 6) global tray ids, already resolved.
+    if 24 <= raw_slot <= 27:
+        return raw_slot
+    return None
+
+
 def printer_state_to_dict(
     state: PrinterState,
     printer_id: int | None = None,
@@ -1051,6 +1133,13 @@ def printer_state_to_dict(
                         "drying_temp": tray.get("drying_temp"),
                         "drying_time": tray.get("drying_time"),
                         "state": state_val,
+                        # Firmware's authoritative presence bit (tray_exist_bits),
+                        # set by apply_tray_exist_bits. The REST serializer already
+                        # emits it (routes/printers.py); without it here the WS
+                        # shallow-merge drops `exists` after the first frame and
+                        # getEmptySlotKind falls back to the firmware-variant state
+                        # 9/10 heuristic — wrong for AMS-HT in both directions (#2670).
+                        "exists": tray.get("exists"),
                     }
                 )
             # Prefer humidity_raw (actual percentage) over humidity (index 1-5)
@@ -1260,6 +1349,7 @@ def printer_state_to_dict(
         # AMS drying support
         "supports_drying": supports_drying(model, state.firmware_version),
         "supports_drying_while_printing": supports_drying_while_printing(model, state.firmware_version),
+        "drying_screen_only": drying_screen_only(model),
         # 1-indexed plate number parsed from gcode_file (e.g. /Metadata/plate_2.gcode).
         # Pushed via WebSocket so the printer card picks up plate transitions within
         # a multi-plate 3MF without waiting for the 30 s REST poll (#881 follow-up).
