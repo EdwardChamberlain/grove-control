@@ -52,6 +52,136 @@ import { ReactSelect } from '../components/ToolbarControls';
 const validTabs = ['general', 'plugs', 'notifications', 'queue', 'filament', 'network', 'apikeys', 'virtual-printer', 'spoolbuddy', 'failure-detection', 'users', 'backup'] as const;
 type TabType = typeof validTabs[number];
 
+// Settings owned by the debounced editor on this page. Keep this list
+// explicit so settings managed by other cards/components are not included in
+// the autosave patch.
+const AUTOSAVE_SETTING_KEYS = [
+  'auto_archive',
+  'save_thumbnails',
+  'capture_finish_photo',
+  'default_filament_cost',
+  'currency',
+  'energy_cost_per_kwh',
+  'energy_tracking_mode',
+  'check_updates',
+  'check_printer_firmware',
+  'local_login_enabled',
+  'notification_language',
+  'bed_cooled_threshold',
+  'ams_humidity_good',
+  'ams_humidity_fair',
+  'ams_temp_good',
+  'ams_temp_fair',
+  'ams_history_retention_days',
+  'disable_filament_warnings',
+  'prefer_lowest_filament',
+  'queue_drying_enabled',
+  'queue_drying_block',
+  'ambient_drying_enabled',
+  'print_drying_enabled',
+  'drying_presets',
+  'ams_humidity_thresholds',
+  'per_printer_mapping_expanded',
+  'date_format',
+  'time_format',
+  'default_printer_id',
+  'ftp_retry_enabled',
+  'ftp_retry_count',
+  'ftp_retry_delay',
+  'ftp_timeout',
+  'mqtt_enabled',
+  'mqtt_broker',
+  'mqtt_port',
+  'mqtt_username',
+  'mqtt_password',
+  'mqtt_topic_prefix',
+  'mqtt_use_tls',
+  'external_url',
+  'ha_enabled',
+  'ha_url',
+  'ha_token',
+  'library_archive_mode',
+  'library_disk_warning_gb',
+  'camera_view_mode',
+  'preferred_slicer',
+  'open_in_slicer',
+  'use_slicer_api',
+  'orcaslicer_api_url',
+  'bambu_studio_api_url',
+  'prometheus_enabled',
+  'prometheus_token',
+  'user_notifications_enabled',
+  'default_bed_levelling',
+  'default_flow_cali',
+  'default_vibration_cali',
+  'default_layer_inspect',
+  'default_timelapse',
+  'default_nozzle_offset_cali',
+  'require_plate_clear',
+  'nozzle_temp_presets',
+  'bed_temp_presets',
+  'chamber_temp_presets',
+  'fan_speed_presets',
+  'session_max_hours',
+] as const satisfies readonly (keyof AppSettings)[];
+
+type AutosaveSettingKey = typeof AUTOSAVE_SETTING_KEYS[number];
+
+function comparableAutosaveValue(settings: AppSettings, key: AutosaveSettingKey): unknown {
+  switch (key) {
+    case 'check_printer_firmware':
+    case 'local_login_enabled':
+      return settings[key] ?? true;
+    case 'bed_cooled_threshold':
+      return settings[key] ?? 35;
+    case 'queue_drying_enabled':
+    case 'queue_drying_block':
+    case 'ambient_drying_enabled':
+    case 'print_drying_enabled':
+    case 'use_slicer_api':
+    case 'default_flow_cali':
+    case 'default_layer_inspect':
+    case 'default_timelapse':
+    case 'require_plate_clear':
+      return settings[key] ?? false;
+    case 'drying_presets':
+    case 'ams_humidity_thresholds':
+    case 'orcaslicer_api_url':
+    case 'bambu_studio_api_url':
+    case 'nozzle_temp_presets':
+    case 'bed_temp_presets':
+    case 'chamber_temp_presets':
+    case 'fan_speed_presets':
+      return settings[key] ?? '';
+    case 'library_archive_mode':
+      return settings[key] ?? 'ask';
+    case 'library_disk_warning_gb':
+      return Number(settings[key] ?? 5);
+    case 'camera_view_mode':
+      return settings[key] ?? 'window';
+    case 'preferred_slicer':
+      return settings[key] ?? 'bambu_studio';
+    case 'open_in_slicer':
+      return settings[key] ?? null;
+    case 'user_notifications_enabled':
+    case 'default_bed_levelling':
+    case 'default_vibration_cali':
+    case 'default_nozzle_offset_cali':
+      return settings[key] ?? true;
+    case 'session_max_hours':
+      return settings[key] ?? 24;
+    default:
+      return settings[key];
+  }
+}
+
+function buildAutosavePatch(baseline: AppSettings, current: AppSettings): AppSettingsUpdate {
+  const changedEntries = AUTOSAVE_SETTING_KEYS
+    .filter((key) => comparableAutosaveValue(baseline, key) !== comparableAutosaveValue(current, key))
+    .map((key) => [key, current[key]] as const);
+  return Object.fromEntries(changedEntries) as AppSettingsUpdate;
+}
+
 // Cross-tab search registrations for cards rendered inline in this file.
 // Adding a new settings card? Register it here (or, if the card lives in its
 // own component file, call registerSettingsSearch at that file's module scope).
@@ -948,80 +1078,11 @@ export function SettingsPage() {
     }
 
     // Compare against the last server snapshot, not the live query result.
-    {
-      const settings = baseline;
-      const hasChanges =
-      settings.auto_archive !== localSettings.auto_archive ||
-      settings.save_thumbnails !== localSettings.save_thumbnails ||
-      settings.capture_finish_photo !== localSettings.capture_finish_photo ||
-      settings.default_filament_cost !== localSettings.default_filament_cost ||
-      settings.currency !== localSettings.currency ||
-      settings.energy_cost_per_kwh !== localSettings.energy_cost_per_kwh ||
-      settings.energy_tracking_mode !== localSettings.energy_tracking_mode ||
-      settings.check_updates !== localSettings.check_updates ||
-      (settings.check_printer_firmware ?? true) !== (localSettings.check_printer_firmware ?? true) ||
-      (settings.local_login_enabled ?? true) !== (localSettings.local_login_enabled ?? true) ||
-      settings.notification_language !== localSettings.notification_language ||
-      (settings.bed_cooled_threshold ?? 35) !== (localSettings.bed_cooled_threshold ?? 35) ||
-      settings.ams_humidity_good !== localSettings.ams_humidity_good ||
-      settings.ams_humidity_fair !== localSettings.ams_humidity_fair ||
-      settings.ams_temp_good !== localSettings.ams_temp_good ||
-      settings.ams_temp_fair !== localSettings.ams_temp_fair ||
-      settings.ams_history_retention_days !== localSettings.ams_history_retention_days ||
-      settings.disable_filament_warnings !== localSettings.disable_filament_warnings ||
-      settings.prefer_lowest_filament !== localSettings.prefer_lowest_filament ||
-      (settings.queue_drying_enabled ?? false) !== (localSettings.queue_drying_enabled ?? false) ||
-      (settings.queue_drying_block ?? false) !== (localSettings.queue_drying_block ?? false) ||
-      (settings.ambient_drying_enabled ?? false) !== (localSettings.ambient_drying_enabled ?? false) ||
-      (settings.print_drying_enabled ?? false) !== (localSettings.print_drying_enabled ?? false) ||
-      (settings.drying_presets ?? '') !== (localSettings.drying_presets ?? '') ||
-      (settings.ams_humidity_thresholds ?? '') !== (localSettings.ams_humidity_thresholds ?? '') ||
-      settings.per_printer_mapping_expanded !== localSettings.per_printer_mapping_expanded ||
-      settings.date_format !== localSettings.date_format ||
-      settings.time_format !== localSettings.time_format ||
-      settings.default_printer_id !== localSettings.default_printer_id ||
-      settings.ftp_retry_enabled !== localSettings.ftp_retry_enabled ||
-      settings.ftp_retry_count !== localSettings.ftp_retry_count ||
-      settings.ftp_retry_delay !== localSettings.ftp_retry_delay ||
-      settings.ftp_timeout !== localSettings.ftp_timeout ||
-      settings.mqtt_enabled !== localSettings.mqtt_enabled ||
-      settings.mqtt_broker !== localSettings.mqtt_broker ||
-      settings.mqtt_port !== localSettings.mqtt_port ||
-      settings.mqtt_username !== localSettings.mqtt_username ||
-      settings.mqtt_password !== localSettings.mqtt_password ||
-      settings.mqtt_topic_prefix !== localSettings.mqtt_topic_prefix ||
-      settings.mqtt_use_tls !== localSettings.mqtt_use_tls ||
-      settings.external_url !== localSettings.external_url ||
-      settings.ha_enabled !== localSettings.ha_enabled ||
-      settings.ha_url !== localSettings.ha_url ||
-      settings.ha_token !== localSettings.ha_token ||
-      (settings.library_archive_mode ?? 'ask') !== (localSettings.library_archive_mode ?? 'ask') ||
-      Number(settings.library_disk_warning_gb ?? 5) !== Number(localSettings.library_disk_warning_gb ?? 5) ||
-      (settings.camera_view_mode ?? 'window') !== (localSettings.camera_view_mode ?? 'window') ||
-      (settings.preferred_slicer ?? 'bambu_studio') !== (localSettings.preferred_slicer ?? 'bambu_studio') ||
-      (settings.open_in_slicer ?? null) !== (localSettings.open_in_slicer ?? null) ||
-      (settings.use_slicer_api ?? false) !== (localSettings.use_slicer_api ?? false) ||
-      (settings.orcaslicer_api_url ?? '') !== (localSettings.orcaslicer_api_url ?? '') ||
-      (settings.bambu_studio_api_url ?? '') !== (localSettings.bambu_studio_api_url ?? '') ||
-      settings.prometheus_enabled !== localSettings.prometheus_enabled ||
-      settings.prometheus_token !== localSettings.prometheus_token ||
-      (settings.user_notifications_enabled ?? true) !== (localSettings.user_notifications_enabled ?? true) ||
-      (settings.default_bed_levelling ?? true) !== (localSettings.default_bed_levelling ?? true) ||
-      (settings.default_flow_cali ?? false) !== (localSettings.default_flow_cali ?? false) ||
-      (settings.default_vibration_cali ?? true) !== (localSettings.default_vibration_cali ?? true) ||
-      (settings.default_layer_inspect ?? false) !== (localSettings.default_layer_inspect ?? false) ||
-      (settings.default_timelapse ?? false) !== (localSettings.default_timelapse ?? false) ||
-      (settings.default_nozzle_offset_cali ?? true) !== (localSettings.default_nozzle_offset_cali ?? true) ||
-      (settings.require_plate_clear ?? false) !== (localSettings.require_plate_clear ?? false) ||
-      (settings.nozzle_temp_presets ?? '') !== (localSettings.nozzle_temp_presets ?? '') ||
-      (settings.bed_temp_presets ?? '') !== (localSettings.bed_temp_presets ?? '') ||
-      (settings.chamber_temp_presets ?? '') !== (localSettings.chamber_temp_presets ?? '') ||
-      (settings.fan_speed_presets ?? '') !== (localSettings.fan_speed_presets ?? '') ||
-      (settings.session_max_hours ?? 24) !== (localSettings.session_max_hours ?? 24);
-
-      if (!hasChanges) {
-        return;
-      }
+    // Only changed fields are sent so a stale page cannot overwrite another
+    // user's unrelated setting changes.
+    const settingsToSave = buildAutosavePatch(baseline, localSettings);
+    if (Object.keys(settingsToSave).length === 0) {
+      return;
     }
 
     // Don't queue more saves while one is in progress
@@ -1040,78 +1101,18 @@ export function SettingsPage() {
       if (isSavingRef.current) {
         return;
       }
+      // Re-check against the latest snapshot in case another response arrived
+      // during the debounce window.
+      const latestBaseline = serverBaselineRef.current;
+      if (!latestBaseline) {
+        return;
+      }
+      const latestSettingsToSave = buildAutosavePatch(latestBaseline, localSettings);
+      if (Object.keys(latestSettingsToSave).length === 0) {
+        return;
+      }
       isSavingRef.current = true;
-      // Only send the fields we manage on this page (exclude virtual_printer_* which are managed separately)
-      const settingsToSave: AppSettingsUpdate = {
-        auto_archive: localSettings.auto_archive,
-        save_thumbnails: localSettings.save_thumbnails,
-        capture_finish_photo: localSettings.capture_finish_photo,
-        default_filament_cost: localSettings.default_filament_cost,
-        currency: localSettings.currency,
-        energy_cost_per_kwh: localSettings.energy_cost_per_kwh,
-        energy_tracking_mode: localSettings.energy_tracking_mode,
-        check_updates: localSettings.check_updates,
-        check_printer_firmware: localSettings.check_printer_firmware,
-        local_login_enabled: localSettings.local_login_enabled,
-        notification_language: localSettings.notification_language,
-        bed_cooled_threshold: localSettings.bed_cooled_threshold,
-        ams_humidity_good: localSettings.ams_humidity_good,
-        ams_humidity_fair: localSettings.ams_humidity_fair,
-        ams_temp_good: localSettings.ams_temp_good,
-        ams_temp_fair: localSettings.ams_temp_fair,
-        ams_history_retention_days: localSettings.ams_history_retention_days,
-        disable_filament_warnings: localSettings.disable_filament_warnings,
-        prefer_lowest_filament: localSettings.prefer_lowest_filament,
-        queue_drying_enabled: localSettings.queue_drying_enabled,
-        queue_drying_block: localSettings.queue_drying_block,
-        ambient_drying_enabled: localSettings.ambient_drying_enabled,
-        print_drying_enabled: localSettings.print_drying_enabled,
-        drying_presets: localSettings.drying_presets,
-        ams_humidity_thresholds: localSettings.ams_humidity_thresholds,
-        per_printer_mapping_expanded: localSettings.per_printer_mapping_expanded,
-        date_format: localSettings.date_format,
-        time_format: localSettings.time_format,
-        default_printer_id: localSettings.default_printer_id,
-        ftp_retry_enabled: localSettings.ftp_retry_enabled,
-        ftp_retry_count: localSettings.ftp_retry_count,
-        ftp_retry_delay: localSettings.ftp_retry_delay,
-        ftp_timeout: localSettings.ftp_timeout,
-        mqtt_enabled: localSettings.mqtt_enabled,
-        mqtt_broker: localSettings.mqtt_broker,
-        mqtt_port: localSettings.mqtt_port,
-        mqtt_username: localSettings.mqtt_username,
-        mqtt_password: localSettings.mqtt_password,
-        mqtt_topic_prefix: localSettings.mqtt_topic_prefix,
-        mqtt_use_tls: localSettings.mqtt_use_tls,
-        external_url: localSettings.external_url,
-        ha_enabled: localSettings.ha_enabled,
-        ha_url: localSettings.ha_url,
-        ha_token: localSettings.ha_token,
-        library_archive_mode: localSettings.library_archive_mode,
-        library_disk_warning_gb: localSettings.library_disk_warning_gb,
-        camera_view_mode: localSettings.camera_view_mode,
-        preferred_slicer: localSettings.preferred_slicer,
-        open_in_slicer: localSettings.open_in_slicer,
-        use_slicer_api: localSettings.use_slicer_api,
-        orcaslicer_api_url: localSettings.orcaslicer_api_url,
-        bambu_studio_api_url: localSettings.bambu_studio_api_url,
-        prometheus_enabled: localSettings.prometheus_enabled,
-        prometheus_token: localSettings.prometheus_token,
-        user_notifications_enabled: localSettings.user_notifications_enabled,
-        default_bed_levelling: localSettings.default_bed_levelling,
-        default_flow_cali: localSettings.default_flow_cali,
-        default_vibration_cali: localSettings.default_vibration_cali,
-        default_layer_inspect: localSettings.default_layer_inspect,
-        default_timelapse: localSettings.default_timelapse,
-        default_nozzle_offset_cali: localSettings.default_nozzle_offset_cali,
-        require_plate_clear: localSettings.require_plate_clear,
-        nozzle_temp_presets: localSettings.nozzle_temp_presets,
-        bed_temp_presets: localSettings.bed_temp_presets,
-        chamber_temp_presets: localSettings.chamber_temp_presets,
-        fan_speed_presets: localSettings.fan_speed_presets,
-        session_max_hours: localSettings.session_max_hours,
-      };
-      updateMutation.mutate(settingsToSave);
+      updateMutation.mutate(latestSettingsToSave);
     }, 500);
 
     // Cleanup on unmount or when localSettings changes again
