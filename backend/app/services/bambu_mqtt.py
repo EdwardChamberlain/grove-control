@@ -32,6 +32,20 @@ logger = logging.getLogger(__name__)
 #   "n3s/<id>"  – AMS HT (H2D Pro and similar; IDs typically start at 128)
 _AMS_MODULE_PREFIXES = ("ams/", "n3f/", "n3s/")
 
+# CONNACK reason codes that mean the printer actively refused our credentials,
+# as opposed to being unreachable or busy. Bambu speaks MQTT 3.1.1, whose
+# single-byte CONNACK return codes paho maps onto the v5 reason-code space:
+# return code 4 ("bad user name or password") -> 134, and 5 ("not authorized")
+# -> 135. Both mean the same thing in practice for a Bambu printer: the access
+# code (or, on some firmware, the serial used as the username) is wrong.
+_CONNACK_AUTH_REJECTED = frozenset({134, 135})
+
+# Short, stable slugs recorded on the client and surfaced to the connection
+# diagnostic as a `params.reason` variant. Deliberately not free text — the
+# frontend picks a localized message key off these.
+CONNECT_ERROR_AUTH_REJECTED = "auth_rejected"
+CONNECT_ERROR_REFUSED = "refused"
+
 
 def parse_ams_filament_backup_from_cfg(cfg_raw: object) -> bool | None:
     """Extract AMS Filament Backup state from a Bambu push_status ``print.cfg`` value.
@@ -588,6 +602,17 @@ class BambuMQTTClient:
         # Intercepts slicer/Grove Control print commands to get the slot-to-tray mapping
         self._captured_ams_mapping: list[int] | None = None
 
+        # Why the last connection attempt was refused by the printer, or None
+        # when we have never seen a CONNACK failure since the last success.
+        # Without this a rejected access code was completely invisible: paho
+        # reports the follow-up disconnect as the generic "Unspecified error"
+        # and `_on_connect`'s failure branch used to log nothing at all, so a
+        # printer stuck in a reconnect loop looked identical whether it was
+        # powered off, on the wrong IP, or refusing our credentials (#2698).
+        # One of the CONNECT_ERROR_* slugs; the paired name is the paho reason
+        # string, kept for the log line only.
+        self.last_connect_error: str | None = None
+        self.last_connect_error_name: str | None = None
         # Request topic subscription tracking
         # Some printer MQTT brokers (e.g. P1S, A1) reject subscriptions to the request
         # topic by killing the TCP connection. We detect this and gracefully degrade.
@@ -791,6 +816,8 @@ class BambuMQTTClient:
     def _on_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
             self.state.connected = True
+            self.last_connect_error = None
+            self.last_connect_error_name = None
             self._stale_reconnecting = False  # Clear stale-reconnect flag on successful connect
             # Reset per-connection warning state so warnings fire once per (re)connection
             self._ams_version_warned = set()
@@ -838,6 +865,43 @@ class BambuMQTTClient:
         else:
             self.state.connected = False
             self.state.heat_soak_disconnected_at = time.time()
+            self._record_connect_refusal(rc)
+
+    def _record_connect_refusal(self, rc) -> None:
+        """Log and remember why the printer refused the MQTT connection.
+
+        The failure branch of ``_on_connect`` used to be a bare
+        ``connected = False``, which threw away the only signal that says
+        *why* a printer never comes online. The user-visible result was a
+        30-second reconnect loop logging nothing but paho's generic
+        ``MQTT disconnected: rc=Unspecified error`` — indistinguishable from a
+        powered-off printer, so "my printer won't print" reports could not be
+        triaged without a round trip (#2698).
+
+        Never logs the access code itself; the code is the likely culprit but
+        printing it would put a credential in every support bundle.
+        """
+        code = getattr(rc, "value", rc)
+        name = rc.getName() if hasattr(rc, "getName") else str(rc)
+        self.last_connect_error_name = name
+        if isinstance(code, int) and code in _CONNACK_AUTH_REJECTED:
+            self.last_connect_error = CONNECT_ERROR_AUTH_REJECTED
+            logger.warning(
+                "[%s] MQTT connection refused by the printer: %s (code %s). The access code "
+                "or serial number is wrong — the access code changes every time LAN Only or "
+                "Developer Mode is toggled, so re-read it from the printer's screen.",
+                self.serial_number,
+                name,
+                code,
+            )
+        else:
+            self.last_connect_error = CONNECT_ERROR_REFUSED
+            logger.warning(
+                "[%s] MQTT connection refused by the printer: %s (code %s).",
+                self.serial_number,
+                name,
+                code,
+            )
 
     def _on_subscribe(self, client, userdata, mid, reason_code_list, properties=None):
         """Handle SUBACK responses to detect request topic subscription rejection."""
@@ -894,7 +958,21 @@ class BambuMQTTClient:
             )
             return
 
-        logger.warning("[%s] MQTT disconnected: rc=%s, flags=%s", self.serial_number, rc, disconnect_flags)
+        # Carry the last CONNACK refusal into the disconnect line. paho reports
+        # the drop that follows a refused CONNACK as "Unspecified error", so on
+        # its own this line says nothing useful about a printer that is looping
+        # on bad credentials — and this is the line that fills a support bundle
+        # (#2698).
+        if self.last_connect_error:
+            logger.warning(
+                "[%s] MQTT disconnected: rc=%s, flags=%s (last connection attempt was refused: %s)",
+                self.serial_number,
+                rc,
+                disconnect_flags,
+                self.last_connect_error_name,
+            )
+        else:
+            logger.warning("[%s] MQTT disconnected: rc=%s, flags=%s", self.serial_number, rc, disconnect_flags)
 
         # Detect if request topic subscription caused the disconnect.
         # If we just subscribed and got disconnected before any SUBACK confirmation,

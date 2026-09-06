@@ -1829,6 +1829,12 @@ export default {
     manageInventoryDescription: '스풀 및 재고 레코드 생성, 업데이트 및 삭제. SpoolBuddy 키오스크(NFC 스캔, 저울 측정값, 키오스크 시스템 명령)에 필요합니다.',
     libraryBadge: '라이브러리',
     inventoryBadge: '재고',
+    manageProjects: '프로젝트 관리',
+    manageProjectsDescription: '프로젝트를 생성, 업데이트 및 삭제하고 아카이브를 추가합니다. 인쇄를 프로젝트로 정리하는 자동화에 적합합니다.',
+    projectsBadge: '프로젝트',
+    manageArchives: '아카이브 관리',
+    manageArchivesDescription: '오래된 인쇄물을 포함하여 인쇄 아카이브를 편집하고 삭제합니다. 통계 기여분을 삭제하는 기능은 포함하지 않습니다.',
+    archivesBadge: '아카이브',
     cloudAccess: '클라우드 접근 허용',
     cloudAccessDescription: '사용자를 대신하여 Bambu Cloud 프리셋 및 필라멘트를 읽습니다. Bambu Cloud에 로그인되어 있어야 합니다.',
     cloudBadge: '클라우드',
@@ -2787,7 +2793,8 @@ export default {
       selectAll: '모두 선택',
       clearAll: '모두 해제',
       permissionsSelected: '{{count}}개 선택됨',
-      noResults: '검색과 일치하는 권한이 없습니다'
+      noResults: '검색과 일치하는 권한이 없습니다',
+      websocketHint: '실시간 업데이트에 필요합니다. 이 권한이 없으면 인터페이스는 주기적 폴링으로 대체됩니다.'
     }
   },
   users: {
@@ -2982,6 +2989,8 @@ export default {
       noSearchResults: '검색어와 일치하는 프리셋이 없습니다'
     },
     connectedAs: '연결된 계정',
+    signInExpiredTitle: 'Bambu 클라우드 로그인이 만료되었습니다',
+    signInExpiredBody: 'Bambu Lab이 저장된 토큰을 더 이상 허용하지 않습니다. 클라우드 프로필, MakerWorld 가져오기, 펌웨어 확인을 복구하려면 다시 로그인하세요.',
     logout: '로그아웃',
     noLogoutPermission: '로그아웃 권한이 없습니다',
     failedToLoad: '프로필 불러오기 실패',
@@ -5669,6 +5678,8 @@ export default {
     resolveButton: '확인',
     signInRequiredTitle: '다운로드하려면 Bambu 클라우드 로그인 필요',
     signInRequiredBody: '익명으로 모델 세부 정보를 탐색할 수 있지만 MakerWorld는 3MF 파일을 다운로드하려면 Bambu 클라우드 계정이 필요합니다.',
+    signInExpiredTitle: 'Bambu 클라우드 로그인이 만료되었습니다',
+    signInExpiredBody: 'Bambuddy에는 여전히 로그인되어 있지만 Bambu Lab이 저장된 토큰을 더 이상 허용하지 않아 다운로드가 실패합니다. Bambu 클라우드에 다시 로그인하세요.',
     openCloudSettings: '클라우드 설정 열기',
     untitledModel: '제목 없는 모델',
     byCreator: '{{name}} 제작',
@@ -6025,7 +6036,8 @@ export default {
         title: '전송된 파일을 외부 저장소에 저장 (설치 단계 4)',
         pass: '프린터가 이 옵션이 켜져 있다고 보고합니다 — 전송된 파일이 SD 카드에 저장되며 아카이브에 썸네일과 슬라이서 메타데이터가 포함됩니다.',
         fail: '프린터가 이 옵션이 꺼져 있다고 보고합니다. "전송된 파일을 외부 저장소에 저장"을 활성화하세요 — 최신 펌웨어 (P2S 01.02 / Bambu Studio 2.6 이상)에서는 프린터의 인쇄 설정에 토글이 있고, 이전 버전에서는 Bambu Studio / OrcaSlicer의 장치 탭에 있습니다. 이 옵션이 없으면 아카이브된 모든 인쇄물에 썸네일과 슬라이서 메타데이터가 없습니다.',
-        skip: '확인되지 않음 — 활성 MQTT 연결이 필요합니다. 이 설정이 슬라이서에만 존재하는 이전 슬라이서에서는 프린터가 보고하지 않으므로, 옵션이 꺼져 있어도 이 검사는 통과합니다 — 설치 단계 4를 수동으로 확인하세요.'
+        skip: '확인되지 않음 — 활성 MQTT 연결이 필요합니다. 이 설정이 슬라이서에만 존재하는 이전 슬라이서에서는 프린터가 보고하지 않으므로, 옵션이 꺼져 있어도 이 검사는 통과합니다 — 설치 단계 4를 수동으로 확인하세요.',
+        skip_unsupported_model: '확인하지 않음 — 이 프린터 모델에서는 이 옵션을 켤 수 없습니다. 설치 단계 4를 수동으로 확인하세요.',
       },
       port_rtsps: {
         title: '카메라 포트 ({{protocol}} {{port}})',
@@ -6047,7 +6059,8 @@ export default {
       mqtt_auth: {
         title: '프린터 자격증명',
         pass: '프린터가 연결을 수락했습니다.',
-        fail: '프린터에 연결됐지만 연결을 거부했습니다. 액세스 코드 또는 시리얼 번호가 잘못됐을 가능성이 높습니다. 개발자 모드를 토글할 때마다 액세스 코드가 변경됩니다 — 프린터 화면에서 다시 복사하세요.',
+        fail: '프린터에 도달할 수 있지만 Bambuddy가 연결되지 않았습니다. 액세스 코드 또는 시리얼 번호가 잘못됐을 가능성이 높습니다 — LAN 전용 모드나 개발자 모드를 토글할 때마다 액세스 코드가 변경되므로 프린터 화면에서 다시 복사하세요. 재부팅 중이거나 이미 동시 연결 한도에 도달한 프린터도 똑같이 보입니다.',
+        fail_auth_rejected: '프린터가 Bambuddy의 자격증명을 거부했습니다. 액세스 코드 또는 시리얼 번호가 잘못됐습니다 — LAN 전용 모드나 개발자 모드를 토글할 때마다 액세스 코드가 변경됩니다. 프린터 화면에서 다시 복사한 뒤 프린터 설정에 저장하세요.',
         skip: '확인하지 않음 — 프린터에 연결할 수 없었습니다.'
       },
       developer_mode: {

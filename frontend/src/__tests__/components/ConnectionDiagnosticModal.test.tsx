@@ -122,4 +122,65 @@ describe('ConnectionDiagnosticModal', () => {
 
     spy.mockRestore();
   });
+
+  it('shows the unsupported-model explanation for the external_storage skip reason', async () => {
+    const spy = vi.spyOn(api, 'diagnosePrinter').mockResolvedValue({
+      ...PROBLEM_RESULT,
+      overall: 'warnings',
+      checks: [{ id: 'external_storage', status: 'skip', params: { reason: 'unsupported_model' } }],
+    });
+
+    renderModal({ printerId: 1, printerName: 'Test P1S', onClose: vi.fn() });
+
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/no way to turn the option on/i)).toBeInTheDocument();
+    expect(screen.queryByText(/needs a live MQTT connection/i)).not.toBeInTheDocument();
+
+    spy.mockRestore();
+  });
+
+  it('names a refused access code when the printer said so', async () => {
+    const spy = vi.spyOn(api, 'diagnosePrinter').mockResolvedValue({
+      ...PROBLEM_RESULT,
+      checks: [{ id: 'mqtt_auth', status: 'fail', params: { reason: 'auth_rejected' } }],
+    });
+
+    renderModal({ printerId: 1, printerName: 'Test A1', onClose: vi.fn() });
+
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/refused Bambuddy's credentials/i)).toBeInTheDocument();
+    expect(screen.queryByText(/most likely wrong/i)).not.toBeInTheDocument();
+
+    spy.mockRestore();
+  });
+
+  it('hedges on the mqtt_auth failure when the printer gave no reason', async () => {
+    const spy = vi.spyOn(api, 'diagnosePrinter').mockResolvedValue({
+      ...PROBLEM_RESULT,
+      checks: [{ id: 'mqtt_auth', status: 'fail', params: {} }],
+    });
+
+    renderModal({ printerId: 1, printerName: 'Test A1', onClose: vi.fn() });
+
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/most likely wrong/i)).toBeInTheDocument();
+    expect(screen.queryByText(/refused Bambuddy's credentials/i)).not.toBeInTheDocument();
+
+    spy.mockRestore();
+  });
+
+  it('falls back to the generic skip text when no reason is present', async () => {
+    const spy = vi.spyOn(api, 'diagnosePrinter').mockResolvedValue({
+      ...PROBLEM_RESULT,
+      overall: 'warnings',
+      checks: [{ id: 'external_storage', status: 'skip', params: {} }],
+    });
+
+    renderModal({ printerId: 1, printerName: 'Test X1C', onClose: vi.fn() });
+
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/needs a live MQTT connection/i)).toBeInTheDocument();
+
+    spy.mockRestore();
+  });
 });

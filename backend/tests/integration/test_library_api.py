@@ -1408,29 +1408,41 @@ class TestLibraryPermissions:
         # Viewers don't have delete_own or delete_all permissions
         assert response.status_code == 403
 
-    # ---------- #1832: API-key curation under can_manage_library ----------
-    #
-    # require_ownership_permission gates API keys on `all_perm`, but the
-    # library deliberately split UPDATE_OWN/DELETE_OWN (allowed under
-    # can_manage_library) from UPDATE_ALL/DELETE_ALL (previously denied).
-    # That made the entire curation surface (DELETE, PUT rename, POST move)
-    # unreachable for API keys, including for files the key's owner uploaded.
-    # The fix folds UPDATE_ALL/DELETE_ALL into can_manage_library so the
-    # checker passes; LIBRARY_PURGE stays admin-only.
+    # ---------- API-key curation stays owner-scoped ----------
 
     @pytest.fixture
     async def manage_library_key(self, db_session, auth_setup):
-        """Mint an API key owned by the admin user with can_manage_library."""
+        """Mint an API key owned by the operator with can_manage_library."""
+        from backend.app.core.auth import generate_api_key
+        from backend.app.models.api_key import APIKey
+
+        operator = auth_setup["operator_user"]
+        full_key, key_hash, key_prefix = generate_api_key()
+        row = APIKey(
+            name="lib-curation",
+            key_hash=key_hash,
+            key_prefix=key_prefix,
+            user_id=operator.id,
+            can_manage_library=True,
+        )
+        db_session.add(row)
+        await db_session.commit()
+        return full_key
+
+    @pytest.fixture
+    async def foreign_manage_library_key(self, db_session, auth_setup):
+        """Mint a fully-scoped key owned by a user other than ``test_file``."""
         from backend.app.core.auth import generate_api_key
         from backend.app.models.api_key import APIKey
 
         admin = auth_setup["admin_user"]
         full_key, key_hash, key_prefix = generate_api_key()
         row = APIKey(
-            name="lib-curation",
+            name="foreign-lib-curation",
             key_hash=key_hash,
             key_prefix=key_prefix,
             user_id=admin.id,
+            can_read_status=True,
             can_manage_library=True,
         )
         db_session.add(row)
@@ -1442,8 +1454,7 @@ class TestLibraryPermissions:
     async def test_apikey_with_manage_library_can_delete_file(
         self, async_client: AsyncClient, db_session, auth_setup, test_file, manage_library_key
     ):
-        """Pre-#1832 this 403'd with "administrative operations" because
-        LIBRARY_DELETE_ALL wasn't in _APIKEY_SCOPE_BY_PERMISSION."""
+        """A scoped key can delete a file owned by its API-key owner."""
         from pathlib import Path
 
         from backend.app.core.config import settings as app_settings
@@ -1465,8 +1476,7 @@ class TestLibraryPermissions:
     async def test_apikey_with_manage_library_can_rename_file(
         self, async_client: AsyncClient, db_session, auth_setup, test_file, manage_library_key
     ):
-        """PUT /library/files/{id} is gated on LIBRARY_UPDATE_ALL/OWN. Same
-        #1832 path as delete."""
+        """PUT /library/files/{id} permits the API-key owner to rename it."""
         response = await async_client.put(
             f"/api/v1/library/files/{test_file.id}",
             headers={"X-API-Key": manage_library_key},
@@ -1480,8 +1490,7 @@ class TestLibraryPermissions:
     async def test_apikey_with_manage_library_can_move_file(
         self, async_client: AsyncClient, db_session, auth_setup, test_file, manage_library_key
     ):
-        """POST /library/files/move (bulk) is gated on LIBRARY_UPDATE_ALL/OWN
-        — same checker, same #1832 path."""
+        """POST /library/files/move permits the API-key owner to move it."""
         # Create a target folder the move can land in.
         from backend.app.models.library import LibraryFolder
 
@@ -1524,6 +1533,40 @@ class TestLibraryPermissions:
         response = await async_client.delete(
             f"/api/v1/library/files/{test_file.id}",
             headers={"X-API-Key": full_key},
+        )
+        assert response.status_code == 403
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_apikey_cannot_read_another_users_file(
+        self, async_client: AsyncClient, test_file, foreign_manage_library_key
+    ):
+        response = await async_client.get(
+            f"/api/v1/library/files/{test_file.id}",
+            headers={"X-API-Key": foreign_manage_library_key},
+        )
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_apikey_cannot_update_another_users_file(
+        self, async_client: AsyncClient, test_file, foreign_manage_library_key
+    ):
+        response = await async_client.put(
+            f"/api/v1/library/files/{test_file.id}",
+            headers={"X-API-Key": foreign_manage_library_key},
+            json={"filename": "not-owned.txt"},
+        )
+        assert response.status_code == 403
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_apikey_cannot_delete_another_users_file(
+        self, async_client: AsyncClient, test_file, foreign_manage_library_key
+    ):
+        response = await async_client.delete(
+            f"/api/v1/library/files/{test_file.id}",
+            headers={"X-API-Key": foreign_manage_library_key},
         )
         assert response.status_code == 403
 

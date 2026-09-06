@@ -5928,6 +5928,130 @@ def stop_spoolbuddy_watchdog():
         logging.getLogger(__name__).info("SpoolBuddy watchdog stopped")
 
 
+# Dead-MQTT-session recovery
+#
+# check_staleness() covers the "connected but silent" half-broken session. It
+# does nothing once ``state.connected`` is False, and paho's own auto-reconnect
+# is the only thing left watching at that point. When paho stops making
+# progress there is no backstop at all: the #2732 bundle has a P1S drop on a
+# keep-alive timeout at 02:19 and not reconnect until 11:24 — nine hours
+# offline with the UI open the whole time, recovered only when something
+# happened to nudge it.
+#
+# This loop is that backstop. It only touches printers that had a working
+# session and lost it, and only when the MQTT port still answers — a printer
+# that is simply switched off is left to paho, since rebuilding a client
+# against an unreachable host achieves nothing and would fill the log every
+# night.
+_connection_watchdog_task: asyncio.Task | None = None
+CONNECTION_WATCHDOG_INTERVAL = 60
+# How long a printer must have been silent before we stop trusting paho.
+# Comfortably above STALE_TIMEOUT (60 s) and the max reconnect backoff (30 s),
+# so a session that is recovering on its own is never interrupted.
+CONNECTION_WATCHDOG_OFFLINE_GRACE = 300
+# Per-printer floor between rebuild attempts.
+CONNECTION_WATCHDOG_RETRY_INTERVAL = 300
+_connection_watchdog_last_attempt: dict[int, float] = {}
+
+
+async def _recover_dead_printer_sessions() -> int:
+    """Rebuild MQTT clients that have been offline too long to still be trying.
+
+    Returns the number of printers a rebuild was attempted for (for tests and
+    for the caller's logging). Never raises: one unreachable printer must not
+    stop the sweep for the rest of the farm.
+    """
+    logger = logging.getLogger(__name__)
+    from backend.app.services.printer_diagnostic import PORT_MQTT, check_port
+
+    now = time.monotonic()
+    recovered = 0
+
+    for printer_id, client in list(printer_manager._clients.items()):
+        try:
+            if client.state.connected:
+                _connection_watchdog_last_attempt.pop(printer_id, None)
+                continue
+
+            # Time since the last inbound message is the age of the last known
+            # good session — no extra bookkeeping needed, and it is the same
+            # clock is_stale() reads. 0 means this client has never had one:
+            # that is the initial-connect path, where paho retrying is the
+            # correct and only behaviour, so leave it be.
+            last_msg = client._last_message_time
+            if not last_msg:
+                continue
+            offline_for = time.time() - last_msg
+            if offline_for < CONNECTION_WATCHDOG_OFFLINE_GRACE:
+                continue
+
+            last_attempt = _connection_watchdog_last_attempt.get(printer_id)
+            if last_attempt is not None and now - last_attempt < CONNECTION_WATCHDOG_RETRY_INTERVAL:
+                continue
+
+            if not await check_port(client.ip_address, PORT_MQTT):
+                # Switched off, unplugged, or off the network. Paho's retry is
+                # the right handler; say so at debug level and move on.
+                logger.debug(
+                    "[#2732] Printer %s offline for %.0fs and its MQTT port is not answering "
+                    "— leaving the reconnect to paho",
+                    printer_id,
+                    offline_for,
+                )
+                _connection_watchdog_last_attempt[printer_id] = now
+                continue
+
+            _connection_watchdog_last_attempt[printer_id] = now
+            recovered += 1
+            logger.warning(
+                "[#2732] Printer %s has been offline for %.0fs but answers on MQTT port %d — "
+                "rebuilding the client with a fresh session (last connect error: %s)",
+                printer_id,
+                offline_for,
+                PORT_MQTT,
+                client.last_connect_error or "none recorded",
+            )
+            # Async context, so this takes the hard-reset path: fresh client_id,
+            # paho's QoS 1 queue dropped. That matters — a project_file left
+            # unacked on the dead session would otherwise replay into the new
+            # one and trip 0500_4003 on the printer (#1136).
+            client.force_reconnect_stale_session(f"offline for {offline_for:.0f}s, port still answering")
+        except Exception as e:
+            logger.warning("[#2732] Connection watchdog failed for printer %s: %s", printer_id, e)
+
+    return recovered
+
+
+async def _connection_watchdog_loop():
+    logger = logging.getLogger(__name__)
+    # Let the initial connects settle before judging anyone offline.
+    await asyncio.sleep(CONNECTION_WATCHDOG_OFFLINE_GRACE)
+    while True:
+        try:
+            await _recover_dead_printer_sessions()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("Connection watchdog sweep failed: %s", e)
+        await asyncio.sleep(CONNECTION_WATCHDOG_INTERVAL)
+
+
+def start_connection_watchdog():
+    global _connection_watchdog_task
+    if _connection_watchdog_task is None:
+        _connection_watchdog_task = asyncio.create_task(_connection_watchdog_loop())
+        logging.getLogger(__name__).info("Printer connection watchdog started")
+
+
+def stop_connection_watchdog():
+    global _connection_watchdog_task
+    if _connection_watchdog_task:
+        _connection_watchdog_task.cancel()
+        _connection_watchdog_task = None
+        _connection_watchdog_last_attempt.clear()
+        logging.getLogger(__name__).info("Printer connection watchdog stopped")
+
+
 # Camera stream orphan cleanup
 _camera_cleanup_task: asyncio.Task | None = None
 CAMERA_CLEANUP_INTERVAL = 60
@@ -6390,6 +6514,8 @@ async def lifespan(app: FastAPI):
     # Start camera stream orphan cleanup
     start_camera_cleanup()
 
+    # Start the backstop for MQTT sessions paho has stopped recovering (#2732)
+    start_connection_watchdog()
     # Start expected-print TTL eviction (prevents memory leak when prints are
     # registered but on_print_start never fires)
     start_expected_prints_cleanup()
@@ -6430,6 +6556,7 @@ async def lifespan(app: FastAPI):
     stop_runtime_tracking()
     stop_spoolbuddy_watchdog()
     stop_camera_cleanup()
+    stop_connection_watchdog()
     from backend.app.services.loop_watchdog import stop_loop_watchdog
 
     stop_loop_watchdog()
