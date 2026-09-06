@@ -1263,13 +1263,30 @@ async def delete_folder(
 
         return file_ids
 
-    await get_all_file_ids(folder_id)
+    doomed_file_ids = await get_all_file_ids(folder_id)
+    from backend.app.services.library_trash import release_queue_references
+
+    await release_queue_references(db, doomed_file_ids)
 
     # Delete folder (cascade will handle files and subfolders)
     await db.delete(folder)
     await db.commit()
 
     return {"status": "success", "message": "Folder deleted"}
+
+
+async def _collect_descendant_file_ids(db: AsyncSession, folder_id: int) -> list[int]:
+    """Return every file ID below a folder, including nested subfolders."""
+    folder_ids = {folder_id}
+    pending = [folder_id]
+    while pending:
+        result = await db.execute(select(LibraryFolder.id).where(LibraryFolder.parent_id.in_(pending)))
+        children = [child_id for (child_id,) in result.all() if child_id not in folder_ids]
+        folder_ids.update(children)
+        pending = children
+
+    result = await db.execute(select(LibraryFile.id).where(LibraryFile.folder_id.in_(folder_ids)))
+    return [file_id for (file_id,) in result.all()]
 
 
 # ============ External Folder Endpoints ============
@@ -4354,6 +4371,9 @@ async def delete_file(
                 abs_thumb_path.unlink()
             except OSError as e:
                 logger.warning("Failed to delete thumbnail from disk: %s", e)
+        from backend.app.services.library_trash import release_queue_references
+
+        await release_queue_references(db, [file.id])
         await db.delete(file)
         await db.commit()
         return {"status": "success", "message": "File deleted", "trashed": False}
@@ -4678,6 +4698,9 @@ async def bulk_delete(
                     abs_thumb_path.unlink()
                 except OSError as e:
                     logger.warning("Failed to delete thumbnail from disk: %s", e)
+            from backend.app.services.library_trash import release_queue_references
+
+            await release_queue_references(db, [file.id])
             await db.delete(file)
         else:
             file.deleted_at = now
@@ -4693,14 +4716,20 @@ async def bulk_delete(
         result = await db.execute(select(LibraryFolder).where(LibraryFolder.id == folder_id))
         folder = result.scalar_one_or_none()
         if folder:
-            # Count files that will be deleted
+            # Count files that will be deleted, including files in nested
+            # subfolders. Queue references must be released before the folder
+            # cascade runs or ON DELETE CASCADE will silently remove queued
+            # items instead of cancelling/detaching them.
+            folder_file_ids = await _collect_descendant_file_ids(db, folder_id)
             file_count_result = await db.execute(
-                select(func.count(LibraryFile.id)).where(
-                    LibraryFile.folder_id == folder_id,
-                    LibraryFile.deleted_at.is_(None),
-                )
+                select(func.count(LibraryFile.id))
+                .where(LibraryFile.id.in_(folder_file_ids))
+                .where(LibraryFile.deleted_at.is_(None))
             )
             deleted_files += file_count_result.scalar() or 0
+            from backend.app.services.library_trash import release_queue_references
+
+            await release_queue_references(db, folder_file_ids)
             await db.delete(folder)
             deleted_folders += 1
 

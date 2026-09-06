@@ -17,6 +17,11 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
+# Do not repeatedly open doomed FTPS connections after a TLS handshake failure.
+# A successful connection clears the gate; five minutes gives a restarted
+# printer a reasonable recovery window without hammering an unavailable one.
+_HANDSHAKE_COOLOFF_SECONDS = 300.0
+
 
 class DeleteResult(Enum):
     """Outcome of an FTP delete attempt.
@@ -125,6 +130,10 @@ class BambuFTPClient:
     # Maps IP -> "prot_p" or "prot_c"
     _mode_cache: dict[str, str] = {}
 
+    # Printers whose FTPS handshake failed, mapped to the monotonic expiry.
+    _handshake_blocked_until: dict[str, float] = {}
+    _handshake_skip_logged: dict[str, float] = {}
+
     def __init__(
         self,
         ip_address: str,
@@ -132,12 +141,15 @@ class BambuFTPClient:
         timeout: float | None = None,
         printer_model: str | None = None,
         force_prot_c: bool = False,
+        respect_handshake_cooloff: bool = True,
     ):
+        """Create a client; bounded user-initiated work may bypass cooldown."""
         self.ip_address = ip_address
         self.access_code = access_code
         self.timeout = timeout if timeout is not None else self.DEFAULT_TIMEOUT
         self.printer_model = printer_model
         self.force_prot_c = force_prot_c
+        self.respect_handshake_cooloff = respect_handshake_cooloff
         self._ftp: ImplicitFTP_TLS | None = None
 
     def _is_a1_model(self) -> bool:
@@ -168,8 +180,38 @@ class BambuFTPClient:
         # Default: try prot_p first (will fall back if needed)
         return False
 
+    @classmethod
+    def handshake_blocked(cls, ip_address: str) -> bool:
+        """Return whether the printer is in the post-handshake cooldown."""
+        deadline = cls._handshake_blocked_until.get(ip_address)
+        if deadline is None:
+            return False
+        if time.monotonic() >= deadline:
+            cls._handshake_blocked_until.pop(ip_address, None)
+            cls._handshake_skip_logged.pop(ip_address, None)
+            return False
+        return True
+
     def connect(self) -> bool:
         """Connect to the printer FTP server (implicit FTPS on port 990)."""
+        if self.respect_handshake_cooloff and self.handshake_blocked(self.ip_address):
+            deadline = self._handshake_blocked_until.get(self.ip_address)
+            remaining = max(0.0, deadline - time.monotonic()) if deadline is not None else 0.0
+            if deadline is not None and self._handshake_skip_logged.get(self.ip_address) != deadline:
+                self._handshake_skip_logged[self.ip_address] = deadline
+                logger.warning(
+                    "FTP connect to %s not attempted: FTPS handshake is cooling off for another %.0fs. "
+                    "Nothing was sent to the printer",
+                    self.ip_address,
+                    remaining,
+                )
+            else:
+                logger.debug(
+                    "FTP connect to %s skipped: still cooling off for another %.0fs",
+                    self.ip_address,
+                    remaining,
+                )
+            return False
         try:
             use_prot_c = self._should_use_prot_c()
             from backend.app.services.ftp_profiles import get_ftp_profile
@@ -202,6 +244,8 @@ class BambuFTPClient:
             logger.info(
                 f"FTP connected successfully to {self.ip_address} (model={self.printer_model}, prot_c={use_prot_c})"
             )
+            self._handshake_blocked_until.pop(self.ip_address, None)
+            self._handshake_skip_logged.pop(self.ip_address, None)
             return True
         except ftplib.error_perm as e:
             logger.warning("FTP connection permission error to %s: %s", self.ip_address, e)
@@ -212,7 +256,13 @@ class BambuFTPClient:
             self._ftp = None
             return False
         except ssl.SSLError as e:
-            logger.warning("FTP SSL error connecting to %s: %s", self.ip_address, e)
+            logger.warning(
+                "FTP SSL error connecting to %s: %s; pausing FTP for %.0fs",
+                self.ip_address,
+                e,
+                _HANDSHAKE_COOLOFF_SECONDS,
+            )
+            self._handshake_blocked_until[self.ip_address] = time.monotonic() + _HANDSHAKE_COOLOFF_SECONDS
             self._ftp = None
             return False
         except (OSError, ftplib.Error) as e:
@@ -726,6 +776,16 @@ class BambuFTPClient:
         return result if result else None
 
 
+def ftps_handshake_blocked(ip_address: str) -> bool:
+    """Return whether background FTP sweeps should skip this printer."""
+    return BambuFTPClient.handshake_blocked(ip_address)
+
+
+def ftps_handshake_cooloff_deadline(ip_address: str) -> float | None:
+    """Return the current monotonic cooldown deadline, if any."""
+    return BambuFTPClient._handshake_blocked_until.get(ip_address)
+
+
 # Shared 3MF download cache (#972).
 #
 # Both the cover thumbnail endpoint (api/routes/printers.py) and the archive
@@ -825,6 +885,7 @@ async def download_file_async(
     timeout: float = 60.0,
     socket_timeout: float | None = None,
     printer_model: str | None = None,
+    respect_handshake_cooloff: bool = True,
 ) -> bool:
     """Async wrapper for downloading a file with timeout.
 
@@ -862,6 +923,7 @@ async def download_file_async(
                 timeout=socket_timeout,
                 printer_model=printer_model,
                 force_prot_c=force_prot_c,
+                respect_handshake_cooloff=respect_handshake_cooloff,
             )
             if client.connect():
                 try:
@@ -938,6 +1000,7 @@ async def download_file_try_paths_async(
     local_path: Path,
     socket_timeout: float | None = None,
     printer_model: str | None = None,
+    respect_handshake_cooloff: bool = True,
 ) -> bool:
     """Try downloading a file from multiple paths using a single connection.
 
@@ -948,7 +1011,13 @@ async def download_file_try_paths_async(
     loop = asyncio.get_event_loop()
 
     def _download():
-        client = BambuFTPClient(ip_address, access_code, timeout=socket_timeout, printer_model=printer_model)
+        client = BambuFTPClient(
+            ip_address,
+            access_code,
+            timeout=socket_timeout,
+            printer_model=printer_model,
+            respect_handshake_cooloff=respect_handshake_cooloff,
+        )
         if not client.connect():
             return False
 
@@ -978,6 +1047,7 @@ async def upload_file_async(
     progress_callback: Callable[[int, int], None] | None = None,
     socket_timeout: float | None = None,
     printer_model: str | None = None,
+    respect_handshake_cooloff: bool = True,
 ) -> bool:
     """Async wrapper for uploading a file with timeout and progress callback.
 
@@ -1004,7 +1074,12 @@ async def upload_file_async(
             f"mode={mode_str}, socket_timeout={socket_timeout}s)..."
         )
         client = BambuFTPClient(
-            ip_address, access_code, timeout=socket_timeout, printer_model=printer_model, force_prot_c=force_prot_c
+            ip_address,
+            access_code,
+            timeout=socket_timeout,
+            printer_model=printer_model,
+            force_prot_c=force_prot_c,
+            respect_handshake_cooloff=respect_handshake_cooloff,
         )
         if client.connect():
             logger.info("FTP connected to %s", ip_address)
@@ -1054,6 +1129,7 @@ async def list_files_async(
     timeout: float = 30.0,
     socket_timeout: float | None = None,
     printer_model: str | None = None,
+    respect_handshake_cooloff: bool = True,
 ) -> list[dict]:
     """Async wrapper for listing files with timeout.
 
@@ -1064,7 +1140,13 @@ async def list_files_async(
     loop = asyncio.get_event_loop()
 
     def _list():
-        client = BambuFTPClient(ip_address, access_code, timeout=socket_timeout, printer_model=printer_model)
+        client = BambuFTPClient(
+            ip_address,
+            access_code,
+            timeout=socket_timeout,
+            printer_model=printer_model,
+            respect_handshake_cooloff=respect_handshake_cooloff,
+        )
         if client.connect():
             try:
                 return client.list_files(path)
@@ -1085,6 +1167,7 @@ async def delete_file_async(
     remote_path: str,
     socket_timeout: float | None = None,
     printer_model: str | None = None,
+    respect_handshake_cooloff: bool = True,
 ) -> DeleteResult:
     """Async wrapper for deleting a file.
 
@@ -1099,7 +1182,13 @@ async def delete_file_async(
     loop = asyncio.get_event_loop()
 
     def _delete() -> DeleteResult:
-        client = BambuFTPClient(ip_address, access_code, timeout=socket_timeout, printer_model=printer_model)
+        client = BambuFTPClient(
+            ip_address,
+            access_code,
+            timeout=socket_timeout,
+            printer_model=printer_model,
+            respect_handshake_cooloff=respect_handshake_cooloff,
+        )
         if client.connect():
             try:
                 return client.delete_file(remote_path)
@@ -1116,6 +1205,7 @@ async def download_file_bytes_async(
     remote_path: str,
     socket_timeout: float | None = None,
     printer_model: str | None = None,
+    respect_handshake_cooloff: bool = True,
 ) -> bytes | None:
     """Async wrapper for downloading file as bytes.
 
@@ -1126,7 +1216,13 @@ async def download_file_bytes_async(
     loop = asyncio.get_event_loop()
 
     def _download():
-        client = BambuFTPClient(ip_address, access_code, timeout=socket_timeout, printer_model=printer_model)
+        client = BambuFTPClient(
+            ip_address,
+            access_code,
+            timeout=socket_timeout,
+            printer_model=printer_model,
+            respect_handshake_cooloff=respect_handshake_cooloff,
+        )
         if client.connect():
             try:
                 return client.download_file(remote_path)
@@ -1142,6 +1238,7 @@ async def get_storage_info_async(
     access_code: str,
     socket_timeout: float | None = None,
     printer_model: str | None = None,
+    respect_handshake_cooloff: bool = True,
 ) -> dict | None:
     """Async wrapper for getting storage info.
 
@@ -1152,7 +1249,13 @@ async def get_storage_info_async(
     loop = asyncio.get_event_loop()
 
     def _get_storage():
-        client = BambuFTPClient(ip_address, access_code, timeout=socket_timeout, printer_model=printer_model)
+        client = BambuFTPClient(
+            ip_address,
+            access_code,
+            timeout=socket_timeout,
+            printer_model=printer_model,
+            respect_handshake_cooloff=respect_handshake_cooloff,
+        )
         if client.connect():
             try:
                 return client.get_storage_info()
@@ -1187,6 +1290,7 @@ async def with_ftp_retry(
     retry_delay: float = 2.0,
     operation_name: str = "FTP operation",
     non_retry_exceptions: tuple[type[BaseException], ...] = (),
+    cooloff_ip: str | None = None,
     **kwargs,
 ) -> T | None:
     """Execute FTP operation with retry logic.
@@ -1204,8 +1308,10 @@ async def with_ftp_retry(
         Result of the operation, or None if all attempts fail
     """
     last_error = None
+    attempts_made = 0
 
     for attempt in range(max_retries + 1):
+        attempts_made = attempt + 1
         try:
             result = await operation(*args, **kwargs)
             # Check for "falsy" success indicators
@@ -1224,10 +1330,19 @@ async def with_ftp_retry(
 
         # Don't wait after the last attempt
         if attempt < max_retries:
+            if cooloff_ip and ftps_handshake_blocked(cooloff_ip):
+                logger.warning(
+                    "%s: stopping after attempt %s/%s because %s is in FTPS handshake cooldown",
+                    operation_name,
+                    attempt + 1,
+                    max_retries + 1,
+                    cooloff_ip,
+                )
+                break
             logger.info("%s will retry in %ss...", operation_name, retry_delay)
             await asyncio.sleep(retry_delay)
 
-    logger.error("%s failed after %s attempts", operation_name, max_retries + 1)
+    logger.error("%s failed after %s attempts", operation_name, attempts_made)
     if last_error:
         logger.debug("Last error: %s", last_error)
     return None

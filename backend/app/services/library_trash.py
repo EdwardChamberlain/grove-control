@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.core.config import settings as app_settings
 from backend.app.core.database import async_session
 from backend.app.models.library import LibraryFile
+from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -351,6 +352,7 @@ class LibraryTrashService:
         for row in rows:
             self._unlink_on_disk(row)
             deleted += 1
+        await release_queue_references(db, [row.id for row in rows])
         # Single DELETE is faster than N await db.delete() round-trips; we
         # still need the Python loop above to unlink bytes on disk.
         await db.execute(delete(LibraryFile).where(LibraryFile.id.in_([r.id for r in rows])))
@@ -383,8 +385,43 @@ class LibraryTrashService:
     async def hard_delete_now(self, db: AsyncSession, file: LibraryFile) -> None:
         """Bypass retention and delete this trashed file + its bytes immediately."""
         self._unlink_on_disk(file)
+        await release_queue_references(db, [file.id])
         await db.delete(file)
         await db.commit()
+
+
+async def release_queue_references(db: AsyncSession, file_ids: list[int]) -> int:
+    """Cancel waiting jobs and detach all other queue rows before deletion."""
+    if not file_ids:
+        return 0
+    rows = (
+        await db.execute(
+            select(PrintQueueItem.id, PrintQueueItem.library_file_id)
+            .where(PrintQueueItem.library_file_id.in_(file_ids))
+            .where(PrintQueueItem.archive_id.is_(None))
+            .where(PrintQueueItem.status.in_(("pending", "skipped")))
+        )
+    ).all()
+    names = dict(
+        (await db.execute(select(LibraryFile.id, LibraryFile.filename).where(LibraryFile.id.in_(file_ids)))).all()
+    )
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    for item_id, library_file_id in rows:
+        await db.execute(
+            PrintQueueItem.__table__.update()
+            .where(PrintQueueItem.id == item_id)
+            .values(
+                status="cancelled",
+                completed_at=now,
+                error_message=f"'{names.get(library_file_id, 'The library file')}' was deleted from the library",
+            )
+        )
+    await db.execute(
+        PrintQueueItem.__table__.update()
+        .where(PrintQueueItem.library_file_id.in_(file_ids))
+        .values(library_file_id=None)
+    )
+    return len(rows)
 
 
 library_trash_service = LibraryTrashService()
