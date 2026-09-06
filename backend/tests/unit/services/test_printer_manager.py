@@ -51,6 +51,19 @@ class TestPrinterManager:
         client.state.temperatures = {"nozzle": 25, "bed": 25}
         client.state.raw_data = {}
         client.logging_enabled = False
+
+        # mark_power_off is real logic on BambuMQTTClient (#2629) — mirror it so
+        # the manager tests still exercise the state transition they assert on.
+        # The real implementation (and its recovery path) is covered in
+        # test_bambu_mqtt.py::TestPresumedPowerOffRecovery.
+        def _mark_power_off():
+            if not client.state.connected:
+                return False
+            client.state.connected = False
+            client.state.state = "unknown"
+            return True
+
+        client.mark_power_off.side_effect = _mark_power_off
         return client
 
     # ========================================================================
@@ -476,6 +489,46 @@ class TestPrinterManager:
         result = await manager.wait_for_cooldown(1, target_temp=50)
 
         assert result is True
+
+    # ========================================================================
+    # Tests for is_print_active (#1890)
+    # ========================================================================
+
+    @pytest.mark.parametrize(
+        "state,expected",
+        [
+            ("RUNNING", True),
+            ("PAUSE", True),
+            ("PREPARE", True),
+            ("SLICING", True),
+            ("FINISH", False),
+            ("IDLE", False),
+            ("FAILED", False),
+            ("unknown", False),
+        ],
+    )
+    def test_is_print_active_state_matrix(self, manager, mock_client, state, expected):
+        """A job-loaded state is 'active'; idle/terminal states are not."""
+        mock_client.state.connected = True
+        mock_client.state.state = state
+        mock_client.check_staleness.return_value = True
+        manager._clients[1] = mock_client
+
+        assert manager.is_print_active(1) is expected
+
+    def test_is_print_active_false_when_disconnected(self, manager, mock_client):
+        """Even in RUNNING, a disconnected printer is not treated as active —
+        we fail safe (no active print) only for the 'nothing printing' cases."""
+        mock_client.state.connected = False
+        mock_client.state.state = "RUNNING"
+        mock_client.check_staleness.return_value = False
+        manager._clients[1] = mock_client
+
+        assert manager.is_print_active(1) is False
+
+    def test_is_print_active_false_for_unknown_printer(self, manager):
+        """Unknown printer id → not active (no client)."""
+        assert manager.is_print_active(999) is False
 
     # ========================================================================
     # Tests for logging methods

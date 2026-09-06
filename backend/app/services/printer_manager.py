@@ -615,6 +615,24 @@ class PrinterManager:
             return client.state
         return None
 
+    # Gcode states in which a job is loaded / in progress and cutting power
+    # would ruin the print. PAUSE is included on purpose — a paused print is
+    # still loaded on the bed. Used by the smart-plug auto-off guard (#1890) so
+    # a re-print started from the touchscreen isn't killed mid-print.
+    ACTIVE_PRINT_STATES = ("RUNNING", "PAUSE", "PREPARE", "SLICING")
+
+    def is_print_active(self, printer_id: int) -> bool:
+        """True when the printer currently has a print loaded / in progress.
+
+        Returns False when disconnected or in any idle/terminal state
+        (IDLE / FINISH / FAILED / unknown), so callers fail *open* only for
+        the safe "nothing is printing" case. #1890.
+        """
+        state = self.get_status(printer_id)
+        if not state or not state.connected:
+            return False
+        return state.state in self.ACTIVE_PRINT_STATES
+
     def get_model(self, printer_id: int) -> str | None:
         """Get the cached model for a printer."""
         return self._models.get(printer_id)
@@ -657,6 +675,11 @@ class PrinterManager:
 
         This is used when we know the printer power was cut (e.g., smart plug turned off)
         to immediately update the UI without waiting for MQTT timeout.
+
+        The mark is a presumption, not a fact: the plug may not actually feed
+        the printer. ``BambuMQTTClient.mark_power_off`` records the state it
+        overwrites so the client can undo it as soon as the printer sends
+        another report (#2629).
         """
         import logging
 
@@ -664,10 +687,8 @@ class PrinterManager:
 
         if printer_id in self._clients:
             client = self._clients[printer_id]
-            if client.state.connected:
+            if client.mark_power_off():
                 logger.info("Marking printer %s as offline (smart plug power off)", printer_id)
-                client.state.connected = False
-                client.state.state = "unknown"
                 # Trigger the status change callback to broadcast via WebSocket
                 if self._on_status_change:
                     self._schedule_async(self._on_status_change(printer_id, client.state))
@@ -1205,6 +1226,10 @@ def printer_state_to_dict(
                 "actions": e.actions,
                 "job_id": e.job_id,
                 "full_code": e.full_code,
+                # Same field as the status response carries (#2926) — a relay
+                # watching the stream should not have to poll REST to find out
+                # what a fault means.
+                "description": e.description,
             }
             for e in (state.hms_errors or [])
         ],

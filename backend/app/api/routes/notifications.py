@@ -62,6 +62,9 @@ def _provider_to_dict(provider: NotificationProvider) -> dict:
         "on_bed_cooled": provider.on_bed_cooled,
         # First layer complete
         "on_first_layer_complete": provider.on_first_layer_complete,
+        # Inventory stock alerts
+        "on_stock_reorder_alert": provider.on_stock_reorder_alert,
+        "on_stock_break_alert": provider.on_stock_break_alert,
         # Print queue events
         "on_queue_job_added": provider.on_queue_job_added,
         "on_queue_job_assigned": provider.on_queue_job_assigned,
@@ -143,6 +146,9 @@ async def create_notification_provider(
         on_bed_cooled=provider_data.on_bed_cooled,
         # First layer complete
         on_first_layer_complete=provider_data.on_first_layer_complete,
+        # Inventory stock alerts
+        on_stock_reorder_alert=provider_data.on_stock_reorder_alert,
+        on_stock_break_alert=provider_data.on_stock_break_alert,
         # Print queue events
         on_queue_job_added=provider_data.on_queue_job_added,
         on_queue_job_assigned=provider_data.on_queue_job_assigned,

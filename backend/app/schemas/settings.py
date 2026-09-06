@@ -379,6 +379,7 @@ class AppSettings(BaseModel):
         default="",
         description="Self-hosted Obico ML API base URL (e.g., http://192.168.1.10:3333)",
     )
+    obico_ml_token: str = Field(default="", description="Optional bearer token for the Obico ML API")
     obico_sensitivity: str = Field(
         default="medium",
         description="Detection sensitivity: 'low', 'medium', or 'high' (adjusts LOW/HIGH thresholds)",
@@ -521,6 +522,7 @@ class AppSettingsUpdate(BaseModel):
     ldap_default_group: str | None = None
     obico_enabled: bool | None = None
     obico_ml_url: str | None = None
+    obico_ml_token: str | None = None
     obico_sensitivity: str | None = None
     obico_action: str | None = None
     obico_poll_interval: int | None = Field(default=None, ge=5, le=120)

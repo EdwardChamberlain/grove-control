@@ -67,6 +67,8 @@ import {
   List,
   BarChart3,
   Package,
+  ScanEye,
+  EyeOff,
 } from 'lucide-react';
 
 import { useNavigate } from 'react-router-dom';
@@ -86,6 +88,8 @@ import { CameraWall } from '../components/CameraWall';
 import { CameraPlaceholder } from '../components/CameraPlaceholder';
 import { MQTTDebugModal } from '../components/MQTTDebugModal';
 import { HMSErrorModal, filterKnownHMSErrors } from '../components/HMSErrorModal';
+import { AiDetectionModal } from '../components/AiDetectionModal';
+import { aiDetectionClass, type AiDetection } from '../utils/aiDetection';
 import { PrinterQueueWidget } from '../components/PrinterQueueWidget';
 import { AMSHistoryModal } from '../components/AMSHistoryModal';
 import { AmsBackupModal } from '../components/AmsBackupModal';
@@ -3000,6 +3004,9 @@ function PrinterCard({
   bedTempPresets = BED_TEMP_DEFAULTS,
   chamberTempPresets = CHAMBER_TEMP_DEFAULTS,
   fanSpeedPresets = FAN_SPEED_DEFAULTS,
+  aiDetectionEnabled = false,
+  aiDetection,
+  aiLastError = null,
 }: {
   printer: Printer;
   hideIfDisconnected?: boolean;
@@ -3037,6 +3044,9 @@ function PrinterCard({
   bedTempPresets?: readonly [number, number, number];
   chamberTempPresets?: readonly [number, number, number];
   fanSpeedPresets?: readonly [number, number, number];
+  aiDetectionEnabled?: boolean;
+  aiDetection?: AiDetection;
+  aiLastError?: string | null;
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -3050,6 +3060,7 @@ function PrinterCard({
   const [showFileManager, setShowFileManager] = useState(false);
   const [showMQTTDebug, setShowMQTTDebug] = useState(false);
   const [showHMSModal, setShowHMSModal] = useState(false);
+  const [showAiModal, setShowAiModal] = useState(false);
   // #1762: AMS Filament Backup status / control modal — opens from the badge.
   const [amsBackupModalOpen, setAmsBackupModalOpen] = useState(false);
   const [showStopConfirm, setShowStopConfirm] = useState(false);
@@ -3402,6 +3413,7 @@ function PrinterCard({
   const showFirmwareVersionPill = false;
   const showDoorPill = !!(status?.connected && hasDoorSensor && status.door_open);
   const hasVisibleStatusPills = isMaintenanceMode ||
+    aiDetectionEnabled ||
     showConnectionPill ||
     showPlateStatusPill ||
     !status?.connected ||
@@ -4266,6 +4278,49 @@ function PrinterCard({
               {showNetworkPill && networkStatusPill}
               {/* HMS Status Indicator */}
               {showHmsPill && hmsStatusPill}
+              {/* AI failure detection badge (#1546) — always shown while detection
+                  is enabled for this printer, like the other health badges. Gray
+                  "Idle" outside a monitored print, class-colored during one. */}
+              {aiDetectionEnabled && (() => {
+                const cls = aiDetectionClass(aiDetection);
+                const colorClass =
+                  cls === 'failure'
+                    ? 'bg-status-error/20 text-status-error'
+                    : cls === 'warning'
+                      ? 'bg-status-warning/20 text-status-warning'
+                      : cls === 'safe'
+                        ? 'bg-status-ok/20 text-status-ok'
+                        : cls === 'error'
+                          ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
+                          : 'bg-bambu-dark-tertiary text-bambu-gray';
+                // 'error' and 'unknown' have no score to quote — saying
+                // "Safe (0.000)" for a print nothing is looking at is the
+                // whole of #2952.
+                const title =
+                  cls === 'error'
+                    ? t('printers.aiDetection.tooltipError', {
+                        reason: aiDetection?.error ?? t('printers.aiDetection.error'),
+                      })
+                    : cls === 'unknown'
+                      ? t('printers.aiDetection.tooltipUnknown')
+                      : aiDetection
+                        ? t('printers.aiDetection.tooltip', {
+                            status: t(`printers.aiDetection.${cls}`),
+                            score: aiDetection.score.toFixed(3),
+                          })
+                        : t('printers.aiDetection.tooltipIdle');
+                const Icon = cls === 'error' ? EyeOff : ScanEye;
+                return (
+                  <button
+                    onClick={() => setShowAiModal(true)}
+                    className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs cursor-pointer hover:opacity-80 transition-opacity ${colorClass}`}
+                    title={title}
+                  >
+                    <Icon className="w-[var(--pc-i3,0.75rem)] h-[var(--pc-i3,0.75rem)]" />
+                    {t(`printers.aiDetection.${cls}`)}
+                  </button>
+                );
+              })()}
               {/* Maintenance Status Indicator */}
               {showMaintenancePill && maintenanceStatusPill}
               {/* Queue Count Badge */}
@@ -5547,6 +5602,15 @@ function PrinterCard({
         />
       )}
 
+      {showAiModal && (
+        <AiDetectionModal
+          printerName={printer.name}
+          detection={aiDetection}
+          lastError={aiLastError}
+          onClose={() => setShowAiModal(false)}
+        />
+      )}
+
       {/* AMS Filament Backup status / control modal (#1762) */}
       {amsBackupModalOpen && status && (
         <AmsBackupModal
@@ -6584,6 +6648,17 @@ export function PrintersPage() {
     enabled: hasPermission('settings:read'),
     staleTime: 5 * 60 * 1000,
   });
+
+  const { data: obicoPrinterStatus } = useQuery({
+    queryKey: ['obico-printer-status'],
+    queryFn: api.getObicoPrinterStatus,
+    refetchInterval: 10000,
+  });
+  const isAiMonitored = useCallback(
+    (printerId: number) => obicoPrinterStatus?.enabled === true &&
+      (obicoPrinterStatus.monitored_printers === null || obicoPrinterStatus.monitored_printers.includes(printerId)),
+    [obicoPrinterStatus],
+  );
 
   // Parse user-configured temperature/fan presets once, with defensive fallback
   // to built-in defaults on parse failure (validators on the backend already
@@ -7680,6 +7755,9 @@ export function PrintersPage() {
                       isSelected={selectedPrinterIds.has(printer.id)}
                       onToggleSelect={toggleSelect}
                       onOpenSinglePrinter={openSinglePrinter}
+                      aiDetectionEnabled={isAiMonitored(printer.id)}
+                      aiDetection={obicoPrinterStatus?.enabled ? obicoPrinterStatus.per_printer[String(printer.id)] : undefined}
+                      aiLastError={obicoPrinterStatus?.last_error ?? null}
                     />
                   ))}
                 </div>
@@ -7728,6 +7806,9 @@ export function PrintersPage() {
               isSelected={selectedPrinterIds.has(printer.id)}
               onToggleSelect={toggleSelect}
               onOpenSinglePrinter={openSinglePrinter}
+              aiDetectionEnabled={isAiMonitored(printer.id)}
+              aiDetection={obicoPrinterStatus?.enabled ? obicoPrinterStatus.per_printer[String(printer.id)] : undefined}
+              aiLastError={obicoPrinterStatus?.last_error ?? null}
             />
           ))}
         </div>

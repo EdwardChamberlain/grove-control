@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 import httpx
 from sqlalchemy import select
 
-from backend.app.core.database import async_session
+from backend.app.core import database
 from backend.app.models.printer import Printer
 from backend.app.models.settings import Settings
 from backend.app.services.obico_smoothing import (
@@ -29,6 +29,20 @@ from backend.app.services.obico_smoothing import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _get_async_session():
+    """Resolve the current session factory at call time.
+
+    Tests replace the application database session factory with an isolated
+    engine. Keeping this lookup dynamic prevents the service from retaining
+    the production factory that was present when the module was imported.
+    The module-level name remains patchable for focused service tests.
+    """
+    return database.async_session()
+
+
+async_session = _get_async_session
 
 HISTORY_MAX = 50
 HEALTH_TIMEOUT = 5.0
@@ -42,6 +56,12 @@ FRAME_CACHE_TTL = 30.0  # seconds — Obico usually fetches within 1s of receivi
 # bytes instantly — so the 5s ceiling never races RTSP keyframe wait.
 _frame_cache: dict[str, tuple[bytes, float]] = {}
 _frame_cache_lock = asyncio.Lock()
+
+
+def auth_headers(token: str | None) -> dict[str, str]:
+    """Return the optional bearer header used by the Obico ML API."""
+    token = (token or "").strip()
+    return {"Authorization": f"Bearer {token}"} if token else {}
 
 
 def _prune_frame_cache() -> None:
@@ -83,8 +103,14 @@ class ObicoDetectionService:
         self._states: dict[int, PrintState] = {}
         # printer_id -> task_name active when state was created (used to detect new prints)
         self._state_keys: dict[int, str] = {}
-        # printer_id -> last classification ("safe"/"warning"/"failure")
+        # printer_id -> last classification ("safe"/"warning"/"failure").
+        # Only written after an inference actually came back, so a missing entry
+        # means "we have no verdict", which is not the same as "safe" (#2952).
         self._last_class: dict[int, str] = {}
+        # printer_id -> why the most recent poll produced no verdict, or absent
+        # when the last poll succeeded. Per-printer rather than global so a card
+        # can say what went wrong for *that* printer.
+        self._errors: dict[int, str] = {}
         # printer_id -> whether an action has already been fired for the current print
         self._action_fired: dict[int, bool] = {}
         # Global detection event log (most-recent-first)
@@ -111,6 +137,7 @@ class ObicoDetectionService:
         keys = [
             "obico_enabled",
             "obico_ml_url",
+            "obico_ml_token",
             "obico_sensitivity",
             "obico_action",
             "obico_poll_interval",
@@ -133,6 +160,7 @@ class ObicoDetectionService:
         return {
             "enabled": rows.get("obico_enabled", "false").lower() == "true",
             "ml_url": (rows.get("obico_ml_url") or "").rstrip("/"),
+            "ml_token": (rows.get("obico_ml_token") or "").strip(),
             "sensitivity": rows.get("obico_sensitivity", "medium"),
             "action": rows.get("obico_action", "notify"),
             "poll_interval": int(rows.get("obico_poll_interval", "10")),
@@ -176,6 +204,8 @@ class ObicoDetectionService:
                 self._states.pop(printer_id, None)
                 self._state_keys.pop(printer_id, None)
                 self._action_fired.pop(printer_id, None)
+                self._last_class.pop(printer_id, None)
+                self._errors.pop(printer_id, None)
                 continue
 
             await self._check_printer(printer_id, status, settings)
@@ -231,6 +261,17 @@ class ObicoDetectionService:
             timeout=SNAPSHOT_CAPTURE_TIMEOUT,
         )
 
+    def _no_verdict(self, printer_id: int, reason: str) -> None:
+        """Record that this poll produced no verdict for ``printer_id``.
+
+        Kept separate from the classification so the status surface can say
+        "not checking" instead of inheriting the previous verdict — or, worse,
+        the default "safe" a printer used to get before its first inference.
+        """
+        self._errors[printer_id] = reason
+        self._last_error = reason
+        logger.warning(reason)
+
     async def _check_printer(self, printer_id: int, status, settings: dict):
         task_name = getattr(status, "task_name", None) or getattr(status, "subtask_name", "") or ""
         key = f"{task_name}"
@@ -245,17 +286,16 @@ class ObicoDetectionService:
         # keyframe wait.
         frame = await self._capture_frame(printer_id)
         if not frame:
-            self._last_error = f"Failed to capture snapshot for printer {printer_id}"
-            logger.warning(self._last_error)
+            self._no_verdict(printer_id, f"Failed to capture snapshot for printer {printer_id}")
             return
 
         external_url = settings.get("external_url") or ""
         if not external_url:
-            self._last_error = (
+            self._no_verdict(
+                printer_id,
                 "external_url setting is empty — Obico's ML API needs a reachable URL to fetch the snapshot from. "
-                "Set Settings → General → External URL."
+                "Set Settings → General → External URL.",
             )
-            logger.warning(self._last_error)
             return
 
         nonce = await stash_frame(frame)
@@ -264,13 +304,33 @@ class ObicoDetectionService:
 
         try:
             async with httpx.AsyncClient(timeout=DETECTION_TIMEOUT) as client:
-                resp = await client.get(ml_url, params={"img": snapshot_url})
+                resp = await client.get(
+                    ml_url,
+                    params={"img": snapshot_url},
+                    headers=auth_headers(settings.get("ml_token")),
+                )
+                if resp.status_code == 401:
+                    # The server runs with ML_API_TOKEN set and rejected ours.
+                    # Say so plainly: the health endpoint is ungated, so "Test
+                    # Connection" passes against exactly this configuration and
+                    # a raw 401 gives the user nothing to act on (#2733).
+                    #
+                    # Obico's auth decorator runs before the handler, so a call
+                    # rejected here leaves no trace in the ML API's own log —
+                    # which is how #2952 came to be reported as "the loop never
+                    # calls the ML API" while it was calling it every 10s.
+                    self._no_verdict(
+                        printer_id,
+                        "Obico ML API rejected the token (401). Set Settings → Failure Detection → "
+                        "ML API Token to the ML_API_TOKEN the server runs with, or clear ML_API_TOKEN "
+                        "on the server.",
+                    )
+                    return
                 resp.raise_for_status()
                 payload = resp.json()
         except Exception as e:
             detail = str(e) or type(e).__name__
-            self._last_error = f"ML API call failed for printer {printer_id}: {detail}"
-            logger.warning(self._last_error)
+            self._no_verdict(printer_id, f"ML API call failed for printer {printer_id}: {detail}")
             return
 
         detections = payload.get("detections", []) if isinstance(payload, dict) else []
@@ -282,6 +342,7 @@ class ObicoDetectionService:
         # A successful capture + ML call clears any transient error from previous
         # polls (typical case: cold-start RTSP timeout on first frame after startup,
         # followed by healthy polls that otherwise leave the banner stuck in the UI).
+        self._errors.pop(printer_id, None)
         self._last_error = None
 
         # Log every non-safe sample — safe samples would flood history
@@ -320,6 +381,45 @@ class ObicoDetectionService:
 
     # ---- queries ----
 
+    def get_per_printer(self) -> dict:
+        """Live classification per actively monitored printer.
+
+        Only printers with a running, monitored print have a state entry, so
+        consumers get "show nothing" for idle printers for free.
+
+        Four classes, and the two non-verdict ones matter as much as the rest:
+
+        ``error``    the most recent poll produced no verdict. ``error`` carries
+                     the reason — a rejected token, an unreachable ML API, a
+                     camera that would not yield a frame, an unset External URL.
+        ``unknown``  monitored, but no inference has come back yet. The state
+                     entry is created when the print is first seen, which is
+                     before the first capture, so this is the honest answer for
+                     that window.
+        ``safe`` / ``warning`` / ``failure``
+                     an actual verdict from an actual inference.
+
+        This used to default to ``safe`` whenever no verdict had been recorded,
+        so a printer whose detection had never once succeeded rendered exactly
+        like a healthy one: a green badge reading "Safe" at score 0.000. That is
+        the worst possible failure mode for a safety feature — it asserts the
+        print is being watched precisely when it is not (#2952).
+        """
+        result = {}
+        for pid, state in self._states.items():
+            error = self._errors.get(pid)
+            if error:
+                verdict = "error"
+            else:
+                verdict = self._last_class.get(pid) or "unknown"
+            result[pid] = {
+                "class": verdict,
+                "frame_count": state.frame_count,
+                "score": round(state.ewm_mean, 4),
+                "error": error,
+            }
+        return result
+
     def get_status(self, sensitivity: str = "medium") -> dict:
         # Report the thresholds for the configured sensitivity, not a hardcoded
         # "medium" — otherwise the Status panel always shows the medium row
@@ -329,33 +429,57 @@ class ObicoDetectionService:
         return {
             "is_running": self._task is not None and not self._task.done(),
             "last_error": self._last_error,
-            "per_printer": {
-                pid: {
-                    "class": self._last_class.get(pid, "safe"),
-                    "frame_count": state.frame_count,
-                    "score": round(state.ewm_mean, 4),
-                }
-                for pid, state in self._states.items()
-            },
+            "per_printer": self.get_per_printer(),
             "thresholds": {"low": low, "high": high},
             "history": list(self._history),
         }
 
-    async def test_connection(self, url: str) -> dict:
-        """Ping the ML API health endpoint. Returns {ok, status_code, body, error}."""
+    async def test_connection(self, url: str, token: str = "") -> dict:
+        """Check ML API health and whether an optional token is accepted."""
         target = f"{url.rstrip('/')}/hc/"
         try:
             async with httpx.AsyncClient(timeout=HEALTH_TIMEOUT) as client:
-                resp = await client.get(target)
-            body = resp.text.strip()
-            return {
-                "ok": resp.status_code == 200 and body.lower() == "ok",
-                "status_code": resp.status_code,
-                "body": body,
-                "error": None,
-            }
+                resp = await client.get(target, headers=auth_headers(token))
+                body = resp.text.strip()
+                if resp.status_code != 200 or body.lower() != "ok":
+                    return {
+                        "ok": False,
+                        "status_code": resp.status_code,
+                        "body": body,
+                        "error": None,
+                        "auth_ok": None,
+                    }
+                try:
+                    probe = await client.get(f"{url.rstrip('/')}/p/", headers=auth_headers(token))
+                    auth_ok = probe.status_code != 401
+                except Exception:
+                    auth_ok = None
+                if auth_ok is False:
+                    return {
+                        "ok": False,
+                        "status_code": 401,
+                        "body": body,
+                        "error": (
+                            "The ML API is reachable but rejected the token. Enter the ML_API_TOKEN value, "
+                            "or clear ML_API_TOKEN on the server."
+                        ),
+                        "auth_ok": False,
+                    }
+                return {
+                    "ok": True,
+                    "status_code": resp.status_code,
+                    "body": body,
+                    "error": None,
+                    "auth_ok": auth_ok,
+                }
         except Exception as e:
-            return {"ok": False, "status_code": None, "body": None, "error": str(e) or type(e).__name__}
+            return {
+                "ok": False,
+                "status_code": None,
+                "body": None,
+                "error": str(e) or type(e).__name__,
+                "auth_ok": None,
+            }
 
 
 obico_detection_service = ObicoDetectionService()

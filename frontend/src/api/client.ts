@@ -340,6 +340,12 @@ export interface HMSError {
   // this back as HmsActionBody.print_error so we don't truncate the 64-bit
   // identifier into the silent-rejection short code (#1830).
   full_code?: string;
+  // The backend's resolved catalogue sentence for this fault (#2926). English
+  // only, and null when the catalogue does not cover the code. Resolved with the
+  // same lookup order this file's consumers use (full_code, then the G1_G4
+  // collapse), so it agrees with what HMSErrorModal renders — the modal still
+  // resolves its own text, and this is here for parity with the API.
+  description?: string | null;
 }
 
 export interface HMSActionBody {
@@ -684,6 +690,8 @@ export interface ArchiveSlim {
   started_at: string | null;
   completed_at: string | null;
   cost: number | null;
+  energy_kwh: number | null;
+  energy_cost: number | null;
   quantity: number;
   created_at: string;
 }
@@ -1238,6 +1246,7 @@ export interface AppSettings {
   ldap_default_group: string;
   obico_enabled: boolean;
   obico_ml_url: string;
+  obico_ml_token: string;
   obico_sensitivity: 'low' | 'medium' | 'high';
   obico_action: 'notify' | 'pause' | 'pause_and_off';
   obico_poll_interval: number;
@@ -1686,7 +1695,14 @@ export interface SmartPlug {
   rest_energy_url: string | null;
   rest_energy_path: string | null;
   rest_energy_multiplier: number;
+  // Lifetime counter, separate from the daily one (#2539). A Shelly reports only
+  // this; Today and Yesterday are derived from its hourly snapshots.
+  rest_energy_total_path: string | null;
+  rest_energy_total_multiplier: number;
   printer_id: number | null;
+  // #2629: only a plug that really feeds the printer may mark it offline when
+  // switched off. Accessory plugs follow the print cycle without powering it.
+  controls_printer_power: boolean;
   enabled: boolean;
   auto_on: boolean;
   auto_off: boolean;
@@ -1760,7 +1776,11 @@ export interface SmartPlugCreate {
   rest_energy_url?: string | null;
   rest_energy_path?: string | null;
   rest_energy_multiplier?: number;
+  rest_energy_total_path?: string | null;
+  rest_energy_total_multiplier?: number;
   printer_id?: number | null;
+  // #2629
+  controls_printer_power?: boolean;
   enabled?: boolean;
   auto_on?: boolean;
   auto_off?: boolean;
@@ -1826,7 +1846,11 @@ export interface SmartPlugUpdate {
   rest_energy_url?: string | null;
   rest_energy_path?: string | null;
   rest_energy_multiplier?: number;
+  rest_energy_total_path?: string | null;
+  rest_energy_total_multiplier?: number;
   printer_id?: number | null;
+  // #2629
+  controls_printer_power?: boolean;
   enabled?: boolean;
   auto_on?: boolean;
   auto_off?: boolean;
@@ -2477,7 +2501,7 @@ export interface ObicoDetectionEvent {
 export interface ObicoStatus {
   is_running: boolean;
   last_error: string | null;
-  per_printer: Record<string, { class: string; frame_count: number; score: number }>;
+  per_printer: Record<string, { class: string; frame_count: number; score: number; error?: string | null }>;
   thresholds: { low: number; high: number };
   history: ObicoDetectionEvent[];
   enabled: boolean;
@@ -2493,6 +2517,14 @@ export interface ObicoTestConnection {
   status_code: number | null;
   body: string | null;
   error: string | null;
+  auth_ok?: boolean | null;
+}
+
+export interface ObicoPrinterStatus {
+  enabled: boolean;
+  monitored_printers: number[] | null;
+  per_printer: Record<string, { class: string; frame_count: number; score: number; error?: string | null }>;
+  last_error: string | null;
 }
 
 export interface GitHubTestConnectionResponse {
@@ -6191,10 +6223,13 @@ export const api = {
   getObicoStatus: () =>
     request<ObicoStatus>('/obico/status'),
 
-  testObicoConnection: (url: string) =>
+  getObicoPrinterStatus: () =>
+    request<ObicoPrinterStatus>('/obico/printer-status'),
+
+  testObicoConnection: (url: string, token?: string) =>
     request<ObicoTestConnection>('/obico/test-connection', {
       method: 'POST',
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, ...(token !== undefined ? { token } : {}) }),
     }),
 
   // Slicer API — slice in the background. Both endpoints return 202 + a
