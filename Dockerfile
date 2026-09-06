@@ -153,6 +153,10 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
 
 # Run the application
 # Use standard asyncio loop (uvloop has permission issues in some Docker environments)
-# Port is configurable via PORT environment variable (default: 8000)
+# Port is configurable via PORT environment variable (default: 8000).
+# Keep uvicorn as PID 1 so Docker signals reach the application directly.
+# Bound graceful shutdown prevents an open MJPEG response from consuming the
+# entire Compose stop grace period and being killed without checkpointing.
+ENV UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN=5
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-CMD ["sh", "-c", "uvicorn backend.app.main:app --host 0.0.0.0 --port ${PORT:-8000} --loop asyncio"]
+CMD ["sh", "-c", "exec uvicorn backend.app.main:app --host 0.0.0.0 --port ${PORT:-8000} --loop asyncio --timeout-graceful-shutdown ${UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN}"]
