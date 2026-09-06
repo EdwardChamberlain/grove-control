@@ -579,25 +579,23 @@ async def create_backup_zip(output_path: Path | None = None) -> tuple[Path, str]
             import json
             import sqlite3
 
+            from sqlalchemy import create_engine as create_sync_engine
+
             from backend.app.core.database import Base, engine
 
             backup_db_path = temp_path / "bambuddy.db"
-            dst = sqlite3.connect(str(backup_db_path))
             metadata = Base.metadata
 
-            # Create tables in SQLite backup (simplified — just column names and types)
-            for table in metadata.sorted_tables:
-                cols = []
-                pk_cols = [col.name for col in table.columns if col.primary_key]
-                for col in table.columns:
-                    col_type = _sqlalchemy_type_to_sqlite_type(str(col.type))
-                    # Only inline PRIMARY KEY for single-column PKs
-                    pk = " PRIMARY KEY" if col.primary_key and len(pk_cols) == 1 else ""
-                    cols.append(f"{col.name} {col_type}{pk}")
-                # Add composite primary key constraint if needed
-                if len(pk_cols) > 1:
-                    cols.append(f"PRIMARY KEY ({', '.join(pk_cols)})")
-                dst.execute(f"CREATE TABLE IF NOT EXISTS {table.name} ({', '.join(cols)})")  # noqa: S608
+            # Use SQLAlchemy's native SQLite DDL so NOT NULL, defaults, foreign
+            # keys, unique constraints, indexes, and BLOB columns survive a
+            # PostgreSQL -> SQLite backup/restore.
+            schema_engine = create_sync_engine(f"sqlite:///{backup_db_path}")
+            try:
+                metadata.create_all(schema_engine)
+            finally:
+                schema_engine.dispose()
+
+            dst = sqlite3.connect(str(backup_db_path))
 
             # Export data from Postgres to SQLite
             async with engine.connect() as conn:

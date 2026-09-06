@@ -846,6 +846,10 @@ export function SettingsPage() {
   const pendingGcodeSnippetsRef = useRef<string | null>(null);
   const isSavingRef = useRef(false);
   const isInitialLoadRef = useRef(true);
+  // Keep the last server snapshot separately from the live query result. A
+  // refetch may contain another user's edit and must not be mistaken for a
+  // local edit that this page should write back.
+  const serverBaselineRef = useRef<AppSettings | null>(null);
 
   // Sync local state when settings load
   useEffect(() => {
@@ -855,6 +859,9 @@ export function SettingsPage() {
         ...settings,
         external_url: settings.external_url || window.location.origin,
       };
+      // Keep the raw row so browser-detected external_url remains a local
+      // change and is still persisted by the normal save path.
+      serverBaselineRef.current = settings;
       setLocalSettings(settingsWithExternalUrl);
       // Mark initial load complete after a short delay
       setTimeout(() => {
@@ -863,9 +870,30 @@ export function SettingsPage() {
     }
   }, [settings, localSettings]);
 
+  // Adopt server-side changes for fields that the user has not edited since
+  // the last snapshot. Fields edited locally remain local and are saved over
+  // the server value by the debounced effect below.
+  useEffect(() => {
+    const baseline = serverBaselineRef.current;
+    if (!settings || !localSettings || !baseline || settings === baseline) {
+      return;
+    }
+    const adopted: Record<string, unknown> = {};
+    for (const key of Object.keys(settings) as (keyof AppSettings)[]) {
+      if (settings[key] !== baseline[key] && localSettings[key] === baseline[key]) {
+        adopted[key] = settings[key];
+      }
+    }
+    serverBaselineRef.current = settings;
+    if (Object.keys(adopted).length > 0) {
+      setLocalSettings((previous) => previous ? { ...previous, ...(adopted as Partial<AppSettings>) } : previous);
+    }
+  }, [settings, localSettings]);
+
   const updateMutation = useMutation({
     mutationFn: api.updateSettings,
     onSuccess: (data) => {
+      serverBaselineRef.current = data;
       queryClient.setQueryData(['settings'], data);
       // Don't call setLocalSettings(data) here — it would overwrite in-progress
       // user input (e.g. typing a hostname) with the stale saved snapshot,
@@ -905,8 +933,9 @@ export function SettingsPage() {
 
   // Debounced auto-save when localSettings change
   useEffect(() => {
+    const baseline = serverBaselineRef.current;
     // Skip if initial load or no settings
-    if (isInitialLoadRef.current || !localSettings || !settings) {
+    if (isInitialLoadRef.current || !localSettings || !settings || !baseline) {
       return;
     }
 
@@ -918,8 +947,10 @@ export function SettingsPage() {
       return;
     }
 
-    // Check if there are actual changes
-    const hasChanges =
+    // Compare against the last server snapshot, not the live query result.
+    {
+      const settings = baseline;
+      const hasChanges =
       settings.auto_archive !== localSettings.auto_archive ||
       settings.save_thumbnails !== localSettings.save_thumbnails ||
       settings.capture_finish_photo !== localSettings.capture_finish_photo ||
@@ -988,8 +1019,9 @@ export function SettingsPage() {
       (settings.fan_speed_presets ?? '') !== (localSettings.fan_speed_presets ?? '') ||
       (settings.session_max_hours ?? 24) !== (localSettings.session_max_hours ?? 24);
 
-    if (!hasChanges) {
-      return;
+      if (!hasChanges) {
+        return;
+      }
     }
 
     // Don't queue more saves while one is in progress

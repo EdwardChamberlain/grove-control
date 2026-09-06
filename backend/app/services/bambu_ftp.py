@@ -938,12 +938,14 @@ async def download_file_try_paths_async(
     local_path: Path,
     socket_timeout: float | None = None,
     printer_model: str | None = None,
+    timeout: float = 90.0,
 ) -> bool:
     """Try downloading a file from multiple paths using a single connection.
 
     Args:
         socket_timeout: FTP socket timeout for slow connections (e.g., A1 printers)
         printer_model: Printer model for A1-specific workarounds
+        timeout: overall async cap, including time waiting for an executor slot
     """
     loop = asyncio.get_event_loop()
 
@@ -966,7 +968,11 @@ async def download_file_try_paths_async(
         finally:
             client.disconnect()
 
-    return await loop.run_in_executor(None, _download)
+    try:
+        return await asyncio.wait_for(loop.run_in_executor(None, _download), timeout=timeout)
+    except TimeoutError:
+        logger.warning("FTP download_try_paths exceeded its %ss cap for %s", timeout, ip_address)
+        return False
 
 
 async def upload_file_async(
@@ -1085,6 +1091,7 @@ async def delete_file_async(
     remote_path: str,
     socket_timeout: float | None = None,
     printer_model: str | None = None,
+    timeout: float = 60.0,
 ) -> DeleteResult:
     """Async wrapper for deleting a file.
 
@@ -1095,6 +1102,7 @@ async def delete_file_async(
     Args:
         socket_timeout: FTP socket timeout for slow connections (e.g., A1 printers)
         printer_model: Printer model for A1-specific workarounds
+        timeout: overall async cap, including time waiting for an executor slot
     """
     loop = asyncio.get_event_loop()
 
@@ -1107,7 +1115,11 @@ async def delete_file_async(
                 client.disconnect()
         return DeleteResult.FAILED
 
-    return await loop.run_in_executor(None, _delete)
+    try:
+        return await asyncio.wait_for(loop.run_in_executor(None, _delete), timeout=timeout)
+    except TimeoutError:
+        logger.warning("FTP delete_file exceeded its %ss cap for %s", timeout, ip_address)
+        return DeleteResult.FAILED
 
 
 async def download_file_bytes_async(
@@ -1116,12 +1128,14 @@ async def download_file_bytes_async(
     remote_path: str,
     socket_timeout: float | None = None,
     printer_model: str | None = None,
+    timeout: float = 300.0,
 ) -> bytes | None:
     """Async wrapper for downloading file as bytes.
 
     Args:
         socket_timeout: FTP socket timeout for slow connections (e.g., A1 printers)
         printer_model: Printer model for A1-specific workarounds
+        timeout: overall async cap, including time waiting for an executor slot
     """
     loop = asyncio.get_event_loop()
 
@@ -1134,7 +1148,11 @@ async def download_file_bytes_async(
                 client.disconnect()
         return None
 
-    return await loop.run_in_executor(None, _download)
+    try:
+        return await asyncio.wait_for(loop.run_in_executor(None, _download), timeout=timeout)
+    except TimeoutError:
+        logger.warning("FTP download_bytes exceeded its %ss cap for %s", timeout, ip_address)
+        return None
 
 
 async def get_storage_info_async(
@@ -1142,12 +1160,14 @@ async def get_storage_info_async(
     access_code: str,
     socket_timeout: float | None = None,
     printer_model: str | None = None,
+    timeout: float = 60.0,
 ) -> dict | None:
     """Async wrapper for getting storage info.
 
     Args:
         socket_timeout: FTP socket timeout for slow connections (e.g., A1 printers)
         printer_model: Printer model for A1-specific workarounds
+        timeout: overall async cap, including time waiting for an executor slot
     """
     loop = asyncio.get_event_loop()
 
@@ -1160,7 +1180,11 @@ async def get_storage_info_async(
                 client.disconnect()
         return None
 
-    return await loop.run_in_executor(None, _get_storage)
+    try:
+        return await asyncio.wait_for(loop.run_in_executor(None, _get_storage), timeout=timeout)
+    except TimeoutError:
+        logger.warning("FTP get_storage_info exceeded its %ss cap for %s", timeout, ip_address)
+        return None
 
 
 async def get_ftp_retry_settings() -> tuple[bool, int, float, float]:
