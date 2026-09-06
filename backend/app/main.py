@@ -1021,11 +1021,13 @@ def _maybe_start_layer_timelapse(printer, printer_id: int, archive_id: int) -> b
 def _format_hms_error_summary(hms_errors: list[dict]) -> str | None:
     """Build a human-readable failure reason from MQTT hms_errors for PrintQueueItem.error_message.
 
-    Each entry has keys: code ('0x4038'), attr (32-bit int), module, severity.
-    The short code used for the hms_errors.py lookup table is 'MMMM_EEEE' — module
-    from attr bits 16-31, error from the numeric part of code. Falls back to the raw
-    short code when no description is on file. Returns None for an empty list so
-    callers can leave error_message unset.
+    Each entry has keys: code ('0x4038'), attr (32-bit int), module, severity, and
+    — since #2926 — the description the parser already resolved, which is preferred
+    when present so the queue's failure reason reads the same as the status
+    response. The short code still produces the bracketed label, and still
+    resolves the sentence for a caller whose entries predate the field. Falls back
+    to the bare short code when no description is on file. Returns None for an
+    empty list so callers can leave error_message unset.
     """
     if not hms_errors:
         return None
@@ -1034,13 +1036,15 @@ def _format_hms_error_summary(hms_errors: list[dict]) -> str | None:
     parts: list[str] = []
     for err in hms_errors:
         try:
-            code_str = str(err.get("code", "")).replace("0x", "")
-            error_num = int(code_str, 16) if code_str else 0
-            module_num = (int(err.get("attr", 0)) >> 16) & 0xFFFF
-            short_code = f"{module_num:04X}_{error_num:04X}"
+            # `_hms_short_code` rather than a local derivation: this one used to
+            # format the error without masking it to 16 bits, so an `hms[]` entry
+            # whose code carries an alert-level group produced a five-digit label
+            # like "0500_3000A" — not a code the user can look up, and never a
+            # catalogue key, so the sentence was lost with it.
+            short_code = _hms_short_code(err.get("attr", 0), err.get("code", 0))
         except (TypeError, ValueError):
             continue
-        description = get_error_description(short_code)
+        description = err.get("description") or get_error_description(short_code)
         parts.append(f"[{short_code}] {description}" if description else f"[{short_code}]")
     return "; ".join(parts) if parts else None
 
@@ -1277,21 +1281,25 @@ async def on_printer_status_change(printer_id: int, state: PrinterState):
         if current_milestone > last_milestone:
             _last_progress_milestone[printer_id] = current_milestone
             try:
-                async with async_session() as db:
-                    from backend.app.models.printer import Printer
+                from backend.app.models.printer import Printer
 
+                # Read the printer in a short session and release the connection
+                # BEFORE the ~15s camera snapshot below — holding it across the grab
+                # pinned a pooled connection per milestone, per printer (issue #2572).
+                async with async_session() as db:
                     result = await db.execute(select(Printer).where(Printer.id == printer_id))
                     printer = result.scalar_one_or_none()
-                    printer_name = printer.name if printer else f"Printer {printer_id}"
-                    filename = state.subtask_name or state.gcode_file or "Unknown"
-                    # remaining_time is in minutes, convert to seconds for notification
-                    remaining_time_seconds = state.remaining_time * 60 if state.remaining_time else None
 
-                    # Capture camera snapshot for notification image attachment
-                    image_data = await _capture_snapshot_for_notification(
-                        printer_id, printer, logging.getLogger(__name__)
-                    )
+                printer_name = printer.name if printer else f"Printer {printer_id}"
+                filename = state.subtask_name or state.gcode_file or "Unknown"
+                # remaining_time is in minutes, convert to seconds for notification
+                remaining_time_seconds = state.remaining_time * 60 if state.remaining_time else None
 
+                # Capture camera snapshot for notification image attachment (no DB held).
+                image_data = await _capture_snapshot_for_notification(printer_id, printer, logging.getLogger(__name__))
+
+                # Notification send needs a session (provider/template lookups).
+                async with async_session() as db:
                     await notification_service.on_print_progress(
                         printer_id,
                         printer_name,
@@ -1334,30 +1342,33 @@ async def on_printer_status_change(printer_id: int, state: PrinterState):
             new_errors = [e for e in current_hms_errors if f"{e.attr:08x}" in new_error_codes and e.severity >= 2]
 
             try:
-                async with async_session() as db:
-                    from backend.app.models.printer import Printer
+                from backend.app.models.printer import Printer
 
+                # Read the printer in a short session and release the connection
+                # BEFORE the ~15s camera snapshot below (issue #2572).
+                async with async_session() as db:
                     result = await db.execute(select(Printer).where(Printer.id == printer_id))
                     printer = result.scalar_one_or_none()
-                    printer_name = printer.name if printer else f"Printer {printer_id}"
 
-                    # Format error details for notification
-                    # Module 0x07 = AMS/Filament, 0x05 = Nozzle, 0x0C = Motion Controller, etc.
-                    module_names = {
-                        0x03: "Print/Task",
-                        0x05: "Nozzle/Extruder",
-                        0x07: "AMS/Filament",
-                        0x0C: "Motion Controller",
-                        0x12: "Chamber",
-                    }
+                printer_name = printer.name if printer else f"Printer {printer_id}"
 
-                    from backend.app.services.hms_errors import get_error_description
+                # Format error details for notification
+                # Module 0x07 = AMS/Filament, 0x05 = Nozzle, 0x0C = Motion Controller, etc.
+                module_names = {
+                    0x03: "Print/Task",
+                    0x05: "Nozzle/Extruder",
+                    0x07: "AMS/Filament",
+                    0x0C: "Motion Controller",
+                    0x12: "Chamber",
+                }
 
-                    # Capture camera snapshot once for all error notifications
-                    error_image_data = await _capture_snapshot_for_notification(
-                        printer_id, printer, logging.getLogger(__name__)
-                    )
+                # Capture camera snapshot once for all error notifications (no DB held).
+                error_image_data = await _capture_snapshot_for_notification(
+                    printer_id, printer, logging.getLogger(__name__)
+                )
 
+                # Notification sends need a session (provider/template lookups).
+                async with async_session() as db:
                     sent_count = 0
                     for error in new_errors:
                         module_name = module_names.get(error.module, f"Module 0x{error.module:02X}")
@@ -1369,7 +1380,9 @@ async def on_printer_status_change(printer_id: int, state: PrinterState):
 
                         # Only notify for errors with known descriptions — printers
                         # send many undocumented/phantom codes that aren't real errors.
-                        description = get_error_description(short_code)
+                        # Resolved at parse time (#2926); short_code is still needed
+                        # for the suppression set below.
+                        description = error.description
                         if not description or short_code in _HMS_NOTIFICATION_SUPPRESS:
                             continue
 
@@ -1386,21 +1399,21 @@ async def on_printer_status_change(printer_id: int, state: PrinterState):
                             f"[HMS] Sent notification for {sent_count} error(s) on printer {printer_id}"
                         )
 
-                    # Also publish to MQTT relay
-                    printer_info = printer_manager.get_printer(printer_id)
-                    if printer_info:
-                        errors_data = [
-                            {
-                                "code": e.code,
-                                "attr": e.attr,
-                                "module": e.module,
-                                "severity": e.severity,
-                            }
-                            for e in new_errors
-                        ]
-                        await mqtt_relay.on_printer_error(
-                            printer_id, printer_info.name, printer_info.serial_number, errors_data
-                        )
+                # Also publish to MQTT relay (no DB).
+                printer_info = printer_manager.get_printer(printer_id)
+                if printer_info:
+                    errors_data = [
+                        {
+                            "code": e.code,
+                            "attr": e.attr,
+                            "module": e.module,
+                            "severity": e.severity,
+                        }
+                        for e in new_errors
+                    ]
+                    await mqtt_relay.on_printer_error(
+                        printer_id, printer_info.name, printer_info.serial_number, errors_data
+                    )
 
             except Exception as e:
                 logging.getLogger(__name__).warning(f"HMS error notification failed: {e}")
@@ -4466,38 +4479,19 @@ async def on_print_complete(printer_id: int, data: dict):
             except Exception:
                 pass  # Don't fail if notification fails
 
-            # Handle auto_off_after - power off printer if requested (after cooldown)
+            # Handle auto_off_after - power off printer if the queue item opted
+            # in. Delegates to the smart-plug manager so the off honours each
+            # plug's configured strategy (time delay or temperature threshold),
+            # is cancelled if the printer starts printing again, and never cuts
+            # power on a loaded print (#1890). Previously an inline block here
+            # hardcoded a 50°C / 600s cooldown wait and powered off on the
+            # timeout regardless of print state — cutting a touchscreen reprint.
             if queue_auto_off:
-                async with async_session() as db:
-                    result = await db.execute(select(SmartPlug).where(SmartPlug.printer_id == printer_id))
-                    plugs = list(result.scalars().all())
-                enabled_plugs = [p for p in plugs if p.enabled]
-                if enabled_plugs:
-                    logger.info("Auto-off requested for printer %s, waiting for cooldown...", printer_id)
-
-                    async def cooldown_and_poweroff(pid: int, plug_ids: list[int]):
-                        # Wait for nozzle to cool down
-                        await printer_manager.wait_for_cooldown(pid, target_temp=50.0, timeout=600)
-                        # Re-fetch plugs in new session and turn off each one
-                        async with async_session() as new_db:
-                            for plug_id in plug_ids:
-                                try:
-                                    result = await new_db.execute(select(SmartPlug).where(SmartPlug.id == plug_id))
-                                    p = result.scalar_one_or_none()
-                                    if p and p.enabled:
-                                        service = await smart_plug_manager.get_service_for_plug(p, new_db)
-                                        success = await service.turn_off(p)
-                                        if success:
-                                            logger.info("Powered off printer %s via smart plug '%s'", pid, p.name)
-                                        else:
-                                            logger.warning("Failed to power off plug '%s' for printer %s", p.name, pid)
-                                except Exception as e:
-                                    logger.warning("Failed to power off plug %s for printer %s: %s", plug_id, pid, e)
-
-                    spawn_background_task(
-                        cooldown_and_poweroff(printer_id, [p.id for p in enabled_plugs]),
-                        name=f"cooldown-poweroff-{printer_id}",
-                    )
+                try:
+                    async with async_session() as db:
+                        await smart_plug_manager.schedule_off_after_queue_job(printer_id, db)
+                except Exception as e:
+                    logger.warning("Failed to schedule queue auto-off for printer %s: %s", printer_id, e)
     except Exception as e:
         logging.getLogger(__name__).warning(f"Queue item update failed: {e}")
 

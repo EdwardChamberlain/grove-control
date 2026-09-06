@@ -5,6 +5,7 @@ Tests the full request/response cycle for /api/v1/notifications/ endpoints.
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import text
 
 
 class TestNotificationsAPI:
@@ -37,6 +38,52 @@ class TestNotificationsAPI:
         data = response.json()
         assert len(data) >= 1
         assert any(p["name"] == "Test Provider" for p in data)
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_a_row_with_null_event_flags_is_still_listable(
+        self, async_client: AsyncClient, notification_provider_factory, db_session
+    ):
+        """A legacy row whose flag columns were never backfilled must not 500 the list.
+
+        Every on_* column is nullable with no server default, so a row created
+        before a flag existed keeps NULL there until a migration backfills it --
+        and #1184's ALTER ... DEFAULT false silently did not, on any install
+        where create_all() had already added the column. Declaring those flags
+        on the response schema in #2827 turned those NULLs into a hard failure:
+        pydantic rejects None for a bool, so every provider row failed at once
+        and the list came back empty to the UI.
+
+        Written against the two flags that actually broke, but the whole set is
+        checked -- the next flag added to the schema has the same exposure.
+        """
+        provider = await notification_provider_factory(name="Legacy Provider")
+
+        flags = ["on_stock_reorder_alert", "on_stock_break_alert"]
+        await db_session.execute(
+            text(f"UPDATE notification_providers SET {', '.join(f'{f} = NULL' for f in flags)} WHERE id = :id"),
+            {"id": provider.id},
+        )
+        await db_session.commit()
+
+        stored = await db_session.execute(
+            text(f"SELECT {', '.join(flags)} FROM notification_providers WHERE id = :id"), {"id": provider.id}
+        )
+        assert all(value is None for value in stored.one()), "row under test must actually hold NULLs"
+
+        response = await async_client.get("/api/v1/notifications/")
+
+        assert response.status_code == 200
+        listed = next(p for p in response.json() if p["name"] == "Legacy Provider")
+        # Off, not the field default: the sender selects on `.is_(True)`, so a
+        # NULL flag never sent anything, and repairing the read must not switch
+        # a notification on.
+        assert all(listed[flag] is False for flag in flags)
+
+        # The single-provider route reads through the same schema.
+        single = await async_client.get(f"/api/v1/notifications/{provider.id}")
+        assert single.status_code == 200
+        assert all(single.json()[flag] is False for flag in flags)
 
     # ========================================================================
     # Create endpoints

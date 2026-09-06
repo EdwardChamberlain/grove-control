@@ -59,6 +59,8 @@ export function AddSmartPlugModal({ plug, onClose }: AddSmartPlugModalProps) {
   const [restEnergyUrl, setRestEnergyUrl] = useState(plug?.rest_energy_url || '');
   const [restEnergyPath, setRestEnergyPath] = useState(plug?.rest_energy_path || '');
   const [restEnergyMultiplier, setRestEnergyMultiplier] = useState<string>((plug?.rest_energy_multiplier ?? 1).toString());
+  const [restEnergyTotalPath, setRestEnergyTotalPath] = useState(plug?.rest_energy_total_path || '');
+  const [restEnergyTotalMultiplier, setRestEnergyTotalMultiplier] = useState<string>((plug?.rest_energy_total_multiplier ?? 1).toString());
   // HA energy sensor entities (optional)
   const [haPowerEntity, setHaPowerEntity] = useState(plug?.ha_power_entity || '');
   const [haEnergyTodayEntity, setHaEnergyTodayEntity] = useState(plug?.ha_energy_today_entity || '');
@@ -83,6 +85,9 @@ export function AddSmartPlugModal({ plug, onClose }: AddSmartPlugModalProps) {
   const energyTotalDropdownRef = useRef<HTMLDivElement>(null);
 
   const [printerId, setPrinterId] = useState<number | null>(plug?.printer_id || null);
+  // #2629: defaults to true (a plug linked to a printer usually powers it);
+  // users turn it off for accessories like a filter fan or chamber light.
+  const [controlsPrinterPower, setControlsPrinterPower] = useState(plug?.controls_printer_power ?? true);
   const [testResult, setTestResult] = useState<{ success: boolean; state?: string | null; device_name?: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -382,9 +387,12 @@ export function AddSmartPlugModal({ plug, onClose }: AddSmartPlugModalProps) {
       rest_energy_url: plugType === 'rest' ? (restEnergyUrl.trim() || null) : null,
       rest_energy_path: plugType === 'rest' ? (restEnergyPath.trim() || null) : null,
       rest_energy_multiplier: plugType === 'rest' ? (parseFloat(restEnergyMultiplier) || 1) : 1,
+      rest_energy_total_path: plugType === 'rest' ? (restEnergyTotalPath.trim() || null) : null,
+      rest_energy_total_multiplier: plugType === 'rest' ? (parseFloat(restEnergyTotalMultiplier) || 1) : 1,
       username: plugType === 'tasmota' ? (username.trim() || null) : null,
       password: plugType === 'tasmota' ? (password.trim() || null) : null,
       printer_id: printerId,
+      controls_printer_power: controlsPrinterPower,
       // Power alerts
       power_alert_enabled: powerAlertEnabled,
       power_alert_high: powerAlertHigh ? parseFloat(powerAlertHigh) : null,
@@ -1313,9 +1321,35 @@ export function AddSmartPlugModal({ plug, onClose }: AddSmartPlugModalProps) {
                     />
                   </div>
                 </div>
-
                 <p className="text-xs text-bambu-gray">
                   {t('smartPlugs.restEnergyHint')}
+                </p>
+
+                {/* Lifetime counter (#2539) — the only energy figure a Shelly has. */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm text-bambu-gray mb-1">{t('smartPlugs.restEnergyTotalPath')}</label>
+                    <input
+                      type="text"
+                      value={restEnergyTotalPath}
+                      onChange={(e) => setRestEnergyTotalPath(e.target.value)}
+                      placeholder={t('smartPlugs.restEnergyTotalPathHint')}
+                      className="w-full px-3 py-2 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg text-white placeholder-bambu-gray focus:border-bambu-green focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-bambu-gray mb-1">{t('smartPlugs.restEnergyTotalMultiplier')}</label>
+                    <input
+                      type="text"
+                      value={restEnergyTotalMultiplier}
+                      onChange={(e) => setRestEnergyTotalMultiplier(e.target.value)}
+                      placeholder="1"
+                      className="w-full px-3 py-2 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg text-white placeholder-bambu-gray focus:border-bambu-green focus:outline-none"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-bambu-gray">
+                  {t('smartPlugs.restEnergyTotalHint')}
                 </p>
               </div>
 
@@ -1476,6 +1510,26 @@ export function AddSmartPlugModal({ plug, onClose }: AddSmartPlugModalProps) {
               <p className="text-xs text-bambu-gray mt-1">
                 {t('smartPlugs.linkingDescription')}
               </p>
+
+              {/* Whether the plug feeds the printer itself, or is an accessory
+                  that merely follows the print cycle (#2629). */}
+              {printerId !== null && (
+                <div className="flex items-center justify-between mt-3">
+                  <div className="pr-3">
+                    <p className="text-sm text-white">{t('smartPlugs.controlsPrinterPower')}</p>
+                    <p className="text-xs text-bambu-gray">{t('smartPlugs.controlsPrinterPowerDescription')}</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={controlsPrinterPower}
+                      onChange={(e) => setControlsPrinterPower(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-bambu-dark-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-bambu-green"></div>
+                  </label>
+                </div>
+              )}
             </div>
           )}
 
