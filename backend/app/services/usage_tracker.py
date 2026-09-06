@@ -326,6 +326,40 @@ async def persist_session(
     await db.commit()
 
 
+async def update_persisted_session_context(
+    db: AsyncSession,
+    printer_id: int,
+    *,
+    ams_mapping: list[int] | None = None,
+    plate_id: int | None = None,
+) -> bool:
+    """Persist context learned while promoting an expected print.
+
+    ``on_print_start`` persists its session before the later archive lookup can
+    promote a queue/reprint registration. Keep that late-added mapping and
+    plate durable as well as updating the in-memory session, otherwise a
+    restart between print start and completion loses the attribution context.
+    Existing values win because the queue session may already contain a more
+    authoritative value than the process-local expected-print registry.
+    """
+    from backend.app.models.active_print_session import ActivePrintSession
+
+    row = await db.get(ActivePrintSession, printer_id)
+    if row is None:
+        return False
+
+    changed = False
+    if ams_mapping and not row.ams_mapping:
+        row.ams_mapping = list(ams_mapping)
+        changed = True
+    if plate_id is not None and row.plate_id is None:
+        row.plate_id = plate_id
+        changed = True
+    if changed:
+        await db.commit()
+    return changed
+
+
 async def record_tray_change(db: AsyncSession, printer_id: int, tray_global: int, layer_num: int) -> None:
     """Append one tray change to the persisted log.
 

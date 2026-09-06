@@ -191,6 +191,63 @@ class TestExpectedPrintDetection:
         assert any(k in _expected_prints for k in keys)
 
 
+class TestPersistedExpectedPrintContext:
+    """Late promotion updates must survive a restart before completion."""
+
+    class _FakeDB:
+        def __init__(self, row):
+            self.row = row
+            self.commits = 0
+
+        async def get(self, _model, _printer_id):
+            return self.row
+
+        async def commit(self):
+            self.commits += 1
+
+    @pytest.mark.asyncio
+    async def test_persists_mapping_and_plate_for_late_promotion(self):
+        from types import SimpleNamespace
+
+        from backend.app.services.usage_tracker import update_persisted_session_context
+
+        row = SimpleNamespace(ams_mapping=None, plate_id=None)
+        db = self._FakeDB(row)
+
+        changed = await update_persisted_session_context(
+            db,
+            printer_id=1,
+            ams_mapping=[2, -1],
+            plate_id=3,
+        )
+
+        assert changed is True
+        assert row.ams_mapping == [2, -1]
+        assert row.plate_id == 3
+        assert db.commits == 1
+
+    @pytest.mark.asyncio
+    async def test_does_not_overwrite_existing_queue_context(self):
+        from types import SimpleNamespace
+
+        from backend.app.services.usage_tracker import update_persisted_session_context
+
+        row = SimpleNamespace(ams_mapping=[5], plate_id=1)
+        db = self._FakeDB(row)
+
+        changed = await update_persisted_session_context(
+            db,
+            printer_id=1,
+            ams_mapping=[2, -1],
+            plate_id=3,
+        )
+
+        assert changed is False
+        assert row.ams_mapping == [5]
+        assert row.plate_id == 1
+        assert db.commits == 0
+
+
 class TestExpectedPrintPromotion:
     """Verify that expected prints are correctly promoted to _active_prints.
 

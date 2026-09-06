@@ -2753,7 +2753,10 @@ async def on_print_start(printer_id: int, data: dict):
                 _stored_plate_id = _print_plate_ids.get(expected_archive_id)
                 if _stored_map or _stored_plate_id is not None:
                     try:
-                        from backend.app.services.usage_tracker import _active_sessions
+                        from backend.app.services.usage_tracker import (
+                            _active_sessions,
+                            update_persisted_session_context,
+                        )
 
                         _ut_session = _active_sessions.get(printer_id)
                         if _ut_session and _stored_map and not _ut_session.ams_mapping:
@@ -2765,8 +2768,19 @@ async def on_print_start(printer_id: int, data: dict):
                         if _ut_session and _stored_plate_id is not None and _ut_session.plate_id is None:
                             _ut_session.plate_id = _stored_plate_id
                             logger.info("[CALLBACK] Injected plate_id into usage tracker session: %s", _stored_plate_id)
+
+                        # The usage session was persisted before this expected
+                        # print was promoted. Mirror the late context update so
+                        # a restart before completion retains the exact mapping
+                        # and plate selection.
+                        await update_persisted_session_context(
+                            db,
+                            printer_id,
+                            ams_mapping=_stored_map,
+                            plate_id=_stored_plate_id,
+                        )
                     except Exception:
-                        pass
+                        logger.exception("[CALLBACK] Failed to persist expected-print usage context")
 
                 # Set up energy tracking (#941: persist start on archive row)
                 await _record_energy_start(archive, printer_id, db, context="expected-print")
