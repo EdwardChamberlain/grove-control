@@ -1285,13 +1285,14 @@ class TestApplyTrayExistBitsHelper:
         assert isinstance(units[0]["tray"][0]["state"], int)
 
     def test_ams_ht_unit_skipped(self):
-        """AMS-HT (id >= 128) uses a different addressing scheme."""
+        """AMS-HT uses its dedicated single-tray presence-bit addressing."""
         from backend.app.services.bambu_mqtt import apply_tray_exist_bits
 
         units = [{"id": 128, "tray": [{"id": 0, "tray_type": "PLA"}]}]
         cleared = apply_tray_exist_bits(units, "0", power_on_flag=True)
-        assert cleared == 0
-        assert units[0]["tray"][0]["tray_type"] == "PLA"
+        assert cleared == 1
+        assert units[0]["tray"][0]["state"] == 9
+        assert units[0]["tray"][0]["tray_type"] == ""
 
     def test_string_ids_handled(self):
         """Bridge cache stores ids as strings (JSON wire format)."""
@@ -3742,13 +3743,13 @@ class TestSendDryingCommand:
     def test_start_caches_target_for_badge(self, mqtt_client):
         """mode=1 send populates _drying_targets so the badge can render it."""
         mqtt_client.send_drying_command(ams_id=2, temp=65, duration=12, mode=1, filament="PETG")
-        assert mqtt_client._drying_targets[2] == {"filament": "PETG", "temp": 65}
+        assert mqtt_client._drying_targets[2] == {"filament": "PETG", "temp": 65, "duration_hours": 12}
 
     def test_start_overwrites_prior_target_for_same_ams(self, mqtt_client):
         """A second start on the same AMS replaces the cached target."""
         mqtt_client.send_drying_command(ams_id=0, temp=55, duration=4, mode=1, filament="PLA")
         mqtt_client.send_drying_command(ams_id=0, temp=70, duration=6, mode=1, filament="ABS")
-        assert mqtt_client._drying_targets[0] == {"filament": "ABS", "temp": 70}
+        assert mqtt_client._drying_targets[0] == {"filament": "ABS", "temp": 70, "duration_hours": 6}
 
     def test_stop_clears_target(self, mqtt_client):
         """mode=0 send drops the cache so the badge stops showing the target."""
@@ -3763,7 +3764,7 @@ class TestSendDryingCommand:
         mqtt_client.send_drying_command(ams_id=128, temp=80, duration=6, mode=1, filament="PA-CF")
         mqtt_client.send_drying_command(ams_id=0, temp=0, duration=0, mode=0)
         assert 0 not in mqtt_client._drying_targets
-        assert mqtt_client._drying_targets[128] == {"filament": "PA-CF", "temp": 80}
+        assert mqtt_client._drying_targets[128] == {"filament": "PA-CF", "temp": 80, "duration_hours": 6}
 
 
 class TestStartPrintAmsMapping:
