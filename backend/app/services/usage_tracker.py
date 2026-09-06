@@ -7,6 +7,7 @@ Primary tracking uses 3MF slicer estimates (precise per-filament data).
 AMS remain% delta is the fallback for trays not covered by 3MF data.
 """
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
@@ -117,6 +118,47 @@ def _archive_colors_from_spools(filament_usage: list[dict], results: list[dict])
     return ordered
 
 
+def _archive_types_from_spools(filament_usage: list[dict], results: list[dict]) -> list[str] | None:
+    """Slot-ordered, de-duplicated materials for an archive's ``filament_type``,
+    taken from the inventory spools that actually fed the print (#2563).
+
+    The slicer's 3MF records the filament type it was *sliced for*. When the
+    user manually maps a slot to a differently-typed loaded spool in the Print
+    dialog — a PLA slice routed to the only loaded PETG slot — that sliced type
+    misclassifies the run in the archive card, the Print Log and the material
+    statistics, even though the deduction correctly hit the PETG spool. Once
+    usage tracking has resolved every used slot to an inventory spool, the
+    spool's declared material is the authoritative record of what was consumed,
+    the same reasoning that already adopts the spool colour (#1494).
+
+    Returns ``None`` — leave the 3MF type untouched — unless *every* slot with
+    non-zero usage was matched to a spool that carries a material. All-or-
+    nothing, exactly like ``_archive_colors_from_spools``: a partial rewrite
+    would silently drop the unmatched slots' types from the archive (and the
+    material stats).
+    """
+    used_slots = {u["slot_id"] for u in filament_usage if u.get("used_g", 0) > 0 and u.get("slot_id") is not None}
+    if not used_slots:
+        return None
+
+    slot_material: dict[int, str] = {}
+    for r in results:
+        slot_id = r.get("slot_id")
+        material = (r.get("material") or "").strip()
+        if slot_id is not None and material:
+            slot_material.setdefault(slot_id, material)
+
+    if not used_slots.issubset(slot_material):
+        return None
+
+    ordered: list[str] = []
+    for slot_id in sorted(used_slots):
+        material = slot_material[slot_id]
+        if material not in ordered:
+            ordered.append(material)
+    return ordered
+
+
 def _match_slots_by_color(
     filament_usage: list[dict],
     ams_raw: dict | list | None,
@@ -220,8 +262,206 @@ class PrintSession:
     plate_id: int | None = None
 
 
-# Module-level storage, keyed by printer_id
+# Module-level storage, keyed by printer_id. Mirrored to the
+# ``active_print_sessions`` table so a restart mid-print doesn't lose the
+# context — see ``persist_session`` / ``restore_session``.
 _active_sessions: dict[int, PrintSession] = {}
+
+# Serialises the read-modify-write on the persisted tray-change log, per printer.
+_tray_change_locks: dict[int, asyncio.Lock] = {}
+
+
+def _tray_key_to_str(key: tuple[int, int]) -> str:
+    return f"{key[0]}-{key[1]}"
+
+
+def _tray_key_from_str(key: str) -> tuple[int, int] | None:
+    ams_str, _, tray_str = key.partition("-")
+    try:
+        return int(ams_str), int(tray_str)
+    except ValueError:
+        return None
+
+
+def _tray_map_to_json(mapping: dict[tuple[int, int], int]) -> dict[str, int]:
+    return {_tray_key_to_str(k): v for k, v in mapping.items()}
+
+
+def _tray_map_from_json(mapping: dict | None) -> dict[tuple[int, int], int]:
+    result: dict[tuple[int, int], int] = {}
+    for raw_key, value in (mapping or {}).items():
+        key = _tray_key_from_str(str(raw_key))
+        if key is not None and isinstance(value, int):
+            result[key] = value
+    return result
+
+
+async def persist_session(
+    db: AsyncSession,
+    session: PrintSession,
+    tray_change_log: list | None = None,
+) -> None:
+    """Mirror ``session`` into ``active_print_sessions`` for restart recovery.
+
+    Overwrites any existing row for the printer: a printer runs one print at a
+    time, and a row left behind by a completion we never saw must not outlive
+    the next print start.
+    """
+    from backend.app.models.active_print_session import ActivePrintSession
+
+    row = await db.get(ActivePrintSession, session.printer_id)
+    if row is None:
+        row = ActivePrintSession(printer_id=session.printer_id)
+        db.add(row)
+
+    row.print_name = session.print_name or ""
+    row.started_at = session.started_at.replace(tzinfo=None)
+    row.tray_now_at_start = session.tray_now_at_start
+    row.plate_id = session.plate_id
+    row.ams_mapping = list(session.ams_mapping) if session.ams_mapping else None
+    row.spool_assignments = _tray_map_to_json(session.spool_assignments) or None
+    row.tray_remain_start = _tray_map_to_json(session.tray_remain_start) or None
+    row.tray_change_log = [list(entry) for entry in (tray_change_log or [])] or None
+
+    await db.commit()
+
+
+async def update_persisted_session_context(
+    db: AsyncSession,
+    printer_id: int,
+    *,
+    ams_mapping: list[int] | None = None,
+    plate_id: int | None = None,
+) -> bool:
+    """Persist context learned while promoting an expected print.
+
+    ``on_print_start`` persists its session before the later archive lookup can
+    promote a queue/reprint registration. Keep that late-added mapping and
+    plate durable as well as updating the in-memory session, otherwise a
+    restart between print start and completion loses the attribution context.
+    Existing values win because the queue session may already contain a more
+    authoritative value than the process-local expected-print registry.
+    """
+    from backend.app.models.active_print_session import ActivePrintSession
+
+    row = await db.get(ActivePrintSession, printer_id)
+    if row is None:
+        return False
+
+    changed = False
+    if ams_mapping and not row.ams_mapping:
+        row.ams_mapping = list(ams_mapping)
+        changed = True
+    if plate_id is not None and row.plate_id is None:
+        row.plate_id = plate_id
+        changed = True
+    if changed:
+        await db.commit()
+    return changed
+
+
+async def record_tray_change(db: AsyncSession, printer_id: int, tray_global: int, layer_num: int) -> None:
+    """Append one tray change to the persisted log.
+
+    No-op when no print-start row exists — a tray change outside a tracked
+    print has nothing to attribute.
+    """
+    from backend.app.models.active_print_session import ActivePrintSession
+
+    # Read-modify-write on a JSON column: two changes close together (a runout
+    # parks the extruder and the backup tray loads moments later) would
+    # otherwise race and drop a segment boundary.
+    async with _tray_change_locks.setdefault(printer_id, asyncio.Lock()):
+        row = await db.get(ActivePrintSession, printer_id)
+        if row is None:
+            return
+
+        log = [list(entry) for entry in (row.tray_change_log or [])]
+        entry = [tray_global, layer_num]
+        if log and log[-1] == entry:
+            # print-start seeds the log from PrinterState, which may already
+            # hold a change this callback is also reporting.
+            return
+        log.append(entry)
+        row.tray_change_log = log
+        await db.commit()
+
+
+async def get_persisted_print_name(db: AsyncSession, printer_id: int) -> str | None:
+    """Print name on the persisted row, for identity-checking a restored session."""
+    from backend.app.models.active_print_session import ActivePrintSession
+
+    row = await db.get(ActivePrintSession, printer_id)
+    return row.print_name if row is not None else None
+
+
+async def restore_session(db: AsyncSession, printer_id: int, register_active: bool = True) -> list[list[int]] | None:
+    """Rebuild the in-memory session for ``printer_id`` from the persisted row.
+
+    Returns the persisted tray-change log so the caller can put it back on
+    ``PrinterState``, or None when there is nothing to restore.
+
+    ``register_active=False`` returns the log without publishing the session to
+    ``_active_sessions`` — for Spoolman users, who need the tray-change log
+    restored but whose remain%-sync must not be suppressed by it (see
+    ``on_print_start``).
+    """
+    from backend.app.models.active_print_session import ActivePrintSession
+
+    row = await db.get(ActivePrintSession, printer_id)
+    if row is None:
+        return None
+
+    started_at = row.started_at
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+
+    session = PrintSession(
+        printer_id=printer_id,
+        print_name=row.print_name or "",
+        started_at=started_at,
+        tray_remain_start=_tray_map_from_json(row.tray_remain_start),
+        tray_now_at_start=row.tray_now_at_start,
+        spool_assignments=_tray_map_from_json(row.spool_assignments),
+        ams_mapping=list(row.ams_mapping) if row.ams_mapping else None,
+        plate_id=row.plate_id,
+    )
+    if register_active:
+        _active_sessions[printer_id] = session
+
+    log = [list(entry) for entry in (row.tray_change_log or [])]
+    logger.info(
+        "[UsageTracker] Restored print session for printer %d: plate_id=%s, ams_mapping=%s, "
+        "%d assignments, tray_change_log=%s",
+        printer_id,
+        row.plate_id,
+        row.ams_mapping,
+        len(row.spool_assignments or {}),
+        log,
+    )
+    return log
+
+
+async def clear_persisted_session(db: AsyncSession, printer_id: int) -> None:
+    """Drop the persisted print-start row once the print is closed out."""
+    from backend.app.models.active_print_session import ActivePrintSession
+
+    row = await db.get(ActivePrintSession, printer_id)
+    if row is not None:
+        await db.delete(row)
+        await db.commit()
+
+
+async def discard_session(db: AsyncSession, printer_id: int) -> None:
+    """Forget a printer's print-start context, in memory and on disk.
+
+    The completion path calls this for every print, including the ones whose
+    usage Spoolman owns: the context is captured for both backends, but only
+    the internal tracker's ``on_print_complete`` consumes (and pops) it.
+    """
+    _active_sessions.pop(printer_id, None)
+    _tray_change_locks.pop(printer_id, None)
+    await clear_persisted_session(db, printer_id)
 
 
 def _to_epoch_seconds(value: datetime | None) -> float | None:
@@ -288,8 +528,27 @@ async def _resolve_spool_id_for_tray(
     return None
 
 
-async def on_print_start(printer_id: int, data: dict, printer_manager, db: AsyncSession | None = None) -> None:
-    """Capture AMS tray remain% and spool assignments at print start."""
+async def on_print_start(
+    printer_id: int,
+    data: dict,
+    printer_manager,
+    db: AsyncSession | None = None,
+    spoolman_owns_usage: bool = False,
+) -> None:
+    """Capture AMS tray remain% and spool assignments at print start.
+
+    The capture runs for both inventory backends — the persisted row carries
+    the tray-change log, which is the only record of which spool fed which
+    layers when AMS Filament Backup swaps trays, and Spoolman's own durable
+    row (#1820) does not hold it.
+
+    ``spoolman_owns_usage`` keeps the in-memory session out of
+    ``_active_sessions`` when Spoolman is writing the usage. That dict doubles
+    as ``on_ams_change``'s "a print is running, so skip the remain%-based
+    weight sync because the internal tracker will deduct precisely" flag
+    (#880); registering a session the internal tracker will never complete
+    would suppress a sync those users still need.
+    """
     state = printer_manager.get_status(printer_id)
     if not state or not state.raw_data:
         logger.debug("[UsageTracker] No state for printer %d, skipping", printer_id)
@@ -411,7 +670,19 @@ async def on_print_start(printer_id: int, data: dict, printer_manager, db: Async
         ams_mapping=data.get("ams_mapping"),
         plate_id=plate_id,
     )
-    _active_sessions[printer_id] = session
+    if spoolman_owns_usage:
+        _active_sessions.pop(printer_id, None)
+    else:
+        _active_sessions[printer_id] = session
+
+    # Mirror to the DB so a restart mid-print doesn't lose the context. The
+    # tray-change log has already been cleared and seeded with the starting
+    # tray by bambu_mqtt before this callback fires.
+    if db:
+        try:
+            await persist_session(db, session, getattr(state, "tray_change_log", None))
+        except Exception:
+            logger.exception("[UsageTracker] Failed to persist print session for printer %d", printer_id)
 
     if tray_remain_start:
         logger.info(
@@ -446,6 +717,16 @@ async def on_print_complete(
     from backend.app.models.spool_usage_history import SpoolUsageHistory
 
     session = _active_sessions.pop(printer_id, None)
+    if session is None:
+        # Restart mid-print: the in-memory session is gone but the print-start
+        # row survived. Without this the completion path loses the plate, the
+        # dispatched mapping and the assignment snapshot, and attributes the
+        # whole print to whichever tray happened to finish it.
+        try:
+            await restore_session(db, printer_id)
+        except Exception:
+            logger.exception("[UsageTracker] Failed to restore print session for printer %d", printer_id)
+        session = _active_sessions.pop(printer_id, None)
     status = data.get("status", "completed")
     results = []
     handled_trays: set[tuple[int, int]] = set()
@@ -931,7 +1212,59 @@ async def _track_from_3mf(
         logger.info("[UsageTracker] 3MF: no file available for archive %s, skipping", archive_id)
         return []
 
+    # The queue item carries both the plate and the dispatched mapping; look it
+    # up at most once. ``.first()`` rather than ``.scalar_one_or_none()``
+    # because a batch dispatches one archive as several queue items, and
+    # raising there would cost the print all of its usage tracking.
+    _queue_item_lookup: list = []
+
+    async def _dispatch_queue_item():
+        if not _queue_item_lookup:
+            if not archive_id:
+                _queue_item_lookup.append(None)
+            else:
+                queue_result = await db.execute(
+                    select(PrintQueueItem)
+                    .where(PrintQueueItem.archive_id == archive_id)
+                    .where(PrintQueueItem.status.in_(["printing", "completed", "failed"]))
+                )
+                _queue_item_lookup.append(queue_result.scalars().first())
+        return _queue_item_lookup[0]
+
+    # The caller's plate_id comes from the in-memory session, which a restart
+    # mid-print destroys. Both the archive and the queue item recorded the
+    # plate at dispatch — without falling back to them the parser sums every
+    # plate of a multi-plate file and charges the lot to one spool.
+    if plate_id is None:
+        if archive is not None and archive.plate_id is not None:
+            plate_id = archive.plate_id
+            logger.info("[UsageTracker] 3MF: plate_id=%s recovered from archive %s", plate_id, archive_id)
+        else:
+            plate_queue_item = await _dispatch_queue_item()
+            if plate_queue_item is not None and plate_queue_item.plate_id is not None:
+                plate_id = plate_queue_item.plate_id
+                logger.info(
+                    "[UsageTracker] 3MF: plate_id=%s recovered from queue item %s",
+                    plate_id,
+                    plate_queue_item.id,
+                )
+
     filament_usage = extract_filament_usage_from_3mf(file_path, plate_id)
+    if not filament_usage and plate_id is not None:
+        # The plate isn't in this file. That happens when the archive's own 3MF
+        # is gone and `_resolve_3mf_fallback` substituted a same-named file from
+        # the library that was sliced with different plates. Summing the whole
+        # file is wrong for a single-plate run, but it is closer than recording
+        # nothing at all — and unlike the silent whole-file sum this replaces,
+        # it says so.
+        filament_usage = extract_filament_usage_from_3mf(file_path, None)
+        if filament_usage:
+            logger.warning(
+                "[UsageTracker] 3MF: plate %s not present in %s — falling back to the whole-file total",
+                plate_id,
+                file_path,
+            )
+            plate_id = None
     if not filament_usage:
         logger.info("[UsageTracker] 3MF: no filament usage data in %s", file_path)
         return []
@@ -946,7 +1279,23 @@ async def _track_from_3mf(
     if slot_to_tray:
         mapping_source = "print_cmd"
 
-    # 2. Try MQTT mapping field from printer state (universal, all print sources)
+    # 2. Try queue item ams_mapping (queue-initiated prints store the exact mapping)
+    #
+    # Ranked above the live MQTT field on purpose: `mapping` reports the tray
+    # the printer is feeding from *now*, and AMS filament backup rewrites it to
+    # the substitute tray when a spool runs dry. Read at completion it names
+    # the tray that finished the print, not the one the slicer assigned — the
+    # queue item's copy is the mapping the print was actually dispatched with.
+    if not slot_to_tray and archive_id:
+        queue_item = await _dispatch_queue_item()
+        if queue_item and queue_item.ams_mapping:
+            try:
+                slot_to_tray = json.loads(queue_item.ams_mapping)
+                mapping_source = "queue"
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+    # 3. Try MQTT mapping field from printer state (universal, all print sources)
     if not slot_to_tray:
         state = printer_manager.get_status(printer_id)
         raw_data = getattr(state, "raw_data", None) if state else None
@@ -956,21 +1305,6 @@ async def _track_from_3mf(
             if decoded:
                 slot_to_tray = decoded
                 mapping_source = "mqtt"
-
-    # 3. Try queue item ams_mapping (queue-initiated prints store the exact mapping)
-    if not slot_to_tray and archive_id:
-        queue_result = await db.execute(
-            select(PrintQueueItem)
-            .where(PrintQueueItem.archive_id == archive_id)
-            .where(PrintQueueItem.status.in_(["printing", "completed", "failed"]))
-        )
-        queue_item = queue_result.scalar_one_or_none()
-        if queue_item and queue_item.ams_mapping:
-            try:
-                slot_to_tray = json.loads(queue_item.ams_mapping)
-                mapping_source = "queue"
-            except (json.JSONDecodeError, TypeError):
-                pass
 
     # 4. Color-match 3MF filament slots to AMS trays (for printers without mapping field)
     if not slot_to_tray:
@@ -1002,6 +1336,22 @@ async def _track_from_3mf(
     state = printer_manager.get_status(printer_id) if len(nonzero_slots) == 1 else None
     if state is not None:
         tray_changes = getattr(state, "tray_change_log", []) or []
+    elif len(nonzero_slots) > 1:
+        # Multi-material print: every filament change moves tray_now, so the
+        # log can't be read as "this slot moved to that tray" and splitting
+        # would attribute worse than the mapping does. Say so rather than
+        # silently dropping the evidence — a runout mid-print on a
+        # multi-material job still lands entirely on the mapped tray.
+        _multi_state = printer_manager.get_status(printer_id)
+        if len(getattr(_multi_state, "tray_change_log", []) or []) > 1:
+            logger.warning(
+                "[UsageTracker] 3MF: %d tray changes observed but %d filament slots used — "
+                "splitting needs a single slot, attributing by mapping alone (printer %d, archive %s)",
+                len(_multi_state.tray_change_log),
+                len(nonzero_slots),
+                printer_id,
+                archive_id,
+            )
 
     if len(tray_changes) > 1:
         # Multi-tray usage detected — splitting takes over regardless of slot_to_tray.
@@ -1060,7 +1410,7 @@ async def _track_from_3mf(
                     mm_to_grams,
                 )
 
-                layer_usage = extract_layer_filament_usage_from_3mf(file_path)
+                layer_usage = extract_layer_filament_usage_from_3mf(file_path, plate_id)
                 if layer_usage:
                     cumulative_mm = get_cumulative_usage_at_layer(layer_usage, current_layer)
                     filament_props = extract_filament_properties_from_3mf(file_path)
@@ -1075,6 +1425,10 @@ async def _track_from_3mf(
                 pass  # Fall back to linear scaling
 
     results = []
+    # Trays this print drew from that no longer have an assignment to charge.
+    # Collected rather than acted on inline so one notification covers the whole
+    # print instead of one per slot (#2812).
+    unassigned_global_trays: list[int] = []
 
     for usage in filament_usage:
         slot_id = usage.get("slot_id", 0)
@@ -1083,6 +1437,10 @@ async def _track_from_3mf(
             continue
 
         # --- Mid-print tray switch: split weight across trays ---
+        # Split math is shared with the Spoolman writer via
+        # ``utils.tray_split.compute_tray_split_grams`` (#1793) — both
+        # inventory backends must attribute segments identically or a
+        # user running dual-mode sees divergent totals.
         if len(tray_changes) > 1:
             # Compute total weight for this slot (same logic as normal path)
             if layer_grams and slot_id in layer_grams:
@@ -1100,56 +1458,28 @@ async def _track_from_3mf(
                 from backend.app.utils.threemf_tools import (
                     extract_filament_properties_from_3mf,
                     extract_layer_filament_usage_from_3mf,
-                    get_cumulative_usage_at_layer,
-                    mm_to_grams,
                 )
 
-                split_layer_usage = extract_layer_filament_usage_from_3mf(file_path)
+                split_layer_usage = extract_layer_filament_usage_from_3mf(file_path, plate_id)
                 filament_props = extract_filament_properties_from_3mf(file_path)
                 split_props = filament_props.get(slot_id, {})
             except Exception:
                 pass  # Fall back to linear splitting
 
-            density = split_props.get("density", 1.24)
-            diameter = split_props.get("diameter", 1.75)
-            filament_id = slot_id - 1  # 0-based for gcode
+            from backend.app.utils.tray_split import compute_tray_split_grams
 
-            sum_previous = 0.0
-            for seg_idx, (tray_global, seg_start_layer) in enumerate(tray_changes):
-                is_last = seg_idx + 1 >= len(tray_changes)
+            segments = compute_tray_split_grams(
+                tray_changes=tray_changes,
+                total_weight=total_weight,
+                slot_id=slot_id,
+                layer_usage=split_layer_usage,
+                density=split_props.get("density", 1.24),
+                diameter=split_props.get("diameter", 1.75),
+                total_layers=(state.total_layers if state else 0) or 0,
+                last_layer_num=last_layer_num,
+            )
 
-                if is_last:
-                    # Last segment: remainder to avoid rounding drift
-                    segment_grams = total_weight - sum_previous
-                elif split_layer_usage:
-                    seg_end_layer = tray_changes[seg_idx + 1][1]
-                    mm_at_start = get_cumulative_usage_at_layer(split_layer_usage, seg_start_layer).get(filament_id, 0)
-                    mm_at_end = get_cumulative_usage_at_layer(split_layer_usage, seg_end_layer).get(filament_id, 0)
-                    segment_grams = mm_to_grams(mm_at_end - mm_at_start, diameter, density)
-                else:
-                    # No per-layer data: linear fallback by layer ratio (#1771).
-                    # Cascade denominators because firmware on some models (P1S
-                    # observed) resets `total_layer_num` to 0 at print end —
-                    # `last_layer_num` is the print's last-valid layer captured
-                    # mid-print and survives that reset (same shape as the
-                    # `last_progress` fallback at line 1040). Equal-split is the
-                    # last-resort fence: still wrong, but bounded — never dumps
-                    # the entire print onto the last segment, which was the
-                    # original #1771 symptom for the reporter (P1S, AMS Backup
-                    # fed from spool 1 then spool 2, all 260 g credited to
-                    # spool 2 even though spool 1 had given up its 180 g).
-                    seg_end_layer = tray_changes[seg_idx + 1][1]
-                    denom = (state.total_layers if state else 0) or last_layer_num
-                    if denom > 0:
-                        segment_grams = total_weight * (seg_end_layer - seg_start_layer) / denom
-                    else:
-                        # No layer information available from any source —
-                        # spread evenly across segments. The last segment will
-                        # get the rounding remainder via the `is_last` branch
-                        # above on its own iteration.
-                        segment_grams = total_weight / len(tray_changes)
-
-                sum_previous += segment_grams
+            for seg_idx, tray_global, segment_grams in segments:
                 if segment_grams <= 0:
                     continue
 
@@ -1168,6 +1498,8 @@ async def _track_from_3mf(
                 if seg_key in handled_trays:
                     continue
 
+                seg_start_layer = tray_changes[seg_idx][1]
+                is_last = seg_idx + 1 >= len(tray_changes)
                 logger.info(
                     "[UsageTracker] 3MF split: segment %d tray=%d (AMS%d-T%d) layers %d-%s -> %.1fg",
                     seg_idx,
@@ -1323,7 +1655,19 @@ async def _track_from_3mf(
             print_started_at=print_started_at,
         )
         if spool_id is None:
-            logger.info("[UsageTracker] 3MF: no spool assignment at printer %d AMS%d-T%d", printer_id, ams_id, tray_id)
+            # WARNING, not INFO: everything upstream of this line succeeded --
+            # the 3MF was found, the grams were read, the tray resolved -- and
+            # the print will still report success while this filament is never
+            # deducted. At INFO it was invisible under the default log level and
+            # absent from the reasoning in support bundles (#2812).
+            logger.warning(
+                "[UsageTracker] 3MF: no spool assignment at printer %d AMS%d-T%d — %.1fg not deducted",
+                printer_id,
+                ams_id,
+                tray_id,
+                used_g,
+            )
+            unassigned_global_trays.append(global_tray_id)
             continue
 
         # Load spool
@@ -1417,5 +1761,27 @@ async def _track_from_3mf(
                     joined,
                 )
                 archive.filament_color = joined
+
+        # Adopt the matched spools' materials too (#2563) — a slot mapped to a
+        # differently-typed spool than it was sliced for otherwise records the
+        # sliced type in the archive, Print Log and material stats.
+        spool_types = _archive_types_from_spools(filament_usage, results)
+        if spool_types:
+            joined_types = ",".join(spool_types)
+            if joined_types != archive.filament_type:
+                logger.info(
+                    "[UsageTracker] 3MF: archive %s filament_type %r -> %r (from inventory spools)",
+                    archive_id,
+                    archive.filament_type,
+                    joined_types,
+                )
+                archive.filament_type = joined_types
+
+    if unassigned_global_trays:
+        from backend.app.services.spool_assignment_notifications import (
+            notify_missing_spool_assignments_on_print_complete,
+        )
+
+        await notify_missing_spool_assignments_on_print_complete(printer_id, unassigned_global_trays, db, logger)
 
     return results

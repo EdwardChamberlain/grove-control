@@ -1441,6 +1441,8 @@ async def on_ams_change(printer_id: int, ams_data: list):
     from backend.app.services.usage_tracker import _active_sessions
 
     _print_active = printer_id in _active_sessions
+    _current_state = printer_manager.get_status(printer_id)
+    printing_now = (getattr(_current_state, "state", "") or "").upper() in ("RUNNING", "PAUSE")
 
     # MQTT relay - publish AMS change
     try:
@@ -1478,14 +1480,26 @@ async def on_ams_change(printer_id: int, ams_data: list):
             from backend.app.api.routes.inventory import _find_tray_in_ams_data
             from backend.app.models.spool import Spool as _Spool
             from backend.app.models.spool_assignment import SpoolAssignment as SA
+            from backend.app.services.inventory_mode import spoolman_owns_assignments
 
-            result = await db.execute(
-                select(SA)
-                .where(SA.printer_id == printer_id)
-                .options(selectinload(SA.spool).selectinload(_Spool.k_profiles))
-            )
+            # Built-in assignments only. Since #2812 they survive a switch to
+            # Spoolman mode rather than being deleted by it, and this pass ends
+            # in ``db.delete`` — left ungated it would unlink them one slot at a
+            # time as the AMS contents changed under the other mode, undoing the
+            # preservation more slowly but just as completely.
+            assignments = []
+            if not await spoolman_owns_assignments(db):
+                result = await db.execute(
+                    select(SA)
+                    .where(SA.printer_id == printer_id)
+                    .options(selectinload(SA.spool).selectinload(_Spool.k_profiles))
+                )
+                assignments = result.scalars().all()
+            # ``printing_now`` (top of this function) keeps a runout from
+            # unlinking the spool that fed the print — the next idle-time pass
+            # unlinks it if the user really did take it out.
             stale = []
-            for assignment in result.scalars().all():
+            for assignment in assignments:
                 # External spool assignments (ams_id=255) live in vt_tray, not AMS data
                 if assignment.ams_id == 255:
                     ps = printer_manager.get_status(printer_id)
@@ -1502,6 +1516,14 @@ async def on_ams_change(printer_id: int, ams_data: list):
                 else:
                     current_tray = _find_tray_in_ams_data(ams_data, assignment.ams_id, assignment.tray_id)
                 if not current_tray:
+                    if printing_now:
+                        logger.info(
+                            "Auto-unlink skipped: spool %d AMS%d-T%d — slot empty during a running print (runout?)",
+                            assignment.spool_id,
+                            assignment.ams_id,
+                            assignment.tray_id,
+                        )
+                        continue
                     logger.info(
                         "Auto-unlink: spool %d AMS%d-T%d — tray not found in AMS data (slot empty?)",
                         assignment.spool_id,
@@ -1611,6 +1633,18 @@ async def on_ams_change(printer_id: int, ams_data: list):
                         continue
 
                     if not _colors_similar(cur_color, fp_color) or cur_type.upper() != fp_type.upper():
+                        # Firmware clears colour and type when it unloads a
+                        # spool it just consumed. During a print that is a
+                        # runout, not evidence that the assignment is stale.
+                        if printing_now and not cur_color.strip() and not cur_type.strip():
+                            logger.info(
+                                "Auto-unlink skipped: spool %d AMS%d-T%d — tray data cleared during a running print "
+                                "(runout?)",
+                                assignment.spool_id,
+                                assignment.ams_id,
+                                assignment.tray_id,
+                            )
+                            continue
                         # Fingerprint mismatch — but check if tray now matches the
                         # assigned spool (e.g. auto-configure changed the tray).
                         spool = assignment.spool
@@ -1640,12 +1674,22 @@ async def on_ams_change(printer_id: int, ams_data: list):
                             spool.material if spool else "?",
                         )
                         stale.append(assignment)  # Spool changed
+            unlinked_slots = [(a.ams_id, a.tray_id) for a in stale]
             for a in stale:
                 await db.delete(a)
             if stale:
                 logger.info("Auto-unlinked %d stale spool assignments for printer %d", len(stale), printer_id)
             # Commit any changes (stale deletions and/or fingerprint updates)
             await db.commit()
+            for ams_id, tray_id in unlinked_slots:
+                await ws_manager.broadcast(
+                    {
+                        "type": "spool_assignment_changed",
+                        "printer_id": printer_id,
+                        "ams_id": ams_id,
+                        "tray_id": tray_id,
+                    }
+                )
     except Exception as e:
         logger.warning("Spool assignment cleanup failed: %s", e, exc_info=True)
 
@@ -1961,21 +2005,35 @@ async def on_ams_change(printer_id: int, ams_data: list):
 
             from backend.app.models.spool_assignment import SpoolAssignment
             from backend.app.models.spoolman_slot_assignment import SpoolmanSlotAssignment
+            from backend.app.services.inventory_mode import spoolman_owns_assignments
 
+            # Built-in remaining weight, used by sync_ams_tray only when the
+            # firmware reports an unusable remain%/tray_weight for a slot.
+            #
+            # Left empty since #2812. This block runs in Spoolman mode only,
+            # and until then the built-in table was emptied on the switch, so
+            # there was never anything here to read and the fallback was inert.
+            # Preserving those rows makes it live again, and it is keyed by slot
+            # rather than by spool: after a mode switch the tray may well hold
+            # different filament, and ``create_spool`` writes ``remaining_weight``
+            # unconditionally, so a stale figure would be seeded into a brand new
+            # Spoolman spool. Deliberately kept inert rather than deleted, so the
+            # intent survives for whoever revisits the cross-mode fallback.
             inventory_weights: dict[tuple[int, int], float] = {}
-            try:
-                assign_result = await db.execute(
-                    select(SpoolAssignment)
-                    .options(selectinload(SpoolAssignment.spool))
-                    .where(SpoolAssignment.printer_id == printer_id)
-                )
-                for assignment in assign_result.scalars().all():
-                    spool = assignment.spool
-                    if spool and spool.label_weight > 0:
-                        remaining = max(0.0, spool.label_weight - (spool.weight_used or 0))
-                        inventory_weights[(assignment.ams_id, assignment.tray_id)] = remaining
-            except Exception as e:
-                logger.warning("Could not load inventory weights for printer %s: %s", printer_id, e)
+            if not await spoolman_owns_assignments(db):
+                try:
+                    assign_result = await db.execute(
+                        select(SpoolAssignment)
+                        .options(selectinload(SpoolAssignment.spool))
+                        .where(SpoolAssignment.printer_id == printer_id)
+                    )
+                    for assignment in assign_result.scalars().all():
+                        spool = assignment.spool
+                        if spool and spool.label_weight > 0:
+                            remaining = max(0.0, spool.label_weight - (spool.weight_used or 0))
+                            inventory_weights[(assignment.ams_id, assignment.tray_id)] = remaining
+                except Exception as e:
+                    logger.warning("Could not load inventory weights for printer %s: %s", printer_id, e)
 
             # Load existing Spoolman slot assignments for the no-RFID fallback path
             spoolman_slot_map: dict[tuple[int, int], int] = {}
@@ -2007,7 +2065,8 @@ async def on_ams_change(printer_id: int, ams_data: list):
                         # Empty tray slot — record for local assignment cleanup
                         # and drop any cached unknown-tag broadcast so a
                         # reinserted spool re-prompts.
-                        empty_slots.append((ams_id, tray_id_raw))
+                        if not printing_now:
+                            empty_slots.append((ams_id, tray_id_raw))
                         _clear_unknown_tag_dedup(printer_id, ams_id, tray_id_raw)
                         continue
 
@@ -2364,16 +2423,22 @@ async def on_print_start(printer_id: int, data: dict):
     except Exception:
         pass  # Don't fail print start callback if MQTT fails
 
-    # Capture AMS tray remain% for filament consumption tracking (skip if Spoolman handles usage)
+    # Capture print context for both inventory backends. Spoolman owns the
+    # usage rows in its mode, but the tray-change log is still needed to split
+    # a backup-switching print across the trays that actually fed it.
     try:
         async with async_session() as db:
             from backend.app.api.routes.settings import get_setting
+            from backend.app.services.usage_tracker import on_print_start as usage_on_print_start
 
             _spoolman_on = await get_setting(db, "spoolman_enabled")
-            if not _spoolman_on or _spoolman_on.lower() != "true":
-                from backend.app.services.usage_tracker import on_print_start as usage_on_print_start
-
-                await usage_on_print_start(printer_id, data, printer_manager, db=db)
+            await usage_on_print_start(
+                printer_id,
+                data,
+                printer_manager,
+                db=db,
+                spoolman_owns_usage=bool(_spoolman_on) and _spoolman_on.lower() == "true",
+            )
     except Exception as e:
         logger.warning("Usage tracker on_print_start failed: %s", e)
 
@@ -2688,7 +2753,10 @@ async def on_print_start(printer_id: int, data: dict):
                 _stored_plate_id = _print_plate_ids.get(expected_archive_id)
                 if _stored_map or _stored_plate_id is not None:
                     try:
-                        from backend.app.services.usage_tracker import _active_sessions
+                        from backend.app.services.usage_tracker import (
+                            _active_sessions,
+                            update_persisted_session_context,
+                        )
 
                         _ut_session = _active_sessions.get(printer_id)
                         if _ut_session and _stored_map and not _ut_session.ams_mapping:
@@ -2700,8 +2768,19 @@ async def on_print_start(printer_id: int, data: dict):
                         if _ut_session and _stored_plate_id is not None and _ut_session.plate_id is None:
                             _ut_session.plate_id = _stored_plate_id
                             logger.info("[CALLBACK] Injected plate_id into usage tracker session: %s", _stored_plate_id)
+
+                        # The usage session was persisted before this expected
+                        # print was promoted. Mirror the late context update so
+                        # a restart before completion retains the exact mapping
+                        # and plate selection.
+                        await update_persisted_session_context(
+                            db,
+                            printer_id,
+                            ams_mapping=_stored_map,
+                            plate_id=_stored_plate_id,
+                        )
                     except Exception:
-                        pass
+                        logger.exception("[CALLBACK] Failed to persist expected-print usage context")
 
                 # Set up energy tracking (#941: persist start on archive row)
                 await _record_energy_start(archive, printer_id, db, context="expected-print")
@@ -3756,6 +3835,10 @@ async def on_print_running_observed(printer_id: int, data: dict):
         return
 
     async with async_session() as db:
+        state = printer_manager.get_status(printer_id)
+        if state is not None:
+            await _restore_usage_tracking_session(printer_id, state, db, logger)
+
         from backend.app.models.printer import Printer
 
         result = await db.execute(select(Printer).where(Printer.id == printer_id))
@@ -3768,6 +3851,57 @@ async def on_print_running_observed(printer_id: int, data: dict):
             return
 
     await _capture_timelapse_baseline_at_start(printer, printer_id, logger)
+
+
+async def _restore_usage_tracking_session(printer_id: int, state, db, logger) -> None:
+    """Restore filament-attribution context after a restart mid-print."""
+    try:
+        from backend.app.api.routes.settings import get_setting
+        from backend.app.services.usage_tracker import (
+            clear_persisted_session,
+            get_persisted_print_name,
+            restore_session,
+        )
+
+        persisted_name = await get_persisted_print_name(db, printer_id)
+        current_name = (state.subtask_name or "").strip()
+        if persisted_name and current_name and persisted_name.strip() != current_name:
+            logger.info(
+                "[RESTART] Discarding stale print session for printer %s (%r != running %r)",
+                printer_id,
+                persisted_name,
+                current_name,
+            )
+            await clear_persisted_session(db, printer_id)
+            persisted_log = None
+        else:
+            spoolman_on = await get_setting(db, "spoolman_enabled")
+            persisted_log = await restore_session(
+                db,
+                printer_id,
+                register_active=not (bool(spoolman_on) and spoolman_on.lower() == "true"),
+            )
+
+        if persisted_log:
+            restored = [tuple(entry) for entry in persisted_log if isinstance(entry, (list, tuple)) and len(entry) == 2]
+            for entry in state.tray_change_log or []:
+                if tuple(entry) not in restored:
+                    restored.append(tuple(entry))
+            state.tray_change_log = restored
+
+        tray_now = state.tray_now
+        if 0 <= tray_now <= 254:
+            if not state.tray_change_log:
+                state.tray_change_log = [(tray_now, state.layer_num)]
+                logger.info(
+                    "[RESTART] Seeded tray change log for printer %s: tray=%d at layer=%d",
+                    printer_id,
+                    tray_now,
+                    state.layer_num,
+                )
+            state.last_loaded_tray = tray_now
+    except Exception:
+        logger.exception("[RESTART] Failed to restore usage-tracking session for printer %s", printer_id)
 
 
 def _is_active_archive_stale(archive, state) -> tuple[bool, str]:
@@ -4582,6 +4716,17 @@ async def on_print_complete(printer_id: int, data: dict):
 
     except Exception as e:
         logger.warning("Usage tracker on_print_complete failed: %s", e)
+
+    # Clear the persisted print-start context for both inventory backends. The
+    # Spoolman path skips the internal completion tracker, so it cannot clear
+    # the row as a side effect.
+    try:
+        from backend.app.services.usage_tracker import discard_session
+
+        async with async_session() as db:
+            await discard_session(db, printer_id)
+    except Exception as e:
+        logger.warning("Failed to clear persisted print session for printer %s: %s", printer_id, e)
 
     # Spoolman: report filament usage (requires archive_id for tracking data lookup)
     if archive_id:
@@ -6185,6 +6330,24 @@ async def lifespan(app: FastAPI):
     printer_manager.set_print_running_observed_callback(on_print_running_observed)
     printer_manager.set_finish_photo_moment_callback(on_finish_photo_moment)
     printer_manager.set_ams_change_callback(on_ams_change)
+
+    async def on_tray_change(printer_id: int, tray_global: int, layer_num: int):
+        """Persist tray boundaries used to split usage after restart recovery."""
+        try:
+            from backend.app.services.usage_tracker import record_tray_change
+
+            async with async_session() as db:
+                await record_tray_change(db, printer_id, tray_global, layer_num)
+        except Exception as e:
+            logging.getLogger(__name__).warning(
+                "Failed to persist tray change for printer %d (tray=%d, layer=%d): %s",
+                printer_id,
+                tray_global,
+                layer_num,
+                e,
+            )
+
+    printer_manager.set_tray_change_callback(on_tray_change)
 
     # Rehydrate persisted awaiting-plate-clear gate (#961) so prompts survive restarts
     await printer_manager.load_awaiting_plate_clear_from_db()

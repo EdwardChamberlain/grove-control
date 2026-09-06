@@ -2142,8 +2142,14 @@ class TestApplyPaAfterRefresh:
     async def test_spoolman_kp_when_no_local(self, db_session, printer_factory):
         """No local assignment + Spoolman SlotAssignment + SpoolmanKProfile → Spoolman cali_idx."""
         from backend.app.api.routes.printers import _apply_pa_after_refresh
+        from backend.app.models.settings import Settings
         from backend.app.models.spoolman_k_profile import SpoolmanKProfile
         from backend.app.models.spoolman_slot_assignment import SpoolmanSlotAssignment
+
+        # A spoolman_slot_assignments row only exists in Spoolman mode, and
+        # since #2812 the mode is asked for explicitly rather than inferred
+        # from which table happens to hold rows.
+        db_session.add(Settings(key="spoolman_enabled", value="true"))
 
         printer = await printer_factory()
         db_session.add(
@@ -2188,7 +2194,13 @@ class TestApplyPaAfterRefresh:
     async def test_spoolman_no_kp_uses_live(self, db_session, printer_factory):
         """Spoolman SlotAssignment but no SpoolmanKProfile → live cali_idx (Stage 3)."""
         from backend.app.api.routes.printers import _apply_pa_after_refresh
+        from backend.app.models.settings import Settings
         from backend.app.models.spoolman_slot_assignment import SpoolmanSlotAssignment
+
+        # A spoolman_slot_assignments row only exists in Spoolman mode, and
+        # since #2812 the mode is asked for explicitly rather than inferred
+        # from which table happens to hold rows.
+        db_session.add(Settings(key="spoolman_enabled", value="true"))
 
         printer = await printer_factory()
         db_session.add(
@@ -2697,8 +2709,14 @@ class TestConfigureAmsSlotPersistsKProfile:
         printer_factory,
     ):
         """SpoolmanSlotAssignment present → SpoolmanKProfile row created with cali_idx + k_value + name."""
+        from backend.app.models.settings import Settings
         from backend.app.models.spoolman_k_profile import SpoolmanKProfile
         from backend.app.models.spoolman_slot_assignment import SpoolmanSlotAssignment
+
+        # A spoolman_slot_assignments row only exists in Spoolman mode, and
+        # since #2812 the mode is asked for explicitly rather than inferred
+        # from which table happens to hold rows.
+        db_session.add(Settings(key="spoolman_enabled", value="true"))
 
         printer = await printer_factory(model="H2D")
         db_session.add(
@@ -2875,8 +2893,14 @@ class TestConfigureAmsSlotPersistsKProfile:
         printer_factory,
     ):
         """cali_idx=-1 (no profile selected) → no DB write even when assignment exists."""
+        from backend.app.models.settings import Settings
         from backend.app.models.spoolman_k_profile import SpoolmanKProfile
         from backend.app.models.spoolman_slot_assignment import SpoolmanSlotAssignment
+
+        # A spoolman_slot_assignments row only exists in Spoolman mode, and
+        # since #2812 the mode is asked for explicitly rather than inferred
+        # from which table happens to hold rows.
+        db_session.add(Settings(key="spoolman_enabled", value="true"))
 
         printer = await printer_factory(model="H2D")
         db_session.add(
@@ -2934,8 +2958,14 @@ class TestConfigureAmsSlotPersistsKProfile:
         printer_factory,
     ):
         """cali_idx=0 is the first valid profile slot (NOT a sentinel for missing)."""
+        from backend.app.models.settings import Settings
         from backend.app.models.spoolman_k_profile import SpoolmanKProfile
         from backend.app.models.spoolman_slot_assignment import SpoolmanSlotAssignment
+
+        # A spoolman_slot_assignments row only exists in Spoolman mode, and
+        # since #2812 the mode is asked for explicitly rather than inferred
+        # from which table happens to hold rows.
+        db_session.add(Settings(key="spoolman_enabled", value="true"))
 
         printer = await printer_factory(model="H2D")
         db_session.add(
@@ -2991,8 +3021,14 @@ class TestConfigureAmsSlotPersistsKProfile:
         printer_factory,
     ):
         """Repeated POSTs update the same row (UNIQUE on spool_id+printer+extruder+nozzle_diameter)."""
+        from backend.app.models.settings import Settings
         from backend.app.models.spoolman_k_profile import SpoolmanKProfile
         from backend.app.models.spoolman_slot_assignment import SpoolmanSlotAssignment
+
+        # A spoolman_slot_assignments row only exists in Spoolman mode, and
+        # since #2812 the mode is asked for explicitly rather than inferred
+        # from which table happens to hold rows.
+        db_session.add(Settings(key="spoolman_enabled", value="true"))
 
         printer = await printer_factory(model="H2D")
         db_session.add(
@@ -3201,7 +3237,13 @@ class TestConfigureAmsSlotPersistsKProfile:
         so we shouldn't return 500 to the user. The error is logged and the
         endpoint returns success.
         """
+        from backend.app.models.settings import Settings
         from backend.app.models.spoolman_slot_assignment import SpoolmanSlotAssignment
+
+        # A spoolman_slot_assignments row only exists in Spoolman mode, and
+        # since #2812 the mode is asked for explicitly rather than inferred
+        # from which table happens to hold rows.
+        db_session.add(Settings(key="spoolman_enabled", value="true"))
 
         printer = await printer_factory(model="H2D")
         db_session.add(

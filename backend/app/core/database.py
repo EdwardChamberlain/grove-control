@@ -165,6 +165,7 @@ async def get_db() -> AsyncSession:
 async def init_db():
     # Import models to register them with SQLAlchemy
     from backend.app.models import (  # noqa: F401
+        active_print_session,
         active_print_spoolman,
         ams_history,
         ams_label,
@@ -3551,6 +3552,9 @@ async def run_migrations(conn):
     # Migration: Disambiguate the four ``user_print_*`` notification template
     # names by appending " Email" (#1792). See ``_migrate_rename_user_print_template_names``.
     await _migrate_rename_user_print_template_names(conn)
+    # Repair RFID-created spools that inherited an arbitrary Bambu catalogue
+    # tare before the exact Low Temp row was selected (#2909).
+    await _migrate_repair_rfid_core_weight(conn)
 
 
 _USER_PRINT_TEMPLATE_RENAMES: tuple[tuple[str, str, str], ...] = (
@@ -3581,6 +3585,87 @@ async def _migrate_rename_user_print_template_names(conn) -> None:
                 text("UPDATE notification_templates SET name = :new WHERE event_type = :et AND name = :old"),
                 {"new": new_name, "et": event_type, "old": old_name},
             )
+
+
+async def _migrate_repair_rfid_core_weight(conn) -> None:
+    """Correct the tare on RFID-created spools affected by the old prefix lookup.
+
+    The repair is deliberately one-shot. It only touches ``rfid_auto`` rows
+    whose tare matches another Bambu catalogue entry, and adjusts weighed
+    spools by the tare delta so their used-weight history remains consistent.
+    """
+    from sqlalchemy import bindparam, text
+
+    from backend.app.services.spool_tag_matcher import (
+        BAMBU_PLASTIC_SPOOL_CATALOG_NAME,
+        BAMBU_PLASTIC_SPOOL_CORE_WEIGHT,
+    )
+
+    flag = "_backfill_2909_rfid_core_weight_done"
+    async with conn.begin_nested():
+        already = (
+            await conn.execute(text('SELECT value FROM settings WHERE "key" = :k'), {"k": flag})
+        ).scalar_one_or_none()
+        if already:
+            return
+
+        correct = (
+            await conn.execute(
+                text("SELECT id, weight FROM spool_catalog WHERE UPPER(name) = :name ORDER BY id LIMIT 1"),
+                {"name": BAMBU_PLASTIC_SPOOL_CATALOG_NAME.upper()},
+            )
+        ).fetchone()
+        correct_id = correct[0] if correct else None
+        correct_weight = correct[1] if correct else BAMBU_PLASTIC_SPOOL_CORE_WEIGHT
+
+        catalogue_weights = {
+            row[0]
+            for row in (
+                await conn.execute(
+                    text("SELECT weight FROM spool_catalog WHERE UPPER(name) LIKE :prefix"),
+                    {"prefix": "BAMBU LAB%"},
+                )
+            ).fetchall()
+        }
+        wrong_weights = sorted(catalogue_weights - {correct_weight})
+        repaired = 0
+        reweighed = 0
+        if wrong_weights:
+            rows = (
+                await conn.execute(
+                    text(
+                        "SELECT id, core_weight, label_weight, weight_used, last_weighed_at "
+                        "FROM spool WHERE data_origin = 'rfid_auto' AND core_weight IN :wrong"
+                    ).bindparams(bindparam("wrong", expanding=True)),
+                    {"wrong": wrong_weights},
+                )
+            ).fetchall()
+            for row in rows:
+                delta = correct_weight - row.core_weight
+                weight_used = row.weight_used or 0.0
+                if row.last_weighed_at is not None:
+                    weight_used = min(max(0.0, weight_used + delta), float(row.label_weight or 0))
+                    reweighed += 1
+                await conn.execute(
+                    text(
+                        "UPDATE spool SET core_weight = :cw, core_weight_catalog_id = :cid, "
+                        "weight_used = :wu WHERE id = :id"
+                    ),
+                    {"cw": correct_weight, "cid": correct_id, "wu": weight_used, "id": row.id},
+                )
+                repaired += 1
+
+        if repaired:
+            logger.info(
+                "[#2909] Corrected %d RFID spool tare(s) to %d g; adjusted %d weighed spool(s)",
+                repaired,
+                correct_weight,
+                reweighed,
+            )
+        await conn.execute(
+            text('INSERT INTO settings ("key", value) VALUES (:k, :v)'),
+            {"k": flag, "v": "true"},
+        )
 
 
 async def seed_notification_templates():

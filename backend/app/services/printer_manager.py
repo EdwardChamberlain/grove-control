@@ -261,6 +261,7 @@ class PrinterManager:
         self._on_layer_change: Callable[[int, int], None] | None = None
         self._on_bed_temp_update: Callable[[int, float], None] | None = None
         self._on_drying_complete: Callable[[int, int], None] | None = None
+        self._on_tray_change: Callable[[int, int, int], None] | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         # Track who started the current print (Issue #206)
         self._current_print_user: dict[int, dict] = {}  # {printer_id: {"user_id": int, "username": str}}
@@ -505,6 +506,14 @@ class PrinterManager:
         """
         self._on_drying_complete = callback
 
+    def set_tray_change_callback(self, callback: Callable[[int, int, int], None]):
+        """Set callback for mid-print tray changes.
+
+        Receives ``(printer_id, global_tray_id, layer_num)`` so the usage
+        tracker can persist segment boundaries for restart recovery.
+        """
+        self._on_tray_change = callback
+
     def _schedule_async(self, coro):
         """Schedule an async coroutine from a sync context.
 
@@ -568,6 +577,10 @@ class PrinterManager:
             if self._on_drying_complete:
                 self._schedule_async(self._on_drying_complete(printer_id, ams_id))
 
+        def on_tray_change(tray_global: int, layer_num: int):
+            if self._on_tray_change:
+                self._schedule_async(self._on_tray_change(printer_id, tray_global, layer_num))
+
         client = BambuMQTTClient(
             ip_address=printer.ip_address,
             serial_number=printer.serial_number,
@@ -582,6 +595,7 @@ class PrinterManager:
             on_drying_complete=on_drying_complete,
             on_print_running_observed=on_print_running_observed,
             on_finish_photo_moment=on_finish_photo_moment,
+            on_tray_change=on_tray_change,
         )
 
         client.connect()
