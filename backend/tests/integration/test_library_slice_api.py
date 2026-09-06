@@ -231,7 +231,7 @@ class TestSliceLibraryFile:
             captured["url"] = str(request.url)
             return httpx.Response(
                 status_code=200,
-                content=b"PK\x03\x04 fake-3mf",
+                content=_make_3mf_with_settings(),  # #2671: real zip; validation rejects non-3MF bodies
                 headers={
                     "x-print-time-seconds": "656",
                     "x-filament-used-g": "0.94",
@@ -274,7 +274,7 @@ class TestSliceLibraryFile:
             captured["body"] = bytes(request.content)
             return httpx.Response(
                 status_code=200,
-                content=b"PK\x03\x04 fake",
+                content=_make_3mf_with_settings(),  # #2671: real zip; validation rejects non-3MF bodies
                 headers={
                     "x-print-time-seconds": "10",
                     "x-filament-used-g": "0.1",
@@ -316,7 +316,7 @@ class TestSliceLibraryFile:
             captured["body"] = bytes(request.content)
             return httpx.Response(
                 status_code=200,
-                content=b"PK\x03\x04 fake",
+                content=_make_3mf_with_settings(),  # #2671: real zip; validation rejects non-3MF bodies
                 headers={
                     "x-print-time-seconds": "10",
                     "x-filament-used-g": "0.1",
@@ -441,7 +441,7 @@ class TestSliceLibraryFile:
             # Retry: no profile triplet → succeed with embedded settings
             return httpx.Response(
                 status_code=200,
-                content=b"PK\x03\x04 fake-3mf",
+                content=_make_3mf_with_settings(),  # #2671: real zip; validation rejects non-3MF bodies
                 headers={
                     "x-print-time-seconds": "100",
                     "x-filament-used-g": "1.0",
@@ -524,7 +524,7 @@ class TestSliceLibraryFile:
             captured["body"] = request.content
             return httpx.Response(
                 status_code=200,
-                content=b"PK\x03\x04 fake-3mf",
+                content=_make_3mf_with_settings(),  # #2671: real zip; validation rejects non-3MF bodies
                 headers={
                     "x-print-time-seconds": "1",
                     "x-filament-used-g": "0",
