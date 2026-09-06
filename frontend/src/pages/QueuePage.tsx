@@ -391,8 +391,8 @@ function SortableQueueItem({
     transition,
   };
 
-  const isPrinting = item.status === 'printing';
-  const isDispatching = item.status === 'dispatching' || item.status === 'preheating';
+  const isPrinting = item.status === 'printing' || item.status === 'preheating';
+  const isDispatching = item.status === 'dispatching';
   const isPending = item.status === 'pending';
   const isHistory = ['completed', 'failed', 'skipped', 'cancelled'].includes(item.status);
 
@@ -1596,7 +1596,7 @@ export function QueuePage() {
     return items;
   }, [queue, filterLocation, matchesLocationFilter]);
   const dispatchingItems = useMemo(
-    () => activeItems.filter((item) => item.status === 'dispatching' || item.status === 'preheating'),
+    () => activeItems.filter((item) => item.status === 'dispatching'),
     [activeItems],
   );
   const printingCount = activeItems.length - dispatchingItems.length;

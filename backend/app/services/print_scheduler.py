@@ -2499,6 +2499,12 @@ class PrintScheduler:
             ):
                 await db.rollback()
                 return
+            # The no-op UPDATE above only establishes ownership of the
+            # dispatch handoff. Release that write lock before archive
+            # preparation and FTP upload, which can take seconds or minutes.
+            # The dispatch boundary below reacquires it immediately before
+            # publishing the print command.
+            await db.commit()
 
         # Get printer first (needed for both paths)
         result = await db.execute(select(Printer).where(Printer.id == item.printer_id))
@@ -2674,6 +2680,15 @@ class PrintScheduler:
 
         # Get FTP retry settings
         ftp_retry_enabled, ftp_retry_count, ftp_retry_delay, ftp_timeout = await get_ftp_retry_settings()
+
+        # Do not keep a queue transaction open across either FTP operation.
+        # Heat-soak handoffs have already released their validation lock above;
+        # this closes the read transaction reopened while preparing the source
+        # file and settings, so cancellation and other queue writers remain
+        # responsive during slow printer I/O. Regular dispatches retain their
+        # existing transaction boundary until the durable dispatch reservation.
+        if heat_soak_complete:
+            await db.commit()
 
         logger.info(
             f"Queue item {item.id}: FTP upload starting - printer={printer.name} ({printer.model}), "

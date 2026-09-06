@@ -5,7 +5,7 @@ import zipfile
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -408,7 +408,17 @@ async def delete_printer(
 
     active_preheat = await db.scalar(
         select(PrintQueueItem.id)
-        .where(PrintQueueItem.printer_id == printer_id, PrintQueueItem.status == "preheating")
+        .where(
+            PrintQueueItem.printer_id == printer_id,
+            or_(
+                PrintQueueItem.status == "preheating",
+                and_(
+                    PrintQueueItem.status == "dispatching",
+                    PrintQueueItem.chamber_heat_soak.is_(True),
+                    PrintQueueItem.dispatch_subtask_id.is_(None),
+                ),
+            ),
+        )
         .limit(1)
     )
     if active_preheat or printer.heat_soak_shutdown_pending:

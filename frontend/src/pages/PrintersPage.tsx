@@ -2061,7 +2061,9 @@ function SinglePrinterCockpit({
   ];
   const iconControlClass = 'relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50';
   const jogButtonClass = 'flex h-7 w-7 shrink-0 items-center justify-center rounded bg-indigo-500/15 text-indigo-300 transition-colors hover:bg-indigo-500/30 disabled:cursor-not-allowed disabled:opacity-50';
-  const currentPrintLabel = activePrintName || t('printers.noActiveJob', 'No active job');
+  const currentPrintLabel = status?.preheating
+    ? t('heatSoak.status')
+    : activePrintName || t('printers.noActiveJob', 'No active job');
   const plateDetectionEnabled = plateDetectionMutation.isPending && plateDetectionMutation.variables != null
     ? plateDetectionMutation.variables
     : printer.plate_detection_enabled;
