@@ -216,7 +216,9 @@ async def _is_orders_last_source(db: AsyncSession, item: PrintQueueItem) -> bool
     if batch_status == "cancelled":
         return False
 
-    plate_scope = PrintBatchPlate.plate_id == item.plate_id if item.plate_id is not None else PrintBatchPlate.plate_id.is_(None)
+    plate_scope = (
+        PrintBatchPlate.plate_id == item.plate_id if item.plate_id is not None else PrintBatchPlate.plate_id.is_(None)
+    )
     target = (
         (
             await db.execute(
