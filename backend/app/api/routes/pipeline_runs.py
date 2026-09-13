@@ -693,7 +693,9 @@ async def recover_pipeline_runs() -> int:
                 run.error_message = "Pipeline run could not be recovered: pipeline or source no longer exists"
                 run.completed_at = datetime.now(timezone.utc)
                 await db.commit()
-                logger.warning("Marked pipeline run %d failed during restart recovery: missing pipeline or source", run.id)
+                logger.warning(
+                    "Marked pipeline run %d failed during restart recovery: missing pipeline or source", run.id
+                )
                 continue
             if not source_path.exists():
                 run.status = "failed"

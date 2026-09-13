@@ -159,7 +159,7 @@ describe('SliceModal', () => {
     // 5 selects: printer, process, bed-type, supports, filament. The
     // additional process controls sit between the process and filament
     // selectors; both default to their preset values (empty overrides).
-    const selects = screen.getAllByRole('combobox') as HTMLSelectElement[];
+    const selects = presetSelects();
     expect(selects).toHaveLength(5);
     await waitFor(() => {
       expect(selects[0].value).toBe('local:1');
@@ -215,7 +215,7 @@ describe('SliceModal', () => {
     });
 
     await waitFor(() => expect(screen.getByText('Imported X1C 0.4')).toBeDefined());
-    const selects = screen.getAllByRole('combobox') as HTMLSelectElement[];
+    const selects = presetSelects();
     await waitFor(() => expect(selects[0].value).toBe('local:1'));
   });
 
@@ -229,7 +229,7 @@ describe('SliceModal', () => {
     });
 
     await waitFor(() => expect(screen.getByText('Bambu Lab X1 Carbon 0.4 nozzle')).toBeDefined());
-    const selects = screen.getAllByRole('combobox') as HTMLSelectElement[];
+    const selects = presetSelects();
     await waitFor(() => {
       expect(selects[0].value).toBe('standard:Bambu Lab X1 Carbon 0.4 nozzle');
     });
@@ -343,7 +343,7 @@ describe('SliceModal', () => {
     await waitFor(() => expect(screen.getByText('My Custom X1C')).toBeDefined());
 
     const user = userEvent.setup();
-    const selects = screen.getAllByRole('combobox');
+    const selects = presetSelects();
     await user.click(selects[0]);
     await user.click(await screen.findByRole('option', { name: 'Bambu Lab X1 Carbon 0.4 nozzle' }));
     await user.click(screen.getByRole('button', { name: /^Slice$/ }));
@@ -760,7 +760,7 @@ describe('SliceModal', () => {
 
     await waitFor(() => expect(screen.getByText('X1C')).toBeDefined());
     // 1 printer + 1 process + 1 bed-type + 1 supports + 2 filament = 6 dropdowns.
-    expect(screen.getAllByRole('combobox')).toHaveLength(6);
+    expect(presetSelects()).toHaveLength(6);
   });
 
   it('pre-picks each filament slot by matching colour metadata', async () => {
@@ -841,7 +841,7 @@ describe('SliceModal', () => {
     await waitFor(() => expect(screen.getByText('X1C')).toBeDefined());
 
     const user = userEvent.setup();
-    const selects = screen.getAllByRole('combobox') as HTMLSelectElement[];
+    const selects = presetSelects();
     // Order: 0 printer, 1 process, 2 bed-type, 3 supports, 4 filament-1,
     // 5 filament-2. Auto-picks land on printer/process/filaments; the bed
     // and supports overrides default to "". Swap filament-1 from the
@@ -967,7 +967,7 @@ describe('SliceModal', () => {
     // Both filament rows render — 1 printer + 1 process + 1 bed-type +
     // 1 supports + 2 filament = 6. bed-type sits at index 2, supports at
     // index 3, and filament slots follow at 4 and 5.
-    const selects = screen.getAllByRole('combobox') as HTMLSelectElement[];
+    const selects = presetSelects();
     expect(selects).toHaveLength(6);
     // Slot 1 (used) is editable, slot 2 (not used) is disabled.
     expect(selects[4].disabled).toBe(false);
