@@ -9,6 +9,40 @@ from datetime import datetime
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
+
+
+async def _enable_auth_with_operator(db_session, username: str):
+    from backend.app.core.auth import invalidate_auth_enabled_cache
+    from backend.app.models.group import Group
+    from backend.app.models.settings import Settings
+    from backend.app.models.user import User
+
+    operators = (await db_session.execute(select(Group).where(Group.name == "Operators"))).scalar_one()
+    user = User(username=username, groups=[operators])
+    db_session.add_all([Settings(key="auth_enabled", value="true"), user])
+    await db_session.commit()
+    await db_session.refresh(user)
+    invalidate_auth_enabled_cache()
+    return user
+
+
+async def _make_queue_api_key(db_session, owner_id: int | None) -> str:
+    from backend.app.core.auth import generate_api_key
+    from backend.app.models.api_key import APIKey
+
+    full_key, key_hash, key_prefix = generate_api_key()
+    db_session.add(
+        APIKey(
+            name="batch orders key",
+            key_hash=key_hash,
+            key_prefix=key_prefix,
+            user_id=owner_id,
+            can_queue=True,
+        )
+    )
+    await db_session.commit()
+    return full_key
 
 
 @pytest.fixture
@@ -232,6 +266,30 @@ class TestBatchOrderProgress:
         result = (await async_client.get(f"/api/v1/queue/batches/{order['id']}")).json()
         assert result["dispatching_count"] == 1
         assert result["remaining_count"] == 1
+
+    async def test_preheating_run_consumes_the_target_and_is_not_redispatched(
+        self, async_client, printer_factory, archive_factory, db_session
+    ):
+        from backend.app.models.print_queue import PrintQueueItem
+
+        printer = await printer_factory()
+        archive = await archive_factory()
+        order = await _create_order(async_client, archive.id, [{"plate_id": 1, "quantity_target": 1}])
+        item = await _queue_item(async_client, printer.id, archive.id, order["id"], plate_id=1)
+        await _set_status(db_session, item["id"], "preheating")
+
+        result = (await async_client.get(f"/api/v1/queue/batches/{order['id']}")).json()
+        assert result["preheating_count"] == 1
+        assert result["plates"][0]["preheating_count"] == 1
+        assert result["remaining_count"] == 0
+        assert result["dispatchable_count"] == 0
+
+        dispatched = await async_client.post(f"/api/v1/queue/batches/{order['id']}/dispatch", json={})
+        assert dispatched.status_code == 200, dispatched.text
+        assert dispatched.json()["preheating_count"] == 1
+        assert dispatched.json()["remaining_count"] == 0
+        item_count = (await db_session.execute(select(PrintQueueItem))).scalars().all()
+        assert len(item_count) == 1
 
     async def test_legacy_batch_without_targets_owes_nothing(self, async_client, printer_factory, archive_factory):
         """Batches created before #342 keep working and report has_targets=false."""
@@ -768,6 +826,49 @@ class TestBatchOrderHeader:
             },
         )
         assert response.status_code == 404
+
+    async def test_owned_api_key_stamps_batch_and_quantity_items(self, async_client, db_session, printer_factory, archive_factory):
+        from backend.app.models.print_batch import PrintBatch
+        from backend.app.models.print_queue import PrintQueueItem
+
+        owner = await _enable_auth_with_operator(db_session, "batch-key-owner")
+        printer = await printer_factory()
+        archive = await archive_factory(created_by_id=owner.id)
+        full_key = await _make_queue_api_key(db_session, owner.id)
+        headers = {"X-API-Key": full_key}
+
+        created = await async_client.post(
+            "/api/v1/queue/batches",
+            headers=headers,
+            json={"name": "Owned batch", "archive_id": archive.id, "plates": [{"plate_id": 1, "quantity_target": 1}]},
+        )
+        assert created.status_code == 200, created.text
+        assert created.json()["created_by_id"] == owner.id
+
+        queued = await async_client.post(
+            "/api/v1/queue/",
+            headers=headers,
+            json={"printer_id": printer.id, "archive_id": archive.id, "quantity": 2},
+        )
+        assert queued.status_code == 200, queued.text
+        batch_id = queued.json()["batch_id"]
+        batch = await db_session.get(PrintBatch, batch_id)
+        assert batch.created_by_id == owner.id
+        items = (
+            await db_session.execute(
+                select(PrintQueueItem).where(PrintQueueItem.batch_id == batch_id)
+            )
+        ).scalars().all()
+        assert len(items) == 2
+        assert {item.created_by_id for item in items} == {owner.id}
+
+        ownerless_key = await _make_queue_api_key(db_session, None)
+        rejected = await async_client.post(
+            "/api/v1/queue/batches",
+            headers={"X-API-Key": ownerless_key},
+            json={"name": "Legacy key batch"},
+        )
+        assert rejected.status_code == 403
 
     async def test_patch_replaces_the_target_set(self, async_client, archive_factory):
         """A plate omitted from the payload has its target row removed."""

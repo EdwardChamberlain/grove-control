@@ -2208,6 +2208,8 @@ export interface PrintBatchPlateProgress {
   dispatched: number;
   remaining: number;
   pending_count: number;
+  preheating_count: number;
+  dispatching_count: number;
   printing_count: number;
   completed_count: number;
   failed_count: number;
@@ -2236,6 +2238,8 @@ export interface PrintBatch {
   due_date: string | null;
   notes: string | null;
   pending_count: number;
+  preheating_count: number;
+  dispatching_count: number;
   printing_count: number;
   completed_count: number;
   failed_count: number;

@@ -442,6 +442,7 @@ class PrintBatchPlateProgress(BaseModel):
     dispatched: int = 0
     remaining: int = 0
     pending_count: int = 0
+    preheating_count: int = 0
     dispatching_count: int = 0
     printing_count: int = 0
     completed_count: int = 0
@@ -475,6 +476,7 @@ class PrintBatchResponse(BaseModel):
     notes: str | None = None
     # Derived counts
     pending_count: int = 0
+    preheating_count: int = 0
     dispatching_count: int = 0
     printing_count: int = 0
     completed_count: int = 0

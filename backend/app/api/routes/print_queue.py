@@ -284,6 +284,24 @@ async def _assert_can_dispatch_batch_sources(db: AsyncSession, batch_id: int, cu
         .scalars()
         .all()
     )
+    # Cross-model queue items keep their source files on PrintQueueVariant
+    # rows, not on the queue item itself. The relationship is optional here so
+    # this branch remains importable before the alternatives PR lands.
+    variant_relationship = getattr(PrintQueueItem, "variants", None)
+    if variant_relationship is not None:
+        variant_model = variant_relationship.property.mapper.class_
+        variant_file_ids = (
+            await db.execute(
+                select(variant_model.library_file_id)
+                .where(
+                    variant_model.queue_item_id.in_(
+                        select(PrintQueueItem.id).where(PrintQueueItem.batch_id == batch_id)
+                    )
+                )
+                .distinct()
+            )
+        ).scalars()
+        library_file_ids.update(variant_file_ids.all())
     for archive_id in archive_ids:
         archive = (await db.execute(select(PrintArchive).where(PrintArchive.id == archive_id))).scalar_one_or_none()
         # A deleted source can't be printed; dispatch will fail on it anyway.
@@ -820,13 +838,7 @@ async def add_to_queue(
         library_file = result.scalar_one_or_none()
         if not library_file:
             raise HTTPException(400, "Library file not found")
-        # Same shape: gate cross-user library-file queueing on LIBRARY_READ_ALL.
-        if (
-            actor is not None
-            and not actor.has_permission(Permission.LIBRARY_READ_ALL.value)
-            and library_file.created_by_id != actor.id
-        ):
-            raise HTTPException(404, "Library file not found")
+        _assert_can_queue_library_file(library_file, actor)
         # Bambu SD card is FAT32/exFAT — illegal filename chars would 553 at
         # FTP upload time (#1540). Reject at queue time so the user gets the
         # actionable error before waiting in queue.
@@ -1271,6 +1283,7 @@ async def create_batch(
     data: PrintBatchCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_CREATE),
+    api_key_owner: User | None = Depends(resolve_api_key_owner),
 ):
     """Create a batch.
 
@@ -1289,8 +1302,9 @@ async def create_batch(
     if not data.name or not data.name.strip():
         raise HTTPException(400, "Batch name is required")
 
+    actor = current_user or api_key_owner
     plate_targets = _validate_plate_targets(data.plates)
-    await _validate_batch_project(db, data.project_id, current_user)
+    await _validate_batch_project(db, data.project_id, actor)
 
     batch = PrintBatch(
         name=data.name.strip()[:255],
@@ -1298,7 +1312,7 @@ async def create_batch(
         library_file_id=data.library_file_id,
         quantity=len(data.item_ids) if data.item_ids else 1,
         status="active",
-        created_by_id=current_user.id if current_user else None,
+        created_by_id=actor.id if actor else None,
         project_id=data.project_id,
         due_date=data.due_date,
         notes=data.notes,
@@ -1333,9 +1347,9 @@ async def create_batch(
             if item.batch_id is not None:
                 continue
             if (
-                current_user is not None
-                and item.created_by_id != current_user.id
-                and not current_user.has_permission(Permission.QUEUE_UPDATE_ALL.value)
+                actor is not None
+                and item.created_by_id != actor.id
+                and not actor.has_permission(Permission.QUEUE_UPDATE_ALL.value)
             ):
                 continue
             item.batch_id = batch.id
@@ -1370,7 +1384,7 @@ async def update_batch(
 
     plate_targets = _validate_plate_targets(data.plates)
     if data.project_id is not None:
-        await _validate_batch_project(db, data.project_id, current_user)
+        await _validate_batch_project(db, data.project_id, actor)
 
     if data.name is not None:
         if not data.name.strip():
@@ -1650,6 +1664,7 @@ async def _build_batch_response(
         due_date=batch.due_date,
         notes=batch.notes,
         pending_count=progress.pending,
+        preheating_count=progress.preheating,
         printing_count=progress.printing,
         completed_count=progress.completed,
         failed_count=progress.failed,
@@ -1672,6 +1687,7 @@ async def _build_batch_response(
                 dispatched=plate.dispatched,
                 remaining=plate.remaining,
                 pending_count=plate.pending,
+                preheating_count=plate.preheating,
                 dispatching_count=plate.dispatching,
                 printing_count=plate.printing,
                 completed_count=plate.completed,

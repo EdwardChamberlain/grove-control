@@ -43,12 +43,21 @@ logger = logging.getLogger(__name__)
 # count because the run is in flight — re-dispatching either would double-print.
 # "failed",
 # "cancelled" and "skipped" deliberately do not.
-CONSUMING_STATUSES = ("pending", "dispatching", "printing", "completed")
+CONSUMING_STATUSES = ("pending", "preheating", "dispatching", "printing", "completed")
 
 # Queue statuses the roll-up has a counter for. Anything else is ignored rather
 # than crashing the page — the queue's status vocabulary is allowed to grow
 # without this module having to be updated in lockstep.
-COUNTED_STATUSES = ("pending", "dispatching", "printing", "completed", "failed", "cancelled", "skipped")
+COUNTED_STATUSES = (
+    "pending",
+    "preheating",
+    "dispatching",
+    "printing",
+    "completed",
+    "failed",
+    "cancelled",
+    "skipped",
+)
 
 # Columns copied onto a clone when dispatching more of a plate. This is the
 # print *configuration* the user already chose and the API already validated —
@@ -115,6 +124,7 @@ class PlateProgress:
     quantity_target: int
     sort_order: int = 0
     pending: int = 0
+    preheating: int = 0
     dispatching: int = 0
     printing: int = 0
     completed: int = 0
@@ -130,7 +140,7 @@ class PlateProgress:
 
     @property
     def dispatched(self) -> int:
-        return self.pending + self.dispatching + self.printing + self.completed
+        return self.pending + self.preheating + self.dispatching + self.printing + self.completed
 
     @property
     def remaining(self) -> int:
@@ -174,6 +184,10 @@ class BatchProgress:
     @property
     def pending(self) -> int:
         return self._sum("pending")
+
+    @property
+    def preheating(self) -> int:
+        return self._sum("preheating")
 
     @property
     def dispatching(self) -> int:
@@ -245,6 +259,7 @@ class BatchProgress:
             self.target > 0
             and self.remaining == 0
             and self.pending == 0
+            and self.preheating == 0
             and self.dispatching == 0
             and self.printing == 0
         )

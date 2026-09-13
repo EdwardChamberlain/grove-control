@@ -161,7 +161,7 @@ function BatchOrderCard({
   // Progress is measured against the target, not against what was queued —
   // that is the whole difference between an order and a grouping.
   const denominator = batch.has_targets ? batch.target_count : batch.completed_count + batch.pending_count
-    + batch.printing_count + batch.failed_count;
+    + batch.preheating_count + batch.dispatching_count + batch.printing_count + batch.failed_count;
   const percent = denominator > 0 ? Math.round((batch.completed_count / denominator) * 100) : 0;
   const dueDate = batch.due_date ? parseUTCDate(batch.due_date) : null;
   const isOverdue = dueDate != null && batch.status === 'active' && dueDate.getTime() < Date.now();
