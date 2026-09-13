@@ -158,7 +158,8 @@ def _candidates_for(item: PrintQueueItem) -> list[_ModelCandidate]:
     ``DISPATCH_MAX_ATTEMPTS`` bound from #2555 intact — a job with alternatives
     still gives up, it just does not give up without trying them.
     """
-    if not item.variants:
+    variants = getattr(item, "variants", None) or []
+    if not variants:
         if not item.archive_id and not item.library_file_id:
             # Nothing to print at all. Dispatching would fail deep in the upload
             # on "No archive_id or library_file_id"; the caller holds the item
@@ -167,7 +168,7 @@ def _candidates_for(item: PrintQueueItem) -> list[_ModelCandidate]:
         return [
             _ModelCandidate(
                 target_model=item.target_model,
-                sliced_for=_sliced_for_model(item.archive, item.library_file),
+                sliced_for=_sliced_for_model(getattr(item, "archive", None), getattr(item, "library_file", None)),
                 required_filament_types=item.required_filament_types,
                 filament_overrides=item.filament_overrides,
             )
@@ -178,7 +179,7 @@ def _candidates_for(item: PrintQueueItem) -> list[_ModelCandidate]:
     # on with ``deleted_at`` set, which no foreign key can express), and SQLite
     # ships with ``PRAGMA foreign_keys`` off, so the ON DELETE CASCADE never
     # fires there and a hard delete leaves the variant row pointing at nothing.
-    usable = [v for v in item.variants if v.library_file is not None and v.library_file.deleted_at is None]
+    usable = [v for v in variants if v.library_file is not None and v.library_file.deleted_at is None]
 
     ordered = sorted(usable, key=lambda v: (v.attempt_count or 0, v.position, v.id))
     return [
@@ -731,7 +732,18 @@ class PrintScheduler:
                 # prove material/colour compatibility. Keep it pending rather
                 # than silently degrading to the legacy type-only mapper.
                 match_preference = getattr(item, "force_color_match", None)
-                if match_preference is True and not self._has_verifiable_filament_metadata(item):
+                has_source_row = bool(getattr(item, "archive", None) or getattr(item, "library_file", None))
+                metadata_required = match_preference is True or (
+                    match_preference is False
+                    and bool(getattr(item, "archive_id", None) or getattr(item, "library_file_id", None))
+                    and not has_source_row
+                )
+                if (
+                    type(match_preference) is bool
+                    and not getattr(item, "variants", None)
+                    and metadata_required
+                    and not self._has_verifiable_filament_metadata(item)
+                ):
                     waiting_reason = "Material/colour metadata unavailable; cannot verify a safe filament match"
                     if item.waiting_reason != waiting_reason:
                         item.waiting_reason = waiting_reason
@@ -926,7 +938,7 @@ class PrintScheduler:
                                 other.been_jumped = True
                         await db.commit()
 
-                elif item.target_model or item.variants:
+                elif item.target_model or getattr(item, "variants", None):
                     # Model-based assignment - find any idle printer of matching model.
                     # A plain model-based item has exactly one candidate, built from
                     # its own columns. A cross-model item (#671) has one per sliced
