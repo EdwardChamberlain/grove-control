@@ -834,8 +834,8 @@ export function PrintModal({
           require_previous_success: scheduleOptions.requirePreviousSuccess,
           auto_off_after: scheduleOptions.autoOffAfter,
           gcode_injection: scheduleOptions.gcodeInjection,
-          manual_start: scheduleOptions.scheduleType === 'queue' && scheduleOptions.requireManualStart,
-          scheduled_time: scheduleOptions.scheduleType === 'scheduled' && scheduleOptions.scheduledTime
+          manual_start: scheduleOptions.requireManualStart,
+          scheduled_time: scheduleOptions.postponePrint && scheduleOptions.scheduledTime
             ? new Date(scheduleOptions.scheduledTime).toISOString()
             : undefined,
           quantity,
