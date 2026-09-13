@@ -11,6 +11,40 @@ from httpx import AsyncClient
 from sqlalchemy import select
 
 
+async def _enable_auth_with_operators(db_session, *usernames: str):
+    from backend.app.core.auth import invalidate_auth_enabled_cache
+    from backend.app.models.group import Group
+    from backend.app.models.settings import Settings
+    from backend.app.models.user import User
+
+    operators = (await db_session.execute(select(Group).where(Group.name == "Operators"))).scalar_one()
+    users = [User(username=username, groups=[operators]) for username in usernames]
+    db_session.add_all([Settings(key="auth_enabled", value="true"), *users])
+    await db_session.commit()
+    for user in users:
+        await db_session.refresh(user)
+    invalidate_auth_enabled_cache()
+    return users
+
+
+async def _make_api_key(db_session, *, owner_id: int | None) -> str:
+    from backend.app.core.auth import generate_api_key
+    from backend.app.models.api_key import APIKey
+
+    full_key, key_hash, key_prefix = generate_api_key()
+    db_session.add(
+        APIKey(
+            name="queue variants key",
+            key_hash=key_hash,
+            key_prefix=key_prefix,
+            user_id=owner_id,
+            can_queue=True,
+        )
+    )
+    await db_session.commit()
+    return full_key
+
+
 @pytest.fixture
 async def sliced_file_factory(db_session):
     _counter = [0]
@@ -77,6 +111,83 @@ class TestQueueWithVariants:
         variants = await _variants_of(db_session, item_id)
         assert [v.target_model for v in variants] == ["H2S", "H2C"]
         assert [v.position for v in variants] == [0, 1]
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_owned_api_key_uses_owner_for_variant_access_and_queue_ownership(
+        self,
+        async_client,
+        db_session,
+        sliced_file_factory,
+        printer_factory,
+    ):
+        from backend.app.models.print_queue import PrintQueueItem
+
+        owner, other = await _enable_auth_with_operators(db_session, "variant-key-owner", "variant-key-other")
+        await printer_factory(model="H2S")
+        await printer_factory(model="H2C")
+        own_h2s = await sliced_file_factory("H2S", created_by_id=owner.id)
+        own_h2c = await sliced_file_factory("H2C", created_by_id=owner.id)
+        foreign_h2c = await sliced_file_factory("H2C", created_by_id=other.id)
+        full_key = await _make_api_key(db_session, owner_id=owner.id)
+        headers = {"X-API-Key": full_key}
+
+        allowed = await async_client.post(
+            "/api/v1/queue/",
+            headers=headers,
+            json={
+                "variants": [
+                    {"library_file_id": own_h2s.id},
+                    {"library_file_id": own_h2c.id},
+                ]
+            },
+        )
+        assert allowed.status_code == 200, allowed.text
+        item = (
+            await db_session.execute(select(PrintQueueItem).where(PrintQueueItem.id == allowed.json()["id"]))
+        ).scalar_one()
+        assert item.created_by_id == owner.id
+
+        denied = await async_client.post(
+            "/api/v1/queue/",
+            headers=headers,
+            json={
+                "variants": [
+                    {"library_file_id": own_h2s.id},
+                    {"library_file_id": foreign_h2c.id},
+                ]
+            },
+        )
+        assert denied.status_code == 404
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_ownerless_api_key_cannot_create_variant_queue_item(
+        self,
+        async_client,
+        db_session,
+        sliced_file_factory,
+        printer_factory,
+    ):
+        await _enable_auth_with_operators(db_session, "variant-key-user")
+        await printer_factory(model="H2S")
+        await printer_factory(model="H2C")
+        h2s = await sliced_file_factory("H2S")
+        h2c = await sliced_file_factory("H2C")
+        full_key = await _make_api_key(db_session, owner_id=None)
+
+        response = await async_client.post(
+            "/api/v1/queue/",
+            headers={"X-API-Key": full_key},
+            json={
+                "variants": [
+                    {"library_file_id": h2s.id},
+                    {"library_file_id": h2c.id},
+                ]
+            },
+        )
+        assert response.status_code == 403
+        assert "owner" in response.json()["detail"].lower()
 
     @pytest.mark.asyncio
     @pytest.mark.integration

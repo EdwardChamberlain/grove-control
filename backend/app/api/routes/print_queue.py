@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.app.api.routes.library_variants import normalize_model_name, resolve_variant_model
-from backend.app.core.auth import RequirePermissionIfAuthEnabled, require_ownership_permission
+from backend.app.core.auth import RequirePermissionIfAuthEnabled, require_ownership_permission, resolve_api_key_owner
 from backend.app.core.config import settings
 from backend.app.core.database import get_db
 from backend.app.core.permissions import Permission
@@ -539,15 +539,17 @@ async def add_to_queue(
     data: PrintQueueItemCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_CREATE),
+    api_key_owner: User | None = Depends(resolve_api_key_owner),
 ):
     """Add an item to the print queue."""
+    actor = current_user or api_key_owner
     # Inserting a new item ahead of pending work is a separate privilege from
     # simply creating a queue item.  Keep the check here (rather than only in
     # the modal) so API callers cannot bypass the queue policy.
     if (
         (data.insert_at_top or data.insert_position is not None)
-        and current_user is not None
-        and not current_user.has_permission(Permission.QUEUE_INSERT_TOP.value)
+        and actor is not None
+        and not actor.has_permission(Permission.QUEUE_INSERT_TOP.value)
     ):
         raise HTTPException(status_code=403, detail="Missing required permission: queue:insert_top")
     # Normalize target_model (e.g., "Bambu Lab X1E" / "C13" -> "X1E").
@@ -572,7 +574,7 @@ async def add_to_queue(
             raise HTTPException(
                 400, "Cannot combine variants with archive_id or library_file_id — the variants are the files"
             )
-        variant_specs = await _resolve_queue_variants(db, data.variants, current_user)
+        variant_specs = await _resolve_queue_variants(db, data.variants, actor)
         # Mirror the first candidate onto the item so the queue listing, the SJF
         # grouping and the "Any H2S" label have something before a printer is
         # picked. Resolution overwrites it with whichever candidate actually runs.
@@ -620,9 +622,9 @@ async def add_to_queue(
         # ownership of the archive. 404 (not 403) so we don't leak
         # "this id exists but you can't queue it" for enumeration.
         if (
-            current_user is not None
-            and not current_user.has_permission(Permission.ARCHIVES_READ_ALL.value)
-            and archive.created_by_id != current_user.id
+            actor is not None
+            and not actor.has_permission(Permission.ARCHIVES_READ_ALL.value)
+            and archive.created_by_id != actor.id
         ):
             raise HTTPException(404, "Archive not found")
         # Reprint perm gate (#1625): the legacy /archives/{id}/reprint endpoint
@@ -632,10 +634,10 @@ async def add_to_queue(
         # frontend `canModify('archives', 'reprint', ...)` helper:
         # REPRINT_ALL allows any archive, REPRINT_OWN allows own only,
         # ownerless archives require REPRINT_ALL (fail-closed).
-        if current_user is not None:
-            owns_archive = archive.created_by_id is not None and archive.created_by_id == current_user.id
-            has_reprint = current_user.has_permission(Permission.ARCHIVES_REPRINT_ALL.value) or (
-                owns_archive and current_user.has_permission(Permission.ARCHIVES_REPRINT_OWN.value)
+        if actor is not None:
+            owns_archive = archive.created_by_id is not None and archive.created_by_id == actor.id
+            has_reprint = actor.has_permission(Permission.ARCHIVES_REPRINT_ALL.value) or (
+                owns_archive and actor.has_permission(Permission.ARCHIVES_REPRINT_OWN.value)
             )
             if not has_reprint:
                 raise HTTPException(
@@ -652,9 +654,9 @@ async def add_to_queue(
             raise HTTPException(400, "Library file not found")
         # Same shape: gate cross-user library-file queueing on LIBRARY_READ_ALL.
         if (
-            current_user is not None
-            and not current_user.has_permission(Permission.LIBRARY_READ_ALL.value)
-            and library_file.created_by_id != current_user.id
+            actor is not None
+            and not actor.has_permission(Permission.LIBRARY_READ_ALL.value)
+            and library_file.created_by_id != actor.id
         ):
             raise HTTPException(404, "Library file not found")
         # Bambu SD card is FAT32/exFAT — illegal filename chars would 553 at
@@ -731,10 +733,10 @@ async def add_to_queue(
         if existing_batch.status != "active":
             raise HTTPException(400, "Cannot add items to a non-active batch")
         if (
-            current_user is not None
+            actor is not None
             and existing_batch.created_by_id is not None
-            and existing_batch.created_by_id != current_user.id
-            and not current_user.has_permission(Permission.QUEUE_UPDATE_ALL.value)
+            and existing_batch.created_by_id != actor.id
+            and not actor.has_permission(Permission.QUEUE_UPDATE_ALL.value)
         ):
             raise HTTPException(404, "Batch not found")
         batch = existing_batch
@@ -759,7 +761,7 @@ async def add_to_queue(
             library_file_id=data.library_file_id,
             quantity=quantity,
             status="active",
-            created_by_id=current_user.id if current_user else None,
+            created_by_id=actor.id if actor else None,
         )
         db.add(batch)
         await db.flush()  # Get batch.id before creating items
@@ -881,7 +883,7 @@ async def add_to_queue(
             project_id=data.project_id,
             position=start_position + i,
             status="pending",
-            created_by_id=current_user.id if current_user else None,
+            created_by_id=actor.id if actor else None,
             batch_id=batch_id,
             print_time_seconds=cached_print_time,
         )
