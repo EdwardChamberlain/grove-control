@@ -48,6 +48,7 @@ const mockPrinters = [
 const mockPrinterStatus = {
   connected: true,
   state: 'IDLE',
+  has_queued_work: false,
   awaiting_plate_clear: false,
   progress: 0,
   layer_num: 0,
@@ -173,12 +174,10 @@ describe('PrintersPage', () => {
 
     it('shows a yellow Queue Job action when a printer has pending work', async () => {
       server.use(
-        http.get('/api/v1/queue/', () => HttpResponse.json([{
-          id: 1,
-          printer_id: 1,
-          position: 1,
-          status: 'pending',
-        }])),
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+          ...mockPrinterStatus,
+          has_queued_work: true,
+        })),
       );
 
       render(<PrintersPage />);
@@ -189,6 +188,24 @@ describe('PrintersPage', () => {
       queueButtons.forEach(button => {
         expect(button).toHaveClass('!bg-yellow-500', '!text-black');
       });
+      expect(screen.queryByRole('button', { name: 'Print' })).not.toBeInTheDocument();
+    });
+
+    it('shows a yellow Queue Job action during an active heat soak', async () => {
+      server.use(
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+          ...mockPrinterStatus,
+          preheating: true,
+          has_queued_work: true,
+        })),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+
+      const queueButton = await screen.findByRole('button', { name: 'Queue Job' });
+
+      expect(queueButton).toHaveClass('bg-yellow-500', 'text-black');
       expect(screen.queryByRole('button', { name: 'Print' })).not.toBeInTheDocument();
     });
 

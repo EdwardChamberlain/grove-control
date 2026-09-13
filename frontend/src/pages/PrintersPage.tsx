@@ -1491,11 +1491,6 @@ function SinglePrinterCockpit({
     queryFn: () => api.getPrintLog({ printerId: printer.id, limit: 250 }),
     staleTime: 60 * 1000,
   });
-  const { data: queueItems } = useQuery({
-    queryKey: ['queue', printer.id, 'pending'],
-    queryFn: () => api.getQueue(printer.id, 'pending'),
-    refetchInterval: 30000,
-  });
   const dryingControls = useAmsDryingControls({
     printerId: printer.id,
     amsUnits: status?.ams ?? [],
@@ -1815,7 +1810,7 @@ function SinglePrinterCockpit({
 
   const knownHmsErrors = status?.hms_errors ? filterKnownHMSErrors(status.hms_errors) : [];
   const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
-  const hasQueuedWork = isPrintingOrPaused || (queueItems?.length ?? 0) > 0;
+  const hasQueuedWork = isPrintingOrPaused || !!status?.has_queued_work;
   const printActionLabel = hasQueuedWork ? t('printers.queueJob', 'Queue Job') : t('common.print');
   const isPaused = status?.state === 'PAUSE';
   const progress = Math.max(0, Math.min(100, status?.progress ?? 0));
@@ -3278,8 +3273,8 @@ function PrinterCard({
 
   // Fetch queue count for this printer
   const { data: queueItems } = useQuery({
-    queryKey: ['queue', printer.id, 'pending'],
-    queryFn: () => api.getQueue(printer.id, 'pending'),
+    queryKey: ['queue', printer.id, 'pending', printer.model],
+    queryFn: () => api.getQueue(printer.id, 'pending', printer.model || undefined),
     refetchInterval: 30000,
   });
   // Filter queue items by filament compatibility (same logic as PrinterQueueWidget)
@@ -3298,7 +3293,7 @@ function PrinterCard({
   });
   const lastPrint = lastPrints?.[0];
   const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
-  const hasQueuedWork = isPrintingOrPaused || (queueItems?.length ?? 0) > 0;
+  const hasQueuedWork = isPrintingOrPaused || !!status?.has_queued_work;
   const printActionLabel = hasQueuedWork ? t('printers.queueJob', 'Queue Job') : t('common.print');
   const needsPlateClear = requirePlateClear && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
   const showClearPlateButton = status?.connected && needsPlateClear && !isPrintingOrPaused;

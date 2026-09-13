@@ -352,6 +352,56 @@ class TestPrintersAPI:
         result = response.json()
         assert "connected" in result
         assert "state" in result
+        assert "has_queued_work" in result
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    @pytest.mark.parametrize("queue_status", ["pending", "preheating", "dispatching", "printing"])
+    async def test_get_printer_status_reports_queue_work_for_active_queue_states(
+        self, async_client: AsyncClient, printer_factory, db_session, queue_status
+    ):
+        """Queue-work state is visible as an aggregate, regardless of row ownership."""
+        from backend.app.models.print_queue import PrintQueueItem
+        from backend.app.services.bambu_mqtt import PrinterState
+
+        printer = await printer_factory()
+        db_session.add(PrintQueueItem(printer_id=printer.id, position=1, status=queue_status))
+        await db_session.commit()
+
+        state = PrinterState()
+        state.connected = True
+        state.state = "IDLE"
+        with patch("backend.app.api.routes.printers.printer_manager") as mock_pm:
+            mock_pm.get_status.return_value = state
+            mock_pm.is_awaiting_plate_clear.return_value = False
+            response = await async_client.get(f"/api/v1/printers/{printer.id}/status")
+
+        assert response.status_code == 200
+        assert response.json()["has_queued_work"] is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_get_printer_status_reports_model_based_queue_work(
+        self, async_client: AsyncClient, printer_factory, db_session
+    ):
+        """Model-targeted work is included without exposing queue-row details."""
+        from backend.app.models.print_queue import PrintQueueItem
+
+        printer = await printer_factory(model="X1C", location="Workshop")
+        db_session.add(
+            PrintQueueItem(
+                target_model="X1C",
+                target_location="Workshop",
+                position=1,
+                status="pending",
+            )
+        )
+        await db_session.commit()
+
+        response = await async_client.get(f"/api/v1/printers/{printer.id}/status")
+
+        assert response.status_code == 200
+        assert response.json()["has_queued_work"] is True
 
     @pytest.mark.asyncio
     @pytest.mark.integration
