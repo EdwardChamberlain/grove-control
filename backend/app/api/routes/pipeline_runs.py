@@ -34,7 +34,7 @@ from sqlalchemy import delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.routes.cloud import resolve_api_key_cloud_owner
-from backend.app.core.auth import RequirePermissionIfAuthEnabled
+from backend.app.core.auth import RequirePermissionIfAuthEnabled, resolve_api_key_owner
 from backend.app.core.config import settings as app_settings
 from backend.app.core.database import async_session, get_db
 from backend.app.core.permissions import Permission
@@ -61,6 +61,7 @@ from backend.app.services.pipeline_eligibility import (
     EligibilityReport,
     check_pipeline_eligibility,
 )
+from backend.app.utils.safe_path import PathTraversalError, safe_join_under
 
 logger = logging.getLogger(__name__)
 
@@ -387,9 +388,7 @@ async def _resolve_source(
         lib = (await db.execute(select(LibraryFile).where(LibraryFile.id == library_file_id))).scalar_one_or_none()
         can_read_all = user is None or user.has_permission(Permission.LIBRARY_READ_ALL.value)
         lib = _ensure_library_file_visible(lib, user, can_read_all)
-        src_path = (
-            Path(app_settings.base_dir) / lib.file_path
-        )  # SEC-PATH-OK: lib.file_path is a LibraryFile DB column set only by the upload route, which writes a UUID-named file under base_dir/library_files/.
+        src_path = safe_join_under(Path(app_settings.base_dir), lib.file_path)
         if not src_path.exists():
             raise HTTPException(404, "Source library file missing on disk")
         return ("library_file", lib.id, lib.filename, src_path)
@@ -401,9 +400,7 @@ async def _resolve_source(
     rel = arc.source_3mf_path or arc.file_path
     if not rel:
         raise HTTPException(400, "Archive has no source file to slice")
-    src_path = (
-        Path(app_settings.base_dir) / rel
-    )  # SEC-PATH-OK: rel is archive.source_3mf_path / archive.file_path, both set by upload-time validators that already do resolve+relative_to containment.
+    src_path = safe_join_under(Path(app_settings.base_dir), rel)
     if not src_path.exists():
         raise HTTPException(404, "Archive source file missing on disk")
     name = arc.filename or arc.print_name or src_path.name
@@ -675,7 +672,10 @@ async def recover_pipeline_runs() -> int:
                     source_kind = "library_file"
                     source_id = source.id
                     source_filename = source.filename
-                    source_path = Path(app_settings.base_dir) / source.file_path
+                    try:
+                        source_path = safe_join_under(Path(app_settings.base_dir), source.file_path, http=False)
+                    except PathTraversalError:
+                        source_path = None
             elif pipeline is not None and run.source_archive_id is not None:
                 source = (
                     await db.execute(select(PrintArchive).where(PrintArchive.id == run.source_archive_id))
@@ -686,7 +686,10 @@ async def recover_pipeline_runs() -> int:
                         source_kind = "archive"
                         source_id = source.id
                         source_filename = source.filename or source.print_name or Path(rel).name
-                        source_path = Path(app_settings.base_dir) / rel
+                        try:
+                            source_path = safe_join_under(Path(app_settings.base_dir), rel, http=False)
+                        except PathTraversalError:
+                            source_path = None
 
             if source_kind is None or source_id is None or source_filename is None or source_path is None:
                 run.status = "failed"
@@ -759,6 +762,7 @@ async def check_eligibility(
     pipeline_id: int,
     body: CheckEligibilityRequest,
     current_user: User | None = RequirePermissionIfAuthEnabled(Permission.PIPELINES_READ),
+    api_key_owner: User | None = Depends(resolve_api_key_owner),
     db: AsyncSession = Depends(get_db),
 ):
     pipeline = await _load_pipeline(db, pipeline_id)
@@ -766,7 +770,7 @@ async def check_eligibility(
         db,
         library_file_id=body.source_library_file_id,
         archive_id=body.source_archive_id,
-        user=current_user,
+        user=current_user or api_key_owner,
     )
     if pipeline.target_kind == "printer_class" and pipeline.target_printer_id is None:
         report = await check_pipeline_eligibility(db, pipeline, status_lookup=_make_status_lookup())
@@ -786,6 +790,7 @@ async def run_pipeline(
     pipeline_id: int,
     body: PipelineRunCreateRequest,
     current_user: User | None = RequirePermissionIfAuthEnabled(Permission.PIPELINES_RUN),
+    api_key_owner: User | None = Depends(resolve_api_key_owner),
     api_key_cloud_owner: User | None = Depends(resolve_api_key_cloud_owner),
     db: AsyncSession = Depends(get_db),
 ):
@@ -797,13 +802,13 @@ async def run_pipeline(
         db,
         library_file_id=body.source_library_file_id,
         archive_id=body.source_archive_id,
-        user=current_user,
+        user=current_user or api_key_owner,
     )
 
     # API-key permission dependencies intentionally return no JWT user. When
     # the pipeline uses cloud presets, use the key owner for cloud credentials
     # and for ownership stamps on the run, sliced file, and queue entries.
-    creator = current_user or api_key_cloud_owner
+    creator = current_user or api_key_owner or api_key_cloud_owner
 
     # Cap copies against the configured ceiling.
     raw_cap = await get_setting(db, "pipeline_max_copies")
@@ -1044,6 +1049,7 @@ async def cancel_run(
 async def retry_failed(
     run_id: int,
     current_user: User | None = RequirePermissionIfAuthEnabled(Permission.PIPELINES_RUN),
+    api_key_owner: User | None = Depends(resolve_api_key_owner),
     api_key_cloud_owner: User | None = Depends(resolve_api_key_cloud_owner),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1090,6 +1096,7 @@ async def retry_failed(
         parent.pipeline_id,
         body,
         current_user=current_user,
+        api_key_owner=api_key_owner,
         api_key_cloud_owner=api_key_cloud_owner,
         db=db,
     )

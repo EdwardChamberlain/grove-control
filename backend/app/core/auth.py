@@ -98,7 +98,11 @@ _APIKEY_SCOPE_BY_PERMISSION: dict[Permission, str | tuple[str, ...]] = {
     Permission.SETTINGS_READ: "can_read_status",
     Permission.MAKERWORLD_VIEW: "can_read_status",
     Permission.PIPELINES_READ: "can_read_status",
-    Permission.PIPELINES_RUN: ("can_queue", "can_manage_library"),
+    # Pipeline execution is a queue write, and the owner permission check
+    # above still gates the dedicated pipeline-run capability. The slice
+    # output is created by the pipeline service, not by the library-upload
+    # API, so this must remain one concrete API-key scope.
+    Permission.PIPELINES_RUN: "can_queue",
     Permission.WEBSOCKET_CONNECT: "can_read_status",
     # can_queue — queue write ops + reprint (which enqueues an existing archive)
     Permission.QUEUE_CREATE: "can_queue",
