@@ -472,17 +472,9 @@ async def _lock_batch_for_dispatch(db: AsyncSession, batch: PrintBatch) -> None:
     elif bind.dialect.name == "sqlite":
         # SQLite has no row-level FOR UPDATE. A no-op UPDATE upgrades the
         # deferred transaction to a writer lock before progress is read.
-        await db.execute(
-            update(PrintBatch)
-            .where(PrintBatch.id == batch.id)
-            .values(name=PrintBatch.name)
-        )
+        await db.execute(update(PrintBatch).where(PrintBatch.id == batch.id).values(name=PrintBatch.name))
     else:
-        await db.execute(
-            select(PrintBatch.id)
-            .where(PrintBatch.id == batch.id)
-            .with_for_update()
-        )
+        await db.execute(select(PrintBatch.id).where(PrintBatch.id == batch.id).with_for_update())
     await db.refresh(batch)
 
 
@@ -589,8 +581,7 @@ async def dispatch_remaining(
 
     if not created and stranded:
         labels = ", ".join(
-            plate.plate_name or f"Plate {plate.plate_id if plate.plate_id is not None else 1}"
-            for plate in stranded
+            plate.plate_name or f"Plate {plate.plate_id if plate.plate_id is not None else 1}" for plate in stranded
         )
         raise BatchDispatchError(
             f"{labels} {'have' if len(stranded) > 1 else 'has'} no queued or finished run to copy settings from. "

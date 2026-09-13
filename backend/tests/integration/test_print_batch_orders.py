@@ -846,7 +846,9 @@ class TestBatchOrderCost:
 @pytest.mark.asyncio
 @pytest.mark.integration
 class TestOrderSourcePreservation:
-    async def test_deleting_last_active_order_source_cancels_it_instead(self, async_client, printer_factory, archive_factory, db_session):
+    async def test_deleting_last_active_order_source_cancels_it_instead(
+        self, async_client, printer_factory, archive_factory, db_session
+    ):
         from backend.app.models.print_queue import PrintQueueItem
 
         printer = await printer_factory()
@@ -868,7 +870,9 @@ class TestOrderSourcePreservation:
         assert progress["dispatchable_count"] == 3
         assert progress["plates"][0]["can_dispatch"] is True
 
-    async def test_completed_order_source_is_deleted_normally(self, async_client, printer_factory, archive_factory, db_session):
+    async def test_completed_order_source_is_deleted_normally(
+        self, async_client, printer_factory, archive_factory, db_session
+    ):
         printer = await printer_factory()
         archive = await archive_factory()
         order = await _create_order(async_client, archive.id, [{"plate_id": 1, "quantity_target": 1}])
