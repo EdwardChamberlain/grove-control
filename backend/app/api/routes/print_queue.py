@@ -236,9 +236,7 @@ async def _is_orders_last_source(db: AsyncSession, item: PrintQueueItem) -> bool
         return False
 
     item_scope = (
-        PrintQueueItem.plate_id == item.plate_id
-        if item.plate_id is not None
-        else PrintQueueItem.plate_id.is_(None)
+        PrintQueueItem.plate_id == item.plate_id if item.plate_id is not None else PrintQueueItem.plate_id.is_(None)
     )
     survivor = (
         await db.execute(
