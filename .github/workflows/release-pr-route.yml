@@ -37,3 +37,30 @@ jobs:
           fi
 
           echo "Release route accepted: $HEAD_REPOSITORY:$HEAD_BRANCH -> $REPOSITORY:$BASE_BRANCH"
+
+  release-version:
+    name: Release Version
+    needs: release-pr-route
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Read base version
+        id: base
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          base_version="$(git show "${BASE_SHA}:VERSION")"
+          echo "base_version=${base_version}" >> "$GITHUB_OUTPUT"
+
+      - name: Check release version
+        env:
+          BASE_VERSION: ${{ steps.base.outputs.base_version }}
+        run: python scripts/check_version.py --previous-version "$BASE_VERSION"
