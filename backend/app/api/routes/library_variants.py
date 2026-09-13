@@ -182,15 +182,7 @@ async def _ensure_group_visible(
     if user is None or group.created_by_id is None or group.created_by_id != user.id:
         raise HTTPException(404, "Variant group not found")
 
-    members = (
-        (
-            await db.execute(
-                LibraryFile.active().where(LibraryFile.variant_group_id == group.id)
-            )
-        )
-        .scalars()
-        .all()
-    )
+    members = (await db.execute(LibraryFile.active().where(LibraryFile.variant_group_id == group.id))).scalars().all()
     if any(member.created_by_id is None or member.created_by_id != user.id for member in members):
         raise HTTPException(404, "Variant group not found")
     return group

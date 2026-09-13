@@ -257,7 +257,6 @@ def _mapping_is_all_unresolved(mapping: list | None) -> bool:
     if not isinstance(mapping, list) or not mapping:
         return False
     return all(t is None or (isinstance(t, int) and t < 0) for t in mapping)
-
 def _nozzle_info_by_id(status) -> dict[int, dict]:
     """Index the H2 ``nozzle.info`` telemetry by its physical nozzle id."""
     by_id: dict[int, dict] = {}
@@ -1016,9 +1015,7 @@ class PrintScheduler:
                     # Re-read it after resolving so the dispatch gates below
                     # cannot accidentally use the last candidate inspected.
                     filament_overrides = self._get_filament_overrides(item)
-                    force_overrides = [
-                        override for override in filament_overrides if override.get("force_color_match")
-                    ]
+                    force_overrides = [override for override in filament_overrides if override.get("force_color_match")]
 
                     # Update waiting_reason if changed and send notification when first waiting
                     if item.waiting_reason != waiting_reason:
