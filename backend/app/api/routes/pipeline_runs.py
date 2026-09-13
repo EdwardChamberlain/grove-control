@@ -1036,11 +1036,7 @@ async def cancel_run(
     job_rows = (await db.execute(select(PipelineJob).where(PipelineJob.pipeline_run_id == run.id))).scalars().all()
     queue_entry_ids = [job.queue_entry_id for job in job_rows if job.queue_entry_id is not None]
     queue_entries = (
-        (
-            await db.execute(select(PrintQueueItem).where(PrintQueueItem.id.in_(queue_entry_ids)))
-        )
-        .scalars()
-        .all()
+        (await db.execute(select(PrintQueueItem).where(PrintQueueItem.id.in_(queue_entry_ids)))).scalars().all()
         if queue_entry_ids
         else []
     )
