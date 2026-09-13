@@ -114,6 +114,8 @@ export default {
     now: '今すぐ',
     collapse: '折りたたむ',
     expand: '展開',
+    previous: '前へ',
+    next: '次へ',
     viewArchive: 'アーカイブを表示',
     viewInFileManager: 'ファイルマネージャーで表示',
     addedBy: '{{username}}が追加',
@@ -1034,6 +1036,75 @@ export default {
     },
   },
 
+  // Sticky upload-progress toast (#1625 follow-up)
+  dispatchToast: {
+    untitled: '印刷ジョブ',
+    startingPrints: '印刷を開始しています',
+    progressSummary: '{{complete}}/{{total}} 完了 • 処理中: {{processing}}',
+    expandDetails: '送信の詳細を表示',
+    collapseDetails: '送信の詳細を非表示',
+    awaitingPrinter: 'プリンターを待機中…',
+    status: {
+      processing: '処理中',
+      completed: '完了',
+      failed: '失敗',
+    },
+    failed: {
+      generic: '送信に失敗しました',
+      upload_failed: 'プリンターへのアップロードに失敗しました',
+      start_command_failed: 'プリンターが開始コマンドを拒否しました',
+    },
+    dismiss: '閉じる',
+  },
+
+  // Pipeline Runs dashboard (#1425 PR C).
+  pipelineRuns: {
+    title: 'パイプライン実行',
+    loading: '読み込み中…',
+    empty: 'パイプラインの実行はまだありません。',
+    filter: {
+      pipeline: 'パイプライン',
+      status: 'ステータス',
+      target: '対象',
+      all: 'すべて',
+      allPipelines: 'すべてのパイプライン',
+      allStatus: 'すべてのステータス',
+      allTargets: 'すべての対象',
+      clear: 'フィルターをクリア',
+      noMatches: '現在のフィルターに一致する実行はありません。',
+    },
+    totalCount_one: '{{n}} 件の実行',
+    totalCount_other: '{{n}} 件の実行',
+    copies: '{{n}} 部',
+    failedCount: '{{n}} 失敗',
+    copyN: 'コピー {{n}}',
+    retryFailed: '失敗を再試行',
+    retryOf: '#{{n}} の再試行',
+    pagination: '{{total}} 件中 {{start}}–{{end}}',
+    toast: {
+      cancelled: '実行をキャンセルしました',
+      cancelFailed: 'キャンセルに失敗しました',
+      retryStarted: '再試行を開始しました',
+      retryFailed: '再試行に失敗しました',
+      cleared: '{{n}} 件の実行を削除しました',
+      clearFailed: '削除に失敗しました',
+    },
+    clearLog: 'ログをクリア',
+    clearConfirmTitle: 'ログをクリアしますか？',
+    clearConfirmBody: '完了、失敗、キャンセル、部分的失敗のすべてのパイプライン実行を削除しますか？実行中のものは残ります。元に戻せません。',
+    clearConfirmAction: 'クリア',
+    jobStatus: {
+      pending: '保留中',
+      awaiting_printer: 'プリンター待機中',
+      queued: '待機中',
+      printing: '印刷中',
+      completed: '完了',
+      failed: '失敗',
+      cancelled: 'キャンセル',
+    },
+    cancelledByUser: 'ユーザーによりキャンセル',
+  },
+
   // Queue page
   queue: {
     filamentShort: {
@@ -1113,6 +1184,7 @@ export default {
       queue: 'キュー',
       history: '履歴',
       timeline: 'タイムライン',
+      pipelines: 'パイプライン',
     },
     layout: {
       flatList: 'リスト',
@@ -1568,6 +1640,8 @@ export default {
       smartPlugs: 'スマートプラグ',
       notifications: '通知',
       queue: 'ワークフロー',
+      queueDispatch: 'キューとディスパッチ',
+      queuePipelines: 'パイプライン',
       filament: 'フィラメント',
       network: 'ネットワーク',
       apiKeys: 'APIキー',
@@ -2575,6 +2649,96 @@ export default {
       migrationErrorWarning: '{{count}} 件のレガシー行を起動時に再暗号化できませんでした。サーバーログを確認し、Grove Control を再起動して再試行してください。',
     },
 
+
+    pipelineLimits: {
+      title: 'スライサーパイプラインの上限',
+      maxCopiesLabel: '実行あたりの最大コピー数',
+      maxCopiesDesc: 'パイプライン実行時にオペレーターが要求できるコピー数の上限。サーバー側の上限は 1000 です。',
+    },
+
+    // Slicer Pipelines (#1425): list/edit/delete preset bundles users saved
+    // from the Slice dialog. Lives in Settings → Workflow → Pipelines sub-tab.
+    pipelines: {
+      title: 'スライサーパイプライン',
+      subtitle: '再利用可能なプリセットバンドル（プリンター + プロセス + フィラメント + ベッドタイプ）。スライスダイアログから保存し、次のファイルにワンクリックで適用できます。',
+      loading: 'パイプラインを読み込み中…',
+      loadError: 'パイプラインを読み込めませんでした。',
+      confirmDelete: 'このパイプラインを削除しますか？元に戻せません。',
+      staleWarning: '参照されているプリセットが見つかりません。スライスダイアログから再保存して修正してください。',
+      empty: {
+        title: 'パイプラインはまだありません。',
+        howto: '任意のファイルでスライスダイアログを開き、プリンター / プロセス / フィラメント / ベッドタイプを選んで「パイプラインとして保存」をクリックしてください。保存したパイプラインはここに表示されます。',
+      },
+      field: {
+        name: 'パイプライン名',
+        description: '説明',
+        targetPrinter: '対象プリンター',
+        noTarget: '— 対象なし —',
+        targetKind: '対象種別',
+        targetKindSpecific: '特定のプリンター',
+        targetKindClass: 'プリンタークラス',
+        targetModelClass: 'プリンターモデル',
+        fanoutStrategy: '分散戦略',
+        fanout: {
+          max_parallel: '最大並列 — 一致する空きプリンターに分散',
+          round_robin: 'ラウンドロビン — 適格なプリンター間で循環',
+          fill_one_first: '1台ずつ埋める — すべてのコピーを1台に固定',
+        },
+        fanoutShort: {
+          max_parallel: '並列',
+          round_robin: 'ラウンドロビン',
+          fill_one_first: '1台ずつ',
+        },
+      },
+      action: {
+        save: '保存',
+        cancel: 'キャンセル',
+        rename: '名前変更',
+        delete: '削除',
+      },
+      slot: {
+        printer: 'プリンター',
+        process: 'プロセス',
+        filament: 'フィラメント',
+        filamentN: 'フィラメント {{n}}',
+        filamentAll: '{{n}} スロットすべて',
+        bed: 'ベッド',
+      },
+      group: {
+        profiles: 'プロファイル',
+        filaments: 'フィラメント',
+      },
+      searchPlaceholder: 'パイプラインを検索…',
+      filterTargetType: '対象種別でフィルター',
+      filterTarget: '対象でフィルター',
+      filter: {
+        all: 'すべての対象',
+        noTarget: '対象未設定',
+        count: '{{shown}} / {{total}}',
+        noMatches: '現在のフィルターに一致するパイプラインはありません。',
+      },
+      toast: {
+        saved: 'パイプラインを保存しました',
+        saveFailed: '保存に失敗しました',
+        deleted: 'パイプラインを削除しました',
+        deleteFailed: '削除に失敗しました',
+      },
+      noTargetHint: '実行するには対象プリンターを設定してください',
+      noTargetWarning: 'このパイプラインを実行する前に対象プリンターを設定してください。',
+      runs: {
+        lastRun: '前回の実行',
+        status: {
+          queued: '待機中',
+          slicing: 'スライス中',
+          dispatching: '送信中',
+          in_progress: '印刷中',
+          completed: '完了',
+          failed: '失敗',
+          partial_failure: '部分的失敗',
+          cancelled: 'キャンセル',
+        },
+      },
+    },
   },
 
   // Notifications (for push notifications)
@@ -3795,6 +3959,41 @@ export default {
     deleteConfirm: 'このフィラメントを削除しますか？',
     importFromPrinter: 'プリンターからインポート',
     exportToFile: 'ファイルにエクスポート',
+    runWithPipeline: {
+      actionLabel: 'パイプラインで実行',
+      noPermission: 'パイプラインを実行する権限がありません',
+      modalTitle: 'パイプラインで実行',
+      confirmTitle: '実行を確認',
+      confirmIntro: 'プリフライトでこの実行に関する問題が見つかりました',
+      sourceHint: 'ソース',
+      pipelineHint: 'パイプライン',
+      targetHint: '対象',
+      pipelineListAria: '利用可能なパイプライン',
+      runAnyway: 'とにかく実行',
+      loading: '読み込み中…',
+      empty: '保存されたパイプラインはまだありません。スライスダイアログを開き「パイプラインとして保存」をクリックして作成してください。',
+      noTarget: '対象プリンターが未設定',
+      noTargetMessage: 'このパイプラインには対象プリンターが設定されていません。設定で開いて選択してください。',
+      copies: 'コピー数',
+      copiesHint: '最大 {{n}}',
+      classTarget: '任意の {{model}}',
+      toast: {
+        started: 'パイプラインの実行を開始しました',
+        failed: '実行を開始できませんでした',
+      },
+      issue: {
+        printerNotSet: 'このパイプラインに対象プリンターが設定されていません。',
+        printerNotFound: '対象プリンターが存在しません。',
+        printerDisabled: '対象プリンターは無効です。',
+        printerOffline: '対象プリンターはオフラインです。',
+        filamentType: 'フィラメントスロット {{slot}}: 期待 {{expected}}、AMS は {{actual}}',
+        filamentColor: 'フィラメントスロット {{slot}}: 色が異なります（期待 {{expected}}、AMS は {{actual}}）',
+        amsSlotMissing: 'AMS スロット {{slot}} はこのプリンターで利用できません',
+        filamentUnverified: 'フィラメントスロット {{slot}} はクラウド／標準プリセットからのため、静的に検証できませんでした。',
+        noClassMatches: 'このインストール内に、パイプラインの対象モデルクラス（{{expected}}）と一致するプリンターがありません。',
+        classNotSet: 'パイプラインの対象がプリンタークラスに設定されていますが、モデルが選択されていません。',
+      },
+    },
   },
 
   // Slice (slicer-API integration via SliceModal)
@@ -3858,6 +4057,22 @@ export default {
       highTemp: 'High Temp Plate',
       texturedPEI: 'Textured PEI Plate',
       smoothPEI: 'Smooth PEI Plate',
+    },
+    // Slicer Pipelines (#1425) — apply a saved bundle or save the current pick.
+    pipelines: {
+      label: 'パイプライン',
+      applyAria: 'パイプラインを適用',
+      applyPrompt: 'パイプラインを適用…',
+      empty: '保存されたパイプラインがありません',
+      saveButton: 'パイプラインとして保存',
+      saveTitle: '現在の4つのスロットの選択を再利用可能なパイプラインとして保存',
+      namePlaceholder: 'パイプライン名',
+      nameAria: '新しいパイプライン名',
+      toast: {
+        applied: '「{{name}}」を適用しました',
+        saved: 'パイプラインを保存しました',
+        saveFailed: '保存に失敗しました',
+      },
     },
   },
 

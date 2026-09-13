@@ -114,6 +114,8 @@ export default {
     now: '现在',
     collapse: '收起',
     expand: '展开',
+    previous: '上一页',
+    next: '下一页',
     viewArchive: '查看归档',
     viewInFileManager: '在文件管理器中查看',
     addedBy: '由 {{username}} 添加',
@@ -1035,6 +1037,75 @@ export default {
     },
   },
 
+  // Sticky upload-progress toast (#1625 follow-up)
+  dispatchToast: {
+    untitled: '打印任务',
+    startingPrints: '正在开始打印',
+    progressSummary: '{{complete}}/{{total}} 已完成 • 处理中: {{processing}}',
+    expandDetails: '展开派发详情',
+    collapseDetails: '收起派发详情',
+    awaitingPrinter: '等待打印机响应…',
+    status: {
+      processing: '处理中',
+      completed: '已完成',
+      failed: '失败',
+    },
+    failed: {
+      generic: '派发失败',
+      upload_failed: '上传到打印机失败',
+      start_command_failed: '打印机拒绝了开始命令',
+    },
+    dismiss: '关闭',
+  },
+
+  // Pipeline Runs dashboard (#1425 PR C).
+  pipelineRuns: {
+    title: '流水线运行',
+    loading: '加载中…',
+    empty: '暂无流水线运行。',
+    filter: {
+      pipeline: '流水线',
+      status: '状态',
+      target: '目标',
+      all: '全部',
+      allPipelines: '全部流水线',
+      allStatus: '全部状态',
+      allTargets: '全部目标',
+      clear: '清除筛选',
+      noMatches: '没有运行匹配当前筛选条件。',
+    },
+    totalCount_one: '{{n}} 次运行',
+    totalCount_other: '{{n}} 次运行',
+    copies: '{{n}} 份',
+    failedCount: '{{n}} 失败',
+    copyN: '副本 {{n}}',
+    retryFailed: '重试失败的',
+    retryOf: '#{{n}} 的重试',
+    pagination: '{{total}} 中的 {{start}}–{{end}}',
+    toast: {
+      cancelled: '运行已取消',
+      cancelFailed: '取消失败',
+      retryStarted: '已开始重试',
+      retryFailed: '重试失败',
+      cleared: '已清除 {{n}} 次运行',
+      clearFailed: '清除失败',
+    },
+    clearLog: '清除日志',
+    clearConfirmTitle: '清除日志？',
+    clearConfirmBody: '删除所有已完成、失败、已取消和部分失败的流水线运行？进行中的运行将保留。此操作无法撤销。',
+    clearConfirmAction: '清除',
+    jobStatus: {
+      pending: '等待中',
+      awaiting_printer: '等待打印机',
+      queued: '排队中',
+      printing: '打印中',
+      completed: '已完成',
+      failed: '失败',
+      cancelled: '已取消',
+    },
+    cancelledByUser: '用户已取消',
+  },
+
   // Queue page
   queue: {
     filamentShort: {
@@ -1114,6 +1185,7 @@ export default {
       queue: '队列',
       history: '历史',
       timeline: '时间线',
+      pipelines: '流水线',
     },
     layout: {
       flatList: '列表',
@@ -1569,6 +1641,8 @@ export default {
       smartPlugs: '智能插座',
       notifications: '通知',
       queue: '工作流',
+      queueDispatch: '队列与调度',
+      queuePipelines: '流水线',
       filament: '耗材',
       network: '网络',
       apiKeys: 'API 密钥',
@@ -2563,6 +2637,96 @@ export default {
       migrationErrorWarning: '{{count}} 行旧数据在启动时未能重新加密。请检查服务器日志并重启 Grove Control 以重试。',
     },
 
+
+    pipelineLimits: {
+      title: '切片机流水线限制',
+      maxCopiesLabel: '每次运行最大副本数',
+      maxCopiesDesc: '操作员运行流水线时可请求的副本数上限。服务器端硬性上限为 1000。',
+    },
+
+    // Slicer Pipelines (#1425): list/edit/delete preset bundles users saved
+    // from the Slice dialog. Lives in Settings → Workflow → Pipelines sub-tab.
+    pipelines: {
+      title: '切片机流水线',
+      subtitle: '可复用的预设捆绑包（打印机 + 工艺 + 耗材 + 热床类型）。在切片对话框中保存一个，下次切片文件时一键应用。',
+      loading: '正在加载流水线…',
+      loadError: '无法加载流水线。',
+      confirmDelete: '删除此流水线？此操作无法撤销。',
+      staleWarning: '引用的一个或多个预设已不存在。请在切片对话框中重新保存此流水线以修复。',
+      empty: {
+        title: '暂无流水线。',
+        howto: '为任意文件打开切片对话框，选择打印机 / 工艺 / 耗材 / 热床，然后点击"另存为流水线"。保存的流水线将显示在此处。',
+      },
+      field: {
+        name: '流水线名称',
+        description: '描述',
+        targetPrinter: '目标打印机',
+        noTarget: '— 无目标 —',
+        targetKind: '目标类型',
+        targetKindSpecific: '特定打印机',
+        targetKindClass: '打印机类别',
+        targetModelClass: '打印机型号',
+        fanoutStrategy: '分发策略',
+        fanout: {
+          max_parallel: '最大并行 — 分发到任何空闲匹配的打印机',
+          round_robin: '轮询 — 在合格打印机间循环',
+          fill_one_first: '先填一台 — 将所有副本固定到一台打印机',
+        },
+        fanoutShort: {
+          max_parallel: '并行',
+          round_robin: '轮询',
+          fill_one_first: '先填一台',
+        },
+      },
+      action: {
+        save: '保存',
+        cancel: '取消',
+        rename: '重命名',
+        delete: '删除',
+      },
+      slot: {
+        printer: '打印机',
+        process: '工艺',
+        filament: '耗材',
+        filamentN: '耗材 {{n}}',
+        filamentAll: '全部 {{n}} 个槽',
+        bed: '热床',
+      },
+      group: {
+        profiles: '配置文件',
+        filaments: '耗材',
+      },
+      searchPlaceholder: '搜索流水线…',
+      filterTargetType: '按目标类型筛选',
+      filterTarget: '按目标筛选',
+      filter: {
+        all: '全部目标',
+        noTarget: '未设置目标',
+        count: '{{shown}} / {{total}}',
+        noMatches: '没有流水线匹配当前筛选条件。',
+      },
+      toast: {
+        saved: '流水线已保存',
+        saveFailed: '保存失败',
+        deleted: '流水线已删除',
+        deleteFailed: '删除失败',
+      },
+      noTargetHint: '设置目标打印机以运行',
+      noTargetWarning: '运行此流水线前请先设置目标打印机。',
+      runs: {
+        lastRun: '上次运行',
+        status: {
+          queued: '排队中',
+          slicing: '切片中',
+          dispatching: '发送中',
+          in_progress: '打印中',
+          completed: '已完成',
+          failed: '失败',
+          partial_failure: '部分失败',
+          cancelled: '已取消',
+        },
+      },
+    },
   },
 
   // Notifications (for push notifications)
@@ -3783,6 +3947,41 @@ export default {
     deleteConfirm: '确定要删除此耗材吗？',
     importFromPrinter: '从打印机导入',
     exportToFile: '导出到文件',
+    runWithPipeline: {
+      actionLabel: '用流水线运行',
+      noPermission: '您没有运行流水线的权限',
+      modalTitle: '用流水线运行',
+      confirmTitle: '确认运行',
+      confirmIntro: '预检发现此次运行存在问题',
+      sourceHint: '来源',
+      pipelineHint: '流水线',
+      targetHint: '目标',
+      pipelineListAria: '可用流水线',
+      runAnyway: '仍然运行',
+      loading: '加载中…',
+      empty: '尚未保存流水线。请打开切片对话框并点击"另存为流水线"创建一个。',
+      noTarget: '未设置目标打印机',
+      noTargetMessage: '此流水线没有目标打印机。请在设置中打开并选择一个。',
+      copies: '副本数',
+      copiesHint: '最多 {{n}}',
+      classTarget: '任意 {{model}}',
+      toast: {
+        started: '流水线运行已开始',
+        failed: '无法启动运行',
+      },
+      issue: {
+        printerNotSet: '此流水线未设置目标打印机。',
+        printerNotFound: '目标打印机已不存在。',
+        printerDisabled: '目标打印机已禁用。',
+        printerOffline: '目标打印机已离线。',
+        filamentType: '耗材槽 {{slot}}：期望 {{expected}}，AMS 实际 {{actual}}',
+        filamentColor: '耗材槽 {{slot}}：颜色不同（期望 {{expected}}，AMS 实际 {{actual}}）',
+        amsSlotMissing: '此打印机上没有 AMS 槽 {{slot}}',
+        filamentUnverified: '耗材槽 {{slot}} 来自云端 / 标准预设，无法静态验证。',
+        noClassMatches: '此安装中没有匹配该流水线目标型号类别（{{expected}}）的打印机。',
+        classNotSet: '流水线目标设置为打印机类别但未选择型号。',
+      },
+    },
   },
 
   // Slice (slicer-API integration via SliceModal)
@@ -3846,6 +4045,22 @@ export default {
       highTemp: 'High Temp Plate',
       texturedPEI: 'Textured PEI Plate',
       smoothPEI: 'Smooth PEI Plate',
+    },
+    // Slicer Pipelines (#1425) — apply a saved bundle or save the current pick.
+    pipelines: {
+      label: '流水线',
+      applyAria: '应用流水线',
+      applyPrompt: '应用流水线…',
+      empty: '无已保存流水线',
+      saveButton: '另存为流水线',
+      saveTitle: '将当前四个槽位的选择保存为可复用流水线',
+      namePlaceholder: '流水线名称',
+      nameAria: '新流水线名称',
+      toast: {
+        applied: '已应用 "{{name}}"',
+        saved: '流水线已保存',
+        saveFailed: '保存失败',
+      },
     },
   },
 

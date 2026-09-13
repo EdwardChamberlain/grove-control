@@ -114,6 +114,8 @@ export default {
     now: 'Ahora',
     collapse: 'Contraer',
     expand: 'Expandir',
+    previous: 'Anterior',
+    next: 'Siguiente',
     viewArchive: 'Ver archivo',
     viewInFileManager: 'Ver en el gestor de archivos',
     addedBy: 'Añadido por {{username}}',
@@ -1035,6 +1037,75 @@ export default {
     },
   },
 
+  // Sticky upload-progress toast (#1625 follow-up)
+  dispatchToast: {
+    untitled: 'Trabajo de impresión',
+    startingPrints: 'Iniciando impresiones',
+    progressSummary: '{{complete}}/{{total}} listas • Procesando: {{processing}}',
+    expandDetails: 'Expandir detalles del despacho',
+    collapseDetails: 'Contraer detalles del despacho',
+    awaitingPrinter: 'Esperando a la impresora…',
+    status: {
+      processing: 'Procesando',
+      completed: 'Completada',
+      failed: 'Fallida',
+    },
+    failed: {
+      generic: 'Despacho fallido',
+      upload_failed: 'Fallo al subir a la impresora',
+      start_command_failed: 'La impresora rechazó el comando de inicio',
+    },
+    dismiss: 'Cerrar',
+  },
+
+  // Pipeline Runs dashboard (#1425 PR C).
+  pipelineRuns: {
+    title: 'Ejecuciones de pipeline',
+    loading: 'Cargando…',
+    empty: 'Aún no hay ejecuciones de pipeline.',
+    filter: {
+      pipeline: 'Pipeline',
+      status: 'Estado',
+      target: 'Destino',
+      all: 'Todas',
+      allPipelines: 'Todas las pipelines',
+      allStatus: 'Todos los estados',
+      allTargets: 'Todos los destinos',
+      clear: 'Limpiar filtros',
+      noMatches: 'Ninguna ejecución coincide con los filtros actuales.',
+    },
+    totalCount_one: '{{n}} ejecución',
+    totalCount_other: '{{n}} ejecuciones',
+    copies: '{{n}} copias',
+    failedCount: '{{n}} fallidas',
+    copyN: 'Copia {{n}}',
+    retryFailed: 'Reintentar fallidas',
+    retryOf: 'reintento de #{{n}}',
+    pagination: '{{start}}–{{end}} de {{total}}',
+    toast: {
+      cancelled: 'Ejecución cancelada',
+      cancelFailed: 'Cancelación fallida',
+      retryStarted: 'Reintento iniciado',
+      retryFailed: 'Reintento fallido',
+      cleared: '{{n}} ejecuciones eliminadas',
+      clearFailed: 'Error al borrar',
+    },
+    clearLog: 'Borrar historial',
+    clearConfirmTitle: '¿Borrar historial?',
+    clearConfirmBody: '¿Eliminar todas las ejecuciones de pipeline completadas, fallidas, canceladas y con fallos parciales? Las ejecuciones en curso se conservan. Esto no se puede deshacer.',
+    clearConfirmAction: 'Borrar',
+    jobStatus: {
+      pending: 'pendiente',
+      awaiting_printer: 'esperando impresora',
+      queued: 'en cola',
+      printing: 'imprimiendo',
+      completed: 'completada',
+      failed: 'fallida',
+      cancelled: 'cancelada',
+    },
+    cancelledByUser: 'Cancelado por el usuario',
+  },
+
   // Queue page
   queue: {
     filamentShort: {
@@ -1114,6 +1185,7 @@ export default {
       queue: 'Cola',
       history: 'Historial',
       timeline: 'Cronología',
+      pipelines: 'Procesos',
     },
     layout: {
       flatList: 'Lista',
@@ -1570,6 +1642,8 @@ export default {
       smartPlugs: 'Enchufes inteligentes',
       notifications: 'Notificaciones',
       queue: 'Flujo de trabajo',
+      queueDispatch: 'Cola y Despacho',
+      queuePipelines: 'Pipelines',
       filament: 'Filamento',
       network: 'Red',
       apiKeys: 'Claves API',
@@ -2578,6 +2652,96 @@ export default {
       migrationErrorWarning: '{{count}} fila(s) heredada(s) no se pudieron volver a cifrar al iniciar. Revise los registros del servidor y reinicie Grove Control para reintentarlo.',
     },
 
+
+    pipelineLimits: {
+      title: 'Límites de pipelines del cortador',
+      maxCopiesLabel: 'Copias máximas por ejecución',
+      maxCopiesDesc: 'Límite superior de copias que los operadores pueden solicitar al ejecutar una pipeline. El límite máximo del servidor es 1000.',
+    },
+
+    // Slicer Pipelines (#1425): list/edit/delete preset bundles users saved
+    // from the Slice dialog. Lives in Settings → Workflow → Pipelines sub-tab.
+    pipelines: {
+      title: 'Pipelines del Cortador',
+      subtitle: 'Paquetes reutilizables de preajustes (impresora + proceso + filamentos + tipo de placa). Guarda uno desde el diálogo Cortar y aplícalo con un clic al siguiente archivo.',
+      loading: 'Cargando pipelines…',
+      loadError: 'No se pudieron cargar las pipelines.',
+      confirmDelete: '¿Eliminar esta pipeline? Esto no se puede deshacer.',
+      staleWarning: 'Uno o más preajustes referenciados ya no existen. Vuelve a guardar esta pipeline desde el diálogo Cortar para corregirla.',
+      empty: {
+        title: 'Aún no hay pipelines.',
+        howto: 'Abre el diálogo Cortar para cualquier archivo, elige impresora / proceso / filamentos / placa, y haz clic en "Guardar como pipeline". Tus pipelines guardadas aparecerán aquí.',
+      },
+      field: {
+        name: 'Nombre de la pipeline',
+        description: 'Descripción',
+        targetPrinter: 'Impresora de destino',
+        noTarget: '— Sin destino —',
+        targetKind: 'Tipo de destino',
+        targetKindSpecific: 'Impresora específica',
+        targetKindClass: 'Clase de impresora',
+        targetModelClass: 'Modelo de impresora',
+        fanoutStrategy: 'Estrategia de distribución',
+        fanout: {
+          max_parallel: 'Máximo paralelo — distribuir entre cualquier impresora libre coincidente',
+          round_robin: 'Round robin — alternar entre impresoras elegibles',
+          fill_one_first: 'Llenar una primero — fijar todas las copias a una impresora',
+        },
+        fanoutShort: {
+          max_parallel: 'paralelo',
+          round_robin: 'round robin',
+          fill_one_first: 'primero uno',
+        },
+      },
+      action: {
+        save: 'Guardar',
+        cancel: 'Cancelar',
+        rename: 'Renombrar',
+        delete: 'Eliminar',
+      },
+      slot: {
+        printer: 'Impresora',
+        process: 'Proceso',
+        filament: 'Filamento',
+        filamentN: 'Filamento {{n}}',
+        filamentAll: 'Todos los {{n}} slots',
+        bed: 'Placa',
+      },
+      group: {
+        profiles: 'Perfiles',
+        filaments: 'Filamentos',
+      },
+      searchPlaceholder: 'Buscar pipelines…',
+      filterTargetType: 'Filtrar por tipo de destino',
+      filterTarget: 'Filtrar por destino',
+      filter: {
+        all: 'Todos los destinos',
+        noTarget: 'Sin destino',
+        count: '{{shown}} / {{total}}',
+        noMatches: 'Ninguna pipeline coincide con los filtros actuales.',
+      },
+      toast: {
+        saved: 'Pipeline guardada',
+        saveFailed: 'Error al guardar',
+        deleted: 'Pipeline eliminada',
+        deleteFailed: 'Error al eliminar',
+      },
+      noTargetHint: 'Establece una impresora de destino para ejecutar',
+      noTargetWarning: 'Establece una impresora de destino antes de ejecutar esta pipeline.',
+      runs: {
+        lastRun: 'Última ejecución',
+        status: {
+          queued: 'en cola',
+          slicing: 'cortando',
+          dispatching: 'enviando',
+          in_progress: 'imprimiendo',
+          completed: 'completada',
+          failed: 'fallida',
+          partial_failure: 'fallo parcial',
+          cancelled: 'cancelada',
+        },
+      },
+    },
   },
 
   // Notifications (for push notifications)
@@ -3798,6 +3962,41 @@ export default {
     deleteConfirm: '¿Está seguro de que desea eliminar este filamento?',
     importFromPrinter: 'Importar desde la impresora',
     exportToFile: 'Exportar a un archivo',
+    runWithPipeline: {
+      actionLabel: 'Ejecutar con pipeline',
+      noPermission: 'No tienes permiso para ejecutar pipelines',
+      modalTitle: 'Ejecutar con pipeline',
+      confirmTitle: 'Confirmar ejecución',
+      confirmIntro: 'El pre-vuelo encontró problemas con esta ejecución',
+      sourceHint: 'Origen',
+      pipelineHint: 'Pipeline',
+      targetHint: 'Destino',
+      pipelineListAria: 'Pipelines disponibles',
+      runAnyway: 'Ejecutar de todos modos',
+      loading: 'Cargando…',
+      empty: 'Aún no hay pipelines guardadas. Abre el diálogo Cortar y haz clic en "Guardar como pipeline" para crear una.',
+      noTarget: 'Sin impresora de destino',
+      noTargetMessage: 'Esta pipeline no tiene impresora de destino. Ábrela en Ajustes para elegir una.',
+      copies: 'Copias',
+      copiesHint: 'máx {{n}}',
+      classTarget: 'Cualquier {{model}}',
+      toast: {
+        started: 'Ejecución de pipeline iniciada',
+        failed: 'No se pudo iniciar la ejecución',
+      },
+      issue: {
+        printerNotSet: 'Sin impresora de destino en esta pipeline.',
+        printerNotFound: 'La impresora de destino ya no existe.',
+        printerDisabled: 'La impresora de destino está deshabilitada.',
+        printerOffline: 'La impresora de destino está desconectada.',
+        filamentType: 'Slot de filamento {{slot}}: esperado {{expected}}, AMS tiene {{actual}}',
+        filamentColor: 'Slot de filamento {{slot}}: color distinto (esperado {{expected}}, AMS tiene {{actual}})',
+        amsSlotMissing: 'Slot AMS {{slot}} no disponible en esta impresora',
+        filamentUnverified: 'Slot de filamento {{slot}} proviene de un preset de nube / estándar y no se pudo verificar estáticamente.',
+        noClassMatches: 'Ninguna impresora en esta instalación coincide con la clase de modelo objetivo de la pipeline ({{expected}}).',
+        classNotSet: 'El destino de la pipeline es una clase de impresora pero no se eligió ningún modelo.',
+      },
+    },
   },
 
   // Slice (slicer-API integration via SliceModal)
@@ -3861,6 +4060,22 @@ export default {
       highTemp: 'High Temp Plate',
       texturedPEI: 'Textured PEI Plate',
       smoothPEI: 'Smooth PEI Plate',
+    },
+    // Slicer Pipelines (#1425) — apply a saved bundle or save the current pick.
+    pipelines: {
+      label: 'Pipeline',
+      applyAria: 'Aplicar pipeline',
+      applyPrompt: 'Aplicar pipeline…',
+      empty: 'Sin pipelines guardadas',
+      saveButton: 'Guardar como pipeline',
+      saveTitle: 'Guardar la selección actual de los cuatro ajustes como pipeline reutilizable',
+      namePlaceholder: 'Nombre de la pipeline',
+      nameAria: 'Nuevo nombre de pipeline',
+      toast: {
+        applied: '"{{name}}" aplicada',
+        saved: 'Pipeline guardada',
+        saveFailed: 'Error al guardar',
+      },
     },
   },
 

@@ -261,6 +261,7 @@ async def init_db():
         oidc_provider,
         orca_base_cache,
         pending_upload,
+        pipeline_run,
         print_batch,
         print_log,
         print_queue,
@@ -270,6 +271,7 @@ async def init_db():
         project_bom,
         settings,
         shopping_list,
+        slicer_pipeline,
         slot_preset,
         smart_plug,
         smart_plug_energy_snapshot,
@@ -953,6 +955,23 @@ async def run_migrations(conn):
     swallowed.
     """
     from sqlalchemy import text
+
+    # Migration: Add parent_run_id column to pipeline_runs (#1425 PR C).
+    # Links a retry-failed run back to its parent so the dashboard can show
+    # "Retry of run #N" inline. Idempotent on both SQLite and Postgres.
+    await _safe_execute(
+        conn,
+        "ALTER TABLE pipeline_runs ADD COLUMN parent_run_id INTEGER REFERENCES pipeline_runs(id) ON DELETE SET NULL",
+    )
+
+    # Migration: Add source_archive_id column to pipeline_runs (#1425 PR B follow-up).
+    # Allows a pipeline run to source from an archive's source 3MF in addition
+    # to a library file. Idempotent — _safe_execute swallows the "already exists"
+    # case on both SQLite and Postgres.
+    await _safe_execute(
+        conn,
+        "ALTER TABLE pipeline_runs ADD COLUMN source_archive_id INTEGER REFERENCES print_archives(id) ON DELETE SET NULL",
+    )
 
     # Migration: Add is_favorite column to print_archives
     await _safe_execute(conn, "ALTER TABLE print_archives ADD COLUMN is_favorite BOOLEAN DEFAULT 0")
@@ -3940,7 +3959,7 @@ async def seed_default_groups():
     from sqlalchemy import select
 
     from backend.app.core.db_dialect import upsert_setting
-    from backend.app.core.permissions import DEFAULT_GROUPS
+    from backend.app.core.permissions import ALL_PERMISSIONS, DEFAULT_GROUPS
     from backend.app.models.group import Group
     from backend.app.models.settings import Settings
     from backend.app.models.user import User
@@ -4094,63 +4113,31 @@ async def seed_default_groups():
                 group.permissions = perms
         await session.commit()
 
-        # Backfill library:purge + archives:purge for the Administrators group
-        # on existing installs. Both permissions were added after Administrators
-        # was first seeded, so upgrading users miss them even though the default
-        # config (ALL_PERMISSIONS) includes them for fresh installs.
+        # Backfill: sync the Administrators system group to ALL_PERMISSIONS.
+        # Administrators' contract is full access to every feature — fresh
+        # installs get that via DEFAULT_GROUPS["Administrators"]["permissions"]
+        # = ALL_PERMISSIONS. Upgrading installs would otherwise stay frozen at
+        # whatever permission set existed when they were first seeded, so a
+        # newly-added Permission enum member silently leaves admins gated out
+        # of the feature it controls.
+        #
+        # Generalises the previous one-off admin backfills (library:purge,
+        # archives:purge, the OWN/ALL read-flag set + legacy read flags,
+        # orca_cloud:auth, printer_sensor_history:read, …): every current
+        # Permission enum value is appended to the admin group if missing.
+        # Additive only — never removes a permission an operator added by
+        # hand. Run AFTER the legacy-rename migration above so the renamed
+        # OWN/ALL variants land in the group before the sync sees them.
         result = await session.execute(select(Group).where(Group.name == "Administrators"))
         admin_group = result.scalar_one_or_none()
         if admin_group and admin_group.permissions is not None:
             perms = list(admin_group.permissions)
             added = False
-            for new_perm in ("library:purge", "archives:purge", "queue:insert_top"):
+            for new_perm in ALL_PERMISSIONS:
                 if new_perm not in perms:
                     perms.append(new_perm)
                     added = True
-                    logger.info("Added %s to Administrators group (backfill)", new_perm)
-            if added:
-                admin_group.permissions = perms
-        await session.commit()
-
-        # Backfill the read flag set for the Administrators group on existing
-        # installs. Two layers:
-        #
-        # (a) New OWN/ALL splits — `archives:read_own` etc. Fresh installs get
-        #     these via ALL_PERMISSIONS; upgrades need the explicit backfill
-        #     so admin's permission set matches a fresh install's.
-        #
-        # (b) Legacy `archives:read` / `library:read` / `queue:read`. The
-        #     frontend still gates download / preview UI on these LEGACY
-        #     strings (see ArchivesPage / FileManagerPage), so admin needs
-        #     them retained even though the new API uses the OWN/ALL split.
-        #     The PERMISSION_MIGRATION_ALL map deliberately doesn't rename
-        #     read flags for admin — this backfill ensures they're present
-        #     even if they were stripped by hand or by an older migration.
-        #
-        # Also includes orca_cloud:auth for parity with fresh-install
-        # behaviour (ALL_PERMISSIONS covers it; backfill makes sure an
-        # admin role that's been customised since seed still has it).
-        result = await session.execute(select(Group).where(Group.name == "Administrators"))
-        admin_group = result.scalar_one_or_none()
-        if admin_group and admin_group.permissions is not None:
-            perms = list(admin_group.permissions)
-            added = False
-            for new_perm in (
-                "archives:read",
-                "archives:read_own",
-                "archives:read_all",
-                "library:read",
-                "library:read_own",
-                "library:read_all",
-                "queue:read",
-                "queue:read_own",
-                "queue:read_all",
-                "orca_cloud:auth",
-            ):
-                if new_perm not in perms:
-                    perms.append(new_perm)
-                    added = True
-                    logger.info("Added %s to Administrators group (backfill)", new_perm)
+                    logger.info("Added %s to Administrators group (ALL_PERMISSIONS sync)", new_perm)
             if added:
                 admin_group.permissions = perms
         await session.commit()
@@ -4228,6 +4215,33 @@ async def seed_default_groups():
                 logger.info("Migrated legacy role-admin user '%s' to Administrators group", user.username)
             await upsert_setting(session, Settings, admin_role_migration_key, "complete")
             await session.commit()
+
+        # Backfill pipeline permissions (#1425). Pipelines were added after
+        # initial seeding, so existing groups need them appended:
+        # Backfill pipeline permissions (#1425) for non-admin groups.
+        # Administrators is handled by the ALL_PERMISSIONS sync above.
+        #   - Operators: all three (matches fresh-install DEFAULT_GROUPS)
+        #   - Any other group with library:read_own or settings:read:
+        #     pipelines:read only
+        result = await session.execute(select(Group))
+        for group in result.scalars().all():
+            if not group.permissions or group.name == "Administrators":
+                continue
+            perms = list(group.permissions)
+            changed = False
+            if group.name == "Operators":
+                for new_perm in ("pipelines:read", "pipelines:write", "pipelines:run"):
+                    if new_perm not in perms:
+                        perms.append(new_perm)
+                        changed = True
+                        logger.info("Added %s to Operators group (backfill)", new_perm)
+            elif "pipelines:read" not in perms and ("library:read_own" in perms or "settings:read" in perms):
+                perms.append("pipelines:read")
+                changed = True
+                logger.info("Added pipelines:read to group '%s' (backfill)", group.name)
+            if changed:
+                group.permissions = perms
+        await session.commit()
 
         # Migrate existing users to groups if they're not already in any group
         if groups_created:

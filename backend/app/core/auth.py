@@ -59,7 +59,7 @@ logger = logging.getLogger(__name__)
 #                         delete of admin resources, settings writes, user/
 #                         group/api-key/backup admin ops, discovery scan,
 #                         cloud auth, library ALL-ownership perms, purges
-_APIKEY_SCOPE_BY_PERMISSION: dict[Permission, str] = {
+_APIKEY_SCOPE_BY_PERMISSION: dict[Permission, str | tuple[str, ...]] = {
     # can_read_status — read-only access to status, history, and configuration
     Permission.PRINTERS_READ: "can_read_status",
     # Legacy flat permissions retained for back-compat with custom API keys —
@@ -97,6 +97,12 @@ _APIKEY_SCOPE_BY_PERMISSION: dict[Permission, str] = {
     # working (they need the UI-language setting via API key).
     Permission.SETTINGS_READ: "can_read_status",
     Permission.MAKERWORLD_VIEW: "can_read_status",
+    Permission.PIPELINES_READ: "can_read_status",
+    # Pipeline execution is a queue write, and the owner permission check
+    # above still gates the dedicated pipeline-run capability. The slice
+    # output is created by the pipeline service, not by the library-upload
+    # API, so this must remain one concrete API-key scope.
+    Permission.PIPELINES_RUN: "can_queue",
     Permission.WEBSOCKET_CONNECT: "can_read_status",
     # can_queue — queue write ops + reprint (which enqueues an existing archive)
     Permission.QUEUE_CREATE: "can_queue",
@@ -225,11 +231,14 @@ _APIKEY_DENIED_PERMISSIONS: frozenset[Permission] = frozenset(
         Permission.SMART_PLUGS_DELETE,
         # Network scanning — operator only (no API-key scope for this).
         Permission.DISCOVERY_SCAN,
+        # Slicer Pipeline authoring remains admin-only. Read and Run are
+        # explicitly mapped in the allowlist above.
+        Permission.PIPELINES_WRITE,
     }
 )
 
 
-def _resolve_apikey_scope(perm_string: str) -> str | None:
+def _required_apikey_scopes(perm_string: str) -> tuple[str, ...] | None:
     """Return the scope-flag attribute name gating ``perm_string`` for API keys.
 
     None when the permission is unmapped (= admin-only / not API-key-usable).
@@ -238,7 +247,10 @@ def _resolve_apikey_scope(perm_string: str) -> str | None:
         perm = Permission(perm_string)
     except ValueError:
         return None
-    return _APIKEY_SCOPE_BY_PERMISSION.get(perm)
+    scopes = _APIKEY_SCOPE_BY_PERMISSION.get(perm)
+    if scopes is None:
+        return None
+    return (scopes,) if isinstance(scopes, str) else tuple(scopes)
 
 
 def _check_apikey_permissions(
@@ -274,16 +286,17 @@ def _check_apikey_permissions(
 
     last_failure: HTTPException | None = None
     for perm_str in perm_strings:
-        scope_attr = _resolve_apikey_scope(perm_str)
-        if scope_attr is None:
+        scopes = _required_apikey_scopes(perm_str)
+        missing = [flag for flag in scopes or () if not getattr(api_key, flag, False)]
+        if not scopes:
             failure = HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="API keys cannot be used for administrative operations",
             )
-        elif not getattr(api_key, scope_attr, False):
+        elif missing:
             failure = HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"API key does not have '{scope_attr}' permission",
+                detail=f"API key does not have {' and '.join(repr(flag) for flag in missing)} permission",
             )
         elif owner is not None and not owner.has_permission(perm_str):
             failure = HTTPException(

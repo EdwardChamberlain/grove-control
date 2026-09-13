@@ -58,8 +58,10 @@ import {
   Ungroup,
   Ban,
   PlayCircle,
+  Workflow,
 } from 'lucide-react';
 import { api, ApiError } from '../api/client';
+import { PipelineRunsView } from './PipelineRunsPage';
 import { type TimeFormat, formatDate, formatETA, formatDuration, formatRelativeTime, parseUTCDate } from '../utils/date';
 import { getBedTypeInfo } from '../utils/bedType';
 import type { PrintQueueItem, PrintQueueBulkUpdate, Permission, CalibrationMode } from '../api/client';
@@ -1338,9 +1340,16 @@ export function QueuePage() {
   // History tab renders unconditionally so this no longer drives the UI.
   // Tabbed page structure: Active queue stays as the main view; History
   // and Timeline split off. Persists per-user via localStorage.
-  const [activeTab, setActiveTab] = useState<'queue' | 'history' | 'timeline'>(() => {
+  const [activeTab, setActiveTab] = useState<'queue' | 'history' | 'timeline' | 'pipelines'>(() => {
+    // URL deep-link wins so the legacy /pipelines/runs redirect lands on the
+    // right tab. localStorage holds the per-user last-selected fallback.
+    const search = new URLSearchParams(window.location.search);
+    const url = search.get('tab');
+    if (url === 'pipelines' || url === 'history' || url === 'timeline' || url === 'queue') {
+      return url;
+    }
     const saved = localStorage.getItem('queue.activeTab');
-    if (saved === 'history' || saved === 'timeline') return saved;
+    if (saved === 'history' || saved === 'timeline' || saved === 'pipelines') return saved;
     return 'queue';
   });
   // Active-tab layout toggle. "position" = today's flat list; "printer"
@@ -2036,6 +2045,10 @@ export function QueuePage() {
           { id: 'queue' as const, label: t('queue.tabs.queue'), icon: Clock, count: pendingItems.length + activeItems.length },
           { id: 'history' as const, label: t('queue.tabs.history'), icon: ListOrdered, count: historyItems.length },
           { id: 'timeline' as const, label: t('queue.tabs.timeline'), icon: GanttChart, count: null as number | null },
+          // Slicer Pipelines dashboard (#1425 PR C). Lives here instead of
+          // its own sidebar entry so the Print Queue page is the single
+          // place an operator looks for "what's running / what ran".
+          { id: 'pipelines' as const, label: t('queue.tabs.pipelines'), icon: Workflow, count: null as number | null },
         ]).map(({ id, label, icon: Icon, count }) => (
           <button
             key={id}
@@ -2059,15 +2072,15 @@ export function QueuePage() {
         ))}
       </div>
 
-      {/* Summary Stats */}
-      <QueueStatsBar
+      {/* Summary Stats — about the print queue, not pipelines. */}
+      {activeTab !== 'pipelines' && <QueueStatsBar
         printingCount={printingCount}
         queuedCount={pendingItems.length + dispatchingItems.length}
         totalTime={totalQueueTime}
         totalWeight={totalWeight}
         historyCount={historyItems.length}
         t={t}
-      />
+      />}
 
       {/* #1818: Resume-after-failure banner. One row per printer whose queue
           is gated by a prior failed/aborted print. Visible regardless of
@@ -2106,7 +2119,10 @@ export function QueuePage() {
         </div>
       )}
 
-      {/* Filters */}
+      {/* Filters — about the print queue items (printer / status / location).
+          The Pipelines tab has its own pipeline + status filters inside the
+          dashboard, so this row is hidden when that tab is active. */}
+      {activeTab !== 'pipelines' && (
       <div className="flex flex-wrap items-center gap-2 sm:gap-4 mb-6">
         <ToolbarDropdown
           value={filterPrinter === -1 ? 'unassigned' : filterPrinter ? String(filterPrinter) : 'all'}
@@ -2168,6 +2184,7 @@ export function QueuePage() {
           </Button>
         )}
       </div>
+      )}
 
       {/* Queue-tab controls: layout toggle (Position / Printer) + SJF.
           Hidden on History/Timeline tabs since they don't apply. */}
@@ -2214,7 +2231,11 @@ export function QueuePage() {
         </div>
       )}
 
-      {isLoading ? (
+      {/* Pipelines tab short-circuits before the queue-empty branch so the
+          dashboard renders even when the regular queue is empty. */}
+      {activeTab === 'pipelines' ? (
+        <PipelineRunsView />
+      ) : isLoading ? (
         <div className="text-center py-12 text-bambu-gray">{t('common.loading')}</div>
       ) : queue?.length === 0 ? (
         <Card className="p-12 text-center border-dashed">

@@ -250,6 +250,7 @@ async def _build_settings_response(db: AsyncSession, is_api_key: bool = False) -
             "session_max_hours",
             "slicer_stall_timeout_minutes",
             "queue_max_concurrent_uploads",
+            "pipeline_max_copies",
         ]:
             settings_dict[setting.key] = int(setting.value)
         elif setting.key == "default_printer_id":

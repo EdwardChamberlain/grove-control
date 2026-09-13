@@ -114,6 +114,8 @@ export default {
     now: '現在',
     collapse: '收起',
     expand: '展開',
+    previous: '上一頁',
+    next: '下一頁',
     viewArchive: '檢視歸檔',
     viewInFileManager: '在檔案管理器中檢視',
     addedBy: '由 {{username}} 新增',
@@ -1035,6 +1037,75 @@ export default {
     },
   },
 
+  // Sticky upload-progress toast (#1625 follow-up)
+  dispatchToast: {
+    untitled: '列印任務',
+    startingPrints: '正在開始列印',
+    progressSummary: '{{complete}}/{{total}} 已完成 • 處理中: {{processing}}',
+    expandDetails: '展開派發詳情',
+    collapseDetails: '收起派發詳情',
+    awaitingPrinter: '等待印表機回應…',
+    status: {
+      processing: '處理中',
+      completed: '已完成',
+      failed: '失敗',
+    },
+    failed: {
+      generic: '派發失敗',
+      upload_failed: '上傳到印表機失敗',
+      start_command_failed: '印表機拒絕了開始命令',
+    },
+    dismiss: '關閉',
+  },
+
+  // Pipeline Runs dashboard (#1425 PR C).
+  pipelineRuns: {
+    title: '管線執行',
+    loading: '載入中…',
+    empty: '尚無管線執行。',
+    filter: {
+      pipeline: '管線',
+      status: '狀態',
+      target: '目標',
+      all: '全部',
+      allPipelines: '全部管線',
+      allStatus: '全部狀態',
+      allTargets: '全部目標',
+      clear: '清除篩選',
+      noMatches: '沒有執行符合目前的篩選條件。',
+    },
+    totalCount_one: '{{n}} 次執行',
+    totalCount_other: '{{n}} 次執行',
+    copies: '{{n}} 份',
+    failedCount: '{{n}} 失敗',
+    copyN: '副本 {{n}}',
+    retryFailed: '重試失敗的',
+    retryOf: '#{{n}} 的重試',
+    pagination: '{{total}} 中的 {{start}}–{{end}}',
+    toast: {
+      cancelled: '執行已取消',
+      cancelFailed: '取消失敗',
+      retryStarted: '已開始重試',
+      retryFailed: '重試失敗',
+      cleared: '已清除 {{n}} 次執行',
+      clearFailed: '清除失敗',
+    },
+    clearLog: '清除日誌',
+    clearConfirmTitle: '清除日誌？',
+    clearConfirmBody: '刪除所有已完成、失敗、已取消和部分失敗的管線執行？進行中的執行將保留。此操作無法復原。',
+    clearConfirmAction: '清除',
+    jobStatus: {
+      pending: '等待中',
+      awaiting_printer: '等待印表機',
+      queued: '排隊中',
+      printing: '列印中',
+      completed: '已完成',
+      failed: '失敗',
+      cancelled: '已取消',
+    },
+    cancelledByUser: '使用者已取消',
+  },
+
   // Queue page
   queue: {
     filamentShort: {
@@ -1114,6 +1185,7 @@ export default {
       queue: '佇列',
       history: '歷史',
       timeline: '時間軸',
+      pipelines: '管線',
     },
     layout: {
       flatList: '清單',
@@ -1569,6 +1641,8 @@ export default {
       smartPlugs: '智慧插座',
       notifications: '通知',
       queue: '工作流程',
+      queueDispatch: '佇列與分派',
+      queuePipelines: '管線',
       filament: '耗材',
       network: '網路',
       apiKeys: 'API 金鑰',
@@ -2563,6 +2637,96 @@ export default {
       migrationErrorWarning: '{{count}} 行舊資料在啟動時未能重新加密。請檢查伺服器日誌並重新啟動 Grove Control 以重試。',
     },
 
+
+    pipelineLimits: {
+      title: '切片機管線限制',
+      maxCopiesLabel: '每次執行最大副本數',
+      maxCopiesDesc: '操作員執行管線時可請求的副本數上限。伺服器端硬性上限為 1000。',
+    },
+
+    // Slicer Pipelines (#1425): list/edit/delete preset bundles users saved
+    // from the Slice dialog. Lives in Settings → Workflow → Pipelines sub-tab.
+    pipelines: {
+      title: '切片機管線',
+      subtitle: '可重複使用的預設組合（印表機 + 製程 + 耗材 + 熱床類型）。在切片對話框中儲存一個，下次切片檔案時一鍵套用。',
+      loading: '正在載入管線…',
+      loadError: '無法載入管線。',
+      confirmDelete: '刪除此管線？此操作無法復原。',
+      staleWarning: '參考的一個或多個預設已不存在。請在切片對話框中重新儲存此管線以修正。',
+      empty: {
+        title: '尚無管線。',
+        howto: '為任意檔案開啟切片對話框，選擇印表機 / 製程 / 耗材 / 熱床,然後點擊「另存為管線」。儲存的管線將顯示於此處。',
+      },
+      field: {
+        name: '管線名稱',
+        description: '描述',
+        targetPrinter: '目標印表機',
+        noTarget: '— 無目標 —',
+        targetKind: '目標類型',
+        targetKindSpecific: '特定印表機',
+        targetKindClass: '印表機類別',
+        targetModelClass: '印表機型號',
+        fanoutStrategy: '分發策略',
+        fanout: {
+          max_parallel: '最大並行 — 分發到任何空閒匹配的印表機',
+          round_robin: '輪替 — 在合格印表機間循環',
+          fill_one_first: '先填一台 — 將所有副本固定到一台印表機',
+        },
+        fanoutShort: {
+          max_parallel: '並行',
+          round_robin: '輪替',
+          fill_one_first: '先填一台',
+        },
+      },
+      action: {
+        save: '儲存',
+        cancel: '取消',
+        rename: '重新命名',
+        delete: '刪除',
+      },
+      slot: {
+        printer: '印表機',
+        process: '製程',
+        filament: '耗材',
+        filamentN: '耗材 {{n}}',
+        filamentAll: '全部 {{n}} 個槽',
+        bed: '熱床',
+      },
+      group: {
+        profiles: '設定檔',
+        filaments: '耗材',
+      },
+      searchPlaceholder: '搜尋管線…',
+      filterTargetType: '依目標類型篩選',
+      filterTarget: '依目標篩選',
+      filter: {
+        all: '全部目標',
+        noTarget: '未設定目標',
+        count: '{{shown}} / {{total}}',
+        noMatches: '沒有管線符合目前的篩選條件。',
+      },
+      toast: {
+        saved: '管線已儲存',
+        saveFailed: '儲存失敗',
+        deleted: '管線已刪除',
+        deleteFailed: '刪除失敗',
+      },
+      noTargetHint: '設定目標印表機以執行',
+      noTargetWarning: '執行此管線前請先設定目標印表機。',
+      runs: {
+        lastRun: '上次執行',
+        status: {
+          queued: '排隊中',
+          slicing: '切片中',
+          dispatching: '傳送中',
+          in_progress: '列印中',
+          completed: '已完成',
+          failed: '失敗',
+          partial_failure: '部分失敗',
+          cancelled: '已取消',
+        },
+      },
+    },
   },
 
   // Notifications (for push notifications)
@@ -3783,6 +3947,41 @@ export default {
     deleteConfirm: '確定要刪除此耗材嗎？',
     importFromPrinter: '從印表機匯入',
     exportToFile: '匯出到檔案',
+    runWithPipeline: {
+      actionLabel: '以管線執行',
+      noPermission: '您沒有執行管線的權限',
+      modalTitle: '以管線執行',
+      confirmTitle: '確認執行',
+      confirmIntro: '預檢發現此次執行存在問題',
+      sourceHint: '來源',
+      pipelineHint: '管線',
+      targetHint: '目標',
+      pipelineListAria: '可用管線',
+      runAnyway: '仍然執行',
+      loading: '載入中…',
+      empty: '尚未儲存管線。請開啟切片對話框並點擊「另存為管線」建立一個。',
+      noTarget: '未設定目標印表機',
+      noTargetMessage: '此管線沒有目標印表機。請在設定中開啟並選擇一個。',
+      copies: '副本數',
+      copiesHint: '最多 {{n}}',
+      classTarget: '任意 {{model}}',
+      toast: {
+        started: '管線執行已開始',
+        failed: '無法啟動執行',
+      },
+      issue: {
+        printerNotSet: '此管線未設定目標印表機。',
+        printerNotFound: '目標印表機已不存在。',
+        printerDisabled: '目標印表機已停用。',
+        printerOffline: '目標印表機已離線。',
+        filamentType: '耗材槽 {{slot}}：預期 {{expected}}，AMS 實際 {{actual}}',
+        filamentColor: '耗材槽 {{slot}}：顏色不同（預期 {{expected}}，AMS 實際 {{actual}}）',
+        amsSlotMissing: '此印表機上沒有 AMS 槽 {{slot}}',
+        filamentUnverified: '耗材槽 {{slot}} 來自雲端 / 標準預設，無法靜態驗證。',
+        noClassMatches: '此安裝中沒有符合該管線目標型號類別（{{expected}}）的印表機。',
+        classNotSet: '管線目標設定為印表機類別但未選擇型號。',
+      },
+    },
   },
 
   // Slice (slicer-API integration via SliceModal)
@@ -3846,6 +4045,22 @@ export default {
       highTemp: 'High Temp Plate',
       texturedPEI: 'Textured PEI Plate',
       smoothPEI: 'Smooth PEI Plate',
+    },
+    // Slicer Pipelines (#1425) — apply a saved bundle or save the current pick.
+    pipelines: {
+      label: '管線',
+      applyAria: '套用管線',
+      applyPrompt: '套用管線…',
+      empty: '無已儲存管線',
+      saveButton: '另存為管線',
+      saveTitle: '將目前四個槽位的選擇儲存為可重複使用的管線',
+      namePlaceholder: '管線名稱',
+      nameAria: '新管線名稱',
+      toast: {
+        applied: '已套用「{{name}}」',
+        saved: '管線已儲存',
+        saveFailed: '儲存失敗',
+      },
     },
   },
 
