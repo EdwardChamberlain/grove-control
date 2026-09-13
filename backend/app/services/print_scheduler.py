@@ -257,6 +257,8 @@ def _mapping_is_all_unresolved(mapping: list | None) -> bool:
     if not isinstance(mapping, list) or not mapping:
         return False
     return all(t is None or (isinstance(t, int) and t < 0) for t in mapping)
+
+
 def _nozzle_info_by_id(status) -> dict[int, dict]:
     """Index the H2 ``nozzle.info`` telemetry by its physical nozzle id."""
     by_id: dict[int, dict] = {}
