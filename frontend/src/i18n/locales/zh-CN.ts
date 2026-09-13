@@ -46,6 +46,7 @@ export default {
 
   // Common
   common: {
+    plusNMore: '另 {{count}} 个',
     save: '保存',
     saving: '保存中...',
     cancel: '取消',
@@ -3515,6 +3516,13 @@ export default {
 
   // File manager
   fileManager: {
+    variants: {
+      badge: '{{count}} 个版本',
+      groupAction: '归为版本组',
+      groupTooltip: '将这些文件标记为针对不同打印机切片的同一任务',
+      grouped: '已将 {{count}} 个文件归为版本组',
+      printAlternatives: '打印（{{count}} 个备选）',
+    },
     title: '文件管理器',
     subtitle: '组织和管理您的打印文件',
     uploadFiles: '上传文件',
@@ -4563,6 +4571,16 @@ export default {
 
   // Print modal
   printModal: {
+    variants: {
+      editNote: '这些备选在任务加入队列时确定。如需更改，请取消后重新加入队列。',
+      title: '打印机备选',
+      help: '一个任务，占一个队列位。第一台空闲且匹配的打印机会打印它对应的文件。',
+      unknownModel: '未知型号',
+      plateFor: '{{filename}} 的盘',
+      moveUp: '上移',
+      moveDown: '下移',
+      queued: '已加入队列，含 {{count}} 个备选',
+    },
     selectPrinter: '选择打印机',
     selectPlate: '选择板',
     filamentMapping: '耗材映射',

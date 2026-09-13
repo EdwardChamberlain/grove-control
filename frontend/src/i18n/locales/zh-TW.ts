@@ -46,6 +46,7 @@ export default {
 
   // Common
   common: {
+    plusNMore: '另 {{count}} 個',
     save: '儲存',
     saving: '儲存中...',
     cancel: '取消',
@@ -3515,6 +3516,13 @@ export default {
 
   // File manager
   fileManager: {
+    variants: {
+      badge: '{{count}} 個版本',
+      groupAction: '歸為版本群組',
+      groupTooltip: '將這些檔案標記為針對不同印表機切片的同一工作',
+      grouped: '已將 {{count}} 個檔案歸為版本群組',
+      printAlternatives: '列印（{{count}} 個備選）',
+    },
     title: '檔案管理器',
     subtitle: '組織和管理您的列印檔案',
     uploadFiles: '上傳檔案',
@@ -4563,6 +4571,16 @@ export default {
 
   // Print modal
   printModal: {
+    variants: {
+      editNote: '這些備選在工作加入佇列時確定。如需變更，請取消後重新加入佇列。',
+      title: '印表機備選',
+      help: '一項工作，佔一個佇列位。第一台空閒且相符的印表機會列印它對應的檔案。',
+      unknownModel: '未知型號',
+      plateFor: '{{filename}} 的列印板',
+      moveUp: '上移',
+      moveDown: '下移',
+      queued: '已加入佇列，含 {{count}} 個備選',
+    },
     selectPrinter: '選擇印表機',
     selectPlate: '選擇板',
     filamentMapping: '耗材對應',

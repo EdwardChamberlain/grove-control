@@ -178,6 +178,42 @@ def build_queue_filament_overrides(
     return resolved
 
 
+def overrides_for_plate(
+    overrides: list[dict],
+    file_path: Path | None,
+    plate_id: int | None,
+) -> list[dict]:
+    """Keep only override slots consumed by the selected plate.
+
+    A multi-plate submission can build one shared override list before creating
+    its individual queue rows. Each row must retain only the slots used by its
+    own plate, otherwise a forced colour from a different plate can block
+    dispatch unnecessarily.
+    """
+    if not overrides or plate_id is None or file_path is None or not file_path.exists():
+        return overrides
+
+    plate_slots = {filament["slot_id"] for filament in extract_filament_requirements(file_path, plate_id)}
+    if not plate_slots:
+        logger.warning(
+            "Cannot read filament requirements for plate %s in %s; keeping all overrides",
+            plate_id,
+            file_path.name,
+        )
+        return overrides
+
+    narrowed: list[dict] = []
+    for override in overrides:
+        try:
+            slot_id = int(override["slot_id"])
+        except (KeyError, TypeError, ValueError):
+            narrowed.append(override)
+            continue
+        if slot_id in plate_slots:
+            narrowed.append(override)
+    return narrowed
+
+
 def _collect_filaments(parent: ET.Element, into: list[dict]) -> None:
     """Walk every `./filament` child under `parent` and append normalised
     entries to `into`. Skips filaments with `used_g <= 0` (slot present in

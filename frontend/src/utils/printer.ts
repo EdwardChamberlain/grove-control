@@ -26,6 +26,19 @@ export function getWifiStrength(rssi: number): { labelKey: string; color: string
   return { labelKey: 'printers.wifiSignal.veryWeak', color: 'text-red-400', bars: 1 };
 }
 
+/** Return whether a sliced file may be sent to the selected printer model. */
+export function isGcodeCompatible(slicedForModel: string | null | undefined, targetModel: string | null | undefined): boolean {
+  if (!slicedForModel || !targetModel) return true;
+
+  const normalize = (model: string) => model.trim().toUpperCase().replace(/[ -]/g, '');
+  const sliced = normalize(slicedForModel);
+  const target = normalize(targetModel);
+  if (sliced === target) return true;
+
+  const interchangeable = new Set(['X1', 'X1C', 'X1E', 'P1P', 'P1S']);
+  return interchangeable.has(sliced) && interchangeable.has(target);
+}
+
 import type { PrintQueueItem } from '../api/client';
 import { canonicalFilamentType } from './amsHelpers';
 

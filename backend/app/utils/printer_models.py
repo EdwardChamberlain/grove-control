@@ -360,3 +360,24 @@ def normalize_printer_model(raw_model: str | None) -> str | None:
     # Strip "Bambu Lab " prefix for unknown models
     stripped = raw_model.replace("Bambu Lab ", "").strip()
     return stripped or None
+
+
+# G-code interchange families (#2578). A sliced 3MF may target a different
+# model only within a deliberately enumerated family.
+GCODE_COMPAT_FAMILIES = (frozenset(["X1", "X1C", "X1E", "P1P", "P1S"]),)
+
+
+def is_gcode_compatible(sliced_for_model: str | None, target_model: str | None) -> bool:
+    """Return whether a file sliced for one model may run on another model."""
+    if not sliced_for_model or not target_model:
+        return True
+
+    def _norm(model: str) -> str:
+        resolved = PRINTER_MODEL_ID_MAP.get(model.strip(), model)
+        return resolved.strip().upper().replace(" ", "").replace("-", "")
+
+    sliced = _norm(sliced_for_model)
+    target = _norm(target_model)
+    if sliced == target:
+        return True
+    return any(sliced in family and target in family for family in GCODE_COMPAT_FAMILIES)

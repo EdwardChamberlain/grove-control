@@ -62,6 +62,25 @@ def _coerce_tristate(v: object) -> object:
 TriState = Annotated[Literal["off", "on", "auto"], BeforeValidator(_coerce_tristate)]
 
 
+class QueueVariantCreate(BaseModel):
+    """One candidate file for a cross-model queue item (#671).
+
+    Per-file rather than per-item because the settings genuinely differ between
+    candidates: an H2C slice is dual-nozzle and will not share slot count, AMS
+    mapping or nozzle mapping with the H2S slice of the same model.
+
+    ``target_model`` is normally omitted and read from the file's own
+    ``sliced_for_model``; supply it only for a legacy 3MF that declares none.
+    """
+
+    library_file_id: int
+    target_model: str | None = None
+    plate_id: int | None = None
+    ams_mapping: list[int] | None = None
+    nozzle_mapping: list[int] | None = None
+    filament_overrides: list[dict] | None = None
+
+
 class PrintQueueItemCreate(BaseModel):
     printer_id: int | None = None  # None = unassigned, user assigns later
     target_model: str | None = None  # Target printer model (mutually exclusive with printer_id)
@@ -118,6 +137,12 @@ class PrintQueueItemCreate(BaseModel):
     # Direct printer-card uploads are temporary library files. The scheduler
     # deletes them after creating the durable archive copy.
     cleanup_library_after_dispatch: bool = False
+    # Cross-model alternatives (#671): several sliced files, one job, whichever
+    # printer frees up first. Mutually exclusive with printer_id (a specific
+    # printer defeats the purpose) and with archive_id/library_file_id (the
+    # candidates ARE the files). The scheduler resolves one onto the row at
+    # dispatch, after which the item is an ordinary single-file job.
+    variants: list[QueueVariantCreate] | None = None
 
     @model_validator(mode="after")
     def _validate_source(self) -> "PrintQueueItemCreate":
@@ -160,6 +185,15 @@ class PrintQueueItemUpdate(BaseModel):
     # physical nozzle position IDs from BambuStudio's project_file MQTT
     # body; sent back to the printer verbatim on dispatch.
     nozzle_mapping: list[int] | None = None
+
+
+class QueueVariantSummary(BaseModel):
+    """One candidate on a cross-model queue item, for display (#671)."""
+
+    library_file_id: int
+    filename: str
+    target_model: str
+    position: int
 
 
 class PrintQueueItemResponse(BaseModel):
@@ -241,6 +275,11 @@ class PrintQueueItemResponse(BaseModel):
     # Batch grouping
     batch_id: int | None = None
     batch_name: str | None = None
+
+    # Cross-model alternatives (#671), in priority order. Empty for every
+    # ordinary item. Present until dispatch resolves one onto the row, after
+    # which library_file_id / target_model name the candidate that actually ran.
+    variants: list[QueueVariantSummary] = []
 
     # Shortest-job-first scheduling
     been_jumped: bool = False

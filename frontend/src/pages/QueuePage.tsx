@@ -19,6 +19,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { queueItemDisplayName } from '../utils/queueItemName';
 import {
   Clock,
   Trash2,
@@ -559,7 +560,7 @@ function SortableQueueItem({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <p className="text-sm sm:text-base text-white font-medium truncate">
-              {item.archive_name || item.library_file_name || `File #${item.archive_id || item.library_file_id}`}
+              {queueItemDisplayName(item, (n) => t('common.plusNMore', { count: n }))}
               {(platesData?.is_multi_plate ?? false) && item.plate_id !== undefined && item.plate_id !== null && ` • ${plates.find(plate => plate.index === item.plate_id)?.name || t('queue.plateNumber', { index: item.plate_id })}`}
             </p>
             {item.archive_id ? (
@@ -590,7 +591,12 @@ function SortableQueueItem({
             <span className={`flex items-center gap-1 sm:gap-1.5 ${item.printer_id === null && !item.target_model ? 'text-orange-400' : ''} ${item.target_model && !item.printer_id ? 'text-blue-400' : ''}`}>
               <Printer className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
               <span className="truncate max-w-[120px] sm:max-w-none">
-              {item.target_model && !item.printer_id
+              {/* A cross-model item (#671) is waiting on several models at once.
+                  Showing only target_model would name whichever candidate is
+                  first and read as a lie the moment the other one runs. */}
+              {(item.variants?.length ?? 0) > 1 && !item.printer_id
+                ? `${t('queue.filter.any')} ${item.variants!.map(v => v.target_model).join(' / ')}${item.target_location ? ` @ ${item.target_location}` : ''}`
+                : item.target_model && !item.printer_id
                 ? `${t('queue.filter.any')} ${item.target_model}${item.target_location ? ` @ ${item.target_location}` : ''}${item.required_filament_types?.length ? ` (${item.required_filament_types.join(', ')})` : ''}`
                 : item.printer_id === null
                   ? t('queue.filter.unassigned')
@@ -1940,6 +1946,20 @@ export function QueuePage() {
           isUnassigned: false,
         };
       }
+      // A cross-model item (#671) is waiting on several models. Its own
+      // target_model is just the first candidate mirrored onto the row, so
+      // bucketing on it would file the job under one printer it might never
+      // run on — and the row underneath already says "Any H2D / X1C".
+      if ((item.variants?.length ?? 0) > 1) {
+        const models = item.variants!.map((v) => v.target_model).join(' / ');
+        return {
+          key: `models:${models}`,
+          label: `${t('queue.filter.any')} ${models}`,
+          printerId: null,
+          targetModel: null,
+          isUnassigned: false,
+        };
+      }
       if (item.target_model) {
         return {
           key: `model:${item.target_model}`,
@@ -2530,7 +2550,7 @@ export function QueuePage() {
           mode="edit-queue-item"
           archiveId={editItem.archive_id ?? undefined}
           libraryFileId={editItem.library_file_id ?? undefined}
-          archiveName={editItem.archive_name || editItem.library_file_name || `File #${editItem.archive_id || editItem.library_file_id}`}
+          archiveName={queueItemDisplayName(editItem, (n) => t('common.plusNMore', { count: n }))}
           queueItem={editItem}
           onClose={() => setEditItem(null)}
         />
@@ -2542,7 +2562,7 @@ export function QueuePage() {
           mode="create"
           archiveId={requeueItem.archive_id ?? undefined}
           libraryFileId={requeueItem.library_file_id ?? undefined}
-          archiveName={requeueItem.archive_name || requeueItem.library_file_name || `File #${requeueItem.archive_id || requeueItem.library_file_id}`}
+          archiveName={queueItemDisplayName(requeueItem, (n) => t('common.plusNMore', { count: n }))}
           onClose={() => setRequeueItem(null)}
         />
       )}

@@ -46,6 +46,7 @@ export default {
 
   // Common
   common: {
+    plusNMore: '+{{count}} altri',
     save: 'Salva',
     saving: 'Salvataggio...',
     cancel: 'Annulla',
@@ -3515,6 +3516,13 @@ export default {
 
   // File manager
   fileManager: {
+    variants: {
+      badge: '{{count}} versioni',
+      groupAction: 'Raggruppa come versioni',
+      groupTooltip: 'Segna questi file come lo stesso lavoro elaborato per stampanti diverse',
+      grouped: '{{count}} file raggruppati come versioni',
+      printAlternatives: 'Stampa ({{count}} alternative)',
+    },
     title: 'Gestore file',
     subtitle: 'Organizza e gestisci i tuoi file di stampa',
     uploadFiles: 'Carica file',
@@ -4563,6 +4571,16 @@ export default {
 
   // Print modal
   printModal: {
+    variants: {
+      editNote: 'Queste alternative sono state definite al momento dell\'accodamento. Annulla e riaccoda per modificarle.',
+      title: 'Alternative di stampante',
+      help: 'Un lavoro, un posto in coda. La prima stampante compatibile che si libera stampa il suo file.',
+      unknownModel: 'Modello sconosciuto',
+      plateFor: 'Piatto per {{filename}}',
+      moveUp: 'Sposta su',
+      moveDown: 'Sposta giù',
+      queued: 'In coda con {{count}} alternative',
+    },
     selectPrinter: 'Seleziona stampante',
     selectPlate: 'Seleziona piatto',
     filamentMapping: 'Mappatura filamento',

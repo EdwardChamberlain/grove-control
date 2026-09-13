@@ -46,6 +46,7 @@ export default {
 
   // Common
   common: {
+    plusNMore: '+{{count}} weitere',
     save: 'Speichern',
     saving: 'Speichern...',
     cancel: 'Abbrechen',
@@ -3527,6 +3528,13 @@ export default {
 
   // File manager
   fileManager: {
+    variants: {
+      badge: '{{count}} Versionen',
+      groupAction: 'Als Versionen gruppieren',
+      groupTooltip: 'Diese Dateien als denselben Auftrag markieren, gesliced für verschiedene Drucker',
+      grouped: '{{count}} Dateien als Versionen gruppiert',
+      printAlternatives: 'Drucken ({{count}} Alternativen)',
+    },
     title: 'Dateimanager',
     subtitle: 'Organisieren und verwalten Sie Ihre Druckdateien',
     uploadFiles: 'Dateien hochladen',
@@ -4575,6 +4583,16 @@ export default {
 
   // Print modal
   printModal: {
+    variants: {
+      editNote: 'Diese Alternativen wurden beim Einreihen festgelegt. Zum Ändern abbrechen und neu einreihen.',
+      title: 'Drucker-Alternativen',
+      help: 'Ein Auftrag, ein Warteschlangenplatz. Der erste passende Drucker, der frei wird, druckt seine Datei.',
+      unknownModel: 'Unbekanntes Modell',
+      plateFor: 'Platte für {{filename}}',
+      moveUp: 'Nach oben',
+      moveDown: 'Nach unten',
+      queued: 'Mit {{count}} Alternativen eingereiht',
+    },
     selectPrinter: 'Drucker auswählen',
     selectPlate: 'Platte auswählen',
     filamentMapping: 'Filamentzuordnung',
