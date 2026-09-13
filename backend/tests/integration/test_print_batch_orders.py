@@ -827,7 +827,9 @@ class TestBatchOrderHeader:
         )
         assert response.status_code == 404
 
-    async def test_owned_api_key_stamps_batch_and_quantity_items(self, async_client, db_session, printer_factory, archive_factory):
+    async def test_owned_api_key_stamps_batch_and_quantity_items(
+        self, async_client, db_session, printer_factory, archive_factory
+    ):
         from backend.app.models.print_batch import PrintBatch
         from backend.app.models.print_queue import PrintQueueItem
 
@@ -855,10 +857,10 @@ class TestBatchOrderHeader:
         batch = await db_session.get(PrintBatch, batch_id)
         assert batch.created_by_id == owner.id
         items = (
-            await db_session.execute(
-                select(PrintQueueItem).where(PrintQueueItem.batch_id == batch_id)
-            )
-        ).scalars().all()
+            (await db_session.execute(select(PrintQueueItem).where(PrintQueueItem.batch_id == batch_id)))
+            .scalars()
+            .all()
+        )
         assert len(items) == 2
         assert {item.created_by_id for item in items} == {owner.id}
 
