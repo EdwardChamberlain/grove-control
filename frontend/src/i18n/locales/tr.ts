@@ -242,6 +242,7 @@ export default {
     },
     // Yazıcı kartı
     readyToPrint: 'Baskıya hazır',
+    queueJob: 'İşi kuyruğa al',
     external: 'Harici',
     extL: 'Ext-L',
     extR: 'Ext-R',

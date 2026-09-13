@@ -242,6 +242,7 @@ export default {
     },
     // Printer card
     readyToPrint: '準備列印',
+    queueJob: '排入佇列',
     external: '外部',
     extL: '外接左',
     extR: '外接右',

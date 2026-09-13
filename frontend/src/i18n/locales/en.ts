@@ -242,6 +242,7 @@ export default {
     },
     // Printer card
     readyToPrint: 'Ready to print',
+    queueJob: 'Queue Job',
     external: 'External',
     extL: 'Ext-L',
     extR: 'Ext-R',

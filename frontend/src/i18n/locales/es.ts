@@ -242,6 +242,7 @@ export default {
     },
     // Printer card
     readyToPrint: 'Lista para imprimir',
+    queueJob: 'Encolar trabajo',
     external: 'Externo',
     extL: 'Ext-L',
     extR: 'Ext-R',

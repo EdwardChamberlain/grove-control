@@ -228,6 +228,7 @@ export default {
       actions: '작업'
     },
     readyToPrint: '인쇄 준비 완료',
+    queueJob: '작업 대기열에 추가',
     external: '외부',
     extL: '외부-L',
     extR: '외부-R',

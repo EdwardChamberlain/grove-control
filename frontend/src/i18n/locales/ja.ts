@@ -241,6 +241,7 @@ export default {
     },
     // Printer card
     readyToPrint: '印刷可能',
+    queueJob: 'ジョブをキューに追加',
     external: '外部',
     extL: 'Ext-L',
     extR: 'Ext-R',
