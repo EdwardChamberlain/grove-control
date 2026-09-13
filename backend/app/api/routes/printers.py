@@ -499,9 +499,7 @@ async def get_printer_status(
         )
     else:
         queue_work_filter.append(PrintQueueItem.printer_id == printer_id)
-    has_queued_work = (
-        await db.scalar(select(PrintQueueItem.id).where(*queue_work_filter).limit(1))
-    ) is not None
+    has_queued_work = (await db.scalar(select(PrintQueueItem.id).where(*queue_work_filter).limit(1))) is not None
     if not state:
         return PrinterStatus(
             id=printer_id,
