@@ -130,8 +130,8 @@ describe('PrintModal cross-model mode', () => {
       />,
     );
 
-    expect(await screen.findByText('h2d.gcode.3mf')).toBeInTheDocument();
-    expect(screen.getByText('x1c.gcode.3mf')).toBeInTheDocument();
+    expect(await screen.findAllByText('h2d.gcode.3mf')).toHaveLength(2);
+    expect(screen.getAllByText('x1c.gcode.3mf')).toHaveLength(2);
     expect(screen.queryByText('Target Model')).not.toBeInTheDocument();
     // Read-only: reordering after queueing would need a variant-level API.
     expect(screen.queryByLabelText('Move down')).not.toBeInTheDocument();

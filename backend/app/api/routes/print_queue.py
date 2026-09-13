@@ -46,7 +46,7 @@ from backend.app.services.filament_requirements import (
     overrides_for_plate,
 )
 from backend.app.services.notification_service import notification_service
-from backend.app.utils.printer_models import is_gcode_compatible, normalize_printer_model, normalize_printer_model_id
+from backend.app.utils.printer_models import is_gcode_compatible
 from backend.app.utils.threemf_tools import (
     extract_bed_type_from_3mf,
     extract_filament_usage_from_3mf,

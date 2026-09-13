@@ -165,6 +165,37 @@ async def _get_group_or_404(db: AsyncSession, group_id: int) -> FileVariantGroup
     return group
 
 
+async def _ensure_group_visible(
+    db: AsyncSession,
+    group: FileVariantGroup,
+    user: User | None,
+    can_access_all: bool,
+) -> FileVariantGroup:
+    """Apply the group-level ownership boundary before reading or mutating it.
+
+    Checking only the requested file is insufficient: a caller can address a
+    group directly, or attach one of their files to somebody else's group,
+    and the response would then disclose the other owner's members.
+    """
+    if can_access_all:
+        return group
+    if user is None or group.created_by_id is None or group.created_by_id != user.id:
+        raise HTTPException(404, "Variant group not found")
+
+    members = (
+        (
+            await db.execute(
+                LibraryFile.active().where(LibraryFile.variant_group_id == group.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if any(member.created_by_id is None or member.created_by_id != user.id for member in members):
+        raise HTTPException(404, "Variant group not found")
+    return group
+
+
 async def _dissolve_if_too_small(db: AsyncSession, group: FileVariantGroup) -> bool:
     """Delete the group when fewer than two members remain.
 
@@ -262,7 +293,9 @@ async def get_group_for_file(
         raise HTTPException(404, "Library file not found")
     if lib_file.variant_group_id is None:
         raise HTTPException(404, "File is not part of a variant group")
-    return await _group_response(db, await _get_group_or_404(db, lib_file.variant_group_id))
+    group = await _get_group_or_404(db, lib_file.variant_group_id)
+    await _ensure_group_visible(db, group, user, can_read_all)
+    return await _group_response(db, group)
 
 
 @router.get("/{group_id}", response_model=VariantGroupResponse)
@@ -276,7 +309,10 @@ async def get_variant_group(
         )
     ),
 ) -> VariantGroupResponse:
-    return await _group_response(db, await _get_group_or_404(db, group_id))
+    user, can_read_all = auth_result
+    group = await _get_group_or_404(db, group_id)
+    await _ensure_group_visible(db, group, user, can_read_all)
+    return await _group_response(db, group)
 
 
 @router.patch("/{group_id}", response_model=VariantGroupResponse)
@@ -299,6 +335,7 @@ async def update_variant_group(
     """
     user, can_update_all = auth_result
     group = await _get_group_or_404(db, group_id)
+    await _ensure_group_visible(db, group, user, can_update_all)
 
     if payload.name is not None:
         group.name = payload.name
@@ -338,6 +375,7 @@ async def add_variant_group_member(
     """
     user, can_update_all = auth_result
     group = await _get_group_or_404(db, group_id)
+    await _ensure_group_visible(db, group, user, can_update_all)
 
     files = await _load_files(db, [payload.library_file_id], user, can_update_all)
     lib_file = files.get(payload.library_file_id)
@@ -390,6 +428,7 @@ async def remove_variant_group_member(
     """Drop one file out of a group; the file itself is untouched."""
     user, can_update_all = auth_result
     group = await _get_group_or_404(db, group_id)
+    await _ensure_group_visible(db, group, user, can_update_all)
 
     files = await _load_files(db, [file_id], user, can_update_all)
     lib_file = files.get(file_id)
@@ -416,7 +455,9 @@ async def delete_variant_group(
 ) -> None:
     """Ungroup the files. The files themselves are kept — every one of them is
     independently printable, which is the whole reason they were grouped."""
+    user, can_update_all = auth_result
     group = await _get_group_or_404(db, group_id)
+    await _ensure_group_visible(db, group, user, can_update_all)
     members = (await db.execute(select(LibraryFile).where(LibraryFile.variant_group_id == group.id))).scalars().all()
     for lib_file in members:
         lib_file.variant_group_id = None
