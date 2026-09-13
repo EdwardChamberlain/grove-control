@@ -219,6 +219,20 @@ class TestBatchOrderProgress:
         assert result["pending_count"] == 1
         assert result["remaining_count"] == 0
 
+    async def test_dispatching_run_consumes_the_target(
+        self, async_client, printer_factory, archive_factory, db_session
+    ):
+        """A scheduler handoff is already a real run and must not be cloned."""
+        printer = await printer_factory()
+        archive = await archive_factory()
+        order = await _create_order(async_client, archive.id, [{"plate_id": 1, "quantity_target": 2}])
+        item = await _queue_item(async_client, printer.id, archive.id, order["id"], plate_id=1)
+        await _set_status(db_session, item["id"], "dispatching")
+
+        result = (await async_client.get(f"/api/v1/queue/batches/{order['id']}")).json()
+        assert result["dispatching_count"] == 1
+        assert result["remaining_count"] == 1
+
     async def test_legacy_batch_without_targets_owes_nothing(self, async_client, printer_factory, archive_factory):
         """Batches created before #342 keep working and report has_targets=false."""
         printer = await printer_factory()

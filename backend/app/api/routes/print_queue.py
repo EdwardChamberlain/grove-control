@@ -1260,13 +1260,9 @@ async def _load_batch_for_write(
     batch = result.scalar_one_or_none()
     if not batch:
         raise HTTPException(404, "Batch not found")
-    if (
-        current_user is not None
-        and batch.created_by_id is not None
-        and batch.created_by_id != current_user.id
-        and not current_user.has_permission(permission.value)
-    ):
-        raise HTTPException(404, "Batch not found")
+    if current_user is not None and not current_user.has_permission(permission.value):
+        if batch.created_by_id is None or batch.created_by_id != current_user.id:
+            raise HTTPException(404, "Batch not found")
     return batch
 
 
@@ -1359,6 +1355,7 @@ async def update_batch(
     data: PrintBatchUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_UPDATE_OWN),
+    api_key_owner: User | None = Depends(resolve_api_key_owner),
 ):
     """Edit an order's header or its per-plate targets while it runs (#342).
 
@@ -1368,7 +1365,8 @@ async def update_batch(
     explicit action, because silently deleting queued work on a number change
     would be a nasty surprise.
     """
-    batch = await _load_batch_for_write(db, batch_id, current_user, Permission.QUEUE_UPDATE_ALL)
+    actor = current_user or api_key_owner
+    batch = await _load_batch_for_write(db, batch_id, actor, Permission.QUEUE_UPDATE_ALL)
 
     plate_targets = _validate_plate_targets(data.plates)
     if data.project_id is not None:
@@ -1429,6 +1427,7 @@ async def dispatch_batch(
     data: PrintBatchDispatchRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_CREATE),
+    api_key_owner: User | None = Depends(resolve_api_key_owner),
 ):
     """Queue the runs this order still owes (#342).
 
@@ -1437,12 +1436,13 @@ async def dispatch_batch(
     overrides and print options the user already chose — and the validation
     those went through at creation time.
     """
-    batch = await _load_batch_for_write(db, batch_id, current_user, Permission.QUEUE_UPDATE_ALL)
+    actor = current_user or api_key_owner
+    batch = await _load_batch_for_write(db, batch_id, actor, Permission.QUEUE_UPDATE_ALL)
     if batch.status == "cancelled":
         raise HTTPException(400, "Cannot dispatch a cancelled batch")
 
     # Dispatch starts prints, so it must not be a weaker door than POST /queue/.
-    await _assert_can_dispatch_batch_sources(db, batch.id, current_user)
+    await _assert_can_dispatch_batch_sources(db, batch.id, actor)
 
     try:
         created = await dispatch_remaining(
@@ -1451,7 +1451,7 @@ async def dispatch_batch(
             plate_id=data.plate_id,
             only_plate=data.only_plate,
             limit=data.limit,
-            created_by_id=current_user.id if current_user else None,
+            created_by_id=actor.id if actor else None,
         )
     except BatchDispatchError as exc:
         raise HTTPException(400, str(exc)) from exc

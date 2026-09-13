@@ -21,7 +21,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -122,7 +122,7 @@ class PlateProgress:
 
     @property
     def dispatched(self) -> int:
-        return self.pending + self.printing + self.completed
+        return self.pending + self.dispatching + self.printing + self.completed
 
     @property
     def remaining(self) -> int:
@@ -461,6 +461,31 @@ async def _next_position(db: AsyncSession, printer_id: int | None) -> int:
     return max_pos + 1
 
 
+async def _lock_batch_for_dispatch(db: AsyncSession, batch: PrintBatch) -> None:
+    """Serialize dispatches for one batch before calculating remaining work."""
+    bind = db.get_bind()
+    if bind.dialect.name == "postgresql":
+        await db.execute(
+            text("SELECT pg_advisory_xact_lock(342, :batch_id)"),
+            {"batch_id": batch.id},
+        )
+    elif bind.dialect.name == "sqlite":
+        # SQLite has no row-level FOR UPDATE. A no-op UPDATE upgrades the
+        # deferred transaction to a writer lock before progress is read.
+        await db.execute(
+            update(PrintBatch)
+            .where(PrintBatch.id == batch.id)
+            .values(name=PrintBatch.name)
+        )
+    else:
+        await db.execute(
+            select(PrintBatch.id)
+            .where(PrintBatch.id == batch.id)
+            .with_for_update()
+        )
+    await db.refresh(batch)
+
+
 def _clone_queue_item(source: PrintQueueItem, *, position: int, created_by_id: int | None) -> PrintQueueItem:
     """Copy *source*'s print configuration into a fresh pending item.
 
@@ -508,6 +533,10 @@ async def dispatch_remaining(
     existing item to clone — the order can describe work it has never once
     dispatched, and there is no configuration to copy in that case.
     """
+    await _lock_batch_for_dispatch(db, batch)
+    if batch.status == "cancelled":
+        raise BatchDispatchError("Cannot dispatch a cancelled batch")
+
     progress = await load_progress(db, batch)
     if not progress.has_targets:
         return []
