@@ -11,6 +11,45 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+
+async def _enable_auth_with_operators(db_session, *usernames: str):
+    from backend.app.core.auth import invalidate_auth_enabled_cache
+    from backend.app.models.group import Group
+    from backend.app.models.settings import Settings
+    from backend.app.models.user import User
+
+    operators = (await db_session.execute(select(Group).where(Group.name == "Operators"))).scalar_one()
+    users = [User(username=username, groups=[operators]) for username in usernames]
+    db_session.add_all([Settings(key="auth_enabled", value="true"), *users])
+    await db_session.commit()
+    for user in users:
+        await db_session.refresh(user)
+    invalidate_auth_enabled_cache()
+    return users
+
+
+async def _make_owned_queued_run(db_session, owner_id: int):
+    from backend.app.models.pipeline_run import PipelineJob, PipelineRun
+    from backend.app.models.print_queue import PrintQueueItem
+
+    queue_item = PrintQueueItem(target_model="X1C", status="pending", created_by_id=owner_id)
+    run = PipelineRun(copies=1, status="dispatching", created_by=owner_id)
+    db_session.add_all([queue_item, run])
+    await db_session.flush()
+    db_session.add(
+        PipelineJob(
+            pipeline_run_id=run.id,
+            copy_index=0,
+            queue_entry_id=queue_item.id,
+            status="queued",
+        )
+    )
+    await db_session.commit()
+    await db_session.refresh(run)
+    return run, queue_item
 
 
 def _pipeline_payload(**overrides) -> dict:
@@ -419,6 +458,75 @@ class TestCancelRun:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_own_scoped_user_cannot_cancel_another_users_run(
+        self,
+        async_client: AsyncClient,
+        db_session,
+    ):
+        from backend.app.core.auth import create_access_token
+
+        owner, other = await _enable_auth_with_operators(db_session, "pipeline-owner", "pipeline-other")
+        run, queue_item = await _make_owned_queued_run(db_session, owner.id)
+
+        other_token = create_access_token({"sub": other.username})
+        denied = await async_client.post(
+            f"/api/v1/pipeline-runs/{run.id}/cancel",
+            headers={"Authorization": f"Bearer {other_token}"},
+        )
+        assert denied.status_code == 404
+        await db_session.refresh(run)
+        await db_session.refresh(queue_item)
+        assert run.status == "dispatching"
+        assert queue_item.status == "pending"
+
+        owner_token = create_access_token({"sub": owner.username})
+        allowed = await async_client.post(
+            f"/api/v1/pipeline-runs/{run.id}/cancel",
+            headers={"Authorization": f"Bearer {owner_token}"},
+        )
+        assert allowed.status_code == 200
+        assert allowed.json()["status"] == "cancelled"
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_owned_api_key_cancels_only_owners_run(
+        self,
+        async_client: AsyncClient,
+        db_session,
+    ):
+        from backend.app.core.auth import generate_api_key
+        from backend.app.models.api_key import APIKey
+
+        owner, other = await _enable_auth_with_operators(db_session, "pipeline-key-owner", "pipeline-key-other")
+        own_run, _ = await _make_owned_queued_run(db_session, owner.id)
+        foreign_run, foreign_queue_item = await _make_owned_queued_run(db_session, other.id)
+
+        full_key, key_hash, key_prefix = generate_api_key()
+        db_session.add(
+            APIKey(
+                name="pipeline cancel key",
+                key_hash=key_hash,
+                key_prefix=key_prefix,
+                user_id=owner.id,
+                can_queue=True,
+            )
+        )
+        await db_session.commit()
+
+        headers = {"X-API-Key": full_key}
+        denied = await async_client.post(f"/api/v1/pipeline-runs/{foreign_run.id}/cancel", headers=headers)
+        assert denied.status_code == 404
+        await db_session.refresh(foreign_run)
+        await db_session.refresh(foreign_queue_item)
+        assert foreign_run.status == "dispatching"
+        assert foreign_queue_item.status == "pending"
+
+        allowed = await async_client.post(f"/api/v1/pipeline-runs/{own_run.id}/cancel", headers=headers)
+        assert allowed.status_code == 200
+        assert allowed.json()["status"] == "cancelled"
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_run_accepts_archive_source(
         self,
         async_client: AsyncClient,
@@ -569,6 +677,50 @@ class TestPipelineC:
         assert body["copies"] == 3
         assert len(body["jobs"]) == 3
         assert [j["copy_index"] for j in body["jobs"]] == [0, 1, 2]
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_missing_source_marks_background_run_failed(
+        self,
+        pipeline_factory,
+        db_session,
+        test_engine,
+        tmp_path,
+    ):
+        from backend.app.api.routes.pipeline_runs import _make_orchestration_callable
+        from backend.app.models.pipeline_run import PipelineJob, PipelineRun
+
+        pipeline = await pipeline_factory()
+        run = PipelineRun(pipeline_id=pipeline["id"], copies=1, status="queued")
+        db_session.add(run)
+        await db_session.flush()
+        db_session.add(PipelineJob(pipeline_run_id=run.id, copy_index=0, status="pending"))
+        await db_session.commit()
+        await db_session.refresh(run)
+
+        missing_path = tmp_path / "removed-before-slice.3mf"
+        orchestrate = _make_orchestration_callable(
+            run_id=run.id,
+            pipeline_id=pipeline["id"],
+            src_kind="library_file",
+            src_id=999_999,
+            src_filename=missing_path.name,
+            src_path=missing_path,
+            creator_user_id=None,
+            copies=1,
+        )
+        test_sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+        with (
+            patch("backend.app.api.routes.pipeline_runs.async_session", test_sessions),
+            patch("backend.app.api.routes.pipeline_runs._publish_run_event", new=AsyncMock()),
+            pytest.raises(FileNotFoundError),
+        ):
+            await orchestrate(slice_job_id=123)
+
+        await db_session.refresh(run)
+        assert run.status == "failed"
+        assert run.completed_at is not None
+        assert "removed-before-slice.3mf" in run.error_message
 
     @pytest.mark.asyncio
     @pytest.mark.integration

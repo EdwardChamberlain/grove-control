@@ -495,16 +495,22 @@ def _make_orchestration_callable(
             await session.commit()
             await _publish_run_event(session, run)
 
-            slice_request = _slice_request_from_pipeline(pipeline)
-            model_bytes = src_path.read_bytes()
-
-            folder_id: int | None = None
-            if src_kind == "library_file":
-                lib = (await session.execute(select(LibraryFile).where(LibraryFile.id == src_id))).scalar_one_or_none()
-                if lib is not None:
-                    folder_id = lib.folder_id
-
             try:
+                # Source preparation belongs to the durable slice attempt too.
+                # The file can disappear after POST /run accepts it but before
+                # this background callable starts; persist that failure rather
+                # than leaving the run stuck in ``slicing`` until a restart.
+                slice_request = _slice_request_from_pipeline(pipeline)
+                model_bytes = src_path.read_bytes()
+
+                folder_id: int | None = None
+                if src_kind == "library_file":
+                    lib = (
+                        await session.execute(select(LibraryFile).where(LibraryFile.id == src_id))
+                    ).scalar_one_or_none()
+                    if lib is not None:
+                        folder_id = lib.folder_id
+
                 slice_response = await slice_and_persist(
                     session,
                     model_bytes=model_bytes,
@@ -1010,7 +1016,8 @@ async def get_run(
 @pipeline_run_router.post("/{run_id}/cancel", response_model=PipelineRunResponse)
 async def cancel_run(
     run_id: int,
-    _: User | None = RequirePermissionIfAuthEnabled(Permission.PIPELINES_RUN),
+    current_user: User | None = RequirePermissionIfAuthEnabled(Permission.PIPELINES_RUN),
+    api_key_owner: User | None = Depends(resolve_api_key_owner),
     db: AsyncSession = Depends(get_db),
 ):
     """Cancel a queued / in-flight run. Cascades to all non-terminal queue
@@ -1018,6 +1025,33 @@ async def cancel_run(
     run = (await db.execute(select(PipelineRun).where(PipelineRun.id == run_id))).scalar_one_or_none()
     if run is None:
         raise HTTPException(404, "Pipeline run not found")
+
+    actor = current_user or api_key_owner
+    can_delete_all = actor is not None and actor.has_permission(Permission.QUEUE_DELETE_ALL)
+    if actor is not None and run.created_by != actor.id and not can_delete_all:
+        # Ownership-scoped resources fail closed without revealing that a
+        # foreign run exists.
+        raise HTTPException(404, "Pipeline run not found")
+
+    job_rows = (await db.execute(select(PipelineJob).where(PipelineJob.pipeline_run_id == run.id))).scalars().all()
+    queue_entry_ids = [job.queue_entry_id for job in job_rows if job.queue_entry_id is not None]
+    queue_entries = (
+        (
+            await db.execute(select(PrintQueueItem).where(PrintQueueItem.id.in_(queue_entry_ids)))
+        )
+        .scalars()
+        .all()
+        if queue_entry_ids
+        else []
+    )
+    queue_entries_by_id = {entry.id: entry for entry in queue_entries}
+
+    # Preflight every linked row before changing anything. A corrupt or legacy
+    # run must not become a way for an own-scoped caller to cancel somebody
+    # else's queued print.
+    if actor is not None and not can_delete_all:
+        if any(entry.created_by_id != actor.id for entry in queue_entries):
+            raise HTTPException(404, "Pipeline run not found")
 
     if run.status in ("completed", "failed", "cancelled", "partial_failure"):
         return await _materialise_run(db, run)
@@ -1027,12 +1061,9 @@ async def cancel_run(
     if not run.error_message:
         run.error_message = "Cancelled by user"
 
-    job_rows = (await db.execute(select(PipelineJob).where(PipelineJob.pipeline_run_id == run.id))).scalars().all()
     for job in job_rows:
         if job.queue_entry_id:
-            queue_entry = (
-                await db.execute(select(PrintQueueItem).where(PrintQueueItem.id == job.queue_entry_id))
-            ).scalar_one_or_none()
+            queue_entry = queue_entries_by_id.get(job.queue_entry_id)
             if queue_entry is not None and queue_entry.status in ("pending", "queued"):
                 queue_entry.status = "cancelled"
         if job.status not in ("completed", "failed", "cancelled"):
