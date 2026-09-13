@@ -6755,6 +6755,13 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logging.warning("Failed to auto-connect to Spoolman: %s", e)
 
+    # Requeue durable pipeline runs whose in-memory slice task was lost during
+    # a process restart before starting the queue scheduler.
+    try:
+        await pipeline_runs.recover_pipeline_runs()
+    except Exception:
+        logging.getLogger(__name__).exception("Failed to recover interrupted pipeline runs")
+
     # Start the print scheduler
     spawn_background_task(print_scheduler.run(), name="print-scheduler")
 

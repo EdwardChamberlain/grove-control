@@ -33,6 +33,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.api.routes.cloud import resolve_api_key_cloud_owner
 from backend.app.core.auth import RequirePermissionIfAuthEnabled
 from backend.app.core.config import settings as app_settings
 from backend.app.core.database import async_session, get_db
@@ -374,11 +375,18 @@ async def _resolve_source(
     *,
     library_file_id: int | None,
     archive_id: int | None,
+    user: User | None,
 ) -> tuple[SourceKind, int, str, Path]:
+    # Source IDs are caller-controlled. Apply the same per-row visibility
+    # checks as the direct library/archive routes before allowing a pipeline
+    # to slice (and subsequently print) the source.
+    from backend.app.api.routes.archives import _ensure_archive_visible
+    from backend.app.api.routes.library import _ensure_library_file_visible
+
     if library_file_id is not None:
         lib = (await db.execute(select(LibraryFile).where(LibraryFile.id == library_file_id))).scalar_one_or_none()
-        if lib is None:
-            raise HTTPException(404, "Source library file not found")
+        can_read_all = user is None or user.has_permission(Permission.LIBRARY_READ_ALL.value)
+        lib = _ensure_library_file_visible(lib, user, can_read_all)
         src_path = (
             Path(app_settings.base_dir) / lib.file_path
         )  # SEC-PATH-OK: lib.file_path is a LibraryFile DB column set only by the upload route, which writes a UUID-named file under base_dir/library_files/.
@@ -388,8 +396,8 @@ async def _resolve_source(
 
     assert archive_id is not None
     arc = (await db.execute(select(PrintArchive).where(PrintArchive.id == archive_id))).scalar_one_or_none()
-    if arc is None:
-        raise HTTPException(404, "Source archive not found")
+    can_read_all = user is None or user.has_permission(Permission.ARCHIVES_READ_ALL.value)
+    arc = _ensure_archive_visible(arc, user, can_read_all)
     rel = arc.source_3mf_path or arc.file_path
     if not rel:
         raise HTTPException(400, "Archive has no source file to slice")
@@ -616,6 +624,129 @@ def _make_orchestration_callable(
     return _orchestrate
 
 
+async def recover_pipeline_runs() -> int:
+    """Requeue pipeline slices that were interrupted by a process restart.
+
+    The slice dispatcher is intentionally in-memory, while the run and its
+    pending jobs are durable. A crash after the run transaction commits but
+    before the dispatcher task finishes would otherwise leave the run in
+    queued/slicing forever. Commit the recovery claim before enqueueing so
+    another restart can safely retry the small enqueue window.
+    """
+    from backend.app.services.slice_dispatch import slice_dispatch
+
+    recovered = 0
+    async with async_session() as db:
+        runs = (
+            (
+                await db.execute(
+                    select(PipelineRun)
+                    .where(
+                        PipelineRun.status.in_(("queued", "slicing")),
+                        PipelineRun.sliced_library_file_id.is_(None),
+                    )
+                    .order_by(PipelineRun.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        for run in runs:
+            pipeline = (
+                await db.execute(
+                    select(SlicerPipeline).where(
+                        SlicerPipeline.id == run.pipeline_id,
+                        SlicerPipeline.is_deleted.is_(False),
+                    )
+                )
+            ).scalar_one_or_none()
+
+            source_kind: SourceKind | None = None
+            source_id: int | None = None
+            source_filename: str | None = None
+            source_path: Path | None = None
+
+            if pipeline is not None and run.source_library_file_id is not None:
+                source = (
+                    await db.execute(select(LibraryFile).where(LibraryFile.id == run.source_library_file_id))
+                ).scalar_one_or_none()
+                if source is not None:
+                    source_kind = "library_file"
+                    source_id = source.id
+                    source_filename = source.filename
+                    source_path = Path(app_settings.base_dir) / source.file_path
+            elif pipeline is not None and run.source_archive_id is not None:
+                source = (
+                    await db.execute(select(PrintArchive).where(PrintArchive.id == run.source_archive_id))
+                ).scalar_one_or_none()
+                if source is not None:
+                    rel = source.source_3mf_path or source.file_path
+                    if rel:
+                        source_kind = "archive"
+                        source_id = source.id
+                        source_filename = source.filename or source.print_name or Path(rel).name
+                        source_path = Path(app_settings.base_dir) / rel
+
+            if source_kind is None or source_id is None or source_filename is None or source_path is None:
+                run.status = "failed"
+                run.error_message = "Pipeline run could not be recovered: pipeline or source no longer exists"
+                run.completed_at = datetime.now(timezone.utc)
+                await db.commit()
+                logger.warning("Marked pipeline run %d failed during restart recovery: missing pipeline or source", run.id)
+                continue
+            if not source_path.exists():
+                run.status = "failed"
+                run.error_message = "Pipeline run could not be recovered: source file is missing on disk"
+                run.completed_at = datetime.now(timezone.utc)
+                await db.commit()
+                logger.warning("Marked pipeline run %d failed during restart recovery: source file missing", run.id)
+                continue
+
+            # Clear the old in-memory job id. It has no meaning in this
+            # process, and the committed queued state makes this operation
+            # retryable if the process dies during enqueue.
+            run.status = "queued"
+            run.started_at = None
+            run.slice_job_id = None
+            run.error_message = None
+            await db.commit()
+
+            orchestrate = _make_orchestration_callable(
+                run_id=run.id,
+                pipeline_id=pipeline.id,
+                src_kind=source_kind,
+                src_id=source_id,
+                src_filename=source_filename,
+                src_path=source_path,
+                creator_user_id=run.created_by,
+                copies=run.copies,
+            )
+            try:
+                slice_job = await slice_dispatch.enqueue(
+                    kind=source_kind,
+                    source_id=source_id,
+                    source_name=source_filename,
+                    owner_id=run.created_by,
+                    run=orchestrate,
+                )
+            except Exception as exc:
+                run.status = "failed"
+                run.error_message = f"Pipeline run recovery failed: {exc}"
+                run.completed_at = datetime.now(timezone.utc)
+                await db.commit()
+                logger.exception("Failed to requeue pipeline run %d", run.id)
+                continue
+
+            run.slice_job_id = slice_job.id
+            await db.commit()
+            recovered += 1
+
+    if recovered:
+        logger.info("Recovered %d interrupted pipeline run(s) after restart", recovered)
+    return recovered
+
+
 # ---------------------------------------------------------------------------
 # /slicer-pipelines/{id}/check-eligibility
 # ---------------------------------------------------------------------------
@@ -625,7 +756,7 @@ def _make_orchestration_callable(
 async def check_eligibility(
     pipeline_id: int,
     body: CheckEligibilityRequest,
-    _: User | None = RequirePermissionIfAuthEnabled(Permission.PIPELINES_READ),
+    current_user: User | None = RequirePermissionIfAuthEnabled(Permission.PIPELINES_READ),
     db: AsyncSession = Depends(get_db),
 ):
     pipeline = await _load_pipeline(db, pipeline_id)
@@ -633,6 +764,7 @@ async def check_eligibility(
         db,
         library_file_id=body.source_library_file_id,
         archive_id=body.source_archive_id,
+        user=current_user,
     )
     if pipeline.target_kind == "printer_class" and pipeline.target_printer_id is None:
         report = await check_pipeline_eligibility(db, pipeline, status_lookup=_make_status_lookup())
@@ -652,6 +784,7 @@ async def run_pipeline(
     pipeline_id: int,
     body: PipelineRunCreateRequest,
     current_user: User | None = RequirePermissionIfAuthEnabled(Permission.PIPELINES_RUN),
+    api_key_cloud_owner: User | None = Depends(resolve_api_key_cloud_owner),
     db: AsyncSession = Depends(get_db),
 ):
     from backend.app.api.routes.settings import get_setting
@@ -662,7 +795,13 @@ async def run_pipeline(
         db,
         library_file_id=body.source_library_file_id,
         archive_id=body.source_archive_id,
+        user=current_user,
     )
+
+    # API-key permission dependencies intentionally return no JWT user. When
+    # the pipeline uses cloud presets, use the key owner for cloud credentials
+    # and for ownership stamps on the run, sliced file, and queue entries.
+    creator = current_user or api_key_cloud_owner
 
     # Cap copies against the configured ceiling.
     raw_cap = await get_setting(db, "pipeline_max_copies")
@@ -700,7 +839,7 @@ async def run_pipeline(
         copies=body.copies,
         status="queued",
         eligibility_overridden=(not report.ok and body.force),
-        created_by=current_user.id if current_user else None,
+        created_by=creator.id if creator else None,
     )
     db.add(run)
     await db.flush()
@@ -725,13 +864,14 @@ async def run_pipeline(
         src_id=src_id,
         src_filename=src_filename,
         src_path=src_path,
-        creator_user_id=current_user.id if current_user else None,
+        creator_user_id=creator.id if creator else None,
         copies=body.copies,
     )
     slice_job = await slice_dispatch.enqueue(
         kind="library_file" if src_kind == "library_file" else "archive",
         source_id=src_id,
         source_name=src_filename,
+        owner_id=creator.id if creator else None,
         run=orchestrate,
     )
 
@@ -902,6 +1042,7 @@ async def cancel_run(
 async def retry_failed(
     run_id: int,
     current_user: User | None = RequirePermissionIfAuthEnabled(Permission.PIPELINES_RUN),
+    api_key_cloud_owner: User | None = Depends(resolve_api_key_cloud_owner),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new run with copies = (failed + cancelled count) from the
@@ -943,7 +1084,13 @@ async def retry_failed(
 
     # Reuse the run_pipeline route logic via a direct call — keeps the
     # orchestration single-sourced. The result inherits parent_run_id.
-    new_run_response = await run_pipeline(parent.pipeline_id, body, current_user=current_user, db=db)
+    new_run_response = await run_pipeline(
+        parent.pipeline_id,
+        body,
+        current_user=current_user,
+        api_key_cloud_owner=api_key_cloud_owner,
+        db=db,
+    )
 
     # Stamp parent_run_id on the freshly-created run.
     new_row = (await db.execute(select(PipelineRun).where(PipelineRun.id == new_run_response.id))).scalar_one_or_none()
