@@ -1038,6 +1038,26 @@ export default {
   },
 
   // Kuyruk sayfası
+  dispatchToast: {
+    untitled: 'Baskı işi',
+    startingPrints: 'Baskılar başlatılıyor',
+    progressSummary: '{{complete}}/{{total}} tamamlandı • İşleniyor: {{processing}}',
+    expandDetails: 'Gönderme ayrıntılarını genişlet',
+    collapseDetails: 'Gönderme ayrıntılarını daralt',
+    awaitingPrinter: 'Yazıcı bekleniyor…',
+    status: {
+      processing: 'İşleniyor',
+      completed: 'Tamamlandı',
+      failed: 'Başarısız',
+    },
+    failed: {
+      generic: 'Gönderme başarısız',
+      upload_failed: 'Yazıcıya yükleme başarısız',
+      start_command_failed: 'Yazıcı başlatma komutunu reddetti',
+    },
+    dismiss: 'Kapat',
+  },
+
   // Pipeline Runs dashboard (#1425 PR C).
   pipelineRuns: {
     title: 'Pipeline çalıştırmaları',
