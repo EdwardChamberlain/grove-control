@@ -27,7 +27,15 @@ from sqlalchemy.orm import selectinload
 
 from backend.app.models.print_batch import PrintBatch, PrintBatchPlate
 from backend.app.models.print_log import PrintLogEntry
-from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
+from backend.app.models.print_queue import PrintQueueItem
+
+try:
+    # Cross-model alternatives are delivered by the preceding PR. Keep batch
+    # dispatch importable on its own branch too; once that relationship lands,
+    # dispatch_remaining copies the candidate rows below automatically.
+    from backend.app.models.print_queue import PrintQueueVariant
+except ImportError:  # pragma: no cover - exercised only before the alternatives PR lands
+    PrintQueueVariant = None  # type: ignore[assignment,misc]
 
 logger = logging.getLogger(__name__)
 
@@ -544,16 +552,17 @@ async def dispatch_remaining(
         if limit is not None and len(created) >= limit:
             break
 
-        source = (
-            await db.execute(
-                select(PrintQueueItem)
-                .options(selectinload(PrintQueueItem.variants))
-                .where(PrintQueueItem.batch_id == batch.id)
-                .where(PrintQueueItem.plate_id == plate.plate_id)
-                .order_by(PrintQueueItem.id.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
+        source_stmt = (
+            select(PrintQueueItem)
+            .where(PrintQueueItem.batch_id == batch.id)
+            .where(PrintQueueItem.plate_id == plate.plate_id)
+            .order_by(PrintQueueItem.id.desc())
+            .limit(1)
+        )
+        variant_relationship = getattr(PrintQueueItem, "variants", None)
+        if variant_relationship is not None:
+            source_stmt = source_stmt.options(selectinload(variant_relationship))
+        source = (await db.execute(source_stmt)).scalar_one_or_none()
 
         if source is None:
             stranded.append(plate)
@@ -572,11 +581,12 @@ async def dispatch_remaining(
             position += 1
             db.add(clone)
             await db.flush()
-            for variant in source.variants:
-                cloned_variant = PrintQueueVariant(queue_item_id=clone.id)
-                for column in CLONED_VARIANT_COLUMNS:
-                    setattr(cloned_variant, column, getattr(variant, column))
-                db.add(cloned_variant)
+            if PrintQueueVariant is not None and variant_relationship is not None:
+                for variant in source.variants:
+                    cloned_variant = PrintQueueVariant(queue_item_id=clone.id)
+                    for column in CLONED_VARIANT_COLUMNS:
+                        setattr(cloned_variant, column, getattr(variant, column))
+                    db.add(cloned_variant)
             created.append(clone)
 
     if not created and stranded:
