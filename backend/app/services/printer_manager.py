@@ -213,6 +213,14 @@ def supports_drying(model: str | None, firmware: str | None) -> bool:
     return True
 
 
+def supports_drying_model(model: str | None) -> bool:
+    """Check model-level AMS drying support without requiring live firmware."""
+    if not model:
+        return False
+    model_upper = model.strip().upper()
+    return model_upper not in _DRYING_UNSUPPORTED_MODELS and model_upper not in _DRYING_SCREEN_ONLY_MODELS
+
+
 # Minimum firmware versions for AMS "Print While Drying" — drying that runs CONCURRENTLY
 # with an active print. Strictly stricter than _DRYING_MIN_FIRMWARE (idle drying). Verified
 # against Bambu wiki release notes — the canonical phrasing on every supported model is

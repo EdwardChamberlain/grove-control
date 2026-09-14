@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, Flame, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -6,6 +6,13 @@ import { useTranslation } from 'react-i18next';
 import type { AMSUnit } from '../../api/client';
 import { getAmsLabel } from '../../utils/amsHelpers';
 import type { AmsDryingController } from '../../hooks/useAmsDryingControls';
+
+function dryingBlockedKey(reasons: Array<number | string> | undefined): string {
+  const codes = (reasons ?? []).map(reason => Number(reason));
+  if (codes.some(code => code === 1 || code === 8)) return 'printers.drying.powerRequired';
+  if (codes.includes(3)) return 'printers.drying.retractFilament';
+  return 'printers.drying.cannotDryNow';
+}
 
 export function AmsDryingControl({
   ams,
@@ -36,7 +43,7 @@ export function AmsDryingControl({
             ? 'bg-bambu-dark text-bambu-gray/50'
             : 'bg-bambu-dark text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white'
       }`}
-      title={ams.dry_time > 0 ? t('printers.drying.stop') : ams.dry_sf_reason?.length ? t('printers.drying.powerRequired') : t('printers.drying.start')}
+      title={ams.dry_time > 0 ? t('printers.drying.stop') : ams.dry_sf_reason?.length ? t(dryingBlockedKey(ams.dry_sf_reason)) : t('printers.drying.start')}
       aria-label={`${getAmsLabel(ams.id, ams.tray.length)}: ${ams.dry_time > 0 ? t('printers.drying.stop') : t('printers.drying.start')}`}
     >
       <Flame className="h-3 w-3" />
@@ -120,11 +127,26 @@ function DryingFilamentDropdown({ controller }: { controller: AmsDryingControlle
 
 export function AmsDryingPopover({ controller }: { controller: AmsDryingController }) {
   const { t } = useTranslation();
+  const datePickerDismissRef = useRef(false);
+  const startAtInputRef = useRef<HTMLInputElement | null>(null);
   if (controller.activeAmsId == null || !controller.position) return null;
   const maxTemp = controller.moduleType === 'n3s' ? 85 : 65;
   const popover = (
     <>
-      <div className="fixed inset-0 z-[100]" onClick={controller.close} />
+      <div
+        className="fixed inset-0 z-[100]"
+        data-testid="drying-popover-backdrop"
+        onMouseDown={() => {
+          datePickerDismissRef.current = document.activeElement === startAtInputRef.current;
+        }}
+        onClick={() => {
+          if (datePickerDismissRef.current) {
+            datePickerDismissRef.current = false;
+            return;
+          }
+          controller.close();
+        }}
+      />
       <div
         role="dialog"
         aria-label={t('printers.drying.start')}
@@ -198,16 +220,75 @@ export function AmsDryingPopover({ controller }: { controller: AmsDryingControll
           >
             {t('printers.drying.rotateTray')}
           </button>
+          <div>
+            <label className="mb-1 block text-[10px] font-medium text-white/70">{t('printers.drying.startMode')}</label>
+            <div className="grid grid-cols-3 gap-1">
+              {(['now', 'delay', 'at_time'] as const).map(mode => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => controller.setStartMode(mode)}
+                  className={`rounded-lg border py-1 text-[10px] font-medium transition-colors ${
+                    controller.startMode === mode
+                      ? 'border-bambu-green bg-bambu-green text-white'
+                      : 'border-bambu-dark-tertiary bg-bambu-dark text-white hover:bg-bambu-dark-tertiary'
+                  }`}
+                >
+                  {t(mode === 'now' ? 'printers.drying.modeNow' : mode === 'delay' ? 'printers.drying.modeDelay' : 'printers.drying.modeAtTime')}
+                </button>
+              ))}
+            </div>
+            {controller.startMode === 'delay' && (
+              <div className="mt-1.5 grid grid-cols-4 gap-1">
+                {[
+                  [30, '30m'],
+                  [60, '1h'],
+                  [120, '2h'],
+                  [240, '4h'],
+                  [480, '8h'],
+                  [720, '12h'],
+                  [1440, '24h'],
+                ].map(([minutes, label]) => (
+                  <button
+                    key={minutes}
+                    type="button"
+                    aria-pressed={controller.delayMinutes === minutes}
+                    onClick={() => controller.setDelayMinutes(minutes as number)}
+                    className={`rounded-lg border py-1 text-[10px] font-medium transition-colors ${
+                      controller.delayMinutes === minutes
+                        ? 'border-bambu-green bg-bambu-green text-white'
+                        : 'border-bambu-dark-tertiary bg-bambu-dark text-white hover:bg-bambu-dark-tertiary'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {controller.startMode === 'at_time' && (
+              <input
+                ref={startAtInputRef}
+                type="datetime-local"
+                data-testid="drying-start-at"
+                value={controller.startAt}
+                onChange={event => controller.setStartAt(event.target.value)}
+                className="mt-1.5 w-full rounded border border-bambu-dark-tertiary bg-bambu-dark px-2 py-1 text-[11px] text-white focus:border-bambu-green focus:outline-none [color-scheme:dark]"
+              />
+            )}
+          </div>
         </div>
         <div className="h-px shrink-0 bg-bambu-dark-tertiary" />
         <div className="shrink-0 px-3 pb-3 pt-2.5">
           <button
             type="button"
-            onClick={controller.start}
-            disabled={controller.isStarting}
+            data-testid="drying-start-confirm"
+            onClick={controller.startMode === 'now' ? controller.start : controller.schedule}
+            disabled={controller.isStarting || controller.isScheduling || (controller.startMode === 'at_time' && !controller.startAt)}
             className="w-full rounded-lg bg-bambu-green py-1.5 text-xs font-medium text-white transition-colors hover:bg-bambu-green/80 disabled:opacity-50"
           >
-            {controller.isStarting ? t('printers.drying.startingDrying') : t('printers.drying.start')}
+            {controller.startMode === 'now'
+              ? (controller.isStarting ? t('printers.drying.startingDrying') : t('printers.drying.start'))
+              : t('printers.drying.schedule')}
           </button>
         </div>
       </div>
