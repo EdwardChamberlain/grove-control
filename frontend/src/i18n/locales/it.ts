@@ -4146,6 +4146,7 @@ export default {
     addShort: 'Aggiungi',
     edit: 'Modifica ubicazione',
     name: 'Nome',
+    sensors: 'Sensori',
     spools: 'Bobine',
     empty: 'Nessuna ubicazione di stoccaggio. Crea il tuo primo scaffale o cassetto.',
     manage: 'Ubicazioni',
@@ -4159,6 +4160,7 @@ export default {
     deleteBlocked: 'Rimuovi prima tutte le bobine da questa ubicazione',
     confirmDelete: 'Eliminare «{{name}}»?',
     confirmDeleteMessage: 'Questa ubicazione verrà rimossa dal catalogo. Sposta prima le bobine.',
+    confirmDeleteMessageWithSensors: 'Rimuovi tutti i sensori Home Assistant da questa ubicazione prima di eliminarla.',
   },
 
   // Inventory

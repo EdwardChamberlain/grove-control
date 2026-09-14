@@ -4161,6 +4161,7 @@ export default {
     addShort: 'Añadir',
     edit: 'Editar ubicación',
     name: 'Nombre',
+    sensors: 'Sensores',
     spools: 'Bobinas',
     empty: 'Aún no hay ubicaciones de almacenamiento. Cree su primer estante o cajón.',
     manage: 'Ubicaciones',
@@ -4174,6 +4175,7 @@ export default {
     deleteBlocked: 'Retire todas las bobinas de esta ubicación antes de eliminarla',
     confirmDelete: '¿Eliminar «{{name}}»?',
     confirmDeleteMessage: 'Esta ubicación se eliminará del catálogo. Mueva las bobinas primero.',
+    confirmDeleteMessageWithSensors: 'Retire todos los sensores de Home Assistant de esta ubicación antes de eliminarla.',
   },
 
   // Inventory

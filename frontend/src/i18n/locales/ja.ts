@@ -4158,6 +4158,7 @@ export default {
     addShort: '追加',
     edit: '場所を編集',
     name: '名前',
+    sensors: 'センサー',
     spools: 'スプール',
     empty: '保管場所がありません。最初の棚または引き出しを作成してください。',
     manage: '保管場所',
@@ -4171,6 +4172,7 @@ export default {
     deleteBlocked: '削除前にこの場所のスプールをすべて移動してください',
     confirmDelete: '「{{name}}」を削除しますか？',
     confirmDeleteMessage: 'この場所はカタログから削除されます。先にスプールを移動してください。',
+    confirmDeleteMessageWithSensors: '削除する前に、この場所からすべての Home Assistant センサーを削除してください。',
   },
 
   // Inventory

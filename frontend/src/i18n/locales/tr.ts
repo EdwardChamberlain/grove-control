@@ -4147,6 +4147,7 @@ export default {
     addShort: 'Ekle',
     edit: 'Konumu Düzenle',
     name: 'Ad',
+    sensors: 'Sensörler',
     spools: 'Makaralar',
     empty: 'Henüz depolama konumu yok. İlk rafınızı veya çekmecenizi oluşturun.',
     manage: 'Konumlar',
@@ -4160,6 +4161,7 @@ export default {
     deleteBlocked: 'Silmeden önce bu konumdaki tüm makaraları taşıyın',
     confirmDelete: '"{{name}}" silinsin mi?',
     confirmDeleteMessage: 'Bu konum kataloğdan kaldırılacak. Önce makaralar taşınmalıdır.',
+    confirmDeleteMessageWithSensors: 'Silmeden önce bu konumdaki tüm Home Assistant sensörlerini kaldırın.',
   },
 
   // Envanter

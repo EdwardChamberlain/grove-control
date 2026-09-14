@@ -4146,6 +4146,7 @@ export default {
     addShort: '添加',
     edit: '编辑位置',
     name: '名称',
+    sensors: '传感器',
     spools: '线轴',
     empty: '尚无存储位置。创建第一个货架或抽屉。',
     manage: '位置',
@@ -4159,6 +4160,7 @@ export default {
     deleteBlocked: '删除前请移走此位置上的所有线轴',
     confirmDelete: '删除「{{name}}」？',
     confirmDeleteMessage: '此位置将从目录中移除。请先移走线轴。',
+    confirmDeleteMessageWithSensors: '删除前请移除此位置上的所有 Home Assistant 传感器。',
   },
 
   // Inventory

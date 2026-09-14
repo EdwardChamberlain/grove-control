@@ -3952,6 +3952,7 @@ export default {
     addShort: '추가',
     edit: '위치 편집',
     name: '이름',
+    sensors: '센서',
     spools: '스풀',
     empty: '아직 보관 위치가 없습니다. 첫 번째 선반이나 서랍을 만드세요.',
     manage: '위치',
@@ -3965,6 +3966,7 @@ export default {
     deleteBlocked: '삭제하기 전에 이 위치의 모든 스풀을 옮기세요',
     confirmDelete: '"{{name}}"을(를) 삭제하시겠습니까?',
     confirmDeleteMessage: '이 위치가 카탈로그에서 제거됩니다. 스풀을 먼저 옮겨야 합니다.',
+    confirmDeleteMessageWithSensors: '삭제하기 전에 이 위치의 모든 Home Assistant 센서를 제거하세요.',
   },
 
   inventory: {

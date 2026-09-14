@@ -4146,6 +4146,7 @@ export default {
     addShort: 'Adicionar',
     edit: 'Editar local',
     name: 'Nome',
+    sensors: 'Sensores',
     spools: 'Bobinas',
     empty: 'Nenhum local de armazenamento. Crie sua primeira prateleira ou gaveta.',
     manage: 'Locais',
@@ -4159,6 +4160,7 @@ export default {
     deleteBlocked: 'Remova todas as bobinas deste local antes de excluir',
     confirmDelete: 'Excluir «{{name}}»?',
     confirmDeleteMessage: 'Este local será removido do catálogo. Mova as bobinas primeiro.',
+    confirmDeleteMessageWithSensors: 'Remova todos os sensores do Home Assistant deste local antes de excluí-lo.',
   },
 
   // Inventory

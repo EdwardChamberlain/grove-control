@@ -4147,6 +4147,7 @@ export default {
     addShort: 'Ajouter',
     edit: 'Modifier l\'emplacement',
     name: 'Nom',
+    sensors: 'Capteurs',
     spools: 'Bobines',
     empty: 'Aucun emplacement de stockage. Créez votre première étagère ou tiroir.',
     manage: 'Emplacements',
@@ -4160,6 +4161,7 @@ export default {
     deleteBlocked: 'Retirez d\'abord toutes les bobines de cet emplacement',
     confirmDelete: 'Supprimer « {{name}} » ?',
     confirmDeleteMessage: 'Cet emplacement sera retiré du catalogue. Déplacez d\'abord les bobines.',
+    confirmDeleteMessageWithSensors: 'Retirez tous les capteurs Home Assistant de cet emplacement avant de le supprimer.',
   },
 
   // Inventory

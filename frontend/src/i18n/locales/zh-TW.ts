@@ -4146,6 +4146,7 @@ export default {
     addShort: '新增',
     edit: '編輯位置',
     name: '名稱',
+    sensors: '感測器',
     spools: '線軸',
     empty: '尚無儲存位置。建立第一個貨架或抽屜。',
     manage: '位置',
@@ -4159,6 +4160,7 @@ export default {
     deleteBlocked: '刪除前請移走此位置上的所有線軸',
     confirmDelete: '刪除「{{name}}」？',
     confirmDeleteMessage: '此位置將從目錄中移除。請先移走線軸。',
+    confirmDeleteMessageWithSensors: '刪除前請移除此位置上的所有 Home Assistant 感測器。',
   },
 
   // Inventory
