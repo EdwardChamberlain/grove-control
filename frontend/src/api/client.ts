@@ -1208,6 +1208,8 @@ export interface AppSettings {
   ha_url_from_env: boolean;
   ha_token_from_env: boolean;
   ha_env_managed: boolean;
+  location_sensor_poll_interval: number;
+  location_sensor_alert_defaults: string;
   // File Manager / Library settings
   library_archive_mode: 'always' | 'never' | 'ask';
   library_disk_warning_gb: number;
@@ -1414,6 +1416,62 @@ export interface StorageLocation {
   created_at: string;
   updated_at: string;
 }
+
+export interface LocationHASensor {
+  id: number;
+  location_id: number;
+  name: string;
+  entity_id: string;
+  kind: 'binary' | 'numeric';
+  device_class: string | null;
+  unit: string | null;
+  alert_state: 'on' | 'off' | null;
+  alert_above: number | null;
+  alert_below: number | null;
+  notify_on_alert: boolean;
+  show_on_card: boolean;
+  sort_order: number;
+  last_state: string | null;
+  last_changed: string | null;
+  last_checked: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LocationHASensorReading {
+  id: number;
+  name: string;
+  entity_id: string;
+  kind: 'binary' | 'numeric';
+  device_class: string | null;
+  unit: string | null;
+  state: string | null;
+  value: number | null;
+  alerting: boolean;
+  reachable: boolean;
+  alert_state: string | null;
+  alert_above: number | null;
+  alert_below: number | null;
+  last_changed: string | null;
+  show_on_card: boolean;
+}
+
+export interface LocationHASensorCreate {
+  location_id: number;
+  name: string;
+  entity_id: string;
+  kind: 'binary' | 'numeric';
+  device_class?: string | null;
+  unit?: string | null;
+  alert_state?: 'on' | 'off' | null;
+  alert_above?: number | null;
+  alert_below?: number | null;
+  notify_on_alert?: boolean;
+  show_on_card?: boolean;
+  sort_order?: number;
+}
+
+export type LocationHASensorUpdate = Partial<Omit<LocationHASensorCreate, 'location_id'>>;
 
 export interface ColorCatalogEntry {
   id: number;
@@ -2603,6 +2661,7 @@ export interface NotificationProvider {
   // Bed cooled
   on_bed_cooled: boolean;
   on_ha_sensor_alert: boolean;
+  on_location_ha_sensor_alert: boolean;
   // First layer complete
   on_first_layer_complete: boolean;
   // Inventory stock alerts
@@ -2663,6 +2722,7 @@ export interface NotificationProviderCreate {
   // Bed cooled
   on_bed_cooled?: boolean;
   on_ha_sensor_alert?: boolean;
+  on_location_ha_sensor_alert?: boolean;
   // First layer complete
   on_first_layer_complete?: boolean;
   // Inventory stock alerts
@@ -2716,6 +2776,7 @@ export interface NotificationProviderUpdate {
   // Bed cooled
   on_bed_cooled?: boolean;
   on_ha_sensor_alert?: boolean;
+  on_location_ha_sensor_alert?: boolean;
   // First layer complete
   on_first_layer_complete?: boolean;
   // Inventory stock alerts
@@ -5734,6 +5795,22 @@ export const api = {
     request<StorageLocation>(`/inventory/locations/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteLocation: (id: number) =>
     request<{ status: string }>(`/inventory/locations/${id}`, { method: 'DELETE' }),
+  getLocationHASensors: (locationId?: number) =>
+    request<LocationHASensor[]>(`/location-ha-sensors/${locationId ? `?location_id=${locationId}` : ''}`),
+  getLocationHASensorReadings: (locationId: number, showOnCard = true) =>
+    request<LocationHASensorReading[]>(
+      `/location-ha-sensors/by-location/${locationId}/readings?show_on_card=${showOnCard}`
+    ),
+  getBindableLocationHAEntities: (search?: string) => {
+    const params = search ? `?search=${encodeURIComponent(search)}` : '';
+    return request<HADisplayEntity[]>(`/location-ha-sensors/entities${params}`);
+  },
+  createLocationHASensor: (data: LocationHASensorCreate) =>
+    request<LocationHASensor>('/location-ha-sensors/', { method: 'POST', body: JSON.stringify(data) }),
+  updateLocationHASensor: (id: number, data: LocationHASensorUpdate) =>
+    request<LocationHASensor>(`/location-ha-sensors/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteLocationHASensor: (id: number) =>
+    request<{ message: string }>(`/location-ha-sensors/${id}`, { method: 'DELETE' }),
   getColorCatalog: () =>
     request<ColorCatalogEntry[]>('/inventory/colors'),
   getColorNameMap: () =>

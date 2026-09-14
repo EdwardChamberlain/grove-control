@@ -10,9 +10,10 @@ the result in memory. Three things consume it:
 * the print interlock, which holds queued jobs for a printer while one of its
   sensors is alerting.
 
-Everything degrades to "no opinion" when Home Assistant cannot be reached: an
-unreadable sensor never alerts, never notifies, and never holds a print. A
-door contact that stops responding must not strand the queue.
+Display and notification consumers treat an unreadable sensor as "no opinion".
+An explicitly enabled print interlock is different: it fails safe and holds
+the queue while the sensor is unknown or unavailable, so a lost door contact
+cannot allow a print to start without a verified safe state.
 """
 
 import asyncio
@@ -42,6 +43,11 @@ class SensorReading:
     value: float | None  # parsed number for numeric sensors
     alerting: bool
     reachable: bool
+
+
+def persistable_state(state: str | None, max_length: int) -> str | None:
+    """Fit a raw Home Assistant state into its database column."""
+    return state[:max_length] if state else state
 
 
 class HASensorManager:
@@ -85,9 +91,10 @@ class HASensorManager:
     async def blocked_printers(self, db: AsyncSession) -> dict[int, str]:
         """Printers currently held by an interlock, mapped to the sensor names.
 
-        A sensor counts only when it is configured to block, *and* was read
-        successfully, *and* is in its alert state. Anything we could not read
-        is omitted, so the queue keeps moving when Home Assistant is down.
+        A configured interlock is fail-safe: it blocks on an alerting reading,
+        and also while the sensor has never produced a reachable reading or
+        has become unavailable. The latter states are named explicitly so the
+        queue's waiting reason tells the operator why it is being held.
 
         One query for the whole fleet — the scheduler calls this on every pass,
         and per-printer lookups would put a query per printer in that loop.
@@ -96,8 +103,15 @@ class HASensorManager:
         blocked: dict[int, list[str]] = {}
         for sensor in result.scalars().all():
             reading = self._readings.get(sensor.id)
-            if reading and reading.reachable and reading.alerting:
-                blocked.setdefault(sensor.printer_id, []).append(sensor.name)
+            if reading is None:
+                reason = f"{sensor.name} (state unknown)"
+            elif not reading.reachable:
+                reason = f"{sensor.name} (state unavailable)"
+            elif reading.alerting:
+                reason = sensor.name
+            else:
+                continue
+            blocked.setdefault(sensor.printer_id, []).append(reason)
         return {printer_id: ", ".join(names) for printer_id, names in blocked.items()}
 
     # -- polling -----------------------------------------------------------

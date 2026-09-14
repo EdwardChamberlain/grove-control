@@ -6,9 +6,9 @@ than through any one of those consumers.
 
 The recurring theme is that "we could not read it" must never be mistaken for
 a reading. A door contact whose integration has dropped out reports
-"unavailable", not "closed", and treating that as closed would let a print
-start into an open enclosure; treating it as *open* would strand the queue.
-Neither: it is not a reading at all.
+"unavailable", not "closed". Display and notification consumers treat that
+as no opinion, while an explicitly enabled print interlock blocks until a
+safe reading is available.
 """
 
 from types import SimpleNamespace
@@ -170,19 +170,19 @@ class TestBlockedPrinters:
 
     @pytest.mark.asyncio
     async def test_silent_when_home_assistant_is_unreachable(self):
-        """The queue must keep running when HA is down, not seize up."""
+        """An enabled interlock holds the queue until HA reports a state."""
         sensor = _sensor(block_print=True)
         manager, db = self._manager_with([sensor], {1: SensorReading(None, None, False, False)})
 
-        assert await manager.blocked_printers(db) == {}
+        assert await manager.blocked_printers(db) == {4: "Enclosure Door (state unavailable)"}
 
     @pytest.mark.asyncio
     async def test_silent_before_the_first_poll(self):
-        """A cold cache is not evidence the door is open."""
+        """A cold cache is unknown and blocks an enabled interlock."""
         sensor = _sensor(block_print=True)
         manager, db = self._manager_with([sensor], {})
 
-        assert await manager.blocked_printers(db) == {}
+        assert await manager.blocked_printers(db) == {4: "Enclosure Door (state unknown)"}
 
     @pytest.mark.asyncio
     async def test_names_every_blocking_sensor_on_a_printer(self):

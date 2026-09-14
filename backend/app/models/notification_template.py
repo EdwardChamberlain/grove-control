@@ -122,6 +122,12 @@ DEFAULT_TEMPLATES = [
         "body_template": "{printer}: {sensor} is {state}",
     },
     {
+        "event_type": "location_ha_sensor_alert",
+        "name": "Storage Location Sensor Alert",
+        "title_template": "Sensor Alert",
+        "body_template": "{location}: {sensor} is {state}",
+    },
+    {
         "event_type": "first_layer_complete",
         "name": "First Layer Complete",
         "title_template": "First Layer Complete",

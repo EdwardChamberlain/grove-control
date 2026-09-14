@@ -178,3 +178,37 @@ async def test_sensor_entity_listing_uses_pinned_lan_transport():
         await service.list_sensor_entities("http://ha.local", "tok")
 
     async_client.assert_called_once_with(timeout=service.timeout, transport=transport, trust_env=False)
+
+
+@pytest.mark.asyncio
+async def test_display_entity_listing_uses_pinned_lan_transport():
+    """Printer sensor discovery must retain the LAN SSRF protections."""
+    service = HomeAssistantService()
+    client = _mock_get([])
+    transport = object()
+
+    with (
+        patch("httpx.AsyncClient", return_value=client) as async_client,
+        patch("backend.app.services.homeassistant.lan_service_transport", return_value=transport),
+    ):
+        await service.list_display_entities("http://ha.local", "tok")
+
+    async_client.assert_called_once_with(timeout=service.timeout, transport=transport, trust_env=False)
+
+
+@pytest.mark.asyncio
+async def test_fetch_states_uses_pinned_lan_transport():
+    """Interlock polling must not bypass the shared LAN SSRF protections."""
+    service = HomeAssistantService()
+    service.base_url = "http://ha.local"
+    service.token = "tok"
+    client = _mock_get([])
+    transport = object()
+
+    with (
+        patch("httpx.AsyncClient", return_value=client) as async_client,
+        patch("backend.app.services.homeassistant.lan_service_transport", return_value=transport),
+    ):
+        await service.fetch_states(["binary_sensor.door"])
+
+    async_client.assert_called_once_with(timeout=service.timeout, transport=transport, trust_env=False)

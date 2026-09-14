@@ -254,6 +254,7 @@ async def init_db():
         library,
         local_preset,
         location,
+        location_ha_sensor,
         long_lived_token,
         maintenance,
         notification,
@@ -3853,6 +3854,23 @@ async def run_migrations(conn):
     # fresh install. SQLite has understood FALSE since 3.23, so this spelling
     # is the one that actually applies on both.
     await _safe_execute(conn, "ALTER TABLE notification_providers ADD COLUMN on_ha_sensor_alert BOOLEAN DEFAULT FALSE")
+    await _safe_execute(
+        conn,
+        "ALTER TABLE notification_providers ADD COLUMN on_location_ha_sensor_alert BOOLEAN DEFAULT FALSE",
+    )
+    # The API rejects duplicates, but older builds had no database backstop.
+    # Keep the oldest row if one slipped in before the unique index was added.
+    await conn.execute(
+        text(
+            "DELETE FROM location_ha_sensors WHERE id NOT IN ("
+            "SELECT MIN(id) FROM location_ha_sensors GROUP BY location_id, entity_id)"
+        )
+    )
+    await _safe_execute(
+        conn,
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_location_ha_sensors_location_entity "
+        "ON location_ha_sensors (location_id, entity_id)",
+    )
 
 
 async def _migrate_backfill_variant_groups(conn) -> None:

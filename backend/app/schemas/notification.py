@@ -64,6 +64,9 @@ class NotificationProviderBase(BaseModel):
     on_ha_sensor_alert: bool = Field(
         default=False, description="Notify when a bound Home Assistant sensor enters its alert state"
     )
+    on_location_ha_sensor_alert: bool = Field(
+        default=False, description="Notify when a storage-location Home Assistant sensor enters its alert state"
+    )
 
     # Event triggers - Build plate detection
     on_plate_not_empty: bool = Field(default=True, description="Notify when objects detected on plate before print")
@@ -155,6 +158,7 @@ class NotificationProviderUpdate(BaseModel):
 
     # Event triggers - Home Assistant sensors (#1148)
     on_ha_sensor_alert: bool | None = None
+    on_location_ha_sensor_alert: bool | None = None
 
     # Event triggers - Build plate detection
     on_plate_not_empty: bool | None = None

@@ -9,7 +9,7 @@ import { getCurrencySymbol, SUPPORTED_CURRENCIES } from '../utils/currency';
 import { checkPasswordComplexity } from '../utils/password';
 import { PRESET_CATEGORIES, parsePresetTriple } from '../utils/temperatureFanPresets';
 import { CALIBRATION_MODES, CALIBRATION_MODE_ACTIVE, CALIBRATION_MODE_INACTIVE } from '../utils/calibrationMode';
-import type { APIKey, AppSettings, AppSettingsUpdate, PrinterHASensor, SmartPlug, SmartPlugStatus, NotificationProvider, NotificationTemplate, UpdateStatus, GitHubBackupStatus, CloudAuthStatus, UserCreate, UserUpdate, UserResponse, StorageUsageResponse, CalibrationMode } from '../api/client';
+import type { APIKey, AppSettings, AppSettingsUpdate, PrinterHASensor, LocationHASensor, StorageLocation, SmartPlug, SmartPlugStatus, NotificationProvider, NotificationTemplate, UpdateStatus, GitHubBackupStatus, CloudAuthStatus, UserCreate, UserUpdate, UserResponse, StorageUsageResponse, CalibrationMode } from '../api/client';
 import { Card, CardContent, CardDensityProvider, CardHeader } from '../components/Card';
 import { SlicerBundlesPanel } from '../components/SlicerBundlesPanel';
 import { SlicerPipelinesPanel } from '../components/SlicerPipelinesPanel';
@@ -19,6 +19,8 @@ import { Button } from '../components/Button';
 import { SmartPlugCard } from '../components/SmartPlugCard';
 import { AddSmartPlugModal } from '../components/AddSmartPlugModal';
 import { HASensorModal } from '../components/HASensorModal';
+import { LocationHASensorModal } from '../components/LocationHASensorModal';
+import { LocationSensorOptionsModal } from '../components/LocationSensorOptionsModal';
 import { NotificationProviderCard } from '../components/NotificationProviderCard';
 import { AddNotificationModal } from '../components/AddNotificationModal';
 import { NotificationTemplateEditor } from '../components/NotificationTemplateEditor';
@@ -321,6 +323,9 @@ export function SettingsPage() {
   const [editingPlug, setEditingPlug] = useState<SmartPlug | null>(null);
   const [showHASensorModal, setShowHASensorModal] = useState(false);
   const [editingHASensor, setEditingHASensor] = useState<PrinterHASensor | null>(null);
+  const [showLocationHASensorModal, setShowLocationHASensorModal] = useState(false);
+  const [editingLocationHASensor, setEditingLocationHASensor] = useState<LocationHASensor | null>(null);
+  const [showLocationSensorOptionsModal, setShowLocationSensorOptionsModal] = useState(false);
   const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [editingProvider, setEditingProvider] = useState<NotificationProvider | null>(null);
   const [editingTemplate, setEditingTemplate] = useState<NotificationTemplate | null>(null);
@@ -478,6 +483,18 @@ export function SettingsPage() {
   const { data: haSensors } = useQuery<PrinterHASensor[]>({
     queryKey: ['haSensors'],
     queryFn: () => api.getHASensors(),
+    enabled: activeTab === 'plugs',
+  });
+
+  const { data: locationHaSensors } = useQuery<LocationHASensor[]>({
+    queryKey: ['locationHaSensors'],
+    queryFn: () => api.getLocationHASensors(),
+    enabled: activeTab === 'plugs',
+  });
+
+  const { data: storageLocations } = useQuery<StorageLocation[]>({
+    queryKey: ['inventory-locations'],
+    queryFn: api.getLocations,
     enabled: activeTab === 'plugs',
   });
 
@@ -3425,6 +3442,93 @@ export function SettingsPage() {
               </Card>
             )}
           </div>
+
+          <div className="mt-8" id="card-location-sensors">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <Gauge className="w-5 h-5 text-bambu-green" />
+                  {t('locationHaSensors.sectionTitle')}
+                </h2>
+                <p className="text-sm text-bambu-gray mt-1">{t('locationHaSensors.sectionDescription')}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setShowLocationSensorOptionsModal(true)}
+                >
+                  <Cog className="w-4 h-4" />
+                  {t('locationHaSensors.options.buttonLabel')}
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={!storageLocations?.length}
+                  onClick={() => {
+                    setEditingLocationHASensor(null);
+                    setShowLocationHASensorModal(true);
+                  }}
+                >
+                  <Plus className="w-4 h-4" />
+                  {t('locationHaSensors.add')}
+                </Button>
+              </div>
+            </div>
+
+            {locationHaSensors && locationHaSensors.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {locationHaSensors.map((sensor) => {
+                  const location = storageLocations?.find((candidate) => candidate.id === sensor.location_id);
+                  return (
+                    <Card key={sensor.id}>
+                      <CardContent className="py-4">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="text-white font-medium truncate">{sensor.name}</div>
+                            <div className="text-xs text-bambu-gray truncate">{sensor.entity_id}</div>
+                            <div className="text-xs text-bambu-gray mt-1">
+                              {location?.name ?? t('locationHaSensors.unknownLocation')}
+                            </div>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => {
+                              setEditingLocationHASensor(sensor);
+                              setShowLocationHASensorModal(true);
+                            }}
+                          >
+                            {t('common.edit')}
+                          </Button>
+                        </div>
+                        <div className="flex flex-wrap gap-1 mt-3">
+                          {sensor.notify_on_alert && (
+                            <span className="px-2 py-0.5 text-xs rounded bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400">
+                              {t('haSensors.badgeNotifies')}
+                            </span>
+                          )}
+                          {!sensor.show_on_card && (
+                            <span className="px-2 py-0.5 text-xs rounded bg-bambu-dark-tertiary text-bambu-gray">
+                              {t('haSensors.badgeHidden')}
+                            </span>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            ) : (
+              <Card>
+                <CardContent className="py-8">
+                  <div className="text-center text-bambu-gray">
+                    <Gauge className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                    <p className="text-sm">{t('locationHaSensors.empty')}</p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
         </div>
       )}
 
@@ -5278,6 +5382,22 @@ export function SettingsPage() {
             setEditingHASensor(null);
           }}
         />
+      )}
+
+      {showLocationHASensorModal && (
+        <LocationHASensorModal
+          sensor={editingLocationHASensor}
+          locations={storageLocations ?? []}
+          onClose={() => {
+            setShowLocationHASensorModal(false);
+            setEditingLocationHASensor(null);
+            queryClient.invalidateQueries({ queryKey: ['locationHaSensors'] });
+          }}
+        />
+      )}
+
+      {showLocationSensorOptionsModal && (
+        <LocationSensorOptionsModal onClose={() => setShowLocationSensorOptionsModal(false)} />
       )}
 
       {/* Notification Modal */}

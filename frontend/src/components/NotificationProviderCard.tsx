@@ -144,6 +144,9 @@ export function NotificationProviderCard({ provider, onEdit }: NotificationProvi
             {provider.on_ha_sensor_alert && (
               <span className="px-2 py-0.5 bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 text-xs rounded">{t('notifications.haSensorAlert')}</span>
             )}
+            {provider.on_location_ha_sensor_alert && (
+              <span className="px-2 py-0.5 bg-teal-100 dark:bg-teal-500/20 text-teal-700 dark:text-teal-300 text-xs rounded">Storage sensor alert</span>
+            )}
             {provider.on_filament_low && (
               <span className="px-2 py-0.5 bg-cyan-500/20 text-cyan-400 text-xs rounded">{t('notifications.lowFilament')}</span>
             )}
@@ -391,6 +394,17 @@ export function NotificationProviderCard({ provider, onEdit }: NotificationProvi
                   <Toggle
                     checked={provider.on_ha_sensor_alert ?? false}
                     onChange={(checked) => updateMutation.mutate({ on_ha_sensor_alert: checked })}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-white">Storage-location sensor alerts</p>
+                    <p className="text-xs text-bambu-gray">Notify when a bound inventory location sensor enters its alert state.</p>
+                  </div>
+                  <Toggle
+                    checked={provider.on_location_ha_sensor_alert ?? false}
+                    onChange={(checked) => updateMutation.mutate({ on_location_ha_sensor_alert: checked })}
                   />
                 </div>
 

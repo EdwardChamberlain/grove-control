@@ -247,6 +247,7 @@ async def _build_settings_response(db: AsyncSession, is_api_key: bool = False) -
             "ftp_timeout",
             "mqtt_port",
             "forecast_global_lead_time_days",
+            "location_sensor_poll_interval",
             "session_max_hours",
             "slicer_stall_timeout_minutes",
             "queue_max_concurrent_uploads",

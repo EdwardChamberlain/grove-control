@@ -404,7 +404,11 @@ class HomeAssistantService:
         that the card has no way to render as a value.
         """
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(
+                timeout=self.timeout,
+                transport=lan_service_transport(),
+                trust_env=False,
+            ) as client:
                 response = await client.get(
                     f"{url.rstrip('/')}/api/states",
                     headers={"Authorization": f"Bearer {token}"},
@@ -466,7 +470,11 @@ class HomeAssistantService:
         if not self.base_url or not self.token:
             return dict.fromkeys(entity_ids)
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with httpx.AsyncClient(
+            timeout=self.timeout,
+            transport=lan_service_transport(),
+            trust_env=False,
+        ) as client:
 
             async def _one(entity_id: str) -> tuple[str, dict | None]:
                 try:

@@ -79,6 +79,7 @@ EVENT_VARIABLES: dict[str, list[str]] = {
     "ams_temperature_high": ["printer", "ams_label", "temperature", "threshold", "timestamp", "app_name"],
     "bed_cooled": ["printer", "bed_temp", "threshold", "filename", "timestamp", "app_name"],
     "ha_sensor_alert": ["printer", "sensor", "state", "timestamp", "app_name"],
+    "location_ha_sensor_alert": ["location", "sensor", "state", "timestamp", "app_name"],
     "test": ["app_name", "timestamp"],
     # Queue notifications
     "queue_job_added": ["job_name", "target", "timestamp", "app_name"],
@@ -211,6 +212,13 @@ SAMPLE_DATA: dict[str, dict[str, str]] = {
         "printer": "Bambu X1C",
         "sensor": "Enclosure Door",
         "state": "open",
+        "timestamp": "2024-01-15 14:30",
+        "app_name": "Bambuddy",
+    },
+    "location_ha_sensor_alert": {
+        "location": "Drybox 1",
+        "sensor": "Humidity",
+        "state": "68 %",
         "timestamp": "2024-01-15 14:30",
         "app_name": "Bambuddy",
     },
