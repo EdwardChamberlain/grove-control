@@ -1810,6 +1810,8 @@ function SinglePrinterCockpit({
 
   const knownHmsErrors = status?.hms_errors ? filterKnownHMSErrors(status.hms_errors) : [];
   const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
+  const hasQueuedWork = isPrintingOrPaused || !!status?.has_queued_work;
+  const printActionLabel = hasQueuedWork ? t('printers.queueJob', 'Queue Job') : t('common.print');
   const isPaused = status?.state === 'PAUSE';
   const progress = Math.max(0, Math.min(100, status?.progress ?? 0));
   const needsPlateClear = !!requirePlateClear && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
@@ -2354,10 +2356,14 @@ function SinglePrinterCockpit({
         type="button"
         onClick={() => setShowUploadForPrint(true)}
         disabled={!hasPermission('queue:create')}
-        className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-bambu-green px-3 text-sm font-medium text-white transition-colors hover:bg-bambu-green-light disabled:cursor-not-allowed disabled:opacity-50"
+        className={`flex h-10 w-full items-center justify-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+          hasQueuedWork
+            ? 'bg-yellow-500 text-black hover:bg-yellow-400'
+            : 'bg-bambu-green text-white hover:bg-bambu-green-light'
+        }`}
       >
         <PrinterIcon className="h-4 w-4" />
-        {t('common.print')}
+        {printActionLabel}
       </button>
       {stateActionPanel}
     </div>
@@ -3267,8 +3273,9 @@ function PrinterCard({
 
   // Fetch queue count for this printer
   const { data: queueItems } = useQuery({
-    queryKey: ['queue', printer.id, 'pending'],
-    queryFn: () => api.getQueue(printer.id, 'pending'),
+    queryKey: ['queue', printer.id, 'pending', printer.model],
+    queryFn: () => api.getQueue(printer.id, 'pending', printer.model || undefined),
+    refetchInterval: 30000,
   });
   // Filter queue items by filament compatibility (same logic as PrinterQueueWidget)
   // so the badge only shows on printers that can actually run the queued jobs.
@@ -3286,6 +3293,8 @@ function PrinterCard({
   });
   const lastPrint = lastPrints?.[0];
   const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
+  const hasQueuedWork = isPrintingOrPaused || !!status?.has_queued_work;
+  const printActionLabel = hasQueuedWork ? t('printers.queueJob', 'Queue Job') : t('common.print');
   const needsPlateClear = requirePlateClear && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
   const showClearPlateButton = status?.connected && needsPlateClear && !isPrintingOrPaused;
   // A live WebSocket status update carries the plate-clear flag, but the exact
@@ -5401,12 +5410,16 @@ function PrinterCard({
                       ? t('fileManager.noPermissionUpload')
                       : !hasPermission('queue:create')
                         ? t('fileManager.noPermissionAddToQueue')
-                        : t('common.print')
+                        : printActionLabel
                   }
-                  className={`${footerActionButtonClass} !bg-bambu-green hover:!bg-bambu-green/80 !text-white`}
+                  className={`${footerActionButtonClass} ${
+                    hasQueuedWork
+                      ? '!bg-yellow-500 hover:!bg-yellow-400 !text-black'
+                      : '!bg-bambu-green hover:!bg-bambu-green/80 !text-white'
+                  }`}
                 >
                   <PrinterIcon className="w-4 h-4" />
-                  {t('common.print')}
+                  {printActionLabel}
                 </Button>
               </div>
             </div>

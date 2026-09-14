@@ -451,6 +451,7 @@ export interface PrinterStatus {
   state: string | null;
   current_print: string | null;
   current_queue_owner?: string | null;
+  has_queued_work?: boolean;
   subtask_name: string | null;
   current_archive_id: number | null;
   current_plate_id: number | null;

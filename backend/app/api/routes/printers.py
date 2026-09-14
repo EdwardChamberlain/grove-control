@@ -21,7 +21,7 @@ from backend.app.core.permissions import Permission
 from backend.app.core.tasks import spawn_background_task
 from backend.app.models.ams_label import AmsLabel
 from backend.app.models.archive import PrintArchive
-from backend.app.models.print_queue import PrintQueueItem
+from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
 from backend.app.models.printer import Printer
 from backend.app.models.slot_preset import SlotPresetMapping
 from backend.app.models.user import User
@@ -473,11 +473,39 @@ async def get_printer_status(
         raise HTTPException(404, "Printer not found")
 
     state = printer_manager.get_status(printer_id)
+    queue_work_filter = [
+        PrintQueueItem.status.in_(["pending", "preheating", "dispatching", "printing"]),
+    ]
+    if printer.model:
+        queue_work_filter.append(
+            or_(
+                PrintQueueItem.printer_id == printer_id,
+                and_(
+                    PrintQueueItem.printer_id.is_(None),
+                    or_(
+                        func.lower(PrintQueueItem.target_model) == printer.model.lower(),
+                        select(PrintQueueVariant.id)
+                        .where(PrintQueueVariant.queue_item_id == PrintQueueItem.id)
+                        .where(func.lower(PrintQueueVariant.target_model) == printer.model.lower())
+                        .exists(),
+                    ),
+                    or_(
+                        PrintQueueItem.target_location.is_(None),
+                        PrintQueueItem.target_location == "",
+                        PrintQueueItem.target_location == printer.location,
+                    ),
+                ),
+            )
+        )
+    else:
+        queue_work_filter.append(PrintQueueItem.printer_id == printer_id)
+    has_queued_work = (await db.scalar(select(PrintQueueItem.id).where(*queue_work_filter).limit(1))) is not None
     if not state:
         return PrinterStatus(
             id=printer_id,
             name=printer.name,
             connected=False,
+            has_queued_work=has_queued_work,
         )
 
     # Determine cover URL if there's an active print (including paused)
@@ -773,6 +801,7 @@ async def get_printer_status(
             .limit(1)
         )
     )
+    has_queued_work = has_queued_work or state.state in ("RUNNING", "PAUSE")
 
     # Resolve the exact terminal print holding the plate-clear gate. Do not use
     # the regular archives listing here: that endpoint is intentionally scoped
@@ -810,6 +839,7 @@ async def get_printer_status(
         state=state.state,
         current_print=state.current_print,
         current_queue_owner=current_queue_owner,
+        has_queued_work=has_queued_work,
         subtask_name=state.subtask_name,
         gcode_file=state.gcode_file,
         progress=state.progress,

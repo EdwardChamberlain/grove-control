@@ -316,6 +316,10 @@ class PrinterStatus(BaseModel):
     # caller's queue ownership scope so shared printer/kiosk views can identify
     # another user's active job without exposing the rest of their queue.
     current_queue_owner: str | None = None
+    # Whether this printer has any active or pending queue work. This aggregate
+    # is intentionally independent of queue-row ownership so shared printer
+    # views can describe the physical queue without exposing its contents.
+    has_queued_work: bool = False
     subtask_name: str | None = None
     gcode_file: str | None = None
     progress: float | None = None

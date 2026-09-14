@@ -48,6 +48,7 @@ const mockPrinters = [
 const mockPrinterStatus = {
   connected: true,
   state: 'IDLE',
+  has_queued_work: false,
   awaiting_plate_clear: false,
   progress: 0,
   layer_num: 0,
@@ -155,6 +156,74 @@ describe('PrintersPage', () => {
         // Status should be shown - may vary based on state
         expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('print action state', () => {
+    it('shows a green Print action when printers are idle with an empty queue', async () => {
+      render(<PrintersPage />);
+
+      const printButtons = await screen.findAllByRole('button', { name: 'Print' });
+
+      expect(printButtons).toHaveLength(mockPrinters.length);
+      printButtons.forEach(button => {
+        expect(button).toHaveClass('!bg-bambu-green', '!text-white');
+      });
+      expect(screen.queryByRole('button', { name: 'Queue Job' })).not.toBeInTheDocument();
+    });
+
+    it('shows a yellow Queue Job action when a printer has pending work', async () => {
+      server.use(
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+          ...mockPrinterStatus,
+          has_queued_work: true,
+        })),
+      );
+
+      render(<PrintersPage />);
+
+      const queueButtons = await screen.findAllByRole('button', { name: 'Queue Job' });
+
+      expect(queueButtons).toHaveLength(mockPrinters.length);
+      queueButtons.forEach(button => {
+        expect(button).toHaveClass('!bg-yellow-500', '!text-black');
+      });
+      expect(screen.queryByRole('button', { name: 'Print' })).not.toBeInTheDocument();
+    });
+
+    it('shows a yellow Queue Job action during an active heat soak', async () => {
+      server.use(
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+          ...mockPrinterStatus,
+          preheating: true,
+          has_queued_work: true,
+        })),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+
+      const queueButton = await screen.findByRole('button', { name: 'Queue Job' });
+
+      expect(queueButton).toHaveClass('bg-yellow-500', 'text-black');
+      expect(screen.queryByRole('button', { name: 'Print' })).not.toBeInTheDocument();
+    });
+
+    it('shows a yellow Queue Job action in the cockpit while printing', async () => {
+      server.use(
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+          ...mockPrinterStatus,
+          state: 'RUNNING',
+        })),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+
+      const queueButton = await screen.findByRole('button', { name: 'Queue Job' });
+
+      expect(queueButton).toHaveClass('bg-yellow-500', 'text-black');
+      expect(screen.queryByRole('button', { name: 'Print' })).not.toBeInTheDocument();
     });
   });
 
@@ -728,7 +797,7 @@ describe('PrintersPage', () => {
       render(<PrintersPage />);
       fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
 
-      expect(await screen.findByRole('button', { name: 'Print' })).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: 'Queue Job' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Pause' })).toBeInTheDocument();
       fireEvent.click(await screen.findByRole('button', { name: 'Stop' }));
       expect(stopRequests).toBe(0);
@@ -738,7 +807,7 @@ describe('PrintersPage', () => {
       await waitFor(() => expect(stopRequests).toBe(1));
     });
 
-    it('keeps Print available on expanded cards while a printer is running', async () => {
+    it('keeps Queue Job available on expanded cards while a printer is running', async () => {
       server.use(
         http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
           ...mockPrinterStatus,
@@ -751,7 +820,7 @@ describe('PrintersPage', () => {
       fireEvent.click(await screen.findByRole('button', { name: 'Detail cards' }));
 
       await waitFor(() => {
-        expect(screen.getAllByRole('button', { name: 'Print' }).length).toBeGreaterThan(0);
+        expect(screen.getAllByRole('button', { name: 'Queue Job' }).length).toBeGreaterThan(0);
       });
     });
 
