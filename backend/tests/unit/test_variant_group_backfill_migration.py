@@ -1,8 +1,8 @@
 """Tests for the variant-group backfill migration (#671 / #2570).
 
 `sliced_from_library_file_id` has been written into `library_files.file_metadata`
-by the Slice button and the pipeline runner since those features shipped, and
-nothing ever read it back. The migration promotes that inert provenance into
+by the Slice button since that feature shipped, and nothing ever read it back.
+The migration promotes that inert provenance into
 real `file_variant_groups` membership so an existing library arrives with its
 slice sets already grouped.
 

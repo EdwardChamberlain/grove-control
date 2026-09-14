@@ -27,15 +27,13 @@ from backend.app.core.database import _is_already_applied, _safe_execute, _sqlst
 
 # Verbatim from a PostgreSQL 15 server running lc_messages=ru_RU.utf8 — the exact
 # text the reporter pasted into the issue. Nothing in the classifier may read it.
-RU_DUPLICATE_COLUMN = 'столбец "parent_run_id" отношения "pipeline_runs" уже существует'
+RU_DUPLICATE_COLUMN = 'столбец "is_favorite" отношения "print_archives" уже существует'
 RU_DUPLICATE_TABLE = 'отношение "t_dup" уже существует'
 RU_DUPLICATE_OBJECT = 'ограничение-проверка "ck_a" для отношения "t_ck" уже существует'
 RU_UNDEFINED_COLUMN = 'столбец "nope" не существует'
 RU_UNDEFINED_TABLE = 'отношение "no_such_table" не существует'
 
-ADD_COLUMN = (
-    "ALTER TABLE pipeline_runs ADD COLUMN parent_run_id INTEGER REFERENCES pipeline_runs(id) ON DELETE SET NULL"
-)
+ADD_COLUMN = "ALTER TABLE print_archives ADD COLUMN is_favorite BOOLEAN DEFAULT 0"
 RENAME_COLUMN = "ALTER TABLE t_rn RENAME COLUMN nope TO other"
 CREATE_INDEX = "CREATE INDEX ix_t ON t (nope)"
 

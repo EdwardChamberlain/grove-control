@@ -18,10 +18,6 @@ interface WebSocketMessage {
   data?: Record<string, unknown>;
   printer_name?: string;
   missing_slots?: Array<{ slot?: string }>;
-  // Slicer Pipeline run events (#1425 PR C). ``run`` carries the full
-  // PipelineRunResponse payload — typed loosely here so the WebSocket hook
-  // doesn't pull the full client.ts types in.
-  run?: { pipeline_id?: number | null };
 }
 
 export function useWebSocket() {
@@ -423,15 +419,6 @@ export function useWebSocket() {
       case 'spoolbuddy_update':
         debouncedInvalidate('spoolbuddy-devices');
         debouncedInvalidate('spoolbuddy-update-check');
-        break;
-      // Slicer Pipeline runs (#1425 PR C). State transitions on the run
-      // refresh both the dashboard list AND the per-pipeline "Last run"
-      // chip in Settings → Pipelines.
-      case 'pipeline_run_updated':
-        queryClient.invalidateQueries({ queryKey: ['pipeline-runs-all'] });
-        if (message.run?.pipeline_id) {
-          queryClient.invalidateQueries({ queryKey: ['pipeline-runs', message.run.pipeline_id] });
-        }
         break;
     }
   }, [queryClient, debouncedInvalidate, throttledPrinterStatusUpdate, showToast, t]);

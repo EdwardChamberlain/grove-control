@@ -51,7 +51,6 @@ from backend.app.api.routes import (
     obico,
     orca_cloud,
     pending_uploads,
-    pipeline_runs,
     print_log,
     print_queue,
     printer_sensor_history,
@@ -60,7 +59,6 @@ from backend.app.api.routes import (
     scheduled_dryings,
     settings as settings_routes,
     slice_jobs,
-    slicer_pipelines,
     slicer_presets,
     smart_plugs,
     spoolbuddy,
@@ -6788,13 +6786,6 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logging.warning("Failed to auto-connect to Spoolman: %s", e)
 
-    # Requeue durable pipeline runs whose in-memory slice task was lost during
-    # a process restart before starting the queue scheduler.
-    try:
-        await pipeline_runs.recover_pipeline_runs()
-    except Exception:
-        logging.getLogger(__name__).exception("Failed to recover interrupted pipeline runs")
-
     # Start the print scheduler
     spawn_background_task(print_scheduler.run(), name="print-scheduler")
 
@@ -7388,9 +7379,6 @@ app.include_router(library_tags.router, prefix=app_settings.api_prefix)
 app.include_router(library_trash.router, prefix=app_settings.api_prefix)
 app.include_router(library_variants.router, prefix=app_settings.api_prefix)
 app.include_router(slice_jobs.router, prefix=app_settings.api_prefix)
-app.include_router(slicer_pipelines.router, prefix=app_settings.api_prefix)
-app.include_router(pipeline_runs.pipeline_run_create_router, prefix=app_settings.api_prefix)
-app.include_router(pipeline_runs.pipeline_run_router, prefix=app_settings.api_prefix)
 app.include_router(slicer_presets.router, prefix=app_settings.api_prefix)
 app.include_router(archive_purge.router, prefix=app_settings.api_prefix)
 app.include_router(makerworld.router, prefix=app_settings.api_prefix)

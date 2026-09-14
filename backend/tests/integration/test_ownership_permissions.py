@@ -1720,8 +1720,7 @@ class TestSliceOwnershipPermissions(TestOwnershipPermissionsSetup):
     READ_OWN operator could slice another user's model by raw id even though a
     direct GET on that id returned 404 — the sliced output was then attributed
     to and downloadable by the requester. ``GET /slice-jobs/{id}`` had no owner
-    scoping at all. ``POST /slicer-pipelines/{id}/run`` (and check-eligibility)
-    resolved the source by raw id with the same gap.
+    scoping at all.
 
     The slice route enforces the gate before touching the source bytes, so the
     owner/READ_ALL "control" cases reach the later on-disk check (a distinct 404
