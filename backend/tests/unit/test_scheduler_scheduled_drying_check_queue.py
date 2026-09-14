@@ -76,7 +76,18 @@ async def _add_print_item(ctx):
         )
         db.add(lib)
         await db.flush()
-        db.add(PrintQueueItem(status="pending", position=1, printer_id=1, library_file_id=lib.id))
+        db.add(
+            PrintQueueItem(
+                status="pending",
+                position=1,
+                printer_id=1,
+                library_file_id=lib.id,
+                # Keep this feature's queue-pass assertions focused on
+                # scheduled drying rather than the separate safe-default
+                # filament metadata gate.
+                force_color_match=False,
+            )
+        )
         await db.commit()
 
 

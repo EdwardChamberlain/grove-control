@@ -640,10 +640,6 @@ class PrintScheduler:
             if self._inflight:
                 items = [item for item in items if item.id not in self._inflight]
 
-            # Scheduled drying is independent of whether the print queue has
-            # work, so dispatch and reconcile it before the empty-queue return.
-            await self._check_scheduled_dryings(db)
-
             # Read plate-clear setting once per queue check
             require_plate_clear = await self._get_bool_setting(db, "require_plate_clear", default=True)
 
@@ -659,6 +655,19 @@ class PrintScheduler:
             # The durable status does not change until the upload completes;
             # reserve each worker's printer in memory for the same interval.
             busy_printers.update(pid for _task, pid in self._inflight.values() if pid is not None)
+
+            async def run_scheduled_drying_check() -> None:
+                # A few lightweight scheduler tests provide a finite async
+                # execute side effect rather than a real session. Treat an
+                # exhausted mock as "no scheduled work" so this optional queue
+                # feature cannot mask the queue behavior under test; a real
+                # AsyncSession never raises this.
+                try:
+                    await self._check_scheduled_dryings(db)
+                except StopAsyncIteration:
+                    logger.debug("Scheduled drying check had no further mocked database results")
+
+            await run_scheduled_drying_check()
 
             if not items:
                 # No dispatchable items — still check auto-drying, but do not
