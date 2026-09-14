@@ -4158,6 +4158,7 @@ export default {
     addShort: 'Hinzufügen',
     edit: 'Lagerort bearbeiten',
     name: 'Name',
+    sensors: 'Sensoren',
     spools: 'Spulen',
     empty: 'Noch keine Lagerorte. Erstellen Sie Ihr erstes Regal oder Ihre erste Schublade.',
     manage: 'Lagerorte',
@@ -4171,6 +4172,7 @@ export default {
     deleteBlocked: 'Entfernen Sie zuerst alle Spulen von diesem Lagerort',
     confirmDelete: '„{{name}}“ löschen?',
     confirmDeleteMessage: 'Dieser Lagerort wird aus dem Katalog entfernt. Spulen müssen zuerst verschoben werden.',
+    confirmDeleteMessageWithSensors: 'Entfernen Sie zuerst alle Home-Assistant-Sensoren von diesem Lagerort.',
   },
 
   // Inventar
