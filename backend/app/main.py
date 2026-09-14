@@ -670,14 +670,108 @@ def _build_status_print_keys(printer_id: int, state: PrinterState) -> list[tuple
     return possible_keys
 
 
-def _is_bambuddy_authorized_print(printer_id: int, state: PrinterState) -> bool:
-    """Return True when the current status belongs to a print started by Bambuddy."""
+def _is_bambuddy_authorized_print_in_memory(printer_id: int, state: PrinterState) -> bool:
+    """Return True when process-local state identifies a Bambuddy print."""
 
     if printer_manager.get_current_print_user(printer_id):
         return True
 
     possible_keys = _build_status_print_keys(printer_id, state)
     return any(key in _expected_prints or key in _active_prints for key in possible_keys)
+
+
+async def _is_bambuddy_authorized_print(printer_id: int, state: PrinterState, db) -> bool:
+    """Return whether an active print has a durable Grove queue identity.
+
+    The in-memory registries are useful for same-process status updates, but
+    they are deliberately empty after a backend restart. When the kill switch
+    is enabled, consult the persisted queue row as well so an authorised print
+    is not stopped merely because Grove Control restarted mid-run.
+    """
+    if _is_bambuddy_authorized_print_in_memory(printer_id, state):
+        return True
+
+    from backend.app.models.print_queue import PrintQueueItem
+
+    result = await db.execute(
+        select(PrintQueueItem).where(
+            PrintQueueItem.printer_id == printer_id,
+            PrintQueueItem.status.in_(("dispatching", "printing")),
+        )
+    )
+    queue_items = list(result.scalars().all())
+    if not queue_items:
+        return False
+
+    raw_subtask_id = getattr(state, "subtask_id", None)
+    subtask_id = str(raw_subtask_id).strip() if raw_subtask_id is not None else None
+    if subtask_id in (None, "", "0"):
+        # Local/non-cloud firmware may omit the submission id. The active
+        # printer invariant still makes one durable queue row authoritative.
+        return len(queue_items) == 1
+
+    if any(item.dispatch_subtask_id for item in queue_items):
+        return any(str(item.dispatch_subtask_id or "").strip() == subtask_id for item in queue_items)
+
+    # Queue rows created before dispatch identity was introduced have no
+    # persisted submission id. Preserve their authorisation across a restart
+    # while the single active-printer invariant leaves only one candidate.
+    return len(queue_items) == 1
+
+
+def _select_queue_completion_item(
+    active_items: list,
+    *,
+    possible_keys: list[tuple[int, str]],
+    archive_id: int | None,
+    event_subtask_id: str | None,
+    recovered_dispatch: bool,
+    event_status: str | None,
+):
+    """Select only the queue row proven to own a terminal printer event.
+
+    A printer may have a cancelled old row and a newer printing row at the
+    same time while the old terminal MQTT event is delayed. Submission IDs
+    must therefore win over the historical "first printing row" heuristic.
+    """
+    if event_subtask_id:
+        matches = [
+            item
+            for item in active_items
+            if (
+                item.status in ("dispatching", "printing")
+                and item.dispatch_subtask_id == event_subtask_id
+                and (archive_id is None or item.archive_id in (None, archive_id))
+            )
+            or _matches_cancelled_queue_completion(
+                item,
+                archive_id=archive_id,
+                event_subtask_id=event_subtask_id,
+            )
+            or (
+                recovered_dispatch
+                and item.status in ("completed", "failed")
+                and item.status == event_status
+                and item.dispatch_subtask_id == event_subtask_id
+            )
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    printing_items = [item for item in active_items if item.status == "printing"]
+    if len(printing_items) == 1:
+        item = printing_items[0]
+        if archive_id is not None and item.archive_id not in (None, archive_id):
+            return None
+        return item
+    if printing_items:
+        return None
+
+    # Legacy rows without a persisted submission id can only use the
+    # process-local filename registration, and only when it is unambiguous.
+    matches = [
+        item for item in active_items if _matches_dispatching_queue_completion(item, possible_keys, event_subtask_id)
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 async def _get_plug_energy(plug, db) -> dict | None:
@@ -1353,16 +1447,24 @@ async def on_printer_status_change(printer_id: int, state: PrinterState):
         _unauthorized_print_kill_sent.discard(printer_id)
     else:
         kill_switch_enabled = False
+        authorization_check_succeeded = False
         status_logger = logging.getLogger(__name__)
         try:
             async with async_session() as db:
                 from backend.app.services.finance_budget import is_printer_kill_switch_enabled
 
                 kill_switch_enabled = await is_printer_kill_switch_enabled(db)
+                authorized_print = (
+                    await _is_bambuddy_authorized_print(printer_id, state, db) if kill_switch_enabled else True
+                )
+                authorization_check_succeeded = True
         except Exception as e:
             status_logger.warning("[KILL SWITCH] Failed to read kill-switch setting for printer %s: %s", printer_id, e)
 
-        if not kill_switch_enabled or _is_bambuddy_authorized_print(printer_id, state):
+        # Fail open when the database is unavailable; a transient status-poll
+        # failure must not turn into an unsolicited printer stop. Once the
+        # setting and durable queue lookup both succeed, enforce the switch.
+        if not authorization_check_succeeded or not kill_switch_enabled or authorized_print:
             _unauthorized_print_kill_sent.discard(printer_id)
         elif printer_id in _unauthorized_print_kill_sent:
             pass
@@ -4777,40 +4879,30 @@ async def on_print_complete(printer_id: int, data: dict):
                     printer_id,
                     [(i.id, i.archive_id, i.library_file_id) for i in printing_items],
                 )
-            item = printing_items[0] if printing_items else None
-            if item is None:
-                # A printer can publish a terminal update before the next
-                # three-second acknowledgement poll. Accept it only when it
-                # matches the exact archive registered by this dispatch; a
-                # delayed completion for a different job must not terminalise
-                # a newly dispatching queue item.
-                matching_dispatches = [
-                    candidate
-                    for candidate in active_items
-                    if _matches_dispatching_queue_completion(candidate, possible_keys, event_subtask_id)
-                    or _matches_cancelled_queue_completion(
-                        candidate,
-                        archive_id=archive_id,
-                        event_subtask_id=event_subtask_id,
-                    )
-                    or (
-                        recovered_dispatch
-                        and candidate.status == data.get("status")
-                        and candidate.dispatch_subtask_id == event_subtask_id
-                    )
-                ]
-                if len(matching_dispatches) == 1:
-                    item = matching_dispatches[0]
-                    logger.info(
-                        "Matched terminal printer event to dispatching queue item %s before start acknowledgement",
-                        item.id,
-                    )
-                elif len(matching_dispatches) > 1:
-                    logger.error(
-                        "Refusing ambiguous terminal event for printer %s; matching dispatches: %s",
-                        printer_id,
-                        [candidate.id for candidate in matching_dispatches],
-                    )
+            # A printer can publish a terminal update before the next
+            # three-second acknowledgement poll. Accept it only when it
+            # matches the exact persisted run identity. In particular, a late
+            # event for a cancelled old run must not terminalise a newer
+            # printing row on the same printer.
+            item = _select_queue_completion_item(
+                active_items,
+                possible_keys=possible_keys,
+                archive_id=archive_id,
+                event_subtask_id=event_subtask_id,
+                recovered_dispatch=recovered_dispatch,
+                event_status=data.get("status"),
+            )
+            if item is not None and item.status == "dispatching":
+                logger.info(
+                    "Matched terminal printer event to dispatching queue item %s before start acknowledgement",
+                    item.id,
+                )
+            elif item is None and (len(printing_items) > 1 or event_subtask_id):
+                logger.error(
+                    "Refusing ambiguous or unmatched terminal event for printer %s (submission_id=%s)",
+                    printer_id,
+                    event_subtask_id,
+                )
             if item:
                 queue_status = data.get("status", "completed")
                 # MQTT sends "aborted" for cancelled prints; normalise to

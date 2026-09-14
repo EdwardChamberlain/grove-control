@@ -7,12 +7,17 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 from backend.app.api.routes.finance import delete_cost_center
-from backend.app.main import _matches_cancelled_queue_completion
+from backend.app.main import (
+    _is_bambuddy_authorized_print,
+    _matches_cancelled_queue_completion,
+    _select_queue_completion_item,
+)
 from backend.app.models.archive import PrintArchive
 from backend.app.models.finance import BudgetReservation, CostCenter, UserWallet, WalletTransaction
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.settings import Settings
 from backend.app.models.user import User
+from backend.app.schemas.finance import ManualPrintRequest
 from backend.app.services.finance_billing import apply_print_charge_for_archive
 
 
@@ -154,3 +159,110 @@ def test_cancelled_queue_completion_requires_persisted_run_identity():
     assert not _matches_cancelled_queue_completion(item, archive_id=43, event_subtask_id="dispatch-1")
     assert not _matches_cancelled_queue_completion(item, archive_id=42, event_subtask_id="dispatch-2")
     assert not _matches_cancelled_queue_completion(item, archive_id=42, event_subtask_id=None)
+
+
+def test_terminal_event_selects_the_matching_run_when_an_old_run_is_cancelled():
+    cancelled_run = SimpleNamespace(
+        id=1,
+        status="cancelled",
+        dispatch_subtask_id="old-run",
+        archive_id=42,
+        library_file_id=None,
+    )
+    current_run = SimpleNamespace(
+        id=2,
+        status="printing",
+        dispatch_subtask_id="current-run",
+        archive_id=84,
+        library_file_id=None,
+    )
+
+    selected = _select_queue_completion_item(
+        [cancelled_run, current_run],
+        possible_keys=[],
+        archive_id=42,
+        event_subtask_id="old-run",
+        recovered_dispatch=False,
+        event_status="completed",
+    )
+
+    assert selected is cancelled_run
+
+    selected = _select_queue_completion_item(
+        [cancelled_run, current_run],
+        possible_keys=[],
+        archive_id=84,
+        event_subtask_id="current-run",
+        recovered_dispatch=False,
+        event_status="completed",
+    )
+
+    assert selected is current_run
+
+
+def test_terminal_event_refuses_ambiguous_printing_rows_without_run_identity():
+    items = [
+        SimpleNamespace(
+            id=1,
+            status="printing",
+            dispatch_subtask_id="first",
+            archive_id=42,
+            library_file_id=None,
+        ),
+        SimpleNamespace(
+            id=2,
+            status="printing",
+            dispatch_subtask_id="second",
+            archive_id=84,
+            library_file_id=None,
+        ),
+    ]
+
+    selected = _select_queue_completion_item(
+        items,
+        possible_keys=[],
+        archive_id=None,
+        event_subtask_id=None,
+        recovered_dispatch=False,
+        event_status="completed",
+    )
+
+    assert selected is None
+
+
+def test_manual_print_request_uses_positive_api_amount():
+    request = ManualPrintRequest(user_id=1, cost_center_id=2, amount=3.50)
+
+    assert request.amount == 3.50
+    with pytest.raises(ValueError):
+        ManualPrintRequest(user_id=1, cost_center_id=2, amount=-3.50)
+
+
+@pytest.mark.asyncio
+async def test_kill_switch_authorization_uses_persisted_queue_run_identity(db_session, printer_factory, monkeypatch):
+    printer = await printer_factory()
+    db_session.add(
+        PrintQueueItem(
+            printer_id=printer.id,
+            status="printing",
+            dispatch_subtask_id="durable-run",
+        )
+    )
+    await db_session.commit()
+
+    from backend.app import main as main_module
+
+    monkeypatch.setattr(main_module, "_expected_prints", {})
+    monkeypatch.setattr(main_module, "_active_prints", {})
+    monkeypatch.setattr(main_module.printer_manager, "get_current_print_user", lambda _printer_id: None)
+
+    state = SimpleNamespace(
+        subtask_id="durable-run",
+        gcode_file="",
+        current_print="",
+        subtask_name="",
+    )
+    assert await _is_bambuddy_authorized_print(printer.id, state, db_session)
+
+    state.subtask_id = "different-run"
+    assert not await _is_bambuddy_authorized_print(printer.id, state, db_session)
