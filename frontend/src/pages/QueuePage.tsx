@@ -2208,6 +2208,7 @@ export function QueuePage() {
           </Button>
         )}
       </div>
+      )}
 
       {/* Queue-tab controls: layout toggle (Position / Printer) + SJF.
           Hidden on History/Timeline tabs since they don't apply. */}
