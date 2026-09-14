@@ -220,6 +220,54 @@ class TestReadPermissionMigration:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_administrators_printer_sensor_history_read_backfilled(self, async_client: AsyncClient):
+        """Admin without `printer_sensor_history:read` gets it backfilled."""
+        await seed_default_groups()
+        async with _database_module.async_session() as session:
+            grp = (await session.execute(select(Group).where(Group.name == "Administrators"))).scalar_one()
+            grp.permissions = [p for p in (grp.permissions or []) if p != "printer_sensor_history:read"]
+            await session.commit()
+
+        await seed_default_groups()
+
+        perms = await _get_perms("Administrators")
+        assert "printer_sensor_history:read" in perms
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_administrators_sync_covers_every_current_permission(self, async_client: AsyncClient):
+        """Every current permission is restored after an admin upgrade."""
+        from backend.app.core.permissions import ALL_PERMISSIONS
+
+        await seed_default_groups()
+        async with _database_module.async_session() as session:
+            grp = (await session.execute(select(Group).where(Group.name == "Administrators"))).scalar_one()
+            grp.permissions = []
+            await session.commit()
+
+        await seed_default_groups()
+
+        perms = await _get_perms("Administrators")
+        missing = [p for p in ALL_PERMISSIONS if p not in perms]
+        assert not missing, f"Administrators missing permissions after backfill: {missing}"
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_administrators_sync_is_additive_only(self, async_client: AsyncClient):
+        """The sync preserves custom permissions while adding current ones."""
+        await seed_default_groups()
+        async with _database_module.async_session() as session:
+            grp = (await session.execute(select(Group).where(Group.name == "Administrators"))).scalar_one()
+            grp.permissions = [*(grp.permissions or []), "custom:plugin_permission"]
+            await session.commit()
+
+        await seed_default_groups()
+
+        perms = await _get_perms("Administrators")
+        assert "custom:plugin_permission" in perms
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_viewers_do_not_get_orca_cloud_auth(self, async_client: AsyncClient):
         """Viewers stay read-only — orca_cloud:auth is not added by the
         backfill (matches the fresh-install Viewers bootstrap, which

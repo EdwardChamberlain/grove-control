@@ -507,6 +507,81 @@ async def _safe_execute(conn, sql):
             raise
 
 
+async def _migrate_retired_pipeline_runs(conn) -> None:
+    """Safely finish pipeline runs that never created ordinary queue items.
+
+    Slicer pipelines are no longer part of the application, but their tables
+    remain as unsupported legacy data. A run can be durable in ``queued`` or
+    ``slicing`` with no produced library file and no ``print_queue`` row yet;
+    leaving that row live would make it look recoverable even though the
+    pipeline orchestrator has been removed. Preserve the run and its source
+    history, but make the outcome explicit and terminal so it cannot be
+    silently retried or produce a duplicate print.
+
+    The table and columns are checked first because fresh installs do not have
+    the retired tables at all, and unsupported legacy exports may contain a
+    table with a different shape.
+    """
+    from sqlalchemy import text
+
+    if is_sqlite():
+        table_result = await conn.execute(
+            text("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = :table_name"),
+            {"table_name": "pipeline_runs"},
+        )
+        table_exists = table_result.scalar() is not None
+        if not table_exists:
+            return
+        column_result = await conn.execute(text("PRAGMA table_info(pipeline_runs)"))
+        columns = {row[1] for row in column_result.fetchall()}
+    else:
+        table_result = await conn.execute(text("SELECT to_regclass(:table_name)"), {"table_name": "pipeline_runs"})
+        table_exists = table_result.scalar() is not None
+        if not table_exists:
+            return
+        column_result = await conn.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = current_schema() AND table_name = :table_name"
+            ),
+            {"table_name": "pipeline_runs"},
+        )
+        columns = {row[0] for row in column_result.fetchall()}
+
+    required_columns = {
+        "status",
+        "sliced_library_file_id",
+        "slice_job_id",
+        "started_at",
+        "completed_at",
+        "error_message",
+    }
+    if not required_columns.issubset(columns):
+        logger.warning("Skipping retired pipeline-run migration: legacy pipeline_runs table has an unknown shape")
+        return
+
+    result = await conn.execute(
+        text(
+            "UPDATE pipeline_runs "
+            "SET status = 'failed', "
+            "    slice_job_id = NULL, "
+            "    started_at = NULL, "
+            "    completed_at = CURRENT_TIMESTAMP, "
+            "    error_message = :retirement_message "
+            "WHERE status IN ('queued', 'slicing') "
+            "  AND sliced_library_file_id IS NULL"
+        ),
+        {
+            "retirement_message": (
+                "Slicer pipelines were retired before this run created a print queue item. "
+                "The source remains available for manual slicing or queueing."
+            )
+        },
+    )
+    if isinstance(result.rowcount, int) and result.rowcount:
+        logger.warning("Marked %d interrupted slicer pipeline run(s) as safely retired", result.rowcount)
+
+
 # Every non-primary-key column on PrintQueueItem. These are deliberately
 # verified separately from the long historical migration sequence: an
 # interrupted upgrade or a database restored from an older image must be
@@ -956,6 +1031,10 @@ async def run_migrations(conn):
     swallowed.
     """
     from sqlalchemy import text
+
+    # Retired pipeline rows are preserved as legacy history, but runs that had
+    # not produced a normal queue item must not remain falsely recoverable.
+    await _migrate_retired_pipeline_runs(conn)
 
     # Migration: Add is_favorite column to print_archives
     await _safe_execute(conn, "ALTER TABLE print_archives ADD COLUMN is_favorite BOOLEAN DEFAULT 0")
@@ -4107,7 +4186,7 @@ async def seed_default_groups():
     from sqlalchemy import select
 
     from backend.app.core.db_dialect import upsert_setting
-    from backend.app.core.permissions import DEFAULT_GROUPS
+    from backend.app.core.permissions import ALL_PERMISSIONS, DEFAULT_GROUPS
     from backend.app.models.group import Group
     from backend.app.models.settings import Settings
     from backend.app.models.user import User
@@ -4261,63 +4340,27 @@ async def seed_default_groups():
                 group.permissions = perms
         await session.commit()
 
-        # Backfill library:purge + archives:purge for the Administrators group
-        # on existing installs. Both permissions were added after Administrators
-        # was first seeded, so upgrading users miss them even though the default
-        # config (ALL_PERMISSIONS) includes them for fresh installs.
+        # Backfill: sync the Administrators system group to ALL_PERMISSIONS.
+        # Administrators' contract is full access to every feature — fresh
+        # installs get that via DEFAULT_GROUPS["Administrators"]["permissions"]
+        # = ALL_PERMISSIONS. Upgrading installs would otherwise stay frozen at
+        # whatever permission set existed when they were first seeded, so a
+        # newly-added Permission enum member silently leaves admins gated out
+        # of the feature it controls.
+        #
+        # This is additive only: custom permissions are retained, while every
+        # current product permission (excluding retired pipeline permissions,
+        # which are no longer in ALL_PERMISSIONS) is restored for admins.
         result = await session.execute(select(Group).where(Group.name == "Administrators"))
         admin_group = result.scalar_one_or_none()
         if admin_group and admin_group.permissions is not None:
             perms = list(admin_group.permissions)
             added = False
-            for new_perm in ("library:purge", "archives:purge", "queue:insert_top"):
+            for new_perm in ALL_PERMISSIONS:
                 if new_perm not in perms:
                     perms.append(new_perm)
                     added = True
-                    logger.info("Added %s to Administrators group (backfill)", new_perm)
-            if added:
-                admin_group.permissions = perms
-        await session.commit()
-
-        # Backfill the read flag set for the Administrators group on existing
-        # installs. Two layers:
-        #
-        # (a) New OWN/ALL splits — `archives:read_own` etc. Fresh installs get
-        #     these via ALL_PERMISSIONS; upgrades need the explicit backfill
-        #     so admin's permission set matches a fresh install's.
-        #
-        # (b) Legacy `archives:read` / `library:read` / `queue:read`. The
-        #     frontend still gates download / preview UI on these LEGACY
-        #     strings (see ArchivesPage / FileManagerPage), so admin needs
-        #     them retained even though the new API uses the OWN/ALL split.
-        #     The PERMISSION_MIGRATION_ALL map deliberately doesn't rename
-        #     read flags for admin — this backfill ensures they're present
-        #     even if they were stripped by hand or by an older migration.
-        #
-        # Also includes orca_cloud:auth for parity with fresh-install
-        # behaviour (ALL_PERMISSIONS covers it; backfill makes sure an
-        # admin role that's been customised since seed still has it).
-        result = await session.execute(select(Group).where(Group.name == "Administrators"))
-        admin_group = result.scalar_one_or_none()
-        if admin_group and admin_group.permissions is not None:
-            perms = list(admin_group.permissions)
-            added = False
-            for new_perm in (
-                "archives:read",
-                "archives:read_own",
-                "archives:read_all",
-                "library:read",
-                "library:read_own",
-                "library:read_all",
-                "queue:read",
-                "queue:read_own",
-                "queue:read_all",
-                "orca_cloud:auth",
-            ):
-                if new_perm not in perms:
-                    perms.append(new_perm)
-                    added = True
-                    logger.info("Added %s to Administrators group (backfill)", new_perm)
+                    logger.info("Added %s to Administrators group (ALL_PERMISSIONS sync)", new_perm)
             if added:
                 admin_group.permissions = perms
         await session.commit()
