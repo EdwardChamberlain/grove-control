@@ -634,7 +634,7 @@ async def test_malformed_ams_id_does_not_throw_while_running(scheduler, db_sessi
         mock_pm.get_status.return_value = state
         await scheduler._check_scheduled_dryings(db_session)
 
-    # No matching unit means no dry_time; the printer is busy, so it re-queues.
+    # No matching unit means the cycle remains active until telemetry recovers.
     await db_session.refresh(row)
-    assert row.status == "pending"
-    assert row.waiting_reason == "interrupted"
+    assert row.status == "running"
+    assert row.waiting_reason == "ams_not_found"
