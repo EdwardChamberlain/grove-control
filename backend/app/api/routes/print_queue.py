@@ -55,7 +55,6 @@ from backend.app.services.print_batch import (
     dispatch_remaining,
     load_progress,
     refresh_batch_status,
-    refresh_batch_status_for_item,
 )
 from backend.app.utils.printer_models import is_gcode_compatible
 from backend.app.utils.threemf_tools import (
@@ -205,117 +204,6 @@ def _assert_can_queue_library_file(library_file: LibraryFile, current_user: User
         raise HTTPException(404, "Library file not found")
 
 
-async def _is_orders_last_source(db: AsyncSession, item: PrintQueueItem) -> bool:
-    """Keep an order's last clone source so remaining work stays recoverable."""
-    if item.batch_id is None:
-        return False
-
-    batch_status = (
-        await db.execute(select(PrintBatch.status).where(PrintBatch.id == item.batch_id))
-    ).scalar_one_or_none()
-    if batch_status == "cancelled":
-        return False
-
-    plate_scope = (
-        PrintBatchPlate.plate_id == item.plate_id if item.plate_id is not None else PrintBatchPlate.plate_id.is_(None)
-    )
-    target = (
-        (
-            await db.execute(
-                select(PrintBatchPlate.quantity_target)
-                .where(PrintBatchPlate.batch_id == item.batch_id)
-                .where(plate_scope)
-                .order_by(PrintBatchPlate.quantity_target.desc())
-                .limit(1)
-            )
-        )
-        .scalars()
-        .first()
-    )
-    if not target:
-        return False
-
-    item_scope = (
-        PrintQueueItem.plate_id == item.plate_id if item.plate_id is not None else PrintQueueItem.plate_id.is_(None)
-    )
-    survivor = (
-        await db.execute(
-            select(PrintQueueItem.id)
-            .where(PrintQueueItem.batch_id == item.batch_id)
-            .where(item_scope)
-            .where(PrintQueueItem.id != item.id)
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    return survivor is None
-
-
-async def _assert_can_dispatch_batch_sources(db: AsyncSession, batch_id: int, current_user: User | None) -> None:
-    """Apply the ``POST /queue/`` source-file gates to everything a dispatch would print.
-
-    Dispatching clones existing queue items, so without this it would be a
-    weaker door to the same outcome: a caller holding QUEUE_CREATE and
-    QUEUE_UPDATE_ALL but explicitly denied ``archives:reprint_*`` could start
-    prints through an order that ``POST /queue/`` would have refused them.
-
-    Every distinct source among the batch's items is checked.
-    """
-    archive_ids = set(
-        (
-            await db.execute(
-                select(PrintQueueItem.archive_id)
-                .where(PrintQueueItem.batch_id == batch_id)
-                .where(PrintQueueItem.archive_id.is_not(None))
-                .distinct()
-            )
-        )
-        .scalars()
-        .all()
-    )
-    library_file_ids = set(
-        (
-            await db.execute(
-                select(PrintQueueItem.library_file_id)
-                .where(PrintQueueItem.batch_id == batch_id)
-                .where(PrintQueueItem.library_file_id.is_not(None))
-                .distinct()
-            )
-        )
-        .scalars()
-        .all()
-    )
-    # Cross-model queue items keep their source files on PrintQueueVariant
-    # rows, not on the queue item itself. The relationship is optional here so
-    # this branch remains importable before the alternatives PR lands.
-    variant_relationship = getattr(PrintQueueItem, "variants", None)
-    if variant_relationship is not None:
-        variant_model = variant_relationship.property.mapper.class_
-        variant_file_ids = (
-            await db.execute(
-                select(variant_model.library_file_id)
-                .where(
-                    variant_model.queue_item_id.in_(
-                        select(PrintQueueItem.id).where(PrintQueueItem.batch_id == batch_id)
-                    )
-                )
-                .distinct()
-            )
-        ).scalars()
-        library_file_ids.update(variant_file_ids.all())
-    for archive_id in archive_ids:
-        archive = (await db.execute(select(PrintArchive).where(PrintArchive.id == archive_id))).scalar_one_or_none()
-        # A deleted source can't be printed; dispatch will fail on it anyway.
-        if archive is not None:
-            _assert_can_queue_archive(archive, current_user)
-
-    for library_file_id in library_file_ids:
-        library_file = (
-            await db.execute(LibraryFile.active().where(LibraryFile.id == library_file_id))
-        ).scalar_one_or_none()
-        if library_file is not None:
-            _assert_can_queue_library_file(library_file, current_user)
-
-
 async def _resolve_source_path(db: AsyncSession, item: PrintQueueItem) -> Path | None:
     """Resolve an existing queue item's source 3MF on disk, or None."""
     if item.archive_id:
@@ -418,7 +306,7 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
         # User tracking (Issue #206)
         "created_by_id": item.created_by_id,
         "created_by_username": item.created_by.username if item.created_by else None,
-        # Batch grouping
+        # Legacy grouping metadata (only populated for pre-#143 rows).
         "batch_id": item.batch_id,
         "batch_name": item.batch.name if item.batch else None,
         # SJF scheduling
@@ -680,8 +568,8 @@ def _variant_values(
     Each candidate is a different slice, so its filament requirements and print
     time come from its own file rather than being inherited from the item.
 
-    Returns values rather than a row so a quantity>1 batch can build one row per
-    copy without re-opening the 3MF for each.
+    Returns values rather than a row so a quantity submission can build one row
+    per copy without re-opening the 3MF for each.
     """
     lib_path = Path(library_file.file_path)
     file_path = lib_path if lib_path.is_absolute() else settings.base_dir / library_file.file_path
@@ -900,53 +788,6 @@ async def add_to_queue(
     # Validate quantity
     quantity = max(1, data.quantity)
 
-    # Validate batch_id if provided. Client passes batch_id when adding items
-    # into a pre-created batch (multi-plate auto-batch or "Group as batch" flow).
-    # 404 keeps the existing-id leak surface low.
-    batch = None
-    batch_id = None
-    if data.batch_id is not None:
-        result = await db.execute(select(PrintBatch).where(PrintBatch.id == data.batch_id))
-        existing_batch = result.scalar_one_or_none()
-        if not existing_batch:
-            raise HTTPException(404, "Batch not found")
-        if existing_batch.status != "active":
-            raise HTTPException(400, "Cannot add items to a non-active batch")
-        if (
-            actor is not None
-            and existing_batch.created_by_id is not None
-            and existing_batch.created_by_id != actor.id
-            and not actor.has_permission(Permission.QUEUE_UPDATE_ALL.value)
-        ):
-            raise HTTPException(404, "Batch not found")
-        batch = existing_batch
-        batch_id = existing_batch.id
-
-    # Create batch if quantity > 1 and no batch_id provided
-    if batch_id is None and quantity > 1:
-        # Derive batch name from source file
-        batch_name_base = "Batch"
-        if archive:
-            batch_name_base = archive.print_name or archive.filename or "Batch"
-        elif library_file:
-            if library_file.file_metadata:
-                batch_name_base = library_file.file_metadata.get("print_name") or library_file.filename
-            else:
-                batch_name_base = library_file.filename
-        batch_name_base = batch_name_base.replace(".gcode.3mf", "").replace(".3mf", "")
-
-        batch = PrintBatch(
-            name=f"{batch_name_base} ×{quantity}",
-            archive_id=data.archive_id,
-            library_file_id=data.library_file_id,
-            quantity=quantity,
-            status="active",
-            created_by_id=actor.id if actor else None,
-        )
-        db.add(batch)
-        await db.flush()  # Get batch.id before creating items
-        batch_id = batch.id
-
     # Get queue scope for this printer (or for unassigned/model-based items).
     if data.printer_id is not None:
         queue_scope = (
@@ -1064,7 +905,11 @@ async def add_to_queue(
             position=start_position + i,
             status="pending",
             created_by_id=actor.id if actor else None,
-            batch_id=batch_id,
+            # Quantity deliberately creates ordinary independent rows. The
+            # legacy batch_id column remains nullable so pre-#143 rows can
+            # still be read and dispatched without making grouping part of the
+            # new queue lifecycle.
+            batch_id=None,
             print_time_seconds=cached_print_time,
         )
         db.add(item)
@@ -1080,9 +925,8 @@ async def add_to_queue(
         # that actually runs.
         estimates = [v["print_time_seconds"] for v in variant_values if v["print_time_seconds"]]
         for item in items:
-            # Each copy in a quantity>1 batch gets its own candidate rows —
-            # attempt counts are per-item, and two copies must be free to land on
-            # different printers.
+            # Each copy gets its own candidate rows — attempt counts are
+            # per-item, and copies must be free to land on different printers.
             item.variants.extend(PrintQueueVariant(**values) for values in variant_values)
             item.print_time_seconds = min(estimates) if estimates else None
 
@@ -1222,6 +1066,20 @@ async def bulk_update_queue_items(
 # --- Batch endpoints ---
 
 
+def _batch_endpoints_retired() -> None:
+    """Reject the pre-#143 batch-order API while preserving legacy rows.
+
+    Batch-linked queue rows remain readable through the ordinary queue API, but
+    new work is always represented by independent queue items. Keeping the
+    retired handlers as explicit 410s gives old clients a useful migration
+    signal instead of silently recreating the removed lifecycle.
+    """
+    raise HTTPException(
+        status_code=410,
+        detail="Batch-order queue APIs were retired; create independent queue items instead",
+    )
+
+
 def _validate_plate_targets(
     plates: list[PrintBatchPlateTarget] | None,
 ) -> list[PrintBatchPlateTarget] | None:
@@ -1280,11 +1138,12 @@ async def _load_batch_for_write(
 
 @router.post("/batches", response_model=PrintBatchResponse)
 async def create_batch(
-    data: PrintBatchCreate,
+    data: PrintBatchCreate | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_CREATE),
     api_key_owner: User | None = Depends(resolve_api_key_owner),
 ):
+    _batch_endpoints_retired()
     """Create a batch.
 
     Two modes:
@@ -1366,11 +1225,12 @@ async def create_batch(
 @router.patch("/batches/{batch_id}", response_model=PrintBatchResponse)
 async def update_batch(
     batch_id: int,
-    data: PrintBatchUpdate,
+    data: PrintBatchUpdate | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_UPDATE_OWN),
     api_key_owner: User | None = Depends(resolve_api_key_owner),
 ):
+    _batch_endpoints_retired()
     """Edit an order's header or its per-plate targets while it runs (#342).
 
     Production requirements change mid-run, so targets are editable. Lowering a
@@ -1438,11 +1298,12 @@ async def update_batch(
 @router.post("/batches/{batch_id}/dispatch", response_model=PrintBatchResponse)
 async def dispatch_batch(
     batch_id: int,
-    data: PrintBatchDispatchRequest,
+    data: PrintBatchDispatchRequest | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_CREATE),
     api_key_owner: User | None = Depends(resolve_api_key_owner),
 ):
+    _batch_endpoints_retired()
     """Queue the runs this order still owes (#342).
 
     Each new item is cloned from the most recent item for the same plate in
@@ -1456,7 +1317,7 @@ async def dispatch_batch(
         raise HTTPException(400, "Cannot dispatch a cancelled batch")
 
     # Dispatch starts prints, so it must not be a weaker door than POST /queue/.
-    await _assert_can_dispatch_batch_sources(db, batch.id, actor)
+    raise AssertionError("retired batch endpoint is unreachable")
 
     try:
         created = await dispatch_remaining(
@@ -1483,6 +1344,7 @@ async def ungroup_batch(
     db: AsyncSession = Depends(get_db),
     current_user: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_UPDATE_OWN),
 ):
+    _batch_endpoints_retired()
     """Disband a batch: clear batch_id from all members and delete the batch row.
 
     Items stay in the queue. Only ungroups items the caller owns (unless they
@@ -1533,6 +1395,7 @@ async def list_batches(
         )
     ),
 ):
+    _batch_endpoints_retired()
     """List print batches with progress stats.
 
     Batches with neither queue items nor per-plate targets are omitted. Those
@@ -1578,6 +1441,7 @@ async def get_batch(
         )
     ),
 ):
+    _batch_endpoints_retired()
     """Get a print batch with progress stats."""
     current_user, can_read_all = auth_result
     result = await db.execute(select(PrintBatch).where(PrintBatch.id == batch_id))
@@ -1599,6 +1463,7 @@ async def cancel_batch(
     db: AsyncSession = Depends(get_db),
     current_user: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_DELETE_ALL),
 ):
+    _batch_endpoints_retired()
     """Cancel all pending items in a batch and mark batch as cancelled."""
     result = await db.execute(select(PrintBatch).where(PrintBatch.id == batch_id))
     batch = result.scalar_one_or_none()
@@ -1962,25 +1827,12 @@ async def delete_queue_item(
     if item.status == "preheating":
         await abort_heat_soak(db, item, "Heat soak deleted", status="cancelled")
         item = await lock_queue_item(db, item_id)
-    keep_as_cancelled = item.status != "completed" and await _is_orders_last_source(db, item)
-    if keep_as_cancelled:
-        item.status = "cancelled"
-        await db.flush()
-        await refresh_batch_status_for_item(db, item.id)
-    else:
-        await db.delete(item)
+    await db.delete(item)
     await db.commit()
 
     from backend.app.services.print_scheduler import scheduler
 
     scheduler.cancel_inflight(item_id)
-
-    if keep_as_cancelled:
-        logger.info("Kept queue item %s as cancelled — last source for its batch plate", item_id)
-        return {
-            "message": "Item cancelled rather than deleted: it remains the source for re-queueing this plate",
-            "deleted": False,
-        }
 
     logger.info("Deleted queue item %s", item_id)
     return {"message": "Queue item deleted", "deleted": True}

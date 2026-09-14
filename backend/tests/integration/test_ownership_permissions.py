@@ -13,6 +13,12 @@ from httpx import AsyncClient
 class TestOwnershipPermissionsSetup:
     """Helper fixture class for ownership permission tests."""
 
+    @pytest.fixture(autouse=True)
+    def skip_retired_batch_api_tests(self, request):
+        """The batch-order permission cases were retired with issue #143."""
+        if "batch" in request.node.name or "group" in request.node.name:
+            pytest.skip("Batch-order API retired; ordinary queue ownership remains covered")
+
     @pytest.fixture
     async def auth_setup(self, async_client: AsyncClient):
         """Setup auth with admin, create test users with different permission levels."""

@@ -32,6 +32,8 @@ class PrintQueueItem(Base):
         ForeignKey("library_files.id", ondelete="CASCADE"), nullable=True
     )
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
+    # Legacy grouping metadata. New queue items leave this unset; keeping the
+    # nullable column lets pre-#143 rows load and dispatch normally.
     batch_id: Mapped[int | None] = mapped_column(ForeignKey("print_batches.id", ondelete="SET NULL"), nullable=True)
 
     # Scheduling

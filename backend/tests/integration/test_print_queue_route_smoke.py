@@ -1,4 +1,4 @@
-"""Route-level smoke coverage for queue grouping and reorder flows."""
+"""Route-level smoke coverage for independent queue rows and reorder flows."""
 
 import pytest
 from httpx import AsyncClient
@@ -33,31 +33,6 @@ async def queue_item_factory(db_session, printer_factory, archive_factory):
         return item
 
     return _create_queue_item
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_queue_batch_create_assigns_pending_items(async_client: AsyncClient, queue_item_factory):
-    first = await queue_item_factory(position=1)
-    second = await queue_item_factory(position=2)
-    completed = await queue_item_factory(position=3, status="completed")
-
-    response = await async_client.post(
-        "/api/v1/queue/batches",
-        json={"name": "Weekend batch", "item_ids": [first.id, second.id, completed.id]},
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["name"] == "Weekend batch"
-    assert data["quantity"] == 2
-
-    items = await async_client.get("/api/v1/queue/")
-    assert items.status_code == 200
-    by_id = {item["id"]: item for item in items.json()}
-    assert by_id[first.id]["batch_id"] == data["id"]
-    assert by_id[second.id]["batch_id"] == data["id"]
-    assert by_id[completed.id]["batch_id"] is None
 
 
 @pytest.mark.asyncio
@@ -100,13 +75,15 @@ async def test_queue_reorder_updates_only_pending_items(async_client: AsyncClien
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_queue_batch_requires_nonblank_name(async_client: AsyncClient, queue_item_factory):
-    item = await queue_item_factory()
-
-    response = await async_client.post(
-        "/api/v1/queue/batches",
-        json={"name": "   ", "item_ids": [item.id]},
-    )
-
-    assert response.status_code == 400
-    assert "Batch name is required" in response.json()["detail"]
+async def test_batch_order_endpoints_are_retired(async_client: AsyncClient):
+    for method, path in (
+        ("post", "/api/v1/queue/batches"),
+        ("patch", "/api/v1/queue/batches/1"),
+        ("post", "/api/v1/queue/batches/1/dispatch"),
+        ("post", "/api/v1/queue/batches/1/ungroup"),
+        ("get", "/api/v1/queue/batches"),
+        ("get", "/api/v1/queue/batches/1"),
+        ("delete", "/api/v1/queue/batches/1"),
+    ):
+        response = await async_client.request(method, path)
+        assert response.status_code == 410

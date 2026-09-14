@@ -126,12 +126,8 @@ class PrintQueueItemCreate(BaseModel):
     nozzle_offset_cali: TriState = "auto"
     # Auto-print G-code injection
     gcode_injection: bool = False
-    # Batch: create multiple copies (creates a batch if > 1)
+    # Quantity creates this many independent queue items.
     quantity: int = 1
-    # Existing batch to add this item into. When set, the item's batch_id is
-    # populated on insert so the queue UI groups it with its siblings. Used by
-    # the multi-plate auto-batch flow and by the "Group as batch" action.
-    batch_id: int | None = None
     # Project to associate the resulting archive with
     project_id: int | None = None
     # Direct printer-card uploads are temporary library files. The scheduler
@@ -272,7 +268,7 @@ class PrintQueueItemResponse(BaseModel):
     created_by_id: int | None = None
     created_by_username: str | None = None
 
-    # Batch grouping
+    # Legacy grouping metadata, retained so pre-#143 rows remain readable.
     batch_id: int | None = None
     batch_name: str | None = None
 

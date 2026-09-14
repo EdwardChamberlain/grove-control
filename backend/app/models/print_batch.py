@@ -7,17 +7,15 @@ from backend.app.core.database import Base
 
 
 class PrintBatch(Base):
-    """Batch grouping for multiple queue items created from the same file.
+    """Legacy grouping metadata retained for rows created before issue #143.
 
-    A batch carries the *intent* — how many of each plate are wanted — in its
-    :class:`PrintBatchPlate` rows, while the queue items it spawned carry what
-    was actually dispatched. Keeping the two apart is what lets a failed print
-    still count as owed work: the plate row's ``quantity_target`` stays put
-    while the failed item lands in the "failed" bucket, so ``remaining`` goes
-    back up instead of the order silently under-delivering (#342).
+    New queue work does not create or require a batch. The table and its
+    nullable foreign key remain so existing queue rows keep their source,
+    ownership, and historical metadata after the batch-order API was retired.
+    Legacy rows are handled as ordinary queue items by the scheduler.
 
-    Batches created before plate rows existed simply have none; every consumer
-    falls back to deriving progress from the queue items alone.
+    The old planning fields are intentionally left in place for safe reads and
+    database compatibility; they no longer participate in queue lifecycle.
     """
 
     __tablename__ = "print_batches"
