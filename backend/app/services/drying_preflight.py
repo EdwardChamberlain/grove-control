@@ -5,7 +5,7 @@ scheduler's delayed dispatch go through here, so a run that the immediate
 path would refuse is never silently published by the scheduled path.
 """
 
-from backend.app.services.printer_manager import drying_screen_only, supports_drying
+from backend.app.services.printer_manager import drying_screen_only, supports_drying, supports_drying_model
 
 SCREEN_ONLY_DETAIL = "This printer only supports AMS drying from its own screen"
 UNSUPPORTED_DETAIL = "Drying not supported for this printer model or firmware version"
@@ -46,6 +46,8 @@ def check_drying_supported(model: str | None, firmware: str | None, *, require_f
     """
     if drying_screen_only(model):
         return SCREEN_ONLY_DETAIL
+    if not require_firmware and not supports_drying_model(model):
+        return UNSUPPORTED_DETAIL
     if require_firmware and not supports_drying(model, firmware):
         return UNSUPPORTED_DETAIL
     return None

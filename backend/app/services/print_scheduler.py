@@ -3110,10 +3110,19 @@ class PrintScheduler:
         if not state:
             return
         target = drying_preflight.find_ams_unit(state, row.ams_id)
+        if target is None:
+            # A missing AMS entry is not the same thing as a completed cycle:
+            # status payloads can be partial while the printer reconnects.
+            # Keep the row running until we have telemetry for its target.
+            row.waiting_reason = "ams_not_found"
+            return
         try:
-            dry_time = int(target.get("dry_time") or 0) if target else 0
+            dry_time = int(target.get("dry_time") or 0)
         except (TypeError, ValueError):
-            dry_time = 0
+            # Do not turn malformed telemetry into a terminal state either.
+            row.waiting_reason = "ams_not_found"
+            return
+        row.waiting_reason = None
         if dry_time > 0:
             return
         if elapsed >= row.duration_hours * 3600 * self.SCHEDULED_DRYING_COMPLETE_FRACTION:

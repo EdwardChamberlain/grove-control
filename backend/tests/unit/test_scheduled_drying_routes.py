@@ -126,6 +126,18 @@ async def test_offline_printer_is_still_schedulable(async_client, printer_factor
 
 
 @pytest.mark.asyncio
+async def test_known_unsupported_model_rejected_when_offline(async_client, printer_factory):
+    """Offline scheduling still rejects a model that can never dry remotely."""
+    printer = await printer_factory(model="A1")
+    resp = await async_client.post(
+        "/api/v1/scheduled-dryings",
+        json={"printer_id": printer.id, "temp": 65, "duration_hours": 8, "start_after": _future_iso()},
+    )
+    assert resp.status_code == 400
+    assert "not supported" in resp.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
 async def test_stale_firmware_rejected_when_printer_is_online(async_client, printer_factory):
     printer = await printer_factory()
     state = type("S", (), {"firmware_version": "01.05.00.00", "raw_data": {}})()

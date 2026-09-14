@@ -436,6 +436,27 @@ async def test_running_completes_after_duration(scheduler, db_session, printer_f
 
 
 @pytest.mark.asyncio
+async def test_running_without_matching_ams_stays_running(scheduler, db_session, printer_factory):
+    """A partial status payload must not make a running cycle look complete."""
+    row = await _make_row(
+        db_session,
+        printer_factory,
+        status="running",
+        duration_hours=1,
+        started_at=_utcnow_naive() - timedelta(minutes=58),
+    )
+    state = _mock_state()
+    state.raw_data = {"ams": []}
+    with patch("backend.app.services.print_scheduler.printer_manager") as mock_pm:
+        mock_pm.get_status.return_value = state
+        await scheduler._check_scheduled_dryings(db_session)
+    await db_session.refresh(row)
+    assert row.status == "running"
+    assert row.waiting_reason == "ams_not_found"
+    assert row.completed_at is None
+
+
+@pytest.mark.asyncio
 async def test_running_interrupted_by_print_requeues(scheduler, db_session, printer_factory):
     row = await _make_row(
         db_session,
