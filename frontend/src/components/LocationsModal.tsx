@@ -12,9 +12,10 @@ interface LocationsModalProps {
   open: boolean;
   onClose: () => void;
   onPickLocation?: (locationId: number) => void;
+  startCreating?: boolean;
 }
 
-export function LocationsModal({ open, onClose, onPickLocation }: LocationsModalProps) {
+export function LocationsModal({ open, onClose, onPickLocation, startCreating }: LocationsModalProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -30,10 +31,23 @@ export function LocationsModal({ open, onClose, onPickLocation }: LocationsModal
     enabled: open,
   });
 
+  const { data: locationSensors = [] } = useQuery({
+    queryKey: ['locationHaSensors'],
+    queryFn: () => api.getLocationHASensors(),
+    enabled: open,
+  });
+
+  const sensorCountByLocation = locationSensors.reduce<Record<number, number>>((counts, sensor) => {
+    counts[sensor.location_id] = (counts[sensor.location_id] ?? 0) + 1;
+    return counts;
+  }, {});
+
   const invalidate = () => {
     invalidateInventoryLocations(queryClient);
     queryClient.invalidateQueries({ queryKey: ['inventory-spools'] });
     queryClient.invalidateQueries({ queryKey: ['spoolman-inventory-spools'] });
+    queryClient.invalidateQueries({ queryKey: ['locationHaSensors'] });
+    queryClient.invalidateQueries({ queryKey: ['locationHaSensorReadings'] });
   };
 
   const saveMutation = useMutation({
@@ -45,12 +59,17 @@ export function LocationsModal({ open, onClose, onPickLocation }: LocationsModal
       }
       return api.createLocation({ name: trimmed });
     },
-    onSuccess: () => {
+    onSuccess: (saved) => {
       showToast(t(editing ? 'locations.updated' : 'locations.created'), 'success');
+      invalidate();
+      if (!editing && startCreating) {
+        onPickLocation?.(saved.id);
+        onClose();
+        return;
+      }
       setEditorOpen(false);
       setEditing(null);
       setName('');
-      invalidate();
     },
     onError: (err: Error) => {
       showToast(err.message || t('locations.saveFailed'), 'error');
@@ -81,12 +100,24 @@ export function LocationsModal({ open, onClose, onPickLocation }: LocationsModal
     setEditorOpen(true);
   };
 
+  useEffect(() => {
+    if (open && startCreating) {
+      setEditing(null);
+      setName('');
+      setEditorOpen(true);
+    }
+  }, [open, startCreating]);
+
   const closeEditor = useCallback(() => {
     if (saveMutation.isPending) return;
+    if (startCreating) {
+      onClose();
+      return;
+    }
     setEditorOpen(false);
     setEditing(null);
     setName('');
-  }, [saveMutation.isPending]);
+  }, [saveMutation.isPending, startCreating, onClose]);
 
   // Esc closes the inner editor first; if it's closed, Esc closes the outer
   // modal — but only when neither save nor delete is mid-flight, so a stray
@@ -169,6 +200,7 @@ export function LocationsModal({ open, onClose, onPickLocation }: LocationsModal
               <thead>
                 <tr className="border-b border-bambu-dark-tertiary text-left text-bambu-gray">
                   <th className="px-4 py-3 font-medium">{t('locations.name')}</th>
+                  <th className="px-2 py-3 font-medium text-right w-24">{t('locations.sensors')}</th>
                   <th className="px-4 py-3 font-medium text-right">{t('locations.spools')}</th>
                   <th className="px-4 py-3 font-medium text-right w-32">{t('common.actions')}</th>
                 </tr>
@@ -186,6 +218,7 @@ export function LocationsModal({ open, onClose, onPickLocation }: LocationsModal
                     }}
                   >
                     <td className="px-4 py-3 text-white font-medium">{loc.name}</td>
+                    <td className="px-2 py-3 text-right text-bambu-gray">{sensorCountByLocation[loc.id] ?? 0}</td>
                     <td className="px-4 py-3 text-right text-bambu-gray">{loc.spool_count}</td>
                     <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-1">
@@ -261,7 +294,7 @@ export function LocationsModal({ open, onClose, onPickLocation }: LocationsModal
       {deleteTarget && (
         <ConfirmModal
           title={t('locations.confirmDelete', { name: deleteTarget.name })}
-          message={t('locations.confirmDeleteMessage')}
+          message={sensorCountByLocation[deleteTarget.id] ? t('locations.confirmDeleteMessageWithSensors') : t('locations.confirmDeleteMessage')}
           confirmText={t('common.delete')}
           variant="danger"
           isLoading={deleteMutation.isPending}

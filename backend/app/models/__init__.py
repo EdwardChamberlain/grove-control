@@ -11,6 +11,7 @@ from backend.app.models.kprofile_note import KProfileNote
 from backend.app.models.library import FileVariantGroup, LibraryFile, LibraryFolder
 from backend.app.models.local_preset import LocalPreset
 from backend.app.models.location import Location
+from backend.app.models.location_ha_sensor import LocationHASensor
 from backend.app.models.long_lived_token import LongLivedToken
 from backend.app.models.maintenance import MaintenanceHistory, MaintenanceType, PrinterMaintenance
 from backend.app.models.notification import NotificationLog
@@ -21,6 +22,7 @@ from backend.app.models.pending_upload import PendingUpload
 from backend.app.models.pipeline_run import PipelineJob, PipelineRun
 from backend.app.models.print_batch import PrintBatch, PrintBatchPlate
 from backend.app.models.printer import Printer
+from backend.app.models.printer_ha_sensor import PrinterHASensor
 from backend.app.models.printer_sensor_history import PrinterSensorHistory
 from backend.app.models.project import Project
 from backend.app.models.scheduled_drying import ScheduledDrying
@@ -57,6 +59,7 @@ __all__ = [
     "APIKey",
     "AMSSensorHistory",
     "PrinterSensorHistory",
+    "PrinterHASensor",
     "AmsLabel",
     "PendingUpload",
     "PrintBatch",
@@ -65,6 +68,7 @@ __all__ = [
     "LibraryFile",
     "FileVariantGroup",
     "Location",
+    "LocationHASensor",
     "User",
     "Group",
     "user_groups",

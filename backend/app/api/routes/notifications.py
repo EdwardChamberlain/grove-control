@@ -56,6 +56,8 @@ def _provider_to_dict(provider: NotificationProvider) -> dict:
         # AMS-HT environmental alarms
         "on_ams_ht_humidity_high": provider.on_ams_ht_humidity_high,
         "on_ams_ht_temperature_high": provider.on_ams_ht_temperature_high,
+        "on_ha_sensor_alert": provider.on_ha_sensor_alert,
+        "on_location_ha_sensor_alert": provider.on_location_ha_sensor_alert,
         # Build plate detection
         "on_plate_not_empty": provider.on_plate_not_empty,
         # Bed cooled
@@ -140,6 +142,8 @@ async def create_notification_provider(
         # AMS-HT environmental alarms
         on_ams_ht_humidity_high=provider_data.on_ams_ht_humidity_high,
         on_ams_ht_temperature_high=provider_data.on_ams_ht_temperature_high,
+        on_ha_sensor_alert=provider_data.on_ha_sensor_alert,
+        on_location_ha_sensor_alert=provider_data.on_location_ha_sensor_alert,
         # Build plate detection
         on_plate_not_empty=provider_data.on_plate_not_empty,
         # Bed cooled

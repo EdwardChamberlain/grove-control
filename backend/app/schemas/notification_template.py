@@ -23,6 +23,7 @@ class EventType(StrEnum):
     AMS_HUMIDITY_HIGH = "ams_humidity_high"
     AMS_TEMPERATURE_HIGH = "ams_temperature_high"
     BED_COOLED = "bed_cooled"
+    HA_SENSOR_ALERT = "ha_sensor_alert"
     TEST = "test"
 
 
@@ -77,6 +78,8 @@ EVENT_VARIABLES: dict[str, list[str]] = {
     "ams_humidity_high": ["printer", "ams_label", "humidity", "threshold", "timestamp", "app_name"],
     "ams_temperature_high": ["printer", "ams_label", "temperature", "threshold", "timestamp", "app_name"],
     "bed_cooled": ["printer", "bed_temp", "threshold", "filename", "timestamp", "app_name"],
+    "ha_sensor_alert": ["printer", "sensor", "state", "timestamp", "app_name"],
+    "location_ha_sensor_alert": ["location", "sensor", "state", "timestamp", "app_name"],
     "test": ["app_name", "timestamp"],
     # Queue notifications
     "queue_job_added": ["job_name", "target", "timestamp", "app_name"],
@@ -204,6 +207,20 @@ SAMPLE_DATA: dict[str, dict[str, str]] = {
         "filename": "Benchy",
         "timestamp": "2024-01-15 14:30",
         "app_name": "Grove Control",
+    },
+    "ha_sensor_alert": {
+        "printer": "Bambu X1C",
+        "sensor": "Enclosure Door",
+        "state": "open",
+        "timestamp": "2024-01-15 14:30",
+        "app_name": "Bambuddy",
+    },
+    "location_ha_sensor_alert": {
+        "location": "Drybox 1",
+        "sensor": "Humidity",
+        "state": "68 %",
+        "timestamp": "2024-01-15 14:30",
+        "app_name": "Bambuddy",
     },
     "test": {
         "app_name": "Grove Control",

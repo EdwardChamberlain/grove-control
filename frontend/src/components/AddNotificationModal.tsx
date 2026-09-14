@@ -45,6 +45,8 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
   const [onStockReorderAlert, setOnStockReorderAlert] = useState(provider?.on_stock_reorder_alert ?? false);
   const [onStockBreakAlert, setOnStockBreakAlert] = useState(provider?.on_stock_break_alert ?? false);
   const [onBedCooled, setOnBedCooled] = useState(provider?.on_bed_cooled ?? false);
+  const [onHaSensorAlert, setOnHaSensorAlert] = useState(provider?.on_ha_sensor_alert ?? false);
+  const [onLocationHaSensorAlert, setOnLocationHaSensorAlert] = useState(provider?.on_location_ha_sensor_alert ?? false);
   const [onFirstLayerComplete, setOnFirstLayerComplete] = useState(provider?.on_first_layer_complete ?? false);
 
   // Provider-specific config (scalar fields only — event_priorities is split out
@@ -175,6 +177,8 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
       on_stock_reorder_alert: onStockReorderAlert,
       on_stock_break_alert: onStockBreakAlert,
       on_bed_cooled: onBedCooled,
+      on_ha_sensor_alert: onHaSensorAlert,
+      on_location_ha_sensor_alert: onLocationHaSensorAlert,
       on_first_layer_complete: onFirstLayerComplete,
     };
 
@@ -538,6 +542,14 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
               </div>
             </div>
 
+            <div className="space-y-2 p-3 bg-bambu-dark rounded-lg">
+              <p className="text-xs text-bambu-gray uppercase tracking-wide mb-2">Home Assistant storage locations</p>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-white">Storage-location sensor alerts</span>
+                <Toggle checked={onLocationHaSensorAlert} onChange={setOnLocationHaSensorAlert} />
+              </div>
+            </div>
+
             {/* Printer Status Events */}
             <div className="space-y-2 p-3 bg-bambu-dark rounded-lg">
               <p className="text-xs text-bambu-gray uppercase tracking-wide mb-2">{t('notifications.printerStatus')}</p>
@@ -545,6 +557,13 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-white">{t('notifications.offline')}</span>
                   <Toggle checked={onPrinterOffline} onChange={setOnPrinterOffline} />
+                </div>
+                <div className="flex items-center justify-between col-span-2">
+                  <div>
+                    <span className="text-sm text-white">{t('notifications.haSensorAlert')}</span>
+                    <span className="text-xs text-bambu-gray ml-1">{t('notifications.haSensorAlertDescription')}</span>
+                  </div>
+                  <Toggle checked={onHaSensorAlert} onChange={setOnHaSensorAlert} />
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-white">{t('notifications.error')}</span>
@@ -598,6 +617,8 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
               if (onFirstLayerComplete) enabledEvents.push({ key: 'on_first_layer_complete', label: t('notifications.firstLayerCompleteLabel') });
               if (onPrinterOffline) enabledEvents.push({ key: 'on_printer_offline', label: t('notifications.offline') });
               if (onPrinterError) enabledEvents.push({ key: 'on_printer_error', label: t('notifications.error') });
+              if (onHaSensorAlert) enabledEvents.push({ key: 'on_ha_sensor_alert', label: t('notifications.haSensorAlert') });
+              if (onLocationHaSensorAlert) enabledEvents.push({ key: 'on_location_ha_sensor_alert', label: 'Storage sensor alert' });
               if (onAiFailureDetection) enabledEvents.push({ key: 'on_ai_failure_detection', label: t('notifications.aiFailureDetection') });
               if (onFilamentLow) enabledEvents.push({ key: 'on_filament_low', label: t('notifications.lowFilament') });
               if (onMaintenanceDue) enabledEvents.push({ key: 'on_maintenance_due', label: t('notifications.maintenance') });

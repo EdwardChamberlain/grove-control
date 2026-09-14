@@ -38,6 +38,7 @@ from backend.app.services.bambu_ftp import (
 from backend.app.services.chamber_heat_soak import ChamberHeatSoak, abort_heat_soak, lock_queue_item
 from backend.app.services.filament_deficit import compute_deficit_for_queue_item
 from backend.app.services.filament_requirements import canonical_filament_type
+from backend.app.services.ha_sensor_manager import ha_sensor_manager
 from backend.app.services.notification_service import notification_service
 from backend.app.services.printer_manager import (
     printer_manager,
@@ -705,6 +706,19 @@ class PrintScheduler:
             # (e.g. a batch with quantity>1) both end up on the same printer —
             # surfaced via the "BUG: Multiple queue items" warning in on_print_complete.
 
+            # Home Assistant printer interlocks are an independent availability
+            # signal. Keep them out of busy_printers because that set is also
+            # used by auto-drying to mean "currently printing"; an idle printer
+            # with an open enclosure must not be treated as mid-print drying.
+            interlocked: dict[int, str] = {}
+            try:
+                interlocked = await ha_sensor_manager.blocked_printers(db)
+            except Exception as e:
+                # A failed HA lookup is fail-open: the integration must not
+                # stop the entire queue when HA itself is unavailable.
+                logger.warning("Home Assistant interlock check failed: %s", e)
+                interlocked = {}
+
             # Log skip reasons once per queue check (not per item)
             skip_reasons: dict[str, int] = {}
 
@@ -773,10 +787,31 @@ class PrintScheduler:
                     continue
 
                 if item.printer_id:
+                    interlock_reason = interlocked.get(item.printer_id)
+                    if interlock_reason:
+                        waiting_reason = f"Waiting on {interlock_reason}"
+                        if item.waiting_reason != waiting_reason:
+                            item.waiting_reason = waiting_reason
+                            await db.commit()
+                        skip_reasons["sensor_interlock"] = skip_reasons.get("sensor_interlock", 0) + 1
+                        continue
+
+                    # Only clear a reason previously written by this
+                    # interlock. Preserve unrelated queue explanations such
+                    # as filament shortages and drying holds for the gates
+                    # below to maintain.
+                    cleared_sensor_interlock_reason = bool(
+                        item.waiting_reason and item.waiting_reason.startswith("Waiting on ")
+                    )
+                    if cleared_sensor_interlock_reason:
+                        item.waiting_reason = None
+                        await db.commit()
+
                     # Specific printer assignment (existing behavior)
                     if item.printer_id in busy_printers:
-                        item.waiting_reason = f"Waiting for printer reservation on printer {item.printer_id}"
-                        await db.commit()
+                        if not cleared_sensor_interlock_reason:
+                            item.waiting_reason = f"Waiting for printer reservation on printer {item.printer_id}"
+                            await db.commit()
                         continue
 
                     # Check if printer is idle
@@ -817,7 +852,8 @@ class PrintScheduler:
 
                     # Check if printer is idle (busy with another print)
                     if not printer_idle:
-                        item.waiting_reason = f"Waiting for printer reservation on printer {item.printer_id}"
+                        if not cleared_sensor_interlock_reason:
+                            item.waiting_reason = f"Waiting for printer reservation on printer {item.printer_id}"
                         busy_printers.add(item.printer_id)
                         await db.commit()
                         continue
@@ -1027,7 +1063,7 @@ class PrintScheduler:
                         match_id, match_reason = await self._find_idle_printer_for_model(
                             db,
                             candidate.target_model,
-                            busy_printers,
+                            busy_printers | set(interlocked),
                             effective_types,
                             item.target_location,
                             filament_overrides=filament_overrides,
