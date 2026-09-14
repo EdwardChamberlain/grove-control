@@ -403,9 +403,6 @@ _last_progress_milestone: dict[int, int] = {}
 # Track whether first layer complete notification has been sent for current print
 _first_layer_notified: dict[int, bool] = {}
 
-# Track whether we already sent a kill-switch stop for the current unauthorized print
-_unauthorized_print_kill_sent: set[int] = set()
-
 # Track HMS errors that have been notified: {printer_id: set of error codes}
 # This prevents sending duplicate notifications for the same error
 _notified_hms_errors: dict[int, set[str]] = {}
@@ -630,94 +627,6 @@ _expected_print_registered_at: dict[tuple[int, str], float] = {}
 # Cleanup loop interval
 _EXPECTED_PRINT_CLEANUP_INTERVAL: int = 15 * 60  # 15 minutes
 _expected_prints_cleanup_task: asyncio.Task | None = None
-
-_ACTIVE_PRINT_STATES: set[str] = {"RUNNING", "PRINTING", "PAUSE"}
-
-
-def _build_status_print_keys(printer_id: int, state: PrinterState) -> list[tuple[int, str]]:
-    """Build filename keys for matching a printer status update to Bambuddy-owned jobs."""
-
-    possible_keys: list[tuple[int, str]] = []
-    filename = (state.gcode_file or state.current_print or "").strip()
-    subtask_name = (state.subtask_name or "").strip()
-
-    if subtask_name:
-        possible_keys.append((printer_id, subtask_name))
-        possible_keys.append((printer_id, f"{subtask_name}.3mf"))
-        possible_keys.append((printer_id, f"{subtask_name}.gcode.3mf"))
-
-    if filename:
-        base_name = filename.rsplit("/", 1)[-1]
-        if base_name.endswith(".gcode.3mf"):
-            root_name = base_name[: -len(".gcode.3mf")]
-            possible_keys.append((printer_id, root_name))
-            possible_keys.append((printer_id, base_name))
-            possible_keys.append((printer_id, f"{root_name}.gcode"))
-            possible_keys.append((printer_id, f"{root_name}.3mf"))
-        elif base_name.endswith(".3mf"):
-            root_name = base_name[: -len(".3mf")]
-            possible_keys.append((printer_id, root_name))
-            possible_keys.append((printer_id, base_name))
-        elif base_name.endswith(".gcode"):
-            root_name = base_name[: -len(".gcode")]
-            possible_keys.append((printer_id, root_name))
-            possible_keys.append((printer_id, f"{root_name}.3mf"))
-            possible_keys.append((printer_id, base_name))
-        else:
-            possible_keys.append((printer_id, base_name))
-            possible_keys.append((printer_id, f"{base_name}.3mf"))
-
-    return possible_keys
-
-
-def _is_bambuddy_authorized_print_in_memory(printer_id: int, state: PrinterState) -> bool:
-    """Return True when process-local state identifies a Bambuddy print."""
-
-    if printer_manager.get_current_print_user(printer_id):
-        return True
-
-    possible_keys = _build_status_print_keys(printer_id, state)
-    return any(key in _expected_prints or key in _active_prints for key in possible_keys)
-
-
-async def _is_bambuddy_authorized_print(printer_id: int, state: PrinterState, db) -> bool:
-    """Return whether an active print has a durable Grove queue identity.
-
-    The in-memory registries are useful for same-process status updates, but
-    they are deliberately empty after a backend restart. When the kill switch
-    is enabled, consult the persisted queue row as well so an authorised print
-    is not stopped merely because Grove Control restarted mid-run.
-    """
-    if _is_bambuddy_authorized_print_in_memory(printer_id, state):
-        return True
-
-    from backend.app.models.print_queue import PrintQueueItem
-
-    result = await db.execute(
-        select(PrintQueueItem).where(
-            PrintQueueItem.printer_id == printer_id,
-            PrintQueueItem.status.in_(("dispatching", "printing")),
-        )
-    )
-    queue_items = list(result.scalars().all())
-    if not queue_items:
-        return False
-
-    raw_subtask_id = getattr(state, "subtask_id", None)
-    subtask_id = str(raw_subtask_id).strip() if raw_subtask_id is not None else None
-    if subtask_id in (None, "", "0"):
-        # Local/non-cloud firmware may omit the submission id. The active
-        # printer invariant still makes one durable queue row authoritative.
-        return len(queue_items) == 1
-
-    if any(item.dispatch_subtask_id for item in queue_items):
-        return any(str(item.dispatch_subtask_id or "").strip() == subtask_id for item in queue_items)
-
-    # Queue rows created before dispatch identity was introduced have no
-    # persisted submission id. Preserve their authorisation across a restart
-    # while the single active-printer invariant leaves only one candidate.
-    return len(queue_items) == 1
-
 
 def _select_queue_completion_item(
     active_items: list,
@@ -1444,53 +1353,6 @@ async def on_printer_status_change(printer_id: int, state: PrinterState):
         f"{state.chamber_light}:{state.active_extruder}:{state.tray_now}:{vt_tray_key}:"
         f"{ams_dry_key}:{ams_tray_key}:{state.door_open}:{state.ams_filament_backup}"
     )
-
-    is_active_print = state.state in _ACTIVE_PRINT_STATES
-    if not is_active_print:
-        _unauthorized_print_kill_sent.discard(printer_id)
-    else:
-        kill_switch_enabled = False
-        authorization_check_succeeded = False
-        status_logger = logging.getLogger(__name__)
-        try:
-            async with async_session() as db:
-                from backend.app.services.finance_budget import is_printer_kill_switch_enabled
-
-                kill_switch_enabled = await is_printer_kill_switch_enabled(db)
-                authorized_print = (
-                    await _is_bambuddy_authorized_print(printer_id, state, db) if kill_switch_enabled else True
-                )
-                authorization_check_succeeded = True
-        except Exception as e:
-            status_logger.warning("[KILL SWITCH] Failed to read kill-switch setting for printer %s: %s", printer_id, e)
-
-        # Fail open when the database is unavailable; a transient status-poll
-        # failure must not turn into an unsolicited printer stop. Once the
-        # setting and durable queue lookup both succeed, enforce the switch.
-        if not authorization_check_succeeded or not kill_switch_enabled or authorized_print:
-            _unauthorized_print_kill_sent.discard(printer_id)
-        elif printer_id in _unauthorized_print_kill_sent:
-            pass
-        else:
-            try:
-                stopped = printer_manager.stop_print(printer_id)
-                if stopped:
-                    _unauthorized_print_kill_sent.add(printer_id)
-                    status_logger.warning(
-                        "[KILL SWITCH] Stopped unauthorized print on printer %s (state=%s)",
-                        printer_id,
-                        state.state,
-                    )
-                else:
-                    status_logger.warning(
-                        "[KILL SWITCH] Could not stop unauthorized print on printer %s (state=%s)",
-                        printer_id,
-                        state.state,
-                    )
-            except Exception as e:
-                status_logger.warning(
-                    "[KILL SWITCH] Failed to stop unauthorized print on printer %s: %s", printer_id, e
-                )
 
     # MQTT relay - publish status (before dedup check - always publish to MQTT)
     try:

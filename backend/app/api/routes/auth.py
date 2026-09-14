@@ -367,6 +367,13 @@ async def disable_auth(
             detail="Only admins can disable authentication",
         )
 
+    billing_setting = await db.scalar(select(Settings.value).where(Settings.key == "billing_enabled"))
+    if (billing_setting or "").strip().lower() == "true":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Disable billing before disabling authentication.",
+        )
+
     try:
         await set_auth_enabled(db, False)
         await db.commit()

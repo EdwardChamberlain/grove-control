@@ -7,17 +7,14 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 from backend.app.api.routes.finance import delete_cost_center
-from backend.app.main import (
-    _is_bambuddy_authorized_print,
-    _matches_cancelled_queue_completion,
-    _select_queue_completion_item,
-)
+from backend.app.main import _matches_cancelled_queue_completion, _select_queue_completion_item
 from backend.app.models.archive import PrintArchive
 from backend.app.models.finance import BudgetReservation, CostCenter, UserWallet, WalletTransaction
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.settings import Settings
 from backend.app.models.user import User
 from backend.app.schemas.finance import ManualPrintRequest
+from backend.app.services.finance_budget import validate_print_budget
 from backend.app.services.finance_billing import apply_print_charge_for_archive
 
 
@@ -152,6 +149,27 @@ async def test_cost_center_delete_rejects_active_queue_item(db_session):
     assert await db_session.get(CostCenter, center.id) is not None
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["preheating", "dispatching"])
+async def test_pre_dispatch_heat_soak_states_hold_budget(db_session, status):
+    """A heat-soak handoff remains a budget hold until command dispatch."""
+    center = CostCenter(name=f"Heat-soak {status} center", total_budget=10.0)
+    db_session.add_all([center, Settings(key="billing_enabled", value="true")])
+    await db_session.flush()
+    db_session.add(PrintQueueItem(cost_center_id=center.id, estimated_cost=10.0, status=status))
+    await db_session.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await validate_print_budget(
+            db_session,
+            cost_center_id=center.id,
+            estimated_cost=1.0,
+            current_user=None,
+        )
+
+    assert "exceeds available" in exc_info.value.detail
+
+
 def test_cancelled_queue_completion_requires_persisted_run_identity():
     item = SimpleNamespace(status="cancelled", dispatch_subtask_id="dispatch-1", archive_id=42)
 
@@ -236,33 +254,3 @@ def test_manual_print_request_uses_positive_api_amount():
     assert request.amount == 3.50
     with pytest.raises(ValueError):
         ManualPrintRequest(user_id=1, cost_center_id=2, amount=-3.50)
-
-
-@pytest.mark.asyncio
-async def test_kill_switch_authorization_uses_persisted_queue_run_identity(db_session, printer_factory, monkeypatch):
-    printer = await printer_factory()
-    db_session.add(
-        PrintQueueItem(
-            printer_id=printer.id,
-            status="printing",
-            dispatch_subtask_id="durable-run",
-        )
-    )
-    await db_session.commit()
-
-    from backend.app import main as main_module
-
-    monkeypatch.setattr(main_module, "_expected_prints", {})
-    monkeypatch.setattr(main_module, "_active_prints", {})
-    monkeypatch.setattr(main_module.printer_manager, "get_current_print_user", lambda _printer_id: None)
-
-    state = SimpleNamespace(
-        subtask_id="durable-run",
-        gcode_file="",
-        current_print="",
-        subtask_name="",
-    )
-    assert await _is_bambuddy_authorized_print(printer.id, state, db_session)
-
-    state.subtask_id = "different-run"
-    assert not await _is_bambuddy_authorized_print(printer.id, state, db_session)

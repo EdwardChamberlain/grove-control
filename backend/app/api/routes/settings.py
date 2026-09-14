@@ -224,7 +224,6 @@ async def _build_settings_response(db: AsyncSession, is_api_key: bool = False) -
             "default_layer_inspect",
             "default_timelapse",
             "billing_enabled",
-            "printer_kill_switch_enabled",
             "ldap_enabled",
             "ldap_auto_provision",
             "local_login_enabled",
@@ -300,6 +299,17 @@ async def update_settings(
 ):
     """Update application settings."""
     update_data = settings_update.model_dump(exclude_unset=True)
+
+    # Finance records are keyed to authenticated users. Do not allow an
+    # installation with authentication disabled to enter a state where billing
+    # is enabled but every wallet/cost-center route has no user identity.
+    if update_data.get("billing_enabled") is True:
+        auth_enabled = (await get_setting(db, "auth_enabled") or "").strip().lower() == "true"
+        if not auth_enabled:
+            raise HTTPException(
+                status_code=400,
+                detail="Billing requires authentication to be enabled first.",
+            )
 
     # Safety refusals on disabling local login (#1589). Two failure modes
     # would otherwise lock everyone out of the install:

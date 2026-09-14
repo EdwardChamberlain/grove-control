@@ -25,16 +25,6 @@ async def is_billing_enabled(db: AsyncSession) -> bool:
     return count > 0
 
 
-async def is_printer_kill_switch_enabled(db: AsyncSession) -> bool:
-    """Return True when billing and the printer kill-switch are both enabled."""
-
-    result = await db.execute(
-        select(Settings.key, Settings.value).where(Settings.key.in_(("billing_enabled", "printer_kill_switch_enabled")))
-    )
-    values = {key: (value or "").strip().lower() for key, value in result.all()}
-    return values.get("billing_enabled") == "true" and values.get("printer_kill_switch_enabled") == "true"
-
-
 async def _get_budget_window_start_utc(db: AsyncSession) -> datetime:
     result = await db.execute(
         select(Settings).where(Settings.key.in_(["finance_budget_reset_day", "finance_budget_reset_timezone"]))
@@ -93,7 +83,10 @@ async def _cost_center_open_queue_reservations(
 ) -> float:
     conditions = [
         PrintQueueItem.cost_center_id == cost_center_id,
-        PrintQueueItem.status.in_(("pending", "printing")),
+        # A queue row is the durable pre-dispatch hold until the command-boundary
+        # BudgetReservation is created. Include every state that has not yet
+        # crossed that boundary so a heat-soak handoff cannot free its estimate.
+        PrintQueueItem.status.in_(("pending", "preheating", "dispatching", "printing")),
     ]
     # Once dispatch has crossed its command boundary, the durable budget
     # reservation replaces the queue estimate. Do not count that item twice.

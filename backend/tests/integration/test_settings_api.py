@@ -81,6 +81,15 @@ class TestSettingsAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_billing_requires_authentication(self, async_client: AsyncClient):
+        """Finance cannot be enabled while the install has no user identity."""
+        response = await async_client.put("/api/v1/settings/", json={"billing_enabled": True})
+
+        assert response.status_code == 400
+        assert "requires authentication" in response.json()["detail"].lower()
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_update_time_format(self, async_client: AsyncClient):
         """Verify time format can be updated."""
         response = await async_client.put("/api/v1/settings/", json={"time_format": "24h"})

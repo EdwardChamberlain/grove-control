@@ -609,6 +609,37 @@ class TestAuthDisableAPI:
         status_response = await async_client.get("/api/v1/auth/status")
         assert status_response.json()["auth_enabled"] is False
 
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_disable_auth_rejected_while_billing_enabled(self, async_client: AsyncClient):
+        """Billing must be disabled before removing the user identity it needs."""
+        await async_client.post(
+            "/api/v1/auth/setup",
+            json={
+                "auth_enabled": True,
+                "admin_username": "billingdisableadmin",
+                "admin_password": "AdminPass1!",
+            },
+        )
+        login_response = await async_client.post(
+            "/api/v1/auth/login",
+            json={"username": "billingdisableadmin", "password": "AdminPass1!"},
+        )
+        token = login_response.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        billing_response = await async_client.put(
+            "/api/v1/settings/",
+            json={"billing_enabled": True},
+            headers=headers,
+        )
+        assert billing_response.status_code == 200
+
+        response = await async_client.post("/api/v1/auth/disable", headers=headers)
+
+        assert response.status_code == 400
+        assert "disable billing" in response.json()["detail"].lower()
+
 
 class TestGroupsAPI:
     """Integration tests for /api/v1/groups/ endpoints."""
