@@ -57,7 +57,6 @@ import {
   Package,
   PackageOpen,
   Ungroup,
-  Ban,
   PlayCircle,
 } from 'lucide-react';
 import { api, ApiError } from '../api/client';
