@@ -10,6 +10,13 @@ def _future_iso(hours: int = 2) -> str:
     return (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
 
 
+@pytest.fixture(autouse=True)
+def scheduled_drying_printer_is_offline():
+    """Keep route fixtures independent of the process-wide printer manager."""
+    with patch("backend.app.api.routes.scheduled_dryings.printer_manager.get_status", return_value=None):
+        yield
+
+
 @pytest.mark.asyncio
 async def test_create_and_list(async_client, printer_factory):
     printer = await printer_factory()
