@@ -14,8 +14,8 @@ from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.settings import Settings
 from backend.app.models.user import User
 from backend.app.schemas.finance import ManualPrintRequest
-from backend.app.services.finance_budget import validate_print_budget
 from backend.app.services.finance_billing import apply_print_charge_for_archive
+from backend.app.services.finance_budget import validate_print_budget
 
 
 @pytest.mark.asyncio
