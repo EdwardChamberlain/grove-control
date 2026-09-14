@@ -57,7 +57,7 @@ from backend.app.services.print_batch import (
     refresh_batch_status,
     refresh_batch_status_for_item,
 )
-from backend.app.utils.printer_models import is_gcode_compatible, normalize_printer_model, normalize_printer_model_id
+from backend.app.utils.printer_models import is_gcode_compatible
 from backend.app.utils.threemf_tools import (
     extract_bed_type_from_3mf,
     extract_filament_usage_from_3mf,
