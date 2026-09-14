@@ -67,6 +67,7 @@ from backend.app.services.printer_manager import (
 )
 from backend.app.services.slot_nozzle import resolve_slot_nozzle
 from backend.app.utils.http import build_content_disposition
+from backend.app.utils.printer_models import uses_exhaust_fan_label
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/printers", tags=["printers"])
@@ -888,6 +889,8 @@ async def get_printer_status(
         big_fan1_speed=state.big_fan1_speed,
         big_fan2_speed=state.big_fan2_speed,
         heatbreak_fan_speed=state.heatbreak_fan_speed,
+        left_aux_fan_speed=state.left_aux_fan_speed,
+        exhaust_fan_present=state.exhaust_fan_present,
         firmware_version=state.firmware_version,
         developer_mode=state.developer_mode if state else None,
         ams_filament_backup=state.ams_filament_backup if state else None,
@@ -3185,16 +3188,16 @@ async def set_chamber_temperature(
 @router.post("/{printer_id}/fan-speed")
 async def set_fan_speed(
     printer_id: int,
-    fan: str = Query(..., description="Fan to control: part, aux, or chamber"),
+    fan: str = Query(..., description="Fan to control: part, aux, aux2 (left aux), or chamber"),
     speed: int = Query(..., ge=0, le=100, description="Fan speed percentage"),
     _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_CONTROL),
     db: AsyncSession = Depends(get_db),
 ):
     """Set a fan speed by percentage."""
-    fan_ids = {"part": 1, "aux": 2, "chamber": 3}
+    fan_ids = {"part": 1, "aux": 2, "aux2": 10, "chamber": 3}
     fan_id = fan_ids.get(fan)
     if fan_id is None:
-        raise HTTPException(400, "fan must be 'part', 'aux', or 'chamber'")
+        raise HTTPException(400, "fan must be 'part', 'aux', 'aux2', or 'chamber'")
 
     result = await db.execute(select(Printer).where(Printer.id == printer_id))
     printer = result.scalar_one_or_none()
@@ -3205,12 +3208,22 @@ async def set_fan_speed(
     if not client:
         raise HTTPException(400, "Printer not connected")
 
+    if fan == "aux2" and (not uses_exhaust_fan_label(printer.model) or client.state.left_aux_fan_speed is None):
+        raise HTTPException(400, "Left auxiliary fan is not reported by this printer")
+    if fan == "chamber" and uses_exhaust_fan_label(printer.model) and not client.state.exhaust_fan_present:
+        raise HTTPException(400, "Exhaust fan is not reported by this printer")
+
     pwm_speed = round(speed * 255 / 100)
     success = client.set_fan_speed(fan_id, pwm_speed)
     if not success:
         raise HTTPException(500, "Failed to set fan speed")
 
-    fan_names = {"part": "Part cooling fan", "aux": "Auxiliary fan", "chamber": "Chamber fan"}
+    fan_names = {
+        "part": "Part cooling fan",
+        "aux": "Auxiliary fan",
+        "aux2": "Left auxiliary fan",
+        "chamber": "Exhaust fan" if uses_exhaust_fan_label(printer.model) else "Chamber fan",
+    }
     return {"success": True, "message": f"{fan_names[fan]} set to {speed}%"}
 
 

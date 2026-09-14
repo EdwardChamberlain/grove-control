@@ -676,6 +676,8 @@ export default {
     fans: {
       partCooling: 'Bauteilkühlung',
       auxiliary: 'Hilfsventilator',
+      leftAuxiliary: 'Linker Hilfsventilator',
+      exhaust: 'Abluft',
       chamber: 'Kammerventilator',
     },
     // HMS errors
@@ -1123,6 +1125,8 @@ export default {
     history: {
       emptyTitle: 'Noch kein Verlauf',
       emptyDescription: 'Abgeschlossene, abgebrochene und fehlgeschlagene Drucke erscheinen hier.',
+      showMore: 'Mehr anzeigen',
+      showingCount: '{{shown}} von {{total}} werden angezeigt',
     },
     dragGhost: {
       multiCount: '{{count}} Einträge',
@@ -3434,6 +3438,9 @@ export default {
     folderSort: 'Ordner sortieren',
     folderSortByName: 'Nach Name',
     folderSortByActivity: 'Nach letzter Aktivität',
+    showModified: 'Änderungsdatum anzeigen',
+    hideModified: 'Änderungsdatum ausblenden',
+    lastModified: 'Zuletzt geändert',
     dragToResizeTooltip: 'Ziehen zum Ändern der Größe, Doppelklick zum Zurücksetzen',
     searchFiles: 'Dateien suchen...',
     searchSubfoldersHint: 'Inklusive Unterordner',

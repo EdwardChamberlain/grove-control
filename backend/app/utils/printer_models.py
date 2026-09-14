@@ -232,6 +232,17 @@ DUAL_NOZZLE_MODELS = frozenset(
 )
 
 
+EXHAUST_FAN_LABEL_MODELS = frozenset(["P2S", "X2D", "N7", "N6"])
+
+
+def uses_exhaust_fan_label(model: str | None) -> bool:
+    """Whether the model calls its enclosure fan an exhaust fan."""
+    if not model:
+        return False
+    normalized = model.strip().upper().replace(" ", "").replace("-", "")
+    return normalized in EXHAUST_FAN_LABEL_MODELS
+
+
 def has_ethernet(model: str | None) -> bool:
     """Return True if the printer model has an ethernet port."""
     if not model:

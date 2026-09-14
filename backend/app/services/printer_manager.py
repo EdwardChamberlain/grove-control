@@ -1390,6 +1390,8 @@ def printer_state_to_dict(
         "big_fan1_speed": state.big_fan1_speed,
         "big_fan2_speed": state.big_fan2_speed,
         "heatbreak_fan_speed": state.heatbreak_fan_speed,
+        "left_aux_fan_speed": getattr(state, "left_aux_fan_speed", None),
+        "exhaust_fan_present": getattr(state, "exhaust_fan_present", False),
         # Chamber light state
         "chamber_light": state.chamber_light,
         # Active extruder for dual-nozzle printers (0=right, 1=left)

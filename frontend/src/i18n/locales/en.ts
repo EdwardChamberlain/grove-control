@@ -681,7 +681,9 @@ export default {
     fans: {
       partCooling: 'Part Cooling Fan',
       auxiliary: 'Auxiliary Fan',
+      leftAuxiliary: 'Left Auxiliary Fan',
       chamber: 'Chamber Fan',
+      exhaust: 'Exhaust',
     },
     // HMS errors
     clickToViewHmsErrors: 'Click to view HMS errors',
@@ -1142,6 +1144,8 @@ export default {
     history: {
       emptyTitle: 'No history yet',
       emptyDescription: 'Completed, cancelled, and failed prints will appear here.',
+      showMore: 'Show more',
+      showingCount: 'Showing {{shown}} of {{total}}',
     },
     // Drag ghost label when multi-dragging
     dragGhost: {
@@ -3459,6 +3463,9 @@ export default {
     folderSort: 'Sort folders',
     folderSortByName: 'By name',
     folderSortByActivity: 'By recent activity',
+    showModified: 'Show modified dates',
+    hideModified: 'Hide modified dates',
+    lastModified: 'Last modified',
     dragToResizeTooltip: 'Drag to resize, double-click to reset',
     searchFiles: 'Search files...',
     searchSubfoldersHint: 'Including subfolders',

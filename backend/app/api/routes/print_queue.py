@@ -1311,14 +1311,33 @@ async def delete_queue_item(
 async def reorder_queue(
     data: PrintQueueReorder,
     db: AsyncSession = Depends(get_db),
-    _: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_UPDATE_ALL),
+    auth_result: tuple[User | None, bool] = Depends(
+        require_ownership_permission(
+            Permission.QUEUE_UPDATE_ALL,
+            Permission.QUEUE_UPDATE_OWN,
+        )
+    ),
 ):
-    """Bulk update positions for queue items."""
+    """Bulk update positions for pending queue items within the caller's scope."""
+    user, can_modify_all = auth_result
+    if user is not None and not user.has_permission(Permission.QUEUE_REORDER.value):
+        raise HTTPException(403, "You do not have permission to reorder queue items")
+
+    item_ids = [reorder_item.id for reorder_item in data.items]
+    result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.id.in_(item_ids)))
+    items_by_id = {item.id: item for item in result.scalars().all()}
+
+    if user is not None and not can_modify_all:
+        unauthorized = [item_id for item_id, item in items_by_id.items() if item.created_by_id != user.id]
+        if unauthorized:
+            raise HTTPException(403, "You can only reorder your own queue items")
+
+    updated_count = 0
     for reorder_item in data.items:
-        result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.id == reorder_item.id))
-        item = result.scalar_one_or_none()
+        item = items_by_id.get(reorder_item.id)
         if item and item.status == "pending":
             item.position = reorder_item.position
+            updated_count += 1
 
     await db.commit()
     logger.info("Reordered %s queue items", len(data.items))

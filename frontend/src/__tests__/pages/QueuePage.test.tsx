@@ -302,6 +302,31 @@ describe('QueuePage', () => {
       });
     });
 
+    it('reveals history beyond the first page on demand', async () => {
+      const user = userEvent.setup();
+      const historyItems = Array.from({ length: 51 }, (_, index) => ({
+        ...mockQueueItems[2],
+        id: 100 + index,
+        archive_name: `History Print ${index + 1}`,
+      }));
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json(historyItems)),
+      );
+
+      render(<QueuePage />);
+      await user.click(await screen.findByRole('button', { name: /^History/ }));
+
+      await waitFor(() => {
+        expect(screen.getByText('History Print 1')).toBeInTheDocument();
+        expect(screen.getByText('Showing 50 of 51')).toBeInTheDocument();
+      });
+      expect(screen.queryByText('History Print 51')).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Show more' }));
+      expect(await screen.findByText('History Print 51')).toBeInTheDocument();
+      expect(screen.queryByText('Showing 50 of 51')).not.toBeInTheDocument();
+    });
+
     it('shows status badges', async () => {
       render(<QueuePage />);
 

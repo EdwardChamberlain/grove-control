@@ -676,6 +676,8 @@ export default {
     fans: {
       partCooling: 'Ventola raffreddamento parte',
       auxiliary: 'Ventola ausiliaria',
+      leftAuxiliary: 'Ventola ausiliaria sinistra',
+      exhaust: 'Estrazione',
       chamber: 'Ventola camera',
     },
     // HMS errors
@@ -1123,6 +1125,8 @@ export default {
     history: {
       emptyTitle: 'Nessuna cronologia',
       emptyDescription: 'Le stampe completate, annullate e fallite appariranno qui.',
+      showMore: 'Mostra altri',
+      showingCount: 'Visualizzati {{shown}} di {{total}}',
     },
     dragGhost: {
       multiCount: '{{count}} elementi',
@@ -3422,6 +3426,9 @@ export default {
     folderSort: 'Ordina cartelle',
     folderSortByName: 'Per nome',
     folderSortByActivity: 'Per attività recente',
+    showModified: 'Mostra date di modifica',
+    hideModified: 'Nascondi date di modifica',
+    lastModified: 'Ultima modifica',
     dragToResizeTooltip: 'Trascina per ridimensionare, doppio clic per reset',
     searchFiles: 'Cerca file...',
     searchSubfoldersHint: 'Sottocartelle incluse',

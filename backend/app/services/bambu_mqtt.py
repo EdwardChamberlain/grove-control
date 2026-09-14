@@ -459,6 +459,10 @@ class PrinterState:
     big_fan1_speed: int | None = None  # Auxiliary fan
     big_fan2_speed: int | None = None  # Chamber/exhaust fan
     heatbreak_fan_speed: int | None = None  # Hotend heatbreak fan
+    # Optional P2S/X2D left auxiliary fan, reported only by airduct part id 10.
+    left_aux_fan_speed: int | None = None
+    # P2S/X2D exhaust kit presence, reported by airduct part id 3.
+    exhaust_fan_present: bool = False
     # Tray change history during current print: [(global_tray_id, layer_num), ...]
     # Used by usage tracker to split filament weight on mid-print tray switch
     tray_change_log: list = field(default_factory=list)
@@ -3031,6 +3035,33 @@ class BambuMQTTClient:
                             f"[{self.serial_number}] airduct_mode changed: {self.state.airduct_mode} -> {new_mode}"
                         )
                     self.state.airduct_mode = new_mode
+                # Parse the bit-packed airduct fan inventory. Bambu reports
+                # decoded part ids in the high nibble (raw id >> 4), while the
+                # low byte of state contains the current percentage. A parts
+                # list missing either mandatory built-in fan is a partial
+                # update, so do not retract an accessory learned earlier.
+                parts = airduct_data.get("parts")
+                if isinstance(parts, list):
+                    speeds: dict[int, int] = {}
+                    for part in parts:
+                        if not isinstance(part, dict):
+                            continue
+                        try:
+                            part_id = int(part["id"]) >> 4
+                            part_state = int(part["state"]) & 0xFF
+                        except (KeyError, ValueError, TypeError):
+                            continue
+                        speeds[part_id] = max(0, min(100, part_state))
+
+                    is_full_inventory = 1 in speeds and 2 in speeds
+                    left_aux_speed = speeds.get(10)
+                    if left_aux_speed is None and not is_full_inventory:
+                        left_aux_speed = self.state.left_aux_fan_speed
+                    self.state.left_aux_fan_speed = left_aux_speed
+                    if 3 in speeds:
+                        self.state.exhaust_fan_present = True
+                    elif is_full_inventory:
+                        self.state.exhaust_fan_present = False
                 # Parse chamber temp - may be encoded as (target*65536+current) when > 500
                 # Check if we recently set the target locally (within 5 seconds)
                 local_set_time = self.state.temperatures.get("_chamber_target_set_time", 0)
@@ -5312,13 +5343,13 @@ class BambuMQTTClient:
         """Set fan speed.
 
         Args:
-            fan: Fan index (1=part cooling, 2=auxiliary, 3=chamber)
+            fan: Fan index (1=part cooling, 2=auxiliary, 3=chamber, 10=left auxiliary)
             speed: Speed 0-255 (0=off, 255=full)
 
         Returns:
             True if command was sent, False otherwise
         """
-        if fan not in (1, 2, 3):
+        if fan not in (1, 2, 3, 10):
             logger.warning("[%s] Invalid fan index: %s", self.serial_number, fan)
             return False
 
@@ -5336,6 +5367,10 @@ class BambuMQTTClient:
     def set_chamber_fan(self, speed: int) -> bool:
         """Set chamber fan speed (0-255)."""
         return self.set_fan_speed(3, speed)
+
+    def set_left_aux_fan(self, speed: int) -> bool:
+        """Set the optional left auxiliary fan speed (0-255)."""
+        return self.set_fan_speed(10, speed)
 
     def set_airduct_mode(self, mode: str) -> bool:
         """Set air conditioning mode (cooling or heating).

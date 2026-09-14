@@ -3789,9 +3789,9 @@ class TestSetChamberTemperatureAPI:
 
 
 class TestSetFanSpeedAPI:
-    """Integration tests for POST /printers/{id}/fan-speed (#1661).
+    """Integration tests for POST /printers/{id}/fan-speed (#1661, #73).
 
-    The fan-id mapping (part->1, aux->2, chamber->3) is the critical
+    The fan-id mapping (part->1, aux->2, left aux->10, chamber->3) is the critical
     correctness gate — wrong mapping would target the wrong physical fan.
     """
 
@@ -3828,6 +3828,36 @@ class TestSetFanSpeedAPI:
         assert response.status_code == 200
         called_fan_id, called_pwm = mock_client.set_fan_speed.call_args.args
         assert called_fan_id == expected_fan_id
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_left_aux_fan_maps_to_p10_for_reported_p2s(self, async_client: AsyncClient, printer_factory):
+        printer = await printer_factory(name="P2S", model="P2S")
+        mock_client = MagicMock()
+        mock_client.state.left_aux_fan_speed = 50
+        mock_client.set_fan_speed.return_value = True
+        with patch("backend.app.api.routes.printers.printer_manager") as mock_pm:
+            mock_pm.get_client.return_value = mock_client
+            response = await async_client.post(f"/api/v1/printers/{printer.id}/fan-speed?fan=aux2&speed=80")
+
+        assert response.status_code == 200
+        assert mock_client.set_fan_speed.call_args.args == (10, 204)
+        assert response.json()["message"] == "Left auxiliary fan set to 80%"
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_left_aux_fan_requires_supported_model_and_telemetry(
+        self, async_client: AsyncClient, printer_factory
+    ):
+        printer = await printer_factory(name="P2S", model="P2S")
+        mock_client = MagicMock()
+        mock_client.state.left_aux_fan_speed = None
+        with patch("backend.app.api.routes.printers.printer_manager") as mock_pm:
+            mock_pm.get_client.return_value = mock_client
+            response = await async_client.post(f"/api/v1/printers/{printer.id}/fan-speed?fan=aux2&speed=50")
+
+        assert response.status_code == 400
+        assert "not reported" in response.json()["detail"]
 
     @pytest.mark.asyncio
     @pytest.mark.integration
