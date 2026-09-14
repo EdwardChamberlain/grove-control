@@ -59,10 +59,8 @@ import {
   Ungroup,
   Ban,
   PlayCircle,
-  Workflow,
 } from 'lucide-react';
 import { api, ApiError } from '../api/client';
-import { PipelineRunsView } from './PipelineRunsPage';
 import { type TimeFormat, formatDate, formatETA, formatDuration, formatRelativeTime, parseUTCDate } from '../utils/date';
 import { getBedTypeInfo } from '../utils/bedType';
 import type { PrintQueueItem, PrintQueueBulkUpdate, Permission, CalibrationMode } from '../api/client';
@@ -1347,16 +1345,14 @@ export function QueuePage() {
   // History tab renders unconditionally so this no longer drives the UI.
   // Tabbed page structure: Active queue stays as the main view; History
   // and Timeline split off. Persists per-user via localStorage.
-  const [activeTab, setActiveTab] = useState<'queue' | 'batches' | 'history' | 'timeline' | 'pipelines'>(() => {
-    // URL deep-link wins so the legacy /pipelines/runs redirect lands on the
-    // right tab. localStorage holds the per-user last-selected fallback.
+  const [activeTab, setActiveTab] = useState<'queue' | 'batches' | 'history' | 'timeline'>(() => {
     const search = new URLSearchParams(window.location.search);
     const url = search.get('tab');
-    if (url === 'pipelines' || url === 'batches' || url === 'history' || url === 'timeline' || url === 'queue') {
+    if (url === 'batches' || url === 'history' || url === 'timeline' || url === 'queue') {
       return url;
     }
     const saved = localStorage.getItem('queue.activeTab');
-    if (saved === 'history' || saved === 'timeline' || saved === 'pipelines' || saved === 'batches') return saved;
+    if (saved === 'history' || saved === 'timeline' || saved === 'batches') return saved;
     return 'queue';
   });
   // Active-tab layout toggle. "position" = today's flat list; "printer"
@@ -2078,10 +2074,6 @@ export function QueuePage() {
           { id: 'batches' as const, label: t('queue.tabs.batches'), icon: Package, count: activeBatchCount },
           { id: 'history' as const, label: t('queue.tabs.history'), icon: ListOrdered, count: historyItems.length },
           { id: 'timeline' as const, label: t('queue.tabs.timeline'), icon: GanttChart, count: null as number | null },
-          // Slicer Pipelines dashboard (#1425 PR C). Lives here instead of
-          // its own sidebar entry so the Print Queue page is the single
-          // place an operator looks for "what's running / what ran".
-          { id: 'pipelines' as const, label: t('queue.tabs.pipelines'), icon: Workflow, count: null as number | null },
         ]).map(({ id, label, icon: Icon, count }) => (
           <button
             key={id}
@@ -2105,8 +2097,8 @@ export function QueuePage() {
         ))}
       </div>
 
-      {/* Summary Stats — about the print queue, not pipelines or batches. */}
-      {activeTab !== 'pipelines' && activeTab !== 'batches' && <QueueStatsBar
+      {/* Summary Stats — hidden while the batch tab owns the content area. */}
+      {activeTab !== 'batches' && <QueueStatsBar
         printingCount={printingCount}
         queuedCount={pendingItems.length + dispatchingItems.length}
         totalTime={totalQueueTime}
@@ -2153,9 +2145,8 @@ export function QueuePage() {
       )}
 
       {/* Filters — about the print queue items (printer / status / location).
-          The Pipelines and Batches tabs have their own controls, so this row is
-          hidden when either tab is active. */}
-      {activeTab !== 'pipelines' && activeTab !== 'batches' && (
+          The Batches tab has its own controls, so this row is hidden there. */}
+      {activeTab !== 'batches' && (
       <div className="flex flex-wrap items-center gap-2 sm:gap-4 mb-6">
         <ToolbarDropdown
           value={filterPrinter === -1 ? 'unassigned' : filterPrinter ? String(filterPrinter) : 'all'}
@@ -2264,11 +2255,7 @@ export function QueuePage() {
         </div>
       )}
 
-      {/* Pipelines tab short-circuits before the queue-empty branch so the
-          dashboard renders even when the regular queue is empty. */}
-      {activeTab === 'pipelines' ? (
-        <PipelineRunsView />
-      ) : activeTab === 'batches' ? (
+      {activeTab === 'batches' ? (
         <BatchOrdersView hasPermission={hasPermission} t={t} />
       ) : isLoading ? (
         <div className="text-center py-12 text-bambu-gray">{t('common.loading')}</div>

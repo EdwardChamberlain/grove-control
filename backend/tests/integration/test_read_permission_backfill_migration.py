@@ -221,10 +221,7 @@ class TestReadPermissionMigration:
     @pytest.mark.asyncio
     @pytest.mark.integration
     async def test_administrators_printer_sensor_history_read_backfilled(self, async_client: AsyncClient):
-        """Admin without `printer_sensor_history:read` (older custom edit or
-        a DB seeded before that permission existed) gets it backfilled —
-        regression for the gap maziggy hit on a live install where the
-        per-permission admin backfills missed it."""
+        """Admin without `printer_sensor_history:read` gets it backfilled."""
         await seed_default_groups()
         async with _database_module.async_session() as session:
             grp = (await session.execute(select(Group).where(Group.name == "Administrators"))).scalar_one()
@@ -239,15 +236,10 @@ class TestReadPermissionMigration:
     @pytest.mark.asyncio
     @pytest.mark.integration
     async def test_administrators_sync_covers_every_current_permission(self, async_client: AsyncClient):
-        """Generic invariant: ALL_PERMISSIONS sync ensures every Permission
-        enum value is present on the Administrators group, no matter what
-        was stripped pre-backfill. Catches every future "new permission
-        missing on upgrade" regression without needing a one-off test."""
+        """Every current permission is restored after an admin upgrade."""
         from backend.app.core.permissions import ALL_PERMISSIONS
 
         await seed_default_groups()
-        # Wipe the admin group's permission list entirely and force the sync
-        # to put everything back.
         async with _database_module.async_session() as session:
             grp = (await session.execute(select(Group).where(Group.name == "Administrators"))).scalar_one()
             grp.permissions = []
@@ -262,8 +254,7 @@ class TestReadPermissionMigration:
     @pytest.mark.asyncio
     @pytest.mark.integration
     async def test_administrators_sync_is_additive_only(self, async_client: AsyncClient):
-        """The sync block must never remove a permission an operator added by
-        hand — only add missing entries from ALL_PERMISSIONS."""
+        """The sync preserves custom permissions while adding current ones."""
         await seed_default_groups()
         async with _database_module.async_session() as session:
             grp = (await session.execute(select(Group).where(Group.name == "Administrators"))).scalar_one()

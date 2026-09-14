@@ -262,7 +262,6 @@ async def init_db():
         oidc_provider,
         orca_base_cache,
         pending_upload,
-        pipeline_run,
         print_batch,
         print_log,
         print_queue,
@@ -274,7 +273,6 @@ async def init_db():
         scheduled_drying,
         settings,
         shopping_list,
-        slicer_pipeline,
         slot_preset,
         smart_plug,
         smart_plug_energy_snapshot,
@@ -507,6 +505,81 @@ async def _safe_execute(conn, sql):
         if not _is_already_applied(exc, sql):
             logger.error("Migration statement failed: %s | SQL: %.200s", exc, sql)
             raise
+
+
+async def _migrate_retired_pipeline_runs(conn) -> None:
+    """Safely finish pipeline runs that never created ordinary queue items.
+
+    Slicer pipelines are no longer part of the application, but their tables
+    remain as unsupported legacy data. A run can be durable in ``queued`` or
+    ``slicing`` with no produced library file and no ``print_queue`` row yet;
+    leaving that row live would make it look recoverable even though the
+    pipeline orchestrator has been removed. Preserve the run and its source
+    history, but make the outcome explicit and terminal so it cannot be
+    silently retried or produce a duplicate print.
+
+    The table and columns are checked first because fresh installs do not have
+    the retired tables at all, and unsupported legacy exports may contain a
+    table with a different shape.
+    """
+    from sqlalchemy import text
+
+    if is_sqlite():
+        table_result = await conn.execute(
+            text("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = :table_name"),
+            {"table_name": "pipeline_runs"},
+        )
+        table_exists = table_result.scalar() is not None
+        if not table_exists:
+            return
+        column_result = await conn.execute(text("PRAGMA table_info(pipeline_runs)"))
+        columns = {row[1] for row in column_result.fetchall()}
+    else:
+        table_result = await conn.execute(text("SELECT to_regclass(:table_name)"), {"table_name": "pipeline_runs"})
+        table_exists = table_result.scalar() is not None
+        if not table_exists:
+            return
+        column_result = await conn.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = current_schema() AND table_name = :table_name"
+            ),
+            {"table_name": "pipeline_runs"},
+        )
+        columns = {row[0] for row in column_result.fetchall()}
+
+    required_columns = {
+        "status",
+        "sliced_library_file_id",
+        "slice_job_id",
+        "started_at",
+        "completed_at",
+        "error_message",
+    }
+    if not required_columns.issubset(columns):
+        logger.warning("Skipping retired pipeline-run migration: legacy pipeline_runs table has an unknown shape")
+        return
+
+    result = await conn.execute(
+        text(
+            "UPDATE pipeline_runs "
+            "SET status = 'failed', "
+            "    slice_job_id = NULL, "
+            "    started_at = NULL, "
+            "    completed_at = CURRENT_TIMESTAMP, "
+            "    error_message = :retirement_message "
+            "WHERE status IN ('queued', 'slicing') "
+            "  AND sliced_library_file_id IS NULL"
+        ),
+        {
+            "retirement_message": (
+                "Slicer pipelines were retired before this run created a print queue item. "
+                "The source remains available for manual slicing or queueing."
+            )
+        },
+    )
+    if isinstance(result.rowcount, int) and result.rowcount:
+        logger.warning("Marked %d interrupted slicer pipeline run(s) as safely retired", result.rowcount)
 
 
 # Every non-primary-key column on PrintQueueItem. These are deliberately
@@ -959,22 +1032,9 @@ async def run_migrations(conn):
     """
     from sqlalchemy import text
 
-    # Migration: Add parent_run_id column to pipeline_runs (#1425 PR C).
-    # Links a retry-failed run back to its parent so the dashboard can show
-    # "Retry of run #N" inline. Idempotent on both SQLite and Postgres.
-    await _safe_execute(
-        conn,
-        "ALTER TABLE pipeline_runs ADD COLUMN parent_run_id INTEGER REFERENCES pipeline_runs(id) ON DELETE SET NULL",
-    )
-
-    # Migration: Add source_archive_id column to pipeline_runs (#1425 PR B follow-up).
-    # Allows a pipeline run to source from an archive's source 3MF in addition
-    # to a library file. Idempotent — _safe_execute swallows the "already exists"
-    # case on both SQLite and Postgres.
-    await _safe_execute(
-        conn,
-        "ALTER TABLE pipeline_runs ADD COLUMN source_archive_id INTEGER REFERENCES print_archives(id) ON DELETE SET NULL",
-    )
+    # Retired pipeline rows are preserved as legacy history, but runs that had
+    # not produced a normal queue item must not remain falsely recoverable.
+    await _migrate_retired_pipeline_runs(conn)
 
     # Migration: Add is_favorite column to print_archives
     await _safe_execute(conn, "ALTER TABLE print_archives ADD COLUMN is_favorite BOOLEAN DEFAULT 0")
@@ -3824,8 +3884,7 @@ async def run_migrations(conn):
     # `file_variant_groups` table itself needs no migration — create_all() above
     # builds it — but the two member-side columns do. INTEGER and the inline
     # REFERENCES clause are spelled identically on SQLite and Postgres, and
-    # SQLite accepts a REFERENCES on ADD COLUMN (same form as the
-    # pipeline_runs.parent_run_id migration at the top of this function).
+    # SQLite accepts a REFERENCES on ADD COLUMN.
     await _safe_execute(
         conn,
         "ALTER TABLE library_files ADD COLUMN variant_group_id INTEGER "
@@ -3878,9 +3937,9 @@ async def _migrate_backfill_variant_groups(conn) -> None:
     """Build variant groups from the slice provenance already on disk (#671 / #2570).
 
     ``sliced_from_library_file_id`` has been stamped into ``file_metadata`` by the
-    Slice button (routes/library.py) and the pipeline runner (routes/pipeline_runs.py)
-    since those features shipped, and until now nothing ever read it back — the
-    link existed but was inert. This promotes it to real group membership so an
+    Slice button (routes/library.py) since that feature shipped, and until now
+    nothing ever read it back — the link existed but was inert. This promotes it
+    to real group membership so an
     existing library arrives with its slice sets already grouped instead of
     requiring the user to re-declare by hand what Bambuddy itself recorded.
 
@@ -4289,13 +4348,9 @@ async def seed_default_groups():
         # newly-added Permission enum member silently leaves admins gated out
         # of the feature it controls.
         #
-        # Generalises the previous one-off admin backfills (library:purge,
-        # archives:purge, the OWN/ALL read-flag set + legacy read flags,
-        # orca_cloud:auth, printer_sensor_history:read, …): every current
-        # Permission enum value is appended to the admin group if missing.
-        # Additive only — never removes a permission an operator added by
-        # hand. Run AFTER the legacy-rename migration above so the renamed
-        # OWN/ALL variants land in the group before the sync sees them.
+        # This is additive only: custom permissions are retained, while every
+        # current product permission (excluding retired pipeline permissions,
+        # which are no longer in ALL_PERMISSIONS) is restored for admins.
         result = await session.execute(select(Group).where(Group.name == "Administrators"))
         admin_group = result.scalar_one_or_none()
         if admin_group and admin_group.permissions is not None:
@@ -4383,33 +4438,6 @@ async def seed_default_groups():
                 logger.info("Migrated legacy role-admin user '%s' to Administrators group", user.username)
             await upsert_setting(session, Settings, admin_role_migration_key, "complete")
             await session.commit()
-
-        # Backfill pipeline permissions (#1425). Pipelines were added after
-        # initial seeding, so existing groups need them appended:
-        # Backfill pipeline permissions (#1425) for non-admin groups.
-        # Administrators is handled by the ALL_PERMISSIONS sync above.
-        #   - Operators: all three (matches fresh-install DEFAULT_GROUPS)
-        #   - Any other group with library:read_own or settings:read:
-        #     pipelines:read only
-        result = await session.execute(select(Group))
-        for group in result.scalars().all():
-            if not group.permissions or group.name == "Administrators":
-                continue
-            perms = list(group.permissions)
-            changed = False
-            if group.name == "Operators":
-                for new_perm in ("pipelines:read", "pipelines:write", "pipelines:run"):
-                    if new_perm not in perms:
-                        perms.append(new_perm)
-                        changed = True
-                        logger.info("Added %s to Operators group (backfill)", new_perm)
-            elif "pipelines:read" not in perms and ("library:read_own" in perms or "settings:read" in perms):
-                perms.append("pipelines:read")
-                changed = True
-                logger.info("Added pipelines:read to group '%s' (backfill)", group.name)
-            if changed:
-                group.permissions = perms
-        await session.commit()
 
         # Migrate existing users to groups if they're not already in any group
         if groups_created:
