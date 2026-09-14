@@ -6,7 +6,6 @@ Thank you for your interest in contributing to Grove Control! This document prov
 
 - [Code of Conduct](#code-of-conduct)
 - [Before You Start](#before-you-start)
-- [Documentation Requirements](#documentation-requirements)
 - [Getting Started](#getting-started)
 - [Development Setup](#development-setup)
 - [Making Changes](#making-changes)
@@ -36,49 +35,6 @@ Please read and follow our [Code of Conduct](CODE_OF_CONDUCT.md) to keep our com
 **No assigned issue = no PR.** Pull requests without a corresponding assigned issue will be closed.
 
 This keeps everyone on the same page, avoids wasted effort on changes that may not fit the project's direction, and prevents multiple contributors from working on the same thing.
-
-## Documentation Requirements
-
-Features and user-visible behavior changes **must** include matching documentation updates in the docs repo:
-
-- **Documentation** — end-user guide (installation, configuration, feature walkthroughs, reference)
-
-### When docs updates are required
-
-| Change | Needs docs? |
-|---|---|
-| New feature | ✅ |
-| New config key / setting | ✅ |
-| New port, URL, API endpoint | ✅ |
-| Installation or upgrade steps change | ✅ |
-| UI change that affects screenshots | ✅ |
-| Bug fix with no observable behavior change | ❌ |
-| Internal refactor | ❌ |
-| Test-only change | ❌ |
-
-### Workflow
-
-1. Open your code PR here in `grove-control`
-2. Open any matching docs PR
-3. **Link the companion PR in the code PR description** (the PR template has a dedicated section)
-4. Merge the PRs together — usually code first, then docs, unless the docs reference new things that don't exist yet
-
-If your change truly doesn't need docs (internal refactor, silent bug fix), say so in the PR description and give a one-line reason.
-
-### Previews before you merge
-
-Clone the docs repo and run it locally to see your changes rendered with the real theme before opening the PR:
-
-- **Docs** — `pip install -r requirements.txt && mkdocs serve` — live-reload on `http://localhost:8000`
-
-Review like you would the production site. Catch broken links, layout regressions, typos, missing images. If it looks right, open the PR.
-
-### Editing docs without a local clone
-
-The docs repo can be edited directly in the browser, no `git clone` required:
-
-- **GitHub web editor** — click the pencil icon on any file in the repo
-- **github.dev** — press `.` (period) on any repo page to open VS Code in your browser, with multi-file editing and syntax highlighting
 
 ## Getting Started
 
@@ -119,6 +75,19 @@ afterward with:
 ```bash
 source venv/bin/activate
 ```
+
+Start the backend and frontend development servers in separate terminals:
+
+```bash
+# Terminal 1 (from the repository root)
+DEBUG=true uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
+
+# Terminal 2
+cd frontend
+npm run dev
+```
+
+The frontend will be available at `http://localhost:5173` and will proxy API requests to the backend.
 
 ### Backend Setup
 
