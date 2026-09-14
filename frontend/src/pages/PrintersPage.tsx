@@ -91,6 +91,7 @@ import { HMSErrorModal, filterKnownHMSErrors } from '../components/HMSErrorModal
 import { AiDetectionModal } from '../components/AiDetectionModal';
 import { aiDetectionClass, type AiDetection } from '../utils/aiDetection';
 import { PrinterQueueWidget } from '../components/PrinterQueueWidget';
+import { PrinterHASensorRow } from '../components/PrinterHASensorRow';
 import { AMSHistoryModal } from '../components/AMSHistoryModal';
 import { AmsBackupModal } from '../components/AmsBackupModal';
 import { useToast } from '../contexts/ToastContext';
@@ -5355,6 +5356,11 @@ function PrinterCard({
             floating up when there's less filament content above. */}
         <div className="mt-auto">
         <PrinterPowerControls key={printer.id} printer={printer} isPrintingOrPaused={isPrintingOrPaused} className="pt-3" />
+
+        {/* Home Assistant sensors (#1148). Outside the smartPlug block above:
+            a printer can have an enclosure door contact without having a plug,
+            and nesting it there would hide the row on exactly those setups. */}
+        <PrinterHASensorRow printerId={printer.id} />
 
         {/* Connection Info & Actions */}
         <div className="pt-4">

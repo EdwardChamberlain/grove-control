@@ -9,7 +9,7 @@ import { getCurrencySymbol, SUPPORTED_CURRENCIES } from '../utils/currency';
 import { checkPasswordComplexity } from '../utils/password';
 import { PRESET_CATEGORIES, parsePresetTriple } from '../utils/temperatureFanPresets';
 import { CALIBRATION_MODES, CALIBRATION_MODE_ACTIVE, CALIBRATION_MODE_INACTIVE } from '../utils/calibrationMode';
-import type { APIKey, AppSettings, AppSettingsUpdate, SmartPlug, SmartPlugStatus, NotificationProvider, NotificationTemplate, UpdateStatus, GitHubBackupStatus, CloudAuthStatus, UserCreate, UserUpdate, UserResponse, StorageUsageResponse, CalibrationMode } from '../api/client';
+import type { APIKey, AppSettings, AppSettingsUpdate, PrinterHASensor, SmartPlug, SmartPlugStatus, NotificationProvider, NotificationTemplate, UpdateStatus, GitHubBackupStatus, CloudAuthStatus, UserCreate, UserUpdate, UserResponse, StorageUsageResponse, CalibrationMode } from '../api/client';
 import { Card, CardContent, CardDensityProvider, CardHeader } from '../components/Card';
 import { SlicerBundlesPanel } from '../components/SlicerBundlesPanel';
 import { SlicerPipelinesPanel } from '../components/SlicerPipelinesPanel';
@@ -18,6 +18,7 @@ import { Collapsible } from '../components/Collapsible';
 import { Button } from '../components/Button';
 import { SmartPlugCard } from '../components/SmartPlugCard';
 import { AddSmartPlugModal } from '../components/AddSmartPlugModal';
+import { HASensorModal } from '../components/HASensorModal';
 import { NotificationProviderCard } from '../components/NotificationProviderCard';
 import { AddNotificationModal } from '../components/AddNotificationModal';
 import { NotificationTemplateEditor } from '../components/NotificationTemplateEditor';
@@ -46,7 +47,7 @@ import { availableLanguages } from '../i18n';
 import { useToast } from '../contexts/ToastContext';
 import { useTheme, type ThemeStyle, type DarkBackground, type LightBackground, type ThemeAccent } from '../contexts/ThemeContext';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Palette } from 'lucide-react';
+import { Gauge, Palette } from 'lucide-react';
 import { registerSettingsSearch, getSettingsSearchEntries } from '../lib/settingsSearch';
 import type { UsersSubTab } from '../lib/settingsSearch';
 import { ReactSelect } from '../components/ToolbarControls';
@@ -204,6 +205,7 @@ registerSettingsSearch({ labelKey: 'settings.updates', tab: 'general', keywords:
 registerSettingsSearch({ labelKey: 'settings.dataManagement', tab: 'general', keywords: 'data reset clear logs notifications preferences', anchor: 'card-data' });
 registerSettingsSearch({ labelKey: 'settings.kioskMode', tab: 'general', keywords: 'kiosk workshop monitor fleet queue display tv screen', anchor: 'control-kiosk-mode' });
 registerSettingsSearch({ labelKey: 'settings.smartPlugs', tab: 'plugs', keywords: 'smart plug energy power automation tapo kasa tplink shelly', anchor: 'card-plugs' });
+registerSettingsSearch({ labelKey: 'haSensors.sectionTitle', labelFallback: 'Home Assistant Sensors', tab: 'plugs', keywords: 'home assistant sensor interlock door temperature humidity', anchor: 'card-ha-sensors' });
 registerSettingsSearch({ labelKey: 'settings.providers', tab: 'notifications', keywords: 'telegram discord email notification providers webhook', anchor: 'card-providers' });
 registerSettingsSearch({ labelKey: 'settings.messageTemplates', tab: 'notifications', keywords: 'message templates notification text edit', anchor: 'card-templates' });
 registerSettingsSearch({ labelKey: 'settings.defaultPrintOptions', labelFallback: 'Default Print Options', tab: 'queue', keywords: 'print bed leveling flow calibration vibration first layer timelapse', anchor: 'card-print-options' });
@@ -317,6 +319,8 @@ export function SettingsPage() {
   const [humidityDrafts, setHumidityDrafts] = useState<Record<string, string>>({});
   const [showPlugModal, setShowPlugModal] = useState(false);
   const [editingPlug, setEditingPlug] = useState<SmartPlug | null>(null);
+  const [showHASensorModal, setShowHASensorModal] = useState(false);
+  const [editingHASensor, setEditingHASensor] = useState<PrinterHASensor | null>(null);
   const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [editingProvider, setEditingProvider] = useState<NotificationProvider | null>(null);
   const [editingTemplate, setEditingTemplate] = useState<NotificationTemplate | null>(null);
@@ -469,6 +473,12 @@ export function SettingsPage() {
   const { data: smartPlugs, isLoading: plugsLoading } = useQuery({
     queryKey: ['smart-plugs'],
     queryFn: api.getSmartPlugs,
+  });
+
+  const { data: haSensors } = useQuery({
+    queryKey: ['haSensors'],
+    queryFn: api.getHASensors,
+    enabled: activeTab === 'plugs',
   });
 
   // Fetch energy data for all smart plugs when on the plugs tab
@@ -3336,6 +3346,85 @@ export function SettingsPage() {
               </CardContent>
             </Card>
           )}
+
+          <div className="mt-8" id="card-ha-sensors">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Gauge className="w-5 h-5 text-bambu-green" />
+                {t('haSensors.sectionTitle')}
+              </h2>
+              <Button
+                className="whitespace-nowrap"
+                disabled={!printers?.length}
+                onClick={() => {
+                  setEditingHASensor(null);
+                  setShowHASensorModal(true);
+                }}
+              >
+                <Plus className="w-4 h-4" />
+                {t('haSensors.add')}
+              </Button>
+            </div>
+
+            {haSensors && haSensors.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {haSensors.map((sensor) => {
+                  const printer = printers?.find((p) => p.id === sensor.printer_id);
+                  return (
+                    <Card key={sensor.id}>
+                      <CardContent className="py-4">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="text-white font-medium truncate">{sensor.name}</div>
+                            <div className="text-xs text-bambu-gray truncate">{sensor.entity_id}</div>
+                            <div className="text-xs text-bambu-gray mt-1">
+                              {printer?.name ?? t('haSensors.unknownPrinter')}
+                            </div>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => {
+                              setEditingHASensor(sensor);
+                              setShowHASensorModal(true);
+                            }}
+                          >
+                            {t('common.edit')}
+                          </Button>
+                        </div>
+                        <div className="flex flex-wrap gap-1 mt-3">
+                          {sensor.block_print && (
+                            <span className="px-2 py-0.5 text-xs rounded bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400">
+                              {t('haSensors.badgeBlocks')}
+                            </span>
+                          )}
+                          {sensor.notify_on_alert && (
+                            <span className="px-2 py-0.5 text-xs rounded bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400">
+                              {t('haSensors.badgeNotifies')}
+                            </span>
+                          )}
+                          {!sensor.show_on_printer_card && (
+                            <span className="px-2 py-0.5 text-xs rounded bg-bambu-dark-tertiary text-bambu-gray">
+                              {t('haSensors.badgeHidden')}
+                            </span>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            ) : (
+              <Card>
+                <CardContent className="py-8">
+                  <div className="text-center text-bambu-gray">
+                    <Gauge className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                    <p className="text-sm">{t('haSensors.empty')}</p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
         </div>
       )}
 
@@ -5176,6 +5265,17 @@ export function SettingsPage() {
           onClose={() => {
             setShowPlugModal(false);
             setEditingPlug(null);
+          }}
+        />
+      )}
+
+      {showHASensorModal && (
+        <HASensorModal
+          sensor={editingHASensor}
+          printers={printers ?? []}
+          onClose={() => {
+            setShowHASensorModal(false);
+            setEditingHASensor(null);
           }}
         />
       )}
