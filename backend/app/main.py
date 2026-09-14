@@ -860,6 +860,27 @@ def _matches_dispatching_queue_completion(
     return item.archive_id is not None and any(_expected_prints.get(key) == item.archive_id for key in possible_keys)
 
 
+def _matches_cancelled_queue_completion(
+    item,
+    *,
+    archive_id: int | None,
+    event_subtask_id: str | None,
+) -> bool:
+    """Match a late terminal event to a queue row cancelled by Grove Control.
+
+    The queue row is deliberately matched by both persisted run identity
+    values. Filename-only matching is unsafe after a restart or a reprint of
+    the same archive.
+    """
+    return (
+        item.status == "cancelled"
+        and archive_id is not None
+        and event_subtask_id is not None
+        and item.dispatch_subtask_id == event_subtask_id
+        and item.archive_id == archive_id
+    )
+
+
 def _compute_run_filament_grams(
     status: str,
     archive_filament_used_grams: float | None,
@@ -4727,8 +4748,16 @@ async def on_print_complete(printer_id: int, data: dict):
         async def _update_queue_status(db):
             nonlocal queue_item_id, queue_item_owner_id, queue_item_billing_run_id, queue_item_cost_center_id
             nonlocal queue_status, queue_auto_off
+            nonlocal data
             recovered_dispatch = bool(data.get("_recovered_dispatch"))
             queue_statuses = ["dispatching", "printing"]
+            # A queue cancellation commits the row before the printer's
+            # terminal event arrives. Keep cancelled rows eligible when the
+            # durable submission id lets us prove that the event belongs to
+            # this exact run; this is required after a process restart, when
+            # the in-memory expected-print registry is gone.
+            if event_subtask_id:
+                queue_statuses.append("cancelled")
             if recovered_dispatch and event_subtask_id:
                 # Scheduler recovery has already committed this exact terminal
                 # state so a process stop cannot requeue it. Include it once to
@@ -4759,6 +4788,11 @@ async def on_print_complete(printer_id: int, data: dict):
                     candidate
                     for candidate in active_items
                     if _matches_dispatching_queue_completion(candidate, possible_keys, event_subtask_id)
+                    or _matches_cancelled_queue_completion(
+                        candidate,
+                        archive_id=archive_id,
+                        event_subtask_id=event_subtask_id,
+                    )
                     or (
                         recovered_dispatch
                         and candidate.status == data.get("status")
@@ -4783,6 +4817,13 @@ async def on_print_complete(printer_id: int, data: dict):
                 # "cancelled" so it matches the queue schema Literal.
                 if queue_status == "aborted":
                     queue_status = "cancelled"
+                if item.status == "cancelled":
+                    # Preserve an earlier queue cancellation if the printer
+                    # reports a late terminal state such as ``completed``.
+                    # The persisted queue decision is the authoritative run
+                    # outcome for billing and notifications.
+                    queue_status = "cancelled"
+                    data = {**data, "status": "cancelled"}
                 item.status = queue_status
                 item.completed_at = datetime.now(timezone.utc)
                 if queue_status == "failed" and not item.error_message:
@@ -5158,7 +5199,8 @@ async def on_print_complete(printer_id: int, data: dict):
 
                 archive = await db.get(PrintArchive, archive_id)
                 cost_center_id = _print_cost_center_ids.pop(archive_id, None)
-                queue_item_id = _print_queue_ids.pop(archive_id, None)
+                registered_queue_item_id = _print_queue_ids.pop(archive_id, None)
+                billing_queue_item_id = queue_item_id or registered_queue_item_id
                 charged = await apply_print_charge_for_archive(
                     db,
                     archive_id,
@@ -5166,7 +5208,7 @@ async def on_print_complete(printer_id: int, data: dict):
                     cost_center_id=(
                         queue_item_cost_center_id if queue_item_cost_center_id is not None else cost_center_id
                     ),
-                    print_queue_id=queue_item_id,
+                    print_queue_id=billing_queue_item_id,
                     print_run_id=(queue_item_billing_run_id or (archive.billing_run_id if archive else None)),
                 )
                 await db.commit()

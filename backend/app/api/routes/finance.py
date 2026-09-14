@@ -1018,6 +1018,41 @@ async def delete_cost_center(
     if center.is_private:
         raise HTTPException(status_code=400, detail="Private cost centers cannot be deleted")
 
+    active_reservation_id = await db.scalar(
+        select(BudgetReservation.id)
+        .where(
+            BudgetReservation.cost_center_id == center.id,
+            BudgetReservation.status == "active",
+        )
+        .limit(1)
+    )
+    if active_reservation_id is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Cost center cannot be deleted while active budget reservations reference it",
+        )
+
+    active_queue_item_id = await db.scalar(
+        select(PrintQueueItem.id)
+        .where(
+            PrintQueueItem.cost_center_id == center.id,
+            PrintQueueItem.status.in_(
+                (
+                    "pending",
+                    "preheating",
+                    "dispatching",
+                    "printing",
+                )
+            ),
+        )
+        .limit(1)
+    )
+    if active_queue_item_id is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Cost center cannot be deleted while active queue items reference it",
+        )
+
     balance_map = await _get_cost_center_balance_map(db, [center.id])
     total_balance = balance_map.get(center.id, 0.0)
     if abs(total_balance) > 1e-9:

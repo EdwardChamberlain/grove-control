@@ -21,6 +21,30 @@ class BillingRunIdCollisionError(RuntimeError):
     """A billing idempotency key was already used by another archive."""
 
 
+async def _release_print_reservation(
+    db: AsyncSession,
+    *,
+    archive_id: int,
+    print_queue_id: int | None,
+    status: str,
+) -> None:
+    """Release exactly the reservation owned by this physical print run.
+
+    An archive row is reusable for reprints and batch copies, so it is not a
+    sufficient reservation identity once a queue item is available. Keep the
+    archive fallback only for legacy/direct prints that have no queue row.
+    """
+    if print_queue_id is not None:
+        await release_budget_reservation(
+            db,
+            source_type="queue_item",
+            source_id=print_queue_id,
+            status=status,
+        )
+    else:
+        await release_budget_reservation(db, print_archive_id=archive_id, status=status)
+
+
 async def _get_balance_after_for_transaction(
     db: AsyncSession,
     user_id: int,
@@ -120,14 +144,12 @@ async def apply_print_charge_for_archive(
     """
     try:
         if not await is_billing_enabled(db):
-            if print_queue_id is not None:
-                await release_budget_reservation(
-                    db,
-                    source_type="queue_item",
-                    source_id=print_queue_id,
-                    status="released",
-                )
-            await release_budget_reservation(db, print_archive_id=archive_id, status="released")
+            await _release_print_reservation(
+                db,
+                archive_id=archive_id,
+                print_queue_id=print_queue_id,
+                status="released",
+            )
             logger.info("Billing is disabled; skipping print charge for archive ID %s.", archive_id)
             return False
 
@@ -139,14 +161,12 @@ async def apply_print_charge_for_archive(
             return False
 
         if archive.wallet_charge_skipped:
-            if print_queue_id is not None:
-                await release_budget_reservation(
-                    db,
-                    source_type="queue_item",
-                    source_id=print_queue_id,
-                    status="released",
-                )
-            await release_budget_reservation(db, print_archive_id=archive_id, status="released")
+            await _release_print_reservation(
+                db,
+                archive_id=archive_id,
+                print_queue_id=print_queue_id,
+                status="released",
+            )
             logger.info(f"Wallet charge skipped for archive ID {archive_id}.")
             return False
 
@@ -202,14 +222,12 @@ async def apply_print_charge_for_archive(
         # Calculate charge (full for completed, partial for others)
         charge, reason_suffix = _calculate_partial_charge(archive, base_cost)
         if charge <= 0:
-            if print_queue_id is not None:
-                await release_budget_reservation(
-                    db,
-                    source_type="queue_item",
-                    source_id=print_queue_id,
-                    status="released",
-                )
-            await release_budget_reservation(db, print_archive_id=archive.id, status="released")
+            await _release_print_reservation(
+                db,
+                archive_id=archive.id,
+                print_queue_id=print_queue_id,
+                status="released",
+            )
             logger.info(f"Calculated charge for archive ID {archive_id} is zero or negative.")
             return False
 
@@ -268,14 +286,12 @@ async def apply_print_charge_for_archive(
         new_wallet_balance = await sync_personal_wallet_balance(db, wallet)
 
         # Consume matching budget reservations after the transaction is persisted
-        await release_budget_reservation(db, print_archive_id=archive.id, status="consumed")
-        if print_queue_id is not None:
-            await release_budget_reservation(
-                db,
-                source_type="queue_item",
-                source_id=print_queue_id,
-                status="consumed",
-            )
+        await _release_print_reservation(
+            db,
+            archive_id=archive.id,
+            print_queue_id=print_queue_id,
+            status="consumed",
+        )
         logger.info(f"Applied print charge for archive ID {archive_id}. New balance: {new_wallet_balance}.")
         return True
     except SQLAlchemyError as e:
