@@ -760,7 +760,10 @@ def _select_queue_completion_item(
     printing_items = [item for item in active_items if item.status == "printing"]
     if len(printing_items) == 1:
         item = printing_items[0]
-        if archive_id is not None and item.archive_id not in (None, archive_id):
+        # ``archive_id`` is an integer primary key in production. Treat an
+        # unexpected value as unknown rather than letting a mocked or malformed
+        # lookup veto the only durable printing row.
+        if isinstance(archive_id, int) and item.archive_id not in (None, archive_id):
             return None
         return item
     if printing_items:
