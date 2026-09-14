@@ -1,7 +1,10 @@
 name: Docker Publish
 
 on:
-  workflow_dispatch:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
 
 env:
   GHCR_IMAGE: ghcr.io/edwardchamberlain/grove-control
@@ -17,11 +20,16 @@ permissions:
 jobs:
   publish:
     name: Publish :latest and version tag
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: main
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
 
       - name: Read version
         id: version
@@ -57,7 +65,7 @@ jobs:
           push: true
           tags: |
             ${{ env.GHCR_IMAGE }}:latest
-            ${{ env.GHCR_IMAGE }}:v${{ steps.version.outputs.version }}
+            ${{ env.GHCR_IMAGE }}:${{ steps.version.outputs.version }}
           labels: |
             org.opencontainers.image.source=https://github.com/EdwardChamberlain/grove-control
             org.opencontainers.image.revision=${{ steps.version.outputs.revision }}

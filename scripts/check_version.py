@@ -3,14 +3,17 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 import tomllib
 
 ROOT = Path(__file__).resolve().parent.parent
+STABLE_VERSION_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
 
 def read_version() -> str:
@@ -38,10 +41,50 @@ def check_missing(label: str, data: dict[str, object], key: str) -> bool:
     return False
 
 
-def main() -> int:
+def parse_stable_version(value: str, label: str) -> tuple[int, int, int]:
+    """Parse a stable X.Y.Z version for release ordering checks."""
+    normalized = value.strip()
+    match = STABLE_VERSION_RE.fullmatch(normalized)
+    if not match:
+        raise ValueError(f"{label} must be a stable X.Y.Z version; got: {normalized!r}")
+    return tuple(int(part) for part in match.groups())
+
+
+def check_release_version(candidate_version: str, previous_version: str) -> bool:
+    """Require a stable candidate version greater than the previous release."""
+    try:
+        candidate = parse_stable_version(candidate_version, "VERSION")
+        previous = parse_stable_version(previous_version, "base VERSION")
+    except ValueError as exc:
+        print(f"FAIL release version: {exc}", file=sys.stderr)
+        return False
+
+    if candidate <= previous:
+        print(
+            "FAIL release version: "
+            f"VERSION {candidate_version.strip()} must be greater than base VERSION {previous_version.strip()}",
+            file=sys.stderr,
+        )
+        return False
+
+    print(f"OK release version: {candidate_version.strip()} > {previous_version.strip()}")
+    return True
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--previous-version",
+        help="also require VERSION to be a greater stable version than this base version",
+    )
+    args = parser.parse_args(argv)
+
     expected = read_version()
     print(f"OK VERSION: {expected}")
     ok = True
+
+    if args.previous_version is not None:
+        ok &= check_release_version(expected, args.previous_version)
 
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     project = pyproject["project"]
