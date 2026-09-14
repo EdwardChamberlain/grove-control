@@ -56,3 +56,76 @@ describe('FolderReadmePanel', () => {
     expect(await screen.findByText('Truncated')).toBeInTheDocument();
   });
 });
+
+describe('FolderReadmePanel GFM support without autolink literals (#86)', () => {
+  it('keeps tables, strikethrough, task lists, and footnotes working', async () => {
+    server.use(
+      http.get('/api/v1/library/folders/:id/readme', () =>
+        HttpResponse.json({
+          filename: 'README.md',
+          content: [
+            '| Part | Filament |',
+            '| --- | --- |',
+            '| Body | PLA |',
+            '',
+            'Print at ~~0.2mm~~ 0.16mm.',
+            '',
+            '- [x] Sliced',
+            '- [ ] Printed',
+            '',
+            'Supports supports[^1]',
+            '',
+            '[^1]: Tree, 0.4mm.',
+          ].join('\n'),
+          truncated: false,
+        }),
+      ),
+    );
+
+    render(<FolderReadmePanel folderId={86} />);
+
+    expect(await screen.findByRole('columnheader', { name: 'Part' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: 'Body' })).toBeInTheDocument();
+    expect(screen.getByText(/0\.16mm\./)).toBeInTheDocument();
+    expect(screen.getByText('0.2mm').tagName).toBe('DEL');
+
+    const checkboxes = await screen.findAllByRole('checkbox');
+    expect(checkboxes).toHaveLength(2);
+    expect(checkboxes[0]).toBeChecked();
+    expect(checkboxes[1]).not.toBeChecked();
+
+    expect(await screen.findByRole('link', { name: '1' })).toHaveAttribute('href', '#user-content-fn-1');
+    expect(screen.getByText('Tree, 0.4mm.')).toBeInTheDocument();
+  });
+
+  it('keeps explicit links while leaving bare URLs and emails as plain text', async () => {
+    server.use(
+      http.get('/api/v1/library/folders/:id/readme', () =>
+        HttpResponse.json({
+          filename: 'README.md',
+          content: [
+            '[the model](https://example.com/model)',
+            '',
+            '<https://example.com/angle>',
+            '',
+            'Bare URL: https://example.com/plain',
+            '',
+            'Bare email: maker@example.com',
+          ].join('\n'),
+          truncated: false,
+        }),
+      ),
+    );
+
+    render(<FolderReadmePanel folderId={86} />);
+
+    expect(await screen.findByRole('link', { name: 'the model' })).toHaveAttribute('href', 'https://example.com/model');
+    expect(screen.getByRole('link', { name: 'https://example.com/angle' })).toHaveAttribute(
+      'href',
+      'https://example.com/angle',
+    );
+    expect(screen.getByText('Bare URL: https://example.com/plain')).toBeInTheDocument();
+    expect(screen.getByText('Bare email: maker@example.com')).toBeInTheDocument();
+    expect(screen.getAllByRole('link')).toHaveLength(2);
+  });
+});

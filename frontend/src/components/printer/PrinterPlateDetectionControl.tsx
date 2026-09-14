@@ -295,7 +295,7 @@ export function PrinterPlateDetectionControl({
                         <button
                           type="button"
                           onClick={() => handleDeleteRef(ref.index)}
-                          className="absolute right-1 top-1 rounded bg-red-500/80 p-0.5 opacity-0 transition-opacity group-hover:opacity-100"
+                          className="absolute right-1 top-1 rounded bg-red-500/80 p-0.5 can-hover:opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
                           title={t('printers.plateDetection.deleteReference')}
                         >
                           <X className="h-3 w-3 text-white" />

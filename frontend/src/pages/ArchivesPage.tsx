@@ -63,7 +63,6 @@ import { openInSlicer, type SlicerType } from '../utils/slicer';
 import { formatDateTime, formatDateOnly, parseUTCDate, type TimeFormat, formatDuration } from '../utils/date';
 import { getCurrencySymbol } from '../utils/currency';
 import { getBedTypeInfo } from '../utils/bedType';
-import { useIsMobile } from '../hooks/useIsMobile';
 import { usePageFileDrop } from '../hooks/usePageFileDrop';
 import type { Archive, PrintLogEntry, ProjectListItem } from '../api/client';
 import { Card, CardContent } from '../components/Card';
@@ -180,7 +179,6 @@ function ArchiveCard({
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const { hasPermission, canModify } = useAuth();
-  const isMobile = useIsMobile();
   const navigate = useNavigate();
   const [showReprint, setShowReprint] = useState(false);
   const [showSliceModal, setShowSliceModal] = useState(false);
@@ -725,9 +723,7 @@ function ArchiveCard({
           <>
             {/* Left arrow */}
             <button
-              className={`absolute left-1 top-1/2 -translate-y-1/2 p-1 rounded-full bg-black/60 hover:bg-black/80 transition-all ${
-                isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-              }`}
+              className="absolute left-1 top-1/2 -translate-y-1/2 p-1 rounded-full bg-black/60 hover:bg-black/80 transition-all can-hover:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
               onClick={(e) => {
                 e.stopPropagation();
                 setCurrentPlateIndex((prev) => {
@@ -741,9 +737,7 @@ function ArchiveCard({
             </button>
             {/* Right arrow */}
             <button
-              className={`absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded-full bg-black/60 hover:bg-black/80 transition-all ${
-                isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-              }`}
+              className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded-full bg-black/60 hover:bg-black/80 transition-all can-hover:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
               onClick={(e) => {
                 e.stopPropagation();
                 setCurrentPlateIndex((prev) => {
@@ -757,9 +751,7 @@ function ArchiveCard({
             </button>
             {/* Dots indicator */}
             <div
-              className={`absolute bottom-1 left-1/2 -translate-x-1/2 flex gap-1 px-2 py-1 rounded-full bg-black/50 transition-all ${
-                isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-              }`}
+              className="absolute bottom-1 left-1/2 -translate-x-1/2 flex gap-1 px-2 py-1 rounded-full bg-black/50 transition-all can-hover:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
             >
               {plates.map((plate, idx) => (
                 <button
@@ -777,11 +769,9 @@ function ArchiveCard({
             </div>
           </>
         )}
-        {/* Context menu button - visible on mobile, shows on hover for desktop */}
+        {/* Context menu button - always available without a hover-capable pointer */}
         <button
-          className={`absolute top-2 left-2 p-1.5 rounded bg-black/50 hover:bg-black/70 transition-all ${
-            isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-          } ${selectionMode ? 'left-10' : ''}`}
+          className={`absolute top-2 left-2 p-1.5 rounded bg-black/50 hover:bg-black/70 transition-all can-hover:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 ${selectionMode ? 'left-10' : ''}`}
           onClick={(e) => {
             e.stopPropagation();
             const rect = e.currentTarget.getBoundingClientRect();
