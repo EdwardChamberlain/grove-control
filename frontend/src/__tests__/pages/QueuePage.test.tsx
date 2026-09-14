@@ -611,6 +611,42 @@ describe('QueuePage', () => {
     });
   });
 
+  describe('queue reorder permissions', () => {
+    it('does not render batch child move controls without queue reorder permission', async () => {
+      setAuthToken('queue-owner-token');
+      vi.mocked(localStorage.getItem).mockImplementation((key: string) => {
+        if (key === 'queue.batchCollapsed') return JSON.stringify({ 77: false });
+        if (key === 'queue.viewMode') return 'list';
+        return null;
+      });
+      server.use(
+        http.get('*/api/v1/auth/status', () =>
+          HttpResponse.json({ auth_enabled: true, requires_setup: false }),
+        ),
+        http.get('*/api/v1/auth/me', () =>
+          HttpResponse.json({
+            id: 7,
+            username: 'queue-owner',
+            is_admin: false,
+            permissions: ['queue:update_own'],
+          }),
+        ),
+        http.get('/api/v1/queue/', () =>
+          HttpResponse.json([
+            { ...mockQueueItems[0], id: 77, archive_name: 'Batch child one', batch_id: 77, batch_name: 'Owned batch', created_by_id: 7 },
+            { ...mockQueueItems[0], id: 78, archive_name: 'Batch child two', batch_id: 77, batch_name: 'Owned batch', created_by_id: 7 },
+          ]),
+        ),
+      );
+
+      render(<QueuePage />);
+
+      expect(await screen.findByText('Batch child one')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Move up' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Move down' })).not.toBeInTheDocument();
+    });
+  });
+
   describe('auto power off badge', () => {
     it('shows power off badge when auto_off_after is true', async () => {
       render(<QueuePage />);

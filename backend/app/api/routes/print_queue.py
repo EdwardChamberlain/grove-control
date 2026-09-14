@@ -1324,13 +1324,65 @@ async def reorder_queue(
         raise HTTPException(403, "You do not have permission to reorder queue items")
 
     item_ids = [reorder_item.id for reorder_item in data.items]
-    result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.id.in_(item_ids)))
+    if len(item_ids) != len(set(item_ids)):
+        raise HTTPException(400, "Duplicate queue item IDs are not allowed")
+    if not item_ids:
+        return {"message": "Reordered 0 items"}
+
+    result = await db.execute(
+        select(PrintQueueItem)
+        .where(PrintQueueItem.id.in_(item_ids))
+        .with_for_update()
+    )
     items_by_id = {item.id: item for item in result.scalars().all()}
 
     if user is not None and not can_modify_all:
-        unauthorized = [item_id for item_id, item in items_by_id.items() if item.created_by_id != user.id]
-        if unauthorized:
+        requested_items = [items_by_id.get(item_id) for item_id in item_ids]
+        if any(item is None for item in requested_items):
+            raise HTTPException(404, "Queue item not found")
+        if any(item.status != "pending" for item in requested_items if item is not None):
+            raise HTTPException(400, "Only pending queue items can be reordered")
+        if any(item.created_by_id != user.id for item in requested_items if item is not None):
             raise HTTPException(403, "You can only reorder your own queue items")
+
+        # An own-only caller may rearrange an owned contiguous block, but must
+        # not be able to jump it over another user's item by submitting an
+        # arbitrary position.  The submitted positions therefore have to be
+        # the same positions currently occupied by the requested items, and
+        # every pending item in that interval must be part of the request.
+        requested_positions = {
+            item_id: reorder_item.position
+            for item_id, reorder_item in zip(item_ids, data.items, strict=True)
+        }
+        current_positions = {
+            item.id: item.position
+            for item in requested_items
+            if item is not None
+        }
+        if set(requested_positions.values()) != set(current_positions.values()):
+            raise HTTPException(403, "You can only reorder your own contiguous queue items")
+
+        queue_printer_id = requested_items[0].printer_id
+        if any(item.printer_id != queue_printer_id for item in requested_items):
+            raise HTTPException(400, "Queue items must belong to the same printer")
+        pending_query = (
+            select(PrintQueueItem)
+            .where(PrintQueueItem.status == "pending")
+            .where(
+                PrintQueueItem.printer_id.is_(None)
+                if queue_printer_id is None
+                else PrintQueueItem.printer_id == queue_printer_id
+            )
+            .where(PrintQueueItem.position >= min(current_positions.values()))
+            .where(PrintQueueItem.position <= max(current_positions.values()))
+            .with_for_update()
+        )
+        pending_result = await db.execute(pending_query)
+        blocked_items = [
+            item for item in pending_result.scalars().all() if item.id not in items_by_id
+        ]
+        if blocked_items:
+            raise HTTPException(403, "You can only reorder your own contiguous queue items")
 
     updated_count = 0
     for reorder_item in data.items:

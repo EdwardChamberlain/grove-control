@@ -513,7 +513,7 @@ class TestQueueOwnershipPermissions(TestOwnershipPermissionsSetup):
         async def _create_item(**kwargs):
             from backend.app.models.print_queue import PrintQueueItem
 
-            printer = await printer_factory()
+            printer = kwargs.pop("printer", None) or await printer_factory()
             # Create an archive to link to the queue item
             archive = await archive_factory(printer.id)
 
@@ -600,6 +600,108 @@ class TestQueueOwnershipPermissions(TestOwnershipPermissionsSetup):
             f"/api/v1/queue/{item.id}",
             headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
             json={"position": 10},
+        )
+
+        assert response.status_code == 403
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_operator_can_reorder_adjacent_owned_queue_items(
+        self, async_client: AsyncClient, auth_setup, queue_item_factory, printer_factory, db_session
+    ):
+        """Own-only reorder swaps owned items without renumbering the queue."""
+        printer = await printer_factory()
+        first = await queue_item_factory(
+            printer=printer,
+            created_by_id=auth_setup["operator_user"]["id"],
+            position=1,
+        )
+        second = await queue_item_factory(
+            printer=printer,
+            created_by_id=auth_setup["operator_user"]["id"],
+            position=2,
+        )
+
+        response = await async_client.post(
+            "/api/v1/queue/reorder",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+            json={
+                "items": [
+                    {"id": first.id, "position": 2},
+                    {"id": second.id, "position": 1},
+                ]
+            },
+        )
+
+        assert response.status_code == 200
+        await db_session.refresh(first)
+        await db_session.refresh(second)
+        assert first.position == 2
+        assert second.position == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_operator_cannot_reorder_owned_items_across_foreign_queue_item(
+        self, async_client: AsyncClient, auth_setup, queue_item_factory, printer_factory
+    ):
+        """Own-only reorder cannot cross an item owned by another operator."""
+        printer = await printer_factory()
+        first = await queue_item_factory(
+            printer=printer,
+            created_by_id=auth_setup["operator_user"]["id"],
+            position=1,
+        )
+        await queue_item_factory(
+            printer=printer,
+            created_by_id=auth_setup["operator2_user"]["id"],
+            position=2,
+        )
+        last = await queue_item_factory(
+            printer=printer,
+            created_by_id=auth_setup["operator_user"]["id"],
+            position=3,
+        )
+
+        response = await async_client.post(
+            "/api/v1/queue/reorder",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+            json={
+                "items": [
+                    {"id": first.id, "position": 3},
+                    {"id": last.id, "position": 1},
+                ]
+            },
+        )
+
+        assert response.status_code == 403
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_operator_cannot_submit_full_queue_reorder_with_foreign_item(
+        self, async_client: AsyncClient, auth_setup, queue_item_factory, printer_factory
+    ):
+        """Own-only callers cannot bypass ownership by including a foreign row."""
+        printer = await printer_factory()
+        own = await queue_item_factory(
+            printer=printer,
+            created_by_id=auth_setup["operator_user"]["id"],
+            position=1,
+        )
+        foreign = await queue_item_factory(
+            printer=printer,
+            created_by_id=auth_setup["operator2_user"]["id"],
+            position=2,
+        )
+
+        response = await async_client.post(
+            "/api/v1/queue/reorder",
+            headers={"Authorization": f"Bearer {auth_setup['operator_token']}"},
+            json={
+                "items": [
+                    {"id": own.id, "position": 2},
+                    {"id": foreign.id, "position": 1},
+                ]
+            },
         )
 
         assert response.status_code == 403

@@ -424,7 +424,9 @@ function SortableQueueItem({
   const platesData = isLibraryFile ? libraryPlatesData : archivePlatesData;
   const plates = platesData?.plates ?? [];
 
-  const canReorder = hasPermission('queue:reorder');
+  const canReorder =
+    hasPermission('queue:reorder') &&
+    canModify('queue', 'update', item.created_by_id);
   const {
     attributes,
     listeners,
@@ -1541,11 +1543,8 @@ export function QueuePage() {
       ...remaining.slice(insertAt),
     ];
 
-    const updates = reordered.map((item, index) => ({
-      id: item.id,
-      position: index + 1,
-    }));
-    reorderMutation.mutate(updates);
+    if (movingIds.includes(overAnchor.id)) return;
+    submitReorder(reordered, movingIds, overAnchor.id, firstMovingIndex < overIndex);
   };
 
   // Every pending row is rendered independently.
@@ -1564,6 +1563,54 @@ export function QueuePage() {
     row.item.status === 'pending' &&
     canModify('queue', 'update', row.item.created_by_id);
 
+  const rowsSharePrinter = (left: QueueRow, right: QueueRow): boolean =>
+    left.item.printer_id === right.item.printer_id;
+
+  const submitReorder = (
+    reordered: PrintQueueItem[],
+    movingIds: number[],
+    anchorId: number,
+    placeAfter: boolean,
+  ) => {
+    if (!canReorderManually) return;
+
+    if (hasPermission('queue:update_all')) {
+      reorderMutation.mutate(reordered.map((item, index) => ({ id: item.id, position: index + 1 })));
+      return;
+    }
+
+    const movingItems = movingIds
+      .map((id) => pendingItems.find((item) => item.id === id))
+      .filter((item): item is PrintQueueItem => !!item);
+    const anchor = pendingItems.find((item) => item.id === anchorId);
+    if (
+      !anchor ||
+      movingItems.length !== movingIds.length ||
+      !canModify('queue', 'update', anchor.created_by_id) ||
+      !movingItems.every((item) => canModify('queue', 'update', item.created_by_id)) ||
+      !movingItems.every((item) => item.printer_id === anchor.printer_id)
+    ) return;
+
+    const queueItems = pendingItems.filter((item) => item.printer_id === anchor.printer_id);
+    const remaining = queueItems.filter((item) => !movingIds.includes(item.id));
+    let insertAt = remaining.findIndex((item) => item.id === anchorId);
+    if (insertAt === -1) return;
+    if (placeAfter) insertAt += 1;
+    const scopedReordered = [
+      ...remaining.slice(0, insertAt),
+      ...movingItems,
+      ...remaining.slice(insertAt),
+    ];
+    const currentPositions = new Map(queueItems.map((item) => [item.id, item.position]));
+    const updates = scopedReordered
+      .map((item, index) => ({
+        id: item.id,
+        position: currentPositions.get(queueItems[index].id)!,
+      }))
+      .filter((update) => update.position !== currentPositions.get(update.id));
+    if (updates.length > 0) reorderMutation.mutate(updates);
+  };
+
   const moveRowRelativeTo = (movingId: number, anchorId: number, placeAfter: boolean) => {
     if (!canReorderManually || movingId === anchorId) return;
     const movingItem = pendingItems.find((item) => item.id === movingId);
@@ -1578,16 +1625,18 @@ export function QueuePage() {
       movingItem,
       ...remaining.slice(insertAt),
     ];
-    reorderMutation.mutate(reordered.map((item, index) => ({ id: item.id, position: index + 1 })));
+    submitReorder(reordered, [movingId], anchorId, placeAfter);
   };
 
   const rowMovers = (rows: QueueRow[], index: number) => {
     if (!canReorderManually || !rowCanMove(rows[index])) return {};
     return {
-      onMoveUp: index > 0 && rowCanMove(rows[index - 1])
+      onMoveUp: index > 0 && rowCanMove(rows[index - 1]) &&
+        (hasPermission('queue:update_all') || rowsSharePrinter(rows[index], rows[index - 1]))
         ? () => moveRowRelativeTo(rows[index].item.id, rows[index - 1].item.id, false)
         : undefined,
-      onMoveDown: index < rows.length - 1 && rowCanMove(rows[index + 1])
+      onMoveDown: index < rows.length - 1 && rowCanMove(rows[index + 1]) &&
+        (hasPermission('queue:update_all') || rowsSharePrinter(rows[index], rows[index + 1]))
         ? () => moveRowRelativeTo(rows[index].item.id, rows[index + 1].item.id, true)
         : undefined,
     };
