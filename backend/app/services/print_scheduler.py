@@ -778,14 +778,18 @@ class PrintScheduler:
                     # interlock. Preserve unrelated queue explanations such
                     # as filament shortages and drying holds for the gates
                     # below to maintain.
-                    if item.waiting_reason and item.waiting_reason.startswith("Waiting on "):
+                    cleared_sensor_interlock_reason = bool(
+                        item.waiting_reason and item.waiting_reason.startswith("Waiting on ")
+                    )
+                    if cleared_sensor_interlock_reason:
                         item.waiting_reason = None
                         await db.commit()
 
                     # Specific printer assignment (existing behavior)
                     if item.printer_id in busy_printers:
-                        item.waiting_reason = f"Waiting for printer reservation on printer {item.printer_id}"
-                        await db.commit()
+                        if not cleared_sensor_interlock_reason:
+                            item.waiting_reason = f"Waiting for printer reservation on printer {item.printer_id}"
+                            await db.commit()
                         continue
 
                     # Check if printer is idle
@@ -826,7 +830,8 @@ class PrintScheduler:
 
                     # Check if printer is idle (busy with another print)
                     if not printer_idle:
-                        item.waiting_reason = f"Waiting for printer reservation on printer {item.printer_id}"
+                        if not cleared_sensor_interlock_reason:
+                            item.waiting_reason = f"Waiting for printer reservation on printer {item.printer_id}"
                         busy_printers.add(item.printer_id)
                         await db.commit()
                         continue

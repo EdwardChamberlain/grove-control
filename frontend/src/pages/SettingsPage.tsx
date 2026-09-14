@@ -475,9 +475,9 @@ export function SettingsPage() {
     queryFn: api.getSmartPlugs,
   });
 
-  const { data: haSensors } = useQuery({
+  const { data: haSensors } = useQuery<PrinterHASensor[]>({
     queryKey: ['haSensors'],
-    queryFn: api.getHASensors,
+    queryFn: () => api.getHASensors(),
     enabled: activeTab === 'plugs',
   });
 
