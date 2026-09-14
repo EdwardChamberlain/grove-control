@@ -26,6 +26,11 @@
 /* Enable class-based dark mode for Tailwind v4 */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Tailwind v4 wraps hover variants in a hover-capability media query. Keep
+   the hiding half of touch-sensitive controls behind the same capability so
+   actions remain visible on touch-only devices (#86). */
+@custom-variant can-hover (@media (hover: hover) and (pointer: fine));
+
 @theme {
   /* Accent colors - use CSS variables for theming */
   --color-bambu-green: var(--accent);
@@ -79,6 +84,10 @@ html {
   --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   --glow-color: transparent;
 
+  /* Native controls follow the active Grove theme rather than the browser's
+     default light appearance. */
+  color-scheme: light;
+
   font-family: 'Inter', system-ui, sans-serif;
   line-height: 1.5;
   font-weight: 400;
@@ -90,6 +99,8 @@ html {
 
 /* Dark mode base */
 .dark {
+  color-scheme: dark;
+
   --bg-primary: #1a1a1a;
   --bg-secondary: #2d2d2d;
   --bg-tertiary: #3d3d3d;

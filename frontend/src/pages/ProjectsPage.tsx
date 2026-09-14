@@ -658,7 +658,7 @@ function ProjectCard({ project, onClick, onEdit, onDelete, hasPermission, t }: P
           {/* Actions menu */}
           <div className="relative" onClick={(e) => e.stopPropagation()}>
             <button
-              className="p-1.5 rounded-lg hover:bg-bambu-dark text-bambu-gray hover:text-white transition-colors opacity-0 group-hover:opacity-100"
+              className="p-1.5 rounded-lg hover:bg-bambu-dark text-bambu-gray hover:text-white transition-colors can-hover:opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
               onClick={() => setShowActions(!showActions)}
             >
               <MoreVertical className="w-4 h-4" />
