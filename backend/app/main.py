@@ -5164,9 +5164,7 @@ async def on_print_complete(printer_id: int, data: dict):
                     archive_id,
                     charged_user_id=queue_item_owner_id,
                     cost_center_id=(
-                        queue_item_cost_center_id
-                        if queue_item_cost_center_id is not None
-                        else cost_center_id
+                        queue_item_cost_center_id if queue_item_cost_center_id is not None else cost_center_id
                     ),
                     print_queue_id=queue_item_id,
                     print_run_id=(queue_item_billing_run_id or (archive.billing_run_id if archive else None)),

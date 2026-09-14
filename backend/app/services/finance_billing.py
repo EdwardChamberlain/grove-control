@@ -215,9 +215,7 @@ async def apply_print_charge_for_archive(
 
         actual_cost_center_id = cost_center_id if cost_center_id is not None else archive.cost_center_id
 
-        wallet = (
-            await db.execute(select(UserWallet).where(UserWallet.user_id == actual_user_id))
-        ).scalar_one_or_none()
+        wallet = (await db.execute(select(UserWallet).where(UserWallet.user_id == actual_user_id))).scalar_one_or_none()
         if wallet is None:
             wallet = UserWallet(user_id=actual_user_id, balance=0.0, currency="EUR")
             db.add(wallet)
@@ -227,9 +225,7 @@ async def apply_print_charge_for_archive(
         label = archive.print_name or archive.filename or f"Archive {archive.id}"
         description = f"Print charge: {label}{' ' + reason_suffix if reason_suffix else ''}"
 
-        balance_after = await _get_balance_after_for_transaction(
-            db, actual_user_id, actual_cost_center_id, -charge
-        )
+        balance_after = await _get_balance_after_for_transaction(db, actual_user_id, actual_cost_center_id, -charge)
         if balance_after is not None:
             balance_after = round(float(balance_after), 2)
 

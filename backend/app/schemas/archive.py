@@ -221,6 +221,8 @@ class ProjectPageUpdate(BaseModel):
     copyright: str | None = None
     profile_title: str | None = None
     profile_description: str | None = None
+
+
 class ReprintRequest(BaseModel):
     """Request body for reprinting an archive."""
 

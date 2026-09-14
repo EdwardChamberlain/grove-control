@@ -4651,9 +4651,7 @@ async def repair_wallet_ledger():
 
     async with async_session() as session:
         # Check if there are any transactions first
-        result = await session.execute(
-            select(WalletTransaction).where(WalletTransaction.is_voided.is_(False)).limit(1)
-        )
+        result = await session.execute(select(WalletTransaction).where(WalletTransaction.is_voided.is_(False)).limit(1))
         if not result.scalar_one_or_none():
             logger.info("No wallet transactions found, skipping ledger rebuild")
             return

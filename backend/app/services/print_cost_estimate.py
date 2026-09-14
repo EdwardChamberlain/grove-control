@@ -107,8 +107,10 @@ async def estimate_queue_source_cost(
             return None
         metadata_cost = metadata.get("cost")
         try:
-            return round(float(metadata_cost), 2) if metadata_cost and float(metadata_cost) > 0 else round(
-                grams / 1000.0 * await _default_cost_per_kg(db), 2
+            return (
+                round(float(metadata_cost), 2)
+                if metadata_cost and float(metadata_cost) > 0
+                else round(grams / 1000.0 * await _default_cost_per_kg(db), 2)
             )
         except (TypeError, ValueError):
             return round(grams / 1000.0 * await _default_cost_per_kg(db), 2)
