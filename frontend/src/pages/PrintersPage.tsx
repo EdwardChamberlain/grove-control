@@ -73,7 +73,7 @@ import {
 
 import { useNavigate } from 'react-router-dom';
 import { api, discoveryApi, firmwareApi, getAuthToken, withStreamToken, ApiError } from '../api/client';
-import { formatDateOnly, formatETA, formatDuration } from '../utils/date';
+import { formatDateOnly, formatDateTime, formatETA, formatDuration } from '../utils/date';
 import { getCurrencySymbol } from '../utils/currency';
 import { getActivePrintIdentity } from '../utils/printIdentity';
 import type { Printer, PrinterCreate, PrinterStatus, AMSUnit, DiscoveredPrinter, LinkedSpoolInfo, SpoolAssignment, HMSError, InventorySpool, PrinterDiagnosticResult, PrintLogEntry, SmartPlug } from '../api/client';
@@ -2981,6 +2981,85 @@ function SinglePrinterCockpit({
   );
 }
 
+const SCHEDULED_DRYINGS_KEY = ['scheduled-dryings'] as const;
+
+const WAITING_REASON_KEYS: Record<string, string> = {
+  ams_power_required: 'printers.drying.powerRequired',
+  ams_retract_filament: 'printers.drying.retractFilament',
+  ams_blocked: 'printers.drying.cannotDryNow',
+  ams_not_found: 'printers.drying.waitingAmsNotFound',
+  printer_offline: 'printers.drying.waitingOffline',
+  printer_busy: 'printers.drying.waitingPrinterBusy',
+  already_drying: 'printers.drying.waitingAlreadyDrying',
+  interrupted: 'printers.drying.waitingInterrupted',
+};
+
+function ScheduledDryingBanner({
+  printerId,
+  dryingActive,
+  timeFormat,
+}: {
+  printerId: number;
+  dryingActive: boolean;
+  timeFormat: 'system' | '12h' | '24h';
+}) {
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const { data: scheduled = [] } = useQuery({
+    queryKey: SCHEDULED_DRYINGS_KEY,
+    queryFn: () => api.listScheduledDryings(),
+    refetchInterval: 30_000,
+  });
+  useEffect(() => {
+    if (dryingActive) queryClient.invalidateQueries({ queryKey: SCHEDULED_DRYINGS_KEY });
+  }, [dryingActive, queryClient]);
+  const cancelMutation = useMutation({
+    mutationFn: (id: number) => api.cancelScheduledDrying(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: SCHEDULED_DRYINGS_KEY }),
+    onError: (error: Error) => showToast(error.message || t('printers.drying.scheduleFailed'), 'error'),
+  });
+  const rows = scheduled.filter(row => row.printer_id === printerId && (row.status === 'pending' || row.status === 'failed'));
+  if (rows.length === 0) return null;
+  return (
+    <div className="mt-2 space-y-1">
+      {rows.map(row => {
+        const failed = row.status === 'failed';
+        const waitingReason = row.waiting_reason ? WAITING_REASON_KEYS[row.waiting_reason] : undefined;
+        return (
+          <div
+            key={row.id}
+            data-testid={failed ? 'scheduled-drying-failed' : 'scheduled-drying-pending'}
+            className={`flex items-center justify-between rounded-lg border px-2 py-1 text-[11px] ${
+              failed ? 'border-red-500/30 bg-red-500/10' : 'border-amber-500/30 bg-amber-500/10'
+            }`}
+          >
+            <span className={failed ? 'text-red-700 dark:text-red-400' : 'text-amber-700 dark:text-amber-400'}>
+              {failed
+                ? t('printers.drying.scheduleFailedReason', { reason: row.error_message || t('printers.drying.scheduleFailedUnknown') })
+                : <>
+                    {row.start_after
+                      ? t('printers.drying.scheduledFor', { time: formatDateTime(row.start_after, timeFormat) })
+                      : t('printers.drying.scheduledAsap')}
+                    {waitingReason && <span className="ml-1 opacity-80">{t(waitingReason)}</span>}
+                  </>}
+            </span>
+            <button
+              type="button"
+              onClick={() => cancelMutation.mutate(row.id)}
+              disabled={cancelMutation.isPending}
+              title={failed ? t('printers.drying.dismissFailed') : t('printers.drying.cancelScheduled')}
+              className="text-bambu-gray transition-colors hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function PrinterCard({
   printer,
   hideIfDisconnected,
@@ -5425,6 +5504,11 @@ function PrinterCard({
             </div>
         </div>
         </div>
+        <ScheduledDryingBanner
+          printerId={printer.id}
+          dryingActive={amsData.some(ams => (ams.dry_time ?? 0) > 0)}
+          timeFormat={timeFormat}
+        />
       </CardContent>
 
       {/* File Manager Modal */}

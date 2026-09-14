@@ -161,6 +161,7 @@ async def test_engine(test_database_url):
         printer,
         project,
         project_bom,
+        scheduled_drying,
         settings,
         slot_preset,
         smart_plug,

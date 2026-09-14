@@ -5,10 +5,10 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -20,10 +20,12 @@ from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
 from backend.app.models.printer import Printer
+from backend.app.models.scheduled_drying import ScheduledDrying
 from backend.app.models.settings import Settings
 from backend.app.models.smart_plug import SmartPlug
 from backend.app.models.spool_assignment import SpoolAssignment
 from backend.app.models.spoolman_slot_assignment import SpoolmanSlotAssignment
+from backend.app.services import drying_preflight
 from backend.app.services.bambu_ftp import (
     UploadCancelled,
     cache_3mf_download,
@@ -44,6 +46,7 @@ from backend.app.services.printer_manager import (
 )
 from backend.app.services.smart_plug_manager import smart_plug_manager
 from backend.app.utils.filename import derive_remote_filename
+from backend.app.utils.local_time import utcnow_naive
 from backend.app.utils.printer_models import is_gcode_compatible, normalize_printer_model
 
 logger = logging.getLogger(__name__)
@@ -71,6 +74,8 @@ _DRYING_WAITING_MESSAGES: frozenset[str] = frozenset(
         _DRYING_STOP_FAILED_MESSAGE,
     }
 )
+SCHEDULED_DRYING_RETENTION_DAYS = 7
+SCHEDULED_DRYING_PRUNE_INTERVAL_SECONDS = 60 * 60
 _DISPATCH_REVIEW_MESSAGE = (
     "Printer did not provide a correlated active-state confirmation; "
     "dispatch held for manual review to avoid a duplicate print."
@@ -383,6 +388,10 @@ class PrintScheduler:
         self._power_on_check_interval = 10  # seconds between connection checks
         # Track which printers are currently auto-drying (printer_id -> start timestamp)
         self._drying_in_progress: dict[int, float] = {}
+        # Printers with a running manual scheduled-drying row. Auto-drying must
+        # not stop a cycle the user explicitly scheduled.
+        self._scheduled_drying_printer_ids: set[int] = set()
+        self._last_scheduled_drying_prune: float | None = None
         # Recovery completion is deliberately asynchronous, so do not start a
         # second completion chain if a slow side effect overlaps the next tick.
         self._terminal_dispatch_recoveries: set[int] = set()
@@ -630,6 +639,10 @@ class PrintScheduler:
             # cannot send the same file twice.
             if self._inflight:
                 items = [item for item in items if item.id not in self._inflight]
+
+            # Scheduled drying is independent of whether the print queue has
+            # work, so dispatch and reconcile it before the empty-queue return.
+            await self._check_scheduled_dryings(db)
 
             # Read plate-clear setting once per queue check
             require_plate_clear = await self._get_bool_setting(db, "require_plate_clear", default=True)
@@ -2715,6 +2728,8 @@ class PrintScheduler:
             # Stop active drying on all printers if both features disabled
             if self._drying_in_progress:
                 for pid in list(self._drying_in_progress):
+                    if pid in self._scheduled_drying_printer_ids:
+                        continue
                     logger.info("Auto-drying: printer %d — stopping, auto-drying disabled", pid)
                     await self._stop_drying(pid)
             return
@@ -2736,6 +2751,8 @@ class PrintScheduler:
         # may still be eligible for mid-print drying regardless of queue state).
         if not ambient_drying_enabled and not printers_with_scheduled and not print_drying_enabled:
             for pid in list(self._drying_in_progress):
+                if pid in self._scheduled_drying_printer_ids:
+                    continue
                 logger.info("Auto-drying: printer %d — stopping, no scheduled prints in queue", pid)
                 await self._stop_drying(pid)
             return
@@ -2759,6 +2776,9 @@ class PrintScheduler:
         all_printers = await db.execute(select(Printer).where(Printer.is_active.is_(True)))
         for printer in all_printers.scalars():
             pid = printer.id
+
+            if pid in self._scheduled_drying_printer_ids:
+                continue
 
             # Resolve model+firmware up front — needed to decide whether this printer
             # qualifies for mid-print drying (busy printer on capable hardware).
@@ -2967,6 +2987,136 @@ class PrintScheduler:
                 )
         self._drying_in_progress.pop(printer_id, None)
         return all_sent
+
+    # Scheduled manual drying (#71) -------------------------------------
+
+    SCHEDULED_DRYING_GRACE_SECONDS = 120
+    SCHEDULED_DRYING_COMPLETE_FRACTION = 0.9
+
+    async def _check_scheduled_dryings(self, db: AsyncSession) -> None:
+        """Dispatch due scheduled drying runs and reconcile running rows."""
+        now = utcnow_naive()
+        monotonic_now = time.monotonic()
+        if (
+            self._last_scheduled_drying_prune is None
+            or monotonic_now - self._last_scheduled_drying_prune >= SCHEDULED_DRYING_PRUNE_INTERVAL_SECONDS
+        ):
+            self._last_scheduled_drying_prune = monotonic_now
+            await db.execute(
+                delete(ScheduledDrying).where(
+                    ScheduledDrying.status.in_(("completed", "cancelled", "failed")),
+                    ScheduledDrying.completed_at.is_not(None),
+                    ScheduledDrying.completed_at < now - timedelta(days=SCHEDULED_DRYING_RETENTION_DAYS),
+                )
+            )
+
+        result = await db.execute(
+            select(ScheduledDrying)
+            .where(ScheduledDrying.status.in_(("pending", "running")))
+            .order_by(ScheduledDrying.start_after.asc().nullsfirst(), ScheduledDrying.id.asc())
+        )
+        rows = list(result.scalars().all())
+        previously_running = self._scheduled_drying_printer_ids
+        self._scheduled_drying_printer_ids = {row.printer_id for row in rows if row.status == "running"}
+        running_printer_ids = set(self._scheduled_drying_printer_ids)
+
+        printer_ids = {row.printer_id for row in rows}
+        printers_by_id: dict[int, Printer] = {}
+        if printer_ids:
+            printer_result = await db.execute(select(Printer).where(Printer.id.in_(printer_ids)))
+            printers_by_id = {printer.id: printer for printer in printer_result.scalars()}
+
+        for row in rows:
+            if row.status == "running":
+                self._update_running_scheduled_drying(row, now)
+                continue
+            if row.start_after is not None and row.start_after > now:
+                continue
+
+            state = printer_manager.get_status(row.printer_id)
+            if not state:
+                row.waiting_reason = "printer_offline"
+                continue
+
+            printer = printers_by_id.get(row.printer_id)
+            unsupported = drying_preflight.check_drying_supported(
+                printer.model if printer else None, state.firmware_version
+            )
+            if unsupported:
+                row.status = "failed"
+                row.error_message = unsupported
+                row.completed_at = now
+                continue
+            if self._drying_in_progress.get(row.printer_id) or row.printer_id in running_printer_ids:
+                row.waiting_reason = "already_drying"
+                continue
+            if not self._is_printer_idle(row.printer_id, require_plate_clear=False):
+                row.waiting_reason = "printer_busy"
+                continue
+
+            target = drying_preflight.find_ams_unit(state, row.ams_id)
+            if target is None:
+                row.waiting_reason = "ams_not_found"
+                continue
+            blocking = drying_preflight.blocking_reason_codes(target)
+            if blocking:
+                row.waiting_reason = drying_preflight.waiting_reason_for_codes(blocking)
+                continue
+
+            filament = drying_preflight.resolve_filament(target, row.filament)
+            success = printer_manager.send_drying_command(
+                row.printer_id,
+                row.ams_id,
+                row.temp,
+                row.duration_hours,
+                mode=1,
+                filament=filament,
+                rotate_tray=row.rotate_tray,
+            )
+            if success:
+                row.status = "running"
+                row.started_at = now
+                row.waiting_reason = None
+                row.filament = filament
+                self._drying_in_progress[row.printer_id] = time.monotonic()
+                self._scheduled_drying_printer_ids.add(row.printer_id)
+                running_printer_ids.add(row.printer_id)
+            else:
+                row.waiting_reason = "printer_offline"
+
+        self._scheduled_drying_printer_ids = {row.printer_id for row in rows if row.status == "running"}
+        for printer_id in (previously_running | running_printer_ids) - self._scheduled_drying_printer_ids:
+            self._drying_in_progress.pop(printer_id, None)
+        await db.commit()
+
+    def _update_running_scheduled_drying(self, row: ScheduledDrying, now: datetime) -> None:
+        """Mark a running schedule complete, cancelled, or ready to retry."""
+        if row.started_at is None:
+            row.started_at = now
+            return
+        elapsed = (now - row.started_at).total_seconds()
+        if elapsed < self.SCHEDULED_DRYING_GRACE_SECONDS:
+            return
+        state = printer_manager.get_status(row.printer_id)
+        if not state:
+            return
+        target = drying_preflight.find_ams_unit(state, row.ams_id)
+        try:
+            dry_time = int(target.get("dry_time") or 0) if target else 0
+        except (TypeError, ValueError):
+            dry_time = 0
+        if dry_time > 0:
+            return
+        if elapsed >= row.duration_hours * 3600 * self.SCHEDULED_DRYING_COMPLETE_FRACTION:
+            row.status = "completed"
+            row.completed_at = now
+        elif not self._is_printer_idle(row.printer_id, require_plate_clear=False):
+            row.status = "pending"
+            row.started_at = None
+            row.waiting_reason = "interrupted"
+        else:
+            row.status = "cancelled"
+            row.completed_at = now
 
     async def _get_smart_plugs(self, db: AsyncSession, printer_id: int) -> list[SmartPlug]:
         """Get all smart plugs associated with a printer."""
