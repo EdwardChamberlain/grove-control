@@ -628,6 +628,7 @@ _expected_print_registered_at: dict[tuple[int, str], float] = {}
 _EXPECTED_PRINT_CLEANUP_INTERVAL: int = 15 * 60  # 15 minutes
 _expected_prints_cleanup_task: asyncio.Task | None = None
 
+
 def _select_queue_completion_item(
     active_items: list,
     *,
