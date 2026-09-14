@@ -88,7 +88,9 @@ async def estimate_queue_source_cost(
 
     if archive is not None:
         archive_path = Path(archive.file_path)
-        archive_path = archive_path if archive_path.is_absolute() else settings.base_dir / archive_path
+        archive_path = (
+            archive_path if archive_path.is_absolute() else settings.base_dir / archive_path
+        )  # SEC-PATH-OK: DB-stored archive path; absolute external paths are intentional
         _grams, cost = plate_scoped_run_estimate(archive, archive_path, plate_id)
         return float(cost) if cost is not None and cost > 0 else None
 
