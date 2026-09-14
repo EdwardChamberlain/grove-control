@@ -1325,7 +1325,7 @@ describe('PrintersPage', () => {
       );
       render(<PrintersPage />);
 
-      const healthButton = await screen.findByLabelText(/Machine health: Offline/);
+      const healthButton = await screen.findByLabelText(/Machine health: Maintenance Mode/);
       expect(healthButton).toHaveClass('bg-blue-500/20', 'text-blue-400');
       fireEvent.click(healthButton);
       await waitFor(() => {
@@ -1334,6 +1334,24 @@ describe('PrintersPage', () => {
       expect(screen.getAllByText('Maintenance Mode').length).toBeGreaterThan(0);
       // No connection diagnostic CTA (that's reserved for involuntary offline).
       expect(screen.queryByRole('button', { name: /run.*diagnostic/i })).not.toBeInTheDocument();
+    });
+
+    it('shows Maintenance Mode in the list view status column', async () => {
+      server.use(
+        http.get('/api/v1/printers/', () => HttpResponse.json([inMaintenancePrinter])),
+        http.get('/api/v1/printers/:id/status', () =>
+          HttpResponse.json({ ...mockPrinterStatus, connected: false }),
+        ),
+      );
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'List' }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'List' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getAllByLabelText('Machine health: Maintenance Mode')).toHaveLength(2);
+        expect(screen.getAllByText('Maintenance Mode').length).toBeGreaterThan(0);
+      });
+      expect(screen.queryByLabelText('Machine health: Offline')).not.toBeInTheDocument();
     });
 
     it('uses the blue Offline health state when an associated smart socket is off', async () => {

@@ -159,6 +159,27 @@ describe('KioskPage', () => {
     });
   });
 
+  it('shows maintenance mode instead of offline for an inactive printer', async () => {
+    const maintenancePrinter = { id: 1, name: 'Atlas', model: 'X1 Carbon', is_active: false };
+    vi.mocked(api.getPrinters).mockResolvedValue([maintenancePrinter, printers[1]] as never);
+    vi.mocked(api.getPrinterStatus).mockImplementation(async (printerId) => {
+      if (printerId === 1) return { ...statusFor('1'), connected: false, awaiting_plate_clear: true } as never;
+      return statusFor(String(printerId)) as never;
+    });
+
+    render(<KioskPage />);
+
+    await waitFor(() => {
+      const tile = screen.getByTestId('kiosk-printer-1');
+      const state = within(tile).getByText('Maintenance Mode');
+      expect(state).toHaveClass('text-blue-400');
+      expect(within(tile).queryByText('Offline')).not.toBeInTheDocument();
+      expect(within(tile).queryByText('Plate clear required')).not.toBeInTheDocument();
+      expect(screen.getByTestId('kiosk-progress-1')).not.toHaveClass('bg-yellow-400');
+      expect(tile).not.toHaveClass('border-yellow-400/60', 'kiosk-plate-clear-alert');
+    });
+  });
+
   it('shows future pending jobs as scheduled with their start time', async () => {
     vi.mocked(api.getQueue).mockResolvedValue([
       {

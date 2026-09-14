@@ -308,7 +308,7 @@ interface PrinterMaintenanceInfo {
 }
 
 type PrinterHealthMeta = {
-  level: 'healthy' | 'attention' | 'error' | 'offline';
+  level: 'healthy' | 'attention' | 'error' | 'offline' | 'maintenance';
   label: string;
   className: string;
 };
@@ -341,11 +341,20 @@ function getPrinterHealthMeta({
     attentionRequired: string;
     error: string;
     offline: string;
+    maintenance: string;
   };
 }): PrinterHealthMeta {
-  const plannedOffline = isMaintenanceMode || (!connected && smartPlugPoweredOff);
+  const plannedOffline = !connected && smartPlugPoweredOff;
   // A planned outage is more useful to operators than the underlying red
   // telemetry condition. It intentionally wins over every other health state.
+  if (isMaintenanceMode) {
+    return {
+      level: 'maintenance',
+      label: labels.maintenance,
+      className: 'bg-blue-500/20 text-blue-400',
+    };
+  }
+
   if (plannedOffline) {
     return {
       level: 'offline',
@@ -844,9 +853,10 @@ function PrinterListRow({
   });
 
   const knownHmsErrors = status?.hms_errors ? filterKnownHMSErrors(status.hms_errors) : [];
-  const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
+  const isMaintenanceMode = printer.is_active === false;
+  const isPrintingOrPaused = !isMaintenanceMode && (status?.state === 'RUNNING' || status?.state === 'PAUSE');
   const progress = Math.max(0, Math.min(100, status?.progress ?? 0));
-  const needsPlateClear = !!requirePlateClear && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
+  const needsPlateClear = !!requirePlateClear && !isMaintenanceMode && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
   const showClearPlateButton = status?.connected === true && needsPlateClear;
   const clearPlateMutation = useMutation({
     mutationFn: () => api.clearPlate(printer.id),
@@ -885,17 +895,20 @@ function PrinterListRow({
     firmwareUpdateAvailable: !!firmwareInfo?.update_available,
     hasDoorSensor,
     doorOpen: status?.door_open,
-    isMaintenanceMode: printer.is_active === false,
+    isMaintenanceMode,
     smartPlugPoweredOff,
     labels: {
       healthy: t('printers.health.healthy', 'Healthy'),
       attentionRequired: t('printers.health.attentionRequired', 'Requires attention'),
       error: t('printers.health.error', 'Error'),
       offline: t('printers.connection.offline', 'Offline'),
+      maintenance: t('printers.maintenance.modeLabel', 'Maintenance Mode'),
     },
   });
   const jobStatusLabel = !status
     ? t('common.loading', 'Loading')
+    : printer.is_active === false
+    ? t('printers.maintenance.modeLabel', 'Maintenance Mode')
     : !status.connected
     ? t('printers.connection.offline')
     : status.preheating ? t('heatSoak.status') : getStatusDisplay(status.state, status.stg_cur_name);
@@ -911,7 +924,7 @@ function PrinterListRow({
     ? t('printers.list.printingJob', 'Printing: {{job}}', { job: activePrintName })
     : jobStatusLabel;
 
-  if (hideIfDisconnected && status?.connected === false) {
+  if (hideIfDisconnected && status?.connected === false && !isMaintenanceMode) {
     return null;
   }
 
@@ -1101,6 +1114,7 @@ function SinglePrinterSwitcherItem({
       attentionRequired: t('printers.health.attentionRequired', 'Requires attention'),
       error: t('printers.health.error', 'Error'),
       offline: t('printers.connection.offline', 'Offline'),
+      maintenance: t('printers.maintenance.modeLabel', 'Maintenance Mode'),
     },
   });
 
@@ -1834,6 +1848,7 @@ function SinglePrinterCockpit({
       attentionRequired: t('printers.health.attentionRequired', 'Requires attention'),
       error: t('printers.health.error', 'Error'),
       offline: t('printers.connection.offline', 'Offline'),
+      maintenance: t('printers.maintenance.modeLabel', 'Maintenance Mode'),
     },
   });
 
@@ -3647,18 +3662,19 @@ function PrinterCard({
     firmwareUpdateAvailable: !!firmwareInfo?.update_available,
     hasDoorSensor,
     doorOpen: status?.door_open,
-    isMaintenanceMode: printer.is_active === false,
+    isMaintenanceMode,
     smartPlugPoweredOff,
     labels: {
       healthy: t('printers.health.healthy', 'Healthy'),
       attentionRequired: t('printers.health.attentionRequired', 'Requires attention'),
       error: t('printers.health.error', 'Error'),
       offline: t('printers.connection.offline', 'Offline'),
+      maintenance: t('printers.maintenance.modeLabel', 'Maintenance Mode'),
     },
   });
 
   // Determine if this card should be hidden (use cached connected state to prevent flicker)
-  const shouldHide = hideIfDisconnected && isConnected === false;
+  const shouldHide = hideIfDisconnected && isConnected === false && !isMaintenanceMode;
 
   const deleteMutation = useMutation({
     mutationFn: (options: { deleteArchives: boolean }) =>

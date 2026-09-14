@@ -14,8 +14,9 @@ function isActivePrint(status: PrinterStatus | undefined): boolean {
   return status?.preheating === true || status?.state === 'RUNNING' || status?.state === 'PAUSE';
 }
 
-function getPrinterStateLabel(status: PrinterStatus | undefined, t: Translate): string {
+function getPrinterStateLabel(printer: PrinterRecord, status: PrinterStatus | undefined, t: Translate): string {
   if (!status) return t('common.loading');
+  if (printer.is_active === false) return t('printers.maintenance.modeLabel', 'Maintenance Mode');
   if (!status.connected) return t('printers.connection.offline');
   if (status.preheating) return t('heatSoak.status');
   if (status.awaiting_plate_clear && !isActivePrint(status)) return t('kiosk.plateClearRequired');
@@ -73,9 +74,10 @@ function KioskPrinterTile({
   className?: string;
   style?: CSSProperties;
 }) {
-  const active = isActivePrint(status);
+  const isMaintenanceMode = printer.is_active === false;
+  const active = !isMaintenanceMode && isActivePrint(status);
   const preheating = status?.preheating === true;
-  const plateClearRequired = status?.awaiting_plate_clear === true && !active;
+  const plateClearRequired = !isMaintenanceMode && status?.awaiting_plate_clear === true && !active;
   const progress = plateClearRequired ? 100 : Math.max(0, Math.min(100, active && !preheating ? status?.progress ?? 0 : 0));
   const jobName = !preheating && (active || plateClearRequired)
     ? formatPrintName(status?.subtask_name || status?.current_print || status?.gcode_file || null, status?.gcode_file, t) || t('kiosk.noJob')
@@ -91,8 +93,8 @@ function KioskPrinterTile({
           <h2 className="truncate text-sm font-semibold text-white">{printer.name}</h2>
           <p className="truncate text-xs text-bambu-gray">{printer.model || t('common.unknown')}</p>
         </div>
-        <span className={`shrink-0 text-[11px] font-medium ${plateClearRequired ? 'text-yellow-300' : status?.connected ? 'text-bambu-gray' : 'text-status-error'}`}>
-          {getPrinterStateLabel(status, t)}
+        <span className={`shrink-0 text-[11px] font-medium ${isMaintenanceMode ? 'text-blue-400' : plateClearRequired ? 'text-yellow-300' : status?.connected ? 'text-bambu-gray' : 'text-status-error'}`}>
+          {getPrinterStateLabel(printer, status, t)}
         </span>
       </div>
 
