@@ -573,6 +573,7 @@ _QUEUE_INSERT_COLUMN_DEFINITIONS: dict[str, tuple[str, str]] = {
     "gate_acknowledged": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
     "dispatched_at": ("DATETIME", "TIMESTAMP"),
     "dispatch_subtask_id": ("VARCHAR(32)", "VARCHAR(32)"),
+    "billing_run_id": ("VARCHAR(36)", "VARCHAR(36)"),
     "started_at": ("DATETIME", "TIMESTAMP"),
     "completed_at": ("DATETIME", "TIMESTAMP"),
     "error_message": ("TEXT", "TEXT"),

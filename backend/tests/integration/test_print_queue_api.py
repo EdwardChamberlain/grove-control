@@ -1924,6 +1924,7 @@ class TestAbortedStatusNormalisation:
             patch("backend.app.main.notification_service") as mock_notif,
             patch("backend.app.main.smart_plug_manager") as mock_plug,
             patch("backend.app.main.printer_manager") as mock_pm,
+            patch("backend.app.services.finance_billing.apply_print_charge_for_archive", AsyncMock(return_value=False)),
         ):
             mock_ws.send_print_complete = AsyncMock()
             mock_ws.broadcast = AsyncMock()
@@ -1985,6 +1986,7 @@ class TestAbortedStatusNormalisation:
             patch("backend.app.main.notification_service") as mock_notif,
             patch("backend.app.main.smart_plug_manager") as mock_plug,
             patch("backend.app.main.printer_manager") as mock_pm,
+            patch("backend.app.services.finance_billing.apply_print_charge_for_archive", AsyncMock(return_value=False)),
         ):
             mock_ws.send_print_complete = AsyncMock()
             mock_ws.broadcast = AsyncMock()

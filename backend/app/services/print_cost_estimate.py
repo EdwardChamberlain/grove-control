@@ -16,7 +16,9 @@ from backend.app.utils.threemf_tools import extract_filament_usage_from_3mf
 
 def _source_path(library_file: LibraryFile) -> Path:
     path = Path(library_file.file_path)
-    return path if path.is_absolute() else settings.base_dir / path
+    return (
+        path if path.is_absolute() else settings.base_dir / path
+    )  # SEC-PATH-OK: DB-stored library path; absolute external paths are intentional
 
 
 def _parse_mapping(mapping: list[int] | str | None) -> list[int] | None:
@@ -47,7 +49,7 @@ def plate_scoped_run_estimate(
     """Return ``(grams, cost)`` for the selected plate, when available."""
 
     whole_grams = archive.filament_used_grams
-    selected_plate = archive.plate_id if plate_id is None else plate_id
+    selected_plate = plate_id
     if selected_plate is None or full_path is None or not full_path.exists():
         return whole_grams, archive.cost
     try:
@@ -85,7 +87,8 @@ async def estimate_queue_source_cost(
     """Compute a queue cost from persisted source metadata, not request input."""
 
     if archive is not None:
-        archive_path = settings.base_dir / archive.file_path
+        archive_path = Path(archive.file_path)
+        archive_path = archive_path if archive_path.is_absolute() else settings.base_dir / archive_path
         _grams, cost = plate_scoped_run_estimate(archive, archive_path, plate_id)
         return float(cost) if cost is not None and cost > 0 else None
 

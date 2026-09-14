@@ -205,6 +205,12 @@ _APIKEY_DENIED_PERMISSIONS: frozenset[Permission] = frozenset(
         Permission.LIBRARY_UPDATE_ALL,
         Permission.LIBRARY_DELETE_ALL,
         Permission.ARCHIVES_PURGE,
+        # Finance administration is deliberately unavailable to API keys;
+        # wallet and cost-centre mutations require an authenticated user.
+        Permission.COST_CENTERS_READ_OWN,
+        Permission.COST_CENTERS_READ_ALL,
+        Permission.COST_CENTERS_MODIFY,
+        Permission.COST_CENTERS_CREATE,
         # Library ALL-ownership operations stay denied. OWN operations are
         # allowed through the owner-resolving ownership dependency; folder and
         # batch operations that require ALL remain admin/JWT-only.
