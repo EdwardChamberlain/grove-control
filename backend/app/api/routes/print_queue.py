@@ -20,19 +20,11 @@ from backend.app.core.database import get_db
 from backend.app.core.permissions import Permission
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
-from backend.app.models.print_batch import PrintBatch, PrintBatchPlate
 from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
 from backend.app.models.printer import Printer
 from backend.app.models.project import Project
 from backend.app.models.user import User
 from backend.app.schemas.print_queue import (
-    PrintBatchCreate,
-    PrintBatchDispatchRequest,
-    PrintBatchPlateProgress,
-    PrintBatchPlateTarget,
-    PrintBatchResponse,
-    PrintBatchUngroupResponse,
-    PrintBatchUpdate,
     PrintQueueBulkUpdate,
     PrintQueueBulkUpdateResponse,
     PrintQueueItemCreate,
@@ -50,12 +42,6 @@ from backend.app.services.filament_requirements import (
     overrides_for_plate,
 )
 from backend.app.services.notification_service import notification_service
-from backend.app.services.print_batch import (
-    BatchDispatchError,
-    dispatch_remaining,
-    load_progress,
-    refresh_batch_status,
-)
 from backend.app.utils.printer_models import is_gcode_compatible
 from backend.app.utils.threemf_tools import (
     extract_bed_type_from_3mf,
@@ -306,9 +292,6 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
         # User tracking (Issue #206)
         "created_by_id": item.created_by_id,
         "created_by_username": item.created_by.username if item.created_by else None,
-        # Legacy grouping metadata (only populated for pre-#143 rows).
-        "batch_id": item.batch_id,
-        "batch_name": item.batch.name if item.batch else None,
         # SJF scheduling
         "been_jumped": item.been_jumped,
         # Auto-print G-code injection
@@ -421,7 +404,6 @@ async def list_queue(
             selectinload(PrintQueueItem.printer),
             selectinload(PrintQueueItem.library_file),
             selectinload(PrintQueueItem.created_by),
-            selectinload(PrintQueueItem.batch),
             # Cross-model candidates (#671) and their files, for the card label.
             selectinload(PrintQueueItem.variants).selectinload(PrintQueueVariant.library_file),
         )
@@ -905,11 +887,6 @@ async def add_to_queue(
             position=start_position + i,
             status="pending",
             created_by_id=actor.id if actor else None,
-            # Quantity deliberately creates ordinary independent rows. The
-            # legacy batch_id column remains nullable so pre-#143 rows can
-            # still be read and dispatched without making grouping part of the
-            # new queue lifecycle.
-            batch_id=None,
             print_time_seconds=cached_print_time,
         )
         db.add(item)
@@ -950,7 +927,7 @@ async def add_to_queue(
     # Refresh the first item for the response
     item = items[0]
     await db.refresh(item)
-    await db.refresh(item, ["archive", "printer", "library_file", "created_by", "batch"])
+    await db.refresh(item, ["archive", "printer", "library_file", "created_by"])
 
     source_name = f"archive {data.archive_id}" if data.archive_id else f"library file {data.library_file_id}"
     target_desc = data.printer_id or (f"model {target_model_norm}" if target_model_norm else "unassigned")
@@ -1063,513 +1040,6 @@ async def bulk_update_queue_items(
     )
 
 
-# --- Batch endpoints ---
-
-
-def _batch_endpoints_retired() -> None:
-    """Reject the pre-#143 batch-order API while preserving legacy rows.
-
-    Batch-linked queue rows remain readable through the ordinary queue API, but
-    new work is always represented by independent queue items. Keeping the
-    retired handlers as explicit 410s gives old clients a useful migration
-    signal instead of silently recreating the removed lifecycle.
-    """
-    raise HTTPException(
-        status_code=410,
-        detail="Batch-order queue APIs were retired; create independent queue items instead",
-    )
-
-
-def _validate_plate_targets(
-    plates: list[PrintBatchPlateTarget] | None,
-) -> list[PrintBatchPlateTarget] | None:
-    """Reject duplicate plates and orders that ask for nothing at all.
-
-    A duplicate would violate the (batch_id, plate_id) unique constraint at
-    flush time — and on SQLite/PostgreSQL a NULL plate_id slips past that
-    constraint entirely, so the check has to happen here to catch two
-    "whole file" rows in one order.
-    """
-    if plates is None:
-        return None
-    if not plates:
-        raise HTTPException(400, "plates must contain at least one plate")
-
-    seen: set[int | None] = set()
-    for target in plates:
-        if target.plate_id in seen:
-            label = target.plate_id if target.plate_id is not None else "whole file"
-            raise HTTPException(400, f"Duplicate plate in order: {label}")
-        seen.add(target.plate_id)
-
-    if all(target.quantity_target == 0 for target in plates):
-        raise HTTPException(400, "Order must request at least one print")
-    return plates
-
-
-async def _validate_batch_project(db: AsyncSession, project_id: int | None, current_user: User | None) -> None:
-    """404 on a bogus project id rather than letting the FK blow up as a 500."""
-    if project_id is None:
-        return
-    result = await db.execute(select(Project).where(Project.id == project_id))
-    if not result.scalar_one_or_none():
-        raise HTTPException(404, "Project not found")
-
-
-async def _load_batch_for_write(
-    db: AsyncSession, batch_id: int, current_user: User | None, permission: Permission
-) -> PrintBatch:
-    """Fetch a batch the caller is allowed to modify, or 404.
-
-    404 rather than 403 on the ownership miss, matching the rest of this
-    module: a 403 would confirm the id exists to someone enumerating.
-    """
-    result = await db.execute(
-        select(PrintBatch).options(selectinload(PrintBatch.plates)).where(PrintBatch.id == batch_id)
-    )
-    batch = result.scalar_one_or_none()
-    if not batch:
-        raise HTTPException(404, "Batch not found")
-    if current_user is not None and not current_user.has_permission(permission.value):
-        if batch.created_by_id is None or batch.created_by_id != current_user.id:
-            raise HTTPException(404, "Batch not found")
-    return batch
-
-
-@router.post("/batches", response_model=PrintBatchResponse)
-async def create_batch(
-    data: PrintBatchCreate | None = None,
-    db: AsyncSession = Depends(get_db),
-    current_user: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_CREATE),
-    api_key_owner: User | None = Depends(resolve_api_key_owner),
-):
-    _batch_endpoints_retired()
-    """Create a batch.
-
-    Two modes:
-    * ``item_ids`` provided: assign the listed pending queue items to a new
-      batch ("Group as batch" UI action).
-    * ``item_ids`` omitted/empty: create an empty batch so the client can
-      pass the returned ``id`` on subsequent ``POST /queue/`` calls. Used by
-      the multi-plate auto-batch flow in PrintModal.
-
-    ``plates`` turns the batch into an order with per-plate targets (#342):
-    progress is then measured against what was asked for rather than against
-    what happened to be queued, so a failed run still counts as owed. Omitting
-    it keeps the pre-#342 behaviour exactly.
-    """
-    if not data.name or not data.name.strip():
-        raise HTTPException(400, "Batch name is required")
-
-    actor = current_user or api_key_owner
-    plate_targets = _validate_plate_targets(data.plates)
-    await _validate_batch_project(db, data.project_id, actor)
-
-    batch = PrintBatch(
-        name=data.name.strip()[:255],
-        archive_id=data.archive_id,
-        library_file_id=data.library_file_id,
-        quantity=len(data.item_ids) if data.item_ids else 1,
-        status="active",
-        created_by_id=actor.id if actor else None,
-        project_id=data.project_id,
-        due_date=data.due_date,
-        notes=data.notes,
-    )
-    db.add(batch)
-    await db.flush()  # Need batch.id before assigning to items
-
-    if plate_targets is not None:
-        for target in plate_targets:
-            db.add(
-                PrintBatchPlate(
-                    batch_id=batch.id,
-                    plate_id=target.plate_id,
-                    plate_name=target.plate_name,
-                    quantity_target=target.quantity_target,
-                    sort_order=target.sort_order,
-                )
-            )
-        # The legacy `quantity` column is display-only; keep it meaningful for
-        # anything still reading it by making it the order's total.
-        batch.quantity = max(1, sum(t.quantity_target for t in plate_targets))
-
-    assigned = 0
-    if data.item_ids:
-        result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.id.in_(data.item_ids)))
-        items = result.scalars().all()
-        for item in items:
-            if item.status != "pending":
-                continue
-            if item.dispatching_at is not None:
-                continue
-            if item.batch_id is not None:
-                continue
-            if (
-                actor is not None
-                and item.created_by_id != actor.id
-                and not actor.has_permission(Permission.QUEUE_UPDATE_ALL.value)
-            ):
-                continue
-            item.batch_id = batch.id
-            assigned += 1
-        batch.quantity = max(assigned, 1)
-
-    await db.commit()
-    await db.refresh(batch)
-
-    logger.info("Created batch %s '%s' with %s assigned items", batch.id, batch.name, assigned)
-    return await _build_batch_response(db, batch)
-
-
-@router.patch("/batches/{batch_id}", response_model=PrintBatchResponse)
-async def update_batch(
-    batch_id: int,
-    data: PrintBatchUpdate | None = None,
-    db: AsyncSession = Depends(get_db),
-    current_user: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_UPDATE_OWN),
-    api_key_owner: User | None = Depends(resolve_api_key_owner),
-):
-    _batch_endpoints_retired()
-    """Edit an order's header or its per-plate targets while it runs (#342).
-
-    Production requirements change mid-run, so targets are editable. Lowering a
-    target below what has already been dispatched is allowed and simply leaves
-    ``remaining`` at zero — cancelling the surplus queue items is a separate,
-    explicit action, because silently deleting queued work on a number change
-    would be a nasty surprise.
-    """
-    actor = current_user or api_key_owner
-    batch = await _load_batch_for_write(db, batch_id, actor, Permission.QUEUE_UPDATE_ALL)
-
-    plate_targets = _validate_plate_targets(data.plates)
-    if data.project_id is not None:
-        await _validate_batch_project(db, data.project_id, actor)
-
-    if data.name is not None:
-        if not data.name.strip():
-            raise HTTPException(400, "Batch name is required")
-        batch.name = data.name.strip()[:255]
-    if data.project_id is not None:
-        batch.project_id = data.project_id
-    if data.due_date is not None:
-        batch.due_date = data.due_date
-    if data.notes is not None:
-        batch.notes = data.notes
-    if data.status is not None:
-        batch.status = data.status
-
-    if plate_targets is not None:
-        existing = {row.plate_id: row for row in batch.plates}
-        for target in plate_targets:
-            row = existing.pop(target.plate_id, None)
-            if row is None:
-                db.add(
-                    PrintBatchPlate(
-                        batch_id=batch.id,
-                        plate_id=target.plate_id,
-                        plate_name=target.plate_name,
-                        quantity_target=target.quantity_target,
-                        sort_order=target.sort_order,
-                    )
-                )
-            else:
-                row.quantity_target = target.quantity_target
-                row.sort_order = target.sort_order
-                if target.plate_name is not None:
-                    row.plate_name = target.plate_name
-        # Plates absent from the payload are dropped — the list is the order.
-        for orphan in existing.values():
-            await db.delete(orphan)
-        batch.quantity = max(1, sum(t.quantity_target for t in plate_targets))
-
-    await db.flush()
-    await db.refresh(batch)
-    # Raising a target on a finished order reopens it; lowering one on a
-    # running order can complete it.
-    await refresh_batch_status(db, batch)
-    await db.commit()
-    await db.refresh(batch)
-
-    logger.info("Updated batch %s", batch.id)
-    return await _build_batch_response(db, batch)
-
-
-@router.post("/batches/{batch_id}/dispatch", response_model=PrintBatchResponse)
-async def dispatch_batch(
-    batch_id: int,
-    data: PrintBatchDispatchRequest | None = None,
-    db: AsyncSession = Depends(get_db),
-    current_user: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_CREATE),
-    api_key_owner: User | None = Depends(resolve_api_key_owner),
-):
-    _batch_endpoints_retired()
-    """Queue the runs this order still owes (#342).
-
-    Each new item is cloned from the most recent item for the same plate in
-    this batch, so it inherits the printer/model target, AMS mapping, filament
-    overrides and print options the user already chose — and the validation
-    those went through at creation time.
-    """
-    actor = current_user or api_key_owner
-    batch = await _load_batch_for_write(db, batch_id, actor, Permission.QUEUE_UPDATE_ALL)
-    if batch.status == "cancelled":
-        raise HTTPException(400, "Cannot dispatch a cancelled batch")
-
-    # Dispatch starts prints, so it must not be a weaker door than POST /queue/.
-    raise AssertionError("retired batch endpoint is unreachable")
-
-    try:
-        created = await dispatch_remaining(
-            db,
-            batch,
-            plate_id=data.plate_id,
-            only_plate=data.only_plate,
-            limit=data.limit,
-            created_by_id=actor.id if actor else None,
-        )
-    except BatchDispatchError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-    await db.commit()
-    await db.refresh(batch)
-
-    logger.info("Batch %s dispatched %d item(s)", batch.id, len(created))
-    return await _build_batch_response(db, batch)
-
-
-@router.post("/batches/{batch_id}/ungroup", response_model=PrintBatchUngroupResponse)
-async def ungroup_batch(
-    batch_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_UPDATE_OWN),
-):
-    _batch_endpoints_retired()
-    """Disband a batch: clear batch_id from all members and delete the batch row.
-
-    Items stay in the queue. Only ungroups items the caller owns (unless they
-    hold QUEUE_UPDATE_ALL). A batch with all members ungrouped is deleted.
-    """
-    result = await db.execute(select(PrintBatch).where(PrintBatch.id == batch_id))
-    batch = result.scalar_one_or_none()
-    if not batch:
-        raise HTTPException(404, "Batch not found")
-
-    can_modify_all = current_user is None or current_user.has_permission(Permission.QUEUE_UPDATE_ALL.value)
-    if not can_modify_all and batch.created_by_id != (current_user.id if current_user else None):
-        raise HTTPException(404, "Batch not found")
-
-    result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.batch_id == batch_id))
-    items = result.scalars().all()
-    ungrouped = 0
-    remaining = 0
-    for item in items:
-        if not can_modify_all and item.created_by_id != (current_user.id if current_user else None):
-            remaining += 1
-            continue
-        item.batch_id = None
-        ungrouped += 1
-
-    # Delete the batch row only when all members were ungrouped — otherwise it
-    # still owns the items the caller couldn't touch.
-    if remaining == 0:
-        await db.delete(batch)
-
-    await db.commit()
-
-    logger.info("Ungrouped batch %s (%s items)", batch_id, ungrouped)
-    return PrintBatchUngroupResponse(
-        ungrouped_count=ungrouped,
-        message=f"Ungrouped {ungrouped} item(s)",
-    )
-
-
-@router.get("/batches", response_model=list[PrintBatchResponse])
-async def list_batches(
-    status: str | None = Query(None, description="Filter by status (active, completed, cancelled)"),
-    db: AsyncSession = Depends(get_db),
-    auth_result: tuple[User | None, bool] = Depends(
-        require_ownership_permission(
-            Permission.QUEUE_READ_ALL,
-            Permission.QUEUE_READ_OWN,
-        )
-    ),
-):
-    _batch_endpoints_retired()
-    """List print batches with progress stats.
-
-    Batches with neither queue items nor per-plate targets are omitted. Those
-    are empty shells — a grouping whose items were deleted with their source
-    archive, or a create that never got as far as adding any — and they carry
-    nothing to show, track or dispatch. A brand-new order is still listed
-    before its first dispatch, because its targets say what it owes.
-    """
-    current_user, can_read_all = auth_result
-    query = (
-        select(PrintBatch)
-        .where(
-            select(PrintQueueItem.id).where(PrintQueueItem.batch_id == PrintBatch.id).exists()
-            | select(PrintBatchPlate.id).where(PrintBatchPlate.batch_id == PrintBatch.id).exists()
-        )
-        .order_by(PrintBatch.created_at.desc())
-    )
-    if status:
-        query = query.where(PrintBatch.status == status)
-    if current_user is not None and not can_read_all:
-        query = query.where(PrintBatch.created_by_id == current_user.id)
-    result = await db.execute(query)
-    batches = result.scalars().all()
-
-    # Resolve creator names in one query rather than one per batch.
-    creator_ids = {b.created_by_id for b in batches if b.created_by_id is not None}
-    usernames: dict[int, str] = {}
-    if creator_ids:
-        rows = await db.execute(select(User.id, User.username).where(User.id.in_(creator_ids)))
-        usernames = {row[0]: row[1] for row in rows.all()}
-
-    return [await _build_batch_response(db, batch, usernames=usernames) for batch in batches]
-
-
-@router.get("/batches/{batch_id}", response_model=PrintBatchResponse)
-async def get_batch(
-    batch_id: int,
-    db: AsyncSession = Depends(get_db),
-    auth_result: tuple[User | None, bool] = Depends(
-        require_ownership_permission(
-            Permission.QUEUE_READ_ALL,
-            Permission.QUEUE_READ_OWN,
-        )
-    ),
-):
-    _batch_endpoints_retired()
-    """Get a print batch with progress stats."""
-    current_user, can_read_all = auth_result
-    result = await db.execute(select(PrintBatch).where(PrintBatch.id == batch_id))
-    batch = result.scalar_one_or_none()
-    if not batch:
-        raise HTTPException(404, "Batch not found")
-    if (
-        current_user is not None
-        and not can_read_all
-        and (batch.created_by_id is None or batch.created_by_id != current_user.id)
-    ):
-        raise HTTPException(404, "Batch not found")
-    return await _build_batch_response(db, batch)
-
-
-@router.delete("/batches/{batch_id}")
-async def cancel_batch(
-    batch_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_DELETE_ALL),
-):
-    _batch_endpoints_retired()
-    """Cancel all pending items in a batch and mark batch as cancelled."""
-    result = await db.execute(select(PrintBatch).where(PrintBatch.id == batch_id))
-    batch = result.scalar_one_or_none()
-    if not batch:
-        raise HTTPException(404, "Batch not found")
-
-    # Cancel all pending queue items in this batch
-    result = await db.execute(
-        select(PrintQueueItem).where(and_(PrintQueueItem.batch_id == batch_id, PrintQueueItem.status == "pending"))
-    )
-    pending_items = result.scalars().all()
-    cancelled_count = 0
-    cancelled_ids: list[int] = []
-    for item in pending_items:
-        item.status = "cancelled"
-        cancelled_count += 1
-        cancelled_ids.append(item.id)
-
-    batch.status = "cancelled"
-    await db.commit()
-
-    if cancelled_ids:
-        from backend.app.services.print_scheduler import scheduler
-
-        for item_id in cancelled_ids:
-            scheduler.cancel_inflight(item_id)
-
-    return {"message": f"Batch cancelled, {cancelled_count} pending items cancelled"}
-
-
-async def _build_batch_response(
-    db: AsyncSession, batch: PrintBatch, *, usernames: dict[int, str] | None = None
-) -> PrintBatchResponse:
-    """Build a batch response with per-plate progress derived from queue items.
-
-    ``usernames`` lets the list endpoint resolve every creator in one query
-    instead of one per batch.
-    """
-    progress = await load_progress(db, batch)
-
-    created_by_username = None
-    if batch.created_by_id:
-        if usernames is not None:
-            created_by_username = usernames.get(batch.created_by_id)
-        else:
-            result = await db.execute(select(User).where(User.id == batch.created_by_id))
-            user = result.scalar_one_or_none()
-            if user:
-                created_by_username = user.username
-
-    return PrintBatchResponse(
-        id=batch.id,
-        name=batch.name,
-        archive_id=batch.archive_id,
-        library_file_id=batch.library_file_id,
-        quantity=batch.quantity,
-        status=batch.status,
-        created_at=batch.created_at,
-        completed_at=batch.completed_at,
-        created_by_id=batch.created_by_id,
-        created_by_username=created_by_username,
-        project_id=batch.project_id,
-        due_date=batch.due_date,
-        notes=batch.notes,
-        pending_count=progress.pending,
-        preheating_count=progress.preheating,
-        printing_count=progress.printing,
-        completed_count=progress.completed,
-        failed_count=progress.failed,
-        cancelled_count=progress.cancelled,
-        skipped_count=progress.skipped,
-        has_targets=progress.has_targets,
-        target_count=progress.target,
-        remaining_count=progress.remaining,
-        dispatchable_count=progress.dispatchable_remaining,
-        dispatching_count=progress.dispatching,
-        actual_cost=progress.actual_cost,
-        estimated_remaining_cost=progress.estimated_remaining_cost,
-        filament_used_grams=progress.filament_used_grams,
-        print_time_seconds=progress.print_time_seconds,
-        plates=[
-            PrintBatchPlateProgress(
-                plate_id=plate.plate_id,
-                plate_name=plate.plate_name,
-                quantity_target=plate.quantity_target,
-                dispatched=plate.dispatched,
-                remaining=plate.remaining,
-                pending_count=plate.pending,
-                preheating_count=plate.preheating,
-                dispatching_count=plate.dispatching,
-                printing_count=plate.printing,
-                completed_count=plate.completed,
-                failed_count=plate.failed,
-                cancelled_count=plate.cancelled,
-                skipped_count=plate.skipped,
-                actual_cost=plate.actual_cost,
-                estimated_remaining_cost=plate.estimated_remaining_cost,
-                filament_used_grams=plate.filament_used_grams,
-                print_time_seconds=plate.print_time_seconds,
-                can_dispatch=plate.can_dispatch,
-            )
-            for plate in progress.plates
-        ],
-    )
-
-
 @router.get("/{item_id}", response_model=PrintQueueItemResponse)
 async def get_queue_item(
     item_id: int,
@@ -1590,7 +1060,6 @@ async def get_queue_item(
             selectinload(PrintQueueItem.printer),
             selectinload(PrintQueueItem.library_file),
             selectinload(PrintQueueItem.created_by),
-            selectinload(PrintQueueItem.batch),
             # Cross-model candidates (#671) and their files, for the card label.
             selectinload(PrintQueueItem.variants).selectinload(PrintQueueVariant.library_file),
         )
@@ -1792,7 +1261,7 @@ async def update_queue_item(
         setattr(item, field, value)
 
     await db.commit()
-    await db.refresh(item, ["archive", "printer", "library_file", "created_by", "batch"])
+    await db.refresh(item, ["archive", "printer", "library_file", "created_by"])
 
     logger.info("Updated queue item %s", item_id)
     return _enrich_response(item)
@@ -2124,7 +1593,6 @@ async def start_queue_item(
             selectinload(PrintQueueItem.archive),
             selectinload(PrintQueueItem.printer),
             selectinload(PrintQueueItem.library_file),
-            selectinload(PrintQueueItem.batch),
             selectinload(PrintQueueItem.variants).selectinload(PrintQueueVariant.library_file),
         )
         .where(PrintQueueItem.id == item_id)
@@ -2176,7 +1644,7 @@ async def start_queue_item(
     if user is not None and item.created_by_id is None:
         item.created_by_id = user.id
     await db.commit()
-    await db.refresh(item, ["archive", "printer", "library_file", "created_by", "batch"])
+    await db.refresh(item, ["archive", "printer", "library_file", "created_by"])
 
     logger.info(
         "Manually started queue item %s (cleared manual_start; skip_filament_check=%s)",

@@ -57,8 +57,6 @@ const createMockQueueItem = (overrides: Partial<PrintQueueItem> = {}): PrintQueu
   archive_thumbnail: null,
   printer_name: 'Test Printer',
   print_time_seconds: 3600,
-  batch_id: null,
-  batch_name: null,
   ...overrides,
 });
 

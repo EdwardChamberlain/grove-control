@@ -48,15 +48,11 @@ import {
   User,
   Pause,
   Weight,
-  ChevronDown,
-  ChevronRight,
   List,
   GanttChart,
   Code,
   Snail,
   Package,
-  PackageOpen,
-  Ungroup,
   PlayCircle,
 } from 'lucide-react';
 import { api, ApiError } from '../api/client';
@@ -847,15 +843,10 @@ function SortableQueueItem({
   );
 }
 
-type QueueRow =
-  | { kind: 'item'; item: PrintQueueItem }
-  | { kind: 'batch'; batchId: number; batchName: string; items: PrintQueueItem[] };
+type QueueRow = { kind: 'item'; item: PrintQueueItem };
 
 interface QueueRowRenderProps {
   row: QueueRow;
-  collapsed: boolean;
-  onToggleBatch?: () => void;
-  onUngroup?: () => void;
   setEditItem: (item: PrintQueueItem) => void;
   setConfirmAction: (a: { type: 'cancel' | 'remove' | 'stop'; item: PrintQueueItem }) => void;
   startMutation: { mutate: (vars: { id: number; skipFilamentCheck?: boolean }) => void };
@@ -867,57 +858,10 @@ interface QueueRowRenderProps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   canModify: (resource: any, action: any, createdById?: number | null) => boolean;
   t: (key: string, options?: Record<string, unknown>) => string;
-  aggregateForRows: (rows: QueueRow[]) => { count: number; time: number; weight: number };
 }
 
-/** Renders either a single item or a collapsible batch group containing N
- *  sibling items. The batch parent shows aggregate stats; children render
- *  with the existing SortableQueueItem (only draggable inside the batch). */
-function QueueRowRender(props: QueueRowRenderProps) {
-  const {
-    row,
-    setEditItem,
-    setConfirmAction,
-    startMutation,
-    selectedItems,
-    handleToggleSelect,
-    timeFormat,
-    hasPermission,
-    canModify,
-    t,
-  } = props;
-
-  if (row.kind === 'item') {
-    return (
-      <SortableQueueItem
-        item={row.item}
-        onEdit={() => setEditItem(row.item)}
-        onCancel={() => setConfirmAction({ type: 'cancel', item: row.item })}
-        onRemove={() => {}}
-        onStop={() => {}}
-        onRequeue={() => {}}
-        onStart={() => startMutation.mutate({ id: row.item.id })}
-        timeFormat={timeFormat}
-        isSelected={selectedItems.includes(row.item.id)}
-        onToggleSelect={() => handleToggleSelect(row.item.id)}
-        hasPermission={hasPermission}
-        canModify={canModify}
-        t={t}
-      />
-    );
-  }
-
-  return <SortableBatchRow {...props} />;
-}
-
-/** Batch parent header registered with dnd-kit so the whole group can be
- *  reordered as one unit. Drag handle lives in the header itself; children
- *  remain individually draggable while expanded for within-batch reorder. */
-function SortableBatchRow({
+function QueueRowRender({
   row,
-  collapsed,
-  onToggleBatch,
-  onUngroup,
   setEditItem,
   setConfirmAction,
   startMutation,
@@ -927,167 +871,25 @@ function SortableBatchRow({
   hasPermission,
   canModify,
   t,
-  aggregateForRows,
 }: QueueRowRenderProps) {
-  // Dispatcher (QueueRowRender) only mounts this with row.kind === 'batch';
-  // narrow up-front so the hook below can reference batchId unconditionally.
-  const batchRow = row as Extract<QueueRow, { kind: 'batch' }>;
-  const canReorder = hasPermission('queue:reorder');
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: `batch-${batchRow.batchId}`, disabled: !canReorder });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-  };
-
-  const agg = aggregateForRows([batchRow]);
-  const allChildIds = batchRow.items.map((i) => i.id);
-  const allSelected = allChildIds.length > 0 && allChildIds.every((id) => selectedItems.includes(id));
-  // Status rollup: worst-of-children (failed > printing > pending).
-  const childStatuses = new Set(batchRow.items.map((i) => i.status));
-  // We never put non-pending into a batch grouping but render defensively.
-  const rollupStatus: PrintQueueItem['status'] = childStatuses.has('failed')
-    ? 'failed'
-    : childStatuses.has('printing')
-      ? 'printing'
-      : 'pending';
-  const pendingChildren = batchRow.items.filter((i) => i.status === 'pending').length;
-
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={`bg-bambu-dark-secondary rounded-xl border border-l-[3px] border-l-cyan-400 border-bambu-dark-tertiary overflow-hidden ${
-        isDragging ? 'opacity-50 scale-[1.01] shadow-xl z-50' : ''
-      }`}
-    >
-      {/* Parent header */}
-      <div className="flex items-center gap-2 sm:gap-3 p-3 sm:p-4">
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            allChildIds.forEach((id) => {
-              if (allSelected && selectedItems.includes(id)) {
-                handleToggleSelect(id);
-              } else if (!allSelected && !selectedItems.includes(id)) {
-                handleToggleSelect(id);
-              }
-            });
-          }}
-          className={`hidden sm:flex items-center justify-center w-6 h-6 rounded border transition-colors shrink-0 ${
-            allSelected
-              ? 'bg-bambu-green border-bambu-green text-white'
-              : 'border-white/30 bg-black/30 hover:border-bambu-green/50'
-          }`}
-          title={allSelected ? t('queue.bulkEdit.deselectAll') : t('queue.bulkEdit.selectAll')}
-        >
-          {allSelected && <Check className="w-4 h-4" />}
-        </button>
-        {canReorder && (
-          <div
-            {...attributes}
-            {...listeners}
-            className="hidden sm:flex items-center justify-center w-8 h-8 rounded-lg bg-bambu-dark cursor-grab active:cursor-grabbing hover:bg-bambu-dark-tertiary transition-colors touch-manipulation shrink-0"
-            title={t('queue.batch.dragGroup', { defaultValue: 'Drag group' })}
-          >
-            <GripVertical className="w-4 h-4 text-bambu-gray" />
-          </div>
-        )}
-        <button
-          onClick={onToggleBatch}
-          className="flex items-center justify-center w-8 h-8 rounded-lg bg-bambu-dark hover:bg-bambu-dark-tertiary transition-colors shrink-0"
-          title={collapsed ? t('queue.batch.expand') : t('queue.batch.collapse')}
-        >
-          {collapsed ? (
-            <ChevronRight className="w-4 h-4 text-bambu-gray" />
-          ) : (
-            <ChevronDown className="w-4 h-4 text-bambu-gray" />
-          )}
-        </button>
-        <div className="w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0 bg-bambu-dark rounded-lg flex items-center justify-center">
-          {collapsed ? (
-            <Package className="w-5 h-5 text-cyan-300" />
-          ) : (
-            <PackageOpen className="w-5 h-5 text-cyan-300" />
-          )}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <p className="text-sm sm:text-base text-white font-medium truncate">{batchRow.batchName}</p>
-            <span className="flex-shrink-0 px-1.5 py-0.5 text-[10px] sm:text-xs bg-cyan-500/15 text-cyan-300 rounded border border-cyan-500/30">
-              {t('queue.batch.label', { count: agg.count })}
-            </span>
-          </div>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs sm:text-sm text-bambu-gray">
-            {agg.time > 0 && (
-              <span className="flex items-center gap-1 sm:gap-1.5">
-                <Timer className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                {formatDuration(agg.time)}
-              </span>
-            )}
-            {agg.weight > 0 && (
-              <span className="flex items-center gap-1 sm:gap-1.5">
-                <Weight className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                {formatWeight(agg.weight)}
-              </span>
-            )}
-            {pendingChildren > 0 && rollupStatus === 'pending' && (
-              <span className="flex items-center gap-1 sm:gap-1.5 text-yellow-400">
-                <Clock className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                {t('queue.batch.pendingCount', { count: pendingChildren })}
-              </span>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-1 shrink-0">
-          {onUngroup && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onUngroup}
-              title={t('queue.batch.ungroup')}
-              className="text-cyan-300 hover:text-cyan-200 hover:bg-cyan-500/10 p-1.5 sm:p-2"
-            >
-              <Ungroup className="w-4 h-4" />
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {/* Children (only when expanded) */}
-      {!collapsed && (
-        <div className="border-t border-bambu-dark-tertiary bg-black/20 p-2 sm:p-3 space-y-2">
-          {batchRow.items.map((child) => (
-            <SortableQueueItem
-              key={child.id}
-              item={child}
-              onEdit={() => setEditItem(child)}
-              onCancel={() => setConfirmAction({ type: 'cancel', item: child })}
-              onRemove={() => {}}
-              onStop={() => {}}
-              onRequeue={() => {}}
-              onStart={() => startMutation.mutate({ id: child.id })}
-              timeFormat={timeFormat}
-              isSelected={selectedItems.includes(child.id)}
-              onToggleSelect={() => handleToggleSelect(child.id)}
-              hasPermission={hasPermission}
-              canModify={canModify}
-              t={t}
-            />
-          ))}
-        </div>
-      )}
-    </div>
+    <SortableQueueItem
+      item={row.item}
+      onEdit={() => setEditItem(row.item)}
+      onCancel={() => setConfirmAction({ type: 'cancel', item: row.item })}
+      onRemove={() => {}}
+      onStop={() => {}}
+      onRequeue={() => {}}
+      onStart={() => startMutation.mutate({ id: row.item.id })}
+      timeFormat={timeFormat}
+      isSelected={selectedItems.includes(row.item.id)}
+      onToggleSelect={() => handleToggleSelect(row.item.id)}
+      hasPermission={hasPermission}
+      canModify={canModify}
+      t={t}
+    />
   );
 }
-
 type HistoryRow = { kind: 'item'; item: PrintQueueItem };
 
 interface HistorySectionProps {
@@ -1231,16 +1033,14 @@ export function QueuePage() {
   // History tab renders unconditionally so this no longer drives the UI.
   // Tabbed page structure: Active queue stays as the main view; History
   // and Timeline split off. Persists per-user via localStorage.
-  const [activeTab, setActiveTab] = useState<'queue' | 'history' | 'timeline' | 'pipelines'>(() => {
-    // URL deep-link wins so the legacy /pipelines/runs redirect lands on the
-    // right tab. localStorage holds the per-user last-selected fallback.
+  const [activeTab, setActiveTab] = useState<'queue' | 'history' | 'timeline'>(() => {
     const search = new URLSearchParams(window.location.search);
     const url = search.get('tab');
-    if (url === 'pipelines' || url === 'history' || url === 'timeline' || url === 'queue') {
+    if (url === 'history' || url === 'timeline' || url === 'queue') {
       return url;
     }
     const saved = localStorage.getItem('queue.activeTab');
-    if (saved === 'history' || saved === 'timeline' || saved === 'pipelines') return saved;
+    if (saved === 'history' || saved === 'timeline') return saved;
     return 'queue';
   });
   // Active-tab layout toggle. "position" = today's flat list; "printer"
@@ -1647,10 +1447,9 @@ export function QueuePage() {
     // Resolve dragged source → movingIds (preserving order from pendingItems).
     // A quantity submission is represented by ordinary rows, so each row is
     // independently reorderable; selected rows still move as one block.
-    let movingIds: number[];
     const activeId = active.id;
     const draggedId = activeId as number;
-    movingIds = selectedItems.includes(draggedId) && selectedItems.length > 1
+    const movingIds = selectedItems.includes(draggedId) && selectedItems.length > 1
       ? selectedItems.slice().sort((a, b) => {
           const ai = pendingItems.findIndex((i) => i.id === a);
           const bi = pendingItems.findIndex((i) => i.id === b);
@@ -1660,9 +1459,8 @@ export function QueuePage() {
     if (movingIds.length === 0) return;
 
     // Resolve drop target → index inside pendingItems.
-    let overIndex: number;
     const overId = over.id;
-    overIndex = pendingItems.findIndex((i) => i.id === overId);
+    const overIndex = pendingItems.findIndex((i) => i.id === overId);
     if (overIndex === -1) return;
 
     // Remove the moving items, then re-insert at overIndex (adjusted).
@@ -1689,9 +1487,7 @@ export function QueuePage() {
     reorderMutation.mutate(updates);
   };
 
-  // Every pending row is rendered independently. Legacy batch_id metadata is
-  // intentionally not used for grouping, so old rows receive the same
-  // reorder/cancel/edit controls as new queue items.
+  // Every pending row is rendered independently.
   const groupedRows = useMemo<QueueRow[]>(() => {
     return pendingItems.map((item) => ({ kind: 'item', item }));
   }, [pendingItems]);
@@ -1755,9 +1551,7 @@ export function QueuePage() {
     };
 
     for (const row of groupedRows) {
-      const representative = row.kind === 'item' ? row.item : row.items[0];
-      if (!representative) continue;
-      const meta = bucketForItem(representative);
+      const meta = bucketForItem(row.item);
       if (!buckets.has(meta.key)) {
         buckets.set(meta.key, { ...meta, rows: [] });
       }
@@ -1811,12 +1605,9 @@ export function QueuePage() {
     let time = 0;
     let weight = 0;
     for (const row of rows) {
-      const items = row.kind === 'item' ? [row.item] : row.items;
-      for (const item of items) {
-        count += 1;
-        time += item.print_time_seconds || 0;
-        weight += item.filament_used_grams || 0;
-      }
+      count += 1;
+      time += row.item.print_time_seconds || 0;
+      weight += row.item.filament_used_grams || 0;
     }
     return { count, time, weight };
   };
@@ -1841,10 +1632,6 @@ export function QueuePage() {
           { id: 'queue' as const, label: t('queue.tabs.queue'), icon: Clock, count: pendingItems.length + activeItems.length },
           { id: 'history' as const, label: t('queue.tabs.history'), icon: ListOrdered, count: historyItems.length },
           { id: 'timeline' as const, label: t('queue.tabs.timeline'), icon: GanttChart, count: null as number | null },
-          // Slicer Pipelines dashboard (#1425 PR C). Lives here instead of
-          // its own sidebar entry so the Print Queue page is the single
-          // place an operator looks for "what's running / what ran".
-          { id: 'pipelines' as const, label: t('queue.tabs.pipelines'), icon: Workflow, count: null as number | null },
         ]).map(({ id, label, icon: Icon, count }) => (
           <button
             key={id}
@@ -1868,15 +1655,15 @@ export function QueuePage() {
         ))}
       </div>
 
-      {/* Summary Stats — about the print queue, not pipelines. */}
-      {activeTab !== 'pipelines' && <QueueStatsBar
+      {/* Summary Stats — about the print queue. */}
+      <QueueStatsBar
         printingCount={printingCount}
         queuedCount={pendingItems.length + dispatchingItems.length}
         totalTime={totalQueueTime}
         totalWeight={totalWeight}
         historyCount={historyItems.length}
         t={t}
-      />}
+      />
 
       {/* #1818: Resume-after-failure banner. One row per printer whose queue
           is gated by a prior failed/aborted print. Visible regardless of
@@ -1916,7 +1703,6 @@ export function QueuePage() {
       )}
 
       {/* Filters — about the print queue items (printer / status / location). */}
-      {activeTab !== 'pipelines' && (
       <div className="flex flex-wrap items-center gap-2 sm:gap-4 mb-6">
         <ToolbarDropdown
           value={filterPrinter === -1 ? 'unassigned' : filterPrinter ? String(filterPrinter) : 'all'}
@@ -1978,7 +1764,6 @@ export function QueuePage() {
           </Button>
         )}
       </div>
-      )}
 
       {/* Queue-tab controls: layout toggle (Position / Printer) + SJF.
           Hidden on History/Timeline tabs since they don't apply. */}
@@ -2025,11 +1810,7 @@ export function QueuePage() {
         </div>
       )}
 
-      {/* Pipelines tab short-circuits before the queue-empty branch so the
-          dashboard renders even when the regular queue is empty. */}
-      {activeTab === 'pipelines' ? (
-        <PipelineRunsView />
-      ) : isLoading ? (
+      {isLoading ? (
         <div className="text-center py-12 text-bambu-gray">{t('common.loading')}</div>
       ) : queue?.length === 0 ? (
         <Card className="p-12 text-center border-dashed">
@@ -2141,7 +1922,7 @@ export function QueuePage() {
                 </div>
               </div>
 
-              {/* Bulk action toolbar (now with "Group as batch") */}
+              {/* Bulk action toolbar */}
               <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-3 sm:mb-4 p-2 sm:p-3 bg-bambu-dark rounded-lg">
                 <Button
                   variant="ghost"
@@ -2202,9 +1983,8 @@ export function QueuePage() {
                     <div className="space-y-2 sm:space-y-3">
                       {groupedRows.map((row) => (
                         <QueueRowRender
-                          key={row.kind === 'item' ? `item-${row.item.id}` : `batch-${row.batchId}`}
+                          key={`item-${row.item.id}`}
                           row={row}
-                          collapsed={false}
                           setEditItem={setEditItem}
                           setConfirmAction={setConfirmAction}
                           startMutation={startMutation}
@@ -2214,7 +1994,6 @@ export function QueuePage() {
                           hasPermission={hasPermission}
                           canModify={canModify}
                           t={t}
-                          aggregateForRows={aggregateForRows}
                         />
                       ))}
                     </div>
@@ -2236,9 +2015,8 @@ export function QueuePage() {
                             <div className="bg-bambu-dark/40 border border-t-0 border-bambu-dark-tertiary rounded-b-lg p-2 space-y-2">
                               {bucket.rows.map((row) => (
                                 <QueueRowRender
-                                  key={row.kind === 'item' ? `item-${row.item.id}` : `batch-${row.batchId}`}
+                                  key={`item-${row.item.id}`}
                                   row={row}
-                                  collapsed={false}
                                   setEditItem={setEditItem}
                                   setConfirmAction={setConfirmAction}
                                   startMutation={startMutation}
@@ -2248,7 +2026,6 @@ export function QueuePage() {
                                   hasPermission={hasPermission}
                                   canModify={canModify}
                                   t={t}
-                                  aggregateForRows={aggregateForRows}
                                 />
                               ))}
                             </div>

@@ -34,12 +34,6 @@ def _write_queue_multiplate_3mf(path) -> None:
 class TestPrintQueueAPI:
     """Integration tests for /api/v1/queue endpoints."""
 
-    @pytest.fixture(autouse=True)
-    def skip_retired_batch_api_tests(self, request):
-        """The legacy batch endpoint cases are superseded by issue #143."""
-        if "batch" in request.node.name or "group" in request.node.name:
-            pytest.skip("Batch-order API retired; legacy rows are covered through ordinary queue tests")
-
     @pytest.fixture
     async def printer_factory(self, db_session):
         """Factory to create test printers."""
@@ -2257,7 +2251,7 @@ class TestAbortedStatusNormalisation:
         await _bump_library_file_usage_if_completed(db_session, item, "completed")
 
     # ========================================================================
-    # Batch quantity tests
+    # Quantity tests
     # ========================================================================
 
     @pytest.mark.asyncio
@@ -2265,7 +2259,7 @@ class TestAbortedStatusNormalisation:
     async def test_add_to_queue_quantity_default(
         self, async_client: AsyncClient, printer_factory, archive_factory, db_session
     ):
-        """Verify quantity=1 (default) creates a single item with no batch."""
+        """Verify quantity=1 (default) creates a single queue item."""
         printer = await printer_factory()
         archive = await archive_factory()
 
@@ -2275,16 +2269,13 @@ class TestAbortedStatusNormalisation:
         }
         response = await async_client.post("/api/v1/queue/", json=data)
         assert response.status_code == 200
-        result = response.json()
-        assert result["batch_id"] is None
-        assert result["batch_name"] is None
 
     @pytest.mark.asyncio
     @pytest.mark.integration
     async def test_add_to_queue_quantity_one_explicit(
         self, async_client: AsyncClient, printer_factory, archive_factory, db_session
     ):
-        """Verify quantity=1 explicitly creates a single item with no batch."""
+        """Verify quantity=1 explicitly creates a single queue item."""
         printer = await printer_factory()
         archive = await archive_factory()
 
@@ -2295,9 +2286,6 @@ class TestAbortedStatusNormalisation:
         }
         response = await async_client.post("/api/v1/queue/", json=data)
         assert response.status_code == 200
-        result = response.json()
-        assert result["batch_id"] is None
-        assert result["batch_name"] is None
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -2315,9 +2303,6 @@ class TestAbortedStatusNormalisation:
         }
         response = await async_client.post("/api/v1/queue/", json=data)
         assert response.status_code == 200
-        result = response.json()
-        assert result["batch_id"] is None
-        assert result["batch_name"] is None
 
         # Verify all 3 items were created
         list_response = await async_client.get("/api/v1/queue/")
@@ -2329,14 +2314,13 @@ class TestAbortedStatusNormalisation:
             assert item["printer_id"] == printer.id
             assert item["archive_id"] == archive.id
             assert item["status"] == "pending"
-            assert item["batch_id"] is None
 
     @pytest.mark.asyncio
     @pytest.mark.integration
     async def test_add_to_queue_quantity_sequential_positions(
         self, async_client: AsyncClient, printer_factory, archive_factory, db_session
     ):
-        """Verify batch items get sequential positions."""
+        """Verify quantity items get sequential positions."""
         printer = await printer_factory()
         archive = await archive_factory()
 
@@ -2347,7 +2331,6 @@ class TestAbortedStatusNormalisation:
         }
         response = await async_client.post("/api/v1/queue/", json=data)
         assert response.status_code == 200
-        assert response.json()["batch_id"] is None
 
         list_response = await async_client.get("/api/v1/queue/")
         items = list_response.json()
@@ -2393,7 +2376,7 @@ class TestAbortedStatusNormalisation:
     async def test_add_to_queue_insert_position_quantity_shifts_existing_by_quantity(
         self, async_client: AsyncClient, printer_factory, archive_factory, db_session
     ):
-        """ASAP batch insertion shifts existing pending items by the inserted quantity."""
+        """ASAP insertion shifts existing pending items by the inserted quantity."""
         printer = await printer_factory()
         first = await archive_factory(print_name="First")
         second = await archive_factory(print_name="Second")
@@ -2416,7 +2399,6 @@ class TestAbortedStatusNormalisation:
             },
         )
         assert response.status_code == 200
-        assert response.json()["batch_id"] is None
 
         list_response = await async_client.get(f"/api/v1/queue/?printer_id={printer.id}")
         items = sorted(list_response.json(), key=lambda item: item["position"])
@@ -2428,7 +2410,6 @@ class TestAbortedStatusNormalisation:
             second.id,
         ]
         assert [item["position"] for item in items] == [1, 2, 3, 4, 5]
-        assert [item["batch_id"] for item in items[:3]] == [None, None, None]
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -2553,7 +2534,7 @@ class TestAbortedStatusNormalisation:
     async def test_add_to_queue_quantity_with_print_options(
         self, async_client: AsyncClient, printer_factory, archive_factory, db_session
     ):
-        """Verify print options are applied to all batch items."""
+        """Verify print options are applied to all quantity items."""
         printer = await printer_factory()
         archive = await archive_factory()
 
@@ -2566,7 +2547,6 @@ class TestAbortedStatusNormalisation:
         }
         response = await async_client.post("/api/v1/queue/", json=data)
         assert response.status_code == 200
-        assert response.json()["batch_id"] is None
 
         list_response = await async_client.get("/api/v1/queue/")
         queue_items = [i for i in list_response.json() if i["archive_id"] == archive.id]
@@ -2574,234 +2554,6 @@ class TestAbortedStatusNormalisation:
         for item in queue_items:
             assert item["bed_levelling"] == "off"
             assert item["timelapse"] is True
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_get_batch(self, async_client: AsyncClient, printer_factory, archive_factory, db_session):
-        """Verify batch can be retrieved with progress stats."""
-        printer = await printer_factory()
-        archive = await archive_factory()
-
-        # Create a batch of 3
-        data = {
-            "printer_id": printer.id,
-            "archive_id": archive.id,
-            "quantity": 3,
-        }
-        response = await async_client.post("/api/v1/queue/", json=data)
-        batch_id = response.json()["batch_id"]
-
-        # Get batch
-        response = await async_client.get(f"/api/v1/queue/batches/{batch_id}")
-        assert response.status_code == 200
-        result = response.json()
-        assert result["id"] == batch_id
-        assert result["quantity"] == 3
-        assert result["status"] == "active"
-        assert result["pending_count"] == 3
-        assert result["printing_count"] == 0
-        assert result["completed_count"] == 0
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_list_batches(self, async_client: AsyncClient, printer_factory, archive_factory, db_session):
-        """Verify batches can be listed."""
-        printer = await printer_factory()
-        archive = await archive_factory()
-
-        # Create two batches
-        for qty in [2, 3]:
-            await async_client.post(
-                "/api/v1/queue/",
-                json={"printer_id": printer.id, "archive_id": archive.id, "quantity": qty},
-            )
-
-        response = await async_client.get("/api/v1/queue/batches")
-        assert response.status_code == 200
-        batches = response.json()
-        assert len(batches) >= 2
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_cancel_batch(self, async_client: AsyncClient, printer_factory, archive_factory, db_session):
-        """Verify cancelling a batch cancels all pending items."""
-        printer = await printer_factory()
-        archive = await archive_factory()
-
-        data = {
-            "printer_id": printer.id,
-            "archive_id": archive.id,
-            "quantity": 3,
-        }
-        response = await async_client.post("/api/v1/queue/", json=data)
-        batch_id = response.json()["batch_id"]
-
-        # Cancel the batch
-        response = await async_client.delete(f"/api/v1/queue/batches/{batch_id}")
-        assert response.status_code == 200
-
-        # Verify all items are cancelled
-        list_response = await async_client.get("/api/v1/queue/")
-        batch_items = [i for i in list_response.json() if i["batch_id"] == batch_id]
-        for item in batch_items:
-            assert item["status"] == "cancelled"
-
-        # Verify batch status
-        batch_response = await async_client.get(f"/api/v1/queue/batches/{batch_id}")
-        assert batch_response.json()["status"] == "cancelled"
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_get_batch_not_found(self, async_client: AsyncClient):
-        """Verify 404 for non-existent batch."""
-        response = await async_client.get("/api/v1/queue/batches/9999")
-        assert response.status_code == 404
-
-    # ========================================================================
-    # Queue redesign: create-empty + group-existing + ungroup
-    # ========================================================================
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_create_empty_batch_for_client_side_grouping(
-        self, async_client: AsyncClient, printer_factory, archive_factory
-    ):
-        """Verify POST /queue/batches without item_ids creates an empty batch
-        whose id can be passed on subsequent /queue/ POSTs (the multi-plate
-        auto-batch flow). Subsequent items must end up with the same batch_id."""
-        printer = await printer_factory()
-        archive = await archive_factory()
-
-        # 1. Pre-create batch
-        batch_resp = await async_client.post(
-            "/api/v1/queue/batches",
-            json={"name": "Plates · 2 plates", "archive_id": archive.id},
-        )
-        assert batch_resp.status_code == 200
-        batch = batch_resp.json()
-        assert batch["status"] == "active"
-        batch_id = batch["id"]
-
-        # 2. Add two items referencing that batch
-        for plate_id in (1, 2):
-            item_resp = await async_client.post(
-                "/api/v1/queue/",
-                json={
-                    "printer_id": printer.id,
-                    "archive_id": archive.id,
-                    "plate_id": plate_id,
-                    "batch_id": batch_id,
-                },
-            )
-            assert item_resp.status_code == 200
-            assert item_resp.json()["batch_id"] == batch_id
-
-        # 3. Verify batch now has 2 pending children
-        list_resp = await async_client.get("/api/v1/queue/")
-        siblings = [i for i in list_resp.json() if i["batch_id"] == batch_id]
-        assert len(siblings) == 2
-        assert {i["plate_id"] for i in siblings} == {1, 2}
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_group_existing_items_as_batch(
-        self, async_client: AsyncClient, printer_factory, archive_factory, queue_item_factory
-    ):
-        """Verify POST /queue/batches with item_ids assigns batch_id to
-        existing pending items (the 'Group as batch' UI action)."""
-        printer = await printer_factory()
-        archive = await archive_factory()
-        item_a = await queue_item_factory(printer_id=printer.id, archive_id=archive.id, status="pending")
-        item_b = await queue_item_factory(printer_id=printer.id, archive_id=archive.id, status="pending")
-
-        resp = await async_client.post(
-            "/api/v1/queue/batches",
-            json={"name": "Manual group", "item_ids": [item_a.id, item_b.id]},
-        )
-        assert resp.status_code == 200
-        batch_id = resp.json()["id"]
-
-        list_resp = await async_client.get("/api/v1/queue/")
-        grouped = [i for i in list_resp.json() if i["batch_id"] == batch_id]
-        assert {i["id"] for i in grouped} == {item_a.id, item_b.id}
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_group_skips_non_pending_items(
-        self, async_client: AsyncClient, printer_factory, archive_factory, queue_item_factory
-    ):
-        """Verify grouping doesn't pull in already-completed/cancelled items."""
-        printer = await printer_factory()
-        archive = await archive_factory()
-        pending = await queue_item_factory(printer_id=printer.id, archive_id=archive.id, status="pending")
-        completed = await queue_item_factory(printer_id=printer.id, archive_id=archive.id, status="completed")
-
-        resp = await async_client.post(
-            "/api/v1/queue/batches",
-            json={"name": "Mixed", "item_ids": [pending.id, completed.id]},
-        )
-        assert resp.status_code == 200
-        batch_id = resp.json()["id"]
-
-        list_resp = await async_client.get("/api/v1/queue/")
-        grouped = [i for i in list_resp.json() if i["batch_id"] == batch_id]
-        assert {i["id"] for i in grouped} == {pending.id}
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_create_batch_requires_name(self, async_client: AsyncClient):
-        """Verify empty / whitespace-only name is rejected with 400."""
-        resp = await async_client.post("/api/v1/queue/batches", json={"name": "   "})
-        assert resp.status_code == 400
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_ungroup_batch_clears_batch_id_and_deletes_row(
-        self, async_client: AsyncClient, printer_factory, archive_factory
-    ):
-        """Verify POST /queue/batches/{id}/ungroup clears batch_id from all
-        members and deletes the batch row when nothing remains assigned."""
-        printer = await printer_factory()
-        archive = await archive_factory()
-
-        # Create batch with two items via the existing quantity flow
-        add_resp = await async_client.post(
-            "/api/v1/queue/",
-            json={"printer_id": printer.id, "archive_id": archive.id, "quantity": 2},
-        )
-        batch_id = add_resp.json()["batch_id"]
-
-        # Ungroup
-        ungroup_resp = await async_client.post(f"/api/v1/queue/batches/{batch_id}/ungroup")
-        assert ungroup_resp.status_code == 200
-        assert ungroup_resp.json()["ungrouped_count"] == 2
-
-        # Verify items still exist but no longer batched
-        list_resp = await async_client.get("/api/v1/queue/")
-        ex_members = [i for i in list_resp.json() if i["batch_id"] == batch_id]
-        assert ex_members == []
-
-        # Batch row was deleted
-        get_resp = await async_client.get(f"/api/v1/queue/batches/{batch_id}")
-        assert get_resp.status_code == 404
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_add_to_queue_with_unknown_batch_id_404(
-        self, async_client: AsyncClient, printer_factory, archive_factory
-    ):
-        """Verify addToQueue with a non-existent batch_id is rejected."""
-        printer = await printer_factory()
-        archive = await archive_factory()
-        resp = await async_client.post(
-            "/api/v1/queue/",
-            json={
-                "printer_id": printer.id,
-                "archive_id": archive.id,
-                "batch_id": 99999,
-            },
-        )
-        assert resp.status_code == 404
 
     # ========================================================================
     # Soft-deleted archive handling (#1348 follow-up)

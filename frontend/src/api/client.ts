@@ -2195,9 +2195,6 @@ export interface PrintQueueItem {
   // User tracking (Issue #206)
   created_by_id?: number | null;
   created_by_username?: string | null;
-  // Legacy grouping metadata. New queue items leave these unset.
-  batch_id?: number | null;
-  batch_name?: string | null;
   // Shortest-job-first scheduling
   been_jumped?: boolean;
   // Auto-print G-code injection
@@ -2238,7 +2235,7 @@ export interface PrintQueueItemCreate {
   nozzle_offset_cali?: CalibrationMode;
   // Auto-print G-code injection
   gcode_injection?: boolean;
-  // Batch: create multiple copies (creates a batch if > 1)
+  // Create multiple independent queue items.
   quantity?: number;
   // Project to associate the resulting archive with
   project_id?: number;

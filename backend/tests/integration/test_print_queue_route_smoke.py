@@ -71,19 +71,3 @@ async def test_queue_reorder_updates_only_pending_items(async_client: AsyncClien
     assert positions[first_id] == 20
     assert positions[second_id] == 10
     assert positions[completed_id] == 3
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_batch_order_endpoints_are_retired(async_client: AsyncClient):
-    for method, path in (
-        ("post", "/api/v1/queue/batches"),
-        ("patch", "/api/v1/queue/batches/1"),
-        ("post", "/api/v1/queue/batches/1/dispatch"),
-        ("post", "/api/v1/queue/batches/1/ungroup"),
-        ("get", "/api/v1/queue/batches"),
-        ("get", "/api/v1/queue/batches/1"),
-        ("delete", "/api/v1/queue/batches/1"),
-    ):
-        response = await async_client.request(method, path)
-        assert response.status_code == 410
