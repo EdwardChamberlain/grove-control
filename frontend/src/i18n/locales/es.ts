@@ -184,7 +184,7 @@ export default {
     balance: 'Saldo',
     budget: 'Presupuesto',
     shared: 'Compartido',
-    personal: 'Personal',
+    personal: 'Uso personal',
     cannotEditPrivateCostCenter: 'Los centros de costes privados no se pueden editar aquí',
     recentTransactions: 'Transacciones recientes',
     transactionsHint: 'Filtrar por tipo y centro de costes',

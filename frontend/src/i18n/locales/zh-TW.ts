@@ -81,6 +81,7 @@ export default {
     actions: '操作',
     status: '狀態',
     name: '名稱',
+    user: '使用者',
     description: '描述',
     date: '日期',
     time: '時間',
