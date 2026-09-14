@@ -2,7 +2,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import { AlertCircle, AlertTriangle, ChevronDown, ChevronUp, Loader2, Palette, Pencil, Printer, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { PrintQueueItemCreate, PrintQueueItemUpdate, SmartPlug, SpoolAssignment } from '../../api/client';
+import type { CostCenterSummary, PrintQueueItemCreate, PrintQueueItemUpdate, SmartPlug, SpoolAssignment } from '../../api/client';
 import { api } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { Card, CardContent } from '../Card';
@@ -19,6 +19,7 @@ import { toDateTimeLocalValue, parseUTCDate } from '../../utils/date';
 import { getGlobalTrayId, effectivePreferLowest } from '../../utils/amsHelpers';
 import { FilamentMapping } from './FilamentMapping';
 import { FilamentOverride } from './FilamentOverride';
+import { CostCenterSelect } from './CostCenterSelect';
 import { PlateSelector } from './PlateSelector';
 import { PrinterSelector } from './PrinterSelector';
 import { PrintOptionsPanel } from './PrintOptions';
@@ -56,7 +57,7 @@ export function PrintModal({
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const { hasPermission } = useAuth();
+  const { user, hasPermission } = useAuth();
 
   // Determine if we're printing a library file
   const isLibraryFile = !!libraryFileId && !archiveId;
@@ -210,6 +211,16 @@ export function PrintModal({
     return null;
   });
 
+  // Finance cost-centre selection. The server remains authoritative for the
+  // estimate and budget check; this state only selects the account to charge.
+  const [selectedCostCenterId, setSelectedCostCenterId] = useState<number | null>(() => {
+    if (mode === 'edit-queue-item' && queueItem?.cost_center_id != null) {
+      return queueItem.cost_center_id;
+    }
+    return null;
+  });
+  const [estimatedCost, setEstimatedCost] = useState<number | null>(queueItem?.estimated_cost ?? null);
+
   // Filament overrides for model-based assignment: slot_id -> {type, color}
   const [filamentOverrides, setFilamentOverrides] = useState<Record<number, { type: string; color: string }>>(() => {
     if (mode === 'edit-queue-item' && queueItem?.filament_overrides) {
@@ -274,11 +285,34 @@ export function PrintModal({
 
   const currencySymbol = getCurrencySymbol(settings?.currency || 'USD');
   const defaultCostPerKg = settings?.default_filament_cost ?? 0;
+  const billingEnabled = settings?.billing_enabled === true;
 
   const { data: printers, isLoading: loadingPrinters } = useQuery({
     queryKey: ['printers'],
     queryFn: api.getPrinters,
   });
+
+  const { data: myCostCenters } = useQuery({
+    queryKey: ['finance', 'cost-centers', 'mine'],
+    queryFn: api.getMyCostCenters,
+    enabled: !!user && billingEnabled,
+  });
+  const printableCostCenters = useMemo(
+    () => (myCostCenters || []).filter((center: CostCenterSummary) => center.can_print && center.is_active),
+    [myCostCenters],
+  );
+  const selectedCostCenter = useMemo(
+    () => printableCostCenters.find((center) => center.id === selectedCostCenterId) ?? null,
+    [printableCostCenters, selectedCostCenterId],
+  );
+
+  // Prefer the personal cost centre, then the first permitted shared centre.
+  useEffect(() => {
+    if (!billingEnabled || printableCostCenters.length === 0) return;
+    if (selectedCostCenterId != null && printableCostCenters.some((center) => center.id === selectedCostCenterId)) return;
+    const preferredPrivate = printableCostCenters.find((center) => center.is_private);
+    setSelectedCostCenterId(preferredPrivate?.id ?? printableCostCenters[0].id);
+  }, [billingEnabled, printableCostCenters, selectedCostCenterId]);
 
   // Auto-off only has an effect when every explicitly selected printer has an
   // enabled, non-script smart plug. Model-targeted jobs are assigned later, so
@@ -846,6 +880,8 @@ export function PrintModal({
           quantity,
           ...printOptions,
           project_id: projectId ?? undefined,
+          cost_center_id: billingEnabled ? selectedCostCenterId : undefined,
+          estimated_cost: billingEnabled && selectedCostCenterId != null ? estimatedCost : undefined,
         });
         showToast(t('printModal.variants.queued', { count: candidates.length }), 'success');
         queryClient.invalidateQueries({ queryKey: ['queue'] });
@@ -952,6 +988,8 @@ export function PrintModal({
         project_id: projectId ?? undefined,
         batch_id: autoBatchId ?? undefined,
         cleanup_library_after_dispatch: cleanupLibraryAfterDispatch,
+        cost_center_id: billingEnabled ? selectedCostCenterId : undefined,
+        estimated_cost: billingEnabled && selectedCostCenterId != null ? estimatedCost : undefined,
       };
     };
 
@@ -986,6 +1024,8 @@ export function PrintModal({
                 ? new Date(scheduleOptions.scheduledTime).toISOString()
                 : null,
               ...printOptions,
+              cost_center_id: billingEnabled ? selectedCostCenterId : undefined,
+              estimated_cost: billingEnabled && selectedCostCenterId != null ? estimatedCost : undefined,
             };
             await updateQueueMutation.mutateAsync(updateData);
           } else {
@@ -1039,6 +1079,8 @@ export function PrintModal({
                   ? new Date(scheduleOptions.scheduledTime).toISOString()
                   : null,
                 ...printOptions,
+                cost_center_id: billingEnabled ? selectedCostCenterId : undefined,
+                estimated_cost: billingEnabled && selectedCostCenterId != null ? estimatedCost : undefined,
               };
               await updateQueueMutation.mutateAsync(updateData);
             } else {
@@ -1098,6 +1140,7 @@ export function PrintModal({
 
     // Need valid printer/model selection
     if (assignmentMode === 'printer' && selectedPrinters.length === 0) return false;
+    if (billingEnabled && selectedCostCenterId == null) return false;
     // Both are about the single-model case. A cross-model job has no one target
     // model, and each candidate is gated against its own by the backend (#671).
     if (!isCrossModel && assignmentMode === 'model' && !targetModel) return false;
@@ -1443,6 +1486,9 @@ export function PrintModal({
                 filamentReqs={effectiveFilamentReqs}
                 manualMappings={manualMappings}
                 onManualMappingChange={handleManualMappingChange}
+                onEstimatedCostChange={setEstimatedCost}
+                budgetAvailable={selectedCostCenter?.budget_available ?? null}
+                quantity={quantity}
                 defaultExpanded={settings?.per_printer_mapping_expanded ?? false}
                 currencySymbol={currencySymbol}
                 defaultCostPerKg={defaultCostPerKg}
@@ -1478,6 +1524,14 @@ export function PrintModal({
                 options={printOptions}
                 onChange={setPrintOptions}
                 showDualNozzleOptions={showDualNozzleOptions}
+              />
+            )}
+
+            {billingEnabled && printableCostCenters.length > 0 && (
+              <CostCenterSelect
+                costCenters={printableCostCenters}
+                selectedCostCenterId={selectedCostCenterId}
+                onChange={setSelectedCostCenterId}
               />
             )}
 

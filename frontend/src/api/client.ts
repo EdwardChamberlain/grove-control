@@ -1150,6 +1150,10 @@ export interface AppSettings {
   capture_finish_photo: boolean;
   default_filament_cost: number;
   currency: string;
+  // Finance budget enforcement.
+  billing_enabled: boolean;
+  finance_budget_reset_day: number;
+  finance_budget_reset_timezone: string;
   energy_cost_per_kwh: number;
   energy_tracking_mode: 'print' | 'total';
   check_updates: boolean;
@@ -2337,6 +2341,9 @@ export interface PrintQueueItem {
   // Auto-print G-code injection
   gcode_injection?: boolean;
   cleanup_library_after_dispatch?: boolean;
+  // Finance cost-centre selection and trusted dispatch-time estimate.
+  cost_center_id?: number | null;
+  estimated_cost?: number | null;
 }
 
 export interface PrintBatchPlateTarget {
@@ -2449,6 +2456,9 @@ export interface PrintQueueItemCreate {
   // defeats the point) and with archive_id/library_file_id (these ARE the files).
   // Order is priority — index 0 wins when several printers are idle at once.
   variants?: QueueVariantCreate[];
+  // Finance cost-centre selection and trusted dispatch-time estimate.
+  cost_center_id?: number | null;
+  estimated_cost?: number | null;
 }
 
 /** One candidate file for a cross-model queue item (#671). */
@@ -2521,6 +2531,8 @@ export interface PrintQueueItemUpdate {
   nozzle_offset_cali?: CalibrationMode;
   // Auto-print G-code injection
   gcode_injection?: boolean;
+  cost_center_id?: number | null;
+  estimated_cost?: number | null;
 }
 
 export interface PrintQueueBulkUpdate {
@@ -2544,6 +2556,7 @@ export interface PrintQueueBulkUpdate {
   nozzle_offset_cali?: CalibrationMode;
   // Auto-print G-code injection
   gcode_injection?: boolean;
+  cost_center_id?: number | null;
 }
 
 export interface PrintQueueBulkUpdateResponse {
@@ -3501,6 +3514,114 @@ export interface ExternalLinkUpdate {
   open_in_new_tab?: boolean;
 }
 
+// Finance types
+export interface CostCenterSummary {
+  id: number;
+  name: string;
+  is_private: boolean;
+  owner_user_id: number | null;
+  is_active: boolean;
+  total_balance: number;
+  total_budget: number | null;
+  monthly_budget: number | null;
+  budget_mode: 'none' | 'total' | 'monthly';
+  budget_limit: number | null;
+  budget_used: number | null;
+  budget_available: number | null;
+  can_print: boolean;
+}
+
+export interface CostCenterCreateRequest {
+  name: string;
+  total_budget?: number | null;
+  monthly_budget?: number | null;
+  is_active?: boolean;
+}
+
+export interface CostCenterBudgetUpdateRequest {
+  total_budget?: number | null;
+  monthly_budget?: number | null;
+}
+
+export interface CostCenterUpdateRequest {
+  name?: string;
+  is_active?: boolean;
+}
+
+export interface CostCenterMemberRequest {
+  user_id: number;
+  can_print?: boolean;
+}
+
+export interface CostCenterMemberResponse {
+  id: number;
+  cost_center_id: number;
+  user_id: number;
+  can_print: boolean;
+  created_at: string;
+}
+
+export interface CostCenterDetail extends CostCenterSummary {
+  members: CostCenterMemberResponse[];
+}
+
+export interface WalletBalance {
+  user_id: number;
+  balance: number;
+  currency: string;
+  updated_at: string | null;
+}
+
+export type WalletTransactionType = 'print_charge' | 'deposit' | 'withdraw' | 'manual_adjustment';
+
+export interface WalletTransaction {
+  id: number;
+  user_id: number;
+  cost_center_id: number | null;
+  transaction_type: WalletTransactionType;
+  amount: number;
+  balance_after: number | null;
+  description: string | null;
+  created_by_user_id: number | null;
+  print_run_id: string | null;
+  print_archive_id: number | null;
+  print_queue_id: number | null;
+  created_at: string;
+}
+
+export interface WalletTransactionListResponse {
+  items: WalletTransaction[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface WalletAdjustmentRequest {
+  amount: number;
+  description?: string;
+  cost_center_id?: number | null;
+}
+
+export interface WalletAdjustmentResponse {
+  transaction: WalletTransaction;
+  balance: WalletBalance;
+}
+
+export interface TransactionEditRequest {
+  user_id?: number | null;
+  cost_center_id?: number | null;
+  amount?: number | null;
+  description?: string | null;
+}
+
+export interface ManualPrintRequest {
+  user_id: number;
+  cost_center_id: number;
+  amount: number;
+  description?: string | null;
+  created_at?: string | null;
+}
+
 // Permission type - all available permissions
 export type Permission =
   | 'printers:read' | 'printers:create' | 'printers:update' | 'printers:delete' | 'printers:control' | 'printers:files' | 'printers:ams_rfid' | 'printers:clear_plate'
@@ -3527,6 +3648,7 @@ export type Permission =
   | 'discovery:scan'
   | 'firmware:read' | 'firmware:update'
   | 'ams_history:read'
+  | 'cost_centers:read_own' | 'cost_centers:read_all' | 'cost_centers:modify' | 'cost_centers:create'
   | 'stats:read' | 'stats:filter_by_user'
   | 'system:read'
   | 'settings:read' | 'settings:update' | 'settings:backup' | 'settings:restore'
@@ -5417,6 +5539,79 @@ export const api = {
     request<{ success: boolean; message: string }>(`/printers/${printerId}/kprofiles/batch`, {
       method: 'POST',
       body: JSON.stringify(profiles),
+    }),
+
+  // Finance
+  getMyBalance: () => request<WalletBalance>('/finance/me/balance'),
+  getMyTransactions: (limit = 50, offset = 0) =>
+    request<WalletTransactionListResponse>(`/finance/me/transactions?limit=${limit}&offset=${offset}`),
+  getAllTransactions: (limit = 50, offset = 0, userId?: number) => {
+    const params = new URLSearchParams();
+    params.set('limit', String(limit));
+    params.set('offset', String(offset));
+    if (userId !== undefined) params.set('user_id', String(userId));
+    return request<WalletTransactionListResponse>(`/finance/transactions?${params.toString()}`);
+  },
+  deleteTransaction: (transactionId: number) =>
+    request<{ status: string }>(`/finance/transactions/${transactionId}`, {
+      method: 'DELETE',
+    }),
+  editTransaction: (transactionId: number, data: TransactionEditRequest) =>
+    request<WalletTransaction>(`/finance/transactions/${transactionId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  createManualPrint: (data: ManualPrintRequest) =>
+    request<WalletTransaction>('/finance/transactions/manual', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getMyCostCenters: () => request<CostCenterSummary[]>('/finance/cost-centers/mine'),
+  listCostCenters: (includeInactive = false) =>
+    request<CostCenterSummary[]>(`/finance/cost-centers?include_inactive=${includeInactive ? 'true' : 'false'}`),
+  createCostCenter: (data: CostCenterCreateRequest) =>
+    request<CostCenterSummary>('/finance/cost-centers', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateCostCenter: (costCenterId: number, data: CostCenterUpdateRequest) =>
+    request<CostCenterSummary>(`/finance/cost-centers/${costCenterId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  updateCostCenterBudgets: (costCenterId: number, data: CostCenterBudgetUpdateRequest) =>
+    request<CostCenterSummary>(`/finance/cost-centers/${costCenterId}/budgets`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  deleteCostCenter: (costCenterId: number) =>
+    request<{ status: string }>(`/finance/cost-centers/${costCenterId}`, {
+      method: 'DELETE',
+    }),
+  getCostCenter: (costCenterId: number) =>
+    request<CostCenterDetail>(`/finance/cost-centers/${costCenterId}`),
+  upsertCostCenterMember: (costCenterId: number, data: CostCenterMemberRequest) =>
+    request<CostCenterMemberResponse>(`/finance/cost-centers/${costCenterId}/members`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  removeCostCenterMember: (costCenterId: number, userId: number) =>
+    request<{ status: string }>(`/finance/cost-centers/${costCenterId}/members/${userId}`, {
+      method: 'DELETE',
+    }),
+  depositUserBalance: (userId: number, data: WalletAdjustmentRequest) =>
+    request<WalletAdjustmentResponse>(`/finance/users/${userId}/deposit`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  withdrawUserBalance: (userId: number, data: WalletAdjustmentRequest) =>
+    request<WalletAdjustmentResponse>(`/finance/users/${userId}/withdraw`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  rebuildBalanceLedger: () =>
+    request<{ status: string }>('/finance/rebuild-balance-ledger', {
+      method: 'POST',
     }),
 
   // K-Profile Notes (stored locally, not on printer)

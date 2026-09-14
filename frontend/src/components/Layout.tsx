@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Printer, Archive, ListOrdered, BarChart3, Cloud, Settings, Sun, Moon, Monitor, ChevronLeft, ArrowUpCircle, Wrench, FolderKanban, FolderOpen, X, Menu, Info, Plug, Bug, LogOut, Key, Loader2, Disc3, ShieldAlert, Globe, type LucideIcon } from 'lucide-react';
+import { Printer, Archive, ListOrdered, BarChart3, Cloud, Settings, Sun, Moon, Monitor, ChevronLeft, ArrowUpCircle, Wrench, FolderKanban, FolderOpen, X, Menu, Info, Plug, Bug, LogOut, Key, Loader2, Disc3, ShieldAlert, Globe, Wallet, type LucideIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../contexts/ThemeContext';
 import { KeyboardShortcutsModal } from './KeyboardShortcutsModal';
@@ -41,6 +41,7 @@ export const defaultNavItems: NavItem[] = [
   { id: 'archives', to: '/archives', icon: Archive, labelKey: 'nav.archives' },
   { id: 'queue', to: '/queue', icon: ListOrdered, labelKey: 'nav.queue' },
   { id: 'projects', to: '/projects', icon: FolderKanban, labelKey: 'nav.projects' },
+  { id: 'finance', to: '/finance', icon: Wallet, labelKey: 'nav.finance' },
   { id: 'files', to: '/files', icon: FolderOpen, labelKey: 'nav.files' },
   { id: 'makerworld', to: '/makerworld', icon: Globe, labelKey: 'nav.makerworld' },
   { id: 'profiles', to: '/profiles', icon: Cloud, labelKey: 'nav.profiles' },
@@ -286,6 +287,7 @@ export function Layout() {
       profiles: 'kprofiles:read',
       maintenance: 'maintenance:read',
       projects: 'projects:read',
+      finance: ['cost_centers:read_own', 'cost_centers:read_all'],
       inventory: 'inventory:read',
       files: ['library:read', 'library:read_own', 'library:read_all'],
       makerworld: 'makerworld:view',
@@ -295,6 +297,9 @@ export function Layout() {
     const isHidden = (id: string) => {
       // User-toggled hide (#1673) wins first — cheapest check, explicit intent.
       if (hiddenSystemItemIds.includes(id)) return true;
+      // Finance requires both its feature flag and an authenticated user
+      // identity; without them its wallet routes cannot resolve an owner.
+      if (id === 'finance' && (!authEnabled || settings?.billing_enabled !== true)) return true;
       // Permission gate accepts Permission | Permission[] so resources with
       // granular `*:read_own` / `*:read_all` tiers (default Operators group)
       // don't get hidden from users who only hold the granular variant (#1755).

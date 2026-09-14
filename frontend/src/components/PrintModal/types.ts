@@ -223,6 +223,9 @@ export interface FilamentMappingProps {
   filamentReqs: FilamentReqsData | undefined;
   manualMappings: Record<number, number>;
   onManualMappingChange: (mappings: Record<number, number>) => void;
+  onEstimatedCostChange?: (estimatedCost: number | null) => void;
+  budgetAvailable?: number | null;
+  quantity?: number;
   currencySymbol: string;
   defaultCostPerKg: number;
   /** Whether the selected filament colour must match exactly. */

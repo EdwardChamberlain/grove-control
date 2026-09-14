@@ -66,6 +66,9 @@ const AUTOSAVE_SETTING_KEYS = [
   'capture_finish_photo',
   'default_filament_cost',
   'currency',
+  'billing_enabled',
+  'finance_budget_reset_day',
+  'finance_budget_reset_timezone',
   'energy_cost_per_kwh',
   'energy_tracking_mode',
   'check_updates',
@@ -149,6 +152,7 @@ function comparableAutosaveValue(settings: AppSettings, key: AutosaveSettingKey)
     case 'default_layer_inspect':
     case 'default_timelapse':
     case 'require_plate_clear':
+    case 'billing_enabled':
       return settings[key] ?? false;
     case 'drying_presets':
     case 'ams_humidity_thresholds':
@@ -180,6 +184,10 @@ function comparableAutosaveValue(settings: AppSettings, key: AutosaveSettingKey)
       return settings[key] ?? true;
     case 'session_max_hours':
       return settings[key] ?? 24;
+    case 'finance_budget_reset_day':
+      return Number(settings[key] ?? 1);
+    case 'finance_budget_reset_timezone':
+      return settings[key] ?? 'UTC';
     case 'queue_max_concurrent_uploads':
       return Number(settings[key] ?? 1);
     default:
@@ -2196,6 +2204,60 @@ export function SettingsPage() {
                     ? t('settings.energyModePrintDescription')
                     : t('settings.energyModeTotalDescription')}
                 </p>
+              </div>
+              <div className="border-t border-bambu-dark-tertiary pt-3 mt-3 space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-white">{t('settings.billingEnabled', 'Enable print billing')}</p>
+                    <p className="text-xs text-bambu-gray">{t('settings.billingEnabledDescription', 'Require a cost center and enforce its budget for new prints.')}</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={localSettings.billing_enabled ?? false}
+                      onChange={(e) => updateSetting('billing_enabled', e.target.checked)}
+                      className="peer sr-only"
+                    />
+                    <div className="w-11 h-6 bg-bambu-dark-tertiary rounded-full peer-checked:bg-bambu-green peer-checked:after:translate-x-5 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all" />
+                  </label>
+                </div>
+                {localSettings.billing_enabled && (
+                  <>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className="block text-sm text-bambu-gray mb-1">
+                          {t('settings.financeBudgetResetDay', 'Budget reset day')}
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={31}
+                          value={localSettings.finance_budget_reset_day ?? 1}
+                          onChange={(e) => updateSetting('finance_budget_reset_day', Math.max(1, Math.min(31, Number.parseInt(e.target.value, 10) || 1)))}
+                          className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm text-bambu-gray mb-1">
+                          {t('settings.financeBudgetResetTimezone', 'Budget reset timezone')}
+                        </label>
+                        <select
+                          value={localSettings.finance_budget_reset_timezone ?? 'UTC'}
+                          onChange={(e) => updateSetting('finance_budget_reset_timezone', e.target.value)}
+                          className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+                        >
+                          <option value="UTC">UTC</option>
+                          <option value="Europe/London">Europe/London</option>
+                          <option value="Europe/Berlin">Europe/Berlin</option>
+                          <option value="America/New_York">America/New_York</option>
+                          <option value="America/Los_Angeles">America/Los_Angeles</option>
+                          <option value="Asia/Tokyo">Asia/Tokyo</option>
+                          <option value="Australia/Sydney">Australia/Sydney</option>
+                        </select>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </CardContent>
           </Card>
