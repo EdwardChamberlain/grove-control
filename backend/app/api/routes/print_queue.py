@@ -2471,8 +2471,8 @@ async def start_queue_item(
     # (#1670). An item that already has a creator (UI-added queue items)
     # keeps that attribution; the dispatcher is not promoted over the
     # original uploader.
-    if current_user is not None and item.created_by_id is None:
-        item.created_by_id = current_user.id
+    if user is not None and item.created_by_id is None:
+        item.created_by_id = user.id
     await db.commit()
     await db.refresh(item, ["archive", "printer", "library_file", "created_by", "batch"])
 
