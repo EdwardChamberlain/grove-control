@@ -326,11 +326,11 @@ test('a running printer accepts a dropped print file for queueing', async ({ pag
   await expect.poll(() => calls.some((call) => call.method === 'POST' && call.path === '/api/v1/library/files')).toBe(true);
 });
 
-test('maintenance mode has a blue Offline health indicator and a blue Maintenance Mode detail row', async ({ page }) => {
+test('maintenance mode has a blue Maintenance Mode health indicator and detail row', async ({ page }) => {
   await mockApi(page, [], { connected: false, maintenanceMode: true });
 
   await page.goto('/');
-  const healthIndicator = page.getByLabel('Machine health: Offline');
+  const healthIndicator = page.getByLabel('Machine health: Maintenance Mode');
   await expect(healthIndicator).toBeVisible();
   await expect(healthIndicator).toHaveClass(/bg-blue-500\/20/);
   await expect(page.getByText('Maintenance Mode', { exact: true })).toBeVisible();

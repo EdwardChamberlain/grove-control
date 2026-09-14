@@ -77,7 +77,7 @@ function KioskPrinterTile({
   const isMaintenanceMode = printer.is_active === false;
   const active = !isMaintenanceMode && isActivePrint(status);
   const preheating = status?.preheating === true;
-  const plateClearRequired = status?.awaiting_plate_clear === true && !active;
+  const plateClearRequired = !isMaintenanceMode && status?.awaiting_plate_clear === true && !active;
   const progress = plateClearRequired ? 100 : Math.max(0, Math.min(100, active && !preheating ? status?.progress ?? 0 : 0));
   const jobName = !preheating && (active || plateClearRequired)
     ? formatPrintName(status?.subtask_name || status?.current_print || status?.gcode_file || null, status?.gcode_file, t) || t('kiosk.noJob')

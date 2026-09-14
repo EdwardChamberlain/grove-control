@@ -163,7 +163,7 @@ describe('KioskPage', () => {
     const maintenancePrinter = { id: 1, name: 'Atlas', model: 'X1 Carbon', is_active: false };
     vi.mocked(api.getPrinters).mockResolvedValue([maintenancePrinter, printers[1]] as never);
     vi.mocked(api.getPrinterStatus).mockImplementation(async (printerId) => {
-      if (printerId === 1) return { ...statusFor('1'), connected: false } as never;
+      if (printerId === 1) return { ...statusFor('1'), connected: false, awaiting_plate_clear: true } as never;
       return statusFor(String(printerId)) as never;
     });
 
@@ -174,6 +174,9 @@ describe('KioskPage', () => {
       const state = within(tile).getByText('Maintenance Mode');
       expect(state).toHaveClass('text-blue-400');
       expect(within(tile).queryByText('Offline')).not.toBeInTheDocument();
+      expect(within(tile).queryByText('Plate clear required')).not.toBeInTheDocument();
+      expect(screen.getByTestId('kiosk-progress-1')).not.toHaveClass('bg-yellow-400');
+      expect(tile).not.toHaveClass('border-yellow-400/60', 'kiosk-plate-clear-alert');
     });
   });
 
