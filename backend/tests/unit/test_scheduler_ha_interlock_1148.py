@@ -82,6 +82,11 @@ async def _add_item(ctx, *, printer_id=None, target_model=None):
             printer_id=printer_id,
             target_model=target_model,
             library_file_id=lib.id,
+            # This suite isolates Home Assistant availability. Grove's
+            # safe-default colour gate is covered separately; explicitly opt
+            # out here so its metadata precondition cannot mask the interlock
+            # waiting reason under test.
+            force_color_match=False,
         )
         db.add(item)
         await db.commit()
