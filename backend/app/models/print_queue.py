@@ -154,6 +154,9 @@ class PrintQueueItem(Base):
     # persisted before dispatch so terminal printer telemetry can still be
     # attributed to this exact attempt after an application restart.
     dispatch_subtask_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Grove-owned identity for one billable physical print run. Unlike the
+    # printer protocol submission id, this is not reused for archive reprints.
+    billing_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

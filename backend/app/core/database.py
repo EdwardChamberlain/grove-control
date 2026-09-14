@@ -323,6 +323,10 @@ async def init_db():
     await seed_spool_catalog()
     await seed_color_catalog()
 
+    # Keep the derived wallet ledger fields consistent after upgrades and
+    # backup restores before finance routes or dispatch workers use them.
+    await repair_wallet_ledger()
+
 
 # B2: Module-level counter exposing the number of rows skipped during the last
 # _migrate_encrypt_legacy_secrets() invocation. Surfaced via /encryption-status
@@ -527,6 +531,7 @@ _QUEUE_INSERT_COLUMN_DEFINITIONS: dict[str, tuple[str, str]] = {
     "library_file_id": ("INTEGER", "INTEGER"),
     "project_id": ("INTEGER", "INTEGER"),
     "batch_id": ("INTEGER", "INTEGER"),
+    "cost_center_id": ("INTEGER", "INTEGER"),
     # Scheduling and dispatch policy
     "position": ("INTEGER DEFAULT 0", "INTEGER DEFAULT 0"),
     "scheduled_time": ("DATETIME", "TIMESTAMP"),
@@ -548,6 +553,7 @@ _QUEUE_INSERT_COLUMN_DEFINITIONS: dict[str, tuple[str, str]] = {
     "print_time_seconds": ("INTEGER", "INTEGER"),
     "been_jumped": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
     "gcode_injection": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
+    "estimated_cost": ("FLOAT", "FLOAT"),
     "nozzle_mapping": ("TEXT", "TEXT"),
     "nozzles_info": ("TEXT", "TEXT"),
     "filament_short": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
@@ -980,8 +986,11 @@ async def run_migrations(conn):
     # Migration: Add is_favorite column to print_archives
     await _safe_execute(conn, "ALTER TABLE print_archives ADD COLUMN is_favorite BOOLEAN DEFAULT 0")
 
-    # Migration: Add wallet_charge_skipped column to print_archives so deleted print charges stay deleted
-    await _safe_execute(conn, "ALTER TABLE print_archives ADD COLUMN wallet_charge_skipped BOOLEAN DEFAULT 0")
+    # Migration: Add wallet_charge_skipped column to print_archives so deleted print charges stay deleted.
+    if is_sqlite():
+        await _safe_execute(conn, "ALTER TABLE print_archives ADD COLUMN wallet_charge_skipped BOOLEAN DEFAULT 0")
+    else:
+        await _safe_execute(conn, "ALTER TABLE print_archives ADD COLUMN wallet_charge_skipped BOOLEAN DEFAULT false")
 
     # Migration: Add content_hash column to print_archives for duplicate detection
     await _safe_execute(conn, "ALTER TABLE print_archives ADD COLUMN content_hash VARCHAR(64)")
@@ -1057,6 +1066,23 @@ async def run_migrations(conn):
     # can be billed independently without mutating archive history.
     await _safe_execute(conn, "ALTER TABLE wallet_transactions ADD COLUMN print_run_id VARCHAR(100)")
 
+    # A queue row and its archive are reused for reprints. Keep a Grove-owned
+    # UUID for each physical run so billing does not depend on the printer's
+    # mutable subtask identifier.
+    await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN billing_run_id VARCHAR(36)")
+    await _safe_execute(conn, "ALTER TABLE print_archives ADD COLUMN billing_run_id VARCHAR(36)")
+    if is_sqlite():
+        await _safe_execute(conn, "ALTER TABLE wallet_transactions ADD COLUMN is_voided BOOLEAN DEFAULT 0 NOT NULL")
+    else:
+        await _safe_execute(
+            conn,
+            "ALTER TABLE wallet_transactions ADD COLUMN is_voided BOOLEAN DEFAULT false NOT NULL",
+        )
+    await _safe_execute(
+        conn,
+        "CREATE INDEX IF NOT EXISTS ix_wallet_transactions_is_voided ON wallet_transactions (is_voided)",
+    )
+
     # Migration: Add missing-spool-assignment print-start notification toggle
     try:
         async with conn.begin_nested():
@@ -1101,14 +1127,18 @@ async def run_migrations(conn):
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_oidc_link_user_provider ON user_oidc_links (user_id, provider_id)",
     )
 
-    # Migration: Add unique indexes to prevent duplicate print-charge transactions
+    # Migration: Add unique indexes to prevent duplicate print-charge transactions.
+    # Reprints share an archive row, so the archive fallback is only unique for
+    # legacy rows without a Grove-owned run UUID.
     await _safe_execute(
         conn,
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_wallet_transactions_print_run ON wallet_transactions (transaction_type, print_run_id)",
     )
+    await _safe_execute(conn, "DROP INDEX IF EXISTS uq_wallet_transactions_archive")
     await _safe_execute(
         conn,
-        "CREATE UNIQUE INDEX IF NOT EXISTS uq_wallet_transactions_archive ON wallet_transactions (transaction_type, print_archive_id)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_wallet_transactions_archive"
+        " ON wallet_transactions (transaction_type, print_archive_id) WHERE print_run_id IS NULL",
     )
 
     # Migration: Create FTS5 virtual table for archive full-text search (SQLite only)
@@ -4621,7 +4651,9 @@ async def repair_wallet_ledger():
 
     async with async_session() as session:
         # Check if there are any transactions first
-        result = await session.execute(select(WalletTransaction).limit(1))
+        result = await session.execute(
+            select(WalletTransaction).where(WalletTransaction.is_voided.is_(False)).limit(1)
+        )
         if not result.scalar_one_or_none():
             logger.info("No wallet transactions found, skipping ledger rebuild")
             return
@@ -4640,36 +4672,48 @@ async def repair_wallet_ledger_internal(session: AsyncSession):
     """
     from sqlalchemy import select
 
-    from backend.app.models.finance import UserWallet, WalletTransaction
+    from backend.app.models.finance import CostCenter, UserWallet, WalletTransaction
 
-    # Get ALL transactions sorted by timestamp
+    # Get all live transactions sorted by timestamp. Voided rows remain in the
+    # table as idempotency tombstones but have no ledger effect.
     result = await session.execute(
-        select(WalletTransaction).order_by(WalletTransaction.created_at.asc(), WalletTransaction.id.asc())
+        select(WalletTransaction)
+        .where(WalletTransaction.is_voided.is_(False))
+        .order_by(WalletTransaction.created_at.asc(), WalletTransaction.id.asc())
     )
     all_transactions = result.scalars().all()
 
-    if not all_transactions:
-        return 0
+    center_result = await session.execute(select(CostCenter.id, CostCenter.is_private, CostCenter.owner_user_id))
+    centers = {
+        int(center_id): (bool(is_private), owner_user_id)
+        for center_id, is_private, owner_user_id in center_result.all()
+    }
 
-    # Build running balances per (user, cost_center_id) pair
+    # Build a global balance for each cost center and a personal balance for
+    # each user's unassigned/private-center ledger.
     cc_running_balances: dict[int, float] = {}  # cost_center_id -> running balance
     user_personal_balances: dict[int, float] = {}  # user_id -> personal running balance
 
     tx_updates: list[tuple[WalletTransaction, float]] = []
 
     for tx in all_transactions:
+        amount = float(tx.amount)
         if tx.cost_center_id is None:
-            # Personal transaction: per-user running balance
             current = user_personal_balances.get(tx.user_id, 0.0)
-            new_balance = current + float(tx.amount)
+            new_balance = round(current + amount, 2)
             user_personal_balances[tx.user_id] = new_balance
             tx_updates.append((tx, new_balance))
         else:
-            # Cost-center transaction: global running balance for this cost center
             current = cc_running_balances.get(tx.cost_center_id, 0.0)
-            new_balance = current + float(tx.amount)
-            cc_running_balances[tx.cost_center_id] = new_balance
-            tx_updates.append((tx, new_balance))
+            center_balance = round(current + amount, 2)
+            cc_running_balances[tx.cost_center_id] = center_balance
+            is_private, owner_user_id = centers.get(tx.cost_center_id, (False, None))
+            if is_private and owner_user_id == tx.user_id:
+                personal_balance = round(user_personal_balances.get(tx.user_id, 0.0) + amount, 2)
+                user_personal_balances[tx.user_id] = personal_balance
+                tx_updates.append((tx, personal_balance))
+            else:
+                tx_updates.append((tx, center_balance))
 
     # Update all transactions with the new balance_after values
     updated_count = 0
@@ -4679,10 +4723,11 @@ async def repair_wallet_ledger_internal(session: AsyncSession):
             session.add(tx)
             updated_count += 1
 
-    # Update UserWallet balances to match final personal balances
-    for user_id, balance in user_personal_balances.items():
-        wallet_result = await session.execute(select(UserWallet).where(UserWallet.user_id == user_id))
-        wallet = wallet_result.scalar_one_or_none()
+    # Update every wallet, including users whose live ledger is now empty.
+    wallet_result = await session.execute(select(UserWallet))
+    for wallet in wallet_result.scalars().all():
+        user_id = wallet.user_id
+        balance = round(user_personal_balances.get(user_id, 0.0), 2)
         if wallet and wallet.balance != balance:
             wallet.balance = balance
             session.add(wallet)

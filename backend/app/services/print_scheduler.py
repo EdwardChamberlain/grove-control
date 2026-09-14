@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -42,7 +43,11 @@ from backend.app.services.chamber_heat_soak import ChamberHeatSoak, abort_heat_s
 from backend.app.services.filament_deficit import compute_deficit_for_queue_item
 from backend.app.services.filament_requirements import canonical_filament_type
 from backend.app.services.ha_sensor_manager import ha_sensor_manager
-from backend.app.services.finance_budget import validate_print_budget
+from backend.app.services.finance_budget import (
+    create_budget_reservation,
+    release_budget_reservation,
+    validate_print_budget,
+)
 from backend.app.services.notification_service import notification_service
 from backend.app.services.printer_manager import (
     printer_manager,
@@ -1348,7 +1353,24 @@ class PrintScheduler:
                     # in-memory printer reservation aligned with the row the
                     # worker actually loaded.
                     self._inflight[item_id] = (current_task, item.printer_id)
-                await self._start_print(item_db, item)
+                try:
+                    await self._start_print(item_db, item)
+                except Exception:
+                    # If an unexpected pre-dispatch failure leaves the row
+                    # pending, also remove any flushed budget hold. Once the
+                    # row is durably dispatching, retain the hold for the
+                    # recovery path because the MQTT command may be in flight.
+                    await item_db.rollback()
+                    pending_item = await item_db.get(PrintQueueItem, item_id)
+                    if pending_item and pending_item.status == "pending":
+                        await release_budget_reservation(
+                            item_db,
+                            source_type="queue_item",
+                            source_id=item_id,
+                            status="released",
+                        )
+                        await item_db.commit()
+                    raise
             finally:
                 await self._clear_dispatch_claim(item_db, item_id)
 
@@ -3431,6 +3453,12 @@ class PrintScheduler:
                     and item.status not in ("printing", "completed")
                     and (item.status != "dispatching" or not item.dispatch_subtask_id)
                 ):
+                    await release_budget_reservation(
+                        db,
+                        source_type="queue_item",
+                        source_id=item_id,
+                        status="released",
+                    )
                     await abort_heat_soak(
                         db,
                         item,
@@ -3848,6 +3876,38 @@ class PrintScheduler:
                 await db.rollback()
                 return
 
+        # A pending queue row counts as a budget hold while it waits. Once the
+        # upload is ready to cross the dispatch boundary, move that hold into a
+        # durable reservation so a concurrent queue insert cannot spend the
+        # same budget while this command is being acknowledged. The CAS below
+        # and this reservation are committed together; a cancellation that won
+        # the upload race therefore rolls the reservation back as well.
+        queue_item_id = item.id
+        queue_user = await db.get(User, item.created_by_id) if item.created_by_id is not None else None
+        try:
+            await create_budget_reservation(
+                db,
+                cost_center_id=item.cost_center_id,
+                estimated_cost=item.estimated_cost,
+                current_user=queue_user,
+                source_type="queue_item",
+                source_id=item.id,
+                print_archive_id=archive.id if archive else None,
+                exclude_queue_item_id=item.id,
+            )
+        except HTTPException as exc:
+            await db.rollback()
+            item = await db.get(PrintQueueItem, queue_item_id)
+            if item and item.status == "pending":
+                item.status = "failed"
+                item.error_message = getattr(exc, "detail", str(exc))
+                item.completed_at = datetime.now(timezone.utc)
+                await db.commit()
+            logger.error("Queue item %s: Budget reservation failed: %s", queue_item_id, exc)
+            if item:
+                await self._power_off_if_needed(db, item)
+            return
+
         # Propagate the queue item's owner into printer_manager so the
         # print-complete callback can credit the user in the PrintLogEntry
         # (#1670). `created_by_id` is set either at queue-add time (UI-added
@@ -3860,8 +3920,17 @@ class PrintScheduler:
         # Keep the same bounded numeric submission id in the row and MQTT
         # command so a terminal event remains attributable after restart.
         dispatch_subtask_id = str(int(time.time() * 1000) % 2_147_483_647 or 1)
+        # The printer submission id is mutable protocol state and can be
+        # reused by firmware. Billing needs an independent identity for this
+        # physical run, including when the same archive is reprinted.
+        billing_run_id = str(uuid.uuid4())
         now_utc = datetime.now(timezone.utc)
         claim_timestamp = item.dispatching_at
+        if archive:
+            archive.billing_run_id = billing_run_id
+            # Legacy deletion used an archive-wide skip flag. A new run has
+            # its own identity and must be independently billable.
+            archive.wallet_charge_skipped = False
         if heat_soak_complete or claim_timestamp is None:
             # Heat-soak handoffs already reserve the row as ``dispatching``.
             # The no-claim path preserves direct unit-test callers; normal
@@ -3869,6 +3938,7 @@ class PrintScheduler:
             item.status = "dispatching"
             item.dispatched_at = now_utc
             item.dispatch_subtask_id = dispatch_subtask_id
+            item.billing_run_id = billing_run_id
             item.started_at = None
             item.error_message = None
             try:
@@ -3892,11 +3962,11 @@ class PrintScheduler:
                         status="dispatching",
                         dispatched_at=now_utc,
                         dispatch_subtask_id=dispatch_subtask_id,
+                        billing_run_id=billing_run_id,
                         started_at=None,
                         error_message=None,
                     )
                 )
-                await db.commit()
             except IntegrityError:
                 # The partial unique index on active printer rows is the
                 # authoritative single-dispatch guard. Another scheduler worker
@@ -3912,7 +3982,9 @@ class PrintScheduler:
 
             if cas.rowcount == 0:
                 # Cancellation or deletion won the race while the file was
-                # being uploaded. Never publish MQTT for a row that is no longer ours.
+                # being uploaded. Roll back the finance reservation too; never
+                # publish MQTT for a row that is no longer ours.
+                await db.rollback()
                 logger.info(
                     "Queue item %s was cancelled or removed during dispatch; cleaning up uploaded file",
                     item.id,
@@ -3929,11 +4001,16 @@ class PrintScheduler:
                     logger.debug("Queue item %s: cancelled-dispatch cleanup failed: %s", item.id, cleanup_err)
                 return
 
+            # Commit the reservation and the successful compare-and-set
+            # together. A zero-row CAS must not commit an orphaned hold.
+            await db.commit()
+
         # Keep the ORM object in sync with the durable CAS before the command
         # boundary and confirmation scheduling below.
         item.status = "dispatching"
         item.dispatched_at = now_utc
         item.dispatch_subtask_id = dispatch_subtask_id
+        item.billing_run_id = billing_run_id
         item.started_at = None
         item.error_message = None
 
@@ -3951,6 +4028,7 @@ class PrintScheduler:
                 created_by_id=item.created_by_id,
                 cost_center_id=item.cost_center_id,
                 plate_id=item.plate_id,
+                queue_item_id=item.id,
             )
 
         for cleanup_path in cleanup_disk_paths:
@@ -4001,6 +4079,13 @@ class PrintScheduler:
                 active_ams_ids=command_boundary_drying,
                 release_dispatch_reservation=True,
             )
+            await release_budget_reservation(
+                db,
+                source_type="queue_item",
+                source_id=item.id,
+                status="released",
+            )
+            await db.commit()
             if archive:
                 from backend.app.main import unregister_expected_print
 
@@ -4017,6 +4102,13 @@ class PrintScheduler:
             item = await lock_queue_item(db, item.id)
             if not item or item.status != "dispatching" or not printer_manager.is_connected(item.printer_id):
                 await db.rollback()
+                await release_budget_reservation(
+                    db,
+                    source_type="queue_item",
+                    source_id=queue_item_id,
+                    status="released",
+                )
+                await db.commit()
                 return
 
         started = printer_manager.start_print(
@@ -4074,6 +4166,12 @@ class PrintScheduler:
             item.started_at = None
             item.error_message = "Failed to send print command to printer"
             item.completed_at = datetime.now(timezone.utc)
+            await release_budget_reservation(
+                db,
+                source_type="queue_item",
+                source_id=item.id,
+                status="released",
+            )
             await db.commit()
             if archive:
                 from backend.app.main import unregister_expected_print

@@ -76,15 +76,15 @@ class TransactionEditRequest(BaseModel):
 class ManualPrintRequest(BaseModel):
     user_id: int
     cost_center_id: int
-    amount: float
+    amount: float = Field(..., gt=0)
     description: str | None = None
     created_at: datetime | None = None
 
 
 class CostCenterCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=150)
-    total_budget: float | None = None
-    monthly_budget: float | None = None
+    total_budget: float | None = Field(default=None, ge=0)
+    monthly_budget: float | None = Field(default=None, ge=0)
     is_active: bool = True
 
 
@@ -94,8 +94,8 @@ class CostCenterUpdateRequest(BaseModel):
 
 
 class CostCenterBudgetUpdateRequest(BaseModel):
-    total_budget: float | None = None
-    monthly_budget: float | None = None
+    total_budget: float | None = Field(default=None, ge=0)
+    monthly_budget: float | None = Field(default=None, ge=0)
 
 
 class CostCenterMemberRequest(BaseModel):

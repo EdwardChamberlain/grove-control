@@ -147,6 +147,10 @@ class WalletTransaction(Base):
     print_queue_id: Mapped[int | None] = mapped_column(
         ForeignKey("print_queue.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # Keep a hidden tombstone when an administrator removes a charge. A
+    # delayed completion callback must not recreate the same charge, while a
+    # later reprint with a new billing_run_id remains billable.
+    is_voided: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
 

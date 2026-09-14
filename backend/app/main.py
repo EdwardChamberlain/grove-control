@@ -384,6 +384,11 @@ _print_ams_mappings: dict[int, list[int]] = {}
 # Track cost center selection for the current print run: {archive_id: cost_center_id}
 _print_cost_center_ids: dict[int, int] = {}
 
+# Track queue ownership for archive creation from library-file queue items. The
+# archive is created after dispatch, so its id cannot be attached to the
+# reservation until the terminal completion callback.
+_print_queue_ids: dict[int, int] = {}
+
 # Track plate_id for prints from multi-plate 3MFs: {archive_id: plate_id}
 # Used by usage tracker to scope 3MF parsing to the dispatched plate (#1697).
 # Populated by direct-Print and queue dispatch paths; queue prints also have a
@@ -748,6 +753,7 @@ def register_expected_print(
     created_by_id: int | None = None,
     cost_center_id: int | None = None,
     plate_id: int | None = None,
+    queue_item_id: int | None = None,
 ):
     """Register an expected print from reprint/scheduled so we don't create duplicate archives."""
     # Store with multiple filename variations to catch different naming patterns
@@ -762,6 +768,8 @@ def register_expected_print(
         _print_ams_mappings[archive_id] = ams_mapping
     if cost_center_id is not None:
         _print_cost_center_ids[archive_id] = cost_center_id
+    if queue_item_id is not None:
+        _print_queue_ids[archive_id] = queue_item_id
     # Store plate_id for usage tracking when this is a single-plate dispatch from
     # a multi-plate 3MF — without this, the direct-Print path attributes the whole
     # file's filament total to the spool instead of just the printed plate (#1697).
@@ -819,6 +827,7 @@ def unregister_expected_print(printer_id: int, filename: str | None = None) -> N
         if archive_id not in live_archive_ids:
             _print_ams_mappings.pop(archive_id, None)
             _print_plate_ids.pop(archive_id, None)
+            _print_queue_ids.pop(archive_id, None)
 
     if keys:
         logging.getLogger(__name__).info(
@@ -4707,6 +4716,8 @@ async def on_print_complete(printer_id: int, data: dict):
     # Uses run_with_retry to handle SQLite "database is locked" errors (#897).
     queue_item_id = None
     queue_item_owner_id = None
+    queue_item_billing_run_id: str | None = None
+    queue_item_cost_center_id: int | None = None
     queue_status = None
     queue_auto_off = False
     try:
@@ -4714,7 +4725,8 @@ async def on_print_complete(printer_id: int, data: dict):
         from backend.app.models.print_queue import PrintQueueItem
 
         async def _update_queue_status(db):
-            nonlocal queue_item_id, queue_item_owner_id, queue_status, queue_auto_off
+            nonlocal queue_item_id, queue_item_owner_id, queue_item_billing_run_id, queue_item_cost_center_id
+            nonlocal queue_status, queue_auto_off
             recovered_dispatch = bool(data.get("_recovered_dispatch"))
             queue_statuses = ["dispatching", "printing"]
             if recovered_dispatch and event_subtask_id:
@@ -4786,6 +4798,8 @@ async def on_print_complete(printer_id: int, data: dict):
                     unregister_expected_print(printer_id)
                 queue_item_id = item.id
                 queue_item_owner_id = item.created_by_id
+                queue_item_billing_run_id = item.billing_run_id
+                queue_item_cost_center_id = item.cost_center_id
                 queue_auto_off = item.auto_off_after
                 logger.info("Updated queue item %s status to %s", item.id, queue_status)
 
@@ -5144,11 +5158,18 @@ async def on_print_complete(printer_id: int, data: dict):
 
                 archive = await db.get(PrintArchive, archive_id)
                 cost_center_id = _print_cost_center_ids.pop(archive_id, None)
+                queue_item_id = _print_queue_ids.pop(archive_id, None)
                 charged = await apply_print_charge_for_archive(
                     db,
                     archive_id,
-                    cost_center_id=cost_center_id,
-                    print_run_id=archive.subtask_id if archive else None,
+                    charged_user_id=queue_item_owner_id,
+                    cost_center_id=(
+                        queue_item_cost_center_id
+                        if queue_item_cost_center_id is not None
+                        else cost_center_id
+                    ),
+                    print_queue_id=queue_item_id,
+                    print_run_id=(queue_item_billing_run_id or (archive.billing_run_id if archive else None)),
                 )
                 await db.commit()
                 if charged:
@@ -6528,6 +6549,7 @@ def _evict_stale_expected_prints() -> None:
             _print_ams_mappings.pop(archive_id, None)
             _print_cost_center_ids.pop(archive_id, None)
             _print_plate_ids.pop(archive_id, None)
+            _print_queue_ids.pop(archive_id, None)
 
     logging.getLogger(__name__).info(
         "Evicted %d stale expected-print entries (TTL=%ds)", len(stale_keys), _EXPECTED_PRINT_TTL_SECONDS

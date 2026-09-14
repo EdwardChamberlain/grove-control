@@ -59,6 +59,12 @@ class PrintArchive(Base):
     # print and keep the original row instead of cancel-then-create.
     subtask_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
+    # Grove-owned identity for one billable physical print run. Bambu's
+    # subtask_id is a printer protocol value and is overwritten on reprints;
+    # this UUID remains stable across restart and lets the ledger bill each
+    # reprint exactly once.
+    billing_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
     # Extended metadata (JSON blob for flexibility)
     extra_data: Mapped[dict | None] = mapped_column(JSON)
 
