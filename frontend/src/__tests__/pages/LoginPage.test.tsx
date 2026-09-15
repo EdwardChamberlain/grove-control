@@ -7,6 +7,7 @@ import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../utils';
 import { LoginPage } from '../../pages/LoginPage';
+import { sanitizeRedirectTarget } from '../../utils/redirect';
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 
@@ -17,6 +18,16 @@ describe('LoginPage', () => {
         return HttpResponse.json({ auth_enabled: true, requires_setup: false });
       })
     );
+  });
+
+  describe('redirect target sanitization', () => {
+    it('accepts internal paths and rejects external or loop-forming targets', () => {
+      expect(sanitizeRedirectTarget('/projects/42?tab=notes')).toBe('/projects/42?tab=notes');
+      expect(sanitizeRedirectTarget('https://evil.example')).toBeNull();
+      expect(sanitizeRedirectTarget('//evil.example')).toBeNull();
+      expect(sanitizeRedirectTarget('/\\evil.example')).toBeNull();
+      expect(sanitizeRedirectTarget('/login')).toBeNull();
+    });
   });
 
   describe('rendering', () => {

@@ -9,6 +9,7 @@ import { X, Mail, Shield, Smartphone, Key } from 'lucide-react';
 import { api, type LoginResponse, type OIDCProvider, type TokenPersistence } from '../api/client';
 import { Card, CardHeader, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
+import { sanitizeRedirectTarget } from '../utils/redirect';
 
 type LoginStep = 'credentials' | '2fa' | 'reset-password';
 
@@ -31,17 +32,6 @@ function consumeSavedRememberMe(): boolean {
     console.warn('consumeSavedRememberMe: sessionStorage unavailable, Remember Me preference lost across OIDC redirect', err);
     return false;
   }
-}
-
-// Only accept same-origin internal paths. Rejects protocol-relative (`//evil.com`),
-// absolute URLs, and the login page itself (would loop). Anything else falls
-// back to `/` so a tampered sessionStorage entry can't open-redirect.
-function sanitizeRedirectTarget(target: string | null | undefined): string | null {
-  if (!target) return null;
-  if (!target.startsWith('/')) return null;
-  if (target.startsWith('//')) return null;
-  if (target.startsWith('/login')) return null;
-  return target;
 }
 
 function stashPostLoginRedirect(target: string): void {
