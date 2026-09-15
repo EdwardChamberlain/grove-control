@@ -17,7 +17,7 @@
 
 Grove Control is a focused tool for reliably running Bambu Lab printers and small fleets. It is intentionally narrower than Bambuddy and does not aim for feature parity or to support every possible workflow.
 
-We favour clear workflows, predictable state, safe recovery, and low maintenance over maximum flexibility. A feature may be simplified, declined, or left in Bambuddy when it adds more complexity than value.
+We focus on clear workflows, predictable state, safe recovery, and low maintenance over maximum flexibility. A feature may be simplified, declined, or left in Bambuddy when it adds too much complexity.
 
 Bambuddy is the broader toolbox. Grove Control is the focused tool.
 
