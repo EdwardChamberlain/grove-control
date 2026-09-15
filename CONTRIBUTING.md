@@ -6,6 +6,7 @@ Thank you for your interest in contributing to Grove Control! This document prov
 
 - [Code of Conduct](#code-of-conduct)
 - [Before You Start](#before-you-start)
+- [Product Direction](#product-direction)
 - [Getting Started](#getting-started)
 - [Development Setup](#development-setup)
 - [Making Changes](#making-changes)
@@ -35,6 +36,19 @@ Please read and follow our [Code of Conduct](CODE_OF_CONDUCT.md) to keep our com
 **No assigned issue = no PR.** Pull requests without a corresponding assigned issue will be closed.
 
 This keeps everyone on the same page, avoids wasted effort on changes that may not fit the project's direction, and prevents multiple contributors from working on the same thing.
+
+## Product Direction
+
+Grove Control is intentionally narrower than Bambuddy. When proposing or reviewing changes, use these questions to keep the project focused:
+
+- Does this improve a core printing or fleet-management workflow?
+- Does it make common tasks clearer or reduce manual steps?
+- Are its states, failures, and recovery behaviour understandable?
+- Can we test and maintain it with the project's available resources?
+- Does it remove complexity, or only add another option?
+- If adapting an upstream change, what are we deliberately leaving out?
+
+Prefer the smallest useful version. New functionality should have a clear user benefit and a clear maintenance boundary. Feature parity with Bambuddy is not a goal; selective adaptation is expected.
 
 ## Getting Started
 
