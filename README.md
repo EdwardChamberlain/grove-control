@@ -141,11 +141,18 @@ remains the supported production install path; source setup details are in
 | `LOG_LEVEL` | `INFO` | Log level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 | `LOG_TO_FILE` | `true` | Write rotating logs to `bambuddy.log` |
 
-The `TZ` value in `.env` or the container environment is authoritative for
-local scheduled times, including scheduled backups. Compose and the
-application both fall back to `UTC` when it is unset. Database timestamps are
-stored in UTC and converted for local display. The installer scripts detect a
-host timezone and write it to `.env`; override it with `--tz` or `-TimeZone`.
+For Docker Compose, the `TZ` value in `.env` or the container environment is
+authoritative for local scheduled times, including scheduled backups. Compose
+and the application both fall back to `UTC` when it is unset. For a
+source/native installation, export `TZ` in the shell or service environment
+before starting Grove Control; setting it only in `.env` is not sufficient for
+the native process. Database timestamps are stored in UTC and converted for
+local display. The installer scripts detect a host timezone and write it to
+`.env`; override it with `--tz` or `-TimeZone`.
+
+```bash
+export TZ=Europe/London
+```
 
 Keep `DEBUG=false` for normal operation: enabling it also turns on SQLAlchemy
 engine query logging and can be noisy. For temporary application diagnostics

@@ -19,7 +19,9 @@ Grove Control 1.0.0 is the stable release line.
 ### Compatibility
 
 - `TZ` defaults to `UTC` in Compose and in the application. Set an IANA timezone
-  in `.env` for local scheduled times such as scheduled backups.
+  in the Docker Compose `.env`; source/native installs must export `TZ` in the
+  process or service environment for local scheduled times such as scheduled
+  backups.
 - `DEBUG=false` is the safe default. Set it to `true` only for temporary
   diagnostics because it also enables SQLAlchemy engine logging; use
   `LOG_LEVEL=DEBUG` for application debug logs without SQL query echoing.

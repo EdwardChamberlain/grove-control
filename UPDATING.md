@@ -115,11 +115,20 @@ exist. Back up the data directory before starting that upgrade.
 `TZ` is the authoritative timezone for the container and for scheduled local
 times such as local backup schedules. Grove Control stores database timestamps
 in UTC and converts them for local display. The Compose default and the
-application fallback are both `UTC`; set an IANA timezone in `.env` or in the
-container environment when a different local timezone is required:
+application fallback are both `UTC`. For Docker Compose, set an IANA timezone
+in `.env` or in the container environment when a different local timezone is
+required:
 
 ```dotenv
 TZ=Europe/London
+```
+
+For a source/native installation, export `TZ` in the shell or service
+environment before starting Grove Control; setting it only in `.env` is not
+sufficient for the native process:
+
+```bash
+export TZ=Europe/London
 ```
 
 The installer scripts detect the host timezone when possible and write it to
