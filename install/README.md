@@ -6,6 +6,12 @@ This directory contains convenience scripts for Docker-based installs only.
 They download the project `docker-compose.yml`, apply the requested port and
 timezone settings, and start Grove Control with Docker Compose.
 
+The downloaded Compose file uses the stable `latest` image. For a reproducible
+stable install, change its image to
+`ghcr.io/edwardchamberlain/grove-control:1.0.0` before starting the container.
+The `dev` image is a separate development channel and is not intended for
+production data.
+
 ## Quick Start
 
 ### Linux
@@ -88,20 +94,38 @@ Examples:
 
 ## Updating
 
+Before updating, use **Settings → Backup → Create Backup** in Grove Control and
+download the ZIP to storage outside the Docker volume. Keep it until the new
+container has started successfully and the printer list, archive, queue, and
+settings have been checked. Docker Compose does not make an application backup
+automatically; do not use `docker compose down -v`, because it removes the
+persistent volumes.
+
 ```bash
 cd /path/to/grove-control
 docker compose pull
 docker compose up -d
 ```
 
+The default image is stable `latest`. Pin the `image` line to
+`ghcr.io/edwardchamberlain/grove-control:1.0.0` when you need to remain on the
+1.0.0 release.
+
 If you use a locally built Docker image with `--build`, update the checkout first and
 rebuild:
 
 ```bash
 cd /path/to/grove-control
-git pull
+git fetch origin
+git checkout main
+git pull --ff-only origin main
 docker compose up -d --build
 ```
+
+Existing Grove Control databases are migrated automatically when the updated
+application starts. The installer detects the host timezone when possible and
+writes it to `.env`; use `--tz` or `-TimeZone` to override it. See
+[`UPDATING.md`](../UPDATING.md) for the full migration and recovery procedure.
 
 ## Service Management
 

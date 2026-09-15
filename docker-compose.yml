@@ -1,5 +1,6 @@
 services:
   grove-control:
+    # Stable channel. Pin to :1.0.0 (or a later X.Y.Z tag) for reproducible deployments.
     image: ghcr.io/edwardchamberlain/grove-control:latest
     build: .
     # Usage:
@@ -102,7 +103,8 @@ services:
       #- /mnt/nas/3d-prints:/external/nas:ro
       #- /srv/library:/external/projects:ro
     environment:
-      - TZ=${TZ:-Europe/Berlin}
+      # IANA timezone for local scheduled times; UTC is the application fallback.
+      - TZ=${TZ:-UTC}
       # User/group the container drops to after the entrypoint normalises
       # ownership on /app/data and /app/logs. Match your host user (run
       # `id -u` / `id -g`) if you want files written by the container to
