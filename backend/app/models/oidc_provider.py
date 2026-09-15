@@ -98,8 +98,9 @@ class OIDCProvider(Base):
     # performs an email_verified check regardless of this setting.
     require_email_verified: Mapped[bool] = mapped_column(Boolean, default=True)
     # Nullable FK — configurable default group for auto-created OIDC users.
-    # Falls back to "Viewers" when None. ON DELETE SET NULL fires on PostgreSQL;
-    # SQLite ignores it (no PRAGMA foreign_keys=ON), so runtime resolution handles dangling refs.
+    # NULL means that newly auto-created users receive no initial group.
+    # ON DELETE SET NULL fires on PostgreSQL; SQLite ignores it (no
+    # PRAGMA foreign_keys=ON), so group deletion clears references in the API.
     default_group_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("groups.id", ondelete="SET NULL"), nullable=True, default=None
     )

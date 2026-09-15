@@ -1,7 +1,7 @@
 """Group management API routes."""
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -13,6 +13,7 @@ from backend.app.core.permissions import (
     Permission,
 )
 from backend.app.models.group import Group
+from backend.app.models.oidc_provider import OIDCProvider
 from backend.app.models.user import User
 from backend.app.schemas.group import (
     GroupCreate,
@@ -258,6 +259,13 @@ async def delete_group(
             detail="Cannot delete system groups",
         )
 
+    # Clear OIDC references explicitly before deleting. PostgreSQL also has
+    # ON DELETE SET NULL, but SQLite does not enforce foreign keys by default;
+    # doing this in the same transaction keeps both dialects consistent and
+    # prevents a deleted group's id from being reused as a stale default.
+    await db.execute(
+        update(OIDCProvider).where(OIDCProvider.default_group_id == group_id).values(default_group_id=None)
+    )
     await db.delete(group)
     await db.commit()
 

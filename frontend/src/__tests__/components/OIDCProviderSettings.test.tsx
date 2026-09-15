@@ -161,15 +161,15 @@ describe('OIDCProviderSettings', () => {
       expect(screen.getByText(/Default Group/i)).toBeInTheDocument();
     });
 
-    it('shows Viewers fallback label when default_group_id is null', async () => {
+    it('shows no-permissions label when default_group_id is null', async () => {
       render(<OIDCProviderSettings />);
 
       await waitFor(() => {
         expect(screen.getByText('TestIdP')).toBeInTheDocument();
       });
 
-      // null default_group_id should display the Viewers fallback text
-      expect(screen.getByText(/Viewers.*default/i)).toBeInTheDocument();
+      // null default_group_id should display the explicit no-permissions text
+      expect(screen.getByText(/None.*no permissions/i)).toBeInTheDocument();
     });
 
     it('shows group name when default_group_id matches a known group', async () => {
@@ -203,10 +203,10 @@ describe('OIDCProviderSettings', () => {
         expect(screen.getByText(/Default Group/i)).toBeInTheDocument();
       });
 
-      // Dropdown should render with Viewers fallback option
+      // Dropdown should render with an explicit no-permissions option
       const select = screen.getByRole('combobox');
       expect(select).toBeInTheDocument();
-      expect(select).toHaveTextContent(/Viewers.*default/i);
+      expect(select).toHaveTextContent(/None.*no permissions/i);
     });
 
     it('populates Default Group dropdown with groups from API', async () => {

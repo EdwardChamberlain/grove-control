@@ -4148,20 +4148,21 @@ async def seed_notification_templates():
 async def seed_default_groups():
     """Seed default groups and migrate existing users to appropriate groups.
 
-    Creates the default system groups (Administrators, Operators, Viewers) if they
-    don't exist, then migrates existing users without group membership into the
-    Operators group. Legacy role-admin users are handled by the one-time
-    migration below; the role column has no continuing authorization authority.
+    Creates all three starter groups on a fresh installation, then guarantees
+    only the protected Administrators group on existing installations. Legacy
+    role-admin users are handled by the one-time migration below; the role
+    column has no continuing authorization authority.
 
     Also migrates old permissions to new ownership-based permissions (Issue #205).
     """
     import logging
 
-    from sqlalchemy import select
+    from sqlalchemy import select, update
 
     from backend.app.core.db_dialect import upsert_setting
     from backend.app.core.permissions import ALL_PERMISSIONS, DEFAULT_GROUPS
     from backend.app.models.group import Group
+    from backend.app.models.oidc_provider import OIDCProvider
     from backend.app.models.settings import Settings
     from backend.app.models.user import User
 
@@ -4177,11 +4178,8 @@ async def seed_default_groups():
     # ArchivesPage, preview button in FileManagerPage) on the LEGACY
     # `archives:read` / `library:read` / `queue:read` strings. For admin we
     # therefore keep the legacy flag (the `*_all` companion gets added via the
-    # backfill block below). For non-admin roles the legacy IS renamed to
-    # `_own` — that closes the IDOR (operators with a custom `archives:read`
-    # row can no longer read cross-user data) and the UI gates degrade to
-    # disabled-button state until the frontend is migrated to also accept
-    # `_own` (separate change).
+    # backfill block below). Optional starter groups are now editable and keep
+    # their stored permissions unchanged during startup.
     PERMISSION_MIGRATION_ALL = {
         "queue:update": "queue:update_all",
         "queue:delete": "queue:delete_all",
@@ -4192,34 +4190,20 @@ async def seed_default_groups():
         "library:delete": "library:delete_all",
     }
 
-    PERMISSION_MIGRATION_OWN = {
-        "queue:update": "queue:update_own",
-        "queue:delete": "queue:delete_own",
-        # Read permissions: any role NOT flagged as Administrator gets
-        # ownership-scoped reads. Pre-existing custom roles with the legacy
-        # `*:read` flag silently saw every user's items; the OWN variant
-        # closes that IDOR. Roles that genuinely need cross-user visibility
-        # must be re-granted `*:read_all` explicitly by an administrator
-        # after upgrade — fail-closed by default (per CWE-636).
-        "queue:read": "queue:read_own",
-        "archives:update": "archives:update_own",
-        "archives:delete": "archives:delete_own",
-        "archives:reprint": "archives:reprint_own",
-        "archives:read": "archives:read_own",
-        "library:update": "library:update_own",
-        "library:delete": "library:delete_own",
-        "library:read": "library:read_own",
-    }
-
     async with async_session() as session:
         # Get existing groups
         result = await session.execute(select(Group))
         existing_groups = {group.name: group for group in result.scalars().all()}
 
-        # Create default groups if they don't exist
+        # Fresh installs get all three starter groups. Once any groups exist,
+        # only Administrators is mandatory; Operators and Viewers are ordinary
+        # editable groups and a deliberate deletion or rename must persist.
         groups_created = []
+        create_optional_defaults = not existing_groups
         for group_name, group_config in DEFAULT_GROUPS.items():
             if group_name not in existing_groups:
+                if not group_config["is_system"] and not create_optional_defaults:
+                    continue
                 group = Group(
                     name=group_name,
                     description=group_config["description"],
@@ -4230,16 +4214,20 @@ async def seed_default_groups():
                 groups_created.append(group_name)
                 logger.info("Created default group: %s", group_name)
             else:
-                # Migrate existing group's permissions from old to new format
+                # Administrators is the only protected default group. Do not
+                # rewrite permissions on optional starter groups: after #37
+                # they are ordinary editable groups and their stored choices
+                # must survive startup unchanged.
                 group = existing_groups[group_name]
-                if group.permissions:
+                expected_is_system = group_config["is_system"]
+                if group.is_system != expected_is_system:
+                    group.is_system = expected_is_system
+                    logger.info("Updated default group '%s' system flag to %s", group_name, expected_is_system)
+                if group.is_system and group.permissions:
                     updated = False
                     new_permissions = list(group.permissions)
 
-                    # Determine which migration map to use based on group
-                    migration_map = (
-                        PERMISSION_MIGRATION_ALL if group_name == "Administrators" else PERMISSION_MIGRATION_OWN
-                    )
+                    migration_map = PERMISSION_MIGRATION_ALL
 
                     for old_perm, new_perm in migration_map.items():
                         if old_perm in new_permissions:
@@ -4275,10 +4263,34 @@ async def seed_default_groups():
 
         await session.commit()
 
+        # Before #37, a NULL default_group_id meant an implicit Viewers
+        # assignment. Convert those legacy provider rows once, after the
+        # existing Viewers group has been located. Providers created after this
+        # marker is written retain NULL and therefore intentionally create users
+        # without group-derived permissions.
+        oidc_default_group_migration_key = "migration_oidc_default_group_viewers_v1"
+        migration_result = await session.execute(
+            select(Settings).where(Settings.key == oidc_default_group_migration_key)
+        )
+        if migration_result.scalar_one_or_none() is None:
+            viewers_result = await session.execute(select(Group).where(Group.name == "Viewers"))
+            viewers_group = viewers_result.scalar_one_or_none()
+            if viewers_group is not None:
+                await session.execute(
+                    update(OIDCProvider)
+                    .where(OIDCProvider.default_group_id.is_(None))
+                    .values(default_group_id=viewers_group.id)
+                )
+                logger.info("Migrated existing OIDC providers with implicit Viewer defaults")
+            await upsert_setting(session, Settings, oidc_default_group_migration_key, "complete")
+            await session.commit()
+
         # Migrate new permissions: grant printers:clear_plate to all groups with printers:control
         result = await session.execute(select(Group))
         all_groups = result.scalars().all()
         for group in all_groups:
+            if not group.is_system:
+                continue
             if (
                 group.permissions
                 and "printers:control" in group.permissions
@@ -4296,6 +4308,8 @@ async def seed_default_groups():
         # any user-customised permission lists.
         result = await session.execute(select(Group))
         for group in result.scalars().all():
+            if not group.is_system:
+                continue
             if not group.permissions:
                 continue
             perms = list(group.permissions)
@@ -4339,44 +4353,14 @@ async def seed_default_groups():
                 admin_group.permissions = perms
         await session.commit()
 
-        # Same OWN-tier backfill for non-admin system groups. Operators and
-        # Viewers are seeded with _own on fresh installs (see DEFAULT_GROUPS),
-        # but the legacy-rename migration above won't run on a role that
-        # didn't carry the legacy `archives:read` flag. Without this block,
-        # an existing Operators row whose permissions list lacks the legacy
-        # flag would never get archives:read_own and operators would lose
-        # read access after upgrade. Re-check by group name so customised
-        # rows still get the correct OWN tier on next startup.
-        #
-        # Operators also get orca_cloud:auth backfilled — fresh installs now
-        # include it in the DEFAULT_GROUPS bootstrap, so this keeps upgrades
-        # consistent. Viewers do NOT get orca_cloud:auth (read-only role,
-        # not expected to author slicer presets / sync to Orca Cloud).
-        for non_admin_group_name in ("Operators", "Viewers"):
-            grp = (await session.execute(select(Group).where(Group.name == non_admin_group_name))).scalar_one_or_none()
-            if grp is None or grp.permissions is None:
-                continue
-            perms = list(grp.permissions)
-            changed = False
-            for own_perm in ("archives:read_own", "library:read_own", "queue:read_own"):
-                if own_perm not in perms:
-                    perms.append(own_perm)
-                    changed = True
-                    logger.info("Added %s to %s group (backfill)", own_perm, non_admin_group_name)
-            if non_admin_group_name == "Operators" and "orca_cloud:auth" not in perms:
-                perms.append("orca_cloud:auth")
-                changed = True
-                logger.info("Added orca_cloud:auth to Operators group (backfill)")
-            if changed:
-                grp.permissions = perms
-        await session.commit()
-
         # Backfill inventory forecast permissions for existing groups.
         # inventory:forecast_read was added after initial seeding, so groups
         # that already have inventory:read (or inventory:update) need it added.
         # inventory:forecast_write goes to any group with inventory:update.
         result = await session.execute(select(Group))
         for group in result.scalars().all():
+            if not group.is_system:
+                continue
             if not group.permissions:
                 continue
             perms = list(group.permissions)
