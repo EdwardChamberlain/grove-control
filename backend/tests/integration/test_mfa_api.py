@@ -969,6 +969,22 @@ class TestOIDCProviders:
         assert put_resp.status_code == 200, put_resp.text
         assert put_resp.json()["default_group_id"] == operators.id
 
+        omitted_resp = await async_client.put(
+            f"/api/v1/auth/oidc/providers/{provider_id}",
+            json={"name": "DgUpdateProviderRenamed"},
+            headers=_auth_header(token),
+        )
+        assert omitted_resp.status_code == 200, omitted_resp.text
+        assert omitted_resp.json()["default_group_id"] == operators.id
+
+        cleared_resp = await async_client.put(
+            f"/api/v1/auth/oidc/providers/{provider_id}",
+            json={"default_group_id": None},
+            headers=_auth_header(token),
+        )
+        assert cleared_resp.status_code == 200, cleared_resp.text
+        assert cleared_resp.json()["default_group_id"] is None
+
     @pytest.mark.asyncio
     @pytest.mark.integration
     async def test_default_group_id_in_public_and_admin_list(self, async_client: AsyncClient, db_session: AsyncSession):
@@ -4823,10 +4839,8 @@ class TestOIDCAutoCreateUsername:
 class TestOIDCAutoCreateDefaultGroup:
     """Auto-created OIDC users receive the provider's configured default group.
 
-    Resolution order:
-      1. provider.default_group_id (configured)
-      2. "Viewers" system group (fallback when default_group_id is None)
-      3. no group (last resort when both are unavailable)
+    The provider.default_group_id is the only group assignment source. A
+    NULL or missing group results in no initial group.
 
     All tests are DB-agnostic: they verify group membership via the OIDC
     exchange response, which includes the user's group list.
@@ -4934,10 +4948,8 @@ class TestOIDCAutoCreateDefaultGroup:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_null_default_group_id_falls_back_to_viewers(
-        self, async_client: AsyncClient, db_session: AsyncSession
-    ):
-        """When default_group_id is None, auto-created user falls back to Viewers."""
+    async def test_null_default_group_id_assigns_no_group(self, async_client: AsyncClient, db_session: AsyncSession):
+        """When default_group_id is None, auto-created user has no group."""
         private_pem, jwks_data = _make_test_rsa_key()
         issuer = "https://dg-null.example"
         client_id = "dg-null-client"
@@ -4960,18 +4972,55 @@ class TestOIDCAutoCreateDefaultGroup:
             private_pem=private_pem,
             jwks_data=jwks_data,
         )
-        assert "Viewers" in group_names, f"Expected Viewers, got {group_names}"
+        assert group_names == []
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_dangling_default_group_id_falls_back_to_viewers(
+    async def test_existing_null_default_is_migrated_to_viewers_id(
         self, async_client: AsyncClient, db_session: AsyncSession
     ):
-        """When configured group is deleted, auto-created user falls back to Viewers.
+        """Existing implicit Viewer defaults are made explicit once on upgrade."""
+        from sqlalchemy import delete, select
+
+        from backend.app.core.database import seed_default_groups
+        from backend.app.models.group import Group
+        from backend.app.models.oidc_provider import OIDCProvider
+        from backend.app.models.settings import Settings
+
+        admin_token = await _setup_and_login(async_client, "dg_migrate_adm", "DgMigrateAdm1!")
+        provider_id = await self._create_provider(
+            async_client,
+            admin_token,
+            issuer="https://dg-migrate.example",
+            client_id="dg-migrate-client",
+        )
+
+        marker_result = await db_session.execute(
+            select(Settings).where(Settings.key == "migration_oidc_default_group_viewers_v1")
+        )
+        marker = marker_result.scalar_one_or_none()
+        assert marker is not None
+        await db_session.execute(delete(Settings).where(Settings.id == marker.id))
+        await db_session.commit()
+
+        await seed_default_groups()
+
+        viewers_result = await db_session.execute(select(Group).where(Group.name == "Viewers"))
+        viewers = viewers_result.scalar_one()
+        provider = await db_session.get(OIDCProvider, provider_id)
+        assert provider is not None
+        assert provider.default_group_id == viewers.id
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_dangling_default_group_id_assigns_no_group(
+        self, async_client: AsyncClient, db_session: AsyncSession
+    ):
+        """A missing configured group does not trigger a name-based fallback.
 
         SQLite does not enforce FK ON DELETE SET NULL (no PRAGMA foreign_keys=ON),
-        so provider.default_group_id may point to a deleted group. The runtime
-        resolution chain must handle this and fall back to Viewers.
+        so provider.default_group_id may point to a deleted group. Runtime
+        resolution treats that missing group as no default.
         """
         from sqlalchemy import delete as sa_delete, select
 
@@ -5011,7 +5060,7 @@ class TestOIDCAutoCreateDefaultGroup:
             private_pem=private_pem,
             jwks_data=jwks_data,
         )
-        assert "Viewers" in group_names, f"Expected Viewers fallback, got {group_names}"
+        assert group_names == []
 
     @pytest.mark.asyncio
     @pytest.mark.integration

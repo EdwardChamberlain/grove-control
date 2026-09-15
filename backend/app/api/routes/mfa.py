@@ -1449,6 +1449,11 @@ async def update_oidc_provider(
             )
 
     dumped = body.model_dump(exclude_none=True)
+    # PUT is a partial update: omitted fields remain unchanged, while an
+    # explicit null clears the OIDC default group. Pydantic's exclude_none
+    # dump drops that distinction unless we restore it from model_fields_set.
+    if "default_group_id" in body.model_fields_set:
+        dumped["default_group_id"] = body.default_group_id
 
     # Decide whether an icon refetch is needed BEFORE mutating the ORM object,
     # so the comparison sees provider.icon_url / icon_content_type as they are
@@ -2021,20 +2026,12 @@ async def oidc_callback(
 
                     # I9: Assign new OIDC users to a group before flush — accessing
                     # new_user.groups after a flush triggers a lazy-load which fails
-                    # in async context.  Resolution order:
-                    #   1. provider.default_group_id (operator-configured)
-                    #   2. "Viewers" (system fallback for read-only access)
-                    #   3. no group (last resort if Viewers was deleted)
-                    # SQLite does not enforce ON DELETE SET NULL, so a dangling
-                    # default_group_id returns None here and falls through to Viewers.
+                    # in async context. The provider's group is resolved only
+                    # by its configured id; NULL or a missing row means no group.
                     default_group: Group | None = None
                     if provider.default_group_id is not None:
                         dg_result = await db.execute(select(Group).where(Group.id == provider.default_group_id))
                         default_group = dg_result.scalar_one_or_none()
-                    if default_group is None:
-                        viewers_result = await db.execute(select(Group).where(Group.name == "Viewers"))
-                        default_group = viewers_result.scalar_one_or_none()
-
                     new_user = User(
                         username=username,
                         email=user_email_for_storage,
