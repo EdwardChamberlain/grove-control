@@ -1329,11 +1329,7 @@ async def reorder_queue(
     if not item_ids:
         return {"message": "Reordered 0 items"}
 
-    result = await db.execute(
-        select(PrintQueueItem)
-        .where(PrintQueueItem.id.in_(item_ids))
-        .with_for_update()
-    )
+    result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.id.in_(item_ids)).with_for_update())
     items_by_id = {item.id: item for item in result.scalars().all()}
 
     if user is not None and not can_modify_all:
@@ -1351,14 +1347,9 @@ async def reorder_queue(
         # the same positions currently occupied by the requested items, and
         # every pending item in that interval must be part of the request.
         requested_positions = {
-            item_id: reorder_item.position
-            for item_id, reorder_item in zip(item_ids, data.items, strict=True)
+            item_id: reorder_item.position for item_id, reorder_item in zip(item_ids, data.items, strict=True)
         }
-        current_positions = {
-            item.id: item.position
-            for item in requested_items
-            if item is not None
-        }
+        current_positions = {item.id: item.position for item in requested_items if item is not None}
         if set(requested_positions.values()) != set(current_positions.values()):
             raise HTTPException(403, "You can only reorder your own contiguous queue items")
 
@@ -1378,9 +1369,7 @@ async def reorder_queue(
             .with_for_update()
         )
         pending_result = await db.execute(pending_query)
-        blocked_items = [
-            item for item in pending_result.scalars().all() if item.id not in items_by_id
-        ]
+        blocked_items = [item for item in pending_result.scalars().all() if item.id not in items_by_id]
         if blocked_items:
             raise HTTPException(403, "You can only reorder your own contiguous queue items")
 
