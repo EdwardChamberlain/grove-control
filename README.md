@@ -42,7 +42,8 @@ Grove Control brings together printer monitoring, scheduling, automation, and pr
 - **Optional authentication**: Add user accounts, permissions, activity tracking, API protection, SSO, 2FA, and per-user notification settings when needed.
 - **Maintenance and diagnostics**: Track maintenance intervals, view logs, generate support bundles, monitor firmware versions, and access diagnostic tools.
 
-For detailed feature documentation, see the project documentation.
+For upgrade and release guidance, see [UPDATING.md](UPDATING.md),
+[CHANGELOG.md](CHANGELOG.md), and the [Docker install guide](install/README.md).
 
 ---
 
@@ -92,6 +93,11 @@ For detailed feature documentation, see the project documentation.
 
 > **Supported install path:** Docker Compose is the supported production install path.
 
+> **Stable release:** The pre-built stable image is available as
+> `ghcr.io/edwardchamberlain/grove-control:latest`. Pin the image to
+> `ghcr.io/edwardchamberlain/grove-control:1.0.0` for a reproducible 1.0.0
+> deployment; stable tags use the bare `X.Y.Z` version with no `v` prefix.
+
 #### Docker Compose
 
 **Option A: Pre-built image (fastest)**
@@ -116,6 +122,12 @@ Open **http://localhost:8000** in your browser.
 
 > **Linux users:** If you get "permission denied" errors, either prefix commands with `sudo` (e.g., `sudo docker compose up -d`) or [add your user to the docker group](https://docs.docker.com/engine/install/linux-postinstall/).
 
+For a source/native installation, use the `main` branch for the stable source
+tree and confirm the root `VERSION` file reports `1.0.0`. The `dev` branch and
+the `:dev` image are development channels, not stable releases. Docker Compose
+remains the supported production install path; source setup details are in
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
 <details>
 <summary><strong>Docker Configuration & Commands</strong></summary>
 
@@ -123,41 +135,66 @@ Open **http://localhost:8000** in your browser.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `TZ` | `UTC` | Your timezone (e.g., `America/New_York`, `Europe/Berlin`) |
+| `TZ` | `UTC` | IANA timezone for local scheduled times (e.g., `America/New_York`, `Europe/Berlin`) |
 | `PORT` | `8000` | Port Grove Control runs on (with host networking mode) |
 | `DEBUG` | `false` | Enable debug logging |
 | `LOG_LEVEL` | `INFO` | Log level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `LOG_TO_FILE` | `true` | Write rotating logs to `bambuddy.log` |
+
+The `TZ` value in `.env` or the container environment is authoritative for
+local scheduled times, including scheduled backups. Compose and the
+application both fall back to `UTC` when it is unset. Database timestamps are
+stored in UTC and converted for local display. The installer scripts detect a
+host timezone and write it to `.env`; override it with `--tz` or `-TimeZone`.
+
+Keep `DEBUG=false` for normal operation: enabling it also turns on SQLAlchemy
+engine query logging and can be noisy. For temporary application diagnostics
+without SQL query echoing, leave `DEBUG=false` and set `LOG_LEVEL=DEBUG`.
 
 **Data Persistence:**
 
 | Volume | Purpose |
 |--------|---------|
-| `bambuddy.db` | SQLite database with all your print data (not used with PostgreSQL) |
-| `archive/` | Archived 3MF files and thumbnails |
-| `logs/` | Application logs |
+| `bambuddy_data` | `/app/data`: database, archived 3MF files, thumbnails, and other application data |
+| `bambuddy_logs` | `/app/logs`: application logs |
 
 **Updating:**
 
 ```bash
-# Pre-built image: just pull the latest
-docker compose pull && docker compose up -d
+# Create and download a backup from Settings → Backup before updating.
+# Pre-built stable image:
+docker compose pull
+docker compose up -d
+docker compose logs --tail=100 grove-control
 
-# Locally built image: rebuild after pulling changes
-cd grove-control && git pull && docker compose up -d --build
+# Locally built stable image: update the main checkout, then rebuild
+git fetch origin
+git checkout main
+git pull --ff-only origin main
+docker compose up -d --build
 ```
+
+The default Compose file tracks stable `latest`. To pin the current release,
+change its image line to
+`ghcr.io/edwardchamberlain/grove-control:1.0.0`. Do not use `docker compose
+down -v`, because removing volumes deletes the persistent database and
+application data. Existing Grove Control databases are migrated automatically
+when the updated application starts; see [UPDATING.md](UPDATING.md) for the
+backup, migration, and recovery procedure.
 
 **Development Builds:**
 
-Development builds are published from the `dev` branch:
+Development builds are published from the `dev` branch and use a separate
+container tag:
 
 ```bash
 # Pull the current development build
 docker pull ghcr.io/edwardchamberlain/grove-control:dev
 ```
 
-Use [Watchtower](https://containrrr.dev/watchtower/) to automatically update when new development builds are pushed.
-
-> **Note:** Beta builds use version tags like `v0.2.2b1` — they are never tagged as `latest`. Your stable installation won't auto-update to a beta unless you explicitly pull a beta tag.
+Use [Watchtower](https://containrrr.dev/watchtower/) to automatically update
+when new development builds are pushed, but do not use this channel for
+production data.
 
 **Useful Commands:**
 

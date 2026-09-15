@@ -80,9 +80,20 @@ volumes:
 
 ## Updating
 
+The `latest` tag is the stable channel. Pin the image to
+`ghcr.io/edwardchamberlain/grove-control:1.0.0` when you need a reproducible
+1.0.0 deployment; stable tags use the bare `X.Y.Z` version with no `v` prefix.
+Create and download a backup from **Settings → Backup → Create Backup** before
+updating, and keep it until the updated service has been verified. Do not use
+`docker compose down -v`, because it deletes persistent volumes.
+
 ```bash
 docker compose pull && docker compose up -d
 ```
+
+Existing Grove Control databases are migrated automatically during application
+startup. See [`UPDATING.md`](UPDATING.md) for migration, recovery, and timezone
+guidance.
 
 ## Development Builds
 
@@ -93,9 +104,10 @@ Development builds are published from the `dev` branch:
 docker pull ghcr.io/edwardchamberlain/grove-control:dev
 ```
 
-Use [Watchtower](https://containrrr.dev/watchtower/) to automatically update when new development builds are pushed.
-
-> **Note:** Beta builds use version tags like `v0.2.2b1` — they are never tagged as `latest`. Your stable installation won't auto-update to a beta unless you explicitly pull a beta tag.
+Use [Watchtower](https://containrrr.dev/watchtower/) to automatically update
+when new development builds are pushed, but do not use this channel for
+production data. There is no separate native release package; source
+installations use the stable `main` branch and the version in `VERSION`.
 
 ## Supported Printers
 
