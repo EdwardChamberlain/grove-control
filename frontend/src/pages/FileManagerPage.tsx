@@ -42,6 +42,7 @@ import {
   Lock,
   FolderSymlink,
   Tag as TagIcon,
+  CalendarClock,
 } from 'lucide-react';
 import { api } from '../api/client';
 import type {
@@ -66,9 +67,10 @@ import { LibraryTagsModal } from '../components/LibraryTagsModal';
 import { PurgeOldFilesModal } from '../components/PurgeOldFilesModal';
 import { ToolbarDropdown, ReactSelect } from '../components/ToolbarControls';
 import { useToast } from '../contexts/ToastContext';
+import { useIsMobile } from '../hooks/useIsMobile';
 import { usePageFileDrop } from '../hooks/usePageFileDrop';
 import { useAuth } from '../contexts/AuthContext';
-import { formatDuration, parseUTCDate } from '../utils/date';
+import { formatDate, formatDuration, parseUTCDate } from '../utils/date';
 import { formatFileSize } from '../utils/file';
 
 type SortField = 'name' | 'date' | 'size' | 'type' | 'prints';
@@ -556,11 +558,12 @@ interface FolderTreeItemProps {
   depth?: number;
   wrapNames?: boolean;
   defaultExpanded?: boolean;
+  showModified?: boolean;
   hasPermission: (permission: Permission) => boolean;
   t: TFunction;
 }
 
-function FolderTreeItem({ folder, selectedFolderId, onSelect, onDelete, onLink, onRename, depth = 0, wrapNames = false, defaultExpanded = true, hasPermission, t }: FolderTreeItemProps) {
+function FolderTreeItem({ folder, selectedFolderId, onSelect, onDelete, onLink, onRename, depth = 0, wrapNames = false, defaultExpanded = true, showModified = false, hasPermission, t }: FolderTreeItemProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [showActions, setShowActions] = useState(false);
   const hasChildren = folder.children.length > 0;
@@ -596,7 +599,15 @@ function FolderTreeItem({ folder, selectedFolderId, onSelect, onDelete, onLink, 
         ) : (
           <FolderOpen className="w-4 h-4 text-bambu-green flex-shrink-0" />
         )}
-        <span className={`text-sm flex-1 min-w-0 ${wrapNames ? 'break-all' : 'truncate'}`} title={folder.name}>{folder.name}</span>
+        <div className={`flex-1 min-w-0 ${wrapNames ? 'break-all' : 'truncate'}`} title={folder.name}>
+          <span className="text-sm">{folder.name}</span>
+          {showModified && folder.latest_activity_at && (
+            <span className="mt-0.5 flex items-center gap-1 text-[10px] text-bambu-gray" title={formatDate(folder.latest_activity_at)}>
+              <CalendarClock className="h-3 w-3 shrink-0" />
+              {t('fileManager.lastModified')}: {formatDate(folder.latest_activity_at)}
+            </span>
+          )}
+        </div>
         {/* Link indicator - clickable to change link */}
         {isLinked && (
           <button
@@ -696,6 +707,7 @@ function FolderTreeItem({ folder, selectedFolderId, onSelect, onDelete, onLink, 
               depth={depth + 1}
               wrapNames={wrapNames}
               defaultExpanded={defaultExpanded}
+              showModified={showModified}
               hasPermission={hasPermission}
               t={t}
             />
@@ -724,6 +736,7 @@ function isSliceableFilename(filename: string): boolean {
 interface FileCardProps {
   file: LibraryFileListItem;
   isSelected: boolean;
+  isMobile: boolean;
   onSelect: (id: number) => void;
   onDelete: (id: number) => void;
   onDownload: (id: number) => void;
@@ -735,13 +748,14 @@ interface FileCardProps {
   onGenerateThumbnail?: (file: LibraryFileListItem) => void;
   onTagClick?: (tagId: number) => void;
   thumbnailVersion?: number;
+  showModified?: boolean;
   hasPermission: (permission: Permission) => boolean;
   canModify: (resource: 'queue' | 'archives' | 'library', action: 'update' | 'delete' | 'reprint', createdById: number | null | undefined) => boolean;
   authEnabled: boolean;
   t: TFunction;
 }
 
-function FileCard({ file, isSelected, onSelect, onDelete, onDownload, onPrint, onSlice, useSlicerApi, onPreview3d, onRename, onGenerateThumbnail, onTagClick, thumbnailVersion, hasPermission, canModify, authEnabled, t }: FileCardProps) {
+function FileCard({ file, isSelected, isMobile, onSelect, onDelete, onDownload, onPrint, onSlice, useSlicerApi, onPreview3d, onRename, onGenerateThumbnail, onTagClick, thumbnailVersion, showModified = false, hasPermission, canModify, authEnabled, t }: FileCardProps) {
   const [showActions, setShowActions] = useState(false);
 
   return (
@@ -782,6 +796,12 @@ function FileCard({ file, isSelected, onSelect, onDelete, onDownload, onPrint, o
         <h3 className="text-sm font-medium text-white truncate" title={file.print_name || file.filename}>
           {file.print_name || file.filename}
         </h3>
+        {showModified && (
+          <div className="mt-1 flex items-center gap-1 text-[10px] text-bambu-gray" title={formatDate(file.updated_at)}>
+            <CalendarClock className="h-3 w-3" />
+            {t('fileManager.lastModified')}: {formatDate(file.updated_at)}
+          </div>
+        )}
         <div className="flex items-center gap-3 mt-1 text-xs text-bambu-gray">
           <span>{formatFileSize(file.file_size)}</span>
           {file.print_time_seconds && (
@@ -834,8 +854,8 @@ function FileCard({ file, isSelected, onSelect, onDelete, onDownload, onPrint, o
         )}
       </div>
 
-      {/* Actions - always available without a hover-capable pointer */}
-      <div className="absolute bottom-2 right-2 transition-opacity can-hover:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100" onClick={(e) => e.stopPropagation()}>
+      {/* Actions - always visible on mobile, hover on desktop */}
+      <div className={`absolute bottom-2 right-2 transition-opacity ${isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'}`} onClick={(e) => e.stopPropagation()}>
         <button
           onClick={() => setShowActions(!showActions)}
           className="p-1.5 rounded bg-bambu-dark-secondary/90 hover:bg-bambu-dark-tertiary"
@@ -938,11 +958,11 @@ function FileCard({ file, isSelected, onSelect, onDelete, onDownload, onPrint, o
         )}
       </div>
 
-      {/* Selection checkbox - always available without a hover-capable pointer */}
+      {/* Selection checkbox - always visible on mobile, hover on desktop */}
       <div className={`absolute top-2 left-2 w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${
         isSelected
           ? 'bg-bambu-green border-bambu-green'
-          : 'border-white/30 bg-black/30 can-hover:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
+          : `border-white/30 bg-black/30 ${isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'}`
       }`}>
         {isSelected && <div className="w-2 h-2 bg-white rounded-sm" />}
       </div>
@@ -997,6 +1017,9 @@ export function FileManagerPage() {
   });
   const [collapseFoldersByDefault, setCollapseFoldersByDefault] = useState(() => {
     return localStorage.getItem('library-collapse-folders') === 'true';
+  });
+  const [showModified, setShowModified] = useState(() => {
+    return localStorage.getItem('library-show-modified') === 'true';
   });
   // Folder tree sort (#1770). 'name' = alphabetical (the prior behaviour);
   // 'activity' = most recent file activity inside the folder first. Persisted
@@ -1068,6 +1091,9 @@ export function FileManagerPage() {
     const saved = localStorage.getItem('library-sort-direction');
     return (saved as SortDirection) || 'asc';
   });
+
+  // Mobile detection for touch-friendly UI
+  const isMobile = useIsMobile();
 
   // Update selectedFolderId when URL parameter changes (e.g., navigating from Project or Archive page)
   useEffect(() => {
@@ -1812,6 +1838,21 @@ export function FileManagerPage() {
               ));
             })()}
           </ReactSelect>
+          <button
+            type="button"
+            onClick={() => {
+              const newValue = !showModified;
+              setShowModified(newValue);
+              localStorage.setItem('library-show-modified', String(newValue));
+            }}
+            className={`mt-2 inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition-colors ${
+              showModified ? 'bg-bambu-green/20 text-bambu-green' : 'bg-bambu-dark-secondary text-bambu-gray hover:text-white'
+            }`}
+            title={showModified ? t('fileManager.hideModified') : t('fileManager.showModified')}
+          >
+            <CalendarClock className="h-3.5 w-3.5" />
+            {showModified ? t('fileManager.hideModified') : t('fileManager.showModified')}
+          </button>
         </div>
 
         {/* Folder sidebar - resizable, hidden on mobile */}
@@ -1861,6 +1902,20 @@ export function FileManagerPage() {
                   { value: 'activity', label: t('fileManager.folderSortByActivity') },
                 ]}
               />
+              <button
+                onClick={() => {
+                  const newValue = !showModified;
+                  setShowModified(newValue);
+                  localStorage.setItem('library-show-modified', String(newValue));
+                }}
+                className={`h-8 w-8 flex items-center justify-center rounded-lg transition-colors ${
+                  showModified ? 'bg-bambu-green/20 text-bambu-green' : 'text-bambu-gray hover:bg-bambu-dark hover:text-white'
+                }`}
+                title={showModified ? t('fileManager.hideModified') : t('fileManager.showModified')}
+                aria-label={showModified ? t('fileManager.hideModified') : t('fileManager.showModified')}
+              >
+                <CalendarClock className="w-4 h-4" />
+              </button>
               <button
                 onClick={() => {
                   const newValue = folderSortDirection === 'asc' ? 'desc' : 'asc';
@@ -1958,6 +2013,7 @@ export function FileManagerPage() {
                 onRename={(f) => setRenameItem({ type: 'folder', id: f.id, name: f.name })}
                 wrapNames={wrapFolderNames}
                 defaultExpanded={!collapseFoldersByDefault}
+                showModified={showModified}
                 hasPermission={hasPermission}
                 t={t}
               />
@@ -2326,6 +2382,7 @@ export function FileManagerPage() {
                     key={file.id}
                     file={file}
                     isSelected={selectedFiles.includes(file.id)}
+                    isMobile={isMobile}
                     t={t}
                     onSelect={handleFileSelect}
                     onDelete={(id) => setDeleteConfirm({ type: 'file', id })}
@@ -2348,6 +2405,7 @@ export function FileManagerPage() {
                     onGenerateThumbnail={(f) => singleThumbnailMutation.mutate(f.id)}
                     onTagClick={toggleTagFilter}
                     thumbnailVersion={thumbnailVersions[file.id]}
+                    showModified={showModified}
                     hasPermission={hasPermission}
                     canModify={canModify}
                     authEnabled={authEnabled}
@@ -2427,6 +2485,12 @@ export function FileManagerPage() {
                       </div>
                       <div className="min-w-0">
                         <div className="text-sm text-white truncate">{file.print_name || file.filename}</div>
+                        {showModified && (
+                          <div className="mt-0.5 flex items-center gap-1 text-[10px] text-bambu-gray" title={formatDate(file.updated_at)}>
+                            <CalendarClock className="h-3 w-3" />
+                            {t('fileManager.lastModified')}: {formatDate(file.updated_at)}
+                          </div>
+                        )}
                       </div>
                     </div>
                     {/* Uploaded By - only show when auth is enabled */}

@@ -205,6 +205,7 @@ class FileListResponse(BaseModel):
     created_by_id: int | None = None
     created_by_username: str | None = None
     created_at: datetime
+    updated_at: datetime
 
     # Key metadata fields for display
     print_name: str | None = None

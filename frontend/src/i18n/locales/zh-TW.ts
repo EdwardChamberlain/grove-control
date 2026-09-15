@@ -676,6 +676,8 @@ export default {
     fans: {
       partCooling: '零件冷卻風扇',
       auxiliary: '輔助風扇',
+      leftAuxiliary: '左輔助風扇',
+      exhaust: '排氣',
       chamber: '腔室風扇',
     },
     // HMS errors
@@ -1123,6 +1125,8 @@ export default {
     history: {
       emptyTitle: '目前沒有歷史記錄',
       emptyDescription: '已完成、已取消與失敗的列印將顯示於此。',
+      showMore: '顯示更多',
+      showingCount: '顯示 {{total}} 項中的 {{shown}} 項',
     },
     dragGhost: {
       multiCount: '{{count}} 項',
@@ -3422,6 +3426,9 @@ export default {
     folderSort: '資料夾排序',
     folderSortByName: '依名稱',
     folderSortByActivity: '依最近活動',
+    showModified: '顯示修改日期',
+    hideModified: '隱藏修改日期',
+    lastModified: '最後修改',
     dragToResizeTooltip: '拖曳調整大小，雙擊重設',
     searchFiles: '搜尋檔案...',
     searchSubfoldersHint: '包含子資料夾',

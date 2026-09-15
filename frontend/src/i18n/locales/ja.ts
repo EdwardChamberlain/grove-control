@@ -675,6 +675,8 @@ export default {
     fans: {
       partCooling: 'パーツ冷却ファン',
       auxiliary: '補助ファン',
+      leftAuxiliary: '左補助ファン',
+      exhaust: '排気',
       chamber: 'チャンバーファン',
     },
     // HMS errors
@@ -1122,6 +1124,8 @@ export default {
     history: {
       emptyTitle: '履歴はまだありません',
       emptyDescription: '完了・キャンセル・失敗した印刷がここに表示されます。',
+      showMore: 'さらに表示',
+      showingCount: '{{total}} 件中 {{shown}} 件を表示',
     },
     dragGhost: {
       multiCount: '{{count}}件',
@@ -3434,6 +3438,9 @@ export default {
     folderSort: 'フォルダの並べ替え',
     folderSortByName: '名前順',
     folderSortByActivity: '最終更新順',
+    showModified: '更新日時を表示',
+    hideModified: '更新日時を非表示',
+    lastModified: '最終更新',
     dragToResizeTooltip: 'ドラッグしてリサイズ、ダブルクリックでリセット',
     searchFiles: 'ファイルを検索...',
     searchSubfoldersHint: 'サブフォルダーを含む',

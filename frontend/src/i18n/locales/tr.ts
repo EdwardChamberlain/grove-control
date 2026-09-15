@@ -676,6 +676,8 @@ export default {
     fans: {
       partCooling: 'Parça Soğutma Fanı',
       auxiliary: 'Yardımcı Fan',
+      leftAuxiliary: 'Sol Yardımcı Fan',
+      exhaust: 'Egzoz',
       chamber: 'Hazne Fanı',
     },
     // HMS hataları
@@ -1123,6 +1125,8 @@ export default {
     history: {
       emptyTitle: 'Henüz geçmiş yok',
       emptyDescription: 'Tamamlanan, iptal edilen ve başarısız baskılar burada görünür.',
+      showMore: 'Daha fazla göster',
+      showingCount: '{{total}} öğeden {{shown}} tanesi gösteriliyor',
     },
     dragGhost: {
       multiCount: '{{count}} öğe',
@@ -3430,6 +3434,9 @@ export default {
     folderSort: 'Klasörleri sırala',
     folderSortByName: 'Ada göre',
     folderSortByActivity: 'Son etkinliğe göre',
+    showModified: 'Değiştirme tarihlerini göster',
+    hideModified: 'Değiştirme tarihlerini gizle',
+    lastModified: 'Son değiştirme',
     dragToResizeTooltip: 'Yeniden boyutlandırmak için sürükleyin, sıfırlamak için çift tıklayın',
     searchFiles: 'Dosyalarda ara...',
     searchSubfoldersHint: 'Alt klasörler dahil',

@@ -302,6 +302,31 @@ describe('QueuePage', () => {
       });
     });
 
+    it('reveals history beyond the first page on demand', async () => {
+      const user = userEvent.setup();
+      const historyItems = Array.from({ length: 51 }, (_, index) => ({
+        ...mockQueueItems[2],
+        id: 100 + index,
+        archive_name: `History Print ${index + 1}`,
+      }));
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json(historyItems)),
+      );
+
+      render(<QueuePage />);
+      await user.click(await screen.findByRole('button', { name: /^History/ }));
+
+      await waitFor(() => {
+        expect(screen.getByText('History Print 1')).toBeInTheDocument();
+        expect(screen.getByText('Showing 50 of 51')).toBeInTheDocument();
+      });
+      expect(screen.queryByText('History Print 51')).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Show more' }));
+      expect(await screen.findByText('History Print 51')).toBeInTheDocument();
+      expect(screen.queryByText('Showing 50 of 51')).not.toBeInTheDocument();
+    });
+
     it('shows status badges', async () => {
       render(<QueuePage />);
 
@@ -583,6 +608,42 @@ describe('QueuePage', () => {
 
       const startButton = await screen.findByTitle('You do not have permission to start prints');
       expect(startButton).toBeDisabled();
+    });
+  });
+
+  describe('queue reorder permissions', () => {
+    it('does not render batch child move controls without queue reorder permission', async () => {
+      setAuthToken('queue-owner-token');
+      vi.mocked(localStorage.getItem).mockImplementation((key: string) => {
+        if (key === 'queue.batchCollapsed') return JSON.stringify({ 77: false });
+        if (key === 'queue.viewMode') return 'list';
+        return null;
+      });
+      server.use(
+        http.get('*/api/v1/auth/status', () =>
+          HttpResponse.json({ auth_enabled: true, requires_setup: false }),
+        ),
+        http.get('*/api/v1/auth/me', () =>
+          HttpResponse.json({
+            id: 7,
+            username: 'queue-owner',
+            is_admin: false,
+            permissions: ['queue:update_own'],
+          }),
+        ),
+        http.get('/api/v1/queue/', () =>
+          HttpResponse.json([
+            { ...mockQueueItems[0], id: 77, archive_name: 'Batch child one', batch_id: 77, batch_name: 'Owned batch', created_by_id: 7 },
+            { ...mockQueueItems[0], id: 78, archive_name: 'Batch child two', batch_id: 77, batch_name: 'Owned batch', created_by_id: 7 },
+          ]),
+        ),
+      );
+
+      render(<QueuePage />);
+
+      expect(await screen.findByText('Batch child one')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Move up' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Move down' })).not.toBeInTheDocument();
     });
   });
 

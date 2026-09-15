@@ -550,6 +550,8 @@ export interface PrinterStatus {
   big_fan1_speed: number | null;     // Auxiliary fan
   big_fan2_speed: number | null;     // Chamber/exhaust fan
   heatbreak_fan_speed: number | null; // Hotend heatbreak fan
+  left_aux_fan_speed: number | null;  // Optional P2S/X2D left auxiliary fan
+  exhaust_fan_present: boolean;       // P2S/X2D exhaust kit reported by telemetry
   firmware_version: string | null;   // Firmware version from MQTT
   // Developer LAN mode: true = enabled, false = disabled, null = unknown
   developer_mode: boolean | null;
@@ -3919,7 +3921,7 @@ export const api = {
     request<{ success: boolean; message: string }>(`/printers/${printerId}/temperature/chamber?target=${target}`, {
       method: 'POST',
     }),
-  setFanSpeed: (printerId: number, fan: 'part' | 'aux' | 'chamber', speed: number) =>
+  setFanSpeed: (printerId: number, fan: 'part' | 'aux' | 'aux2' | 'chamber', speed: number) =>
     request<{ success: boolean; message: string }>(`/printers/${printerId}/fan-speed?fan=${fan}&speed=${speed}`, {
       method: 'POST',
     }),
@@ -6907,6 +6909,7 @@ export interface LibraryFileListItem {
   created_by_id: number | null;
   created_by_username: string | null;
   created_at: string;
+  updated_at: string;
   print_name: string | null;
   print_time_seconds: number | null;
   filament_used_grams: number | null;

@@ -54,6 +54,8 @@ import {
   Snail,
   Package,
   PlayCircle,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { api, ApiError } from '../api/client';
 import { type TimeFormat, formatDate, formatETA, formatDuration, formatRelativeTime, parseUTCDate } from '../utils/date';
@@ -368,6 +370,8 @@ function SortableQueueItem({
   hasPermission,
   canModify,
   printerState,
+  onMoveUp,
+  onMoveDown,
   t,
 }: {
   item: PrintQueueItem;
@@ -386,6 +390,8 @@ function SortableQueueItem({
   hasPermission: (permission: Permission) => boolean;
   canModify: (resource: 'queue' | 'archives' | 'library', action: 'update' | 'delete' | 'reprint', createdById: number | null | undefined) => boolean;
   printerState?: string | null;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
   t: (key: string, options?: Record<string, unknown>) => string;
 }) {
   // Fetch printer status every 30 seconds while printing to monitor progress
@@ -418,7 +424,9 @@ function SortableQueueItem({
   const platesData = isLibraryFile ? libraryPlatesData : archivePlatesData;
   const plates = platesData?.plates ?? [];
 
-  const canReorder = hasPermission('queue:reorder');
+  const canReorder =
+    hasPermission('queue:reorder') &&
+    canModify('queue', 'update', item.created_by_id);
   const {
     attributes,
     listeners,
@@ -501,6 +509,35 @@ function SortableQueueItem({
           >
             {isSelected && <Check className="w-4 h-4" />}
           </button>
+        )}
+
+        {isPending && (onMoveUp || onMoveDown) && (
+          <div className="sm:hidden flex flex-col gap-0.5 shrink-0">
+            <button
+              type="button"
+              aria-label={t('queue.moveUp')}
+              disabled={!onMoveUp}
+              onClick={(e) => {
+                e.stopPropagation();
+                onMoveUp?.();
+              }}
+              className="flex h-5 w-6 items-center justify-center rounded text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white disabled:opacity-25"
+            >
+              <ChevronUp className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              aria-label={t('queue.moveDown')}
+              disabled={!onMoveDown}
+              onClick={(e) => {
+                e.stopPropagation();
+                onMoveDown?.();
+              }}
+              className="flex h-5 w-6 items-center justify-center rounded text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white disabled:opacity-25"
+            >
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
+          </div>
         )}
 
         {/* Drag handle or position number - hidden on mobile */}
@@ -858,6 +895,8 @@ interface QueueRowRenderProps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   canModify: (resource: any, action: any, createdById?: number | null) => boolean;
   t: (key: string, options?: Record<string, unknown>) => string;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
 }
 
 function QueueRowRender({
@@ -871,6 +910,8 @@ function QueueRowRender({
   hasPermission,
   canModify,
   t,
+  onMoveUp,
+  onMoveDown,
 }: QueueRowRenderProps) {
   return (
     <SortableQueueItem
@@ -886,6 +927,8 @@ function QueueRowRender({
       onToggleSelect={() => handleToggleSelect(row.item.id)}
       hasPermission={hasPermission}
       canModify={canModify}
+      onMoveUp={onMoveUp}
+      onMoveDown={onMoveDown}
       t={t}
     />
   );
@@ -894,6 +937,8 @@ type HistoryRow = { kind: 'item'; item: PrintQueueItem };
 
 interface HistorySectionProps {
   items: PrintQueueItem[];
+  visibleCount: number;
+  onShowMore: () => void;
   collapsed: boolean;
   sortBy: 'date' | 'name' | 'printer';
   sortAsc: boolean;
@@ -911,6 +956,8 @@ interface HistorySectionProps {
 
 function HistorySection({
   items,
+  visibleCount,
+  onShowMore,
   sortBy,
   sortAsc,
   onSortByChange,
@@ -934,7 +981,7 @@ function HistorySection({
 
   // History is also a flat list: legacy batch metadata must not hide or merge
   // the independent rows that users can remove or requeue.
-  const rows: HistoryRow[] = items.slice(0, 50).map((item) => ({ kind: 'item', item }));
+  const rows: HistoryRow[] = items.slice(0, visibleCount).map((item) => ({ kind: 'item', item }));
 
   return (
     <div>
@@ -985,6 +1032,16 @@ function HistorySection({
           }
         })}
       </div>
+      {visibleCount < items.length && (
+        <div className="mt-4 flex flex-col items-center gap-2">
+          <Button variant="secondary" size="sm" onClick={onShowMore}>
+            {t('queue.history.showMore')}
+          </Button>
+          <span className="text-xs text-bambu-gray">
+            {t('queue.history.showingCount', { shown: Math.min(visibleCount, items.length), total: items.length })}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -994,6 +1051,7 @@ export function QueuePage() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const { hasPermission, hasAnyPermission, canModify } = useAuth();
+  const HISTORY_PAGE_SIZE = 50;
   const [filterPrinter, setFilterPrinter] = useState<number | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [filterLocation, setFilterLocation] = useState<string>('');
@@ -1021,6 +1079,7 @@ export function QueuePage() {
     const saved = localStorage.getItem('queue.historySortAsc');
     return saved !== null ? saved === 'true' : false;
   });
+  const [historyVisibleCount, setHistoryVisibleCount] = useState(HISTORY_PAGE_SIZE);
   const [pendingSortBy, setPendingSortBy] = useState<'position' | 'name' | 'printer' | 'time'>(() => {
     const saved = localStorage.getItem('queue.pendingSortBy');
     return (saved as 'position' | 'name' | 'printer' | 'time') || 'position';
@@ -1059,6 +1118,10 @@ export function QueuePage() {
   useEffect(() => {
     localStorage.setItem('queue.historySortAsc', String(historySortAsc));
   }, [historySortAsc]);
+
+  useEffect(() => {
+    setHistoryVisibleCount(HISTORY_PAGE_SIZE);
+  }, [historySortBy, historySortAsc, filterLocation]);
 
   useEffect(() => {
     localStorage.setItem('queue.pendingSortBy', pendingSortBy);
@@ -1480,17 +1543,104 @@ export function QueuePage() {
       ...remaining.slice(insertAt),
     ];
 
-    const updates = reordered.map((item, index) => ({
-      id: item.id,
-      position: index + 1,
-    }));
-    reorderMutation.mutate(updates);
+    if (movingIds.includes(overAnchor.id)) return;
+    submitReorder(reordered, movingIds, overAnchor.id, firstMovingIndex < overIndex);
   };
 
   // Every pending row is rendered independently.
   const groupedRows = useMemo<QueueRow[]>(() => {
     return pendingItems.map((item) => ({ kind: 'item', item }));
   }, [pendingItems]);
+
+  const canReorderManually =
+    hasPermission('queue:reorder') &&
+    hasAnyPermission('queue:update_own', 'queue:update_all') &&
+    pendingSortBy === 'position' &&
+    !settings?.queue_shortest_first;
+
+  const rowCanMove = (row: QueueRow | undefined): row is QueueRow =>
+    !!row &&
+    row.item.status === 'pending' &&
+    canModify('queue', 'update', row.item.created_by_id);
+
+  const rowsSharePrinter = (left: QueueRow, right: QueueRow): boolean =>
+    left.item.printer_id === right.item.printer_id;
+
+  const submitReorder = (
+    reordered: PrintQueueItem[],
+    movingIds: number[],
+    anchorId: number,
+    placeAfter: boolean,
+  ) => {
+    if (!canReorderManually) return;
+
+    if (hasPermission('queue:update_all')) {
+      reorderMutation.mutate(reordered.map((item, index) => ({ id: item.id, position: index + 1 })));
+      return;
+    }
+
+    const movingItems = movingIds
+      .map((id) => pendingItems.find((item) => item.id === id))
+      .filter((item): item is PrintQueueItem => !!item);
+    const anchor = pendingItems.find((item) => item.id === anchorId);
+    if (
+      !anchor ||
+      movingItems.length !== movingIds.length ||
+      !canModify('queue', 'update', anchor.created_by_id) ||
+      !movingItems.every((item) => canModify('queue', 'update', item.created_by_id)) ||
+      !movingItems.every((item) => item.printer_id === anchor.printer_id)
+    ) return;
+
+    const queueItems = pendingItems.filter((item) => item.printer_id === anchor.printer_id);
+    const remaining = queueItems.filter((item) => !movingIds.includes(item.id));
+    let insertAt = remaining.findIndex((item) => item.id === anchorId);
+    if (insertAt === -1) return;
+    if (placeAfter) insertAt += 1;
+    const scopedReordered = [
+      ...remaining.slice(0, insertAt),
+      ...movingItems,
+      ...remaining.slice(insertAt),
+    ];
+    const currentPositions = new Map(queueItems.map((item) => [item.id, item.position]));
+    const updates = scopedReordered
+      .map((item, index) => ({
+        id: item.id,
+        position: currentPositions.get(queueItems[index].id)!,
+      }))
+      .filter((update) => update.position !== currentPositions.get(update.id));
+    if (updates.length > 0) reorderMutation.mutate(updates);
+  };
+
+  const moveRowRelativeTo = (movingId: number, anchorId: number, placeAfter: boolean) => {
+    if (!canReorderManually || movingId === anchorId) return;
+    const movingItem = pendingItems.find((item) => item.id === movingId);
+    if (!movingItem || !canModify('queue', 'update', movingItem.created_by_id)) return;
+
+    const remaining = pendingItems.filter((item) => item.id !== movingId);
+    let insertAt = remaining.findIndex((item) => item.id === anchorId);
+    if (insertAt === -1) return;
+    if (placeAfter) insertAt += 1;
+    const reordered = [
+      ...remaining.slice(0, insertAt),
+      movingItem,
+      ...remaining.slice(insertAt),
+    ];
+    submitReorder(reordered, [movingId], anchorId, placeAfter);
+  };
+
+  const rowMovers = (rows: QueueRow[], index: number) => {
+    if (!canReorderManually || !rowCanMove(rows[index])) return {};
+    return {
+      onMoveUp: index > 0 && rowCanMove(rows[index - 1]) &&
+        (hasPermission('queue:update_all') || rowsSharePrinter(rows[index], rows[index - 1]))
+        ? () => moveRowRelativeTo(rows[index].item.id, rows[index - 1].item.id, false)
+        : undefined,
+      onMoveDown: index < rows.length - 1 && rowCanMove(rows[index + 1]) &&
+        (hasPermission('queue:update_all') || rowsSharePrinter(rows[index], rows[index + 1]))
+        ? () => moveRowRelativeTo(rows[index].item.id, rows[index + 1].item.id, true)
+        : undefined,
+    };
+  };
 
   // SortableContext ID list.
   const sortableIds = useMemo<number[]>(() => pendingItems.map((item) => item.id), [pendingItems]);
@@ -1839,6 +1989,8 @@ export function QueuePage() {
       ) : activeTab === 'history' ? (
         <HistorySection
           items={historyItems}
+          visibleCount={historyVisibleCount}
+          onShowMore={() => setHistoryVisibleCount((count) => Math.min(count + HISTORY_PAGE_SIZE, historyItems.length))}
           collapsed={false}
           sortBy={historySortBy}
           sortAsc={historySortAsc}
@@ -1981,7 +2133,7 @@ export function QueuePage() {
                 >
                   {activeLayout === 'position' ? (
                     <div className="space-y-2 sm:space-y-3">
-                      {groupedRows.map((row) => (
+                      {groupedRows.map((row, index) => (
                         <QueueRowRender
                           key={`item-${row.item.id}`}
                           row={row}
@@ -1994,6 +2146,7 @@ export function QueuePage() {
                           hasPermission={hasPermission}
                           canModify={canModify}
                           t={t}
+                          {...rowMovers(groupedRows, index)}
                         />
                       ))}
                     </div>
@@ -2013,7 +2166,7 @@ export function QueuePage() {
                               </span>
                             </div>
                             <div className="bg-bambu-dark/40 border border-t-0 border-bambu-dark-tertiary rounded-b-lg p-2 space-y-2">
-                              {bucket.rows.map((row) => (
+                              {bucket.rows.map((row, index) => (
                                 <QueueRowRender
                                   key={`item-${row.item.id}`}
                                   row={row}
@@ -2026,6 +2179,7 @@ export function QueuePage() {
                                   hasPermission={hasPermission}
                                   canModify={canModify}
                                   t={t}
+                                  {...rowMovers(bucket.rows, index)}
                                 />
                               ))}
                             </div>

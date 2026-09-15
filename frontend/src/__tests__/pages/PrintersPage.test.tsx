@@ -62,6 +62,8 @@ const mockPrinterStatus = {
   filename: null,
   wifi_signal: -50,
   vt_tray: [],
+  left_aux_fan_speed: null,
+  exhaust_fan_present: false,
 };
 
 const selectToolbarDropdownOption = async (triggerName: RegExp, optionName: RegExp) => {
@@ -331,10 +333,10 @@ describe('PrintersPage', () => {
       big_fan2_speed: 53,
     };
 
-    const renderWithPrinter = (printer: typeof mockPrinters[number]) => {
+    const renderWithPrinter = (printer: typeof mockPrinters[number], status = statusWithFans) => {
       server.use(
         http.get('/api/v1/printers/', () => HttpResponse.json([printer])),
-        http.get('/api/v1/printers/:id/status', () => HttpResponse.json(statusWithFans)),
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json(status)),
       );
       render(<PrintersPage />);
     };
@@ -384,6 +386,28 @@ describe('PrintersPage', () => {
       await waitFor(() => {
         expect(screen.getByTitle('Chamber Fan')).toBeInTheDocument();
       });
+    });
+
+    it('shows P2S accessory fans only when telemetry reports them', async () => {
+      renderWithPrinter(
+        { ...mockPrinters[0], model: 'P2S' },
+        { ...statusWithFans, left_aux_fan_speed: 80, exhaust_fan_present: true },
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTitle('Left Auxiliary Fan')).toBeInTheDocument();
+        expect(screen.getByTitle('Exhaust')).toBeInTheDocument();
+      });
+    });
+
+    it('hides P2S accessory fans when telemetry does not report them', async () => {
+      renderWithPrinter({ ...mockPrinters[0], model: 'P2S' });
+
+      await waitFor(() => {
+        expect(screen.getByTitle('Part Cooling Fan')).toBeInTheDocument();
+      });
+      expect(screen.queryByTitle('Left Auxiliary Fan')).not.toBeInTheDocument();
+      expect(screen.queryByTitle('Exhaust')).not.toBeInTheDocument();
     });
   });
 

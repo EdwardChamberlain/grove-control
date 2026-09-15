@@ -17,6 +17,7 @@ const mockFolders = [
     name: 'Functional Parts',
     parent_id: null,
     file_count: 5,
+    latest_activity_at: '2024-01-05T00:00:00Z',
     project_id: null,
     archive_id: null,
     project_name: null,
@@ -27,6 +28,7 @@ const mockFolders = [
         name: 'Brackets',
         parent_id: 1,
         file_count: 3,
+        latest_activity_at: '2024-01-04T00:00:00Z',
         project_id: null,
         archive_id: null,
         project_name: null,
@@ -40,6 +42,7 @@ const mockFolders = [
     name: 'Art Projects',
     parent_id: null,
     file_count: 2,
+    latest_activity_at: '2024-01-03T00:00:00Z',
     project_id: 1,
     archive_id: null,
     project_name: 'My Art Project',
@@ -62,6 +65,7 @@ const mockFiles = [
     print_count: 5,
     duplicate_count: 0,
     created_at: '2024-01-01T00:00:00Z',
+    updated_at: '2024-01-05T00:00:00Z',
   },
   {
     id: 2,
@@ -76,6 +80,7 @@ const mockFiles = [
     print_count: 0,
     duplicate_count: 2,
     created_at: '2024-01-02T00:00:00Z',
+    updated_at: '2024-01-06T00:00:00Z',
   },
   {
     id: 3,
@@ -90,6 +95,7 @@ const mockFiles = [
     print_count: 2,
     duplicate_count: 0,
     created_at: '2024-01-03T00:00:00Z',
+    updated_at: '2024-01-07T00:00:00Z',
   },
 ];
 
@@ -364,6 +370,20 @@ describe('FileManagerPage', () => {
         // Sort dropdown should show Name as default option (persisted to localStorage)
         expect(screen.getByRole('button', { name: 'Name' })).toBeInTheDocument();
       });
+    });
+
+    it('shows file and folder activity dates when enabled', async () => {
+      const user = userEvent.setup();
+      render(<FileManagerPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Benchy')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getAllByTitle('Show modified dates')[0]);
+
+      expect(screen.getAllByTitle('Hide modified dates')).toHaveLength(2);
+      expect(screen.getAllByText(/Last modified:/i).length).toBeGreaterThan(0);
     });
   });
 

@@ -14,6 +14,7 @@ from backend.app.utils.printer_models import (
     normalize_printer_model,
     normalize_printer_model_id,
     supports_nozzle_flow_type,
+    uses_exhaust_fan_label,
 )
 
 
@@ -279,3 +280,13 @@ class TestHasExternalStorage:
     def test_none_and_empty_default_to_true(self):
         assert has_external_storage(None) is True
         assert has_external_storage("") is True
+
+
+class TestExhaustFanLabel:
+    @pytest.mark.parametrize("model", ["P2S", "X2D", "p2s", "N7", "N6"])
+    def test_p2s_and_x2d_use_exhaust_label(self, model: str):
+        assert uses_exhaust_fan_label(model) is True
+
+    @pytest.mark.parametrize("model", ["X1C", "P1S", "H2D", "A1", None, ""])
+    def test_other_models_use_chamber_label(self, model: str | None):
+        assert uses_exhaust_fan_label(model) is False

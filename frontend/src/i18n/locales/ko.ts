@@ -634,6 +634,8 @@ export default {
     fans: {
       partCooling: '파트 냉각 팬',
       auxiliary: '보조 팬',
+      leftAuxiliary: '왼쪽 보조 팬',
+      exhaust: '배기',
       chamber: '챔버 팬'
     },
     clickToViewHmsErrors: 'HMS 오류 보기 클릭',
@@ -1068,6 +1070,8 @@ export default {
     history: {
       emptyTitle: '아직 기록이 없습니다',
       emptyDescription: '완료·취소·실패한 인쇄가 여기에 표시됩니다.',
+      showMore: '더 보기',
+      showingCount: '{{total}}개 중 {{shown}}개 표시',
     },
     dragGhost: {
       multiCount: '{{count}}개 항목',
@@ -3249,6 +3253,9 @@ export default {
     folderSort: '폴더 정렬',
     folderSortByName: '이름순',
     folderSortByActivity: '최근 활동순',
+    showModified: '수정 날짜 표시',
+    hideModified: '수정 날짜 숨기기',
+    lastModified: '마지막 수정',
     dragToResizeTooltip: '드래그하여 크기 조정, 더블클릭하여 초기화',
     searchFiles: '파일 검색...',
     searchSubfoldersHint: '하위 폴더 포함',

@@ -718,6 +718,7 @@ function NozzleTemperatureControlBox({
 const MODELS_WITH_CHAMBER_FAN = new Set([
   'X1C', 'X1', 'X1E', 'X2D', 'P1S', 'P2S', 'H2D', 'H2D Pro', 'H2C', 'H2S',
 ]);
+const MODELS_WITH_EXHAUST_FAN = new Set(['P2S', 'X2D']);
 
 interface PrinterThermalControlsProps {
   printer: Printer;
@@ -792,11 +793,16 @@ export function PrinterThermalControls({
     onError: (error: Error) => showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
   });
   const fanSpeedMutation = useMutation({
-    mutationFn: ({ fan, speed }: { fan: 'part' | 'aux' | 'chamber'; speed: number }) => api.setFanSpeed(printer.id, fan, speed),
+    mutationFn: ({ fan, speed }: { fan: 'part' | 'aux' | 'aux2' | 'chamber'; speed: number }) => api.setFanSpeed(printer.id, fan, speed),
     onMutate: async ({ fan, speed }) => {
       await queryClient.cancelQueries({ queryKey: ['printerStatus', printer.id] });
       const previousStatus = queryClient.getQueryData(['printerStatus', printer.id]);
-      const fanField = { part: 'cooling_fan_speed', aux: 'big_fan1_speed', chamber: 'big_fan2_speed' }[fan];
+      const fanField = {
+        part: 'cooling_fan_speed',
+        aux: 'big_fan1_speed',
+        aux2: 'left_aux_fan_speed',
+        chamber: 'big_fan2_speed',
+      }[fan];
       queryClient.setQueryData(['printerStatus', printer.id], (old: PrinterStatus | undefined) => old ? { ...old, [fanField]: speed } : old);
       return { previousStatus };
     },
@@ -868,11 +874,17 @@ export function PrinterThermalControls({
   if (temperatures.nozzle_2 !== undefined) availableHeaterKinds.push('nozzle_2');
   availableHeaterKinds.push('bed');
   if (temperatures.chamber !== undefined) availableHeaterKinds.push('chamber');
+  const isExhaustModel = MODELS_WITH_EXHAUST_FAN.has(printer.model ?? '');
+  const showChamberFan = MODELS_WITH_CHAMBER_FAN.has(printer.model ?? '') &&
+    (!isExhaustModel || status.exhaust_fan_present);
   const fanItems = [
     { key: 'part' as const, label: t('printers.fans.partCooling'), value: status.cooling_fan_speed ?? 0, Icon: Fan, activeClass: 'text-cyan-400' },
+    ...(isExhaustModel && status.left_aux_fan_speed != null
+      ? [{ key: 'aux2' as const, label: t('printers.fans.leftAuxiliary'), value: status.left_aux_fan_speed, Icon: Wind, activeClass: 'text-indigo-400' }]
+      : []),
     { key: 'aux' as const, label: t('printers.fans.auxiliary'), value: status.big_fan1_speed ?? 0, Icon: Wind, activeClass: 'text-blue-400' },
-    ...(MODELS_WITH_CHAMBER_FAN.has(printer.model ?? '')
-      ? [{ key: 'chamber' as const, label: t('printers.fans.chamber'), value: status.big_fan2_speed ?? 0, Icon: AirVent, activeClass: 'text-green-400' }]
+    ...(showChamberFan
+      ? [{ key: 'chamber' as const, label: t(isExhaustModel ? 'printers.fans.exhaust' : 'printers.fans.chamber'), value: status.big_fan2_speed ?? 0, Icon: AirVent, activeClass: 'text-green-400' }]
       : []),
   ];
 
