@@ -262,7 +262,6 @@ async def init_db():
         oidc_provider,
         orca_base_cache,
         pending_upload,
-        print_batch,
         print_log,
         print_queue,
         printer,
@@ -598,7 +597,6 @@ _QUEUE_INSERT_COLUMN_DEFINITIONS: dict[str, tuple[str, str]] = {
     "archive_id": ("INTEGER", "INTEGER"),
     "library_file_id": ("INTEGER", "INTEGER"),
     "project_id": ("INTEGER", "INTEGER"),
-    "batch_id": ("INTEGER", "INTEGER"),
     # Scheduling and dispatch policy
     "position": ("INTEGER DEFAULT 0", "INTEGER DEFAULT 0"),
     "scheduled_time": ("DATETIME", "TIMESTAMP"),
@@ -2643,30 +2641,6 @@ async def run_migrations(conn):
     # never reset at midnight and "Total" stayed empty forever.
     await _safe_execute(conn, "ALTER TABLE smart_plugs ADD COLUMN rest_energy_total_path VARCHAR(200)")
     await _safe_execute(conn, "ALTER TABLE smart_plugs ADD COLUMN rest_energy_total_multiplier REAL DEFAULT 1.0")
-
-    # Migration: Add batch_id column to print_queue for batch grouping
-    try:
-        async with conn.begin_nested():
-            await conn.execute(
-                text(
-                    "ALTER TABLE print_queue ADD COLUMN batch_id INTEGER REFERENCES print_batches(id) ON DELETE SET NULL"
-                )
-            )
-    except (OperationalError, ProgrammingError):
-        pass
-
-    # Migration (#342): batch orders — planning metadata on print_batches. The
-    # per-plate target rows live in their own table, created by create_all().
-    await _safe_execute(
-        conn, "ALTER TABLE print_batches ADD COLUMN project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL"
-    )
-    await _safe_execute(conn, "ALTER TABLE print_batches ADD COLUMN notes TEXT")
-    if is_sqlite():
-        await _safe_execute(conn, "ALTER TABLE print_batches ADD COLUMN due_date DATETIME")
-        await _safe_execute(conn, "ALTER TABLE print_batches ADD COLUMN completed_at DATETIME")
-    else:
-        await _safe_execute(conn, "ALTER TABLE print_batches ADD COLUMN due_date TIMESTAMP")
-        await _safe_execute(conn, "ALTER TABLE print_batches ADD COLUMN completed_at TIMESTAMP")
 
     # Migration (#342): attribute a logged run to the queue item that produced
     # it, so batch cost/energy can be summed without guessing from archive_id.

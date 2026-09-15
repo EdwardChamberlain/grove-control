@@ -113,7 +113,7 @@ export function PrintModal({
   // Derived single-plate value for filament queries and single-select contexts
   const selectedPlate = selectedPlates.size === 1 ? [...selectedPlates][0] : null;
 
-  // Quantity — number of copies (creates a batch if > 1)
+  // Quantity — number of independent queue items to create.
   const [quantity, setQuantity] = useState(1);
 
   // Per-plate quantities for multi-plate files (#342). Keyed by plate index;
@@ -859,48 +859,6 @@ export function PrintModal({
       return;
     }
 
-    // Batch order (#342): a create submission that produces more than one run
-    // from one source is pre-created as a batch carrying per-plate targets,
-    // and its id is passed to each subsequent addToQueue call. The targets are
-    // what make the order able to say a failed run is still owed — without
-    // them the batch only knows what it happened to queue. Only for
-    // single-target submissions; multi-printer fan-out keeps the old per-item
-    // shape, where "how many" is answered by the printer count.
-    const plateTargets = platesToQueue.map((plate, index) => {
-      const plateIndex = plate ? plate.index : selectedPlate;
-      return {
-        plate_id: plateIndex,
-        plate_name: plate ? (plate.name || null) : null,
-        quantity_target: quantityForPlate(plateIndex),
-        sort_order: index,
-      };
-    });
-    const totalRuns = plateTargets.reduce((sum, target) => sum + target.quantity_target, 0);
-    const shouldAutoBatch =
-      mode === 'create'
-      && (platesToQueue.length > 1 || totalRuns > 1)
-      && (assignmentMode === 'model' || selectedPrinters.length === 1);
-    let autoBatchId: number | null = null;
-    if (shouldAutoBatch) {
-      try {
-        const baseName = (archiveName || '').replace(/\.gcode\.3mf$/i, '').replace(/\.3mf$/i, '');
-        const batchName = platesToQueue.length > 1
-          ? `${baseName || 'Batch'} · ${platesToQueue.length} plates`
-          : `${baseName || 'Batch'} ×${totalRuns}`;
-        const batch = await api.createBatch({
-          name: batchName,
-          archive_id: isLibraryFile ? undefined : archiveId,
-          library_file_id: isLibraryFile ? libraryFileId : undefined,
-          plates: plateTargets,
-        });
-        autoBatchId = batch.id;
-      } catch {
-        // Non-fatal: fall back to ungrouped items so the queue still works.
-        // The server still creates a plain batch when quantity > 1, so the
-        // queue grouping survives even when the order layer doesn't.
-        autoBatchId = null;
-      }
-    }
     const topInsertionCounts = new Map<string, number>();
 
     const applyTopInsertion = (
@@ -950,7 +908,6 @@ export function PrintModal({
           : undefined,
         ...printOptions,
         project_id: projectId ?? undefined,
-        batch_id: autoBatchId ?? undefined,
         cleanup_library_after_dispatch: cleanupLibraryAfterDispatch,
       };
     };
@@ -1494,7 +1451,7 @@ export function PrintModal({
               hasGcodeSnippets={!!settings?.gcode_snippets}
             />
 
-            {/* Quantity — create multiple copies (batch). Hidden for multi-printer
+            {/* Quantity — create independent queue items. Hidden for multi-printer
                 selection, and for multi-plate files where the per-plate steppers
                 in PlateSelector own the number instead (#342). */}
             {mode !== 'edit-queue-item' && !usePerPlateQuantities

@@ -57,8 +57,6 @@ const createMockQueueItem = (overrides: Partial<PrintQueueItem> = {}): PrintQueu
   archive_thumbnail: null,
   printer_name: 'Test Printer',
   print_time_seconds: 3600,
-  batch_id: null,
-  batch_name: null,
   ...overrides,
 });
 
@@ -2428,7 +2426,6 @@ describe('PrintModal — per-plate quantity (#342)', () => {
         HttpResponse.json({ filaments: [{ slot_id: 1, type: 'PLA', color: '#FF0000', tray_info_idx: '', used_grams: 50 }] }),
       ),
       http.get('/api/v1/printers/available-filaments', () => HttpResponse.json([])),
-      http.post('/api/v1/queue/batches', () => HttpResponse.json({ id: 42, name: 'Order', status: 'active' })),
       http.post('/api/v1/queue/', () => HttpResponse.json({ id: 1, status: 'pending' })),
     );
   });
@@ -2475,15 +2472,9 @@ describe('PrintModal — per-plate quantity (#342)', () => {
   });
 
   it('queues the reporter\'s example: plate 1 once, plate 2 twice, plate 3 three times', async () => {
-    type Queued = { plate_id: number | null; quantity?: number; batch_id?: number };
-    type OrderBody = { plates?: Array<{ plate_id: number | null; quantity_target: number }> };
+    type Queued = { plate_id: number | null; quantity?: number };
     const queued: Queued[] = [];
-    let order: OrderBody | null = null;
     server.use(
-      http.post('/api/v1/queue/batches', async ({ request }) => {
-        order = (await request.json()) as OrderBody;
-        return HttpResponse.json({ id: 42, name: 'Order', status: 'active' });
-      }),
       http.post('/api/v1/queue/', async ({ request }) => {
         queued.push((await request.json()) as Queued);
         return HttpResponse.json({ id: queued.length, status: 'pending' });
@@ -2509,20 +2500,12 @@ describe('PrintModal — per-plate quantity (#342)', () => {
 
     await waitFor(() => expect(queued.length).toBe(3));
 
-    // The order records the intent, so a failed run still reads as owed.
-    expect(order!.plates).toEqual([
-      expect.objectContaining({ plate_id: 1, quantity_target: 1 }),
-      expect.objectContaining({ plate_id: 2, quantity_target: 2 }),
-      expect.objectContaining({ plate_id: 3, quantity_target: 3 }),
-    ]);
-
-    // ...and the runs are dispatched immediately, one call per plate carrying
-    // that plate's own count. Quantity 1 is left off the payload as before.
+    // Each plate is submitted as independent queue work, one call per plate
+    // carrying that plate's own count. Quantity 1 is left off the payload.
     const byPlate = Object.fromEntries(queued.map((q) => [q.plate_id, q]));
     expect(byPlate[1].quantity).toBeUndefined();
     expect(byPlate[2].quantity).toBe(2);
     expect(byPlate[3].quantity).toBe(3);
-    expect(queued.every((q) => q.batch_id === 42)).toBe(true);
   });
 
   it('does not multiply per-plate counts across a multi-printer fan-out', async () => {

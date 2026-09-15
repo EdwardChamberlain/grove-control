@@ -28,7 +28,6 @@ from backend.app.models.group import Group
 from backend.app.models.library import LibraryFile
 from backend.app.models.long_lived_token import LongLivedToken
 from backend.app.models.oidc_provider import UserOIDCLink
-from backend.app.models.print_batch import PrintBatch
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.settings import Settings
 from backend.app.models.user import User
@@ -382,12 +381,9 @@ async def delete_user(
         await db.execute(delete(PrintArchive).where(PrintArchive.created_by_id == user_id))
         await db.execute(delete(PrintQueueItem).where(PrintQueueItem.created_by_id == user_id))
         await db.execute(delete(LibraryFile).where(LibraryFile.created_by_id == user_id))
-        await db.execute(delete(PrintBatch).where(PrintBatch.created_by_id == user_id))
     else:
         # Explicitly set created_by_id to NULL for all items (ensures consistent behavior
         # across different database backends, including SQLite without foreign key support).
-        # PrintBatch carries the same created_by_id FK with ondelete=SET NULL — admin-deleted
-        # users would otherwise leave dangling created_by_id on SQLite (#1295 review nit).
         from sqlalchemy import update
 
         await db.execute(update(PrintArchive).where(PrintArchive.created_by_id == user_id).values(created_by_id=None))
@@ -395,7 +391,6 @@ async def delete_user(
             update(PrintQueueItem).where(PrintQueueItem.created_by_id == user_id).values(created_by_id=None)
         )
         await db.execute(update(LibraryFile).where(LibraryFile.created_by_id == user_id).values(created_by_id=None))
-        await db.execute(update(PrintBatch).where(PrintBatch.created_by_id == user_id).values(created_by_id=None))
 
     # Drop API keys owned by this user. The model declares ON DELETE CASCADE
     # so Postgres handles this automatically, but SQLite ships with FK

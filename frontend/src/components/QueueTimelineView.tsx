@@ -401,14 +401,12 @@ export function QueueTimelineView({
                           : null;
                       const isPrinting = ev.type === 'printing';
                       const isDispatching = ev.type === 'preheating' || ev.type === 'dispatching';
-                      const isBatched = ev.item.batch_id != null;
                       const tooltipParts = [
                         displayName,
                         `${formatTooltipTime(ev.estimatedStart)} → ${formatTooltipTime(ev.estimatedEnd)}`,
                         ev.item.print_time_seconds ? formatDuration(ev.item.print_time_seconds) : null,
                         isDispatching ? t(ev.type === 'preheating' ? 'heatSoak.status' : 'queue.status.dispatching') : null,
                         isPrinting && ev.progress != null ? `${Math.round(ev.progress)}%` : null,
-                        ev.item.batch_name ? `batch: ${ev.item.batch_name}` : null,
                       ].filter(Boolean).join(' · ');
                       return (
                         <button
@@ -422,9 +420,7 @@ export function QueueTimelineView({
                               ? 'bg-blue-500/30 border border-blue-400/60'
                               : isDispatching
                                 ? 'bg-purple-500/30 border border-purple-400/60'
-                              : isBatched
-                                ? 'bg-cyan-500/20 border border-cyan-400/50'
-                                : 'bg-bambu-green/20 border border-bambu-green/40'
+                              : 'bg-bambu-green/20 border border-bambu-green/40'
                           }`}
                           style={{
                             left: `${leftPct}%`,

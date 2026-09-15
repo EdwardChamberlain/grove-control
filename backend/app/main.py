@@ -4695,18 +4695,6 @@ async def on_print_complete(printer_id: int, data: dict):
         # Post-commit side effects (notifications, MQTT relay, auto-off) use
         # their own sessions and have their own error handling — no retry needed.
         if queue_item_id is not None:
-            # Batch orders (#342): this run may have been the last one an order
-            # owed. Re-evaluate here rather than lazily on read, so a finished
-            # order reports itself complete without someone opening the page.
-            try:
-                from backend.app.services.print_batch import refresh_batch_status_for_item
-
-                async with async_session() as db:
-                    await refresh_batch_status_for_item(db, queue_item_id)
-                    await db.commit()
-            except Exception as e:
-                logger.warning("[BATCH] Failed to refresh batch status for queue item %s: %s", queue_item_id, e)
-
             # MQTT relay - publish queue job completed
             try:
                 printer_info = printer_manager.get_printer(printer_id)
@@ -6543,17 +6531,6 @@ async def lifespan(app: FastAPI):
     install_proactor_reset_filter()
 
     await init_db()
-
-    # Close out batches that finished before `completed` was a reachable status
-    # (#342). Without this the Batches tab opens on every batch created since
-    # the feature shipped, all still marked active. Never blocks startup.
-    try:
-        from backend.app.services.print_batch import backfill_batch_statuses
-
-        async with async_session() as batch_db:
-            await backfill_batch_statuses(batch_db)
-    except Exception as exc:
-        logging.warning("[BATCH] Startup status backfill failed: %s", exc)
 
     # Register an app-scoped httpx client for Bambu Cloud services so
     # per-request BambuCloudService instances reuse the same connection pool

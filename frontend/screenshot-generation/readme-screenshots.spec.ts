@@ -361,8 +361,6 @@ const queueItems = [
     created_by_username: 'Morgan',
     waiting_reason: null,
     manual_start: false,
-    batch_id: null,
-    batch_name: null,
   },
   {
     id: 2,
@@ -385,8 +383,6 @@ const queueItems = [
     created_by_username: 'Priya',
     waiting_reason: null,
     manual_start: false,
-    batch_id: null,
-    batch_name: null,
   },
   {
     id: 3,
@@ -409,8 +405,6 @@ const queueItems = [
     created_by_username: 'Morgan',
     waiting_reason: null,
     manual_start: false,
-    batch_id: null,
-    batch_name: null,
   },
   {
     id: 4,
@@ -433,8 +427,6 @@ const queueItems = [
     created_by_username: 'Alex',
     waiting_reason: null,
     manual_start: false,
-    batch_id: 7,
-    batch_name: 'Production Setup',
   },
   {
     id: 5,
@@ -457,8 +449,6 @@ const queueItems = [
     created_by_username: 'Alex',
     waiting_reason: null,
     manual_start: false,
-    batch_id: 7,
-    batch_name: 'Production Setup',
   },
   {
     id: 6,
@@ -481,8 +471,6 @@ const queueItems = [
     created_by_username: 'Priya',
     waiting_reason: 'Waiting for matching PETG',
     manual_start: false,
-    batch_id: null,
-    batch_name: null,
   },
 ];
 

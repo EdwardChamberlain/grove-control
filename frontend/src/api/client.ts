@@ -2195,78 +2195,11 @@ export interface PrintQueueItem {
   // User tracking (Issue #206)
   created_by_id?: number | null;
   created_by_username?: string | null;
-  // Batch grouping
-  batch_id?: number | null;
-  batch_name?: string | null;
   // Shortest-job-first scheduling
   been_jumped?: boolean;
   // Auto-print G-code injection
   gcode_injection?: boolean;
   cleanup_library_after_dispatch?: boolean;
-}
-
-export interface PrintBatchPlateTarget {
-  plate_id: number | null;
-  plate_name?: string | null;
-  quantity_target: number;
-  sort_order?: number;
-}
-
-export interface PrintBatchPlateProgress {
-  plate_id: number | null;
-  plate_name: string | null;
-  quantity_target: number;
-  dispatched: number;
-  remaining: number;
-  pending_count: number;
-  preheating_count: number;
-  dispatching_count: number;
-  printing_count: number;
-  completed_count: number;
-  failed_count: number;
-  cancelled_count: number;
-  skipped_count: number;
-  /** Measured from finished runs; null until one has produced a cost. */
-  actual_cost: number | null;
-  estimated_remaining_cost: number | null;
-  filament_used_grams: number | null;
-  print_time_seconds: number;
-  can_dispatch: boolean;
-}
-
-export interface PrintBatch {
-  id: number;
-  name: string;
-  archive_id: number | null;
-  library_file_id: number | null;
-  quantity: number;
-  status: string;
-  created_at: string;
-  completed_at: string | null;
-  created_by_id: number | null;
-  created_by_username: string | null;
-  project_id: number | null;
-  due_date: string | null;
-  notes: string | null;
-  pending_count: number;
-  preheating_count: number;
-  dispatching_count: number;
-  printing_count: number;
-  completed_count: number;
-  failed_count: number;
-  cancelled_count: number;
-  skipped_count: number;
-  /** False for batches created before per-plate targets existed (#342):
-   *  they report progress but owe nothing and cannot be dispatched from. */
-  has_targets: boolean;
-  target_count: number;
-  remaining_count: number;
-  dispatchable_count: number;
-  actual_cost: number | null;
-  estimated_remaining_cost: number | null;
-  filament_used_grams: number | null;
-  print_time_seconds: number;
-  plates: PrintBatchPlateProgress[];
 }
 
 export interface PrintQueueItemCreate {
@@ -2302,10 +2235,8 @@ export interface PrintQueueItemCreate {
   nozzle_offset_cali?: CalibrationMode;
   // Auto-print G-code injection
   gcode_injection?: boolean;
-  // Batch: create multiple copies (creates a batch if > 1)
+  // Create multiple independent queue items.
   quantity?: number;
-  // Existing batch to add this item into (multi-plate auto-batch flow).
-  batch_id?: number | null;
   // Project to associate the resulting archive with
   project_id?: number;
   // Delete transient uploaded library file after scheduler creates the archive
@@ -2326,38 +2257,6 @@ export interface QueueVariantCreate {
   ams_mapping?: number[] | null;
   nozzle_mapping?: number[] | null;
   filament_overrides?: Array<{ slot_id: number; type: string; color: string; color_name?: string; force_color_match?: boolean }> | null;
-}
-
-export interface PrintBatchCreate {
-  name: string;
-  archive_id?: number | null;
-  library_file_id?: number | null;
-  /** When set, the listed pending items are assigned to the new batch
-   *  (manual "Group as batch"). When omitted/empty, an empty batch is
-   *  returned so the client can pass batch_id on subsequent addToQueue calls. */
-  item_ids?: number[];
-  /** Per-plate targets. Omitting them creates a plain grouping batch. */
-  plates?: PrintBatchPlateTarget[];
-  project_id?: number | null;
-  due_date?: string | null;
-  notes?: string | null;
-}
-
-export interface PrintBatchUpdate {
-  name?: string;
-  status?: 'active' | 'cancelled';
-  /** Replaces the full target set — a plate omitted here is removed. */
-  plates?: PrintBatchPlateTarget[];
-  project_id?: number | null;
-  due_date?: string | null;
-  notes?: string | null;
-}
-
-export interface PrintBatchDispatchRequest {
-  plate_id?: number | null;
-  only_plate?: boolean;
-  /** Cap on items created across all plates; omit to queue everything owed. */
-  limit?: number;
 }
 
 export interface PrintQueueItemUpdate {
@@ -5236,35 +5135,6 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
-  // Batches
-  getBatches: (status?: string) => {
-    const params = status ? `?status=${status}` : '';
-    return request<PrintBatch[]>(`/queue/batches${params}`);
-  },
-  getBatch: (id: number) => request<PrintBatch>(`/queue/batches/${id}`),
-  cancelBatch: (id: number) =>
-    request<{ message: string }>(`/queue/batches/${id}`, { method: 'DELETE' }),
-  createBatch: (data: PrintBatchCreate) =>
-    request<PrintBatch>('/queue/batches', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
-  updateBatch: (id: number, data: PrintBatchUpdate) =>
-    request<PrintBatch>(`/queue/batches/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    }),
-  dispatchBatch: (id: number, data: PrintBatchDispatchRequest = {}) =>
-    request<PrintBatch>(`/queue/batches/${id}/dispatch`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
-  ungroupBatch: (id: number) =>
-    request<{ ungrouped_count: number; message: string }>(
-      `/queue/batches/${id}/ungroup`,
-      { method: 'POST' },
-    ),
-
   // K-Profiles
   getKProfiles: (printerId: number, nozzleDiameter = '0.4') =>
     request<KProfilesResponse>(`/printers/${printerId}/kprofiles/?nozzle_diameter=${nozzleDiameter}`),
