@@ -7,8 +7,8 @@ Post-fix they split into OWN/ALL. The migration in seed_default_groups must:
      and to `archives:read_own` on every other role (fail-closed default).
   2. Backfill `_own` AND `_all` variants for the Administrators group on upgrade
      so an upgraded install matches a fresh install's permission set.
-  3. Backfill `_own` variants for Operators and Viewers so they keep read access
-     even if their stored row didn't carry the legacy flag.
+  3. Leave Operators and Viewers untouched after they become editable starter
+     groups; administrators can choose their permissions explicitly.
 
 These regressions are the failure shape Maziggy hit on a live upgrade — the
 admin role ended up missing queue:read_own AND queue:read after migration.
@@ -109,35 +109,33 @@ class TestReadPermissionMigration:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_operators_backfill_adds_own_read_flags(self, async_client: AsyncClient):
-        """Operators with no read flags get the _OWN variants backfilled
-        (fail-closed — no _ALL)."""
+    async def test_operators_permissions_are_not_backfilled(self, async_client: AsyncClient):
+        """Editable Operators are not changed by the startup backfill."""
         await seed_default_groups()
         await _strip_and_set("Operators")
 
         await seed_default_groups()
 
         perms = await _get_perms("Operators")
-        assert "archives:read_own" in perms
-        assert "library:read_own" in perms
-        assert "queue:read_own" in perms
+        assert "archives:read_own" not in perms
+        assert "library:read_own" not in perms
+        assert "queue:read_own" not in perms
         assert "archives:read_all" not in perms
         assert "library:read_all" not in perms
         assert "queue:read_all" not in perms
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_operators_legacy_archives_read_renamed_to_own(self, async_client: AsyncClient):
-        """Pre-PR Operators with legacy `archives:read` get the _OWN rename
-        (fail-closed — close the IDOR, the operator can re-request _ALL via
-        admin if cross-user visibility is genuinely needed)."""
+    async def test_operators_legacy_permissions_are_preserved(self, async_client: AsyncClient):
+        """Editable Operators retain legacy permissions until an admin edits them."""
         await seed_default_groups()
         await _strip_and_set("Operators", extra=["archives:read"])
 
         await seed_default_groups()
 
         perms = await _get_perms("Operators")
-        assert "archives:read_own" in perms
+        assert "archives:read" in perms
+        assert "archives:read_own" not in perms
         assert "archives:read_all" not in perms
 
     @pytest.mark.asyncio
@@ -203,10 +201,8 @@ class TestReadPermissionMigration:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_operators_orca_cloud_auth_backfilled(self, async_client: AsyncClient):
-        """Operators on upgraded installs get `orca_cloud:auth` backfilled
-        (the new default — needed for the Slice modal's Orca Cloud preset
-        picker)."""
+    async def test_operators_orca_cloud_auth_is_not_backfilled(self, async_client: AsyncClient):
+        """Editable Operators keep their administrator-selected permissions."""
         await seed_default_groups()
         async with _database_module.async_session() as session:
             grp = (await session.execute(select(Group).where(Group.name == "Operators"))).scalar_one()
@@ -216,7 +212,7 @@ class TestReadPermissionMigration:
         await seed_default_groups()
 
         perms = await _get_perms("Operators")
-        assert "orca_cloud:auth" in perms
+        assert "orca_cloud:auth" not in perms
 
     @pytest.mark.asyncio
     @pytest.mark.integration

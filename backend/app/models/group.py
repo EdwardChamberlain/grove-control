@@ -29,7 +29,9 @@ class Group(Base):
 
     Groups contain a list of permissions that are granted to all members.
     Users can belong to multiple groups, and their permissions are additive.
-    System groups (Administrators, Operators, Viewers) cannot be deleted.
+    The Administrators group is protected as the canonical system group;
+    starter groups such as Operators and Viewers are editable like any other
+    user-created group.
     """
 
     __tablename__ = "groups"

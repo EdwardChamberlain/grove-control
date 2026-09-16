@@ -2403,8 +2403,8 @@ export default {
         requireEmailVerifiedWarning: '경고: 확인 없이도 이메일이 수락됩니다. 신뢰할 수 있는 제공자에만 사용하세요.',
         requireEmailVerifiedAutoLink: '이 설정을 변경하려면 먼저 자동 연결을 비활성화하세요.',
         defaultGroup: '기본 그룹',
-        defaultGroupDesc: '자동 생성된 사용자에게 할당되는 그룹. 설정되지 않으면 Viewers로 대체됩니다.',
-        defaultGroupViewersFallback: 'Viewers (기본값)',
+        defaultGroupDesc: '자동 생성된 사용자에게 할당되는 그룹입니다. 비워 두면 그룹 권한 없이 생성됩니다.',
+        defaultGroupNone: '없음 (권한 없음)',
         autologin: '자동 로그인',
         autologinDesc: '인증되지 않은 방문자를 이 공급자로 바로 리디렉션합니다. 이 플래그를 가질 수 있는 공급자는 하나뿐입니다.'
       },

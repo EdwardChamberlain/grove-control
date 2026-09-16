@@ -181,7 +181,7 @@ function ProviderForm({
           value={form.default_group_id ?? ''}
           onChange={(e) => set('default_group_id', e.target.value ? Number(e.target.value) : null)}
         >
-          <option value="">{t('settings.oidc.form.defaultGroupViewersFallback')}</option>
+          <option value="">{t('settings.oidc.form.defaultGroupNone')}</option>
           {groups.map((g) => (
             <option key={g.id} value={g.id}>{g.name}</option>
           ))}
@@ -503,8 +503,8 @@ export function OIDCProviderSettings() {
                   <dt className="text-bambu-gray">{t('settings.oidc.form.defaultGroup')}</dt>
                   <dd className="text-white">
                     {provider.default_group_id
-                      ? (groups.find((g) => g.id === provider.default_group_id)?.name ?? t('settings.oidc.form.defaultGroupViewersFallback'))
-                      : t('settings.oidc.form.defaultGroupViewersFallback')}
+                      ? (groups.find((g) => g.id === provider.default_group_id)?.name ?? t('settings.oidc.form.defaultGroupNone'))
+                      : t('settings.oidc.form.defaultGroupNone')}
                   </dd>
                 </div>
               </dl>

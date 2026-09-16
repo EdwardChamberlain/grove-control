@@ -45,7 +45,7 @@ const mockGroup = {
   name: 'Operators',
   description: 'Control printers and manage content',
   permissions: ['printers:read', 'printers:control', 'printers:clear_plate'],
-  is_system: true,
+  is_system: false,
   user_count: 3,
   users: [{ id: 1, username: 'admin', is_active: true }],
   created_at: '2024-01-01T00:00:00Z',
@@ -257,6 +257,7 @@ describe('GroupEditPage', () => {
       await waitFor(() => {
         expect(screen.getByDisplayValue('Operators')).toBeInTheDocument();
       });
+      expect(screen.getByDisplayValue('Operators')).not.toBeDisabled();
 
       // Change permissions then save
       await waitFor(() => {
