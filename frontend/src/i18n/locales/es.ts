@@ -4440,6 +4440,7 @@ export default {
     customPrinterMapping: 'Personalizar esta impresora',
     mappingHint: 'Cambia una ranura cargada solo cuando esta impresora necesite una excepción.',
     originalFilament: 'Original',
+    useOriginalFilament: 'Usar perfil laminado',
     overrideWith: 'Anular con',
     resetToOriginal: 'Restablecer al original',
     insufficientFilamentTitle: 'No hay suficiente filamento',

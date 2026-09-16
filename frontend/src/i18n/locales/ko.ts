@@ -4209,6 +4209,7 @@ export default {
     customPrinterMapping: '이 프린터 사용자 지정',
     mappingHint: '이 프린터에 예외가 필요한 경우에만 장착된 슬롯을 변경하세요.',
     originalFilament: '원래',
+    useOriginalFilament: '슬라이스 프로필 사용',
     overrideWith: '재정의',
     resetToOriginal: '원래대로 초기화',
     insufficientFilamentTitle: '필라멘트 부족',

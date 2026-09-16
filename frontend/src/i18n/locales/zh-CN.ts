@@ -4420,6 +4420,7 @@ export default {
     customPrinterMapping: '自定义此打印机',
     mappingHint: '仅当此打印机需要例外时更改已装载的槽位。',
     originalFilament: '原始',
+    useOriginalFilament: '使用切片配置',
     overrideWith: '覆盖为',
     resetToOriginal: '恢复为原始',
     insufficientFilamentTitle: '耗材不足',

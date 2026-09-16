@@ -11,7 +11,11 @@ interface FilamentOverrideProps {
   availableFilaments: Array<{ type: string; color: string; tray_info_idx: string; tray_sub_brands: string; extruder_id: number | null }>;
   overrides: Record<number, { type: string; color: string }>;
   onChange: (overrides: Record<number, { type: string; color: string }>) => void;
+  forceColorMatch?: boolean;
   showHeader?: boolean;
+  embedded?: boolean;
+  currencySymbol?: string;
+  defaultCostPerKg?: number;
 }
 
 /**
@@ -24,7 +28,11 @@ export function FilamentOverride({
   availableFilaments,
   overrides,
   onChange,
+  forceColorMatch = true,
   showHeader = true,
+  embedded = false,
+  currencySymbol,
+  defaultCostPerKg,
 }: FilamentOverrideProps) {
   const { t } = useTranslation();
 
@@ -46,6 +54,12 @@ export function FilamentOverride({
   }, [availableFilaments]);
 
   const filaments = filamentReqs?.filaments;
+  const totalCost = useMemo(() => {
+    if (!filaments || defaultCostPerKg == null || defaultCostPerKg <= 0) return 0;
+    return filaments.reduce((total, filament) => total + (filament.used_grams / 1000) * defaultCostPerKg, 0);
+  }, [filaments, defaultCostPerKg]);
+  const hasCostEstimate = defaultCostPerKg != null && defaultCostPerKg > 0;
+
   if (!filaments || filaments.length === 0) {
     return null;
   }
@@ -64,14 +78,14 @@ export function FilamentOverride({
   };
 
   return (
-    <div className="mb-4">
+    <div className={embedded ? undefined : 'mb-4'}>
       {showHeader && (
         <div className="flex items-center gap-2 text-sm text-bambu-gray mb-2">
           <span>{t('printModal.filamentOverride')}</span>
         </div>
       )}
       <p className="text-xs text-bambu-gray mb-2">{t('printModal.filamentOverrideHint')}</p>
-      <div className="bg-bambu-dark rounded-lg p-3 space-y-2">
+      <div className={embedded ? 'space-y-2' : 'bg-bambu-dark rounded-lg p-3 space-y-2'}>
         {filaments.map((req, slotIdx) => {
           const override = overrides[req.slot_id];
           const isOverridden = !!override;
@@ -91,6 +105,9 @@ export function FilamentOverride({
           // when the by-material lookup hasn't resolved yet, returned null,
           // or errored) so a slow query never blanks out the row.
           const { resolvedName, colorLabel } = labels[slotIdx] ?? { resolvedName: req.type, colorLabel: getColorName(req.color) };
+          const originalOptionLabel = forceColorMatch
+            ? t('printModal.useOriginalFilament')
+            : `${t('printModal.originalFilament')}: ${resolvedName} (${colorLabel})`;
 
           return (
             <FilamentProfileRow
@@ -100,7 +117,7 @@ export function FilamentOverride({
               usedGrams={req.used_grams}
               requiredTitle={`${t('printModal.originalFilament')}: ${resolvedName} - ${colorLabel}`}
               value={isOverridden ? `${override.type}|${override.color}` : ''}
-              emptyLabel={`${t('printModal.originalFilament')}: ${resolvedName} (${colorLabel})`}
+              emptyLabel={originalOptionLabel}
               options={compatible.map((filament) => ({
                 value: `${filament.type}|${filament.color}`,
                 label: `${filament.tray_sub_brands || filament.type} (${getColorName(filament.color)})`,
@@ -113,6 +130,14 @@ export function FilamentOverride({
             />
           );
         })}
+        {currencySymbol !== undefined && defaultCostPerKg !== undefined && (
+          <div className="border-t border-bambu-dark-tertiary pt-2 text-xs text-bambu-gray">
+            {t('printModal.totalCost')}{' '}
+            <span className="text-white">
+              {hasCostEstimate ? `${currencySymbol}${totalCost.toFixed(2)}` : 'N/A'}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

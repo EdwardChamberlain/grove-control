@@ -4410,6 +4410,7 @@ export default {
     customPrinterMapping: 'Bu yazıcıyı özelleştir',
     mappingHint: 'Yüklü yuvayı yalnızca bu yazıcı için bir istisna gerektiğinde değiştirin.',
     originalFilament: 'Orijinal',
+    useOriginalFilament: 'Dilimlenmiş profili kullan',
     overrideWith: 'Şununla geçersiz kıl',
     resetToOriginal: 'Orijinale sıfırla',
     insufficientFilamentTitle: 'Yeterli filament yok',

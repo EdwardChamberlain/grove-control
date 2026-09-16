@@ -4432,6 +4432,7 @@ export default {
     customPrinterMapping: 'このプリンターをカスタマイズ',
     mappingHint: 'このプリンターで例外が必要な場合のみ装填済みスロットを変更します。',
     originalFilament: 'オリジナル',
+    useOriginalFilament: 'スライス済みプロファイルを使用',
     overrideWith: '変更先',
     resetToOriginal: 'オリジナルに戻す',
     insufficientFilamentTitle: 'フィラメントが不足しています',
