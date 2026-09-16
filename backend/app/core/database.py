@@ -4209,7 +4209,17 @@ async def seed_default_groups():
         admin_result = await session.execute(select(Group).where(Group.system_key == ADMINISTRATOR_GROUP_KEY))
         admin_group = admin_result.scalar_one_or_none()
         if admin_group is None:
-            admin_group = existing_groups.get("Administrators")
+            # Before stable keys existed, the protected built-in group was
+            # identified by its display name and marked as a system group.
+            # Prefer that legacy marker so an administrator group that was
+            # renamed or localized before this upgrade keeps its row and
+            # memberships. Fall back to the old name for databases where the
+            # marker was not preserved.
+            legacy_system_groups = [group for group in existing_groups.values() if group.is_system]
+            if len(legacy_system_groups) == 1:
+                admin_group = legacy_system_groups[0]
+            else:
+                admin_group = existing_groups.get("Administrators")
             if admin_group is not None:
                 admin_group.system_key = ADMINISTRATOR_GROUP_KEY
                 logger.info("Migrated legacy Administrators group to stable identity")

@@ -280,6 +280,7 @@ async def test_legacy_administrator_row_is_adopted_without_changing_id_or_member
     result = await db_session.execute(select(Group).where(Group.name == "Administrators"))
     administrators = result.scalar_one()
     original_id = administrators.id
+    administrators.name = "Administrateurs"
     administrators.system_key = None
     await db_session.commit()
 
@@ -287,6 +288,7 @@ async def test_legacy_administrator_row_is_adopted_without_changing_id_or_member
 
     await db_session.refresh(administrators)
     assert administrators.id == original_id
+    assert administrators.name == "Administrateurs"
     assert administrators.system_key == ADMINISTRATOR_GROUP_KEY
     me = await async_client.get("/api/v1/auth/me", headers=headers)
     assert me.json()["is_admin"] is True
