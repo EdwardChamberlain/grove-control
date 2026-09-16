@@ -158,6 +158,42 @@ describe('FilamentMapping — FTS routing', () => {
     expect(screen.queryByText(/Bambu PLA/)).not.toBeInTheDocument();
   });
 
+  it('does not gate availability on colour when Match colour is disabled', async () => {
+    server.use(
+      http.get(
+        '/api/v1/printers/:id/status',
+        () =>
+          HttpResponse.json(
+            createStatus({
+              fila_switch: null,
+              ams_extruder_map: { '0': 1 },
+            }),
+          ),
+      ),
+    );
+
+    render(
+      <FilamentMapping
+        printerId={1}
+        filamentReqs={{
+          filaments: [
+            { ...mockFilamentReqs.filaments[0], color: '#FF0000' },
+          ],
+        }}
+        manualMappings={{}}
+        onManualMappingChange={() => {}}
+        currencySymbol="$"
+        defaultCostPerKg={0}
+        forceColorMatch={false}
+        onForceColorMatchChange={() => {}}
+      />,
+    );
+
+    const mappingButton = await screen.findByRole('button', { name: /Filament Mapping/i });
+    expect(mappingButton).toHaveTextContent('(Filament Available)');
+    expect(within(mappingButton).getByText('(Filament Available)')).toHaveClass('text-bambu-green');
+  });
+
   it('renders sub-brand + material-disambiguated colour on the required side (#1718)', async () => {
     // Same fix as FilamentOverride: required-side label was rendering the
     // raw 3MF type ("PLA") and the generic getColorName bucket ("Black").

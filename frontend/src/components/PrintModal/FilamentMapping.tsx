@@ -72,6 +72,7 @@ export function FilamentMapping({
 
   const { loadedFilaments, filamentComparison, hasTypeMismatch, hasColorMismatch } =
     useFilamentMapping(filamentReqs, printerStatus, manualMappings, gatedPreferLowest, inventoryByTrayId);
+  const showColorMismatch = forceColorMatch && hasColorMismatch;
 
   // Per-slot sub-brand + material-disambiguated colour labels (#1718). Same
   // shared hook the model-mode FilamentOverride uses so both panels render
@@ -190,7 +191,7 @@ export function FilamentMapping({
         <span>{t('printModal.filamentMapping')}</span>
         {hasTypeMismatch ? (
           <span className="text-xs text-orange-400">(Type not found)</span>
-        ) : hasColorMismatch ? (
+        ) : showColorMismatch ? (
           <span className="text-xs text-yellow-400">(Color mismatch)</span>
         ) : (
           <span className="text-xs text-bambu-green">(Filament Available)</span>

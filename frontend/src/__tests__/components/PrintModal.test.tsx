@@ -863,6 +863,76 @@ describe('PrintModal', () => {
       ]);
       expect(capturedBody?.ams_mapping).toEqual([1]);
     });
+
+    it('clears a printer-specific filament profile when switching printers', async () => {
+      let capturedBody: Record<string, unknown> | null = null;
+      server.use(
+        http.get('/api/v1/archives/:id/filament-requirements', () =>
+          HttpResponse.json({
+            filaments: [
+              { slot_id: 1, type: 'PLA', color: '#000000', used_grams: 10, used_meters: 3 },
+            ],
+          }),
+        ),
+        http.get('/api/v1/printers/:id/status', () =>
+          HttpResponse.json({
+            connected: true,
+            state: 'IDLE',
+            ams: [
+              {
+                id: 0,
+                tray: [
+                  { id: 0, tray_type: 'PLA', tray_color: '000000FF', tray_sub_brands: 'PLA Basic' },
+                  { id: 1, tray_type: 'PLA', tray_color: 'FFFFFFFF', tray_sub_brands: 'PLA Matte' },
+                ],
+              },
+            ],
+            vt_tray: [],
+          }),
+        ),
+        http.post('/api/v1/queue/', async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json({ id: 1, status: 'pending' });
+        }),
+      );
+      const user = userEvent.setup();
+
+      render(
+        <PrintModal
+          mode="create"
+          archiveId={1}
+          archiveName="Benchy"
+          initialSelectedPrinterIds={[1]}
+          onClose={mockOnClose}
+          onSuccess={mockOnSuccess}
+        />
+      );
+
+      await user.click(await screen.findByRole('button', { name: /Filament Mapping/i }));
+      const mappingSelect = await waitFor(() => {
+        const select = screen
+          .getAllByRole('combobox')
+          .find((candidate) => candidate.querySelector('option[value="1"]'));
+        expect(select).toBeDefined();
+        return select!;
+      });
+      fireEvent.change(mappingSelect, { target: { value: '1' } });
+
+      await user.click(await screen.findByRole('button', { name: /^P1S/ }));
+      await user.click(screen.getByRole('button', { name: /^print$/i }));
+
+      await waitFor(() => expect(capturedBody).not.toBeNull());
+      expect(capturedBody?.printer_id).toBe(2);
+      expect(capturedBody?.ams_mapping).toBeUndefined();
+      expect(capturedBody?.filament_overrides).toEqual([
+        expect.objectContaining({
+          slot_id: 1,
+          type: 'PLA',
+          color: '#000000',
+          force_color_match: true,
+        }),
+      ]);
+    });
   });
 
   describe('create mode', () => {

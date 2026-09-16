@@ -543,6 +543,24 @@ export function PrintModal({
     }
   }, [mode, selectedPrinters, selectedPlate, initialPrinterIds, initialPlateId]);
 
+  // A tray selected in the single-printer mapping is converted into a
+  // type/colour profile override for the queue payload. That profile belongs
+  // to the printer whose tray was selected; do not carry it across a direct
+  // switch to another specific printer where it may no longer be loaded.
+  const previousSelectedPrinters = useRef<number[] | null>(null);
+  useEffect(() => {
+    const previous = previousSelectedPrinters.current;
+    const printerSelectionChanged = previous !== null
+      && (previous.length !== selectedPrinters.length
+        || previous.some((printerId, index) => printerId !== selectedPrinters[index]));
+
+    if (mode === 'create' && assignmentMode === 'printer' && printerSelectionChanged) {
+      setFilamentOverrides({});
+    }
+
+    previousSelectedPrinters.current = [...selectedPrinters];
+  }, [mode, assignmentMode, selectedPrinters]);
+
   // Clear filament overrides when target model or plate changes (but not on initial mount for edit mode)
   const [prevTargetModel, setPrevTargetModel] = useState(targetModel);
   const [prevPlateForOverrides, setPrevPlateForOverrides] = useState(selectedPlate);
