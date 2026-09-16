@@ -21,7 +21,7 @@ from backend.app.core.auth import (
     verify_password,
 )
 from backend.app.core.database import get_db
-from backend.app.core.permissions import Permission
+from backend.app.core.permissions import ADMINISTRATOR_GROUP_KEY, Permission
 from backend.app.models.api_key import APIKey
 from backend.app.models.archive import PrintArchive
 from backend.app.models.group import Group
@@ -45,7 +45,9 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 
 async def _get_administrators_group(db: AsyncSession) -> Group | None:
-    result = await db.execute(select(Group).where(Group.name == "Administrators").options(selectinload(Group.users)))
+    result = await db.execute(
+        select(Group).where(Group.system_key == ADMINISTRATOR_GROUP_KEY).options(selectinload(Group.users))
+    )
     return result.scalar_one_or_none()
 
 

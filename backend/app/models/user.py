@@ -86,8 +86,8 @@ class User(Base):
 
     @property
     def is_admin(self) -> bool:
-        """Check if user belongs to the canonical Administrators group."""
-        return any(g.name == "Administrators" for g in self.groups)
+        """Check if user belongs to the canonical administrator group."""
+        return any(group.is_administrator for group in self.groups)
 
     def get_permissions(self) -> set[str]:
         """Get all permissions from all groups the user belongs to.

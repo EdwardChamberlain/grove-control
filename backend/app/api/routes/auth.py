@@ -35,7 +35,7 @@ from backend.app.core.auth import (
     security,
 )
 from backend.app.core.database import async_session, get_db
-from backend.app.core.permissions import ALL_PERMISSIONS
+from backend.app.core.permissions import ADMINISTRATOR_GROUP_KEY, ALL_PERMISSIONS
 from backend.app.models.auth_ephemeral import AuthEphemeralToken, AuthRateLimitEvent, EventType, TokenType
 from backend.app.models.group import Group, user_groups
 from backend.app.models.settings import Settings
@@ -103,7 +103,9 @@ def _api_key_to_user_response(api_key) -> UserResponse:
 
 
 async def _ensure_administrators_group(db: AsyncSession) -> Group:
-    result = await db.execute(select(Group).where(Group.name == "Administrators").options(selectinload(Group.users)))
+    result = await db.execute(
+        select(Group).where(Group.system_key == ADMINISTRATOR_GROUP_KEY).options(selectinload(Group.users))
+    )
     admin_group = result.scalar_one_or_none()
     if admin_group is not None:
         return admin_group
@@ -113,6 +115,7 @@ async def _ensure_administrators_group(db: AsyncSession) -> Group:
         description="Full access to all features",
         permissions=ALL_PERMISSIONS,
         is_system=True,
+        system_key=ADMINISTRATOR_GROUP_KEY,
     )
     db.add(admin_group)
     await db.flush()
@@ -1370,7 +1373,7 @@ async def _sync_ldap_user(db: AsyncSession, user: User, ldap_user, ldap_config) 
     # LDAP may manage the Administrators mapping, but it must not remove the
     # final active administrator. Keep that membership in place so an external
     # group revocation cannot lock the instance out of admin-only operations.
-    admin_group = next((group for group in user.groups if group.name == "Administrators"), None)
+    admin_group = next((group for group in user.groups if group.is_administrator), None)
     if admin_group is not None and user.is_active and admin_group.id not in new_group_ids:
         active_admin_count = await db.scalar(
             select(func.count(User.id))

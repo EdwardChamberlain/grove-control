@@ -1,6 +1,7 @@
 """Tests for the permission system definitions and consistency."""
 
 from backend.app.core.permissions import (
+    ADMINISTRATOR_GROUP_KEY,
     ALL_PERMISSIONS,
     DEFAULT_GROUPS,
     PERMISSION_CATEGORIES,
@@ -60,6 +61,10 @@ class TestDefaultGroups:
         assert DEFAULT_GROUPS["Administrators"]["is_system"] is True
         assert DEFAULT_GROUPS["Operators"]["is_system"] is False
         assert DEFAULT_GROUPS["Viewers"]["is_system"] is False
+
+    def test_administrators_have_stable_system_key(self):
+        """The canonical group identity must not be its display name."""
+        assert DEFAULT_GROUPS["Administrators"]["system_key"] == ADMINISTRATOR_GROUP_KEY
 
 
 class TestPermissionCategoriesCompleteness:

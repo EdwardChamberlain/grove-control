@@ -42,7 +42,7 @@ def _permission_label(perm: Permission) -> str:
 
 
 def _active_admin_user_ids(group: Group) -> set[int]:
-    if group.name != "Administrators":
+    if not group.is_administrator:
         return set()
     return {u.id for u in group.users if u.is_active}
 
@@ -191,8 +191,10 @@ async def update_group(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Group name already exists",
             )
-        # System groups cannot have their name changed
-        if group.is_system:
+        # System groups cannot have their name changed. Check the stable
+        # administrator identity as well as the generic system flag so a
+        # renamed or partially migrated canonical row remains protected.
+        if group.is_system or group.is_administrator:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot rename system groups",
@@ -208,7 +210,7 @@ async def update_group(
         # service vector that even admin callers shouldn't trigger by
         # accident through the generic edit form. Mirrors the rename block
         # immediately above.
-        if group.is_system:
+        if group.is_system or group.is_administrator:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot modify permissions of system groups",
@@ -253,7 +255,7 @@ async def delete_group(
             detail="Group not found",
         )
 
-    if group.is_system:
+    if group.is_system or group.is_administrator:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot delete system groups",
@@ -342,7 +344,7 @@ async def remove_user_from_group(
             detail="User is not in this group",
         )
 
-    if group.name == "Administrators" and user.is_active:
+    if group.is_administrator and user.is_active:
         active_admin_ids = _active_admin_user_ids(group)
         if user.id in active_admin_ids and len(active_admin_ids) <= 1:
             raise HTTPException(

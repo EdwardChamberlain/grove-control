@@ -6,6 +6,10 @@ Permissions are additive across groups - a user has all permissions from all the
 
 from backend.app.core.compat import StrEnum
 
+# Stable identity for the built-in administrator group. The display name is
+# user-facing and must remain free to change without affecting authorization.
+ADMINISTRATOR_GROUP_KEY = "administrators"
+
 
 class Permission(StrEnum):
     """All available permissions in the system.
@@ -355,6 +359,7 @@ DEFAULT_GROUPS = {
         "description": "Full access to all features and settings",
         "permissions": ALL_PERMISSIONS,  # All permissions
         "is_system": True,
+        "system_key": ADMINISTRATOR_GROUP_KEY,
     },
     "Operators": {
         "description": "Can control printers, manage queue and archives, view settings",

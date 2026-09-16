@@ -1030,6 +1030,14 @@ async def run_migrations(conn):
     """
     from sqlalchemy import text
 
+    # Migration: Add stable identity for built-in groups. The key is nullable
+    # so user-created groups remain ordinary display-name-only groups.
+    await _safe_execute(conn, "ALTER TABLE groups ADD COLUMN system_key VARCHAR(50)")
+    await _safe_execute(
+        conn,
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_groups_system_key ON groups (system_key) WHERE system_key IS NOT NULL",
+    )
+
     # Retired pipeline rows are preserved as legacy history, but runs that had
     # not produced a normal queue item must not remain falsely recoverable.
     await _migrate_retired_pipeline_runs(conn)
@@ -4160,7 +4168,7 @@ async def seed_default_groups():
     from sqlalchemy import select, update
 
     from backend.app.core.db_dialect import upsert_setting
-    from backend.app.core.permissions import ALL_PERMISSIONS, DEFAULT_GROUPS
+    from backend.app.core.permissions import ADMINISTRATOR_GROUP_KEY, ALL_PERMISSIONS, DEFAULT_GROUPS
     from backend.app.models.group import Group
     from backend.app.models.oidc_provider import OIDCProvider
     from backend.app.models.settings import Settings
@@ -4195,13 +4203,53 @@ async def seed_default_groups():
         result = await session.execute(select(Group))
         existing_groups = {group.name: group for group in result.scalars().all()}
 
+        # Adopt the legacy display-name row exactly once. After this migration
+        # every administrator lookup uses the stable key, so a later rename,
+        # localization, or data repair cannot orphan administrator authority.
+        admin_result = await session.execute(select(Group).where(Group.system_key == ADMINISTRATOR_GROUP_KEY))
+        admin_group = admin_result.scalar_one_or_none()
+        if admin_group is None:
+            # Before stable keys existed, the protected built-in group was
+            # identified by its display name and marked as a system group.
+            # Prefer that legacy marker so an administrator group that was
+            # renamed or localized before this upgrade keeps its row and
+            # memberships. Fall back to the old name for databases where the
+            # marker was not preserved.
+            legacy_system_groups = [group for group in existing_groups.values() if group.is_system]
+            if len(legacy_system_groups) == 1:
+                admin_group = legacy_system_groups[0]
+            else:
+                admin_group = existing_groups.get("Administrators")
+            if admin_group is not None:
+                admin_group.system_key = ADMINISTRATOR_GROUP_KEY
+                logger.info("Migrated legacy Administrators group to stable identity")
+
         # Fresh installs get all three starter groups. Once any groups exist,
         # only Administrators is mandatory; Operators and Viewers are ordinary
         # editable groups and a deliberate deletion or rename must persist.
         groups_created = []
         create_optional_defaults = not existing_groups
         for group_name, group_config in DEFAULT_GROUPS.items():
-            if group_name not in existing_groups:
+            if group_config.get("system_key") == ADMINISTRATOR_GROUP_KEY:
+                group = admin_group
+                if group is None:
+                    group = Group(
+                        name=group_name,
+                        description=group_config["description"],
+                        permissions=group_config["permissions"],
+                        is_system=group_config["is_system"],
+                        system_key=ADMINISTRATOR_GROUP_KEY,
+                    )
+                    session.add(group)
+                    groups_created.append(group_name)
+                    admin_group = group
+                    logger.info("Created default group: %s", group_name)
+                else:
+                    expected_is_system = group_config["is_system"]
+                    if group.is_system != expected_is_system:
+                        group.is_system = expected_is_system
+                        logger.info("Updated default group '%s' system flag to %s", group.name, expected_is_system)
+            elif group_name not in existing_groups:
                 if not group_config["is_system"] and not create_optional_defaults:
                     continue
                 group = Group(
@@ -4213,6 +4261,7 @@ async def seed_default_groups():
                 session.add(group)
                 groups_created.append(group_name)
                 logger.info("Created default group: %s", group_name)
+                continue
             else:
                 # Administrators is the only protected default group. Do not
                 # rewrite permissions on optional starter groups: after #37
@@ -4223,43 +4272,41 @@ async def seed_default_groups():
                 if group.is_system != expected_is_system:
                     group.is_system = expected_is_system
                     logger.info("Updated default group '%s' system flag to %s", group_name, expected_is_system)
-                if group.is_system and group.permissions:
-                    updated = False
-                    new_permissions = list(group.permissions)
 
-                    migration_map = PERMISSION_MIGRATION_ALL
+            if group.is_system and group.permissions:
+                updated = False
+                new_permissions = list(group.permissions)
 
-                    for old_perm, new_perm in migration_map.items():
-                        if old_perm in new_permissions:
-                            new_permissions.remove(old_perm)
-                            if new_perm not in new_permissions:
-                                new_permissions.append(new_perm)
+                migration_map = PERMISSION_MIGRATION_ALL
+
+                for old_perm, new_perm in migration_map.items():
+                    if old_perm in new_permissions:
+                        new_permissions.remove(old_perm)
+                        if new_perm not in new_permissions:
+                            new_permissions.append(new_perm)
+                        updated = True
+                        logger.info("Migrated permission '%s' to '%s' in group '%s'", old_perm, new_perm, group.name)
+
+                # For Administrators, also ensure they get *_all permissions if they have any new *_own
+                if group.is_administrator:
+                    for _own_perm, all_perm in [
+                        ("queue:update_own", "queue:update_all"),
+                        ("queue:delete_own", "queue:delete_all"),
+                        ("queue:read_own", "queue:read_all"),
+                        ("archives:update_own", "archives:update_all"),
+                        ("archives:delete_own", "archives:delete_all"),
+                        ("archives:reprint_own", "archives:reprint_all"),
+                        ("archives:read_own", "archives:read_all"),
+                        ("library:update_own", "library:update_all"),
+                        ("library:delete_own", "library:delete_all"),
+                        ("library:read_own", "library:read_all"),
+                    ]:
+                        if all_perm not in new_permissions:
+                            new_permissions.append(all_perm)
                             updated = True
-                            logger.info(
-                                "Migrated permission '%s' to '%s' in group '%s'", old_perm, new_perm, group_name
-                            )
 
-                    # For Administrators, also ensure they get *_all permissions if they have any new *_own
-                    if group_name == "Administrators":
-                        for _own_perm, all_perm in [
-                            ("queue:update_own", "queue:update_all"),
-                            ("queue:delete_own", "queue:delete_all"),
-                            ("queue:read_own", "queue:read_all"),
-                            ("archives:update_own", "archives:update_all"),
-                            ("archives:delete_own", "archives:delete_all"),
-                            ("archives:reprint_own", "archives:reprint_all"),
-                            ("archives:read_own", "archives:read_all"),
-                            ("library:update_own", "library:update_all"),
-                            ("library:delete_own", "library:delete_all"),
-                            ("library:read_own", "library:read_all"),
-                        ]:
-                            # Add *_all if not present
-                            if all_perm not in new_permissions:
-                                new_permissions.append(all_perm)
-                                updated = True
-
-                    if updated:
-                        group.permissions = new_permissions
+                if updated:
+                    group.permissions = new_permissions
 
         await session.commit()
 
@@ -4339,7 +4386,7 @@ async def seed_default_groups():
         # This is additive only: custom permissions are retained, while every
         # current product permission (excluding retired pipeline permissions,
         # which are no longer in ALL_PERMISSIONS) is restored for admins.
-        result = await session.execute(select(Group).where(Group.name == "Administrators"))
+        result = await session.execute(select(Group).where(Group.system_key == ADMINISTRATOR_GROUP_KEY))
         admin_group = result.scalar_one_or_none()
         if admin_group and admin_group.permissions is not None:
             perms = list(admin_group.permissions)
@@ -4383,14 +4430,14 @@ async def seed_default_groups():
         admin_role_migration_key = "migration_role_admin_to_administrators_v1"
         migration_result = await session.execute(select(Settings).where(Settings.key == admin_role_migration_key))
         migration_completed = migration_result.scalar_one_or_none() is not None
-        admin_result = await session.execute(select(Group).where(Group.name == "Administrators"))
+        admin_result = await session.execute(select(Group).where(Group.system_key == ADMINISTRATOR_GROUP_KEY))
         admin_group = admin_result.scalar_one_or_none()
         if admin_group is not None and not migration_completed:
             users_result = await session.execute(
                 select(User).where(User.role == "admin").options(selectinload(User.groups))
             )
             for user in users_result.scalars().all():
-                if all(group.name != "Administrators" for group in user.groups):
+                if all(not group.is_administrator for group in user.groups):
                     user.groups.append(admin_group)
                 user.role = "user"
                 logger.info("Migrated legacy role-admin user '%s' to Administrators group", user.username)
