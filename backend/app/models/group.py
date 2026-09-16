@@ -10,6 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
 from backend.app.core.database import Base
+from backend.app.core.permissions import ADMINISTRATOR_GROUP_KEY
 
 if TYPE_CHECKING:
     from backend.app.models.user import User
@@ -38,6 +39,9 @@ class Group(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    # Nullable for user-created groups. Built-in groups use a stable key so
+    # authorization never depends on their mutable display name.
+    system_key: Mapped[str | None] = mapped_column(String(50), unique=True, nullable=True)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     permissions: Mapped[list[str]] = mapped_column(JSON, default=list)
     is_system: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -51,6 +55,11 @@ class Group(Base):
         back_populates="groups",
         lazy="selectin",
     )
+
+    @property
+    def is_administrator(self) -> bool:
+        """Whether this is the canonical administrator group."""
+        return self.system_key == ADMINISTRATOR_GROUP_KEY
 
     def __repr__(self) -> str:
         return f"<Group {self.name}>"

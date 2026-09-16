@@ -9,6 +9,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 
 from backend.app.core.database import seed_default_groups
+from backend.app.core.permissions import ADMINISTRATOR_GROUP_KEY
 from backend.app.models.group import Group
 from backend.app.models.oidc_provider import OIDCProvider
 
@@ -235,6 +236,60 @@ async def test_administrators_remain_protected(async_client: AsyncClient):
     assert rename.status_code == 400
     assert permissions.status_code == 400
     assert delete.status_code == 400
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_renamed_administrator_group_keeps_identity_and_protection(async_client: AsyncClient, db_session):
+    """Admin behavior follows the stable key, not the display name."""
+    headers = await _setup_admin(async_client)
+    result = await db_session.execute(select(Group).where(Group.system_key == ADMINISTRATOR_GROUP_KEY))
+    administrators = result.scalar_one()
+    original_id = administrators.id
+
+    administrators.name = "Administrateurs"
+    await db_session.commit()
+
+    me = await async_client.get("/api/v1/auth/me", headers=headers)
+    assert me.status_code == 200
+    assert me.json()["is_admin"] is True
+
+    deactivate = await async_client.patch(
+        f"/api/v1/users/{me.json()['id']}",
+        headers=headers,
+        json={"is_active": False},
+    )
+    assert deactivate.status_code == 400
+
+    groups = await async_client.get("/api/v1/groups/", headers=headers)
+    renamed = next(group for group in groups.json() if group["id"] == original_id)
+    assert renamed["name"] == "Administrateurs"
+
+    delete = await async_client.delete(f"/api/v1/groups/{original_id}", headers=headers)
+    assert delete.status_code == 400
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_legacy_administrator_row_is_adopted_without_changing_id_or_membership(
+    async_client: AsyncClient,
+    db_session,
+):
+    """The one-time legacy migration preserves the canonical row and users."""
+    headers = await _setup_admin(async_client)
+    result = await db_session.execute(select(Group).where(Group.name == "Administrators"))
+    administrators = result.scalar_one()
+    original_id = administrators.id
+    administrators.system_key = None
+    await db_session.commit()
+
+    await seed_default_groups()
+
+    await db_session.refresh(administrators)
+    assert administrators.id == original_id
+    assert administrators.system_key == ADMINISTRATOR_GROUP_KEY
+    me = await async_client.get("/api/v1/auth/me", headers=headers)
+    assert me.json()["is_admin"] is True
 
 
 @pytest.mark.asyncio

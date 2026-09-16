@@ -16,6 +16,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.routes.auth import _sync_ldap_user
+from backend.app.core.permissions import ADMINISTRATOR_GROUP_KEY
 from backend.app.models.group import Group
 from backend.app.models.user import User
 
@@ -39,7 +40,12 @@ class _FakeLdapConfig:
 
 
 async def _make_group(db: AsyncSession, name: str) -> Group:
-    group = Group(name=name, description=f"Test group {name}")
+    group = Group(
+        name=name,
+        description=f"Test group {name}",
+        system_key=ADMINISTRATOR_GROUP_KEY if name == "Administrators" else None,
+        is_system=name == "Administrators",
+    )
     db.add(group)
     await db.commit()
     await db.refresh(group)
@@ -175,6 +181,25 @@ class TestLdapGroupSyncPreservesManualAssignments:
         await db_session.refresh(user, attribute_names=["groups"])
 
         assert {group.name for group in user.groups} == {"Administrators"}
+
+    @pytest.mark.asyncio
+    async def test_renamed_administrator_remains_protected_from_ldap_revocation(self, db_session: AsyncSession):
+        """LDAP sync recognizes the canonical group by key after a rename."""
+        admins = await _make_group(db_session, "Administrators")
+        admins.name = "Administrateurs"
+        await db_session.commit()
+        user = await _make_ldap_user(db_session, "renamed-admin", [admins])
+
+        ldap_user = _FakeLdapUser(username="renamed-admin", email=user.email, groups=[])
+        ldap_config = _FakeLdapConfig(
+            group_mapping={"cn=admins,ou=groups,dc=example,dc=com": "Administrators"},
+            default_group="",
+        )
+
+        await _sync_ldap_user(db_session, user, ldap_user, ldap_config)
+        await db_session.refresh(user, attribute_names=["groups"])
+
+        assert {group.name for group in user.groups} == {"Administrateurs"}
 
     @pytest.mark.asyncio
     async def test_mixed_manual_and_ldap_groups(self, db_session: AsyncSession):
