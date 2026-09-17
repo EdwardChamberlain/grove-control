@@ -4091,6 +4091,20 @@ def _is_active_archive_stale(archive, state) -> tuple[bool, str]:
     return False, ""
 
 
+def _is_printer_actively_printing(state) -> bool:
+    """Return whether ``state`` proves that the printer is currently printing.
+
+    Reconciliation is intentionally asynchronous: its connected-edge task can
+    capture an IDLE snapshot, yield while it queries the database, and resume
+    after queue dispatch has started a new print. A synthetic completion must
+    never escape while that live print is active.
+    """
+    current_state = (getattr(state, "state", "") or "").upper()
+    return bool(
+        state and getattr(state, "connected", False) and current_state in ("RUNNING", "PAUSE", "PREPARE", "SLICING")
+    )
+
+
 async def reconcile_stale_active_prints(printer_id: int) -> int:
     """Synthesise ``on_print_complete`` for archives whose print can't be
     running on the printer anymore.
@@ -4135,6 +4149,13 @@ async def reconcile_stale_active_prints(printer_id: int) -> int:
         active = list(result.scalars().all())
 
     if not active:
+        return 0
+
+    # The connected-edge task may have read an IDLE state just before queue
+    # dispatch started a print. Re-read after the database await so the stale
+    # snapshot cannot be used to synthesize completion for a live print.
+    state = printer_manager.get_status(printer_id)
+    if not state or not state.connected:
         return 0
 
     logger = logging.getLogger(__name__)
@@ -4316,6 +4337,17 @@ async def on_print_complete(printer_id: int, data: dict):
 
     logger = logging.getLogger(__name__)
     start_time = time.time()
+
+    # Connected-edge reconciliation runs in the background and can race with
+    # queue dispatch. If its IDLE snapshot is stale by the time this callback
+    # runs, suppress the synthetic completion before it emits any websocket,
+    # webhook, plate-clear, or cleanup side effects.
+    if data.get("_reconciled") and _is_printer_actively_printing(printer_manager.get_status(printer_id)):
+        logger.info(
+            "[CALLBACK] Ignoring stale reconciled completion for printer %s while a print is active",
+            printer_id,
+        )
+        return
 
     def log_timing(section: str):
         elapsed = time.time() - start_time

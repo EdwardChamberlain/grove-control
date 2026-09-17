@@ -223,6 +223,27 @@ class TestReconcileStaleActivePrints:
         assert payload["_reconciled"] is True
 
     @pytest.mark.asyncio
+    async def test_status_is_rechecked_after_archive_query(self):
+        """A connected-edge IDLE snapshot must not complete a print that has
+        started while reconciliation was waiting on the archive query."""
+        from backend.app.main import reconcile_stale_active_prints
+
+        active = _archive(subtask_id="ABC123", filename="job.3mf", print_name="job")
+        idle = _state("IDLE")
+        running = _state("RUNNING", subtask_id="ABC123", subtask_name="job")
+        with patch("backend.app.main.printer_manager") as mock_pm:
+            mock_pm.get_status.side_effect = [idle, running]
+            with patch("backend.app.main.async_session") as mock_session:
+                session_ctx = AsyncMock()
+                session_ctx.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [active])))
+                mock_session.return_value.__aenter__.return_value = session_ctx
+                with patch("backend.app.main.on_print_complete", new=AsyncMock()) as mock_complete:
+                    count = await reconcile_stale_active_prints(printer_id=1)
+
+        assert count == 0
+        mock_complete.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_non_stale_archive_does_not_synthesise(self):
         from backend.app.main import reconcile_stale_active_prints
 
@@ -264,3 +285,31 @@ class TestReconcileStaleActivePrints:
         # Only the second archive is recorded as reconciled (first raised).
         assert count == 1
         assert mock_complete.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_reconciled_completion_is_ignored_while_printing(self):
+        """The final live-state check must suppress every synthetic side effect,
+        even when the printer has not populated a subtask name yet."""
+        from backend.app.main import on_print_complete
+
+        with (
+            patch("backend.app.main.printer_manager") as mock_pm,
+            patch("backend.app.main.clear_3mf_cache") as mock_clear_cache,
+            patch("backend.app.main.ws_manager") as mock_ws,
+        ):
+            mock_pm.get_status.return_value = _state("RUNNING", subtask_name="")
+            mock_ws.send_print_complete = AsyncMock()
+
+            await on_print_complete(
+                1,
+                {
+                    "status": "aborted",
+                    "filename": "job.3mf",
+                    "subtask_name": "job",
+                    "_reconciled": True,
+                },
+            )
+
+        mock_clear_cache.assert_not_called()
+        mock_ws.send_print_complete.assert_not_awaited()
+        mock_pm.set_awaiting_plate_clear.assert_not_called()
