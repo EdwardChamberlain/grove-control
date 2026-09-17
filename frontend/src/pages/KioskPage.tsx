@@ -219,7 +219,7 @@ function KioskQueueStatusPill({
   status,
   t,
 }: {
-  item: PrintQueueItem;
+  item: KioskQueueItem;
   status: PrinterStatus | undefined;
   t: Translate;
 }) {
