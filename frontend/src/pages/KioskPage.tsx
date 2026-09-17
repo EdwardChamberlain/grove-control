@@ -326,6 +326,18 @@ export function KioskPage() {
     })),
   });
   const statuses = useMemo(() => new Map(printers.map((printer, index) => [printer.id, printerStatusQueries[index]?.data])), [printers, printerStatusQueries]);
+  const currentPrintUserQueries = useQueries({
+    queries: printers.map((printer, index) => {
+      const status = printerStatusQueries[index]?.data;
+      const printIdentity = status?.current_print_identity || status?.subtask_name || status?.current_print || status?.gcode_file || null;
+      return {
+        queryKey: ['currentPrintUser', printer.id, printIdentity],
+        queryFn: () => api.getCurrentPrintUser(printer.id),
+        enabled: status?.state === 'RUNNING' || status?.state === 'PAUSE',
+        refetchInterval: 30_000,
+      };
+    }),
+  });
   const printingItems = useMemo(
     () => queue.filter((item) => item.status === 'preheating' || item.status === 'dispatching' || item.status === 'printing'),
     [queue],
@@ -333,17 +345,18 @@ export function KioskPage() {
   const pendingItems = useMemo(() => queue.filter((item) => item.status === 'pending').sort((a, b) => a.position - b.position), [queue]);
   const printingItemsByPrinter = useMemo(() => new Map(printingItems.filter((item) => item.printer_id != null).map((item) => [item.printer_id!, item])), [printingItems]);
 
-  const owners = useMemo(() => new Map(printers.map((printer) => {
+  const owners = useMemo(() => new Map(printers.map((printer, index) => {
     const status = statuses.get(printer.id);
     const queueOwner = printingItemsByPrinter.get(printer.id)?.created_by_username ?? undefined;
+    const currentPrintUser = currentPrintUserQueries[index]?.data?.username;
     const plateClearOwner = status?.awaiting_plate_clear_print?.created_by_username ?? undefined;
     const owner = isActivePrint(status)
-      ? status?.current_queue_owner || queueOwner
+      ? status?.current_queue_owner || currentPrintUser || queueOwner
       : status?.awaiting_plate_clear
         ? plateClearOwner
         : undefined;
     return [printer.id, owner];
-  })), [printers, printingItemsByPrinter, statuses]);
+  })), [currentPrintUserQueries, printers, printingItemsByPrinter, statuses]);
 
   const prioritizedPrinters = useMemo(() => [...printers].sort((a, b) => {
     const priority = (printer: PrinterRecord) => {
