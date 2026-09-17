@@ -515,7 +515,29 @@ class TestActivePrinterReservation:
                 poll_interval=0.01,
             )
 
-        assert telemetry_status == "completed"
+        assert telemetry_status == "dispatching"
+
+    @pytest.mark.asyncio
+    async def test_terminal_telemetry_waits_for_active_confirmation(self):
+        """A stale terminal state must not end confirmation before RUNNING."""
+        get_status = MagicMock(
+            side_effect=[
+                _status("FINISH", "NEW_SUBTASK"),
+                _status("RUNNING", "NEW_SUBTASK"),
+            ]
+        )
+        with patch("backend.app.services.print_scheduler.printer_manager.get_status", get_status):
+            telemetry_status, status = await PrintScheduler()._wait_for_print_start_ack(
+                printer_id=42,
+                dispatch_subtask_id="NEW_SUBTASK",
+                timeout=0.05,
+                phase_b_timeout=0.05,
+                poll_interval=0.01,
+            )
+
+        assert telemetry_status == "printing"
+        assert status.state == "RUNNING"
+        assert get_status.call_count == 2
 
     @pytest.mark.asyncio
     async def test_active_telemetry_requires_this_dispatch_submission_id(self):

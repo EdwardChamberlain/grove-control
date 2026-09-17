@@ -4235,9 +4235,14 @@ class PrintScheduler:
                 continue
             last_status = status
             telemetry_status = _queue_status_from_dispatch_telemetry(status, dispatch_subtask_id)
-            if telemetry_status in ("printing", "completed", "failed"):
+            if telemetry_status == "printing":
                 return telemetry_status, status
-            if telemetry_status == "dispatching":
+            if telemetry_status in ("dispatching", "completed", "failed"):
+                # A terminal state can be left over from the previous print
+                # while this dispatch's subtask id has already arrived. It
+                # proves the printer saw the submission, but not that this
+                # dispatch completed. Keep polling for PREPARE/RUNNING so a
+                # mixed-generation update cannot strand the queue item.
                 landed_on_subtask = True
                 break
             await asyncio.sleep(poll_interval)
@@ -4251,7 +4256,7 @@ class PrintScheduler:
                     continue
                 last_status = status
                 telemetry_status = _queue_status_from_dispatch_telemetry(status, dispatch_subtask_id)
-                if telemetry_status in ("printing", "completed", "failed"):
+                if telemetry_status == "printing":
                     return telemetry_status, status
 
         return ("dispatching" if landed_on_subtask else None), last_status
