@@ -831,12 +831,26 @@ async def get_printer_status(
         # A viewer may not be allowed to see the completed archive, and an
         # older visible archive is worse than omitting the completion details.
         if archive is not None:
+            # The archive owner is the uploader, not necessarily the user who
+            # queued this particular print. Prefer the terminal queue item so
+            # the kiosk identifies the owner of the print run (#163). The
+            # archive owner remains a fallback for legacy/non-queue prints.
+            queue_owner_result = await db.execute(
+                select(User.username)
+                .join(PrintQueueItem, PrintQueueItem.created_by_id == User.id)
+                .where(PrintQueueItem.archive_id == archive.id)
+                .where(PrintQueueItem.printer_id == printer_id)
+                .where(PrintQueueItem.status.in_(("completed", "failed", "cancelled", "aborted")))
+                .order_by(PrintQueueItem.completed_at.desc().nullslast(), PrintQueueItem.id.desc())
+                .limit(1)
+            )
+            queue_owner = queue_owner_result.scalar_one_or_none()
             awaiting_plate_clear_print = PlateClearPrintSummary(
                 archive_id=archive.id,
                 print_name=archive.print_name,
                 filename=archive.filename,
                 thumbnail_path=archive.thumbnail_path,
-                created_by_username=archive.created_by.username if archive.created_by else None,
+                created_by_username=queue_owner or (archive.created_by.username if archive.created_by else None),
             )
 
     return PrinterStatus(
