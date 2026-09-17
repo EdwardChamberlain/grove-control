@@ -1144,16 +1144,14 @@ async def on_printer_status_change(printer_id: int, state: PrinterState):
     # Connected-edge reconciliation (#1542 follow-up). When the printer
     # transitions disconnected → connected — which covers both Grove Control
     # startup (no prior connection) and a mid-session MQTT reconnect — fire
-    # `reconcile_stale_active_prints` exactly once for this connection so
-    # any archive still in `status="printing"` that can't actually be
-    # running anymore (printer IDLE / different subtask / empty subtask)
-    # gets a synthesised PRINT COMPLETE. Without this, a print that
-    # finished during a disconnect window + a smart-plug power cycle
-    # leaves the .3mf on the SD card and the firmware ghost-replays it on
-    # next boot. Reconciliation runs concurrently — it must not block the
-    # WebSocket dedup / broadcast logic below, and the connected edge is
-    # marked True BEFORE the await so concurrent status updates inside
-    # the same connection don't re-trigger reconciliation.
+    # `reconcile_stale_active_prints` once the printer is in a safe terminal
+    # state. Never synthesize a completion while another print is active: the
+    # completion handler has printer-level side effects (webhooks,
+    # plate-clear, queue state), not just archive cleanup. Without this,
+    # a print that finished during a disconnect window + a smart-plug power
+    # cycle leaves the .3mf on the SD card and the firmware ghost-replays it
+    # on next boot. Reconciliation runs concurrently — it must not block the
+    # WebSocket dedup / broadcast logic below.
     #
     # Wait for a real push_status before reconciling (#1679): MQTT
     # `_on_connect` broadcasts `state` IMMEDIATELY after the broker accepts
@@ -1166,10 +1164,15 @@ async def on_printer_status_change(printer_id: int, state: PrinterState):
     # double-counts filament. Gating on `state.state ∉ ("", "unknown")`
     # keeps the #1542 mechanism intact: once the first real push_status
     # updates `state.state` (RUNNING / IDLE / FINISH / …), this handler
-    # fires again with the flag still False — reconcile then runs against
-    # actual evidence.
+    # evaluates actual evidence. Active states are deferred until the
+    # printer reaches a terminal state, where reconciliation is safe.
     state_known = bool(state.state) and state.state.upper() not in ("", "UNKNOWN")
-    if state.connected and state_known and not _printer_reconciled_since_connect.get(printer_id, False):
+    if (
+        state.connected
+        and state_known
+        and not _is_printer_actively_printing(state)
+        and not _printer_reconciled_since_connect.get(printer_id, False)
+    ):
         _printer_reconciled_since_connect[printer_id] = True
         spawn_background_task(
             reconcile_stale_active_prints(printer_id),
@@ -4105,48 +4108,6 @@ def _is_printer_actively_printing(state) -> bool:
     )
 
 
-def _normalise_print_identity(value) -> str:
-    """Reduce a printer/archive name or path to a comparable print identity."""
-    identity = str(value or "").replace("\\", "/").rsplit("/", 1)[-1].lower()
-    for suffix in (".gcode.3mf", ".3mf", ".gcode"):
-        if identity.endswith(suffix):
-            return identity[: -len(suffix)]
-    return identity
-
-
-def _reconciled_completion_matches_active_print(data: dict, state) -> bool:
-    """Return whether a synthetic completion describes the live print.
-
-    A running printer with a different subtask is a legitimate stale-archive
-    recovery case. Only suppress the synthetic callback when its subtask or
-    filename identifies the print that is currently active.
-    """
-    if not _is_printer_actively_printing(state):
-        return False
-
-    # The reconciled payload's explicit subtask_id belongs to the stale
-    # archive. raw_data is copied from the live printer for usage tracking,
-    # so using raw_data.subtask_id here would mistake the current print's ID
-    # for the archive's when the archive has no stored subtask_id.
-    event_subtask_id = str(data.get("subtask_id") or "").strip()
-    live_subtask_id = str(getattr(state, "subtask_id", None) or "").strip()
-    if event_subtask_id and live_subtask_id:
-        return event_subtask_id == live_subtask_id
-
-    event_identities = {
-        _normalise_print_identity(data.get("filename")),
-        _normalise_print_identity(data.get("subtask_name")),
-    }
-    active_identities = {
-        _normalise_print_identity(getattr(state, "gcode_file", None)),
-        _normalise_print_identity(getattr(state, "current_print", None)),
-        _normalise_print_identity(getattr(state, "subtask_name", None)),
-    }
-    event_identities.discard("")
-    active_identities.discard("")
-    return bool(event_identities & active_identities)
-
-
 async def reconcile_stale_active_prints(printer_id: int) -> int:
     """Synthesise ``on_print_complete`` for archives whose print can't be
     running on the printer anymore.
@@ -4195,9 +4156,13 @@ async def reconcile_stale_active_prints(printer_id: int) -> int:
 
     # The connected-edge task may have read an IDLE state just before queue
     # dispatch started a print. Re-read after the database await so the stale
-    # snapshot cannot be used to synthesize completion for a live print.
+    # snapshot cannot be used to synthesize completion for a live print. Leave
+    # the connection un-reconciled so the next terminal state can retry.
     state = printer_manager.get_status(printer_id)
     if not state or not state.connected:
+        return 0
+    if _is_printer_actively_printing(state):
+        _printer_reconciled_since_connect[printer_id] = False
         return 0
 
     logger = logging.getLogger(__name__)
@@ -4219,7 +4184,7 @@ async def reconcile_stale_active_prints(printer_id: int) -> int:
         # the usage tracker can compare end-of-print remain% against the
         # captured start values.
         try:
-            await on_print_complete(
+            completion_result = await on_print_complete(
                 printer_id,
                 {
                     "status": "aborted",
@@ -4230,7 +4195,8 @@ async def reconcile_stale_active_prints(printer_id: int) -> int:
                     "_reconciled": True,
                 },
             )
-            reconciled += 1
+            if completion_result is not False:
+                reconciled += 1
         except Exception as e:
             # Catch-all: a reconciliation failure must not block the
             # printer's normal status flow. The archive stays in
@@ -4381,17 +4347,15 @@ async def on_print_complete(printer_id: int, data: dict):
     start_time = time.time()
 
     # Connected-edge reconciliation runs in the background and can race with
-    # queue dispatch. If its IDLE snapshot is stale by the time this callback
-    # runs, suppress only the synthetic completion for that live print before
-    # it emits any websocket, webhook, plate-clear, or cleanup side effects.
-    if data.get("_reconciled") and _reconciled_completion_matches_active_print(
-        data, printer_manager.get_status(printer_id)
-    ):
+    # queue dispatch. A synthetic completion must never enter this handler
+    # while any print is active: this callback has printer-level side effects,
+    # so even a stale archive for a different job must be deferred.
+    if data.get("_reconciled") and _is_printer_actively_printing(printer_manager.get_status(printer_id)):
         logger.info(
             "[CALLBACK] Ignoring stale reconciled completion for printer %s while a print is active",
             printer_id,
         )
-        return
+        return False
 
     def log_timing(section: str):
         elapsed = time.time() - start_time
@@ -4512,7 +4476,13 @@ async def on_print_complete(printer_id: int, data: dict):
             possible_keys.append((printer_id, filename))
 
     raw_data = data.get("raw_data") or {}
-    raw_subtask_id = raw_data.get("subtask_id") or data.get("subtask_id")
+    # Reconciliation carries live raw_data for usage tracking, but its
+    # explicit subtask_id belongs to the archive being finalized. Never let
+    # the live printer ID replace an ID-less reconciled archive.
+    if data.get("_reconciled"):
+        raw_subtask_id = data.get("subtask_id")
+    else:
+        raw_subtask_id = data.get("subtask_id") or raw_data.get("subtask_id")
     event_subtask_id = str(raw_subtask_id).strip() if raw_subtask_id is not None else None
     if event_subtask_id in ("", "0"):
         event_subtask_id = None

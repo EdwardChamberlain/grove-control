@@ -50,6 +50,31 @@ def _archive(
     )
 
 
+def _status_state(state: str) -> SimpleNamespace:
+    """Minimal status-change payload for the reconciliation edge tests."""
+    return SimpleNamespace(
+        connected=True,
+        state=state,
+        progress=0,
+        layer_num=0,
+        temperatures={},
+        raw_data={},
+        stg_cur=0,
+        cooling_fan_speed=0,
+        big_fan1_speed=0,
+        big_fan2_speed=0,
+        chamber_light="",
+        active_extruder=0,
+        tray_now=0,
+        door_open=False,
+        ams_filament_backup=None,
+        remaining_time=0,
+        gcode_file=None,
+        subtask_name="",
+        hms_errors=[],
+    )
+
+
 class TestIsActiveArchiveStale:
     """Decision function — covers all three stale triggers + the
     intentionally-conservative no-op cases."""
@@ -166,6 +191,33 @@ class TestReconcileStaleActivePrints:
     """
 
     @pytest.mark.asyncio
+    async def test_connected_active_state_defers_until_terminal_state(self):
+        """An active reconnect must re-arm reconciliation for completion."""
+        from backend.app import main as main_module
+        from backend.app.main import on_printer_status_change
+
+        scheduled = []
+
+        def capture_task(coro, *, name):
+            scheduled.append(name)
+            coro.close()
+
+        with (
+            patch("backend.app.main.spawn_background_task", side_effect=capture_task),
+            patch("backend.app.main.mqtt_relay") as mock_relay,
+            patch("backend.app.main.printer_state_to_dict", return_value={}),
+            patch.dict(main_module._printer_reconciled_since_connect, {}, clear=True),
+            patch.dict(main_module._last_status_broadcast, {}, clear=True),
+        ):
+            mock_relay.on_printer_status = AsyncMock()
+            await on_printer_status_change(1, _status_state("RUNNING"))
+            assert scheduled == []
+
+            await on_printer_status_change(1, _status_state("IDLE"))
+
+        assert scheduled == ["reconcile-stale-prints-1"]
+
+    @pytest.mark.asyncio
     async def test_no_status_skips_reconciliation(self):
         from backend.app.main import reconcile_stale_active_prints
 
@@ -272,19 +324,24 @@ class TestReconcileStaleActivePrints:
         a1.id = 1
         a2 = _archive(subtask_id="B", filename="b.3mf")
         a2.id = 2
+        a3 = _archive(subtask_id="C", filename="c.3mf")
+        a3.id = 3
         with patch("backend.app.main.printer_manager") as mock_pm:
             mock_pm.get_status.return_value = _state("IDLE")
             with patch("backend.app.main.async_session") as mock_session:
                 session_ctx = AsyncMock()
-                session_ctx.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [a1, a2])))
+                session_ctx.execute = AsyncMock(
+                    return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [a1, a2, a3]))
+                )
                 mock_session.return_value.__aenter__.return_value = session_ctx
-                # First call raises, second call must still happen.
-                mock_complete = AsyncMock(side_effect=[RuntimeError("boom"), None])
+                # First call raises, second is suppressed, and the third succeeds.
+                mock_complete = AsyncMock(side_effect=[RuntimeError("boom"), False, None])
                 with patch("backend.app.main.on_print_complete", new=mock_complete):
                     count = await reconcile_stale_active_prints(printer_id=1)
-        # Only the second archive is recorded as reconciled (first raised).
+        # Only the third archive is recorded as reconciled: the first raised
+        # and the second explicitly reported that it was suppressed.
         assert count == 1
-        assert mock_complete.await_count == 2
+        assert mock_complete.await_count == 3
 
     @pytest.mark.asyncio
     async def test_reconciled_completion_is_ignored_while_printing(self):
@@ -306,48 +363,31 @@ class TestReconcileStaleActivePrints:
             mock_pm.get_status.return_value.current_print = "/data/Metadata/job.gcode.3mf"
             mock_ws.send_print_complete = AsyncMock()
 
-            await on_print_complete(
+            result = await on_print_complete(
                 1,
                 {
                     "status": "aborted",
                     "filename": "job.gcode.3mf",
                     "subtask_name": "job",
                     "subtask_id": "OLD_ID",
+                    "raw_data": {"subtask_id": "NEW_ID"},
                     "_reconciled": True,
                 },
             )
 
+        assert result is False
         mock_clear_cache.assert_not_called()
         mock_ws.send_print_complete.assert_not_awaited()
         mock_pm.set_awaiting_plate_clear.assert_not_called()
 
-    def test_idless_archive_does_not_borrow_live_subtask_id(self):
-        """Live raw_data is telemetry, not the reconciled archive's identity.
-
-        An older archive can legitimately have no stored subtask ID. When a
-        different print is active, the guard must fall back to filename/name
-        matching instead of borrowing the live print's ID from raw_data and
-        suppressing the stale-archive recovery.
-        """
-        from backend.app.main import _reconciled_completion_matches_active_print
-
-        running = _state("RUNNING", subtask_id="NEW_ID", subtask_name="")
-        running.gcode_file = "/data/Metadata/new.gcode.3mf"
-        running.current_print = "/data/Metadata/new.gcode.3mf"
-        running.raw_data = {"subtask_id": "NEW_ID"}
-        payload = {
-            "filename": "old.gcode.3mf",
-            "subtask_name": "old",
-            "subtask_id": "",
-            "raw_data": running.raw_data,
-        }
-
-        assert _reconciled_completion_matches_active_print(payload, running) is False
-
     @pytest.mark.asyncio
-    async def test_reconciled_different_print_is_still_recovered(self):
-        """An active printer may still have a genuinely stale archive from a
-        different print; the blocker fix must preserve that recovery path."""
+    async def test_active_print_defers_different_stale_archive(self):
+        """A different stale archive must wait for a terminal printer state.
+
+        Calling the full completion handler while another print is active
+        would raise plate-clear and publish a false completion for the live
+        printer, so reconciliation must defer the archive instead.
+        """
         from backend.app.main import reconcile_stale_active_prints
 
         stale = _archive(subtask_id="OLD_ID", filename="old.gcode.3mf", print_name="old")
@@ -363,5 +403,5 @@ class TestReconcileStaleActivePrints:
                 with patch("backend.app.main.on_print_complete", new=AsyncMock()) as mock_complete:
                     count = await reconcile_stale_active_prints(printer_id=1)
 
-        assert count == 1
-        mock_complete.assert_awaited_once()
+        assert count == 0
+        mock_complete.assert_not_awaited()
