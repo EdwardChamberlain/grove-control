@@ -1561,7 +1561,7 @@ export function SettingsPage() {
                       i18n.changeLanguage(newLang);
                       updateMutation.mutate({ language: newLang });
                     }}
-                    className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
+                    className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
                   >
                     {availableLanguages.map((lang) => (
                       <option key={lang.code} value={lang.code}>
@@ -1582,7 +1582,7 @@ export function SettingsPage() {
                   <ReactSelect
                     value={defaultView}
                     onChange={(e) => handleDefaultViewChange(e.target.value)}
-                    className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
+                    className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
                   >
                     {defaultNavItems.map((item) => (
                       <option key={item.id} value={item.to}>
@@ -1604,7 +1604,7 @@ export function SettingsPage() {
                     <ReactSelect
                       value={localSettings.date_format || 'system'}
                       onChange={(e) => updateSetting('date_format', e.target.value as 'system' | 'us' | 'eu' | 'iso')}
-                      className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
+                      className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
                     >
                       <option value="system">{t('settings.systemDefault')}</option>
                       <option value="us">{t('settings.dateFormatUs')}</option>
@@ -1621,7 +1621,7 @@ export function SettingsPage() {
                     <ReactSelect
                       value={localSettings.time_format || 'system'}
                       onChange={(e) => updateSetting('time_format', e.target.value as 'system' | '12h' | '24h')}
-                      className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
+                      className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
                     >
                       <option value="system">{t('settings.systemDefault')}</option>
                       <option value="12h">{t('settings.timeFormat12')}</option>
@@ -1638,7 +1638,7 @@ export function SettingsPage() {
                   <ReactSelect
                     value={localSettings.default_printer_id ?? ''}
                     onChange={(e) => updateSetting('default_printer_id', e.target.value ? Number(e.target.value) : null)}
-                    className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
+                    className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
                   >
                     <option value="">{t('settings.noDefaultPrinter')}</option>
                     {printers?.map((printer) => (
@@ -2690,7 +2690,7 @@ export function SettingsPage() {
                       <ReactSelect
                         value={localSettings.ftp_retry_count ?? 3}
                         onChange={(e) => updateSetting('ftp_retry_count', parseInt(e.target.value))}
-                        className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
+                        className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
                       >
                         {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
                           <option key={n} value={n}>{t('settings.time', { count: n })}</option>
@@ -2707,7 +2707,7 @@ export function SettingsPage() {
                       <ReactSelect
                         value={localSettings.ftp_retry_delay ?? 2}
                         onChange={(e) => updateSetting('ftp_retry_delay', parseInt(e.target.value))}
-                        className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
+                        className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
                       >
                         {[1, 2, 3, 5, 10, 15, 20, 30].map(n => (
                           <option key={n} value={n}>{t('settings.second', { count: n })}</option>
@@ -2723,7 +2723,7 @@ export function SettingsPage() {
                       <ReactSelect
                         value={localSettings.ftp_timeout ?? 30}
                         onChange={(e) => updateSetting('ftp_timeout', parseInt(e.target.value))}
-                        className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
+                        className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
                       >
                         {[10, 15, 20, 30, 45, 60, 90, 120, 180, 300].map(n => (
                           <option key={n} value={n}>{t('settings.nSeconds', { count: n })}</option>
@@ -4596,7 +4596,7 @@ export function SettingsPage() {
                   <ReactSelect
                     value={localSettings.preferred_slicer ?? 'bambu_studio'}
                     onChange={(e) => updateSetting('preferred_slicer', e.target.value as 'bambu_studio' | 'orcaslicer')}
-                    className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
+                    className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
                   >
                     <option value="bambu_studio">{t('settings.slicerBambuStudio')}</option>
                     <option value="orcaslicer">{t('settings.slicerOrcaSlicer')}</option>
@@ -4641,7 +4641,7 @@ export function SettingsPage() {
                         e.target.value === '' ? null : (e.target.value as 'bambu_studio' | 'orcaslicer'),
                       )
                     }
-                    className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
+                    className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
                   >
                     <option value="">{t('settings.openInSlicerInherit', 'Same as API slicer')}</option>
                     <option value="bambu_studio">{t('settings.slicerBambuStudio')}</option>

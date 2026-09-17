@@ -220,6 +220,7 @@ describe('SettingsPage', () => {
           const field = select?.parentElement?.parentElement;
           expect(field).toBeInTheDocument();
           expect(field?.querySelectorAll('svg')).toHaveLength(1);
+          expect(select).not.toHaveClass('pr-10');
         }
       });
     });
