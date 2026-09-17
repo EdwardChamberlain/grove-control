@@ -4161,7 +4161,6 @@ async def reconcile_stale_active_prints(printer_id: int) -> int:
     if not state or not state.connected:
         return 0
     if _is_printer_actively_printing(state):
-        _printer_reconciled_since_connect[printer_id] = True
         return 0
 
     logger = logging.getLogger(__name__)
