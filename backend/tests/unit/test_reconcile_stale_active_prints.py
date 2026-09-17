@@ -321,6 +321,29 @@ class TestReconcileStaleActivePrints:
         mock_ws.send_print_complete.assert_not_awaited()
         mock_pm.set_awaiting_plate_clear.assert_not_called()
 
+    def test_idless_archive_does_not_borrow_live_subtask_id(self):
+        """Live raw_data is telemetry, not the reconciled archive's identity.
+
+        An older archive can legitimately have no stored subtask ID. When a
+        different print is active, the guard must fall back to filename/name
+        matching instead of borrowing the live print's ID from raw_data and
+        suppressing the stale-archive recovery.
+        """
+        from backend.app.main import _reconciled_completion_matches_active_print
+
+        running = _state("RUNNING", subtask_id="NEW_ID", subtask_name="")
+        running.gcode_file = "/data/Metadata/new.gcode.3mf"
+        running.current_print = "/data/Metadata/new.gcode.3mf"
+        running.raw_data = {"subtask_id": "NEW_ID"}
+        payload = {
+            "filename": "old.gcode.3mf",
+            "subtask_name": "old",
+            "subtask_id": "",
+            "raw_data": running.raw_data,
+        }
+
+        assert _reconciled_completion_matches_active_print(payload, running) is False
+
     @pytest.mark.asyncio
     async def test_reconciled_different_print_is_still_recovered(self):
         """An active printer may still have a genuinely stale archive from a

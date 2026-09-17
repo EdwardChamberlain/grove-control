@@ -4124,8 +4124,11 @@ def _reconciled_completion_matches_active_print(data: dict, state) -> bool:
     if not _is_printer_actively_printing(state):
         return False
 
-    raw_data = data.get("raw_data") or {}
-    event_subtask_id = str(data.get("subtask_id") or raw_data.get("subtask_id") or "").strip()
+    # The reconciled payload's explicit subtask_id belongs to the stale
+    # archive. raw_data is copied from the live printer for usage tracking,
+    # so using raw_data.subtask_id here would mistake the current print's ID
+    # for the archive's when the archive has no stored subtask_id.
+    event_subtask_id = str(data.get("subtask_id") or "").strip()
     live_subtask_id = str(getattr(state, "subtask_id", None) or "").strip()
     if event_subtask_id and live_subtask_id:
         return event_subtask_id == live_subtask_id
