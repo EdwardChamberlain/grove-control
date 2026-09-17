@@ -191,8 +191,8 @@ class TestReconcileStaleActivePrints:
     """
 
     @pytest.mark.asyncio
-    async def test_connected_active_state_defers_until_terminal_state(self):
-        """An active reconnect must re-arm reconciliation for completion."""
+    async def test_connected_active_state_defers_until_next_reconnect(self):
+        """An active reconnect must not race its later completion callback."""
         from backend.app import main as main_module
         from backend.app.main import on_printer_status_change
 
@@ -215,7 +215,7 @@ class TestReconcileStaleActivePrints:
 
             await on_printer_status_change(1, _status_state("IDLE"))
 
-        assert scheduled == ["reconcile-stale-prints-1"]
+        assert scheduled == []
 
     @pytest.mark.asyncio
     async def test_no_status_skips_reconciliation(self):

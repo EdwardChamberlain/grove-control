@@ -1164,20 +1164,18 @@ async def on_printer_status_change(printer_id: int, state: PrinterState):
     # double-counts filament. Gating on `state.state ∉ ("", "unknown")`
     # keeps the #1542 mechanism intact: once the first real push_status
     # updates `state.state` (RUNNING / IDLE / FINISH / …), this handler
-    # evaluates actual evidence. Active states are deferred until the
-    # printer reaches a terminal state, where reconciliation is safe.
+    # evaluates actual evidence. If the first real state is active, mark this
+    # connection handled but defer reconciliation until the next reconnect;
+    # triggering on the terminal transition would race the real completion
+    # callback for that same MQTT message.
     state_known = bool(state.state) and state.state.upper() not in ("", "UNKNOWN")
-    if (
-        state.connected
-        and state_known
-        and not _is_printer_actively_printing(state)
-        and not _printer_reconciled_since_connect.get(printer_id, False)
-    ):
+    if state.connected and state_known and not _printer_reconciled_since_connect.get(printer_id, False):
         _printer_reconciled_since_connect[printer_id] = True
-        spawn_background_task(
-            reconcile_stale_active_prints(printer_id),
-            name=f"reconcile-stale-prints-{printer_id}",
-        )
+        if not _is_printer_actively_printing(state):
+            spawn_background_task(
+                reconcile_stale_active_prints(printer_id),
+                name=f"reconcile-stale-prints-{printer_id}",
+            )
     elif not state.connected and _printer_reconciled_since_connect.get(printer_id, False):
         # Re-arm so the next reconnect triggers reconciliation again.
         _printer_reconciled_since_connect[printer_id] = False
@@ -4156,13 +4154,14 @@ async def reconcile_stale_active_prints(printer_id: int) -> int:
 
     # The connected-edge task may have read an IDLE state just before queue
     # dispatch started a print. Re-read after the database await so the stale
-    # snapshot cannot be used to synthesize completion for a live print. Leave
-    # the connection un-reconciled so the next terminal state can retry.
+    # snapshot cannot be used to synthesize completion for a live print. The
+    # connection was already marked handled by the status edge; the next
+    # reconnect will retry against a terminal state.
     state = printer_manager.get_status(printer_id)
     if not state or not state.connected:
         return 0
     if _is_printer_actively_printing(state):
-        _printer_reconciled_since_connect[printer_id] = False
+        _printer_reconciled_since_connect[printer_id] = True
         return 0
 
     logger = logging.getLogger(__name__)
