@@ -10,6 +10,24 @@ import { formatPrintName } from '../utils/printName';
 
 type Translate = TFunction;
 
+type KioskQueueItem = Pick<
+  PrintQueueItem,
+  | 'id'
+  | 'printer_id'
+  | 'archive_id'
+  | 'library_file_id'
+  | 'archive_name'
+  | 'archive_thumbnail'
+  | 'library_file_name'
+  | 'library_file_thumbnail'
+  | 'printer_name'
+  | 'created_by_username'
+  | 'print_time_seconds'
+  | 'status'
+  | 'scheduled_time'
+  | 'waiting_reason'
+>;
+
 function isActivePrint(status: PrinterStatus | undefined): boolean {
   return status?.preheating === true || status?.state === 'RUNNING' || status?.state === 'PAUSE';
 }
@@ -29,6 +47,14 @@ function getPrinterStateLabel(printer: PrinterRecord, status: PrinterStatus | un
     case 'IDLE': return t('printers.status.idle', 'Idle');
     default: return status.state ? status.state.charAt(0) + status.state.slice(1).toLowerCase() : t('printers.status.idle', 'Idle');
   }
+}
+
+function getActiveJobName(status: PrinterStatus | undefined, t: Translate): string {
+  return formatPrintName(
+    status?.subtask_name || status?.current_print || status?.gcode_file || null,
+    status?.gcode_file,
+    t,
+  ) || t('kiosk.noJob');
 }
 
 function useOverflowing(dependencies: unknown[]) {
@@ -80,7 +106,7 @@ function KioskPrinterTile({
   const plateClearRequired = !isMaintenanceMode && status?.awaiting_plate_clear === true && !active;
   const progress = plateClearRequired ? 100 : Math.max(0, Math.min(100, active && !preheating ? status?.progress ?? 0 : 0));
   const jobName = !preheating && (active || plateClearRequired)
-    ? formatPrintName(status?.subtask_name || status?.current_print || status?.gcode_file || null, status?.gcode_file, t) || t('kiosk.noJob')
+    ? getActiveJobName(status, t)
     : t('kiosk.noJob');
   const eta = active && status?.remaining_time != null && status.remaining_time > 0
     ? formatETA(status.remaining_time, timeFormat, t)
@@ -133,7 +159,7 @@ function KioskQueueCard({
   timeFormat,
   t,
 }: {
-  item: PrintQueueItem;
+  item: KioskQueueItem;
   status: PrinterStatus | undefined;
   timeFormat: TimeFormat;
   t: Translate;
@@ -265,7 +291,7 @@ function KioskQueueSection({
   listClassName,
 }: {
   title: string;
-  items: PrintQueueItem[];
+  items: KioskQueueItem[];
   statuses: Map<number, PrinterStatus | undefined>;
   timeFormat: TimeFormat;
   t: Translate;
@@ -357,6 +383,32 @@ export function KioskPage() {
         : undefined;
     return [printer.id, owner];
   })), [currentPrintUserQueries, printers, printingItemsByPrinter, statuses]);
+  const synthesizedPrintingItems = useMemo<KioskQueueItem[]>(() => printers.flatMap((printer) => {
+    const status = statuses.get(printer.id);
+    if (!isActivePrint(status) || printingItemsByPrinter.has(printer.id)) return [];
+
+    return [{
+      // Synthetic IDs are only used as stable React keys for read-only kiosk cards.
+      id: -printer.id,
+      printer_id: printer.id,
+      archive_id: status?.current_archive_id ?? null,
+      library_file_id: null,
+      archive_name: getActiveJobName(status, t),
+      archive_thumbnail: null,
+      library_file_name: null,
+      library_file_thumbnail: null,
+      printer_name: printer.name,
+      created_by_username: owners.get(printer.id) ?? null,
+      print_time_seconds: null,
+      status: status?.preheating ? 'preheating' : 'printing',
+      scheduled_time: null,
+      waiting_reason: null,
+    }];
+  }), [owners, printers, printingItemsByPrinter, statuses, t]);
+  const activeItems = useMemo(
+    () => [...printingItems, ...synthesizedPrintingItems],
+    [printingItems, synthesizedPrintingItems],
+  );
 
   const prioritizedPrinters = useMemo(() => [...printers].sort((a, b) => {
     const priority = (printer: PrinterRecord) => {
@@ -418,7 +470,7 @@ export function KioskPage() {
         </section>
 
         <div data-testid="kiosk-queue-area" className="flex min-h-0 flex-1 flex-col border-t border-bambu-dark-tertiary pt-3">
-          <KioskQueueSection title={t('queue.sections.activeJobs')} items={printingItems} statuses={statuses} timeFormat={timeFormat} t={t} testId="kiosk-printing-section" className="mb-4 shrink-0" listClassName="max-h-52" />
+          <KioskQueueSection title={t('queue.sections.activeJobs')} items={activeItems} statuses={statuses} timeFormat={timeFormat} t={t} testId="kiosk-printing-section" className="mb-4 shrink-0" listClassName="max-h-52" />
           <KioskQueueSection title={t('queue.sections.queued')} items={pendingItems} statuses={statuses} timeFormat={timeFormat} t={t} testId="kiosk-pending-section" fillAvailableHeight />
         </div>
       </main>

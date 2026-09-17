@@ -372,6 +372,10 @@ describe('KioskPage', () => {
       const printerTile = screen.getByTestId('kiosk-printer-1');
       expect(within(printerTile).getByText('Ed')).toBeInTheDocument();
       expect(within(printerTile).getByTitle('Added by Ed')).toBeInTheDocument();
+      const activeSection = screen.getByTestId('kiosk-printing-section');
+      expect(within(activeSection).getByText('Widget batch')).toBeInTheDocument();
+      expect(within(activeSection).getByText('Atlas')).toBeInTheDocument();
+      expect(within(activeSection).getByText('(1)')).toBeInTheDocument();
     });
   });
 });
