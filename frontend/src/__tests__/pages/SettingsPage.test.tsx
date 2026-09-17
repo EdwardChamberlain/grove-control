@@ -216,7 +216,10 @@ describe('SettingsPage', () => {
           const select = label.closest('div')?.querySelector('[role="combobox"]');
 
           expect(select).toBeInTheDocument();
-          expect(select?.parentElement?.querySelectorAll('svg')).toHaveLength(1);
+          // The duplicate chevron would be a sibling of ReactSelect's root.
+          const field = select?.parentElement?.parentElement;
+          expect(field).toBeInTheDocument();
+          expect(field?.querySelectorAll('svg')).toHaveLength(1);
         }
       });
     });
