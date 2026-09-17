@@ -357,4 +357,25 @@ describe('KioskPage', () => {
       expect(within(screen.getByTestId('kiosk-printer-1')).getByTitle('Added by Morgan')).toBeInTheDocument();
     });
   });
+
+  it('uses the current print user when an active job is absent from the queue response', async () => {
+    vi.mocked(api.getQueue).mockResolvedValue([] as never);
+    vi.mocked(api.getPrinterStatus).mockImplementation(async (printerId) => {
+      if (printerId === 1) return { ...statusFor('1'), current_queue_owner: null } as never;
+      return statusFor(String(printerId)) as never;
+    });
+    vi.spyOn(api, 'getCurrentPrintUser').mockResolvedValue({ username: 'Ed' } as never);
+
+    render(<KioskPage />);
+
+    await waitFor(() => {
+      const printerTile = screen.getByTestId('kiosk-printer-1');
+      expect(within(printerTile).getByText('Ed')).toBeInTheDocument();
+      expect(within(printerTile).getByTitle('Added by Ed')).toBeInTheDocument();
+      const activeSection = screen.getByTestId('kiosk-printing-section');
+      expect(within(activeSection).getByText('Widget batch')).toBeInTheDocument();
+      expect(within(activeSection).getByText('Atlas')).toBeInTheDocument();
+      expect(within(activeSection).getByText('(1)')).toBeInTheDocument();
+    });
+  });
 });
