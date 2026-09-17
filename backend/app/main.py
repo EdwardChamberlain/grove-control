@@ -4105,6 +4105,45 @@ def _is_printer_actively_printing(state) -> bool:
     )
 
 
+def _normalise_print_identity(value) -> str:
+    """Reduce a printer/archive name or path to a comparable print identity."""
+    identity = str(value or "").replace("\\", "/").rsplit("/", 1)[-1].lower()
+    for suffix in (".gcode.3mf", ".3mf", ".gcode"):
+        if identity.endswith(suffix):
+            return identity[: -len(suffix)]
+    return identity
+
+
+def _reconciled_completion_matches_active_print(data: dict, state) -> bool:
+    """Return whether a synthetic completion describes the live print.
+
+    A running printer with a different subtask is a legitimate stale-archive
+    recovery case. Only suppress the synthetic callback when its subtask or
+    filename identifies the print that is currently active.
+    """
+    if not _is_printer_actively_printing(state):
+        return False
+
+    raw_data = data.get("raw_data") or {}
+    event_subtask_id = str(data.get("subtask_id") or raw_data.get("subtask_id") or "").strip()
+    live_subtask_id = str(getattr(state, "subtask_id", None) or "").strip()
+    if event_subtask_id and live_subtask_id:
+        return event_subtask_id == live_subtask_id
+
+    event_identities = {
+        _normalise_print_identity(data.get("filename")),
+        _normalise_print_identity(data.get("subtask_name")),
+    }
+    active_identities = {
+        _normalise_print_identity(getattr(state, "gcode_file", None)),
+        _normalise_print_identity(getattr(state, "current_print", None)),
+        _normalise_print_identity(getattr(state, "subtask_name", None)),
+    }
+    event_identities.discard("")
+    active_identities.discard("")
+    return bool(event_identities & active_identities)
+
+
 async def reconcile_stale_active_prints(printer_id: int) -> int:
     """Synthesise ``on_print_complete`` for archives whose print can't be
     running on the printer anymore.
@@ -4340,9 +4379,11 @@ async def on_print_complete(printer_id: int, data: dict):
 
     # Connected-edge reconciliation runs in the background and can race with
     # queue dispatch. If its IDLE snapshot is stale by the time this callback
-    # runs, suppress the synthetic completion before it emits any websocket,
-    # webhook, plate-clear, or cleanup side effects.
-    if data.get("_reconciled") and _is_printer_actively_printing(printer_manager.get_status(printer_id)):
+    # runs, suppress only the synthetic completion for that live print before
+    # it emits any websocket, webhook, plate-clear, or cleanup side effects.
+    if data.get("_reconciled") and _reconciled_completion_matches_active_print(
+        data, printer_manager.get_status(printer_id)
+    ):
         logger.info(
             "[CALLBACK] Ignoring stale reconciled completion for printer %s while a print is active",
             printer_id,

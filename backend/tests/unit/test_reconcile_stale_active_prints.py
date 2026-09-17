@@ -297,15 +297,22 @@ class TestReconcileStaleActivePrints:
             patch("backend.app.main.clear_3mf_cache") as mock_clear_cache,
             patch("backend.app.main.ws_manager") as mock_ws,
         ):
-            mock_pm.get_status.return_value = _state("RUNNING", subtask_name="")
+            mock_pm.get_status.return_value = _state(
+                "RUNNING",
+                subtask_id="",
+                subtask_name="",
+            )
+            mock_pm.get_status.return_value.gcode_file = "/data/Metadata/job.gcode.3mf"
+            mock_pm.get_status.return_value.current_print = "/data/Metadata/job.gcode.3mf"
             mock_ws.send_print_complete = AsyncMock()
 
             await on_print_complete(
                 1,
                 {
                     "status": "aborted",
-                    "filename": "job.3mf",
+                    "filename": "job.gcode.3mf",
                     "subtask_name": "job",
+                    "subtask_id": "OLD_ID",
                     "_reconciled": True,
                 },
             )
@@ -313,3 +320,25 @@ class TestReconcileStaleActivePrints:
         mock_clear_cache.assert_not_called()
         mock_ws.send_print_complete.assert_not_awaited()
         mock_pm.set_awaiting_plate_clear.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_reconciled_different_print_is_still_recovered(self):
+        """An active printer may still have a genuinely stale archive from a
+        different print; the blocker fix must preserve that recovery path."""
+        from backend.app.main import reconcile_stale_active_prints
+
+        stale = _archive(subtask_id="OLD_ID", filename="old.gcode.3mf", print_name="old")
+        running = _state("RUNNING", subtask_id="NEW_ID", subtask_name="new")
+        running.gcode_file = "/data/Metadata/new.gcode.3mf"
+        running.current_print = "/data/Metadata/new.gcode.3mf"
+        with patch("backend.app.main.printer_manager") as mock_pm:
+            mock_pm.get_status.return_value = running
+            with patch("backend.app.main.async_session") as mock_session:
+                session_ctx = AsyncMock()
+                session_ctx.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [stale])))
+                mock_session.return_value.__aenter__.return_value = session_ctx
+                with patch("backend.app.main.on_print_complete", new=AsyncMock()) as mock_complete:
+                    count = await reconcile_stale_active_prints(printer_id=1)
+
+        assert count == 1
+        mock_complete.assert_awaited_once()
