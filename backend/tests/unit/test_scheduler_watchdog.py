@@ -382,6 +382,33 @@ class TestDurableDispatchingState:
                 },
             )
 
+    @pytest.mark.asyncio
+    async def test_current_process_dispatch_is_not_recovered_from_previous_terminal_state(self, db_session):
+        """Fresh dispatches must wait for their confirmation task.
+
+        A partial MQTT update can replace the printer's subtask_id while the
+        cached gcode_state is still FINISH/FAILED for the previous job. The
+        restart-recovery path must not interpret that mixed-generation state as
+        completion of a dispatch created by this scheduler process.
+        """
+        dispatched_at = datetime.now(timezone.utc)
+        async with db_session() as db:
+            item = await db.get(PrintQueueItem, 1)
+            item.status = "dispatching"
+            item.dispatched_at = dispatched_at
+            item.dispatch_subtask_id = "NEW_SUBTASK"
+            await db.commit()
+
+            scheduler = PrintScheduler()
+            scheduler._recovery_started_at = dispatched_at - timedelta(seconds=1)
+            status = _status("FINISH", "NEW_SUBTASK", "old-job.gcode.3mf")
+            with patch("backend.app.services.print_scheduler.printer_manager.get_status", return_value=status):
+                await scheduler._recover_stale_dispatches(db)
+
+            item = await db.get(PrintQueueItem, 1)
+            assert item.status == "dispatching"
+            assert item.completed_at is None
+
 
 class TestDispatchConfirmationScheduling:
     @pytest.mark.asyncio

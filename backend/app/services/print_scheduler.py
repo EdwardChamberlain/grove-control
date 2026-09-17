@@ -396,6 +396,10 @@ class PrintScheduler:
         # Recovery completion is deliberately asynchronous, so do not start a
         # second completion chain if a slow side effect overlaps the next tick.
         self._terminal_dispatch_recoveries: set[int] = set()
+        # `_recover_stale_dispatches` is restart recovery, not the owner of a
+        # fresh dispatch. Set when the scheduler loop starts so rows created by
+        # this process remain with their dispatch-confirmation task.
+        self._recovery_started_at: datetime | None = None
         # Queue rows remain pending while their per-item worker uploads and
         # prepares the durable dispatch reservation. Keep them out of later
         # selection passes and release the slot on every task outcome.
@@ -404,6 +408,7 @@ class PrintScheduler:
     async def run(self):
         """Main loop - check queue every interval."""
         self._running = True
+        self._recovery_started_at = datetime.now(timezone.utc)
         logger.info("Print scheduler started")
 
         await self._clear_stale_dispatch_claims()
@@ -471,6 +476,17 @@ class PrintScheduler:
         promoted_ids: list[int] = []
         terminal_dispatches: list[tuple[int, int, dict]] = []
         for item in dispatches:
+            if self._recovery_started_at is not None and item.dispatched_at is not None:
+                dispatched_at = item.dispatched_at
+                if dispatched_at.tzinfo is None:
+                    dispatched_at = dispatched_at.replace(tzinfo=timezone.utc)
+                if dispatched_at >= self._recovery_started_at:
+                    # This row was created after the current scheduler loop
+                    # started. Its confirmation task owns the dispatch; using
+                    # the previous terminal state here can complete a fresh
+                    # job before the printer has entered PREPARE/RUNNING.
+                    continue
+
             printer_status = printer_manager.get_status(item.printer_id) if item.printer_id is not None else None
             dispatch_subtask_id = str(item.dispatch_subtask_id).strip() if item.dispatch_subtask_id else None
             telemetry_status = _queue_status_from_dispatch_telemetry(printer_status, dispatch_subtask_id)
