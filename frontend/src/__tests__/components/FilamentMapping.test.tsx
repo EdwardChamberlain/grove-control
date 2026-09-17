@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { screen, waitFor, cleanup } from '@testing-library/react';
+import { screen, waitFor, cleanup, fireEvent, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { render } from '../utils';
 import { server } from '../mocks/server';
@@ -91,17 +91,25 @@ describe('FilamentMapping — FTS routing', () => {
       />,
     );
 
+    const mappingButton = await screen.findByRole('button', { name: /Filament Mapping/i });
+    expect(mappingButton).toHaveTextContent('(Filament Available)');
+    expect(within(mappingButton).getByText('(Filament Available)')).toHaveClass('text-bambu-green');
+    expect(within(mappingButton).getByText('Filament Mapping')).not.toHaveClass('text-bambu-green');
+
     // PETG remains available despite the route, while unrelated PLA must not
     // be offered as an unsafe manual override.
+    const combobox = await waitFor(() => screen.getByRole('combobox'));
     await waitFor(() => {
-      expect(screen.getByRole('combobox')).toHaveTextContent(/Bambu PETG/);
+      expect(combobox).toHaveTextContent(/Use Sliced Profile/);
     });
+    fireEvent.click(combobox);
+    expect(screen.getByRole('option', { name: /Bambu PETG/ })).toBeInTheDocument();
     expect(screen.queryByText(/Bambu PLA/)).not.toBeInTheDocument();
 
     // The slot currently fed into a track gets an [L]/[R] badge. AMS-0 slot 1
     // (global tray ID 1) is in fila_switch.in_slots[1], whose track terminates
     // at extruder 1 → the LEFT-nozzle short label appears in that option.
-    expect(screen.getByRole('combobox')).toHaveTextContent(/\[L\]/);
+    expect(screen.getByRole('option', { name: /\[L\]/ })).toBeInTheDocument();
 
     // AMS-0 slot 0 (global tray ID 0) is NOT currently fed into any track —
     // FTS routes it on demand, so no badge.
@@ -148,6 +156,42 @@ describe('FilamentMapping — FTS routing', () => {
       expect(screen.getByText(/Bambu PETG/)).toBeInTheDocument();
     });
     expect(screen.queryByText(/Bambu PLA/)).not.toBeInTheDocument();
+  });
+
+  it('does not gate availability on colour when Match colour is disabled', async () => {
+    server.use(
+      http.get(
+        '/api/v1/printers/:id/status',
+        () =>
+          HttpResponse.json(
+            createStatus({
+              fila_switch: null,
+              ams_extruder_map: { '0': 1 },
+            }),
+          ),
+      ),
+    );
+
+    render(
+      <FilamentMapping
+        printerId={1}
+        filamentReqs={{
+          filaments: [
+            { ...mockFilamentReqs.filaments[0], color: '#FF0000' },
+          ],
+        }}
+        manualMappings={{}}
+        onManualMappingChange={() => {}}
+        currencySymbol="$"
+        defaultCostPerKg={0}
+        forceColorMatch={false}
+        onForceColorMatchChange={() => {}}
+      />,
+    );
+
+    const mappingButton = await screen.findByRole('button', { name: /Filament Mapping/i });
+    expect(mappingButton).toHaveTextContent('(Filament Available)');
+    expect(within(mappingButton).getByText('(Filament Available)')).toHaveClass('text-bambu-green');
   });
 
   it('renders sub-brand + material-disambiguated colour on the required side (#1718)', async () => {

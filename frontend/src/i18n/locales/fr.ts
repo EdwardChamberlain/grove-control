@@ -4421,6 +4421,7 @@ export default {
     customPrinterMapping: 'Personnaliser cette imprimante',
     mappingHint: 'Modifiez un emplacement chargé uniquement si cette imprimante nécessite une exception.',
     originalFilament: 'Original',
+    useOriginalFilament: 'Utiliser le profil tranché',
     overrideWith: 'Remplacer par',
     resetToOriginal: 'Revenir à l\'original',
     insufficientFilamentTitle: 'Filament insuffisant',

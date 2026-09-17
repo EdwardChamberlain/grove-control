@@ -4420,6 +4420,7 @@ export default {
     customPrinterMapping: 'Personalizza questa stampante',
     mappingHint: 'Cambia uno slot caricato solo quando questa stampante richiede un\'eccezione.',
     originalFilament: 'Originale',
+    useOriginalFilament: 'Usa profilo di slicing',
     overrideWith: 'Sostituisci con',
     resetToOriginal: 'Ripristina originale',
     insufficientFilamentTitle: 'Filamento insufficiente',

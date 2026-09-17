@@ -4466,6 +4466,7 @@ export default {
     customPrinterMapping: 'Customise this printer',
     mappingHint: 'Change a loaded slot only when this printer needs an exception.',
     originalFilament: 'Original',
+    useOriginalFilament: 'Use Sliced Profile',
     overrideWith: 'Override with',
     resetToOriginal: 'Reset to original',
     insufficientFilamentTitle: 'Not enough filament',

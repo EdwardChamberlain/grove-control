@@ -4432,6 +4432,7 @@ export default {
     customPrinterMapping: 'Diesen Drucker anpassen',
     mappingHint: 'Einen geladenen Slot nur ändern, wenn dieser Drucker eine Ausnahme benötigt.',
     originalFilament: 'Original',
+    useOriginalFilament: 'Geslictes Profil verwenden',
     overrideWith: 'Ersetzen mit',
     resetToOriginal: 'Auf Original zurücksetzen',
     insufficientFilamentTitle: 'Nicht genug Filament',

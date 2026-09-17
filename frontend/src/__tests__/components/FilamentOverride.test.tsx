@@ -73,7 +73,22 @@ describe('FilamentOverride', () => {
       expect(screen.getByText('Filament Requirements')).toBeInTheDocument();
       const select = screen.getByRole('combobox');
       expect(select).toBeDisabled();
-      expect(select.querySelector('option[value=""]')?.textContent).toMatch(/Original: PLA/);
+      expect(select.querySelector('option[value=""]')?.textContent).toBe('Use Sliced Profile');
+    });
+
+    it('shows the configured default filament cost estimate', () => {
+      render(
+        <FilamentOverride
+          filamentReqs={defaultFilamentReqs}
+          availableFilaments={defaultAvailable}
+          overrides={{}}
+          onChange={mockOnChange}
+          currencySymbol="$"
+          defaultCostPerKg={20}
+        />
+      );
+
+      expect(screen.getByText('$0.50')).toBeInTheDocument();
     });
 
     it('renders filament slot with type and grams', () => {
@@ -367,6 +382,7 @@ describe('FilamentOverride', () => {
           availableFilaments={defaultAvailable}
           overrides={{}}
           onChange={mockOnChange}
+          forceColorMatch={false}
         />,
       );
 
@@ -405,6 +421,7 @@ describe('FilamentOverride', () => {
           availableFilaments={defaultAvailable}
           overrides={{}}
           onChange={mockOnChange}
+          forceColorMatch={false}
         />,
       );
 
@@ -452,6 +469,7 @@ describe('FilamentOverride', () => {
           availableFilaments={defaultAvailable}
           overrides={{}}
           onChange={mockOnChange}
+          forceColorMatch={false}
         />,
       );
 
@@ -496,6 +514,7 @@ describe('FilamentOverride', () => {
           availableFilaments={defaultAvailable}
           overrides={{}}
           onChange={mockOnChange}
+          forceColorMatch={false}
         />,
       );
 
@@ -533,6 +552,7 @@ describe('FilamentOverride', () => {
           availableFilaments={defaultAvailable}
           overrides={{}}
           onChange={mockOnChange}
+          forceColorMatch={false}
         />,
       );
 
@@ -566,6 +586,7 @@ describe('FilamentOverride', () => {
           availableFilaments={defaultAvailable}
           overrides={{}}
           onChange={mockOnChange}
+          forceColorMatch={false}
         />,
       );
 

@@ -543,6 +543,24 @@ export function PrintModal({
     }
   }, [mode, selectedPrinters, selectedPlate, initialPrinterIds, initialPlateId]);
 
+  // A tray selected in the single-printer mapping is converted into a
+  // type/colour profile override for the queue payload. That profile belongs
+  // to the printer whose tray was selected; do not carry it across a direct
+  // switch to another specific printer where it may no longer be loaded.
+  const previousSelectedPrinters = useRef<number[] | null>(null);
+  useEffect(() => {
+    const previous = previousSelectedPrinters.current;
+    const printerSelectionChanged = previous !== null
+      && (previous.length !== selectedPrinters.length
+        || previous.some((printerId, index) => printerId !== selectedPrinters[index]));
+
+    if (mode === 'create' && assignmentMode === 'printer' && printerSelectionChanged) {
+      setFilamentOverrides({});
+    }
+
+    previousSelectedPrinters.current = [...selectedPrinters];
+  }, [mode, assignmentMode, selectedPrinters]);
+
   // Clear filament overrides when target model or plate changes (but not on initial mount for edit mode)
   const [prevTargetModel, setPrevTargetModel] = useState(targetModel);
   const [prevPlateForOverrides, setPrevPlateForOverrides] = useState(selectedPlate);
@@ -759,7 +777,10 @@ export function PrintModal({
           return multiPrinterMapping.getFinalMapping(printerId);
         }
       }
-      return amsMapping;
+      // An automatically suggested mapping reflects the printer's current
+      // load, not a user decision. Leave it out of the queue payload so a job
+      // queued ahead of loading is resolved again when the printer is ready.
+      return Object.keys(manualMappings).length > 0 ? amsMapping : undefined;
     };
 
     // Convert filament overrides from Record to array format for API.
@@ -1297,14 +1318,16 @@ export function PrintModal({
               />
             )}
 
-            {/* Printer selection with per-printer mapping — hidden when printer is pre-selected via props */}
-            {!isCrossModel && !hasEditingVariants && !initialSelectedPrinterIds?.length && (
+            {/* Printer selection with per-printer mapping. Keep it visible for
+                printer-originated launches so the initial target can be changed
+                or switched to model-based assignment. */}
+            {!isCrossModel && !hasEditingVariants && (
               <PrinterSelector
                 printers={printers || []}
                 selectedPrinterIds={selectedPrinters}
                 onMultiSelect={setSelectedPrinters}
                 isLoading={loadingPrinters}
-                allowMultiple={true}
+                allowMultiple={!initialSelectedPrinterIds?.length}
                 showInactive={mode === 'edit-queue-item'}
                 disableBusy={false}
                 printerMappingResults={multiPrinterMapping.printerResults}
@@ -1339,7 +1362,7 @@ export function PrintModal({
 
                 {isModelFilamentOptionsExpanded && (
                   <div id="model-filament-options" className="mt-2 space-y-3 rounded-lg bg-bambu-dark p-3">
-                    <label className="group flex cursor-pointer items-center justify-between">
+                    <label className="group flex cursor-pointer items-center justify-between pb-2 border-b border-bambu-dark-tertiary">
                       <div>
                         <span className="text-sm text-white">{t('printModal.forceColorMatch')}</span>
                         <p className="text-xs text-bambu-gray">{t('printModal.forceColorMatchHint')}</p>
@@ -1359,6 +1382,10 @@ export function PrintModal({
                       availableFilaments={effectiveAvailableFilaments ?? []}
                       overrides={filamentOverrides}
                       onChange={setFilamentOverrides}
+                      forceColorMatch={forceColorMatch}
+                      currencySymbol={currencySymbol}
+                      defaultCostPerKg={defaultCostPerKg}
+                      embedded
                       showHeader={false}
                     />
                   </div>

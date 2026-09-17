@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Circle, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
+import { Palette, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
 import { api } from '../../api/client';
 import { useFilamentMapping } from '../../hooks/useFilamentMapping';
 import { canonicalFilamentType, getGlobalTrayId, effectivePreferLowest } from '../../utils/amsHelpers';
@@ -72,6 +72,7 @@ export function FilamentMapping({
 
   const { loadedFilaments, filamentComparison, hasTypeMismatch, hasColorMismatch } =
     useFilamentMapping(filamentReqs, printerStatus, manualMappings, gatedPreferLowest, inventoryByTrayId);
+  const showColorMismatch = forceColorMatch && hasColorMismatch;
 
   // Per-slot sub-brand + material-disambiguated colour labels (#1718). Same
   // shared hook the model-mode FilamentOverride uses so both panels render
@@ -149,13 +150,6 @@ export function FilamentMapping({
     return null;
   }
 
-  // Determine status indicator color
-  const statusColor = hasTypeMismatch
-    ? '#f97316' // orange
-    : hasColorMismatch
-    ? '#facc15' // yellow
-    : '#00ae42'; // green
-
   const handleSlotChange = (slotId: number, value: string) => {
     if (slotId > 0) {
       if (value === '') {
@@ -193,14 +187,14 @@ export function FilamentMapping({
         aria-expanded={isExpanded}
         className="flex items-center gap-2 text-sm text-bambu-gray hover:text-white transition-colors w-full"
       >
-        <Circle className="w-4 h-4" fill={statusColor} stroke="none" />
+        <Palette className="w-4 h-4" />
         <span>{t('printModal.filamentMapping')}</span>
         {hasTypeMismatch ? (
           <span className="text-xs text-orange-400">(Type not found)</span>
-        ) : hasColorMismatch ? (
+        ) : showColorMismatch ? (
           <span className="text-xs text-yellow-400">(Color mismatch)</span>
         ) : (
-          <span className="text-xs text-bambu-green">(Ready)</span>
+          <span className="text-xs text-bambu-green">(Filament Available)</span>
         )}
         {isExpanded ? (
           <ChevronUp className="w-4 h-4 ml-auto" />
@@ -211,6 +205,31 @@ export function FilamentMapping({
 
       {isExpanded && (
         <div className="mt-2 bg-bambu-dark rounded-lg p-3 space-y-2">
+          {onForceColorMatchChange && (
+            <label className="flex items-center justify-between cursor-pointer group pb-2 border-b border-bambu-dark-tertiary">
+              <div>
+                <span className="text-sm text-white">{t('printModal.forceColorMatch')}</span>
+                <p className="text-xs text-bambu-gray">{t('printModal.forceColorMatchHint')}</p>
+              </div>
+              <input
+                type="checkbox"
+                checked={forceColorMatch}
+                onChange={(event) => onForceColorMatchChange(event.target.checked)}
+                className="peer sr-only"
+              />
+              <div
+                className={`relative w-10 h-5 rounded-full transition-colors ${
+                  forceColorMatch ? 'bg-bambu-green' : 'bg-bambu-dark-tertiary'
+                }`}
+              >
+                <div
+                  className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                    forceColorMatch ? 'translate-x-5' : 'translate-x-0.5'
+                  }`}
+                />
+              </div>
+            </label>
+          )}
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs text-bambu-gray">{t('printModal.mappingHint')}</span>
             <button
@@ -266,8 +285,8 @@ export function FilamentMapping({
                 usedGrams={item.used_grams}
                 leadingBadge={nozzleBadge}
                 requiredTitle={`Required: ${resolvedName} - ${colorLabel}`}
-                value={item.loaded ? String(item.loaded.globalTrayId) : ''}
-                emptyLabel={t('printModal.selectFilamentSlot')}
+                value={manualMappings[slotId] !== undefined ? String(manualMappings[slotId]) : ''}
+                emptyLabel={t('printModal.useOriginalFilament')}
                 options={options}
                 onChange={(value) => handleSlotChange(slotId, value)}
                 status={item.status}
@@ -276,7 +295,7 @@ export function FilamentMapping({
               />
             );
           })}
-          <div className="text-xs text-bambu-gray">
+          <div className="border-t border-bambu-dark-tertiary pt-2 text-xs text-bambu-gray">
             {t('printModal.totalCost')}{' '}
             <span className="text-white">
               {totalCost > 0 || hasAnyCost ? `${currencySymbol}${totalCost.toFixed(2)}` : 'N/A'}
@@ -284,31 +303,6 @@ export function FilamentMapping({
           </div>
           {hasTypeMismatch && (
             <p className="text-xs text-orange-400 mt-2">Required filament type not found in printer.</p>
-          )}
-          {onForceColorMatchChange && (
-            <label className="flex items-center justify-between cursor-pointer group pt-2 border-t border-bambu-dark-tertiary">
-              <div>
-                <span className="text-sm text-white">{t('printModal.forceColorMatch')}</span>
-                <p className="text-xs text-bambu-gray">{t('printModal.forceColorMatchHint')}</p>
-              </div>
-              <input
-                type="checkbox"
-                checked={forceColorMatch}
-                onChange={(event) => onForceColorMatchChange(event.target.checked)}
-                className="peer sr-only"
-              />
-              <div
-                className={`relative w-10 h-5 rounded-full transition-colors ${
-                  forceColorMatch ? 'bg-bambu-green' : 'bg-bambu-dark-tertiary'
-                }`}
-              >
-                <div
-                  className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-                    forceColorMatch ? 'translate-x-5' : 'translate-x-0.5'
-                  }`}
-                />
-              </div>
-            </label>
           )}
         </div>
       )}
