@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Plus, Plug, AlertTriangle, RotateCcw, Bell, Download, RefreshCw, ExternalLink, Globe, Droplets, Thermometer, FileText, Edit2, Send, CheckCircle, XCircle, History, Trash2, Zap, TrendingUp, Calendar, DollarSign, Power, PowerOff, Key, Copy, Database, X, Shield, Printer, Cylinder, Wifi, Home, Video, Users, Lock, Unlock, ChevronDown, Save, Mail, Flame, ListOrdered, Code, Search, Scale, Settings as SettingsIcon, ScanEye, Cog, QrCode, Monitor } from 'lucide-react';
+import { Loader2, Plus, Plug, AlertTriangle, RotateCcw, Bell, Download, RefreshCw, ExternalLink, Globe, Droplets, Thermometer, FileText, Edit2, Send, CheckCircle, XCircle, History, Trash2, Zap, TrendingUp, Calendar, DollarSign, Power, PowerOff, Key, Copy, Database, X, Shield, Printer, Cylinder, Wifi, Home, Video, Users, Lock, Unlock, Save, Mail, Flame, ListOrdered, Code, Search, Scale, Settings as SettingsIcon, ScanEye, Cog, QrCode, Monitor } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
@@ -1569,7 +1569,6 @@ export function SettingsPage() {
                       </option>
                     ))}
                   </ReactSelect>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                 </div>
                 <p className="text-xs text-bambu-gray mt-1">
                   {t('settings.languageDescription')}
@@ -1591,7 +1590,6 @@ export function SettingsPage() {
                       </option>
                     ))}
                   </ReactSelect>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                 </div>
                 <p className="text-xs text-bambu-gray mt-1">
                   {t('settings.defaultViewDescription')}
@@ -1613,7 +1611,6 @@ export function SettingsPage() {
                       <option value="eu">{t('settings.dateFormatEu')}</option>
                       <option value="iso">{t('settings.dateFormatIso')}</option>
                     </ReactSelect>
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                   </div>
                 </div>
                 <div>
@@ -1630,7 +1627,6 @@ export function SettingsPage() {
                       <option value="12h">{t('settings.timeFormat12')}</option>
                       <option value="24h">{t('settings.timeFormat24')}</option>
                     </ReactSelect>
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                   </div>
                 </div>
               </div>
@@ -1651,7 +1647,6 @@ export function SettingsPage() {
                       </option>
                     ))}
                   </ReactSelect>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                 </div>
                 <p className="text-xs text-bambu-gray mt-1">
                   {t('settings.defaultPrinterDescription')}
@@ -2701,7 +2696,6 @@ export function SettingsPage() {
                           <option key={n} value={n}>{t('settings.time', { count: n })}</option>
                         ))}
                       </ReactSelect>
-                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                     </div>
                   </div>
 
@@ -2719,7 +2713,6 @@ export function SettingsPage() {
                           <option key={n} value={n}>{t('settings.second', { count: n })}</option>
                         ))}
                       </ReactSelect>
-                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                     </div>
                   </div>
                   <div>
@@ -2736,7 +2729,6 @@ export function SettingsPage() {
                           <option key={n} value={n}>{t('settings.nSeconds', { count: n })}</option>
                         ))}
                       </ReactSelect>
-                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                     </div>
                     <p className="text-xs text-bambu-gray mt-1">
                       {t('settings.increaseForWeakWifi')}
@@ -4609,7 +4601,6 @@ export function SettingsPage() {
                     <option value="bambu_studio">{t('settings.slicerBambuStudio')}</option>
                     <option value="orcaslicer">{t('settings.slicerOrcaSlicer')}</option>
                   </ReactSelect>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                 </div>
                 <p className="text-xs text-bambu-gray mt-1">
                   {t('settings.preferredSlicerDescription')}
@@ -4656,7 +4647,6 @@ export function SettingsPage() {
                     <option value="bambu_studio">{t('settings.slicerBambuStudio')}</option>
                     <option value="orcaslicer">{t('settings.slicerOrcaSlicer')}</option>
                   </ReactSelect>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                 </div>
                 <p className="text-xs text-bambu-gray mt-1">
                   {t(

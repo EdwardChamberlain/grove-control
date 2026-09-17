@@ -207,6 +207,20 @@ describe('SettingsPage', () => {
       });
     });
 
+    it('renders one chevron for custom general settings selectors', async () => {
+      render(<SettingsPage />);
+
+      await waitFor(() => {
+        for (const labelText of ['Language', 'Default View']) {
+          const label = screen.getByText(labelText, { selector: 'label' });
+          const select = label.closest('div')?.querySelector('[role="combobox"]');
+
+          expect(select).toBeInTheDocument();
+          expect(select?.parentElement?.querySelectorAll('svg')).toHaveLength(1);
+        }
+      });
+    });
+
     it('shows preferred slicer setting on Workflow tab', async () => {
       const user = userEvent.setup();
       render(<SettingsPage />);
