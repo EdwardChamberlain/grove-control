@@ -370,6 +370,13 @@ _stage22_finish_in_flight: dict[int, asyncio.Event] = {}
 # reconnect re-arms reconciliation. Keyed by printer_id.
 _printer_reconciled_since_connect: dict[int, bool] = {}
 
+# Printers whose first real state after reconnect was active. Reconciliation is
+# deferred until the real terminal completion callback finishes so a stale
+# archive cannot run printer-level completion side effects against a live job.
+# The flag is intentionally process-local like the connected-edge tracker: the
+# next reconnect remains the fallback when no terminal callback is observed.
+_pending_stale_reconciliation: set[int] = set()
+
 # Track expected prints from reprint/scheduled (skip auto-archiving for these)
 # {(printer_id, filename): archive_id}
 _expected_prints: dict[tuple[int, str], int] = {}
@@ -1171,7 +1178,14 @@ async def on_printer_status_change(printer_id: int, state: PrinterState):
     state_known = bool(state.state) and state.state.upper() not in ("", "UNKNOWN")
     if state.connected and state_known and not _printer_reconciled_since_connect.get(printer_id, False):
         _printer_reconciled_since_connect[printer_id] = True
-        if not _is_printer_actively_printing(state):
+        if _is_printer_actively_printing(state):
+            _pending_stale_reconciliation.add(printer_id)
+        elif printer_id in _pending_stale_reconciliation:
+            # A reconnect can begin in a terminal state without producing a
+            # separate completion callback. This is the safe fallback for a
+            # deferred reconciliation left by an earlier active reconnect.
+            _schedule_pending_stale_reconciliation(printer_id)
+        else:
             spawn_background_task(
                 reconcile_stale_active_prints(printer_id),
                 name=f"reconcile-stale-prints-{printer_id}",
@@ -4106,6 +4120,31 @@ def _is_printer_actively_printing(state) -> bool:
     )
 
 
+def _schedule_pending_stale_reconciliation(printer_id: int) -> None:
+    """Schedule deferred stale-print reconciliation once the printer is safe."""
+    if printer_id not in _pending_stale_reconciliation:
+        return
+
+    _pending_stale_reconciliation.remove(printer_id)
+
+    async def _run_reconciliation():
+        try:
+            await reconcile_stale_active_prints(printer_id)
+        finally:
+            # A new print may have started while reconciliation was querying
+            # the database, or the printer may have disconnected again. Keep
+            # the retry armed so the next terminal callback/reconnect can
+            # flush the stale archive safely.
+            state = printer_manager.get_status(printer_id)
+            if not state or not state.connected or _is_printer_actively_printing(state):
+                _pending_stale_reconciliation.add(printer_id)
+
+    spawn_background_task(
+        _run_reconciliation(),
+        name=f"reconcile-stale-prints-after-completion-{printer_id}",
+    )
+
+
 async def reconcile_stale_active_prints(printer_id: int) -> int:
     """Synthesise ``on_print_complete`` for archives whose print can't be
     running on the printer anymore.
@@ -4432,6 +4471,7 @@ async def on_print_complete(printer_id: int, data: dict):
         logger.warning("Print complete without filename or subtask_name")
         if _final_status in ("completed", "failed", "aborted", "cancelled"):
             printer_manager.set_awaiting_plate_clear_archive_id(printer_id, None)
+        _schedule_pending_stale_reconciliation(printer_id)
         return
 
     logger.info("Print complete - filename: %s, subtask: %s, status: %s", filename, subtask_name, data.get("status"))
@@ -5013,6 +5053,7 @@ async def on_print_complete(printer_id: int, data: dict):
                 logger.warning("[NOTIFY-BG] Failed to send notification without archive: %s", e, exc_info=True)
 
         spawn_background_task(_notify_no_archive(), name="notify-no-archive")
+        _schedule_pending_stale_reconciliation(printer_id)
         return
 
     log_timing("Archive lookup")
@@ -5674,6 +5715,10 @@ async def on_print_complete(printer_id: int, data: dict):
         )
         log_timing("Timelapse scan scheduled")
 
+    # The real terminal callback has now completed its archive, queue and
+    # printer-level state changes. It is safe to reconcile any older stale
+    # archive from the same reconnect without racing the live completion.
+    _schedule_pending_stale_reconciliation(printer_id)
     logger.info("[CALLBACK] on_print_complete finished for printer %s, archive %s", printer_id, archive_id)
 
 

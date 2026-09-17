@@ -50,10 +50,10 @@ def _archive(
     )
 
 
-def _status_state(state: str) -> SimpleNamespace:
+def _status_state(state: str, *, connected: bool = True) -> SimpleNamespace:
     """Minimal status-change payload for the reconciliation edge tests."""
     return SimpleNamespace(
-        connected=True,
+        connected=connected,
         state=state,
         progress=0,
         layer_num=0,
@@ -207,15 +207,48 @@ class TestReconcileStaleActivePrints:
             patch("backend.app.main.mqtt_relay") as mock_relay,
             patch("backend.app.main.printer_state_to_dict", return_value={}),
             patch.dict(main_module._printer_reconciled_since_connect, {}, clear=True),
+            patch.object(main_module, "_pending_stale_reconciliation", set()),
             patch.dict(main_module._last_status_broadcast, {}, clear=True),
         ):
             mock_relay.on_printer_status = AsyncMock()
             await on_printer_status_change(1, _status_state("RUNNING"))
             assert scheduled == []
+            assert main_module._pending_stale_reconciliation == {1}
 
             await on_printer_status_change(1, _status_state("IDLE"))
+            assert scheduled == []
 
-        assert scheduled == []
+            # The real completion callback calls this after its terminal work
+            # has finished, making the deferred reconciliation safe to run.
+            main_module._schedule_pending_stale_reconciliation(1)
+
+        assert scheduled == ["reconcile-stale-prints-after-completion-1"]
+
+    @pytest.mark.asyncio
+    async def test_terminal_reconnect_flushes_pending_reconciliation(self):
+        from backend.app import main as main_module
+        from backend.app.main import on_printer_status_change
+
+        scheduled = []
+
+        def capture_task(coro, *, name):
+            scheduled.append(name)
+            coro.close()
+
+        with (
+            patch("backend.app.main.spawn_background_task", side_effect=capture_task),
+            patch("backend.app.main.mqtt_relay") as mock_relay,
+            patch("backend.app.main.printer_state_to_dict", return_value={}),
+            patch.dict(main_module._printer_reconciled_since_connect, {}, clear=True),
+            patch.object(main_module, "_pending_stale_reconciliation", set()),
+            patch.dict(main_module._last_status_broadcast, {}, clear=True),
+        ):
+            mock_relay.on_printer_status = AsyncMock()
+            await on_printer_status_change(1, _status_state("RUNNING"))
+            await on_printer_status_change(1, _status_state("IDLE", connected=False))
+            await on_printer_status_change(1, _status_state("IDLE"))
+
+        assert scheduled == ["reconcile-stale-prints-after-completion-1"]
 
     @pytest.mark.asyncio
     async def test_no_status_skips_reconciliation(self):
