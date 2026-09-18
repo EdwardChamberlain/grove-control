@@ -293,12 +293,18 @@ class TestMaintenanceLogAPI:
     """Integration tests for the durable, fleet-wide maintenance log (#180)."""
 
     @staticmethod
-    def _manual_payload(printer_id: int, *, title: str = "Replaced extruder", hours: float | None = 123.5) -> dict:
+    def _manual_payload(
+        printer_id: int,
+        *,
+        title: str = "Replaced extruder",
+        hours: float | None = 123.5,
+        occurred_at: datetime | None = None,
+    ) -> dict:
         return {
             "printer_id": printer_id,
             "title": title,
             "notes": "Installed a replacement extruder assembly",
-            "occurred_at": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+            "occurred_at": (occurred_at or datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
             "hours_at_maintenance": hours,
         }
 
@@ -415,22 +421,52 @@ class TestMaintenanceLogAPI:
     @pytest.mark.integration
     async def test_log_pagination_and_future_dates(self, async_client: AsyncClient, printer_factory):
         printer = await printer_factory(name="Pagination Log Printer")
-        for title in ("First repair", "Second repair"):
+        now = datetime.now(timezone.utc)
+        for title, occurred_at in (
+            ("First repair", now - timedelta(hours=1)),
+            ("Second repair", now - timedelta(hours=2)),
+        ):
             response = await async_client.post(
-                "/api/v1/maintenance/logs", json=self._manual_payload(printer.id, title=title)
+                "/api/v1/maintenance/logs", json=self._manual_payload(printer.id, title=title, occurred_at=occurred_at)
             )
             assert response.status_code == 200
 
         first_page = await async_client.get(f"/api/v1/maintenance/logs?printer_id={printer.id}&limit=1")
         assert first_page.status_code == 200
         assert len(first_page.json()["items"]) == 1
+        assert first_page.json()["items"][0]["title"] == "First repair"
         assert first_page.json()["next_cursor"]
         second_page = await async_client.get(
             f"/api/v1/maintenance/logs?printer_id={printer.id}&limit=1&cursor={first_page.json()['next_cursor']}"
         )
         assert second_page.status_code == 200
         assert len(second_page.json()["items"]) == 1
+        assert second_page.json()["items"][0]["title"] == "Second repair"
 
         future = self._manual_payload(printer.id)
         future["occurred_at"] = (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat()
         assert (await async_client.post("/api/v1/maintenance/logs", json=future)).status_code == 422
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_log_rejects_invalid_input_and_cursor(self, async_client: AsyncClient, printer_factory):
+        printer = await printer_factory(name="Invalid Log Input Printer")
+
+        blank_title = await async_client.post(
+            "/api/v1/maintenance/logs", json=self._manual_payload(printer.id, title="   ")
+        )
+        assert blank_title.status_code == 422
+
+        negative_hours = await async_client.post(
+            "/api/v1/maintenance/logs", json=self._manual_payload(printer.id, hours=-1)
+        )
+        assert negative_hours.status_code == 422
+
+        unknown_printer = await async_client.post("/api/v1/maintenance/logs", json=self._manual_payload(999999))
+        assert unknown_printer.status_code == 404
+
+        too_many = await async_client.get(f"/api/v1/maintenance/logs?printer_id={printer.id}&limit=101")
+        assert too_many.status_code == 422
+
+        invalid_cursor = await async_client.get(f"/api/v1/maintenance/logs?printer_id={printer.id}&cursor=not-a-cursor")
+        assert invalid_cursor.status_code == 422

@@ -62,6 +62,40 @@ const mockMaintenanceTasks = [
   },
 ];
 
+const mockScheduledLogEntry = {
+  id: 1,
+  printer_id: 1,
+  printer_name: 'X1 Carbon',
+  entry_type: 'scheduled' as const,
+  title: 'Clean Nozzle',
+  notes: 'Completed as scheduled',
+  occurred_at: '2024-01-02T10:00:00Z',
+  hours_at_maintenance: 100,
+  created_by_id: null,
+  created_by_username: null,
+  updated_by_id: null,
+  updated_by_username: null,
+  created_at: '2024-01-02T10:00:00Z',
+  updated_at: '2024-01-02T10:00:00Z',
+};
+
+const mockManualLogEntry = {
+  id: 2,
+  printer_id: 1,
+  printer_name: 'X1 Carbon',
+  entry_type: 'manual' as const,
+  title: 'Replaced extruder',
+  notes: 'Swapped the worn part',
+  occurred_at: '2024-01-03T10:00:00Z',
+  hours_at_maintenance: 120,
+  created_by_id: 7,
+  created_by_username: 'alice',
+  updated_by_id: 7,
+  updated_by_username: 'alice',
+  created_at: '2024-01-03T10:00:00Z',
+  updated_at: '2024-01-03T10:00:00Z',
+};
+
 describe('MaintenancePage', () => {
   beforeEach(() => {
     server.use(
@@ -110,24 +144,7 @@ describe('MaintenancePage', () => {
       }),
       http.get('/api/v1/maintenance/logs', () => {
         return HttpResponse.json({
-          items: [
-            {
-              id: 1,
-              printer_id: 1,
-              printer_name: 'X1 Carbon',
-              entry_type: 'scheduled',
-              title: 'Clean Nozzle',
-              notes: 'Completed as scheduled',
-              occurred_at: '2024-01-02T10:00:00Z',
-              hours_at_maintenance: 100,
-              created_by_id: null,
-              created_by_username: null,
-              updated_by_id: null,
-              updated_by_username: null,
-              created_at: '2024-01-02T10:00:00Z',
-              updated_at: '2024-01-02T10:00:00Z',
-            },
-          ],
+          items: [mockScheduledLogEntry],
           next_cursor: null,
         });
       }),
@@ -210,6 +227,102 @@ describe('MaintenancePage', () => {
       expect(datePicker.querySelector('[role="grid"]')).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'Save' }));
       expect(screen.queryByRole('dialog', { name: 'Choose date' })).not.toBeInTheDocument();
+    });
+
+    it('creates a manual entry and filters the log by entry type', async () => {
+      let entries = [mockScheduledLogEntry, mockManualLogEntry];
+      let createRequest: Record<string, unknown> | undefined;
+
+      server.use(
+        http.get('/api/v1/maintenance/logs', ({ request }) => {
+          const entryType = new URL(request.url).searchParams.get('entry_type');
+          const filteredEntries = entryType
+            ? entries.filter((entry) => entry.entry_type === entryType)
+            : entries;
+          return HttpResponse.json({ items: filteredEntries, next_cursor: null });
+        }),
+        http.post('/api/v1/maintenance/logs', async ({ request }) => {
+          createRequest = await request.json() as Record<string, unknown>;
+          const created = {
+            ...mockManualLogEntry,
+            id: 3,
+            title: createRequest.title,
+            notes: createRequest.notes,
+            occurred_at: createRequest.occurred_at,
+            hours_at_maintenance: createRequest.hours_at_maintenance,
+          };
+          entries = [created, ...entries];
+          return HttpResponse.json(created, { status: 201 });
+        }),
+      );
+
+      render(<MaintenancePage />);
+      fireEvent.click(await screen.findByText('Log'));
+      fireEvent.click(await screen.findByRole('button', { name: 'Add log entry' }));
+      fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Bearing replaced' } });
+      fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'Replaced during inspection' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save log entry' }));
+
+      await waitFor(() => expect(createRequest).toMatchObject({
+        printer_id: 1,
+        title: 'Bearing replaced',
+        notes: 'Replaced during inspection',
+      }));
+      expect(screen.queryByRole('button', { name: 'Save log entry' })).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('combobox', { name: 'Filter by type' }));
+      fireEvent.click(await screen.findByRole('option', { name: 'Unscheduled' }));
+
+      await waitFor(() => {
+        expect(screen.getByText('Bearing replaced')).toBeInTheDocument();
+        expect(screen.queryByText('Clean Nozzle')).not.toBeInTheDocument();
+      });
+    });
+
+    it('edits and permanently deletes manual entries while showing attribution', async () => {
+      let entries = [mockScheduledLogEntry, mockManualLogEntry];
+      let updateRequest: Record<string, unknown> | undefined;
+      let deletedId: string | undefined;
+
+      server.use(
+        http.get('/api/v1/maintenance/logs', () =>
+          HttpResponse.json({ items: entries, next_cursor: null })),
+        http.patch('/api/v1/maintenance/logs/:id', async ({ params, request }) => {
+          updateRequest = await request.json() as Record<string, unknown>;
+          const updated = {
+            ...mockManualLogEntry,
+            ...updateRequest,
+            id: Number(params.id),
+            updated_by_username: 'bob',
+            updated_at: '2024-01-04T10:00:00Z',
+          };
+          entries = entries.map((entry) => entry.id === updated.id ? updated : entry);
+          return HttpResponse.json(updated);
+        }),
+        http.delete('/api/v1/maintenance/logs/:id', ({ params }) => {
+          deletedId = String(params.id);
+          entries = entries.filter((entry) => entry.id !== Number(params.id));
+          return HttpResponse.json({ status: 'deleted' });
+        }),
+      );
+
+      render(<MaintenancePage />);
+      fireEvent.click(await screen.findByText('Log'));
+      expect(await screen.findByText('Recorded by alice')).toBeInTheDocument();
+      expect(screen.getByLabelText('Edit')).toBeInTheDocument();
+      expect(screen.getByLabelText('Delete')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByLabelText('Edit'));
+      fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Extruder replaced' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save log entry' }));
+      await waitFor(() => expect(updateRequest).toMatchObject({ title: 'Extruder replaced' }));
+      expect(await screen.findByText('Extruder replaced')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByLabelText('Delete'));
+      expect(await screen.findByText('Delete maintenance log entry?')).toBeInTheDocument();
+      const deleteButtons = screen.getAllByRole('button', { name: 'Delete' });
+      fireEvent.click(deleteButtons[deleteButtons.length - 1]);
+      await waitFor(() => expect(deletedId).toBe('2'));
     });
   });
 });

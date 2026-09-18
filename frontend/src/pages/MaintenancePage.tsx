@@ -49,6 +49,7 @@ import type {
   Permission,
 } from '../api/client';
 import { getMaintenanceWikiUrl } from '../utils/maintenanceWikiUrls';
+import { parseUTCDate } from '../utils/date';
 import { Card, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
 import { Toggle } from '../components/Toggle';
@@ -143,7 +144,8 @@ function formatIntervalLabel(value: number, type: 'hours' | 'days', t?: TFunctio
 }
 
 function toDateTimeLocal(value: string | Date = new Date()): string {
-  const date = typeof value === 'string' ? new Date(value) : value;
+  const date = typeof value === 'string' ? (parseUTCDate(value) ?? new Date(value)) : value;
+  if (Number.isNaN(date.getTime())) return '';
   const pad = (part: number) => String(part).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
@@ -1267,6 +1269,10 @@ function MaintenanceLogSection({
           {entries.map((entry) => {
             const isManual = entry.entry_type === 'manual';
             const author = authorLine(entry);
+            const occurredAt = parseUTCDate(entry.occurred_at);
+            const occurredAtLabel = occurredAt && !Number.isNaN(occurredAt.getTime())
+              ? occurredAt.toLocaleString()
+              : entry.occurred_at;
             return (
               <Card key={entry.id} className="border-bambu-dark-tertiary">
                 <CardContent className="p-4">
@@ -1279,7 +1285,7 @@ function MaintenanceLogSection({
                       {entry.notes && <p className="whitespace-pre-wrap text-sm text-bambu-gray-light">{entry.notes}</p>}
                       <div className="mt-1 space-y-0.5 text-xs text-bambu-gray">
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                          <span>{new Date(entry.occurred_at).toLocaleString()}</span>
+                          <span>{occurredAtLabel}</span>
                           {entry.hours_at_maintenance !== null && (
                             <>
                               <span aria-hidden="true">•</span>
