@@ -171,11 +171,10 @@ class TestApiKeyDenylistIntegrity:
         from backend.app.core.auth import _APIKEY_DENIED_PERMISSIONS
         from backend.app.core.permissions import Permission
 
-        # NOTE: under the GHSA-r2qv-8222-hqg3 allowlist model, INVENTORY_CREATE
-        # and INVENTORY_UPDATE are administrative (not in the allowlist) and
-        # therefore denied for API keys regardless of denylist membership.
-        # This test still guards the small denylist-redundancy set of read-y
-        # permissions that external kiosk and status integrations rely on.
+        # Inventory create/update are explicitly allowlisted through the
+        # can_manage_inventory scope. This test guards the small
+        # denylist-redundancy set of read-y permissions that external kiosk
+        # and status integrations rely on.
         expected_allowed = {
             Permission.INVENTORY_READ,
             Permission.PRINTERS_READ,

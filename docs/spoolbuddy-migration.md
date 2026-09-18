@@ -2,7 +2,7 @@
 
 Grove Control no longer bundles or manages the SpoolBuddy hardware daemon,
 touchscreen kiosk, installer, SSH update flow, or device-management API.
-Hardware support now belongs in the standalone upstream SpoolBuddy project.
+Hardware support now belongs in the [standalone upstream SpoolBuddy project](https://github.com/macpit/spoolbuddy).
 
 Existing inventory clients remain supported through the ordinary Grove Control
 surfaces:
@@ -14,6 +14,10 @@ surfaces:
 - /api/v1/inventory/assignments for AMS slot assignment
 - /api/v1/spoolman/inventory/spools and
   /api/v1/spoolman/inventory/slot-assignments when Spoolman mode is enabled
+
+Clients should authenticate with an API key that has read-status and inventory-management
+permissions enabled. These scopes can be created and managed from Grove Control's API-key
+settings; the former bundled `kiosk-bootstrap` command is removed with the hardware suite.
 
 The Grove-hosted /api/v1/spoolbuddy/* device, NFC, scale, calibration,
 diagnostics, display, system-command, and update endpoints, together with the
