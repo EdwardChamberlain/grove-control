@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Plus, Plug, AlertTriangle, RotateCcw, Bell, Download, RefreshCw, ExternalLink, Globe, Droplets, Thermometer, FileText, Edit2, Send, CheckCircle, XCircle, History, Trash2, Zap, TrendingUp, Calendar, DollarSign, Power, PowerOff, Key, Copy, Database, X, Shield, Printer, Cylinder, Wifi, Home, Video, Users, Lock, Unlock, ChevronDown, Save, Mail, Flame, ListOrdered, Code, Search, Scale, Settings as SettingsIcon, ScanEye, Cog, QrCode, Monitor } from 'lucide-react';
+import { Loader2, Plus, Plug, AlertTriangle, RotateCcw, Bell, Download, RefreshCw, ExternalLink, Globe, Droplets, Thermometer, FileText, Edit2, Send, CheckCircle, XCircle, History, Trash2, Zap, TrendingUp, Calendar, DollarSign, Power, PowerOff, Key, Copy, Database, X, Shield, Printer, Cylinder, Wifi, Home, Video, Users, Lock, Unlock, Save, Mail, Flame, ListOrdered, Code, Search, Scale, Settings as SettingsIcon, ScanEye, Cog, QrCode, Monitor } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
@@ -1561,7 +1561,7 @@ export function SettingsPage() {
                       i18n.changeLanguage(newLang);
                       updateMutation.mutate({ language: newLang });
                     }}
-                    className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
+                    className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
                   >
                     {availableLanguages.map((lang) => (
                       <option key={lang.code} value={lang.code}>
@@ -1569,7 +1569,6 @@ export function SettingsPage() {
                       </option>
                     ))}
                   </ReactSelect>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                 </div>
                 <p className="text-xs text-bambu-gray mt-1">
                   {t('settings.languageDescription')}
@@ -1583,7 +1582,7 @@ export function SettingsPage() {
                   <ReactSelect
                     value={defaultView}
                     onChange={(e) => handleDefaultViewChange(e.target.value)}
-                    className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
+                    className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
                   >
                     {defaultNavItems.map((item) => (
                       <option key={item.id} value={item.to}>
@@ -1591,7 +1590,6 @@ export function SettingsPage() {
                       </option>
                     ))}
                   </ReactSelect>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                 </div>
                 <p className="text-xs text-bambu-gray mt-1">
                   {t('settings.defaultViewDescription')}
@@ -1606,14 +1604,13 @@ export function SettingsPage() {
                     <ReactSelect
                       value={localSettings.date_format || 'system'}
                       onChange={(e) => updateSetting('date_format', e.target.value as 'system' | 'us' | 'eu' | 'iso')}
-                      className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
+                      className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
                     >
                       <option value="system">{t('settings.systemDefault')}</option>
                       <option value="us">{t('settings.dateFormatUs')}</option>
                       <option value="eu">{t('settings.dateFormatEu')}</option>
                       <option value="iso">{t('settings.dateFormatIso')}</option>
                     </ReactSelect>
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                   </div>
                 </div>
                 <div>
@@ -1624,13 +1621,12 @@ export function SettingsPage() {
                     <ReactSelect
                       value={localSettings.time_format || 'system'}
                       onChange={(e) => updateSetting('time_format', e.target.value as 'system' | '12h' | '24h')}
-                      className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
+                      className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
                     >
                       <option value="system">{t('settings.systemDefault')}</option>
                       <option value="12h">{t('settings.timeFormat12')}</option>
                       <option value="24h">{t('settings.timeFormat24')}</option>
                     </ReactSelect>
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                   </div>
                 </div>
               </div>
@@ -1642,7 +1638,7 @@ export function SettingsPage() {
                   <ReactSelect
                     value={localSettings.default_printer_id ?? ''}
                     onChange={(e) => updateSetting('default_printer_id', e.target.value ? Number(e.target.value) : null)}
-                    className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
+                    className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
                   >
                     <option value="">{t('settings.noDefaultPrinter')}</option>
                     {printers?.map((printer) => (
@@ -1651,7 +1647,6 @@ export function SettingsPage() {
                       </option>
                     ))}
                   </ReactSelect>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                 </div>
                 <p className="text-xs text-bambu-gray mt-1">
                   {t('settings.defaultPrinterDescription')}
@@ -2695,13 +2690,12 @@ export function SettingsPage() {
                       <ReactSelect
                         value={localSettings.ftp_retry_count ?? 3}
                         onChange={(e) => updateSetting('ftp_retry_count', parseInt(e.target.value))}
-                        className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
+                        className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
                       >
                         {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
                           <option key={n} value={n}>{t('settings.time', { count: n })}</option>
                         ))}
                       </ReactSelect>
-                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                     </div>
                   </div>
 
@@ -2713,13 +2707,12 @@ export function SettingsPage() {
                       <ReactSelect
                         value={localSettings.ftp_retry_delay ?? 2}
                         onChange={(e) => updateSetting('ftp_retry_delay', parseInt(e.target.value))}
-                        className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
+                        className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
                       >
                         {[1, 2, 3, 5, 10, 15, 20, 30].map(n => (
                           <option key={n} value={n}>{t('settings.second', { count: n })}</option>
                         ))}
                       </ReactSelect>
-                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                     </div>
                   </div>
                   <div>
@@ -2730,13 +2723,12 @@ export function SettingsPage() {
                       <ReactSelect
                         value={localSettings.ftp_timeout ?? 30}
                         onChange={(e) => updateSetting('ftp_timeout', parseInt(e.target.value))}
-                        className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
+                        className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
                       >
                         {[10, 15, 20, 30, 45, 60, 90, 120, 180, 300].map(n => (
                           <option key={n} value={n}>{t('settings.nSeconds', { count: n })}</option>
                         ))}
                       </ReactSelect>
-                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                     </div>
                     <p className="text-xs text-bambu-gray mt-1">
                       {t('settings.increaseForWeakWifi')}
@@ -4604,12 +4596,11 @@ export function SettingsPage() {
                   <ReactSelect
                     value={localSettings.preferred_slicer ?? 'bambu_studio'}
                     onChange={(e) => updateSetting('preferred_slicer', e.target.value as 'bambu_studio' | 'orcaslicer')}
-                    className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
+                    className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
                   >
                     <option value="bambu_studio">{t('settings.slicerBambuStudio')}</option>
                     <option value="orcaslicer">{t('settings.slicerOrcaSlicer')}</option>
                   </ReactSelect>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                 </div>
                 <p className="text-xs text-bambu-gray mt-1">
                   {t('settings.preferredSlicerDescription')}
@@ -4650,13 +4641,12 @@ export function SettingsPage() {
                         e.target.value === '' ? null : (e.target.value as 'bambu_studio' | 'orcaslicer'),
                       )
                     }
-                    className="w-full px-3 py-2 pr-10 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
+                    className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none appearance-none cursor-pointer"
                   >
                     <option value="">{t('settings.openInSlicerInherit', 'Same as API slicer')}</option>
                     <option value="bambu_studio">{t('settings.slicerBambuStudio')}</option>
                     <option value="orcaslicer">{t('settings.slicerOrcaSlicer')}</option>
                   </ReactSelect>
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray pointer-events-none" />
                 </div>
                 <p className="text-xs text-bambu-gray mt-1">
                   {t(

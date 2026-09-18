@@ -207,6 +207,24 @@ describe('SettingsPage', () => {
       });
     });
 
+    it('renders one chevron for custom general settings selectors', async () => {
+      render(<SettingsPage />);
+
+      await waitFor(() => {
+        for (const labelText of ['Language', 'Default View']) {
+          const label = screen.getByText(labelText, { selector: 'label' });
+          const select = label.closest('div')?.querySelector('[role="combobox"]');
+
+          expect(select).toBeInTheDocument();
+          // The duplicate chevron would be a sibling of ReactSelect's root.
+          const field = select?.parentElement?.parentElement;
+          expect(field).toBeInTheDocument();
+          expect(field?.querySelectorAll('svg')).toHaveLength(1);
+          expect(select).not.toHaveClass('pr-10');
+        }
+      });
+    });
+
     it('shows preferred slicer setting on Workflow tab', async () => {
       const user = userEvent.setup();
       render(<SettingsPage />);
