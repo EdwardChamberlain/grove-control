@@ -410,10 +410,6 @@ export function SettingsPage() {
   const [haTestResult, setHaTestResult] = useState<{ success: boolean; message: string | null; error: string | null } | null>(null);
   const [haTestLoading, setHaTestLoading] = useState(false);
 
-  // External camera test state
-  const [extCameraTestResults, setExtCameraTestResults] = useState<Record<number, { success: boolean; error?: string; resolution?: string } | null>>({});
-  const [extCameraTestLoading, setExtCameraTestLoading] = useState<Record<number, boolean>>({});
-
   const handleDefaultViewChange = (path: string) => {
     setDefaultViewState(path);
     setDefaultView(path);
@@ -1077,7 +1073,7 @@ export function SettingsPage() {
   });
 
   const updatePrinterMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<{ external_camera_url: string | null; external_camera_type: string | null; external_camera_enabled: boolean; external_camera_snapshot_url: string | null; camera_rotation: number }> }) =>
+    mutationFn: ({ id, data }: { id: number; data: Partial<{ camera_rotation: number }> }) =>
       api.updatePrinter(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['printers'] });
@@ -1161,101 +1157,8 @@ export function SettingsPage() {
     setLocalSettings(prev => prev ? { ...prev, [key]: value } : null);
   }, [authEnabled, hasPermission, showToast, t]);
 
-  const handleTestExternalCamera = async (printerId: number, url: string, cameraType: string) => {
-    if (!url) {
-      showToast(t('settings.toast.enterCameraUrl'), 'error');
-      return;
-    }
-    setExtCameraTestLoading(prev => ({ ...prev, [printerId]: true }));
-    setExtCameraTestResults(prev => ({ ...prev, [printerId]: null }));
-    try {
-      const result = await api.testExternalCamera(printerId, url, cameraType);
-      setExtCameraTestResults(prev => ({ ...prev, [printerId]: result }));
-      if (result.success) {
-        showToast(t('settings.toast.cameraConnected', { resolution: result.resolution || '' }), 'success');
-      } else {
-        showToast(result.error || t('settings.toast.connectionFailed'), 'error');
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : t('settings.toast.testFailed');
-      setExtCameraTestResults(prev => ({ ...prev, [printerId]: { success: false, error: message } }));
-      showToast(message, 'error');
-    } finally {
-      setExtCameraTestLoading(prev => ({ ...prev, [printerId]: false }));
-    }
-  };
-
-  // Local state for camera URL inputs (to avoid saving on every keystroke)
-  const [localCameraUrls, setLocalCameraUrls] = useState<Record<number, string>>({});
-  const cameraUrlSaveTimeoutRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
-  const initializedPrinterUrlsRef = useRef<Set<number>>(new Set());
-  const [localSnapshotUrls, setLocalSnapshotUrls] = useState<Record<number, string>>({});
-  const snapshotUrlSaveTimeoutRef = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
-  const initializedPrinterSnapshotUrlsRef = useRef<Set<number>>(new Set());
-
-  // Initialize local camera URLs from printer data
-  useEffect(() => {
-    if (printers) {
-      const urls: Record<number, string> = {};
-      const snapUrls: Record<number, string> = {};
-      printers.forEach(p => {
-        if (p.external_camera_url && !initializedPrinterUrlsRef.current.has(p.id)) {
-          urls[p.id] = p.external_camera_url;
-          initializedPrinterUrlsRef.current.add(p.id);
-        }
-        if (p.external_camera_snapshot_url && !initializedPrinterSnapshotUrlsRef.current.has(p.id)) {
-          snapUrls[p.id] = p.external_camera_snapshot_url;
-          initializedPrinterSnapshotUrlsRef.current.add(p.id);
-        }
-      });
-      if (Object.keys(urls).length > 0) {
-        setLocalCameraUrls(prev => ({ ...prev, ...urls }));
-      }
-      if (Object.keys(snapUrls).length > 0) {
-        setLocalSnapshotUrls(prev => ({ ...prev, ...snapUrls }));
-      }
-    }
-  }, [printers]);
-
-  const handleCameraUrlChange = (printerId: number, url: string) => {
-    // Update local state immediately for responsive UI
-    setLocalCameraUrls(prev => ({ ...prev, [printerId]: url }));
-
-    // Clear existing timeout for this printer
-    if (cameraUrlSaveTimeoutRef.current[printerId]) {
-      clearTimeout(cameraUrlSaveTimeoutRef.current[printerId]);
-    }
-
-    // Debounce the save (800ms delay)
-    cameraUrlSaveTimeoutRef.current[printerId] = setTimeout(() => {
-      updatePrinterMutation.mutate({
-        id: printerId,
-        data: { external_camera_url: url || null }
-      });
-    }, 800);
-  };
-
-  const handleSnapshotUrlChange = (printerId: number, url: string) => {
-    setLocalSnapshotUrls(prev => ({ ...prev, [printerId]: url }));
-
-    if (snapshotUrlSaveTimeoutRef.current[printerId]) {
-      clearTimeout(snapshotUrlSaveTimeoutRef.current[printerId]);
-    }
-
-    snapshotUrlSaveTimeoutRef.current[printerId] = setTimeout(() => {
-      updatePrinterMutation.mutate({
-        id: printerId,
-        data: { external_camera_snapshot_url: url || null }
-      });
-    }, 800);
-  };
-
-  const handleUpdatePrinterCamera = (printerId: number, updates: { type?: string; enabled?: boolean; rotation?: number }) => {
-    const data: Partial<{ external_camera_type: string | null; external_camera_enabled: boolean; camera_rotation: number }> = {};
-    if (updates.type !== undefined) data.external_camera_type = updates.type || null;
-    if (updates.enabled !== undefined) data.external_camera_enabled = updates.enabled;
-    if (updates.rotation !== undefined) data.camera_rotation = updates.rotation;
-    updatePrinterMutation.mutate({ id: printerId, data });
+  const handleUpdatePrinterCamera = (printerId: number, rotation: number) => {
+    updatePrinterMutation.mutate({ id: printerId, data: { camera_rotation: rotation } });
   };
 
   if (isLoading || !localSettings) {
@@ -1939,11 +1842,11 @@ export function SettingsPage() {
                 </p>
               </div>
 
-              {/* External Cameras Section */}
+              {/* Native printer cameras */}
               <div className="border-t border-bambu-dark-tertiary pt-4 mt-4">
-                <h3 className="text-sm font-medium text-white mb-2">{t('settings.externalCameras')}</h3>
+                <h3 className="text-sm font-medium text-white mb-2">{t('settings.cameraNativeOnly', 'Native printer cameras')}</h3>
                 <p className="text-xs text-bambu-gray mb-3">
-                  {t('settings.externalCamerasDescription')}
+                  {t('settings.cameraNativeOnlyDescription', 'Live view and snapshots use the camera built into each supported Bambu printer. External and USB cameras are not supported.')}
                 </p>
 
                 {printers && printers.length > 0 ? (
@@ -1952,109 +1855,21 @@ export function SettingsPage() {
                       <div key={printer.id} className="p-3 bg-bambu-dark rounded-lg">
                         <div className="flex items-center justify-between mb-2">
                           <span className="text-white font-medium text-sm">{printer.name}</span>
-                          <label className="relative inline-flex items-center cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={printer.external_camera_enabled}
-                              onChange={(e) => handleUpdatePrinterCamera(printer.id, { enabled: e.target.checked })}
-                              className="sr-only peer"
-                            />
-                            <div className="w-9 h-5 bg-bambu-dark-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-bambu-green"></div>
-                          </label>
+                          <span className="text-xs text-bambu-gray">{t('settings.nativeCamera', 'Native camera')}</span>
                         </div>
-
-                        {printer.external_camera_enabled && (
-                          <div className="space-y-2 mt-2">
-                            <input
-                              type="text"
-                              placeholder={printer.external_camera_type === 'usb' ? t('settings.cameraPlaceholderUsb') : t('settings.cameraPlaceholderUrl')}
-                              value={localCameraUrls[printer.id] ?? printer.external_camera_url ?? ''}
-                              onChange={(e) => handleCameraUrlChange(printer.id, e.target.value)}
-                              className="w-full px-3 py-2 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded text-white text-sm focus:border-bambu-green focus:outline-none"
-                            />
-                            <div className="flex gap-2">
-                              <ReactSelect
-                                value={printer.external_camera_type || 'mjpeg'}
-                                onChange={(e) => handleUpdatePrinterCamera(printer.id, { type: e.target.value })}
-                                className="flex-1 px-3 py-2 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded text-white text-sm focus:border-bambu-green focus:outline-none"
-                              >
-                                <option value="mjpeg">{t('settings.cameraTypeMjpeg')}</option>
-                                <option value="rtsp">{t('settings.cameraTypeRtsp')}</option>
-                                <option value="snapshot">{t('settings.cameraTypeSnapshot')}</option>
-                                <option value="usb">{t('settings.cameraTypeUsb')}</option>
-                              </ReactSelect>
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                onClick={() => handleTestExternalCamera(printer.id, localCameraUrls[printer.id] ?? printer.external_camera_url ?? '', printer.external_camera_type || 'mjpeg')}
-                                disabled={extCameraTestLoading[printer.id] || !(localCameraUrls[printer.id] ?? printer.external_camera_url)}
-                              >
-                                {extCameraTestLoading[printer.id] ? (
-                                  <Loader2 className="w-4 h-4 animate-spin" />
-                                ) : (
-                                  t('settings.test')
-                                )}
-                              </Button>
-                            </div>
-                            {extCameraTestResults[printer.id] && (
-                              <div className={`text-xs flex items-center gap-1 ${extCameraTestResults[printer.id]?.success ? 'text-green-500' : 'text-red-500'}`}>
-                                {extCameraTestResults[printer.id]?.success ? (
-                                  <>
-                                    <CheckCircle className="w-3 h-3" />
-                                    {t('settings.connected')}{extCameraTestResults[printer.id]?.resolution && ` (${extCameraTestResults[printer.id]?.resolution})`}
-                                  </>
-                                ) : (
-                                  <>
-                                    <XCircle className="w-3 h-3" />
-                                    {extCameraTestResults[printer.id]?.error || t('settings.toast.connectionFailed')}
-                                  </>
-                                )}
-                              </div>
-                            )}
-                            {(printer.external_camera_type === 'mjpeg' || printer.external_camera_type === 'rtsp' || printer.external_camera_type === 'usb') && (
-                              <div className="space-y-1">
-                                <label className="text-xs text-bambu-gray">{t('settings.cameraSnapshotUrl', 'Snapshot URL (optional)')}</label>
-                                <div className="flex gap-2">
-                                  <input
-                                    type="text"
-                                    placeholder={t('settings.cameraSnapshotUrlPlaceholder', 'http://192.168.1.61:1984/api/frame.jpeg?src=printer')}
-                                    value={localSnapshotUrls[printer.id] ?? printer.external_camera_snapshot_url ?? ''}
-                                    onChange={(e) => handleSnapshotUrlChange(printer.id, e.target.value)}
-                                    className="flex-1 px-3 py-2 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded text-white text-sm focus:border-bambu-green focus:outline-none"
-                                  />
-                                  <Button
-                                    size="sm"
-                                    variant="secondary"
-                                    onClick={() => handleTestExternalCamera(printer.id, localSnapshotUrls[printer.id] ?? printer.external_camera_snapshot_url ?? '', 'snapshot')}
-                                    disabled={extCameraTestLoading[printer.id] || !(localSnapshotUrls[printer.id] ?? printer.external_camera_snapshot_url)}
-                                  >
-                                    {extCameraTestLoading[printer.id] ? (
-                                      <Loader2 className="w-4 h-4 animate-spin" />
-                                    ) : (
-                                      t('settings.test')
-                                    )}
-                                  </Button>
-                                </div>
-                                <p className="text-xs text-bambu-gray opacity-75">
-                                  {t('settings.cameraSnapshotUrlHelp', 'Single-frame URL used for notification thumbnails, finish photos, timelapse and plate detection. Leave blank to capture from the live stream above. Useful for go2rtc (/api/frame.jpeg) and IP cameras with a dedicated snapshot endpoint.')}
-                                </p>
-                              </div>
-                            )}
-                            <div className="flex items-center gap-2">
-                              <label className="text-xs text-bambu-gray">{t('settings.cameraRotation')}</label>
-                              <ReactSelect
-                                value={printer.camera_rotation || 0}
-                                onChange={(e) => handleUpdatePrinterCamera(printer.id, { rotation: parseInt(e.target.value) })}
-                                className="px-2 py-1 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded text-white text-xs focus:border-bambu-green focus:outline-none"
-                              >
-                                <option value={0}>0°</option>
-                                <option value={90}>90°</option>
-                                <option value={180}>180°</option>
-                                <option value={270}>270°</option>
-                              </ReactSelect>
-                            </div>
-                          </div>
-                        )}
+                        <div className="flex items-center gap-2">
+                          <label className="text-xs text-bambu-gray">{t('settings.cameraRotation')}</label>
+                          <ReactSelect
+                            value={printer.camera_rotation || 0}
+                            onChange={(e) => handleUpdatePrinterCamera(printer.id, parseInt(e.target.value, 10))}
+                            className="px-2 py-1 bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded text-white text-xs focus:border-bambu-green focus:outline-none"
+                          >
+                            <option value={0}>0°</option>
+                            <option value={90}>90°</option>
+                            <option value={180}>180°</option>
+                            <option value={270}>270°</option>
+                          </ReactSelect>
+                        </div>
                       </div>
                     ))}
                   </div>

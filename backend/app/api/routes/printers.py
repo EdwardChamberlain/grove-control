@@ -175,24 +175,6 @@ async def create_printer(
     return printer
 
 
-@router.get("/usb-cameras")
-async def list_usb_cameras(
-    _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
-):
-    """List available USB cameras connected to the system.
-
-    Returns a list of detected V4L2 video devices with their info.
-    Only works on Linux systems with V4L2 support.
-
-    Returns:
-        List of dicts with {device: str, name: str, capabilities: list, formats?: list}
-    """
-    from backend.app.services.external_camera import list_usb_cameras
-
-    cameras = list_usb_cameras()
-    return {"cameras": cameras}
-
-
 @router.get("/available-filaments")
 async def get_available_filaments(
     model: str = Query(..., description="Target printer model"),

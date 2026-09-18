@@ -40,10 +40,6 @@ def fake_printer():
         ip_address="192.0.2.7",
         access_code="x",
         model="X1C",
-        external_camera_enabled=False,
-        external_camera_url=None,
-        external_camera_type=None,
-        external_camera_snapshot_url=None,
     )
 
 
@@ -117,8 +113,8 @@ async def test_event_set_after_successful_capture(patched_env, monkeypatch):
 
 
 async def test_event_set_when_capture_returns_no_frame(patched_env, monkeypatch):
-    """Producer gives up (RTSP timeout, no buffered frame, no external
-    camera) — consumer must NOT wait the full 20s for nothing."""
+    """Producer gives up (RTSP timeout or no buffered frame) — consumer must
+    NOT wait the full 20s for nothing."""
 
     async def _capture(**_kwargs):
         return None
