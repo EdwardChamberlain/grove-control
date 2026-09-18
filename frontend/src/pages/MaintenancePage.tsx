@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Wrench,
   Loader2,
@@ -20,6 +20,7 @@ import {
   Edit3,
   RotateCcw,
   Calendar,
+  CalendarCheck,
   Timer,
   Cog,
   Fan,
@@ -38,7 +39,15 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { api } from '../api/client';
-import type { MaintenanceStatus, PrinterMaintenanceOverview, MaintenanceType, Permission } from '../api/client';
+import type {
+  MaintenanceLogEntry,
+  MaintenanceLogEntryInput,
+  MaintenanceLogEntryType,
+  MaintenanceStatus,
+  PrinterMaintenanceOverview,
+  MaintenanceType,
+  Permission,
+} from '../api/client';
 import { getMaintenanceWikiUrl } from '../utils/maintenanceWikiUrls';
 import { Card, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
@@ -47,6 +56,7 @@ import { ConfirmModal } from '../components/ConfirmModal';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { ReactSelect } from '../components/ToolbarControls';
+import { DateTimePicker } from '../components/DateTimePicker';
 
 // Icon mapping for maintenance types
 const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -73,6 +83,9 @@ const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   CircleDot,
   ScanLine,
 };
+
+const maintenanceFieldClass =
+  'w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:border-bambu-green focus:outline-none';
 
 function getIcon(iconName: string | null) {
   if (!iconName) return Wrench;
@@ -127,6 +140,12 @@ function formatIntervalLabel(value: number, type: 'hours' | 'days', t?: TFunctio
     return t ? t('maintenance.days', { count: value }) : `${value} days`;
   }
   return `${value}h`;
+}
+
+function toDateTimeLocal(value: string | Date = new Date()): string {
+  const date = typeof value === 'string' ? new Date(value) : value;
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 
@@ -647,7 +666,7 @@ function SettingsSection({
                       type="text"
                       value={newTypeName}
                       onChange={(e) => setNewTypeName(e.target.value)}
-                      className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:border-bambu-green focus:outline-none"
+                      className={maintenanceFieldClass}
                       placeholder={t('maintenance.exampleName')}
                       autoFocus
                     />
@@ -665,7 +684,7 @@ function SettingsSection({
                           setNewTypeInterval('100');
                         }
                       }}
-                      className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:border-bambu-green focus:outline-none"
+                      className={maintenanceFieldClass}
                     >
                       <option value="hours">{t('maintenance.printHours')}</option>
                       <option value="days">{t('maintenance.calendarDays')}</option>
@@ -679,7 +698,7 @@ function SettingsSection({
                       type="number"
                       value={newTypeInterval}
                       onChange={(e) => setNewTypeInterval(e.target.value)}
-                      className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:border-bambu-green focus:outline-none"
+                      className={maintenanceFieldClass}
                       min="1"
                     />
                   </div>
@@ -715,7 +734,7 @@ function SettingsSection({
                     type="url"
                     value={newTypeWikiUrl}
                     onChange={(e) => setNewTypeWikiUrl(e.target.value)}
-                    className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:border-bambu-green focus:outline-none"
+                    className={maintenanceFieldClass}
                     placeholder="https://wiki.bambulab.com/..."
                   />
                 </div>
@@ -811,7 +830,7 @@ function SettingsSection({
                       <ReactSelect
                         value={editTypeIntervalType}
                         onChange={(e) => setEditTypeIntervalType(e.target.value as 'hours' | 'days')}
-                        className="flex-1 px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm focus:border-bambu-green focus:outline-none"
+                        className={`flex-1 ${maintenanceFieldClass}`}
                       >
                         <option value="hours">{t('maintenance.printHours')}</option>
                         <option value="days">{t('maintenance.calendarDays')}</option>
@@ -1084,7 +1103,327 @@ function SettingsSection({
   );
 }
 
-type TabType = 'status' | 'settings';
+type MaintenanceLogForm = {
+  printerId: string;
+  title: string;
+  notes: string;
+  occurredAt: string;
+  hours: string;
+};
+
+type MaintenanceLogFilter = MaintenanceLogEntryType | null;
+
+function MaintenanceLogSection({
+  overview,
+  entries,
+  isLoading,
+  isFetchingMore,
+  hasMore,
+  selectedPrinterId,
+  selectedEntryType,
+  onSelectPrinter,
+  onSelectEntryType,
+  onLoadMore,
+  onCreate,
+  onUpdate,
+  onDelete,
+  isSaving,
+  hasPermission,
+  t,
+}: {
+  overview: PrinterMaintenanceOverview[] | undefined;
+  entries: MaintenanceLogEntry[];
+  isLoading: boolean;
+  isFetchingMore: boolean;
+  hasMore: boolean;
+  selectedPrinterId: number | null;
+  selectedEntryType: MaintenanceLogFilter;
+  onSelectPrinter: (printerId: number | null) => void;
+  onSelectEntryType: (entryType: MaintenanceLogFilter) => void;
+  onLoadMore: () => void;
+  onCreate: (data: MaintenanceLogEntryInput) => Promise<MaintenanceLogEntry>;
+  onUpdate: (id: number, data: MaintenanceLogEntryInput) => Promise<MaintenanceLogEntry>;
+  onDelete: (id: number) => Promise<unknown>;
+  isSaving: boolean;
+  hasPermission: (permission: Permission) => boolean;
+  t: TFunction;
+}) {
+  const printers = useMemo(
+    () => [...(overview || [])].sort((a, b) => a.printer_name.localeCompare(b.printer_name)),
+    [overview],
+  );
+  const [editingEntry, setEditingEntry] = useState<MaintenanceLogEntry | null | undefined>(undefined);
+  const [form, setForm] = useState<MaintenanceLogForm>({
+    printerId: '',
+    title: '',
+    notes: '',
+    occurredAt: toDateTimeLocal(),
+    hours: '',
+  });
+  const [pendingDelete, setPendingDelete] = useState<MaintenanceLogEntry | null>(null);
+
+  const openCreate = () => {
+    setEditingEntry(null);
+    setForm({
+      printerId: selectedPrinterId?.toString() || printers[0]?.printer_id.toString() || '',
+      title: '',
+      notes: '',
+      occurredAt: toDateTimeLocal(),
+      hours: '',
+    });
+  };
+
+  const openEdit = (entry: MaintenanceLogEntry) => {
+    setEditingEntry(entry);
+    setForm({
+      printerId: entry.printer_id.toString(),
+      title: entry.title,
+      notes: entry.notes || '',
+      occurredAt: toDateTimeLocal(entry.occurred_at),
+      hours: entry.hours_at_maintenance?.toString() || '',
+    });
+  };
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const printerId = Number(form.printerId);
+    const hours = form.hours === '' ? null : Number(form.hours);
+    if (!printerId || !form.title.trim() || Number.isNaN(hours) || (hours !== null && hours < 0)) return;
+
+    const occurredAt = new Date(form.occurredAt);
+    if (Number.isNaN(occurredAt.getTime())) return;
+
+    const data: MaintenanceLogEntryInput = {
+      printer_id: printerId,
+      title: form.title.trim(),
+      notes: form.notes.trim() || null,
+      occurred_at: occurredAt.toISOString(),
+      hours_at_maintenance: hours,
+    };
+    if (editingEntry) {
+      await onUpdate(editingEntry.id, data);
+    } else {
+      await onCreate(data);
+    }
+    setEditingEntry(undefined);
+  };
+
+  const authorLine = (entry: MaintenanceLogEntry) => {
+    const created = entry.created_by_username
+      ? `${t('maintenance.recordedBy')} ${entry.created_by_username}`
+      : null;
+    const updated = entry.updated_by_username && entry.updated_at !== entry.created_at
+      ? `${t('maintenance.updatedBy')} ${entry.updated_by_username}`
+      : null;
+    return [created, updated].filter(Boolean).join(' · ');
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <ReactSelect
+            aria-label={t('maintenance.filterByPrinter')}
+            value={selectedPrinterId?.toString() || ''}
+            onChange={(event) => onSelectPrinter(event.target.value ? Number(event.target.value) : null)}
+            className="min-w-48"
+          >
+            <option value="">{t('maintenance.allPrinters')}</option>
+            {printers.map((printer) => (
+              <option key={printer.printer_id} value={printer.printer_id}>{printer.printer_name}</option>
+            ))}
+          </ReactSelect>
+          <ReactSelect
+            aria-label={t('maintenance.filterByType')}
+            value={selectedEntryType || ''}
+            onChange={(event) => onSelectEntryType((event.target.value || null) as MaintenanceLogFilter)}
+            className="min-w-40"
+          >
+            <option value="">{t('maintenance.allLogEntries')}</option>
+            <option value="scheduled">{t('maintenance.scheduledLogs')}</option>
+            <option value="manual">{t('maintenance.unscheduledLogs')}</option>
+          </ReactSelect>
+        </div>
+        {hasPermission('maintenance:create') && (
+          <Button onClick={openCreate} disabled={printers.length === 0}>
+            <Plus className="w-4 h-4 mr-2" />
+            {t('maintenance.addLogEntry')}
+          </Button>
+        )}
+      </div>
+
+      {isLoading ? (
+        <div className="flex justify-center py-12"><Loader2 className="w-7 h-7 animate-spin text-bambu-green" /></div>
+      ) : entries.length === 0 ? (
+        <Card>
+          <CardContent className="py-14 text-center">
+            <Clock className="mx-auto mb-4 h-12 w-12 text-bambu-gray/30" />
+            <p className="text-lg font-medium text-white">{t('maintenance.noLogEntries')}</p>
+            <p className="mt-1 text-bambu-gray">{t('maintenance.logDescription')}</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {entries.map((entry) => {
+            const isManual = entry.entry_type === 'manual';
+            const author = authorLine(entry);
+            return (
+              <Card key={entry.id} className="border-bambu-dark-tertiary">
+                <CardContent className="p-4">
+                  <div className="flex gap-3">
+                    <div className={`flex w-9 shrink-0 self-stretch items-center justify-center rounded-lg ${isManual ? 'bg-blue-500/10 text-blue-300' : 'bg-bambu-green/10 text-bambu-green'}`}>
+                      {isManual ? <Wrench className="h-5 w-5" /> : <CalendarCheck className="h-5 w-5" />}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="font-medium text-white">{entry.title}</h3>
+                      {entry.notes && <p className="whitespace-pre-wrap text-sm text-bambu-gray-light">{entry.notes}</p>}
+                      <div className="mt-1 space-y-0.5 text-xs text-bambu-gray">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span>{new Date(entry.occurred_at).toLocaleString()}</span>
+                          {entry.hours_at_maintenance !== null && (
+                            <>
+                              <span aria-hidden="true">•</span>
+                              <span>{entry.hours_at_maintenance.toFixed(1)}h</span>
+                            </>
+                          )}
+                        </div>
+                        <div>
+                          <span>{entry.printer_name}</span>
+                          <span aria-hidden="true"> • </span>
+                          <span>{isManual ? t('maintenance.unscheduledLogs') : t('maintenance.scheduledLogs')}</span>
+                        </div>
+                        {author && <div>{author}</div>}
+                      </div>
+                    </div>
+                    {isManual && (hasPermission('maintenance:update') || hasPermission('maintenance:delete')) && (
+                      <div className="flex gap-1">
+                        {hasPermission('maintenance:update') && (
+                          <Button variant="ghost" size="sm" onClick={() => openEdit(entry)} aria-label={t('common.edit')}>
+                            <Edit3 className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {hasPermission('maintenance:delete') && (
+                          <Button variant="ghost" size="sm" onClick={() => setPendingDelete(entry)} aria-label={t('common.delete')}>
+                            <Trash2 className="h-4 w-4 text-red-400" />
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {hasMore && (
+        <div className="flex justify-center">
+          <Button variant="secondary" onClick={onLoadMore} disabled={isFetchingMore}>
+            {isFetchingMore && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {t('maintenance.loadMore')}
+          </Button>
+        </div>
+      )}
+
+      {editingEntry !== undefined && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <Card className="w-full max-w-lg">
+            <CardContent className="p-6">
+              <h2 className="text-lg font-semibold text-white">
+                {editingEntry ? t('maintenance.editLogEntry') : t('maintenance.addLogEntry')}
+              </h2>
+              <form className="mt-5 space-y-4" onSubmit={submit}>
+                <label className="block text-sm text-bambu-gray">
+                  {t('maintenance.printer')}
+                  <ReactSelect
+                    required
+                    value={form.printerId}
+                    aria-label={t('maintenance.printer')}
+                    onChange={(event) => setForm({ ...form, printerId: event.target.value })}
+                    className={`mt-1 ${maintenanceFieldClass}`}
+                  >
+                    <option value="" disabled>{t('maintenance.selectPrinter')}</option>
+                    {printers.map((printer) => (
+                      <option key={printer.printer_id} value={printer.printer_id}>{printer.printer_name}</option>
+                    ))}
+                  </ReactSelect>
+                </label>
+                <label className="block text-sm text-bambu-gray">
+                  {t('maintenance.entryTitle')}
+                  <input
+                    required
+                    maxLength={200}
+                    value={form.title}
+                    onChange={(event) => setForm({ ...form, title: event.target.value })}
+                    placeholder={t('maintenance.entryTitlePlaceholder')}
+                    className="mt-1 w-full rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary px-3 py-2 text-white"
+                  />
+                </label>
+                <div className="block text-sm text-bambu-gray">
+                  <label htmlFor="maintenance-occurred-at">{t('maintenance.occurredAt')}</label>
+                  <DateTimePicker
+                    required
+                    value={form.occurredAt}
+                    onChange={(occurredAt) => setForm({ ...form, occurredAt })}
+                    dateInputId="maintenance-occurred-at"
+                    className="mt-1"
+                  />
+                </div>
+                <label className="block text-sm text-bambu-gray">
+                  {t('maintenance.recordPrintHours')}
+                  <input
+                    min="0"
+                    step="0.1"
+                    type="number"
+                    value={form.hours}
+                    onChange={(event) => setForm({ ...form, hours: event.target.value })}
+                    className="mt-1 w-full rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary px-3 py-2 text-white"
+                  />
+                </label>
+                <label className="block text-sm text-bambu-gray">
+                  {t('maintenance.notes')}
+                  <textarea
+                    maxLength={10000}
+                    rows={4}
+                    value={form.notes}
+                    onChange={(event) => setForm({ ...form, notes: event.target.value })}
+                    className="mt-1 w-full resize-y rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary px-3 py-2 text-white"
+                  />
+                </label>
+                <div className="flex justify-end gap-3 pt-2">
+                  <Button type="button" variant="secondary" onClick={() => setEditingEntry(undefined)}>
+                    {t('common.cancel')}
+                  </Button>
+                  <Button type="submit" disabled={isSaving}>
+                    {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    {t('maintenance.saveLogEntry')}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {pendingDelete && (
+        <ConfirmModal
+          title={t('maintenance.deleteLogEntryTitle')}
+          message={t('maintenance.deleteLogEntryMessage', { title: pendingDelete.title })}
+          confirmText={t('common.delete')}
+          variant="danger"
+          onConfirm={async () => {
+            await onDelete(pendingDelete.id);
+            setPendingDelete(null);
+          }}
+          onCancel={() => setPendingDelete(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+type TabType = 'status' | 'log' | 'settings';
 
 export function MaintenancePage() {
   const { t } = useTranslation();
@@ -1092,6 +1431,8 @@ export function MaintenancePage() {
   const { showToast } = useToast();
   const { hasPermission } = useAuth();
   const [activeTab, setActiveTab] = useState<TabType>('status');
+  const [logPrinterId, setLogPrinterId] = useState<number | null>(null);
+  const [logEntryType, setLogEntryType] = useState<MaintenanceLogFilter>(null);
 
   const { data: overview, isLoading } = useQuery({
     queryKey: ['maintenanceOverview'],
@@ -1103,17 +1444,66 @@ export function MaintenancePage() {
     queryFn: api.getMaintenanceTypes,
   });
 
+  const {
+    data: logPages,
+    isLoading: isLogsLoading,
+    isFetchingNextPage: isFetchingMoreLogs,
+    hasNextPage: hasMoreLogs,
+    fetchNextPage: fetchMoreLogs,
+  } = useInfiniteQuery({
+    queryKey: ['maintenanceLogs', logPrinterId, logEntryType],
+    queryFn: ({ pageParam }) => api.getMaintenanceLogs({
+      printerId: logPrinterId,
+      entryType: logEntryType,
+      cursor: pageParam,
+      limit: 50,
+    }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.next_cursor,
+    enabled: activeTab === 'log',
+  });
+
+  const logEntries = logPages?.pages.flatMap((page) => page.items) || [];
+
   const performMutation = useMutation({
     mutationFn: ({ id, notes }: { id: number; notes?: string }) =>
       api.performMaintenance(id, notes),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['maintenanceOverview'] });
       queryClient.invalidateQueries({ queryKey: ['maintenanceSummary'] });
+      queryClient.invalidateQueries({ queryKey: ['maintenanceLogs'] });
       showToast(t('maintenance.maintenanceComplete'));
     },
     onError: (error: Error) => {
       showToast(error.message, 'error');
     },
+  });
+
+  const createLogMutation = useMutation({
+    mutationFn: api.createMaintenanceLog,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['maintenanceLogs'] });
+      showToast(t('maintenance.logEntryCreated'));
+    },
+    onError: (error: Error) => showToast(error.message, 'error'),
+  });
+
+  const updateLogMutation = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: MaintenanceLogEntryInput }) => api.updateMaintenanceLog(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['maintenanceLogs'] });
+      showToast(t('maintenance.logEntryUpdated'));
+    },
+    onError: (error: Error) => showToast(error.message, 'error'),
+  });
+
+  const deleteLogMutation = useMutation({
+    mutationFn: api.deleteMaintenanceLog,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['maintenanceLogs'] });
+      showToast(t('maintenance.logEntryDeleted'));
+    },
+    onError: (error: Error) => showToast(error.message, 'error'),
   });
 
   const updateMutation = useMutation({
@@ -1246,6 +1636,8 @@ export function MaintenancePage() {
               {totalWarning > 0 && <span className="text-amber-400">{t('maintenance.warningCount', { count: totalWarning })}</span>}
               {totalDue === 0 && totalWarning === 0 && <span className="text-bambu-green">{t('maintenance.allOk')}</span>}
             </>
+          ) : activeTab === 'log' ? (
+            t('maintenance.logDescription')
           ) : (
             t('maintenance.configureSettings')
           )}
@@ -1263,6 +1655,16 @@ export function MaintenancePage() {
           }`}
         >
           {t('maintenance.statusTab')}
+        </button>
+        <button
+          onClick={() => setActiveTab('log')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            activeTab === 'log'
+              ? 'text-bambu-green border-bambu-green'
+              : 'text-bambu-gray border-transparent hover:text-white'
+          }`}
+        >
+          {t('maintenance.logTab')}
         </button>
         <button
           onClick={() => setActiveTab('settings')}
@@ -1307,6 +1709,25 @@ export function MaintenancePage() {
             </Card>
           )}
         </div>
+      ) : activeTab === 'log' ? (
+        <MaintenanceLogSection
+          overview={overview}
+          entries={logEntries}
+          isLoading={isLogsLoading}
+          isFetchingMore={isFetchingMoreLogs}
+          hasMore={Boolean(hasMoreLogs)}
+          selectedPrinterId={logPrinterId}
+          selectedEntryType={logEntryType}
+          onSelectPrinter={setLogPrinterId}
+          onSelectEntryType={setLogEntryType}
+          onLoadMore={() => fetchMoreLogs()}
+          onCreate={(data) => createLogMutation.mutateAsync(data)}
+          onUpdate={(id, data) => updateLogMutation.mutateAsync({ id, data })}
+          onDelete={(id) => deleteLogMutation.mutateAsync(id)}
+          isSaving={createLogMutation.isPending || updateLogMutation.isPending}
+          hasPermission={hasPermission}
+          t={t}
+        />
       ) : (
         <SettingsSection
           overview={overview}

@@ -3,6 +3,7 @@
 Tests the full request/response cycle for /api/v1/printers/ endpoints.
 """
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import unquote
 
@@ -301,6 +302,31 @@ class TestPrintersAPI:
         assert response.status_code == 200
 
         result = await db_session.execute(select(ScheduledDrying).where(ScheduledDrying.id == row_id))
+        assert result.scalar_one_or_none() is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_delete_printer_removes_maintenance_log_entries(
+        self, async_client: AsyncClient, printer_factory, db_session
+    ):
+        """Maintenance logs are durable until their printer is permanently removed."""
+        from backend.app.models.maintenance import MaintenanceLogEntry
+
+        printer = await printer_factory()
+        entry = MaintenanceLogEntry(
+            printer_id=printer.id,
+            entry_type="manual",
+            title="Replaced nozzle",
+            occurred_at=datetime.now(timezone.utc),
+        )
+        db_session.add(entry)
+        await db_session.commit()
+        entry_id = entry.id
+
+        response = await async_client.delete(f"/api/v1/printers/{printer.id}")
+        assert response.status_code == 200
+
+        result = await db_session.execute(select(MaintenanceLogEntry).where(MaintenanceLogEntry.id == entry_id))
         assert result.scalar_one_or_none() is None
 
     @pytest.mark.asyncio

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { render } from '../utils';
 import { MaintenancePage } from '../../pages/MaintenancePage';
 import { http, HttpResponse } from 'msw';
@@ -108,6 +108,29 @@ describe('MaintenancePage', () => {
           },
         ]);
       }),
+      http.get('/api/v1/maintenance/logs', () => {
+        return HttpResponse.json({
+          items: [
+            {
+              id: 1,
+              printer_id: 1,
+              printer_name: 'X1 Carbon',
+              entry_type: 'scheduled',
+              title: 'Clean Nozzle',
+              notes: 'Completed as scheduled',
+              occurred_at: '2024-01-02T10:00:00Z',
+              hours_at_maintenance: 100,
+              created_by_id: null,
+              created_by_username: null,
+              updated_by_id: null,
+              updated_by_username: null,
+              created_at: '2024-01-02T10:00:00Z',
+              updated_at: '2024-01-02T10:00:00Z',
+            },
+          ],
+          next_cursor: null,
+        });
+      }),
       http.post('/api/v1/maintenance/', async ({ request }) => {
         const body = await request.json() as { name: string };
         return HttpResponse.json({ id: 3, ...body });
@@ -145,6 +168,48 @@ describe('MaintenancePage', () => {
         // Should show printer name in tabs
         expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('maintenance log', () => {
+    it('shows scheduled history as a read-only fleet log entry', async () => {
+      render(<MaintenancePage />);
+
+      fireEvent.click(await screen.findByText('Log'));
+
+      expect(await screen.findByText('Clean Nozzle')).toBeInTheDocument();
+      expect(screen.getByRole('combobox', { name: 'Filter by printer' })).toBeInTheDocument();
+      expect(screen.getByRole('combobox', { name: 'Filter by type' })).toBeInTheDocument();
+      expect(screen.getByText('Completed as scheduled')).toBeInTheDocument();
+      expect(screen.getByText('X1 Carbon', { selector: 'span' })).toBeInTheDocument();
+      expect(screen.getByText('Scheduled', { selector: 'span' })).toBeInTheDocument();
+      expect(screen.queryByLabelText('Edit')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Delete')).not.toBeInTheDocument();
+    });
+
+    it('uses the shared React dropdown for the log printer field', async () => {
+      render(<MaintenancePage />);
+
+      fireEvent.click(await screen.findByText('Log'));
+      fireEvent.click(await screen.findByRole('button', { name: 'Add log entry' }));
+
+      expect(screen.getByRole('combobox', { name: 'Printer' })).toBeInTheDocument();
+    });
+
+    it('uses the owned calendar date picker for the occurrence time', async () => {
+      render(<MaintenancePage />);
+
+      fireEvent.click(await screen.findByText('Log'));
+      fireEvent.click(await screen.findByRole('button', { name: 'Add log entry' }));
+
+      expect(screen.getByLabelText('Occurred at', { selector: 'input[type="text"]' })).toHaveAttribute('type', 'text');
+      fireEvent.click(screen.getByTitle('Open calendar'));
+
+      const datePicker = screen.getByRole('dialog', { name: 'Choose date' });
+      expect(datePicker).toBeInTheDocument();
+      expect(datePicker.querySelector('[role="grid"]')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      expect(screen.queryByRole('dialog', { name: 'Choose date' })).not.toBeInTheDocument();
     });
   });
 });

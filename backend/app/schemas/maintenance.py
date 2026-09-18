@@ -91,6 +91,48 @@ class MaintenanceHistoryResponse(MaintenanceHistoryBase):
         from_attributes = True
 
 
+# Maintenance Log schemas
+class MaintenanceLogEntryBase(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    notes: str | None = Field(default=None, max_length=10000)
+    occurred_at: datetime | None = None
+    hours_at_maintenance: float | None = Field(default=None, ge=0)
+
+
+class MaintenanceLogEntryCreate(MaintenanceLogEntryBase):
+    printer_id: int
+
+
+class MaintenanceLogEntryUpdate(BaseModel):
+    printer_id: int | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    notes: str | None = Field(default=None, max_length=10000)
+    occurred_at: datetime | None = None
+    hours_at_maintenance: float | None = Field(default=None, ge=0)
+
+
+class MaintenanceLogEntryResponse(BaseModel):
+    id: int
+    printer_id: int
+    printer_name: str
+    entry_type: str
+    title: str
+    notes: str | None
+    occurred_at: datetime
+    hours_at_maintenance: float | None
+    created_by_id: int | None
+    created_by_username: str | None
+    updated_by_id: int | None
+    updated_by_username: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class MaintenanceLogResponse(BaseModel):
+    items: list[MaintenanceLogEntryResponse]
+    next_cursor: str | None = None
+
+
 # Combined status response for frontend
 class MaintenanceStatus(BaseModel):
     """Maintenance status for a printer with calculated values."""
