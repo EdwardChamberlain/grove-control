@@ -77,11 +77,14 @@ async def test_legacy_camera_settings_are_cleared_without_touching_printer_state
         await conn.execute(
             text(
                 "INSERT INTO printers "
-                "(id, name, serial_number, ip_address, access_code, model, camera_rotation, "
-                "plate_detection_enabled, external_camera_url, external_camera_type, "
+                "(id, name, serial_number, ip_address, access_code, model, nozzle_count, "
+                "is_active, auto_archive, print_hours_offset, runtime_seconds, "
+                "camera_rotation, plate_detection_enabled, awaiting_plate_clear, "
+                "external_camera_url, external_camera_type, "
                 "external_camera_enabled, external_camera_snapshot_url) "
-                "VALUES (1, 'P1S', 'ABC123', '192.168.1.10', 'secret', 'P1S', 90, 1, "
-                "'rtsp://camera.invalid/live', 'rtsp', 1, 'http://camera.invalid/frame.jpg')"
+                "VALUES (1, 'P1S', 'ABC123', '192.168.1.10', 'secret', 'P1S', 1, "
+                "1, 1, 0, 0, 90, 1, 0, 'rtsp://camera.invalid/live', 'rtsp', 1, "
+                "'http://camera.invalid/frame.jpg')"
             )
         )
 
@@ -108,8 +111,11 @@ async def test_legacy_camera_cleanup_is_idempotent(engine):
         await conn.execute(
             text(
                 "INSERT INTO printers "
-                "(id, name, serial_number, ip_address, access_code, external_camera_url) "
-                "VALUES (1, 'P1S', 'ABC123', '192.168.1.10', 'secret', 'http://camera.invalid/frame.jpg')"
+                "(id, name, serial_number, ip_address, access_code, nozzle_count, is_active, "
+                "auto_archive, print_hours_offset, runtime_seconds, awaiting_plate_clear, "
+                "external_camera_url) "
+                "VALUES (1, 'P1S', 'ABC123', '192.168.1.10', 'secret', 1, 1, 1, 0, 0, 0, "
+                "'http://camera.invalid/frame.jpg')"
             )
         )
 
