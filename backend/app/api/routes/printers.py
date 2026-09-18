@@ -403,7 +403,7 @@ async def delete_printer(
     from sqlalchemy import delete as sql_delete
 
     from backend.app.models.archive import PrintArchive
-    from backend.app.models.maintenance import MaintenanceHistory, PrinterMaintenance
+    from backend.app.models.maintenance import MaintenanceHistory, MaintenanceLogEntry, PrinterMaintenance
     from backend.app.models.scheduled_drying import ScheduledDrying
     from backend.app.models.spoolman_slot_assignment import SpoolmanSlotAssignment
 
@@ -448,8 +448,10 @@ async def delete_printer(
     # the ScheduledDrying printer foreign-key cascade.
     await db.execute(sql_delete(ScheduledDrying).where(ScheduledDrying.printer_id == printer_id))
 
-    # Delete maintenance history and items for this printer
+    # Delete durable maintenance logs plus legacy task history/items for this
+    # printer. SQLite does not enforce these foreign-key cascades.
     # (SQLite doesn't enforce FK cascades, so do it explicitly)
+    await db.execute(sql_delete(MaintenanceLogEntry).where(MaintenanceLogEntry.printer_id == printer_id))
     maintenance_ids = (
         (await db.execute(select(PrinterMaintenance.id).where(PrinterMaintenance.printer_id == printer_id)))
         .scalars()

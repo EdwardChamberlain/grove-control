@@ -3914,6 +3914,55 @@ async def run_migrations(conn):
         "ON location_ha_sensors (location_id, entity_id)",
     )
 
+    # #180: promote task-local completion history into the durable per-printer
+    # Maintenance Log.  ``create_all`` creates the new table before this pass;
+    # the helper is deliberately idempotent for every subsequent startup.
+    await _backfill_maintenance_log_entries(conn)
+
+
+async def _backfill_maintenance_log_entries(conn) -> None:
+    """Copy pre-#180 completion records to the durable maintenance log once."""
+    from sqlalchemy import text
+
+    required_source = {"id", "printer_maintenance_id", "performed_at", "hours_at_maintenance", "notes"}
+    required_log = {
+        "printer_id",
+        "entry_type",
+        "title",
+        "notes",
+        "occurred_at",
+        "hours_at_maintenance",
+        "source_history_id",
+        "created_at",
+        "updated_at",
+    }
+    if not required_source.issubset(await _table_columns(conn, "maintenance_history")):
+        return
+    if not required_log.issubset(await _table_columns(conn, "maintenance_log_entries")):
+        return
+
+    # ``source_history_id`` is unique.  The NOT EXISTS guard makes the
+    # backfill safe on both SQLite and PostgreSQL, including an interrupted
+    # startup that is retried after some rows have already been copied.
+    async with conn.begin_nested():
+        result = await conn.execute(
+            text(
+                "INSERT INTO maintenance_log_entries "
+                "(printer_id, entry_type, title, notes, occurred_at, hours_at_maintenance, "
+                "source_history_id, created_at, updated_at) "
+                "SELECT pm.printer_id, 'scheduled', mt.name, h.notes, h.performed_at, "
+                "h.hours_at_maintenance, h.id, h.performed_at, h.performed_at "
+                "FROM maintenance_history h "
+                "JOIN printer_maintenance pm ON pm.id = h.printer_maintenance_id "
+                "JOIN maintenance_types mt ON mt.id = pm.maintenance_type_id "
+                "WHERE NOT EXISTS ("
+                "SELECT 1 FROM maintenance_log_entries l WHERE l.source_history_id = h.id"
+                ")"
+            )
+        )
+    if result.rowcount:
+        logger.info("Backfilled %d maintenance history row(s) into the maintenance log", result.rowcount)
+
 
 async def _migrate_backfill_variant_groups(conn) -> None:
     """Build variant groups from the slice provenance already on disk (#671 / #2570).

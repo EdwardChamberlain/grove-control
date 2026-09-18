@@ -3230,6 +3230,40 @@ export interface MaintenanceHistory {
   notes: string | null;
 }
 
+export interface MaintenanceLogEntry {
+  id: number;
+  printer_id: number;
+  printer_name: string;
+  entry_type: 'scheduled' | 'manual';
+  title: string;
+  notes: string | null;
+  occurred_at: string;
+  hours_at_maintenance: number | null;
+  created_by_id: number | null;
+  created_by_username: string | null;
+  updated_by_id: number | null;
+  updated_by_username: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type MaintenanceLogEntryType = MaintenanceLogEntry['entry_type'];
+
+export interface MaintenanceLogResponse {
+  items: MaintenanceLogEntry[];
+  next_cursor: string | null;
+}
+
+export interface MaintenanceLogEntryInput {
+  printer_id: number;
+  title: string;
+  notes?: string | null;
+  occurred_at?: string;
+  hours_at_maintenance?: number | null;
+}
+
+export type MaintenanceLogEntryUpdate = Partial<MaintenanceLogEntryInput>;
+
 export interface MaintenanceSummary {
   total_due: number;
   total_warning: number;
@@ -5815,6 +5849,32 @@ export const api = {
     }),
   getMaintenanceHistory: (itemId: number) =>
     request<MaintenanceHistory[]>(`/maintenance/items/${itemId}/history`),
+  getMaintenanceLogs: (options: {
+    printerId?: number | null;
+    entryType?: MaintenanceLogEntryType | null;
+    cursor?: string | null;
+    limit?: number;
+  } = {}) => {
+    const params = new URLSearchParams();
+    if (options.printerId != null) params.set('printer_id', String(options.printerId));
+    if (options.entryType) params.set('entry_type', options.entryType);
+    if (options.cursor) params.set('cursor', options.cursor);
+    if (options.limit) params.set('limit', String(options.limit));
+    const query = params.toString();
+    return request<MaintenanceLogResponse>(`/maintenance/logs${query ? `?${query}` : ''}`);
+  },
+  createMaintenanceLog: (data: MaintenanceLogEntryInput) =>
+    request<MaintenanceLogEntry>('/maintenance/logs', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateMaintenanceLog: (entryId: number, data: MaintenanceLogEntryUpdate) =>
+    request<MaintenanceLogEntry>(`/maintenance/logs/${entryId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  deleteMaintenanceLog: (entryId: number) =>
+    request<{ status: string }>(`/maintenance/logs/${entryId}`, { method: 'DELETE' }),
   getMaintenanceSummary: () => request<MaintenanceSummary>('/maintenance/summary'),
   setPrinterHours: (printerId: number, totalHours: number) =>
     request<{ printer_id: number; total_hours: number; archive_hours: number; offset_hours: number }>(

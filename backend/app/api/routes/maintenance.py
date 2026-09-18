@@ -1,21 +1,29 @@
 """Maintenance tracking API routes."""
 
+import base64
+import binascii
+import json
 import logging
 from datetime import datetime, timezone
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.app.core.auth import RequirePermissionIfAuthEnabled
 from backend.app.core.database import get_db
 from backend.app.core.permissions import Permission
-from backend.app.models.maintenance import MaintenanceHistory, MaintenanceType, PrinterMaintenance
+from backend.app.models.maintenance import MaintenanceHistory, MaintenanceLogEntry, MaintenanceType, PrinterMaintenance
 from backend.app.models.printer import Printer
 from backend.app.models.user import User
 from backend.app.schemas.maintenance import (
     MaintenanceHistoryResponse,
+    MaintenanceLogEntryCreate,
+    MaintenanceLogEntryResponse,
+    MaintenanceLogEntryUpdate,
+    MaintenanceLogResponse,
     MaintenanceStatus,
     MaintenanceTypeCreate,
     MaintenanceTypeResponse,
@@ -26,11 +34,81 @@ from backend.app.schemas.maintenance import (
     PrinterMaintenanceUpdate,
 )
 from backend.app.services.notification_service import notification_service
+from backend.app.utils.local_time import to_naive_utc, utcnow_naive
 from backend.app.utils.printer_models import get_rod_type, supports_vision_encoder
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/maintenance", tags=["maintenance"])
+
+
+def _actor_values(actor: User | None) -> dict[str, int | str | None]:
+    """Return actor fields for a durable log snapshot."""
+    return {
+        "created_by_id": actor.id if actor else None,
+        "created_by_username": actor.username if actor else None,
+        "updated_by_id": actor.id if actor else None,
+        "updated_by_username": actor.username if actor else None,
+    }
+
+
+def _normalise_log_time(value: datetime | None) -> datetime:
+    """Use UTC for user input while accepting legacy naive database values."""
+    if value is None:
+        return datetime.now(timezone.utc)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _validate_log_time(value: datetime | None) -> datetime:
+    occurred_at = _normalise_log_time(value)
+    if occurred_at > datetime.now(timezone.utc):
+        raise HTTPException(status_code=422, detail="Maintenance log entries cannot be dated in the future")
+    return occurred_at
+
+
+def _encode_log_cursor(entry: MaintenanceLogEntry) -> str:
+    payload = json.dumps({"occurred_at": entry.occurred_at.isoformat(), "id": entry.id}).encode()
+    return base64.urlsafe_b64encode(payload).decode().rstrip("=")
+
+
+def _decode_log_cursor(cursor: str) -> tuple[datetime, int]:
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded).decode())
+        occurred_at = to_naive_utc(_normalise_log_time(datetime.fromisoformat(payload["occurred_at"])))
+        entry_id = int(payload["id"])
+    except (binascii.Error, KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=422, detail="Invalid maintenance log cursor") from exc
+    return occurred_at, entry_id
+
+
+def _log_response(entry: MaintenanceLogEntry, printer_name: str) -> MaintenanceLogEntryResponse:
+    return MaintenanceLogEntryResponse(
+        id=entry.id,
+        printer_id=entry.printer_id,
+        printer_name=printer_name,
+        entry_type=entry.entry_type,
+        title=entry.title,
+        notes=entry.notes,
+        occurred_at=entry.occurred_at,
+        hours_at_maintenance=entry.hours_at_maintenance,
+        created_by_id=entry.created_by_id,
+        created_by_username=entry.created_by_username,
+        updated_by_id=entry.updated_by_id,
+        updated_by_username=entry.updated_by_username,
+        created_at=entry.created_at,
+        updated_at=entry.updated_at,
+    )
+
+
+def _normalise_log_title(title: str) -> str:
+    normalised = title.strip()
+    if not normalised:
+        raise HTTPException(status_code=422, detail="Maintenance log title cannot be blank")
+    return normalised
+
 
 # Default maintenance types
 DEFAULT_MAINTENANCE_TYPES = [
@@ -87,6 +165,12 @@ DEFAULT_MAINTENANCE_TYPES = [
         "description": "Deep clean build plate with IPA or soap",
         "default_interval_hours": 25.0,
         "icon": "Square",
+    },
+    {
+        "name": "Clear waste basket",
+        "description": "Empty the waste basket and remove accumulated purge material",
+        "default_interval_hours": 25.0,
+        "icon": "Box",
     },
     {
         "name": "Check PTFE Tube",
@@ -585,12 +669,146 @@ async def remove_maintenance_item(
     return {"status": "removed"}
 
 
+@router.get("/logs", response_model=MaintenanceLogResponse)
+async def get_maintenance_logs(
+    printer_id: int | None = None,
+    entry_type: Literal["scheduled", "manual"] | None = None,
+    cursor: str | None = None,
+    limit: int = Query(default=50, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.MAINTENANCE_READ),
+):
+    """Return durable scheduled and manual maintenance records, newest first."""
+    query = select(MaintenanceLogEntry, Printer.name).join(Printer, Printer.id == MaintenanceLogEntry.printer_id)
+    if printer_id is not None:
+        query = query.where(MaintenanceLogEntry.printer_id == printer_id)
+    if entry_type is not None:
+        query = query.where(MaintenanceLogEntry.entry_type == entry_type)
+    if cursor:
+        cursor_time, cursor_id = _decode_log_cursor(cursor)
+        query = query.where(
+            or_(
+                MaintenanceLogEntry.occurred_at < cursor_time,
+                and_(
+                    MaintenanceLogEntry.occurred_at == cursor_time,
+                    MaintenanceLogEntry.id < cursor_id,
+                ),
+            )
+        )
+
+    result = await db.execute(
+        query.order_by(MaintenanceLogEntry.occurred_at.desc(), MaintenanceLogEntry.id.desc()).limit(limit + 1)
+    )
+    rows = result.all()
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    entries = [_log_response(entry, printer_name) for entry, printer_name in rows]
+    return MaintenanceLogResponse(
+        items=entries,
+        next_cursor=_encode_log_cursor(rows[-1][0]) if has_more and rows else None,
+    )
+
+
+@router.post("/logs", response_model=MaintenanceLogEntryResponse)
+async def create_maintenance_log(
+    data: MaintenanceLogEntryCreate,
+    db: AsyncSession = Depends(get_db),
+    actor: User | None = RequirePermissionIfAuthEnabled(Permission.MAINTENANCE_CREATE),
+):
+    """Record one-off maintenance without altering any scheduled task state."""
+    result = await db.execute(select(Printer).where(Printer.id == data.printer_id))
+    printer = result.scalar_one_or_none()
+    if not printer:
+        raise HTTPException(status_code=404, detail="Printer not found")
+
+    entry = MaintenanceLogEntry(
+        printer_id=printer.id,
+        entry_type="manual",
+        title=_normalise_log_title(data.title),
+        notes=data.notes,
+        occurred_at=to_naive_utc(_validate_log_time(data.occurred_at)),
+        hours_at_maintenance=data.hours_at_maintenance,
+        **_actor_values(actor),
+    )
+    db.add(entry)
+    await db.commit()
+    await db.refresh(entry)
+    return _log_response(entry, printer.name)
+
+
+@router.patch("/logs/{entry_id}", response_model=MaintenanceLogEntryResponse)
+async def update_maintenance_log(
+    entry_id: int,
+    data: MaintenanceLogEntryUpdate,
+    db: AsyncSession = Depends(get_db),
+    actor: User | None = RequirePermissionIfAuthEnabled(Permission.MAINTENANCE_UPDATE),
+):
+    """Edit a manual record without changing printer maintenance counters."""
+    result = await db.execute(
+        select(MaintenanceLogEntry, Printer.name)
+        .join(Printer, Printer.id == MaintenanceLogEntry.printer_id)
+        .where(MaintenanceLogEntry.id == entry_id)
+    )
+    row = result.one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Maintenance log entry not found")
+    entry, printer_name = row
+    if entry.entry_type != "manual":
+        raise HTTPException(status_code=409, detail="Scheduled maintenance log entries cannot be edited")
+
+    update_data = data.model_dump(exclude_unset=True)
+    if "printer_id" in update_data:
+        result = await db.execute(select(Printer).where(Printer.id == update_data["printer_id"]))
+        printer = result.scalar_one_or_none()
+        if not printer:
+            raise HTTPException(status_code=404, detail="Printer not found")
+        entry.printer_id = printer.id
+        printer_name = printer.name
+    if "title" in update_data:
+        if update_data["title"] is None:
+            raise HTTPException(status_code=422, detail="Maintenance log title cannot be null")
+        entry.title = _normalise_log_title(update_data["title"])
+    if "notes" in update_data:
+        entry.notes = update_data["notes"]
+    if "occurred_at" in update_data:
+        if update_data["occurred_at"] is None:
+            raise HTTPException(status_code=422, detail="Maintenance log occurrence time cannot be null")
+        entry.occurred_at = to_naive_utc(_validate_log_time(update_data["occurred_at"]))
+    if "hours_at_maintenance" in update_data:
+        entry.hours_at_maintenance = update_data["hours_at_maintenance"]
+
+    entry.updated_by_id = actor.id if actor else None
+    entry.updated_by_username = actor.username if actor else None
+    await db.commit()
+    await db.refresh(entry)
+    return _log_response(entry, printer_name)
+
+
+@router.delete("/logs/{entry_id}")
+async def delete_maintenance_log(
+    entry_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.MAINTENANCE_DELETE),
+):
+    """Permanently delete a manually recorded maintenance entry."""
+    result = await db.execute(select(MaintenanceLogEntry).where(MaintenanceLogEntry.id == entry_id))
+    entry = result.scalar_one_or_none()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Maintenance log entry not found")
+    if entry.entry_type != "manual":
+        raise HTTPException(status_code=409, detail="Scheduled maintenance log entries cannot be deleted")
+
+    await db.delete(entry)
+    await db.commit()
+    return {"status": "deleted"}
+
+
 @router.post("/items/{item_id}/perform", response_model=MaintenanceStatus)
 async def perform_maintenance(
     item_id: int,
     data: PerformMaintenanceRequest,
     db: AsyncSession = Depends(get_db),
-    _: User | None = RequirePermissionIfAuthEnabled(Permission.MAINTENANCE_UPDATE),
+    actor: User | None = RequirePermissionIfAuthEnabled(Permission.MAINTENANCE_UPDATE),
 ):
     """Mark maintenance as performed (reset the counter)."""
     result = await db.execute(
@@ -610,15 +828,31 @@ async def perform_maintenance(
     current_hours = await get_printer_total_hours(db, item.printer_id)
 
     # Create history entry
+    performed_at = utcnow_naive()
     history = MaintenanceHistory(
         printer_maintenance_id=item.id,
+        performed_at=performed_at,
         hours_at_maintenance=current_hours,
         notes=data.notes,
     )
     db.add(history)
+    await db.flush()
+
+    db.add(
+        MaintenanceLogEntry(
+            printer_id=item.printer_id,
+            entry_type="scheduled",
+            title=item.maintenance_type.name,
+            notes=data.notes,
+            occurred_at=performed_at,
+            hours_at_maintenance=current_hours,
+            source_history_id=history.id,
+            **_actor_values(actor),
+        )
+    )
 
     # Update item
-    item.last_performed_at = datetime.now(timezone.utc)
+    item.last_performed_at = performed_at
     item.last_performed_hours = current_hours
 
     await db.commit()
