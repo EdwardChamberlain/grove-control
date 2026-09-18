@@ -89,6 +89,10 @@ _CSV_UPLOAD_CHUNK_BYTES = 64 * 1024
 FILAMENT_COLORS_API = "https://filamentcolors.xyz/api"
 
 
+class SpoolWeightUpdate(BaseModel):
+    weight_grams: float = Field(..., ge=0.0, le=100_000.0)
+
+
 async def apply_spool_to_slot_via_mqtt(
     *,
     db: AsyncSession,
@@ -103,7 +107,7 @@ async def apply_spool_to_slot_via_mqtt(
     """Publish ams_filament_setting + extrusion_cali_sel for a spool on a slot.
 
     Shared by `assign_spool` (initial assign for a loaded slot) and
-    `on_ams_change` (re-fire when a SpoolBuddy-pre-assigned slot transitions
+    `on_ams_change` (re-fire when an externally assigned slot transitions
     empty → loaded). Returns True when MQTT commands were published, False if
     no client was available or setup failed mid-way.
 
@@ -1119,6 +1123,35 @@ async def list_spools(
     return list(result.scalars().all())
 
 
+@router.patch("/spools/{spool_id}/weight")
+async def sync_spool_weight(
+    spool_id: int,
+    data: SpoolWeightUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.INVENTORY_UPDATE),
+):
+    """Update local inventory usage from a measured gross spool weight."""
+    result = await db.execute(select(Spool).where(Spool.id == spool_id))
+    spool = result.scalar_one_or_none()
+    if not spool:
+        raise HTTPException(status_code=404, detail="Spool not found")
+
+    net_filament = max(0.0, data.weight_grams - spool.core_weight)
+    spool.weight_used = max(0.0, spool.label_weight - net_filament)
+    spool.last_scale_weight = round(data.weight_grams)
+    from datetime import datetime, timezone
+
+    spool.last_weighed_at = datetime.now(timezone.utc)
+    await db.commit()
+    logger.info(
+        "Updated spool %d weight: %.1fg on scale, %.1fg used",
+        spool.id,
+        data.weight_grams,
+        spool.weight_used,
+    )
+    return {"status": "ok", "weight_used": spool.weight_used}
+
+
 # ── CSV import / export (#1576) ──────────────────────────────────────────────
 # Declared before the dynamic `/spools/{spool_id}` route below so the literal
 # `export` / `import` segments match here instead of being parsed as an int id.
@@ -1871,7 +1904,7 @@ async def assign_spool(
     # still has empty fingerprint_type because nothing in the assign path
     # updates that column, and on_ams_change at main.py:1031-1054 still
     # fires the deferred config when a spool eventually appears. So the
-    # SpoolBuddy weigh-then-assign-before-insert workflow continues to
+    # weigh-then-assign-before-insert workflow continues to
     # work — just without the optimization of skipping a no-op MQTT call.
     #
     # state ∈ {9, 10} stays as an explicit short-circuit so we don't churn

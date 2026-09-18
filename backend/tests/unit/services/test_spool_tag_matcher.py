@@ -1266,7 +1266,7 @@ async def test_core_weight_matches_low_temp_row_not_first_bambu_row(db_session):
     by name, not take whichever 'Bambu Lab%' row the database returns first.
 
     Before the fix this asserted 216 (High Temp), because the query had neither a
-    matching step nor an ORDER BY. core_weight is the tare in SpoolBuddy's weigh
+    matching step nor an ORDER BY. core_weight is the tare in the client's weigh
     flow, so the 34 g error propagated into every scale weighing of an RFID-created
     spool.
     """

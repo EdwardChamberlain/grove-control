@@ -27,7 +27,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gosu \
     iproute2 \
     libcap2-bin \
-    openssh-client \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
@@ -76,15 +75,6 @@ COPY backend/ ./backend/
 COPY scripts/rebuild_print_queue.py ./scripts/rebuild_print_queue.py
 COPY scripts/rebuild_database.py ./scripts/rebuild_database.py
 
-# Capture the current git branch at build time. `.git/HEAD` is the only
-# .git metadata the build context lets through (see .dockerignore); it
-# contains `ref: refs/heads/<branch>`, which the SpoolBuddy remote-update
-# flow reads at runtime via detect_current_branch() in spoolbuddy_ssh.py.
-# Without this, the production image has no git metadata at all and would
-# always pull `main` on the remote device regardless of which branch
-# Grove Control itself was built from.
-COPY .git/HEAD ./.git/HEAD
-
 # Copy built frontend from builder stage
 COPY --from=frontend-builder /app/static ./static
 
@@ -126,17 +116,8 @@ ENV PYTHONUNBUFFERED=1
 ENV DATA_DIR=/app/data
 ENV LOG_DIR=/app/logs
 ENV PORT=8000
-# Provide a local username + home for tools that call getpass.getuser() /
-# os.path.expanduser() under arbitrary PUIDs. With `user: "1001:1001"` the
-# stock python:3.13-slim image has no /etc/passwd entry for that UID, so
-# pwd.getpwuid() raises and breaks libraries that do host-level user lookups
-# (notably asyncssh, which uses the local username for ~/.ssh/config host
-# matching during the SpoolBuddy remote-update flow). Setting LOGNAME/USER
-# makes getpass.getuser() resolve via env vars instead of the passwd db;
-# HOME=/app gives a writable home that is guaranteed to exist.
+# Provide a writable home for libraries that cache generated assets.
 ENV HOME=/app
-ENV USER=bambuddy
-ENV LOGNAME=bambuddy
 
 # Matplotlib (imported lazily by the STL thumbnail generator) tries to create
 # its font/style cache at $HOME/.config/matplotlib on first import. /app is

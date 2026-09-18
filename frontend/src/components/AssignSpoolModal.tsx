@@ -64,12 +64,12 @@ export function AssignSpoolModal({ isOpen, onClose, printerId, amsId, trayId, tr
 
   // Unique cache key — different consumers of `['inventory-spools']` call
   // `getSpools()` with different `includeArchived` arguments (InventoryPage:
-  // true, SpoolBuddyDashboard / SpoolBuddyInventoryPage: false), but they
-  // all share the same key. React Query treats them as one query and
-  // serves whichever response landed first, so a SpoolBuddy component
+  // true and assignment pickers: false), but they all share the same key.
+  // React Query treats them as one query and serves whichever response landed
+  // first, so another component
   // priming the cache with the archived-excluded payload makes the picker
   // miss spools that *are* archived OR (more subtly) miss any spool that
-  // wasn't yet present when SpoolBuddy ran its initial fetch. The picker
+  // wasn't yet present when another component ran its initial fetch. The picker
   // gets its own key + a fetch-everything call so this consumer is never
   // at the mercy of someone else's cache state. Archived spools are then
   // explicitly excluded client-side because the backend rejects archived
@@ -157,8 +157,7 @@ export function AssignSpoolModal({ isOpen, onClose, printerId, amsId, trayId, tr
       // spool is detected in the slot (#1680). The success-but-pending case
       // gets a distinct toast so the user understands the slot hasn't been
       // configured on the printer yet — saying "AMS slot configured" reads
-      // as a lie in that state. Mirror of `spoolbuddy/AssignToAmsModal.tsx`,
-      // which has handled this since the SpoolBuddy assign flow shipped.
+      // as a lie in that state.
       const toastKey = newAssignment.pending_config
         ? 'inventory.assignPendingInsert'
         : 'inventory.assignSuccess';
@@ -243,7 +242,7 @@ export function AssignSpoolModal({ isOpen, onClose, printerId, amsId, trayId, tr
   // RFID-tagged Bambu Lab spools (#1133). The earlier "manual spools only"
   // gate (tag_uid && tray_uuid both null) blocked the workflow where a
   // user has a Bambu Lab spool in inventory but doesn't want to scan it
-  // via SpoolBuddy NFC every time and just wants to pick it from the list.
+  // every time and just wants to pick it from the list.
   // External slots (amsId 254/255) have always been allowed to pick from
   // any spool because the slot itself has no RFID reader; that
   // distinction collapses now that AMS slots also accept any spool.

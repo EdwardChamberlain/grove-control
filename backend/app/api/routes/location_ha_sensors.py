@@ -31,7 +31,7 @@ router = APIRouter(prefix="/location-ha-sensors", tags=["location-ha-sensors"])
 # "the Home Assistant integration", just scoped to a location instead of a
 # printer. INVENTORY_* would put HA entity bindings behind
 # can_manage_inventory, which defaults to on for API keys (see auth.py) —
-# an inventory-scoped key (e.g. a SpoolBuddy kiosk) would then be able to
+# an inventory-scoped key would then be able to
 # create, edit and delete HA sensor bindings, a capability the printer
 # sibling deliberately keeps admin-only by leaving SMART_PLUGS_CREATE/
 # UPDATE/DELETE off the API-key allowlist entirely.

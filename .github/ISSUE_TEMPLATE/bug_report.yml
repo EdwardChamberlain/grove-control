@@ -20,7 +20,6 @@ body:
       description: Which product is affected?
       options:
         - Grove Control
-        - SpoolBuddy
     validations:
       required: true
 
@@ -44,7 +43,6 @@ body:
         - Updates / firmware check
         - UI / display / theme / i18n
         - API / integrations (Home Assistant, MQTT export, Obico, ...)
-        - SpoolBuddy kiosk / display
         - Other / not sure
     validations:
       required: true
@@ -127,13 +125,6 @@ body:
       placeholder: e.g., 0.2.5
     validations:
       required: true
-
-  - type: input
-    id: spoolbuddy_version
-    attributes:
-      label: SpoolBuddy Version
-      description: If SpoolBuddy-related, which version is running? (Check SpoolBuddy Settings → Updates)
-      placeholder: e.g., 0.1.0
 
   - type: input
     id: firmware

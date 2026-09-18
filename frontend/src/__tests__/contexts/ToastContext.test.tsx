@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { act, render, renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { type ReactNode } from 'react';
 import { ToastProvider, useToast } from '../../contexts/ToastContext';
 
@@ -92,52 +92,5 @@ describe('ToastContext post-unmount safety', () => {
     }).not.toThrow();
 
     vi.useRealTimers();
-  });
-});
-
-describe('ToastContext viewport suppression', () => {
-  // The kiosk layout flips setViewportSuppressed(true) on mount so the
-  // SpoolBuddy display stays free of main-app toasts (login flows, etc.).
-  // Verify the gate hides the visible viewport
-  // without affecting the underlying state machine.
-  function ViewportProbe() {
-    const { showToast, setViewportSuppressed } = useToast();
-    return (
-      <>
-        <button data-testid="show-toast" onClick={() => showToast('hello', 'success')} />
-        <button data-testid="suppress-on" onClick={() => setViewportSuppressed(true)} />
-        <button data-testid="suppress-off" onClick={() => setViewportSuppressed(false)} />
-      </>
-    );
-  }
-
-  it('hides the visible toast viewport when suppressed but keeps state alive', () => {
-    const { container, getByTestId } = render(
-      <ToastProvider>
-        <ViewportProbe />
-      </ToastProvider>
-    );
-
-    // Toast viewport is the fixed-position container with bottom-4 right-4.
-    const findViewport = () => container.querySelector('div.fixed.bottom-4.right-4');
-    expect(findViewport()?.className).not.toContain('hidden');
-
-    act(() => {
-      getByTestId('suppress-on').click();
-    });
-    expect(findViewport()?.className).toContain('hidden');
-
-    // State is unaffected — emitting a toast while suppressed is fine; the
-    // state container exists, just hidden.
-    act(() => {
-      getByTestId('show-toast').click();
-    });
-    expect(findViewport()?.className).toContain('hidden');
-
-    // Restore on unmount of the kiosk layout (or via the setter directly).
-    act(() => {
-      getByTestId('suppress-off').click();
-    });
-    expect(findViewport()?.className).not.toContain('hidden');
   });
 });

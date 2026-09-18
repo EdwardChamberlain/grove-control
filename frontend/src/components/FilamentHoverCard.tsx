@@ -357,7 +357,7 @@ export function FilamentHoverCard({ data, children, disabled, className = '', sp
                   Bambu Lab (#1133). The earlier "non-Bambu only" gate
                   prevented users from manually assigning a Bambu spool
                   in inventory to an AMS slot when they didn't want to
-                  re-scan via SpoolBuddy NFC. */}
+                  rescan a tag. */}
               {inventory && (
                 <div className="pt-2 mt-2 border-t border-bambu-dark-tertiary space-y-2">
                   {inventory.assignedSpool ? (

@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build && npm run check:baseline",
+    "build": "tsc -b && vite build && npm run check:baseline && npm run check:spoolbuddy-removal",
+    "check:spoolbuddy-removal": "node scripts/check-spoolbuddy-removal.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "generate:readme-screenshots": "playwright test --config=playwright.screenshots.config.ts",
