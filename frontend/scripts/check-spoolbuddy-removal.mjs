@@ -48,6 +48,10 @@ const sourceChecks = [
 
 for (const [relativePath, pattern, description] of sourceChecks) {
   const absolutePath = path.resolve(frontendRoot, relativePath);
+  // The Docker frontend-builder contains only frontend/, so backend and root
+  // packaging files are unavailable there. The full repository check still
+  // validates those files in CI and developer checkouts.
+  if (!fs.existsSync(absolutePath)) continue;
   if (pattern.test(fs.readFileSync(absolutePath, 'utf8'))) {
     failures.push('removed ' + description + ' remains in ' + relativePath);
   }
