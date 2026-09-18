@@ -229,6 +229,20 @@ describe('MaintenancePage', () => {
       expect(screen.queryByRole('dialog', { name: 'Choose date' })).not.toBeInTheDocument();
     });
 
+    it('uses the saved date format in the occurrence picker', async () => {
+      server.use(
+        http.get('/api/v1/settings/ui-preferences', () =>
+          HttpResponse.json({ date_format: 'eu' })),
+      );
+
+      render(<MaintenancePage />);
+
+      fireEvent.click(await screen.findByText('Log'));
+      fireEvent.click(await screen.findByRole('button', { name: 'Add log entry' }));
+
+      expect(await screen.findByPlaceholderText('DD/MM/YYYY')).toBeInTheDocument();
+    });
+
     it('creates a manual entry and filters the log by entry type', async () => {
       let entries = [mockScheduledLogEntry, mockManualLogEntry];
       let createRequest: Record<string, unknown> | undefined;

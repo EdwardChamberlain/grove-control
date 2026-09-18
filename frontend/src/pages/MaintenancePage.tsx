@@ -49,7 +49,7 @@ import type {
   Permission,
 } from '../api/client';
 import { getMaintenanceWikiUrl } from '../utils/maintenanceWikiUrls';
-import { parseUTCDate } from '../utils/date';
+import { parseUTCDate, type DateFormat } from '../utils/date';
 import { Card, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
 import { Toggle } from '../components/Toggle';
@@ -1131,6 +1131,7 @@ function MaintenanceLogSection({
   onDelete,
   isSaving,
   hasPermission,
+  dateFormat,
   t,
 }: {
   overview: PrinterMaintenanceOverview[] | undefined;
@@ -1148,6 +1149,7 @@ function MaintenanceLogSection({
   onDelete: (id: number) => Promise<unknown>;
   isSaving: boolean;
   hasPermission: (permission: Permission) => boolean;
+  dateFormat: DateFormat;
   t: TFunction;
 }) {
   const printers = useMemo(
@@ -1373,6 +1375,7 @@ function MaintenanceLogSection({
                     value={form.occurredAt}
                     onChange={(occurredAt) => setForm({ ...form, occurredAt })}
                     dateInputId="maintenance-occurred-at"
+                    dateFormat={dateFormat}
                     className="mt-1"
                   />
                 </div>
@@ -1449,6 +1452,17 @@ export function MaintenancePage() {
     queryKey: ['maintenanceTypes'],
     queryFn: api.getMaintenanceTypes,
   });
+
+  const { data: uiPreferences } = useQuery({
+    queryKey: ['ui-preferences'],
+    queryFn: api.getUiPreferences,
+  });
+
+  const dateFormat: DateFormat = uiPreferences?.date_format === 'us' ||
+    uiPreferences?.date_format === 'eu' ||
+    uiPreferences?.date_format === 'iso'
+    ? uiPreferences.date_format
+    : 'system';
 
   const {
     data: logPages,
@@ -1732,6 +1746,7 @@ export function MaintenancePage() {
           onDelete={(id) => deleteLogMutation.mutateAsync(id)}
           isSaving={createLogMutation.isPending || updateLogMutation.isPending}
           hasPermission={hasPermission}
+          dateFormat={dateFormat}
           t={t}
         />
       ) : (

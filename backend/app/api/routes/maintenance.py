@@ -34,6 +34,7 @@ from backend.app.schemas.maintenance import (
     PrinterMaintenanceUpdate,
 )
 from backend.app.services.notification_service import notification_service
+from backend.app.utils.local_time import to_naive_utc, utcnow_naive
 from backend.app.utils.printer_models import get_rod_type, supports_vision_encoder
 
 logger = logging.getLogger(__name__)
@@ -76,7 +77,7 @@ def _decode_log_cursor(cursor: str) -> tuple[datetime, int]:
     try:
         padded = cursor + "=" * (-len(cursor) % 4)
         payload = json.loads(base64.urlsafe_b64decode(padded).decode())
-        occurred_at = _normalise_log_time(datetime.fromisoformat(payload["occurred_at"]))
+        occurred_at = to_naive_utc(_normalise_log_time(datetime.fromisoformat(payload["occurred_at"])))
         entry_id = int(payload["id"])
     except (binascii.Error, KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=422, detail="Invalid maintenance log cursor") from exc
@@ -725,7 +726,7 @@ async def create_maintenance_log(
         entry_type="manual",
         title=_normalise_log_title(data.title),
         notes=data.notes,
-        occurred_at=_validate_log_time(data.occurred_at),
+        occurred_at=to_naive_utc(_validate_log_time(data.occurred_at)),
         hours_at_maintenance=data.hours_at_maintenance,
         **_actor_values(actor),
     )
@@ -772,7 +773,7 @@ async def update_maintenance_log(
     if "occurred_at" in update_data:
         if update_data["occurred_at"] is None:
             raise HTTPException(status_code=422, detail="Maintenance log occurrence time cannot be null")
-        entry.occurred_at = _validate_log_time(update_data["occurred_at"])
+        entry.occurred_at = to_naive_utc(_validate_log_time(update_data["occurred_at"]))
     if "hours_at_maintenance" in update_data:
         entry.hours_at_maintenance = update_data["hours_at_maintenance"]
 
@@ -827,7 +828,7 @@ async def perform_maintenance(
     current_hours = await get_printer_total_hours(db, item.printer_id)
 
     # Create history entry
-    performed_at = datetime.now(timezone.utc)
+    performed_at = utcnow_naive()
     history = MaintenanceHistory(
         printer_maintenance_id=item.id,
         performed_at=performed_at,
