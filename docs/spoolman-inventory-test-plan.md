@@ -214,7 +214,7 @@ These tests exercise the AMS slot UI, the AssignSpoolModal, and the ConfigureAms
 | B2.6 | Pick a spool whose `slicer_filament` is a PFUS\* cloud preset | Toast OK | Slicer shows the **cloud preset name**, not a generic fallback | tray_info_idx resolved via cloud lookup (check logs) | _ | _ |
 | B2.7 | Pick a spool whose K-profile cascades from RFID tag scan | K-profile auto-populates from tag, persists after assignment | Slicer cali_idx matches the cascaded K-profile (regression — Phase 13 fix) | k_profile row + assignment both correct | _ | _ |
 
-### B3. Assign spool to an **empty** AMS slot (deferral / SpoolBuddy primary workflow)
+### B3. Assign spool to an **empty** AMS slot (deferred configuration workflow)
 
 > Empty slot = printer reports `tray_type=""`. Bambu firmware silently drops MQTT for these, so Grove Control persists the assignment and replays MQTT when the spool is physically inserted.
 
@@ -253,60 +253,6 @@ These tests exercise the AMS slot UI, the AssignSpoolModal, and the ConfigureAms
 | B6.2 | HT AMS IDs 128–135 → labels "HT-A" through "HT-H" | — | _ | _ |
 | B6.3 | External / VT slot (id 254/255) → "External" | — | _ | _ |
 | B6.4 | User-edited AMS friendly name → shows on hover card and assignment list | — | _ | _ |
-
----
-
-## C — SpoolBuddy frontend (`/spoolbuddy`)
-
-These tests run on a **paired SpoolBuddy device** (kiosk on a Pi or a desktop browser pointed at `/spoolbuddy`). Same Local-vs-Spoolman pass.
-
-> **Reminder before you start C:** rows that touch AMS slot config (especially C4 weigh-and-assign and C5 AMS page) must be run with **both** a Bambu Lab spool and a non-Bambu Lab spool, and verified in the slicer per [How to verify in the slicer](#how-to-verify-in-the-slicer). Use OrcaSlicer if at all possible.
-
-### C1. Dashboard rendering
-
-| # | Step | Verify | Pass 1 (Local) | Pass 2 (Spoolman) |
-|---|---|---|---|---|
-| C1.1 | Open `/spoolbuddy` | Top bar: connection state, mode chip ("Local" or "Spoolman" — unified label, regression check) | _ | _ |
-| C1.2 | Quick menu / bottom nav | Tabs: Dashboard, Inventory, AMS, Calibration, Settings | _ | _ |
-| C1.3 | Status bar shows weight reading | If scale absent, shows clear "scale not connected" — not a silent zero | _ | _ |
-
-### C2. NFC tag flow — link to spool
-
-| # | Step | Verify (UI) | Verify (DB) | Pass 1 (Local) | Pass 2 (Spoolman) |
-|---|---|---|---|---|---|
-| C2.1 | Place a Bambu RFID tag on the reader | TagDetectedModal opens, shows tag UID + auto-decoded material/color | scanned UID logged | _ | _ |
-| C2.2 | (Bambu auto-detected tag, never linked) "Assign to AMS" button is **disabled** with explanation tooltip (regression check) | — | — | _ | _ |
-| C2.3 | Click **Link to existing spool** → spool list opens | Search works; can select | — | _ | _ |
-| C2.4 | Confirm link | SpoolInfoCard appears + success toast (regression — `d8811a77`) | spool's `tag_uid` (NOT bambu tray_type code) updated (regression — `be48c60e`) | _ | _ |
-| C2.5 | Place same tag again | Modal opens at the linked-spool view directly (no re-link prompt) | — | _ | _ |
-| C2.6 | (Spoolman) link a non-Bambu NFC tag (14-hex-char UID) | Saves OK (column widening regression) | tag_uid persisted | N/A | _ |
-
-### C4. Weigh-and-assign workflow
-
-| # | Step | Verify (UI) | **Verify (slicer)** | Verify (DB) | Pass 1 (Local) | Pass 2 (Spoolman) |
-|---|---|---|---|---|---|---|
-| C4.1 | Place spool on scale, place its tag | Live weight readout updates; spool info card shown | — | — | _ | _ |
-| C4.2 | (Regression) Negative scale reading shown when tare not yet applied | Doesn't crash; shows the negative number rather than zero-clamping (`05d03062`) | — | — | _ | _ |
-| C4.3 | Click "Assign to AMS" → AssignToAmsModal opens | Lists AMS slots across all reachable printers; **disabled for already-assigned spools** with clear tooltip (`f3a475ca`) | — | — | _ | _ |
-| C4.4 | Pick an empty AMS slot → confirm | Toast: "Assigned. Slot will configure when you insert the spool." | Slicer empty (correct — pending) | row with `pending_config=true` | _ | _ |
-| C4.5 | Insert spool into slot | After AMS push, full configuration replayed | **Slicer slot detail shows correct preset + K-value + cali_idx** | fingerprint stamped; full publish in logs | _ | _ |
-| C4.6 | Pick a **loaded** AMS slot → confirm | Toast: "Assigned!" | Slicer immediately reflects new spool's preset + K-profile | row with `pending_config=false` | _ | _ |
-
-### C5. SpoolBuddy AMS page
-
-| # | Step | Verify | Pass 1 (Local) | Pass 2 (Spoolman) |
-|---|---|---|---|---|
-| C5.1 | Open AMS page | All paired printers listed; tap a printer → its AMS units shown | _ | _ |
-| C5.2 | Tap a slot card | Same Configure-Slot modal as desktop (or unified equivalent) | _ | _ |
-| C5.3 | Apply changes from SpoolBuddy AMS page | Same effect + slicer visibility as B4 | _ | _ |
-
-### C6. SpoolBuddy inventory page
-
-| # | Step | Verify | Pass 1 (Local) | Pass 2 (Spoolman) |
-|---|---|---|---|---|
-| C6.1 | Open Inventory page in SpoolBuddy | Spool list mirrors desktop /inventory (same backend, same mode) | _ | _ |
-| C6.2 | (Regression) UI labels on Local vs Spoolman views are unified — same wording, no mode-specific divergence (#`05d819d1`) | "Spool weight", "Storage location", "Tag UID" reads identical in both | _ | _ |
-| C6.3 | Edit spool from SpoolBuddy → save | Reflects in desktop /inventory after refresh | _ | _ |
 
 ---
 
@@ -372,11 +318,9 @@ For each F row, please post a comment on issue **TBD** with:
 
 ## Skip / N/A guidance
 
-- **No SpoolBuddy hardware:** skip Section C entirely in both passes. Note this at the top of your report.
 - **No Spoolman instance:** skip Pass 2 (Spoolman) entirely, plus row D11. Run only Pass 1 (Local).
 - **Single AMS unit:** skip B6, but still run B1–B5 on that one unit (in both passes).
 - **Single printer:** skip B1.4 in both passes. Still run all per-printer tests on the one you have.
-- **No NFC reader:** skip C2 in both passes.
 
 ---
 

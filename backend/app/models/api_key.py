@@ -33,9 +33,7 @@ class APIKey(Base):
     can_manage_library: Mapped[bool] = mapped_column(
         Boolean, default=True
     )  # Upload/rename/delete own library files + MakerWorld import
-    can_manage_inventory: Mapped[bool] = mapped_column(
-        Boolean, default=True
-    )  # Inventory write ops (incl. SpoolBuddy kiosk NFC/scale/system)
+    can_manage_inventory: Mapped[bool] = mapped_column(Boolean, default=True)  # Inventory write operations
     can_manage_archives: Mapped[bool] = mapped_column(
         Boolean, default=True
     )  # Create/update/delete print archives (not purge) (#1888)

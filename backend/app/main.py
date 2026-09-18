@@ -61,7 +61,6 @@ from backend.app.api.routes import (
     slice_jobs,
     slicer_presets,
     smart_plugs,
-    spoolbuddy,
     spoolman,
     spoolman_inventory,
     support,
@@ -1722,8 +1721,8 @@ async def on_ams_change(printer_id: int, ams_data: list):
                     fp_color = assignment.fingerprint_color or ""
                     fp_type = assignment.fingerprint_type or ""
 
-                    # SpoolBuddy pre-config replay: fingerprint_type empty means
-                    # the slot was empty when the user pre-assigned via SpoolBuddy
+                    # Pre-config replay: fingerprint_type empty means the slot
+                    # was empty when the user pre-assigned the spool
                     # (the firmware drops ams_filament_setting on empty slots, so
                     # MQTT was deferred). The moment any filament gets inserted
                     # — Bambu RFID, 3rd-party, or even an existing-but-now-
@@ -1756,7 +1755,7 @@ async def on_ams_change(printer_id: int, ams_data: list):
                                 current_tray_type=cur_type,
                             )
                             logger.info(
-                                "SpoolBuddy pre-config applied on insert: spool %d → printer %d AMS%d-T%d",
+                                "Pre-config applied on insert: spool %d → printer %d AMS%d-T%d",
                                 assignment.spool_id,
                                 printer_id,
                                 assignment.ams_id,
@@ -6253,40 +6252,6 @@ def stop_runtime_tracking():
         logging.getLogger(__name__).info("Printer runtime tracking stopped")
 
 
-# SpoolBuddy device watchdog
-_spoolbuddy_watchdog_task: asyncio.Task | None = None
-SPOOLBUDDY_WATCHDOG_INTERVAL = 15
-
-
-async def _spoolbuddy_watchdog_loop():
-    """Periodic check for SpoolBuddy devices that have gone offline."""
-    from backend.app.api.routes.spoolbuddy import spoolbuddy_watchdog
-
-    while True:
-        try:
-            await spoolbuddy_watchdog()
-        except asyncio.CancelledError:
-            break
-        except Exception as e:
-            logging.getLogger(__name__).warning("SpoolBuddy watchdog failed: %s", e)
-        await asyncio.sleep(SPOOLBUDDY_WATCHDOG_INTERVAL)
-
-
-def start_spoolbuddy_watchdog():
-    global _spoolbuddy_watchdog_task
-    if _spoolbuddy_watchdog_task is None:
-        _spoolbuddy_watchdog_task = asyncio.create_task(_spoolbuddy_watchdog_loop())
-        logging.getLogger(__name__).info("SpoolBuddy watchdog started")
-
-
-def stop_spoolbuddy_watchdog():
-    global _spoolbuddy_watchdog_task
-    if _spoolbuddy_watchdog_task:
-        _spoolbuddy_watchdog_task.cancel()
-        _spoolbuddy_watchdog_task = None
-        logging.getLogger(__name__).info("SpoolBuddy watchdog stopped")
-
-
 # Dead-MQTT-session recovery
 #
 # check_staleness() covers the "connected but silent" half-broken session. It
@@ -6890,9 +6855,6 @@ async def lifespan(app: FastAPI):
     # Start printer runtime tracking
     start_runtime_tracking()
 
-    # Start SpoolBuddy device watchdog
-    start_spoolbuddy_watchdog()
-
     # Start camera stream orphan cleanup
     start_camera_cleanup()
 
@@ -6938,7 +6900,6 @@ async def lifespan(app: FastAPI):
     stop_ams_history_recording()
     stop_printer_sensor_history_recording()
     stop_runtime_tracking()
-    stop_spoolbuddy_watchdog()
     stop_camera_cleanup()
     stop_connection_watchdog()
     from backend.app.services.loop_watchdog import stop_loop_watchdog
@@ -7463,7 +7424,6 @@ app.include_router(local_backup.router, prefix=app_settings.api_prefix)
 app.include_router(obico.router, prefix=app_settings.api_prefix)
 app.include_router(metrics.router, prefix=app_settings.api_prefix)
 app.include_router(virtual_printers.router, prefix=app_settings.api_prefix)
-app.include_router(spoolbuddy.router, prefix=app_settings.api_prefix)
 
 
 # Serve static files (React build)

@@ -28,12 +28,6 @@ interface ToastContextType {
   showToast: (message: string, type?: ToastType) => void;
   showPersistentToast: ShowPersistentToast;
   dismissToast: (id: string) => void;
-  /**
-   * Suppress the visible toast viewport while keeping the state machine alive.
-   * Used by the SpoolBuddy kiosk layout to keep the kiosk display free of
-   * main-app notifications.
-   */
-  setViewportSuppressed: (suppressed: boolean) => void;
 }
 
 const ToastContext = createContext<ToastContextType | undefined>(undefined);
@@ -64,7 +58,6 @@ const bgColors = {
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [viewportSuppressed, setViewportSuppressed] = useState(false);
   const timeoutRefs = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   // Tracks whether the provider is still mounted. A toast can be triggered by
   // an async callback that resolves AFTER React has unmounted us (common in
@@ -129,12 +122,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <ToastContext.Provider value={{ showToast, showPersistentToast, dismissToast, setViewportSuppressed }}>
+    <ToastContext.Provider value={{ showToast, showPersistentToast, dismissToast }}>
       {children}
 
-      {/* The kiosk layout suppresses this entire viewport so SpoolBuddy displays stay
-          free of main-app notifications. */}
-      <div className={`fixed bottom-4 right-4 z-[60] flex flex-col items-end gap-2 ${viewportSuppressed ? 'hidden' : ''}`}>
+      <div className="fixed bottom-4 right-4 z-[60] flex flex-col items-end gap-2">
         {toasts.map((toast) => (
           <div
             key={toast.id}

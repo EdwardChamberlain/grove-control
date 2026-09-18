@@ -135,7 +135,7 @@ class TestApiKeyDenylistIntegrity:
         from backend.app.core.permissions import Permission
 
         expected_denied = {
-            # SETTINGS_READ is intentionally NOT denied — SpoolBuddy kiosk reads
+            # SETTINGS_READ is intentionally NOT denied — external kiosk clients read
             # settings via API key (e.g. to sync the UI language).
             Permission.SETTINGS_UPDATE,
             Permission.SETTINGS_BACKUP,
@@ -171,17 +171,16 @@ class TestApiKeyDenylistIntegrity:
         from backend.app.core.auth import _APIKEY_DENIED_PERMISSIONS
         from backend.app.core.permissions import Permission
 
-        # NOTE: under the GHSA-r2qv-8222-hqg3 allowlist model, INVENTORY_CREATE
-        # and INVENTORY_UPDATE are administrative (not in the allowlist) and
-        # therefore denied for API keys regardless of denylist membership.
-        # This test still guards the small denylist-redundancy set of read-y
-        # permissions that the SpoolBuddy kiosk + status integrations rely on.
+        # Inventory create/update are explicitly allowlisted through the
+        # can_manage_inventory scope. This test guards the small
+        # denylist-redundancy set of read-y permissions that external kiosk
+        # and status integrations rely on.
         expected_allowed = {
             Permission.INVENTORY_READ,
             Permission.PRINTERS_READ,
             Permission.PRINTERS_CONTROL,
             Permission.ARCHIVES_READ,
-            # SpoolBuddy kiosk reads settings (e.g. language) via API key — must stay allowed.
+            # External kiosk clients read settings (e.g. language) via API key — must stay allowed.
             Permission.SETTINGS_READ,
         }
         incorrectly_denied = expected_allowed & _APIKEY_DENIED_PERMISSIONS
@@ -329,7 +328,7 @@ class TestCheckApiKeyPermissionsMatrix:
         ("PRINTERS_READ", "can_read_status", "read printer status"),
         ("ARCHIVES_READ", "can_read_status", "read archives"),
         ("QUEUE_READ", "can_read_status", "read queue"),
-        ("SETTINGS_READ", "can_read_status", "SpoolBuddy kiosk settings read"),
+        ("SETTINGS_READ", "can_read_status", "external kiosk settings read"),
         ("WEBSOCKET_CONNECT", "can_read_status", "websocket subscribe"),
         # can_queue
         ("QUEUE_CREATE", "can_queue", "add queue item"),
@@ -347,7 +346,7 @@ class TestCheckApiKeyPermissionsMatrix:
         ("MAKERWORLD_IMPORT", "can_manage_library", "import from MakerWorld"),
         # can_manage_inventory
         ("INVENTORY_CREATE", "can_manage_inventory", "create spool record"),
-        ("INVENTORY_UPDATE", "can_manage_inventory", "update spool / SpoolBuddy kiosk write"),
+        ("INVENTORY_UPDATE", "can_manage_inventory", "update spool / external kiosk write"),
         ("INVENTORY_DELETE", "can_manage_inventory", "delete spool record"),
         ("INVENTORY_FORECAST_WRITE", "can_manage_inventory", "update forecast SKU settings"),
         # can_manage_archives — archive CRUD, excluding destructive purge.

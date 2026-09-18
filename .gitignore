@@ -75,9 +75,6 @@ data/
 # MFA encryption key file (#1219) — same protection as .jwt_secret
 .mfa_encryption_key
 
-# SpoolBuddy SSH keys (generated at runtime for remote updates)
-spoolbuddy/ssh/
-
 # Security scan output
 *.sarif
 

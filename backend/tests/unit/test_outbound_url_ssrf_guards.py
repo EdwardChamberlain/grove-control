@@ -408,7 +408,7 @@ def test_every_url_setting_is_either_guarded_or_explicitly_exempt():
         # links; it cannot make Bambuddy request anything it otherwise wouldn't.
         "external_url",
         # Guarded by assert_safe_spoolman_url at each consumer (spoolman.py,
-        # location_service.py, inventory.py, spoolbuddy.py,
+        # location_service.py and inventory.py,
         # spoolman_inventory.py) rather than in the schema, keeping its
         # established user-facing "Spoolman URL ..." error wording.
         "spoolman_url",
@@ -746,9 +746,6 @@ NOT_A_FETCH_TARGET = {
     ("BOMItemCreate", "sourcing_url"),  # stored supplier link, never fetched
     ("BOMItemUpdate", "sourcing_url"),
     ("MakerWorldResolveRequest", "url"),  # parsed for a model id; fetches go to a pinned CDN allowlist
-    ("DeviceRegisterRequest", "backend_url"),  # the device's view of Bambuddy's own address
-    ("HeartbeatRequest", "backend_url"),
-    ("SystemConfigRequest", "backend_url"),
     ("ExternalLinkCreate", "url"),  # sidebar link, rendered in the UI, never requested
     ("ExternalLinkUpdate", "url"),
     ("MaintenanceTypeCreate", "wiki_url"),  # documentation link surfaced in the UI/notifications

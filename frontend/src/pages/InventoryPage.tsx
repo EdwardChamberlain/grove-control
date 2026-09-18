@@ -10,7 +10,7 @@ import {
   Upload, Download,
 } from 'lucide-react';
 import { ForecastPanel } from '../components/ForecastPanel';
-import { api, spoolbuddyApi, ApiError } from '../api/client';
+import { api, ApiError } from '../api/client';
 import type { InventorySpool, SpoolCatalogEntry } from '../api/client';
 import { Button } from '../components/Button';
 import { ToolbarDropdown, ReactSelect } from '../components/ToolbarControls';
@@ -175,7 +175,7 @@ type CellCtx = {
   onSyncWeight?: (spool: InventorySpool) => void;
 };
 
-// Column header labels (25 columns — matching SpoolBuddy exactly)
+// Column header labels for the inventory table.
 const columnHeaders: Record<string, (t: TFn) => string> = {
   id: () => '#',
   added_time: () => 'Added',
@@ -208,7 +208,7 @@ const columnHeaders: Record<string, (t: TFn) => string> = {
   weight_check: (t) => t('inventory.weightCheck'),
 };
 
-// Column cell renderers (25 columns — matching SpoolBuddy exactly)
+// Column cell renderers for the inventory table.
 const columnCells: Record<string, (ctx: CellCtx) => ReactNode> = {
   id: ({ spool }) => (
     <span className="text-sm font-medium text-white">{spool.id}</span>
@@ -928,7 +928,7 @@ function InventoryPage({ spoolmanMode = false, spoolmanModeReady = true }: { spo
       if (spoolmanMode) {
         await api.syncSpoolmanSpoolWeight(spool.id, spool.last_scale_weight);
       } else {
-        await spoolbuddyApi.updateSpoolWeight(spool.id, spool.last_scale_weight);
+        await api.syncInventorySpoolWeight(spool.id, spool.last_scale_weight);
       }
       queryClient.invalidateQueries({ queryKey: spoolsQueryKey });
       const spoolName = [spool.brand, spool.material, spool.color_name].filter(Boolean).join(' ');
@@ -2705,7 +2705,7 @@ function SpoolTableGroup({
   );
 }
 
-/* Empty state matching SpoolBuddy's design */
+/* Inventory empty state */
 function EmptyFilterState({
   hasFilters,
   onAddSpool,

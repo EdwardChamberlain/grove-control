@@ -37,7 +37,6 @@ from backend.app.models import (
     spool_filament_preset,  # noqa: F401
     spool_k_profile,  # noqa: F401
     spool_usage_history,  # noqa: F401
-    spoolbuddy_device,  # noqa: F401
     spoolman_k_profile,  # noqa: F401
     spoolman_slot_assignment,  # noqa: F401
     user,  # noqa: F401

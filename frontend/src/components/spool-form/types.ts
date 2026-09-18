@@ -73,7 +73,7 @@ export interface PrinterWithCalibrations {
   // list a model's installed diameters. Read as a SET of diameters only --
   // never indexed by extruder, because which array position belongs to which
   // extruder is unsettled between the two MQTT parsers. Optional: callers that
-  // predate the Printers tab (SpoolBuddy's write-tag page) do not supply it.
+  // predate the Printers tab do not supply it.
   nozzles?: { nozzle_diameter?: string; nozzle_type?: string }[];
 }
 

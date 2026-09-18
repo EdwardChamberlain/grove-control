@@ -156,7 +156,7 @@ def test_setting_is_true_stays_narrower_than_the_write_path(stored: str):
     """Reading must agree with the rest of the codebase, which only accepts "true".
 
     normalize_bool_setting is generous about what clients may *send*; every
-    reader (spoolman_tracking, filament_deficit, inventory, spoolbuddy, labels,
+    reader (spoolman_tracking, filament_deficit, inventory, labels,
     main) compares ``.lower() == "true"``. Accepting more here would make the
     mode-switch check disagree with them about a legacy row.
     """

@@ -11,7 +11,7 @@ class APIKeyCreate(BaseModel):
     can_control_printer: bool = False
     can_read_status: bool = True
     can_manage_library: bool = True  # Upload / rename / delete own library files + MakerWorld import
-    can_manage_inventory: bool = True  # Inventory writes — SpoolBuddy NFC/scale/system, manual stock edits via API
+    can_manage_inventory: bool = True  # Inventory writes and manual stock edits via API
     can_manage_archives: bool = True  # Create/update/delete print archives — not purge (#1888)
     can_manage_projects: bool = True  # Project CRUD and membership changes (#1893)
     can_access_cloud: bool = False  # Read /cloud/* on the creator's behalf — default off (#1182)

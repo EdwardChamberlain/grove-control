@@ -35,18 +35,13 @@ aioftp>=0.22.0
 # Virtual Printer (emulates Bambu printer for slicer uploads)
 pyftpdlib>=2.0.0
 # 46.x line has GHSA-537c-gmf6-5ccf; 48.0.1 is the fix release. Upstream's
-# X.509 / PKCS#7 surface is in our trust path via asyncssh, pyOpenSSL,
+# X.509 / PKCS#7 surface is in our trust path via pyOpenSSL,
 # py-vapid, http_ece, pywebpush.
 cryptography>=48.0.1
-# Transitive of asyncssh / pywebpush. pyopenssl<26.3.0 caps `cryptography<47`
+# Transitive of pywebpush. pyopenssl<26.3.0 caps `cryptography<47`
 # so without this floor the resolver either downgrades cryptography below
 # the GHSA-537c-gmf6-5ccf fix line or installs an inconsistent pair.
 pyopenssl>=26.3.0
-
-# SpoolBuddy remote SSH updates (pure-Python SSH client; avoids the
-# OpenSSH `ssh` binary which calls getpwuid() and fails in Docker when
-# the container UID isn't in /etc/passwd)
-asyncssh>=2.18.0
 
 # 3MF Processing (standard zipfile is sufficient for Bambu 3MF files)
 defusedxml>=0.7.0  # Safe XML parsing (prevents XXE attacks)

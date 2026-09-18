@@ -93,7 +93,7 @@ _APIKEY_SCOPE_BY_PERMISSION: dict[Permission, str] = {
     Permission.STATS_READ: "can_read_status",
     Permission.STATS_FILTER_BY_USER: "can_read_status",
     Permission.SYSTEM_READ: "can_read_status",
-    # SETTINGS_READ stays allowed via read-status so SpoolBuddy kiosks keep
+    # SETTINGS_READ stays allowed via read-status so kiosk clients keep
     # working (they need the UI-language setting via API key).
     Permission.SETTINGS_READ: "can_read_status",
     Permission.MAKERWORLD_VIEW: "can_read_status",
@@ -124,10 +124,8 @@ _APIKEY_SCOPE_BY_PERMISSION: dict[Permission, str] = {
     Permission.LIBRARY_DELETE_OWN: "can_manage_library",
     Permission.MAKERWORLD_IMPORT: "can_manage_library",
     # can_manage_inventory — inventory write scope. Covers the documented
-    # spool/catalog/forecast write surface AND the SpoolBuddy kiosk endpoints
-    # (NFC scan, scale reading, system command/update) which used
-    # INVENTORY_UPDATE as a stand-in for "kiosk write" under the prior
-    # denylist model. Read-only inventory (INVENTORY_READ etc.) stays under
+    # spool/catalog/forecast write surface and external inventory clients.
+    # Read-only inventory (INVENTORY_READ etc.) stays under
     # can_read_status.
     Permission.INVENTORY_CREATE: "can_manage_inventory",
     Permission.INVENTORY_UPDATE: "can_manage_inventory",

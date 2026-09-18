@@ -153,7 +153,7 @@ describe('FilamentHoverCard', () => {
 
   // The inventory section was previously hidden for `vendor === 'Bambu Lab'`
   // because BL spools were assumed to be managed entirely via RFID. #1133
-  // removed that gate so users who don't want to scan via SpoolBuddy NFC
+  // removed that gate so users who don't want to scan a tag
   // can still pick a BL spool from inventory the same way they pick a
   // third-party one.
   describe('inventory section vendor visibility (#1133)', () => {
