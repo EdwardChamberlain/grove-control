@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from pydantic import ValidationError
 from sqlalchemy import select, text
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from backend.app.core.database import Base, _ensure_active_queue_printer_reservation
@@ -20,6 +19,7 @@ from backend.app.services import chamber_heat_soak as heat
 from backend.app.services.bambu_mqtt import PrinterState
 from backend.app.services.heat_soak_telemetry import record_heat_soak_reports
 from backend.app.services.library_trash import release_queue_references
+from backend.app.services.print_job_lifecycle import DISPATCHING, ReservationConflict, admit_job, transition_job
 
 
 @pytest.fixture
@@ -84,10 +84,11 @@ async def test_supported_controls_and_durable_reservation(soak, model, chamber, 
     soak.client.set_bed_temperature.assert_called_once_with(60)
     assert soak.client.set_chamber_temperature.called == chamber
     assert soak.client.set_airduct_mode.called == airduct
-    soak.db.add(PrintQueueItem(printer_id=1, status="dispatching"))
-    with pytest.raises(IntegrityError):
-        await soak.db.commit()
-    await soak.db.rollback()
+    second = PrintQueueItem(printer_id=1, status="pending")
+    soak.db.add(second)
+    await admit_job(soak.db, second)
+    with pytest.raises(ReservationConflict):
+        await transition_job(soak.db, second, to_state=DISPATCHING, source="test")
 
 
 async def test_full_timer_starts_when_heating_commands_are_sent(soak):
@@ -166,7 +167,7 @@ async def test_live_foreign_worker_never_claims_or_advances_reserved_item(soak):
         await soak.db.refresh(soak.item)
         assert soak.item.status == "preheating"
         assert soak.item.printer_id == 1
-        assert soak.item.preheat_owner == soak.service.owner
+        assert soak.item.preheat_owner == soak.item.active_operation_id
         soak.client.set_bed_temperature.assert_called_once_with(60)
 
 
@@ -301,22 +302,24 @@ def test_telemetry_decodes_nested_firmware_targets_and_ignores_local_ui_values()
     assert state.heat_soak_reports["airduct"][0] == 1
 
 
-async def test_index_upgrade_includes_preheating_when_old_index_exists(soak):
+async def test_lifecycle_migration_retires_status_index_in_favour_of_durable_reservation(soak):
     async with soak.engine.begin() as conn:
-        await conn.execute(text("DROP INDEX uq_print_queue_active_printer_heat_soak"))
         await conn.execute(
             text(
-                "CREATE UNIQUE INDEX uq_print_queue_active_printer ON print_queue(printer_id) "
-                "WHERE status IN ('dispatching', 'printing')"
+                "CREATE UNIQUE INDEX uq_print_queue_active_printer_heat_soak ON print_queue(printer_id) "
+                "WHERE status IN ('preheating', 'dispatching', 'printing')"
             )
         )
         await _ensure_active_queue_printer_reservation(conn)
         await _ensure_active_queue_printer_reservation(conn)
+        indexes = {row[1] for row in await conn.execute(text("PRAGMA index_list(print_queue)"))}
+        assert "uq_print_queue_active_printer_heat_soak" not in indexes
     await soak.service.stage(soak.db, soak.item)
-    soak.db.add(PrintQueueItem(printer_id=1, status="preheating"))
-    with pytest.raises(IntegrityError):
-        await soak.db.commit()
-    await soak.db.rollback()
+    second = PrintQueueItem(printer_id=1, status="pending")
+    soak.db.add(second)
+    await admit_job(soak.db, second)
+    with pytest.raises(ReservationConflict):
+        await transition_job(soak.db, second, to_state=DISPATCHING, source="test")
 
 
 async def test_no_upload_or_print_until_soak_then_normal_correlated_dispatch(soak, tmp_path, monkeypatch):
