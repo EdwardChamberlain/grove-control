@@ -116,7 +116,7 @@ async def test_legacy_camera_cleanup_is_idempotent(engine):
                 "plate_detection_enabled, awaiting_plate_clear, external_camera_url, "
                 "external_camera_enabled) "
                 "VALUES (1, 'P1S', 'ABC123', '192.168.1.10', 'secret', 1, 1, 1, 0, 0, 0, 0, "
-                "0, 0, 'http://camera.invalid/frame.jpg', 1)"
+                "0, 'http://camera.invalid/frame.jpg', 1)"
             )
         )
 
