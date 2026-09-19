@@ -16,7 +16,7 @@ explicitly retired because it relied on unsafe identity inference.
 | Print log service tests | Retain and extend | A terminal log remains a compatibility projection and has at most one deterministic `job_id`; jobs without a log still remain durable terminal records. |
 | Migration tests | New | Legacy rows receive UUIDs/events; duplicate active rows create a safety hold without a recency election; only exact queue-item log links are backfilled. |
 | Scheduler selection tests | Retain and extend | Scheduling properties remain separate from lifecycle state; active reservation or safety hold blocks a printer even when queue visibility changes. |
-| Effects / notification / cleanup tests | New | Effects deduplicate on job, operation, source event and type, can be retried after a crash, and stale leased work is fenced before external action. |
+| Effects / notification / cleanup tests | New | Effects deduplicate on job, operation, source event and type; delivery has an owner lease, retry release, retention purge, and pending/expired-lease health counters. |
 
 The focused lifecycle tests exercise the transition graph, compare-and-set
 failure, reservation exclusivity, operation fencing, effect de-duplication,

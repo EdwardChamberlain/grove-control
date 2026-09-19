@@ -6,10 +6,10 @@ identity and evidence together so a late worker cannot affect a later print.
 """
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.inspection import inspect
 
@@ -514,6 +514,117 @@ async def enqueue_effect(
     db.add(effect)
     await db.flush()
     return effect
+
+
+async def claim_effect(
+    db: AsyncSession,
+    *,
+    effect_id: str,
+    lease_owner: str,
+    lease_seconds: int = 60,
+) -> PrintJobEffect | None:
+    """Atomically lease a pending (or expired) effect to one delivery worker."""
+    now = utcnow()
+    lease_expires_at = now + timedelta(seconds=lease_seconds)
+    result = await db.execute(
+        update(PrintJobEffect)
+        .where(PrintJobEffect.id == effect_id)
+        .where(
+            or_(
+                PrintJobEffect.state == "pending",
+                (PrintJobEffect.state == "processing")
+                & (PrintJobEffect.lease_expires_at.is_not(None))
+                & (PrintJobEffect.lease_expires_at < now),
+            )
+        )
+        .values(
+            state="processing",
+            lease_owner=lease_owner,
+            lease_expires_at=lease_expires_at,
+            attempt_count=PrintJobEffect.attempt_count + 1,
+            last_error=None,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
+        return None
+    effect = await db.get(PrintJobEffect, effect_id)
+    if effect is not None:
+        await db.refresh(effect)
+    return effect
+
+
+async def complete_effect(db: AsyncSession, *, effect_id: str, lease_owner: str) -> bool:
+    """Mark an effect delivered only for its current worker lease."""
+    result = await db.execute(
+        update(PrintJobEffect)
+        .where(
+            PrintJobEffect.id == effect_id,
+            PrintJobEffect.state == "processing",
+            PrintJobEffect.lease_owner == lease_owner,
+        )
+        .values(state="delivered", lease_owner=None, lease_expires_at=None, last_error=None)
+        .execution_options(synchronize_session=False)
+    )
+    return result.rowcount == 1
+
+
+async def fail_effect(
+    db: AsyncSession,
+    *,
+    effect_id: str,
+    lease_owner: str,
+    error: str,
+) -> bool:
+    """Release a failed effect for a later idempotent retry."""
+    result = await db.execute(
+        update(PrintJobEffect)
+        .where(
+            PrintJobEffect.id == effect_id,
+            PrintJobEffect.state == "processing",
+            PrintJobEffect.lease_owner == lease_owner,
+        )
+        .values(state="pending", lease_owner=None, lease_expires_at=None, last_error=error)
+        .execution_options(synchronize_session=False)
+    )
+    return result.rowcount == 1
+
+
+async def effect_health(db: AsyncSession) -> dict[str, int | datetime | None]:
+    """Return the small operational health surface for effect delivery."""
+    now = utcnow()
+    pending = await db.scalar(select(func.count(PrintJobEffect.id)).where(PrintJobEffect.state == "pending"))
+    processing = await db.scalar(select(func.count(PrintJobEffect.id)).where(PrintJobEffect.state == "processing"))
+    expired = await db.scalar(
+        select(func.count(PrintJobEffect.id)).where(
+            PrintJobEffect.state == "processing",
+            PrintJobEffect.lease_expires_at.is_not(None),
+            PrintJobEffect.lease_expires_at < now,
+        )
+    )
+    oldest_pending = await db.scalar(
+        select(func.min(PrintJobEffect.created_at)).where(PrintJobEffect.state == "pending")
+    )
+    return {
+        "pending": pending or 0,
+        "processing": processing or 0,
+        "expired_leases": expired or 0,
+        "oldest_pending_at": oldest_pending,
+    }
+
+
+async def purge_delivered_effects(db: AsyncSession, *, retention_days: int = 30) -> int:
+    """Remove delivered effects only after the declared retention interval."""
+    if retention_days < 0:
+        raise ValueError("retention_days must not be negative")
+    cutoff = utcnow() - timedelta(days=retention_days)
+    result = await db.execute(
+        delete(PrintJobEffect).where(
+            PrintJobEffect.state == "delivered",
+            PrintJobEffect.updated_at < cutoff,
+        )
+    )
+    return result.rowcount or 0
 
 
 async def bind_device_task(

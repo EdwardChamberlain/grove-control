@@ -23,10 +23,15 @@ from backend.app.services.print_job_lifecycle import (
     admit_job,
     adopt_observed_user_print,
     bind_device_task,
+    claim_effect,
+    complete_effect,
     create_retry_job,
+    effect_health,
     enqueue_effect,
+    fail_effect,
     mark_dispatch_attempted,
     operation_is_current,
+    purge_delivered_effects,
     quarantine_device_event,
     resolve_job_for_device_event,
     transition_job,
@@ -182,6 +187,36 @@ async def test_effects_deduplicate_even_when_the_effect_is_job_scoped(db_session
     )
     assert first.id == second.id
     assert (await db_session.scalars(select(PrintJobEffect))).all() == [first]
+
+
+@pytest.mark.asyncio
+async def test_effect_leases_retry_and_expose_operational_health(db_session):
+    item = await _item(db_session)
+    event = await transition_job(db_session, item, to_state=CANCELLED, source="test")
+    effect = await enqueue_effect(
+        db_session,
+        job_id=item.job_id,
+        operation_id=None,
+        source_event_id=event.id,
+        effect_type="notify_cancelled",
+        delivery_policy="idempotent_retry",
+    )
+
+    claimed = await claim_effect(db_session, effect_id=effect.id, lease_owner="worker-a")
+    assert claimed and claimed.state == "processing" and claimed.attempt_count == 1
+    assert await claim_effect(db_session, effect_id=effect.id, lease_owner="worker-b") is None
+    assert await fail_effect(db_session, effect_id=effect.id, lease_owner="worker-a", error="network timeout")
+
+    health = await effect_health(db_session)
+    assert health["pending"] == 1
+    assert health["processing"] == 0
+    assert health["oldest_pending_at"] is not None
+
+    claimed = await claim_effect(db_session, effect_id=effect.id, lease_owner="worker-b")
+    assert claimed and claimed.attempt_count == 2
+    assert await complete_effect(db_session, effect_id=effect.id, lease_owner="worker-b")
+    await db_session.flush()
+    assert await purge_delivered_effects(db_session, retention_days=0) == 1
 
 
 @pytest.mark.asyncio
