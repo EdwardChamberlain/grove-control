@@ -588,6 +588,16 @@ async def _migrate_retired_pipeline_runs(conn) -> None:
 # compares the two sets so newly added model columns cannot be overlooked.
 _QUEUE_INSERT_COLUMN_DEFINITIONS: dict[str, tuple[str, str]] = {
     # Identity / queue targeting
+    "job_id": ("VARCHAR(36)", "VARCHAR(36)"),
+    "previous_job_id": ("VARCHAR(36)", "VARCHAR(36)"),
+    "lifecycle_state": ("VARCHAR(20) DEFAULT 'queued'", "VARCHAR(20) DEFAULT 'queued'"),
+    "lifecycle_version": ("INTEGER DEFAULT 0", "INTEGER DEFAULT 0"),
+    "uncertainty_status": ("VARCHAR(64)", "VARCHAR(64)"),
+    "terminal_reason": ("VARCHAR(100)", "VARCHAR(100)"),
+    "queue_visible": ("BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT true"),
+    "active_operation_id": ("VARCHAR(36)", "VARCHAR(36)"),
+    "dispatch_attempted_at": ("DATETIME", "TIMESTAMP"),
+    "physical_execution_observed": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
     "printer_id": ("INTEGER", "INTEGER"),
     "target_model": ("VARCHAR(50)", "VARCHAR(50)"),
     "target_location": ("VARCHAR(100)", "VARCHAR(100)"),
@@ -967,52 +977,303 @@ async def _migrate_widen_spoolman_slot_ams_id_range(conn) -> None:
         raise
 
 
-async def _ensure_active_queue_printer_reservation(conn) -> None:
-    """Repair old duplicate active rows, then enforce one active row per printer.
+def _legacy_lifecycle_state(status: str | None) -> str:
+    """Map pre-PrintJob status values without making them a second authority."""
+    return {
+        "pending": "queued",
+        "preheating": "heat_soaking",
+        "dispatching": "dispatching",
+        "printing": "printing",
+        "completed": "completed",
+        "failed": "failed",
+        "cancelled": "cancelled",
+        # `skipped` means scheduler-gated before a physical attempt, not a
+        # lifecycle terminal. It remains a compatibility scheduling status.
+        "skipped": "queued",
+        "aborted": "cancelled",
+    }.get(status or "", "queued")
 
-    This must run after the queue table exists but before the partial unique
-    index is created. Older releases could leave multiple optimistic
-    ``printing`` rows for a printer; failing startup on those databases would
-    turn a safety migration into an outage. Keep the most credible active row
-    (confirmed printing before dispatching, then the newest timestamp) and
-    fail the rest closed so they require an intentional retry instead of
-    risking a second physical print.
+
+def _database_truth(value: object) -> bool:
+    """Interpret legacy SQLite booleans without treating the text 'false' as true."""
+    return value is True or value == 1 or (isinstance(value, str) and value.strip().lower() in {"1", "true", "t"})
+
+
+async def _migrate_print_job_lifecycle(conn) -> None:
+    """Adopt legacy queue rows into durable PrintJobs without guessing ownership.
+
+    Older releases had only a status string and a partial unique index.  In
+    particular, that index's startup repair chose a winner by recency when it
+    found more than one active row.  A timestamp is not execution identity, so
+    this migration instead keeps every row, records the uncertainty, and blocks
+    that printer until an operator resolves it.
     """
+    from uuid import uuid4
+
     from sqlalchemy import text
 
-    recovery_message = (
-        "Recovered duplicate active queue reservation during startup; manual retry required to avoid a duplicate print."
-    )
-    async with conn.begin_nested():
-        result = await conn.execute(
-            text(
-                "WITH ranked_active_queue AS ("
-                " SELECT id, ROW_NUMBER() OVER ("
-                "   PARTITION BY printer_id"
-                "   ORDER BY CASE status WHEN 'printing' THEN 0 WHEN 'dispatching' THEN 1 ELSE 2 END,"
-                "            COALESCE(started_at, dispatched_at, created_at) DESC, id DESC"
-                " ) AS reservation_rank"
-                " FROM print_queue"
-                " WHERE printer_id IS NOT NULL AND status IN ('preheating', 'dispatching', 'printing')"
-                ")"
-                " UPDATE print_queue"
-                " SET status = 'failed', dispatched_at = NULL, started_at = NULL,"
-                "     completed_at = CURRENT_TIMESTAMP, error_message = :recovery_message"
-                " WHERE id IN (SELECT id FROM ranked_active_queue WHERE reservation_rank > 1)"
-            ),
-            {"recovery_message": recovery_message},
-        )
-    recovered_count = result.rowcount
-    if isinstance(recovered_count, int) and recovered_count > 0:
-        logger.warning("Recovered %d duplicate active print_queue reservation(s)", recovered_count)
+    has_print_log_entries = bool(await _table_columns(conn, "print_log_entries"))
 
-    # A new name upgrades the old predicate without dropping the existing guard.
+    # ``create_all`` creates the new durable tables on a normal startup.  These
+    # ALTERs make the existing physical queue table usable before any later
+    # migration code reads the new fields.
+    for column in (
+        "job_id",
+        "previous_job_id",
+        "lifecycle_state",
+        "lifecycle_version",
+        "uncertainty_status",
+        "terminal_reason",
+        "queue_visible",
+        "active_operation_id",
+        "dispatch_attempted_at",
+        "physical_execution_observed",
+    ):
+        sql_type = _QUEUE_INSERT_COLUMN_DEFINITIONS[column][0 if is_sqlite() else 1]
+        await _safe_execute(conn, f"ALTER TABLE print_queue ADD COLUMN {column} {sql_type}")
+
+    timestamp_type = "DATETIME" if is_sqlite() else "TIMESTAMP"
+    boolean_default = "0" if is_sqlite() else "false"
+    if has_print_log_entries:
+        await _safe_execute(conn, "ALTER TABLE print_log_entries ADD COLUMN job_id VARCHAR(36)")
+    await _safe_execute(conn, "ALTER TABLE printers ADD COLUMN awaiting_plate_clear_job_id VARCHAR(36)")
+    await _safe_execute(conn, "ALTER TABLE printers ADD COLUMN heat_soak_shutdown_job_id VARCHAR(36)")
+    await _safe_execute(conn, "ALTER TABLE printers ADD COLUMN heat_soak_shutdown_operation_id VARCHAR(36)")
+    # These columns are present on newer databases, but old exports can predate
+    # the original heat-soak migration. Keep the lifecycle migration safe when
+    # it is run directly in a recovery tool as well as normal startup.
     await _safe_execute(
-        conn,
-        "CREATE UNIQUE INDEX IF NOT EXISTS uq_print_queue_active_printer_heat_soak "
-        "ON print_queue (printer_id) "
-        "WHERE printer_id IS NOT NULL AND status IN ('preheating', 'dispatching', 'printing')",
+        conn, f"ALTER TABLE printers ADD COLUMN heat_soak_shutdown_pending BOOLEAN DEFAULT {boolean_default}"
     )
+    await _safe_execute(conn, f"ALTER TABLE printers ADD COLUMN heat_soak_shutdown_at {timestamp_type}")
+
+    rows = (
+        await conn.execute(
+            text(
+                "SELECT id, printer_id, status, job_id, lifecycle_state, lifecycle_version, "
+                "active_operation_id, dispatch_attempted_at, dispatched_at, preheat_owner "
+                "FROM print_queue"
+            )
+        )
+    ).mappings().all()
+
+    active_by_printer: dict[int, list[dict]] = {}
+    for row in rows:
+        status_state = _legacy_lifecycle_state(row["status"])
+        # SQLite fills existing rows with a column's DEFAULT when it adds the
+        # new lifecycle field. A legacy `printing` row therefore appears as
+        # lifecycle_state='queued' until we deliberately adopt it. Only a row
+        # with no durable job identity gets this compatibility interpretation.
+        state = row["lifecycle_state"] or status_state
+        if row["job_id"] is None and state == "queued" and status_state != "queued":
+            state = status_state
+        job_id = row["job_id"] or str(uuid4())
+        operation_id = row["active_operation_id"]
+        if state in {"heat_soaking", "dispatching", "printing"} and not operation_id:
+            operation_id = str(uuid4())
+        terminal = state in {"completed", "failed", "cancelled"}
+        values = {
+            "id": row["id"],
+            "job_id": job_id,
+            "state": state,
+            "version": row["lifecycle_version"] or 0,
+            "operation_id": operation_id,
+            "visibility": 0 if terminal else 1,
+            "dispatch_attempted_at": row["dispatch_attempted_at"] or row["dispatched_at"],
+            "physical_execution_observed": 1 if state == "printing" else 0,
+            "preheat_owner": operation_id if state == "heat_soaking" else row["preheat_owner"],
+        }
+        async with conn.begin_nested():
+            await conn.execute(
+                text(
+                    "UPDATE print_queue SET job_id = :job_id, lifecycle_state = :state, "
+                    "lifecycle_version = :version, active_operation_id = :operation_id, "
+                    "queue_visible = :visibility, dispatch_attempted_at = :dispatch_attempted_at, "
+                    "physical_execution_observed = :physical_execution_observed, preheat_owner = :preheat_owner "
+                    "WHERE id = :id"
+                ),
+                values,
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO print_job_events "
+                    "(id, job_id, queue_item_id, operation_id, lifecycle_version, event_type, to_state, source, evidence_json) "
+                    "SELECT :event_id, :job_id, :id, :operation_id, :version, 'job_admitted', :state, "
+                    "'legacy_migration', :evidence "
+                    "WHERE NOT EXISTS ("
+                    "SELECT 1 FROM print_job_events WHERE job_id = :job_id AND event_type = 'job_admitted'"
+                    ")"
+                ),
+                {
+                    **values,
+                    "event_id": str(uuid4()),
+                    "evidence": '{"source":"legacy_print_queue"}',
+                },
+            )
+        if state in {"heat_soaking", "dispatching", "printing"} and row["printer_id"] is not None:
+            active_by_printer.setdefault(row["printer_id"], []).append(
+                {"job_id": job_id, "operation_id": operation_id, "version": values["version"], "state": state}
+            )
+
+    # This is deliberately not an election. A legacy conflict cannot safely be
+    # resolved from filename, row recency, or an optimistic status string.
+    for printer_id, active_rows in active_by_printer.items():
+        if len(active_rows) == 1:
+            active = active_rows[0]
+            uncertainty = "legacy_active_identity_unverified"
+            if active["state"] == "heat_soaking":
+                uncertainty = "legacy_heat_soak_identity_unverified"
+            async with conn.begin_nested():
+                await conn.execute(
+                    text(
+                        "UPDATE print_queue SET uncertainty_status = :uncertainty "
+                        "WHERE job_id = :job_id AND uncertainty_status IS NULL"
+                    ),
+                    {"uncertainty": uncertainty, "job_id": active["job_id"]},
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO print_job_reservations "
+                        "(printer_id, job_id, operation_id, lifecycle_version) "
+                        "VALUES (:printer_id, :job_id, :operation_id, :version) "
+                        "ON CONFLICT (printer_id) DO NOTHING"
+                    ),
+                    {"printer_id": printer_id, **active},
+                )
+            continue
+
+        reason = "legacy_active_identity_conflict"
+        async with conn.begin_nested():
+            await conn.execute(
+                text(
+                    "UPDATE print_queue SET uncertainty_status = :reason "
+                    "WHERE printer_id = :printer_id "
+                    "AND lifecycle_state IN ('heat_soaking', 'dispatching', 'printing')"
+                ),
+                {"reason": reason, "printer_id": printer_id},
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO printer_safety_holds "
+                    "(id, printer_id, hold_type, state, reason, evidence_json) "
+                    "SELECT :id, :printer_id, 'legacy_active_identity_conflict', 'active', :reason, :evidence "
+                    "WHERE NOT EXISTS ("
+                    "SELECT 1 FROM printer_safety_holds "
+                    "WHERE printer_id = :printer_id AND hold_type = 'legacy_active_identity_conflict' "
+                    "AND state = 'active'"
+                    ")"
+                ),
+                {
+                    "id": str(uuid4()),
+                    "printer_id": printer_id,
+                    "reason": reason,
+                    "evidence": f'{{"source":"legacy_print_queue","active_rows":{len(active_rows)}}}',
+                },
+            )
+
+    # Existing printer-level flags remain the simple client-facing projection.
+    # They become unattributed durable holds until explicitly acknowledged,
+    # rather than being attached to the newest similarly named print.
+    printers = (
+        await conn.execute(
+            text(
+                "SELECT id, awaiting_plate_clear, heat_soak_shutdown_pending "
+                "FROM printers"
+            )
+        )
+    ).mappings().all()
+    for printer in printers:
+        for column, hold_type in (
+            ("awaiting_plate_clear", "legacy_unattributed_plate_clear"),
+            ("heat_soak_shutdown_pending", "legacy_unattributed_heat_soak_shutdown"),
+        ):
+            if not _database_truth(printer[column]):
+                continue
+            async with conn.begin_nested():
+                await conn.execute(
+                    text(
+                        "INSERT INTO printer_safety_holds "
+                        "(id, printer_id, hold_type, state, reason, evidence_json) "
+                        "SELECT :id, :printer_id, :hold_type, 'active', :hold_type, :evidence "
+                        "WHERE NOT EXISTS ("
+                        "SELECT 1 FROM printer_safety_holds "
+                        "WHERE printer_id = :printer_id AND hold_type = :hold_type AND state = 'active'"
+                        ")"
+                    ),
+                    {
+                        "id": str(uuid4()),
+                        "printer_id": printer["id"],
+                        "hold_type": hold_type,
+                        "evidence": '{"source":"legacy_printer_flag"}',
+                    },
+                )
+
+    # A queue-item FK is the only legacy log relationship that proves job
+    # identity. If several log rows point at a queue item, retain them as
+    # historical compatibility records rather than assigning one arbitrarily.
+    if has_print_log_entries:
+        async with conn.begin_nested():
+            await conn.execute(
+                text(
+                    "UPDATE print_log_entries SET job_id = ("
+                    "SELECT q.job_id FROM print_queue q WHERE q.id = print_log_entries.queue_item_id"
+                    ") WHERE job_id IS NULL AND queue_item_id IS NOT NULL "
+                    "AND 1 = (SELECT COUNT(*) FROM print_log_entries other "
+                    "WHERE other.queue_item_id = print_log_entries.queue_item_id)"
+                )
+            )
+
+    await _safe_execute(conn, "DROP INDEX IF EXISTS uq_print_queue_active_printer_heat_soak")
+    await _safe_execute(conn, "CREATE UNIQUE INDEX IF NOT EXISTS uq_print_queue_job_id ON print_queue (job_id)")
+    await _safe_execute(conn, "CREATE INDEX IF NOT EXISTS ix_print_queue_job_id ON print_queue (job_id)")
+    if has_print_log_entries:
+        await _safe_execute(conn, "CREATE INDEX IF NOT EXISTS ix_print_log_entries_job_id ON print_log_entries (job_id)")
+        await _safe_execute(
+            conn,
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_print_log_entries_job_id "
+            "ON print_log_entries (job_id) WHERE job_id IS NOT NULL",
+        )
+
+    # Lifecycle evidence is audit evidence, not mutable current state. Effects
+    # and reservations deliberately remain mutable operational records, but an
+    # event correction must be represented by a later event rather than a
+    # rewrite. Enforce this at the database boundary as well as by convention.
+    if is_sqlite():
+        await _safe_execute(
+            conn,
+            "CREATE TRIGGER IF NOT EXISTS trg_print_job_events_no_update "
+            "BEFORE UPDATE ON print_job_events BEGIN "
+            "SELECT RAISE(ABORT, 'print_job_events are append-only'); END",
+        )
+        await _safe_execute(
+            conn,
+            "CREATE TRIGGER IF NOT EXISTS trg_print_job_events_no_delete "
+            "BEFORE DELETE ON print_job_events BEGIN "
+            "SELECT RAISE(ABORT, 'print_job_events are append-only'); END",
+        )
+    else:
+        await _safe_execute(
+            conn,
+            "CREATE OR REPLACE FUNCTION reject_print_job_event_mutation() RETURNS trigger "
+            "LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'print_job_events are append-only'; END; $$",
+        )
+        await _safe_execute(conn, "DROP TRIGGER IF EXISTS trg_print_job_events_no_update ON print_job_events")
+        await _safe_execute(
+            conn,
+            "CREATE TRIGGER trg_print_job_events_no_update BEFORE UPDATE ON print_job_events "
+            "FOR EACH ROW EXECUTE FUNCTION reject_print_job_event_mutation()",
+        )
+        await _safe_execute(conn, "DROP TRIGGER IF EXISTS trg_print_job_events_no_delete ON print_job_events")
+        await _safe_execute(
+            conn,
+            "CREATE TRIGGER trg_print_job_events_no_delete BEFORE DELETE ON print_job_events "
+            "FOR EACH ROW EXECUTE FUNCTION reject_print_job_event_mutation()",
+        )
+
+
+async def _ensure_active_queue_printer_reservation(conn) -> None:
+    """Compatibility entry point for the durable reservation migration."""
+    await _migrate_print_job_lifecycle(conn)
 
 
 async def run_migrations(conn):

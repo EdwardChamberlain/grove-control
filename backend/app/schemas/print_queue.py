@@ -194,6 +194,9 @@ class QueueVariantSummary(BaseModel):
 
 class PrintQueueItemResponse(BaseModel):
     id: int
+    # Additive opaque identity for lifecycle-aware consumers. The legacy
+    # numeric row ID remains the primary UI identifier in this release.
+    job_id: str
     printer_id: int | None  # None = unassigned
     target_model: str | None = None  # Target printer model for model-based assignment
     target_location: str | None = None  # Target location filter for model-based assignment
