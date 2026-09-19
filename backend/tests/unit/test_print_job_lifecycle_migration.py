@@ -33,31 +33,31 @@ async def test_legacy_active_conflict_is_quarantined_without_a_recency_election(
             )
         )
         await conn.execute(
-            text(
-                "INSERT INTO print_queue (id, printer_id, status) "
-                "VALUES (1, 1, 'printing'), (2, 1, 'dispatching')"
-            )
+            text("INSERT INTO print_queue (id, printer_id, status) VALUES (1, 1, 'printing'), (2, 1, 'dispatching')")
         )
 
         await _migrate_print_job_lifecycle(conn)
 
         rows = (
-            await conn.execute(
-                text(
-                    "SELECT id, lifecycle_state, uncertainty_status, job_id FROM print_queue "
-                    "WHERE printer_id = 1 ORDER BY id"
+            (
+                await conn.execute(
+                    text(
+                        "SELECT id, lifecycle_state, uncertainty_status, job_id FROM print_queue "
+                        "WHERE printer_id = 1 ORDER BY id"
+                    )
                 )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         hold = (
             await conn.execute(
-                text(
-                    "SELECT hold_type FROM printer_safety_holds "
-                    "WHERE printer_id = 1 AND state = 'active'"
-                )
+                text("SELECT hold_type FROM printer_safety_holds WHERE printer_id = 1 AND state = 'active'")
             )
         ).scalar_one()
-        reservations = (await conn.execute(text("SELECT COUNT(*) FROM print_job_reservations WHERE printer_id = 1"))).scalar_one()
+        reservations = (
+            await conn.execute(text("SELECT COUNT(*) FROM print_job_reservations WHERE printer_id = 1"))
+        ).scalar_one()
 
     assert [row["lifecycle_state"] for row in rows] == ["printing", "dispatching"]
     assert all(row["job_id"] and row["uncertainty_status"] == "legacy_active_identity_conflict" for row in rows)
@@ -78,10 +78,7 @@ async def test_legacy_rows_gain_events_and_only_exact_log_identity_is_backfilled
             )
         )
         await conn.execute(
-            text(
-                "INSERT INTO print_queue (id, printer_id, status) "
-                "VALUES (1, 1, 'completed'), (2, 1, 'completed')"
-            )
+            text("INSERT INTO print_queue (id, printer_id, status) VALUES (1, 1, 'completed'), (2, 1, 'completed')")
         )
         await conn.execute(
             text(
@@ -91,13 +88,13 @@ async def test_legacy_rows_gain_events_and_only_exact_log_identity_is_backfilled
         )
 
         await _migrate_print_job_lifecycle(conn)
-        events = (await conn.execute(text("SELECT COUNT(*) FROM print_job_events WHERE event_type = 'job_admitted'"))).scalar_one()
+        events = (
+            await conn.execute(text("SELECT COUNT(*) FROM print_job_events WHERE event_type = 'job_admitted'"))
+        ).scalar_one()
         jobs = (
-            await conn.execute(text("SELECT id, job_id, queue_visible FROM print_queue ORDER BY id"))
-        ).mappings().all()
-        logs = (
-            await conn.execute(text("SELECT id, job_id FROM print_log_entries ORDER BY id"))
-        ).mappings().all()
+            (await conn.execute(text("SELECT id, job_id, queue_visible FROM print_queue ORDER BY id"))).mappings().all()
+        )
+        logs = (await conn.execute(text("SELECT id, job_id FROM print_log_entries ORDER BY id"))).mappings().all()
 
     assert events == 2
     assert all(row["job_id"] and not row["queue_visible"] for row in jobs)

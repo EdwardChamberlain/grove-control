@@ -4744,9 +4744,7 @@ async def on_print_complete(printer_id: int, data: dict):
                     evidence={"status": queue_status, "filename": filename, "subtask_name": subtask_name},
                 )
                 await db.commit()
-                logger.warning(
-                    "Quarantined terminal printer event for %s: no unique durable task binding", printer_id
-                )
+                logger.warning("Quarantined terminal printer event for %s: no unique durable task binding", printer_id)
                 return
 
             if item.lifecycle_state != target_state:

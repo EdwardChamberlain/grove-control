@@ -450,7 +450,9 @@ class PrinterManager:
                 printer.awaiting_plate_clear_archive_id = (
                     self._awaiting_plate_clear_archive_id.get(printer_id) if awaiting else None
                 )
-                printer.awaiting_plate_clear_job_id = self._awaiting_plate_clear_job_id.get(printer_id) if awaiting else None
+                printer.awaiting_plate_clear_job_id = (
+                    self._awaiting_plate_clear_job_id.get(printer_id) if awaiting else None
+                )
                 await db.commit()
 
         try:
@@ -507,9 +509,9 @@ class PrinterManager:
         try:
             async with async_session() as db:
                 result = await db.execute(
-                    select(Printer.id, Printer.awaiting_plate_clear_archive_id, Printer.awaiting_plate_clear_job_id).where(
-                        Printer.awaiting_plate_clear.is_(True)
-                    )
+                    select(
+                        Printer.id, Printer.awaiting_plate_clear_archive_id, Printer.awaiting_plate_clear_job_id
+                    ).where(Printer.awaiting_plate_clear.is_(True))
                 )
                 rows = result.all()
                 ids = {row[0] for row in rows}
@@ -1484,7 +1486,9 @@ def printer_state_to_dict(
         "awaiting_plate_clear_archive_id": (
             printer_manager.get_awaiting_plate_clear_archive_id(printer_id) if printer_id else None
         ),
-        "awaiting_plate_clear_job_id": printer_manager.get_awaiting_plate_clear_job_id(printer_id) if printer_id else None,
+        "awaiting_plate_clear_job_id": printer_manager.get_awaiting_plate_clear_job_id(printer_id)
+        if printer_id
+        else None,
     }
     # Add cover URL if there's an active print and printer_id is provided
     # Include PAUSE state so skip objects modal can show cover

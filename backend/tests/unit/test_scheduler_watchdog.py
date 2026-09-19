@@ -284,9 +284,7 @@ class TestDurableDispatchingState:
         """An uncorrelated active printer is unsafe to requeue automatically."""
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            await _make_dispatching(
-                db, item, dispatched_at=datetime.now(timezone.utc) - timedelta(seconds=300)
-            )
+            await _make_dispatching(db, item, dispatched_at=datetime.now(timezone.utc) - timedelta(seconds=300))
 
             with patch(
                 "backend.app.services.print_scheduler.printer_manager.get_status",
@@ -304,9 +302,7 @@ class TestDurableDispatchingState:
     async def test_restart_recovery_holds_stale_uncertain_dispatch(self, db_session, printer_status):
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            await _make_dispatching(
-                db, item, dispatched_at=datetime.now(timezone.utc) - timedelta(seconds=300)
-            )
+            await _make_dispatching(db, item, dispatched_at=datetime.now(timezone.utc) - timedelta(seconds=300))
 
             with patch(
                 "backend.app.services.print_scheduler.printer_manager.get_status",
@@ -324,9 +320,7 @@ class TestDurableDispatchingState:
         """Unknown terminal telemetry must not cause a duplicate retry."""
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            await _make_dispatching(
-                db, item, dispatched_at=datetime.now(timezone.utc) - timedelta(seconds=300)
-            )
+            await _make_dispatching(db, item, dispatched_at=datetime.now(timezone.utc) - timedelta(seconds=300))
 
             # This is the shape the MQTT parser exposes when a terminal push
             # carries subtask_id=0 after a restart.
@@ -357,9 +351,7 @@ class TestDurableDispatchingState:
         """
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            await _make_dispatching(
-                db, item, dispatched_at=datetime.now(timezone.utc) - timedelta(seconds=300)
-            )
+            await _make_dispatching(db, item, dispatched_at=datetime.now(timezone.utc) - timedelta(seconds=300))
 
             complete = AsyncMock()
             status = _status(printer_state, "12345", "completed-while-down.3mf")

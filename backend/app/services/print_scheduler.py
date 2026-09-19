@@ -630,7 +630,9 @@ class PrintScheduler:
         ready = await self._heat_soak.check(db)
         for item_id in ready:
             spawn_background_task(self._dispatch_after_heat_soak(item_id), name=f"heat-soak-dispatch-{item_id}")
-        shutdowns = set((await db.scalars(select(Printer.id).where(Printer.heat_soak_shutdown_pending.is_(True)))).all())
+        shutdowns = set(
+            (await db.scalars(select(Printer.id).where(Printer.heat_soak_shutdown_pending.is_(True)))).all()
+        )
         holds = set(
             (await db.scalars(select(PrinterSafetyHold.printer_id).where(PrinterSafetyHold.state == "active"))).all()
         )

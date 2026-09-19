@@ -1048,14 +1048,18 @@ async def _migrate_print_job_lifecycle(conn) -> None:
     await _safe_execute(conn, f"ALTER TABLE printers ADD COLUMN heat_soak_shutdown_at {timestamp_type}")
 
     rows = (
-        await conn.execute(
-            text(
-                "SELECT id, printer_id, status, job_id, lifecycle_state, lifecycle_version, "
-                "active_operation_id, dispatch_attempted_at, dispatched_at, preheat_owner "
-                "FROM print_queue"
+        (
+            await conn.execute(
+                text(
+                    "SELECT id, printer_id, status, job_id, lifecycle_state, lifecycle_version, "
+                    "active_operation_id, dispatch_attempted_at, dispatched_at, preheat_owner "
+                    "FROM print_queue"
+                )
             )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
 
     active_by_printer: dict[int, list[dict]] = {}
     for row in rows:
@@ -1175,13 +1179,10 @@ async def _migrate_print_job_lifecycle(conn) -> None:
     # They become unattributed durable holds until explicitly acknowledged,
     # rather than being attached to the newest similarly named print.
     printers = (
-        await conn.execute(
-            text(
-                "SELECT id, awaiting_plate_clear, heat_soak_shutdown_pending "
-                "FROM printers"
-            )
-        )
-    ).mappings().all()
+        (await conn.execute(text("SELECT id, awaiting_plate_clear, heat_soak_shutdown_pending FROM printers")))
+        .mappings()
+        .all()
+    )
     for printer in printers:
         for column, hold_type in (
             ("awaiting_plate_clear", "legacy_unattributed_plate_clear"),
@@ -1227,7 +1228,9 @@ async def _migrate_print_job_lifecycle(conn) -> None:
     await _safe_execute(conn, "CREATE UNIQUE INDEX IF NOT EXISTS uq_print_queue_job_id ON print_queue (job_id)")
     await _safe_execute(conn, "CREATE INDEX IF NOT EXISTS ix_print_queue_job_id ON print_queue (job_id)")
     if has_print_log_entries:
-        await _safe_execute(conn, "CREATE INDEX IF NOT EXISTS ix_print_log_entries_job_id ON print_log_entries (job_id)")
+        await _safe_execute(
+            conn, "CREATE INDEX IF NOT EXISTS ix_print_log_entries_job_id ON print_log_entries (job_id)"
+        )
         await _safe_execute(
             conn,
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_print_log_entries_job_id "
