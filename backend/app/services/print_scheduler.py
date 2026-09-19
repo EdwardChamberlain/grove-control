@@ -3881,9 +3881,15 @@ class PrintScheduler:
 
         # Re-check at the final dispatch boundary. Drying may have started
         # after the scheduler selected this printer or while the FTP upload
-        # was in progress. Never create a durable dispatch reservation until
-        # telemetry confirms every dryer is off.
-        if not await self._prepare_drying_for_dispatch(db, item, item.printer_id):
+        # was in progress. A dispatch reservation already exists while this
+        # worker prepares the command, so a drying deferral must atomically
+        # release it and return the job to queued before the worker exits.
+        if not await self._prepare_drying_for_dispatch(
+            db,
+            item,
+            item.printer_id,
+            release_dispatch_reservation=True,
+        ):
             logger.info(
                 "Queue item %s: dispatch deferred because printer %s is drying",
                 item.id,

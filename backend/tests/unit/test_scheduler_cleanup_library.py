@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import backend.app.models  # noqa: F401 - populate Base.metadata
@@ -11,7 +12,7 @@ import backend.app.services.print_scheduler as scheduler_module
 from backend.app.core.database import Base
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
-from backend.app.models.print_queue import PrintQueueItem
+from backend.app.models.print_queue import PrinterSafetyHold, PrintJobReservation, PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services.print_scheduler import PrintScheduler
 
@@ -312,12 +313,12 @@ async def test_final_dispatch_boundary_can_wait_for_natural_drying_completion(qu
     ],
 )
 @pytest.mark.asyncio
-async def test_command_boundary_releases_reservation_if_drying_starts_after_final_check(
+async def test_command_boundary_holds_uncertain_dispatch_if_drying_starts_after_final_check(
     queue_factory,
     wait_for_drying_complete,
     waiting_reason,
 ):
-    """Never publish project_file when drying starts during reservation setup."""
+    """Never publish project_file or release the printer after dispatch may have started."""
     ctx = await queue_factory(
         cleanup=True,
         wait_for_drying_complete=wait_for_drying_complete,
@@ -341,14 +342,28 @@ async def test_command_boundary_releases_reservation_if_drying_starts_after_fina
         )
 
     item, library_file, archive = await _queue_snapshot(ctx)
-    assert item.status == "pending"
-    assert item.dispatched_at is None
-    assert item.dispatch_subtask_id is None
+    assert item.status == "dispatching"
+    assert item.uncertainty_status == "dispatch_resolution_pending"
+    assert item.dispatched_at is not None
+    assert item.dispatch_subtask_id is not None
     assert item.waiting_reason == waiting_reason
     assert item.library_file_id is None
     assert item.archive_id == archive.id
     assert library_file is None
     assert ctx.archive_path.exists()
+    async with ctx.session_maker() as db:
+        reservation = await db.get(PrintJobReservation, ctx.printer_id)
+        hold = await db.scalar(
+            select(PrinterSafetyHold).where(
+                PrinterSafetyHold.printer_id == ctx.printer_id,
+                PrinterSafetyHold.job_id == item.job_id,
+                PrinterSafetyHold.hold_type == "dispatch_resolution",
+                PrinterSafetyHold.state == "active",
+            )
+        )
+    assert reservation is not None
+    assert reservation.job_id == item.job_id
+    assert hold is not None
     register_expected.assert_called_once()
     unregister_expected.assert_called_once()
     clear_current_print_user.assert_called_once_with(ctx.printer_id)
