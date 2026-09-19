@@ -113,9 +113,9 @@ async def test_legacy_camera_cleanup_is_idempotent(engine):
                 "INSERT INTO printers "
                 "(id, name, serial_number, ip_address, access_code, nozzle_count, is_active, "
                 "auto_archive, print_hours_offset, runtime_seconds, awaiting_plate_clear, "
-                "external_camera_url) "
+                "external_camera_url, external_camera_enabled) "
                 "VALUES (1, 'P1S', 'ABC123', '192.168.1.10', 'secret', 1, 1, 1, 0, 0, 0, "
-                "'http://camera.invalid/frame.jpg')"
+                "'http://camera.invalid/frame.jpg', 1)"
             )
         )
 
