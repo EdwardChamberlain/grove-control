@@ -153,22 +153,23 @@ class TestExpectedPrintDetection:
         keys = self._build_check_keys(2, filename="Box.3mf", subtask_name="Box")
         assert not any(k in _expected_prints for k in keys)
 
-    def test_dispatching_completion_requires_the_registered_job(self):
+    def test_dispatching_completion_does_not_use_filename_identity(self):
         from types import SimpleNamespace
 
-        item = SimpleNamespace(status="dispatching", archive_id=54)
+        item = SimpleNamespace(lifecycle_state="dispatching", archive_id=54, dispatch_subtask_id="12345")
         register_expected_print(1, "Box.3mf", archive_id=54)
 
-        assert _matches_dispatching_queue_completion(item, [(1, "Box.3mf")], None)
-        assert not _matches_dispatching_queue_completion(item, [(1, "Benchy.3mf")], None)
+        assert not _matches_dispatching_queue_completion(item, [(1, "Box.3mf")], None)
+        assert not _matches_dispatching_queue_completion(item, [(1, "Box.3mf")], "different")
+        assert _matches_dispatching_queue_completion(item, [(1, "Benchy.3mf")], "12345")
 
         unregister_expected_print(1, "Box.3mf")
-        assert not _matches_dispatching_queue_completion(item, [(1, "Box.3mf")], None)
+        assert _matches_dispatching_queue_completion(item, [(1, "Box.3mf")], "12345")
 
     def test_dispatching_completion_uses_persisted_submission_id_after_restart(self):
         from types import SimpleNamespace
 
-        item = SimpleNamespace(status="dispatching", archive_id=54, dispatch_subtask_id="12345")
+        item = SimpleNamespace(lifecycle_state="dispatching", archive_id=54, dispatch_subtask_id="12345")
 
         assert _matches_dispatching_queue_completion(item, [], "12345")
         register_expected_print(1, "Box.3mf", archive_id=54)

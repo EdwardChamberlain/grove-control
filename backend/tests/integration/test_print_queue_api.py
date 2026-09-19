@@ -1161,7 +1161,8 @@ class TestQueueCancelEndpoint:
     @pytest.mark.integration
     async def test_cancel_non_pending_queue_item(self, async_client: AsyncClient, queue_item_factory, db_session):
         """Verify 400 error when trying to cancel a non-pending queue item."""
-        item = await queue_item_factory(status="printing")
+        item = await queue_item_factory(status="printing", dispatch_subtask_id="task-aborted")
+        item.lifecycle_state = "printing"
 
         response = await async_client.post(f"/api/v1/queue/{item.id}/cancel")
         assert response.status_code == 400
@@ -1916,6 +1917,11 @@ class TestAbortedStatusNormalisation:
 
         tasks_before = set(asyncio.all_tasks())
 
+        async def transition(db, queue_item, *, to_state, **_kwargs):
+            queue_item.lifecycle_state = to_state
+            queue_item.status = to_state
+            return MagicMock(id="terminal-event", operation_id=None)
+
         with (
             patch("backend.app.main.async_session", return_value=mock_session),
             patch("backend.app.core.database.async_session", return_value=mock_session),
@@ -1924,6 +1930,11 @@ class TestAbortedStatusNormalisation:
             patch("backend.app.main.notification_service") as mock_notif,
             patch("backend.app.main.smart_plug_manager") as mock_plug,
             patch("backend.app.main.printer_manager") as mock_pm,
+            patch(
+                "backend.app.services.print_job_lifecycle.resolve_job_for_device_event",
+                new=AsyncMock(return_value=item),
+            ),
+            patch("backend.app.services.print_job_lifecycle.transition_job", new=transition),
         ):
             mock_ws.send_print_complete = AsyncMock()
             mock_ws.broadcast = AsyncMock()
@@ -1941,6 +1952,7 @@ class TestAbortedStatusNormalisation:
                     "status": "aborted",
                     "filename": "test.gcode",
                     "subtask_name": "Test",
+                    "subtask_id": "task-aborted",
                     "timelapse_was_active": False,
                 },
             )
@@ -2058,7 +2070,8 @@ class TestAbortedStatusNormalisation:
         import asyncio
         from unittest.mock import AsyncMock, MagicMock, patch
 
-        item = await queue_item_factory(status="printing")
+        item = await queue_item_factory(status="printing", dispatch_subtask_id="task-completed")
+        item.lifecycle_state = "printing"
 
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [item]
@@ -2071,6 +2084,11 @@ class TestAbortedStatusNormalisation:
 
         tasks_before = set(asyncio.all_tasks())
 
+        async def transition(db, queue_item, *, to_state, **_kwargs):
+            queue_item.lifecycle_state = to_state
+            queue_item.status = to_state
+            return MagicMock(id="terminal-event", operation_id=None)
+
         with (
             patch("backend.app.main.async_session", return_value=mock_session),
             patch("backend.app.core.database.async_session", return_value=mock_session),
@@ -2079,6 +2097,11 @@ class TestAbortedStatusNormalisation:
             patch("backend.app.main.notification_service") as mock_notif,
             patch("backend.app.main.smart_plug_manager") as mock_plug,
             patch("backend.app.main.printer_manager") as mock_pm,
+            patch(
+                "backend.app.services.print_job_lifecycle.resolve_job_for_device_event",
+                new=AsyncMock(return_value=item),
+            ),
+            patch("backend.app.services.print_job_lifecycle.transition_job", new=transition),
         ):
             mock_ws.send_print_complete = AsyncMock()
             mock_ws.broadcast = AsyncMock()
@@ -2096,6 +2119,7 @@ class TestAbortedStatusNormalisation:
                     "status": "completed",
                     "filename": "test.gcode",
                     "subtask_name": "Test",
+                    "subtask_id": "task-completed",
                     "timelapse_was_active": False,
                 },
             )

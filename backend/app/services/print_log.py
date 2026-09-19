@@ -17,6 +17,7 @@ async def write_log_entry(
     db: AsyncSession,
     *,
     status: str,
+    job_id: str | None = None,
     archive_id: int | None = None,
     queue_item_id: int | None = None,
     print_name: str | None = None,
@@ -41,6 +42,7 @@ async def write_log_entry(
         duration = int((completed_at - started_at).total_seconds())
 
     entry = PrintLogEntry(
+        job_id=job_id,
         archive_id=archive_id,
         queue_item_id=queue_item_id,
         print_name=print_name,

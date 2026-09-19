@@ -302,6 +302,9 @@ class PrinterManager:
         # Exact archive associated with each awaiting plate-clear gate (#43).
         # This is persisted on Printer so the completion card survives restarts.
         self._awaiting_plate_clear_archive_id: dict[int, int] = {}
+        # Additive durable ownership for lifecycle-sensitive cleanup. The
+        # existing boolean/archive fields remain the compatibility surface.
+        self._awaiting_plate_clear_job_id: dict[int, str] = {}
 
     def get_printer(self, printer_id: int) -> PrinterInfo | None:
         """Get printer info by ID."""
@@ -329,6 +332,10 @@ class PrinterManager:
         """Return the archive associated with the outstanding plate-clear gate."""
         return self._awaiting_plate_clear_archive_id.get(printer_id)
 
+    def get_awaiting_plate_clear_job_id(self, printer_id: int) -> str | None:
+        """Return the PrintJob which raised the outstanding plate-clear gate."""
+        return self._awaiting_plate_clear_job_id.get(printer_id)
+
     def set_awaiting_plate_clear(self, printer_id: int, awaiting: bool):
         """Set/clear the awaiting-plate-clear gate and persist it to DB.
 
@@ -353,9 +360,11 @@ class PrinterManager:
             # A new terminal event starts a new gate. The exact archive is
             # attached after the completion handler resolves it.
             self._awaiting_plate_clear_archive_id.pop(printer_id, None)
+            self._awaiting_plate_clear_job_id.pop(printer_id, None)
         else:
             self._awaiting_plate_clear.discard(printer_id)
             self._awaiting_plate_clear_archive_id.pop(printer_id, None)
+            self._awaiting_plate_clear_job_id.pop(printer_id, None)
         # Only create the coroutine when there is a loop to run it on — otherwise Python
         # emits "coroutine was never awaited" warnings (e.g. in sync unit tests).
         if self._loop and self._loop.is_running():
@@ -372,6 +381,18 @@ class PrinterManager:
             self._awaiting_plate_clear_archive_id[printer_id] = archive_id
         if self._loop and self._loop.is_running():
             self._schedule_async(self._persist_awaiting_plate_clear_archive_id(printer_id, archive_id))
+            self._schedule_async(self._broadcast_status_change(printer_id))
+
+    def set_awaiting_plate_clear_job_id(self, printer_id: int, job_id: str | None) -> None:
+        """Associate a plate-clear gate with its lifecycle owner."""
+        if job_id is not None and not self.is_awaiting_plate_clear(printer_id):
+            return
+        if job_id is None:
+            self._awaiting_plate_clear_job_id.pop(printer_id, None)
+        else:
+            self._awaiting_plate_clear_job_id[printer_id] = job_id
+        if self._loop and self._loop.is_running():
+            self._schedule_async(self._persist_awaiting_plate_clear_job_id(printer_id, job_id))
             self._schedule_async(self._broadcast_status_change(printer_id))
 
     async def _broadcast_status_change(self, printer_id: int) -> None:
@@ -429,6 +450,7 @@ class PrinterManager:
                 printer.awaiting_plate_clear_archive_id = (
                     self._awaiting_plate_clear_archive_id.get(printer_id) if awaiting else None
                 )
+                printer.awaiting_plate_clear_job_id = self._awaiting_plate_clear_job_id.get(printer_id) if awaiting else None
                 await db.commit()
 
         try:
@@ -458,6 +480,26 @@ class PrinterManager:
         except Exception as e:
             logger.warning("Failed to persist awaiting_plate_clear archive for printer %d: %s", printer_id, e)
 
+    async def _persist_awaiting_plate_clear_job_id(self, printer_id: int, job_id: str | None):
+        from backend.app.core.database import run_with_retry
+
+        async def _do(db):
+            if (
+                not self.is_awaiting_plate_clear(printer_id)
+                or self._awaiting_plate_clear_job_id.get(printer_id) != job_id
+            ):
+                return
+            printer = await db.get(Printer, printer_id)
+            if printer is not None:
+                printer.awaiting_plate_clear = True
+                printer.awaiting_plate_clear_job_id = job_id
+                await db.commit()
+
+        try:
+            await run_with_retry(_do, label=f"persist awaiting_plate_clear job printer={printer_id}")
+        except Exception as e:
+            logger.warning("Failed to persist awaiting_plate_clear job for printer %d: %s", printer_id, e)
+
     async def load_awaiting_plate_clear_from_db(self):
         """Rehydrate the awaiting-plate-clear set from the printers table on startup."""
         from backend.app.core.database import async_session
@@ -465,7 +507,7 @@ class PrinterManager:
         try:
             async with async_session() as db:
                 result = await db.execute(
-                    select(Printer.id, Printer.awaiting_plate_clear_archive_id).where(
+                    select(Printer.id, Printer.awaiting_plate_clear_archive_id, Printer.awaiting_plate_clear_job_id).where(
                         Printer.awaiting_plate_clear.is_(True)
                     )
                 )
@@ -473,6 +515,7 @@ class PrinterManager:
                 ids = {row[0] for row in rows}
                 self._awaiting_plate_clear = ids
                 self._awaiting_plate_clear_archive_id = {row[0]: row[1] for row in rows if row[1] is not None}
+                self._awaiting_plate_clear_job_id = {row[0]: row[2] for row in rows if row[2] is not None}
                 if ids:
                     logger.info("Loaded %d printer(s) awaiting plate-clear acknowledgment: %s", len(ids), sorted(ids))
         except Exception as e:
@@ -1441,6 +1484,7 @@ def printer_state_to_dict(
         "awaiting_plate_clear_archive_id": (
             printer_manager.get_awaiting_plate_clear_archive_id(printer_id) if printer_id else None
         ),
+        "awaiting_plate_clear_job_id": printer_manager.get_awaiting_plate_clear_job_id(printer_id) if printer_id else None,
     }
     # Add cover URL if there's an active print and printer_id is provided
     # Include PAUSE state so skip objects modal can show cover

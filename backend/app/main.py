@@ -777,24 +777,14 @@ def _matches_dispatching_queue_completion(
 ) -> bool:
     """Return whether a terminal event belongs to this unconfirmed dispatch.
 
-    New dispatches persist the MQTT submission id before their command is sent,
-    so this comparison works across a restart. Legacy rows without that id fall
-    back to the in-process expected-print registry.
+    The device subtask ID is print identity.  Filenames and the process-local
+    expected-print registry are useful content hints, but can never terminalise
+    a durable job because a repeated filename can describe another attempt.
     """
-    if item.status != "dispatching":
+    if item.lifecycle_state != "dispatching":
         return False
     dispatch_subtask_id = getattr(item, "dispatch_subtask_id", None)
-    if dispatch_subtask_id is not None:
-        if event_subtask_id is not None:
-            return dispatch_subtask_id == event_subtask_id
-        # A same-process pre-print failure can arrive before firmware has
-        # echoed its submission id. The short-lived expected registry remains
-        # a safe fallback for that narrow window; restart recovery relies on
-        # the durable id above.
-        return item.archive_id is not None and any(
-            _expected_prints.get(key) == item.archive_id for key in possible_keys
-        )
-    return item.archive_id is not None and any(_expected_prints.get(key) == item.archive_id for key in possible_keys)
+    return bool(dispatch_subtask_id and event_subtask_id and dispatch_subtask_id == event_subtask_id)
 
 
 def _compute_run_filament_grams(
@@ -2767,6 +2757,20 @@ async def on_print_start(printer_id: int, data: dict):
                 await _send_print_start_notification(printer_id, data, logger=logger)
             return
 
+        # A physical user print is still a print attempt even when it bypassed
+        # Grove's queue. Adopt it only from the printer task identity; content
+        # names remain archive metadata and must never choose lifecycle owner.
+        from backend.app.services.print_job_lifecycle import adopt_observed_user_print
+
+        observed_job = await adopt_observed_user_print(
+            db,
+            printer_id=printer_id,
+            device_subtask_id=subtask_id,
+            evidence={"filename": filename, "subtask_name": subtask_name},
+        )
+        if observed_job is not None:
+            await db.commit()
+
         if not filename and not subtask_name:
             # Send notification without archive data (no filename)
             logger.info("[CALLBACK] Skipping archive - no filename or subtask_name")
@@ -4690,88 +4694,99 @@ async def on_print_complete(printer_id: int, data: dict):
     # so queue items don't get stuck in "printing" when archive lookup fails.
     # Uses run_with_retry to handle SQLite "database is locked" errors (#897).
     queue_item_id = None
+    queue_job_id = None
     queue_item_owner_id = None
     queue_status = None
     queue_auto_off = False
     try:
         from backend.app.core.database import run_with_retry
         from backend.app.models.print_queue import PrintQueueItem
+        from backend.app.services.print_job_lifecycle import (
+            CANCELLED,
+            COMPLETED,
+            DISPATCHING,
+            FAILED,
+            PRINTING,
+            enqueue_effect,
+            quarantine_device_event,
+            resolve_job_for_device_event,
+            transition_job,
+        )
 
         async def _update_queue_status(db):
-            nonlocal queue_item_id, queue_item_owner_id, queue_status, queue_auto_off
+            nonlocal queue_item_id, queue_job_id, queue_item_owner_id, queue_status, queue_auto_off
             recovered_dispatch = bool(data.get("_recovered_dispatch"))
-            queue_statuses = ["dispatching", "printing"]
+            queue_status = data.get("status", "completed")
+            if queue_status == "aborted":
+                queue_status = "cancelled"
+            target_state = {"completed": COMPLETED, "failed": FAILED, "cancelled": CANCELLED}.get(queue_status)
+            if target_state is None:
+                return
+
+            permitted_states = (DISPATCHING, PRINTING)
             if recovered_dispatch and event_subtask_id:
-                # Scheduler recovery has already committed this exact terminal
-                # state so a process stop cannot requeue it. Include it once to
-                # run the normal completion side effects; ordinary terminal
-                # MQTT callbacks never take this path.
-                queue_statuses.extend(["completed", "failed"])
-            result = await db.execute(
-                select(PrintQueueItem)
-                .where(PrintQueueItem.printer_id == printer_id)
-                .where(PrintQueueItem.status.in_(queue_statuses))
+                # Recovery already committed the terminal transition before
+                # invoking the normal completion consequences.
+                permitted_states = (*permitted_states, target_state)
+            item = await resolve_job_for_device_event(
+                db,
+                printer_id=printer_id,
+                device_subtask_id=event_subtask_id,
+                permitted_states=permitted_states,
             )
-            active_items = list(result.scalars().all())
-            printing_items = [item for item in active_items if item.status == "printing"]
-            if len(printing_items) > 1:
-                logger.warning(
-                    "BUG: Multiple queue items in 'printing' status for printer %s: %s",
-                    printer_id,
-                    [(i.id, i.archive_id, i.library_file_id) for i in printing_items],
-                )
-            item = printing_items[0] if printing_items else None
             if item is None:
-                # A printer can publish a terminal update before the next
-                # three-second acknowledgement poll. Accept it only when it
-                # matches the exact archive registered by this dispatch; a
-                # delayed completion for a different job must not terminalise
-                # a newly dispatching queue item.
-                matching_dispatches = [
-                    candidate
-                    for candidate in active_items
-                    if _matches_dispatching_queue_completion(candidate, possible_keys, event_subtask_id)
-                    or (
-                        recovered_dispatch
-                        and candidate.status == data.get("status")
-                        and candidate.dispatch_subtask_id == event_subtask_id
-                    )
-                ]
-                if len(matching_dispatches) == 1:
-                    item = matching_dispatches[0]
-                    logger.info(
-                        "Matched terminal printer event to dispatching queue item %s before start acknowledgement",
-                        item.id,
-                    )
-                elif len(matching_dispatches) > 1:
-                    logger.error(
-                        "Refusing ambiguous terminal event for printer %s; matching dispatches: %s",
-                        printer_id,
-                        [candidate.id for candidate in matching_dispatches],
-                    )
-            if item:
-                queue_status = data.get("status", "completed")
-                # MQTT sends "aborted" for cancelled prints; normalise to
-                # "cancelled" so it matches the queue schema Literal.
-                if queue_status == "aborted":
-                    queue_status = "cancelled"
-                item.status = queue_status
-                item.completed_at = datetime.now(timezone.utc)
-                if queue_status == "failed" and not item.error_message:
-                    item.error_message = _format_hms_error_summary(data.get("hms_errors") or [])
-
-                # Bump usage counters on the source library file so admins can
-                # sort by "last printed" and (eventually) auto-purge stale
-                # files — #1008.
-                await _bump_library_file_usage_if_completed(db, item, queue_status)
-
+                await quarantine_device_event(
+                    db,
+                    printer_id=printer_id,
+                    event_type="terminal_print_event",
+                    device_subtask_id=event_subtask_id,
+                    reason="No unique durable PrintJob binding for terminal device event",
+                    evidence={"status": queue_status, "filename": filename, "subtask_name": subtask_name},
+                )
                 await db.commit()
-                if item.status in ("completed", "failed", "cancelled"):
-                    unregister_expected_print(printer_id)
-                queue_item_id = item.id
-                queue_item_owner_id = item.created_by_id
-                queue_auto_off = item.auto_off_after
-                logger.info("Updated queue item %s status to %s", item.id, queue_status)
+                logger.warning(
+                    "Quarantined terminal printer event for %s: no unique durable task binding", printer_id
+                )
+                return
+
+            if item.lifecycle_state != target_state:
+                event = await transition_job(
+                    db,
+                    item,
+                    to_state=target_state,
+                    source="mqtt_terminal_event",
+                    evidence={"device_subtask_id": event_subtask_id, "printer_status": queue_status},
+                    allow_missed_start_terminal=item.lifecycle_state == DISPATCHING,
+                    physical_execution_observed=item.lifecycle_state == PRINTING,
+                    resolve_safety_hold_types=("dispatch_resolution", "stop_resolution"),
+                )
+                await enqueue_effect(
+                    db,
+                    job_id=item.job_id,
+                    operation_id=event.operation_id,
+                    source_event_id=event.id,
+                    effect_type="terminal_consequences",
+                    delivery_policy="idempotent_retry",
+                    payload={"status": queue_status, "printer_id": printer_id},
+                )
+            elif not recovered_dispatch:
+                # A duplicate terminal callback must not repeat accounting,
+                # notifications or media cleanup.
+                return
+
+            if queue_status == "failed" and not item.error_message:
+                item.error_message = _format_hms_error_summary(data.get("hms_errors") or [])
+            if archive_id is not None and item.archive_id is None:
+                item.archive_id = archive_id
+            await _bump_library_file_usage_if_completed(db, item, queue_status)
+            await db.commit()
+            unregister_expected_print(printer_id)
+            printer_manager.set_awaiting_plate_clear_job_id(printer_id, item.job_id)
+            queue_item_id = item.id
+            queue_job_id = item.job_id
+            queue_item_owner_id = item.created_by_id
+            queue_auto_off = item.auto_off_after
+            logger.info("Updated queue item %s / job %s to %s", item.id, item.job_id, queue_status)
 
         await run_with_retry(_update_queue_status, label="queue status update")
 
@@ -5153,6 +5168,7 @@ async def on_print_complete(printer_id: int, data: dict):
 
                 await write_log_entry(
                     db,
+                    job_id=queue_job_id,
                     archive_id=archive.id,
                     # Captured by _update_queue_status above; None for
                     # printer-initiated prints with no queue row. Batch
@@ -6610,12 +6626,20 @@ async def lifespan(app: FastAPI):
     try:
         async with async_session() as db:
             from backend.app.models.print_queue import PrintQueueItem
+            from backend.app.services.print_job_lifecycle import CANCELLED, admit_job, transition_job
 
             result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.status == "aborted"))
             aborted_items = result.scalars().all()
             if aborted_items:
                 for item in aborted_items:
-                    item.status = "cancelled"
+                    await admit_job(db, item, source="startup_legacy_adoption")
+                    await transition_job(
+                        db,
+                        item,
+                        to_state=CANCELLED,
+                        source="startup_aborted_status_repair",
+                        reason="Legacy aborted status",
+                    )
                 await db.commit()
                 logging.info("Fixed %d queue item(s) with invalid 'aborted' status → 'cancelled'", len(aborted_items))
     except Exception as e:
