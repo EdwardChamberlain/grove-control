@@ -29,14 +29,13 @@ class Printer(Base):
     last_runtime_update: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True
     )  # Last time runtime was updated
-    # External camera configuration
+    # Legacy external-camera columns retained only so existing databases can
+    # migrate without a destructive table rewrite. They are not exposed by
+    # the API and are cleared on startup by the native-camera migration.
     external_camera_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    external_camera_type: Mapped[str | None] = mapped_column(String(20), nullable=True)  # mjpeg, rtsp, snapshot
+    external_camera_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
     external_camera_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
-    # Optional single-frame snapshot URL — when set, used for snapshot / finish-photo
-    # / timelapse / plate-detect captures instead of opening the live stream and
-    # skipping a warm-up frame. Bypasses MJPEG warm-up issues on sources that
-    # expose a dedicated frame endpoint (e.g. go2rtc's /api/frame.jpeg). #1177.
+    # Legacy custom snapshot URL column; retained only for the migration shim.
     external_camera_snapshot_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     camera_rotation: Mapped[int] = mapped_column(default=0)  # 0, 90, 180, 270 degrees
     # Plate detection - check if build plate is empty before starting print

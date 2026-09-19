@@ -18,8 +18,7 @@ safe, so a printer with a viewer attached looked idle; the janitor's /proc scan
 reaps any ffmpeg missing from ``_active_streams``, so it killed the live stream;
 and ``/camera/stop`` reported ``Stopped 0``.
 
-The external-camera path already solved this with a per-instance id (#2675).
-These tests pin the same property for the fan-out path.
+These tests pin the same property for the native fan-out path.
 """
 
 from __future__ import annotations
@@ -81,11 +80,8 @@ async def test_camera_stream_has_no_function_local_module_imports():
     """A local ``import x`` anywhere in camera_stream shadows x for the WHOLE
     function, including branches that never reach the import.
 
-    This is not hypothetical: an ``import uuid`` inside the external-camera
-    branch meant building the fan-out id on the RTSP path raised
-    UnboundLocalError, so the camera would not start on any printer without an
-    external camera configured. ``time`` and ``uuid`` are module-level now;
-    keep them that way.
+    This protects the native RTSP/chamber paths from accidental shadowing of
+    the module-level ``time`` and ``uuid`` imports.
     """
     import ast
     import inspect
@@ -103,19 +99,6 @@ async def test_fanout_stream_id_keeps_the_printer_prefix():
     assert stream_id.startswith(f"{PRINTER_ID}-")
     camera._active_streams[stream_id] = object()
     assert camera.is_stream_active(PRINTER_ID) is True
-
-
-async def test_external_stream_registry_is_reference_counted():
-    """One external viewer disconnecting must not hide a second viewer."""
-    camera._active_external_streams[PRINTER_ID] = 2
-    try:
-        assert camera.is_stream_active(PRINTER_ID) is True
-        camera._active_external_streams[PRINTER_ID] -= 1
-        assert camera.is_stream_active(PRINTER_ID) is True
-        camera._active_external_streams.pop(PRINTER_ID, None)
-        assert camera.is_stream_active(PRINTER_ID) is False
-    finally:
-        camera._active_external_streams.pop(PRINTER_ID, None)
 
 
 # ---------------------------------------------------------------------------

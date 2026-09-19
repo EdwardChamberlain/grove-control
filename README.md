@@ -29,7 +29,9 @@ Grove Control brings together printer monitoring, scheduling, automation, and pr
 
 ### Core Features
 
-- **Printer monitoring and control**: View live printer status, camera feeds, temperatures, fan states, AMS data, HMS errors, and job progress from a central dashboard.
+- **Printer monitoring and control**: View live printer status, native Bambu camera feeds, temperatures, fan states, AMS data, HMS errors, and job progress from a central dashboard.
+
+Grove Control monitors the camera built into each supported Bambu printer. External network cameras, USB/V4L2 devices, RTSP sources, and custom snapshot URLs are not supported. Upgrading clears those legacy camera settings without changing print archives, finish metadata, notifications, or queue state.
 - **Production scheduling**: Queue, schedule, and dispatch prints across multiple printers with support for batch jobs, model-based assignment, filament validation, and clear-plate workflows.
 - **Print archive and history**: Automatically archive completed prints with metadata, thumbnails, reprint support, print logs, cost tracking, and failure history.
 - **Multi-printer fleet management**: Manage multiple Bambu Lab printers from one interface, with filtering, search, bulk actions, and per-printer configuration.

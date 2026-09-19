@@ -317,10 +317,6 @@ export interface Printer {
   nozzle_count: number;  // 1 or 2, auto-detected from MQTT
   is_active: boolean;
   auto_archive: boolean;
-  external_camera_url: string | null;
-  external_camera_type: string | null;  // "mjpeg", "rtsp", "snapshot"
-  external_camera_enabled: boolean;
-  external_camera_snapshot_url: string | null;  // optional single-frame override (#1177)
   camera_rotation: number;  // 0, 90, 180, 270 degrees
   plate_detection_enabled: boolean;  // Check plate before print
   plate_detection_roi?: PlateDetectionROI;  // ROI for plate detection
@@ -587,10 +583,6 @@ export interface PrinterCreate {
   // scheduler, metrics and the print picker on this; toggling via PATCH
   // /printers/{id} disconnects or reconnects MQTT accordingly.
   is_active?: boolean;
-  external_camera_url?: string | null;
-  external_camera_type?: string | null;
-  external_camera_enabled?: boolean;
-  external_camera_snapshot_url?: string | null;
   camera_rotation?: number;
   plate_detection_enabled?: boolean;
   plate_detection_roi?: PlateDetectionROI;
@@ -3906,12 +3898,6 @@ export const api = {
     request<{ connected: boolean }>(`/printers/${id}/disconnect`, {
       method: 'POST',
     }),
-  testExternalCamera: (printerId: number, url: string, cameraType: string) =>
-    request<{ success: boolean; error?: string; resolution?: string }>(
-      `/printers/${printerId}/camera/external/test?url=${encodeURIComponent(url)}&camera_type=${encodeURIComponent(cameraType)}`,
-      { method: 'POST' }
-    ),
-
   // Print Control
   stopPrint: (printerId: number) =>
     request<{ success: boolean; message: string }>(`/printers/${printerId}/print/stop`, {
@@ -5942,14 +5928,8 @@ export const api = {
     }),
 
   // Plate Detection - Multi-reference calibration (stores up to 5 references per printer)
-  checkPlateEmpty: (printerId: number, options?: { useExternal?: boolean; includeDebugImage?: boolean }) => {
+  checkPlateEmpty: (printerId: number, options?: { includeDebugImage?: boolean }) => {
     const params = new URLSearchParams();
-    // Only forward use_external when the caller explicitly sets it. Omitted →
-    // backend derives the default from the printer's external_camera_enabled
-    // setting so calibration and runtime checks use the same camera (#1359).
-    if (options?.useExternal !== undefined) {
-      params.set('use_external', String(options.useExternal));
-    }
     params.set('include_debug_image', String(options?.includeDebugImage ?? false));
     return request<PlateDetectionResult>(
       `/printers/${printerId}/camera/check-plate?${params.toString()}`
@@ -5960,12 +5940,9 @@ export const api = {
       `/printers/${printerId}/camera/plate-detection/status`
     );
   },
-  calibratePlateDetection: (printerId: number, options?: { label?: string; useExternal?: boolean }) => {
+  calibratePlateDetection: (printerId: number, options?: { label?: string }) => {
     const params = new URLSearchParams();
     if (options?.label) params.set('label', options.label);
-    if (options?.useExternal !== undefined) {
-      params.set('use_external', String(options.useExternal));
-    }
     return request<CalibrationResult & { index: number }>(
       `/printers/${printerId}/camera/plate-detection/calibrate?${params.toString()}`,
       { method: 'POST' }
