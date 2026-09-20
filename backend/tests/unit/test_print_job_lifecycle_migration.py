@@ -66,6 +66,41 @@ async def test_legacy_active_conflict_is_quarantined_without_a_recency_election(
 
 
 @pytest.mark.asyncio
+async def test_legacy_heat_soak_is_not_migrated_as_a_live_worker_lease(test_engine):
+    async with test_engine.begin() as conn:
+        await _replace_queue_with_legacy_shape(conn)
+        await conn.execute(
+            text(
+                "INSERT INTO printers (id, name, serial_number, ip_address, access_code, model, nozzle_count, "
+                "is_active, auto_archive, print_hours_offset, runtime_seconds, external_camera_enabled, "
+                "camera_rotation, plate_detection_enabled, awaiting_plate_clear) "
+                "VALUES (1, 'P1', 'MIGRATION-HEAT', '127.0.0.1', '12345678', 'H2D', 1, 1, 1, 0, 0, 0, 0, 0, 0)"
+            )
+        )
+        await conn.execute(
+            text(
+                "INSERT INTO print_queue (id, printer_id, status, preheat_owner) "
+                "VALUES (1, 1, 'preheating', 'old-worker')"
+            )
+        )
+
+        await _migrate_print_job_lifecycle(conn)
+        row = (
+            (
+                await conn.execute(
+                    text("SELECT lifecycle_state, uncertainty_status, preheat_owner FROM print_queue WHERE id = 1")
+                )
+            )
+            .mappings()
+            .one()
+        )
+
+    assert row["lifecycle_state"] == "heat_soaking"
+    assert row["uncertainty_status"] == "legacy_heat_soak_identity_unverified"
+    assert row["preheat_owner"] is None
+
+
+@pytest.mark.asyncio
 async def test_legacy_rows_gain_events_and_only_exact_log_identity_is_backfilled(test_engine):
     async with test_engine.begin() as conn:
         await _replace_queue_with_legacy_shape(conn)

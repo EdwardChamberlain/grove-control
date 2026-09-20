@@ -755,10 +755,11 @@ class TestPrintQueueAPI:
         assert response.status_code == 200, response.text
         assert response.json()["message"] == "Heat soak skipped"
         await db_session.refresh(item)
-        assert item.status == "pending"
+        assert item.status == "dispatching"
+        assert item.lifecycle_state == "dispatching"
         assert item.chamber_heat_soak is False
         assert item.manual_start is False
-        assert item.preheat_owner is None
+        assert item.preheat_owner == item.active_operation_id
         assert item.preheat_started_at is None
 
     @pytest.mark.parametrize("action", ["cancel", "stop", "edit", "delete"])
@@ -2614,18 +2615,21 @@ class TestAbortedStatusNormalisation:
         service = ArchiveService(db_session)
         assert await service.soft_delete_archive(archive.id) is True
 
-        # Every queue row that referenced this archive is gone — both the
-        # pending and the completed rows. Print history (PrintLogEntry) is
-        # the authoritative record and is preserved by the FK SET NULL.
+        # Queue rows are durable PrintJobs, not disposable archive children.
+        # The queue projection is hidden and the content association is
+        # detached, while the physical-attempt identity remains available for
+        # audit and recovery.
         remaining = (
             (await db_session.execute(select(PrintQueueItem).where(PrintQueueItem.id.in_([pending.id, completed.id]))))
             .scalars()
             .all()
         )
-        assert remaining == [], (
-            "Soft-deleting the archive must delete every related queue row, "
-            f"got {[(r.id, r.status) for r in remaining]} still present"
-        )
+        assert {row.id for row in remaining} == {pending.id, completed.id}
+        by_id = {row.id: row for row in remaining}
+        assert by_id[pending.id].status == "cancelled"
+        assert by_id[completed.id].status == "completed"
+        assert all(row.queue_visible is False and row.archive_id is None for row in remaining)
+        assert all(row.job_id for row in remaining)
 
     @pytest.mark.asyncio
     @pytest.mark.integration

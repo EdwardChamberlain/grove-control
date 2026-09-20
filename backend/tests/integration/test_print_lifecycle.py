@@ -13,9 +13,12 @@ Full end-to-end tests require the actual database setup.
 """
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+from backend.app.services.print_job_lifecycle import TerminalResolution
 
 
 class TestPrintStartLogic:
@@ -71,6 +74,33 @@ class TestPlateClearGate:
     @staticmethod
     def _setup_mocks(stack):
         mock_session_maker = stack.enter_context(patch("backend.app.main.async_session"))
+        stack.enter_context(patch("backend.app.core.database.async_session"))
+        stack.enter_context(
+            patch(
+                "backend.app.core.database.run_with_retry",
+                new=AsyncMock(
+                    return_value=TerminalResolution(
+                        resolved=True,
+                        changed=True,
+                        job_id="job-1",
+                        queue_item_id=1,
+                        status="completed",
+                        effect_id="effect-1",
+                        physical_execution_observed=True,
+                    )
+                ),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "backend.app.services.print_job_lifecycle.claim_effect",
+                new=AsyncMock(return_value=SimpleNamespace(id="effect-1")),
+            )
+        )
+        stack.enter_context(
+            patch("backend.app.services.print_job_lifecycle.complete_effect", new=AsyncMock(return_value=True))
+        )
+        stack.enter_context(patch("backend.app.main._deliver_terminal_consequences", new=AsyncMock(return_value=True)))
         stack.enter_context(patch("backend.app.main.notification_service")).on_print_complete = AsyncMock()
         stack.enter_context(patch("backend.app.main.smart_plug_manager")).on_print_complete = AsyncMock()
         mock_ws = stack.enter_context(patch("backend.app.main.ws_manager"))
@@ -182,6 +212,26 @@ class TestPrintCompleteLogic:
 
         with (
             patch("backend.app.main.async_session") as mock_session_maker,
+            patch(
+                "backend.app.core.database.run_with_retry",
+                new=AsyncMock(
+                    return_value=TerminalResolution(
+                        resolved=True,
+                        changed=True,
+                        job_id="job-1",
+                        queue_item_id=1,
+                        status="completed",
+                        effect_id="effect-1",
+                        physical_execution_observed=True,
+                    )
+                ),
+            ),
+            patch(
+                "backend.app.services.print_job_lifecycle.claim_effect",
+                new=AsyncMock(return_value=SimpleNamespace(id="effect-1")),
+            ),
+            patch("backend.app.services.print_job_lifecycle.complete_effect", new=AsyncMock(return_value=True)),
+            patch("backend.app.main._deliver_terminal_consequences", new=AsyncMock(return_value=True)),
             patch("backend.app.main.notification_service") as mock_notif,
             patch("backend.app.main.smart_plug_manager") as mock_plug,
             patch("backend.app.main.ws_manager") as mock_ws,

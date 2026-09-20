@@ -29,14 +29,16 @@ async def test_reconnect_reconciliation_requires_durable_task_identity():
     with (
         patch("backend.app.main.printer_manager") as manager,
         patch("backend.app.main.async_session") as session_factory,
+        patch("backend.app.services.print_job_lifecycle.quarantine_device_event", new=AsyncMock()) as quarantine,
     ):
         manager.get_status.return_value = _state("IDLE")
         session_factory.return_value.__aenter__.return_value = session
         assert await reconcile_stale_active_prints(1) == 0
+        quarantine.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_reconnect_reconciliation_synthesises_event_for_exact_job_task():
+async def test_reconnect_reconciliation_synthesises_event_for_exact_terminal_task():
     from backend.app.main import reconcile_stale_active_prints
 
     job = SimpleNamespace(job_id="job-1", dispatch_subtask_id="task-1")
@@ -50,7 +52,7 @@ async def test_reconnect_reconciliation_synthesises_event_for_exact_job_task():
         patch("backend.app.main.async_session") as session_factory,
         patch("backend.app.main.on_print_complete", new=AsyncMock()) as complete,
     ):
-        manager.get_status.side_effect = [_state("IDLE"), _state("IDLE")]
+        manager.get_status.side_effect = [_state("IDLE", subtask_id="task-1"), _state("IDLE", subtask_id="task-1")]
         manager.get_connection_epoch.return_value = "epoch-1"
         session_factory.return_value.__aenter__.return_value = session
         assert await reconcile_stale_active_prints(1) == 1

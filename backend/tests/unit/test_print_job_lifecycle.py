@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import select, update
 
 from backend.app.models.print_queue import (
+    PrinterSafetyHold,
     PrintJobEffect,
     PrintJobEvent,
     PrintJobQuarantinedEvent,
@@ -32,10 +33,12 @@ from backend.app.services.print_job_lifecycle import (
     enqueue_effect,
     fail_effect,
     mark_dispatch_attempted,
+    mark_job_uncertain,
     operation_is_current,
     purge_delivered_effects,
     quarantine_device_event,
     resolve_job_for_device_event,
+    resolve_uncertain_job,
     settle_terminal_event,
     transition_job,
 )
@@ -381,6 +384,72 @@ async def test_user_stop_resolution_is_scoped_to_the_exact_job(db_session):
 
     assert resolution.status == "cancelled"
     assert item.lifecycle_state == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_manual_resolution_closes_uncertain_job_and_its_reservation(db_session):
+    item = await _item(db_session)
+    await transition_job(db_session, item, to_state=DISPATCHING, source="test")
+    await mark_dispatch_attempted(db_session, item, source="test")
+    await mark_job_uncertain(
+        db_session,
+        item,
+        uncertainty_status="stop_resolution_pending",
+        source="test_stop",
+        safety_hold_type="stop_resolution",
+        reason="device acknowledgement missing",
+    )
+
+    effect = await resolve_uncertain_job(
+        db_session,
+        item,
+        outcome=CANCELLED,
+        reason="Operator confirmed the physical attempt was stopped",
+        operator_id=7,
+    )
+
+    assert item.lifecycle_state == CANCELLED
+    assert item.uncertainty_status is None
+    assert await db_session.get(PrintJobReservation, item.printer_id) is None
+    assert effect.delivery_policy == "reconcile_before_retry"
+    hold = await db_session.scalar(
+        select(PrinterSafetyHold).where(
+            PrinterSafetyHold.job_id == item.job_id,
+            PrinterSafetyHold.hold_type == "stop_resolution",
+        )
+    )
+    assert hold is not None and hold.state == "resolved"
+
+
+@pytest.mark.asyncio
+async def test_observed_print_hands_off_only_a_pre_send_reservation(db_session):
+    item = await _item(db_session)
+    item.chamber_heat_soak = True
+    await transition_job(db_session, item, to_state=HEAT_SOAKING, source="test")
+    old_job_id = item.job_id
+
+    adopted = await adopt_observed_user_print(
+        db_session,
+        printer_id=item.printer_id,
+        device_subtask_id="manual-task-handoff",
+        evidence={"source": "printer-panel"},
+    )
+
+    assert adopted is not None and adopted.lifecycle_state == "printing"
+    await db_session.refresh(item)
+    assert item.job_id == old_job_id
+    assert item.lifecycle_state == QUEUED
+    assert item.queue_visible is True
+    assert item.manual_start is True
+    reservation = await db_session.get(PrintJobReservation, item.printer_id)
+    assert reservation is not None and reservation.job_id == adopted.job_id
+    hold = await db_session.scalar(
+        select(PrinterSafetyHold).where(
+            PrinterSafetyHold.job_id == item.job_id,
+            PrinterSafetyHold.hold_type == "heat_soak_shutdown",
+        )
+    )
+    assert hold is not None and hold.state == "active"
 
 
 @pytest.mark.asyncio
