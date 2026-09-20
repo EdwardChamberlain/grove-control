@@ -209,8 +209,9 @@ class TestOnPrintComplete:
             tray_now=0,
         )
 
-        # db returns: archive, queue_item(None), assignment, spool
-        db = _mock_db_sequential([archive, None, assignment, spool])
+        # db returns: archive, assignment, spool.  Direct prints have no
+        # queue projection to consult.
+        db = _mock_db_sequential([archive, assignment, spool])
 
         filament_usage = [{"slot_id": 1, "used_g": 15.0, "type": "PLA", "color": "#FF0000"}]
 
@@ -300,8 +301,9 @@ class TestOnPrintComplete:
             tray_now=0,
         )
 
-        # db returns: archive, queue_item(None), assignment, spool
-        db = _mock_db_sequential([archive, None, assignment, spool])
+        # db returns: archive, assignment, spool.  Direct prints have no
+        # queue projection to consult.
+        db = _mock_db_sequential([archive, assignment, spool])
 
         filament_usage = [{"slot_id": 1, "used_g": 15.0, "type": "PLA", "color": "#FF0000"}]
 
@@ -344,8 +346,8 @@ class TestTrackFrom3mf:
         started_at = datetime.now(timezone.utc)
         live_assignment.created_at = started_at + timedelta(seconds=5)
 
-        # db: archive, queue_item(None), live assignment lookup, spool_new lookup
-        db = _mock_db_sequential([archive, None, live_assignment, spool_new])
+        # db: archive, live assignment lookup, spool_new lookup
+        db = _mock_db_sequential([archive, live_assignment, spool_new])
 
         printer_manager = MagicMock()
         printer_manager.get_status.return_value = SimpleNamespace(
@@ -394,8 +396,8 @@ class TestTrackFrom3mf:
         started_at = datetime.now(timezone.utc)
         live_assignment.created_at = started_at - timedelta(seconds=5)
 
-        # db: archive, queue_item(None), live assignment lookup, spool_old lookup
-        db = _mock_db_sequential([archive, None, live_assignment, spool_old])
+        # db: archive, live assignment lookup, spool_old lookup
+        db = _mock_db_sequential([archive, live_assignment, spool_old])
 
         printer_manager = MagicMock()
         printer_manager.get_status.return_value = SimpleNamespace(
@@ -441,8 +443,8 @@ class TestTrackFrom3mf:
         assignment = _make_assignment(spool_id=1)
         archive = _make_archive(archive_id=10)
 
-        # db: archive, queue_item(None), assignment, spool
-        db = _mock_db_sequential([archive, None, assignment, spool])
+        # db: archive, assignment, spool
+        db = _mock_db_sequential([archive, assignment, spool])
 
         printer_manager = MagicMock()
         printer_manager.get_status.return_value = SimpleNamespace(
@@ -493,8 +495,8 @@ class TestTrackFrom3mf:
         assignment = _make_assignment(spool_id=1)
         archive = _make_archive(archive_id=10)
 
-        # db: archive, queue_item(None), assignment, spool
-        db = _mock_db_sequential([archive, None, assignment, spool])
+        # db: archive, assignment, spool
+        db = _mock_db_sequential([archive, assignment, spool])
 
         printer_manager = MagicMock()
         printer_manager.get_status.return_value = SimpleNamespace(
@@ -558,8 +560,8 @@ class TestTrackFrom3mf:
         assignment = _make_assignment(spool_id=1)
         archive = _make_archive(archive_id=10)
 
-        # db: archive, queue_item(None), assignment, spool
-        db = _mock_db_sequential([archive, None, assignment, spool])
+        # db: archive, assignment, spool
+        db = _mock_db_sequential([archive, assignment, spool])
 
         printer_manager = MagicMock()
         printer_manager.get_status.return_value = SimpleNamespace(
@@ -604,8 +606,8 @@ class TestTrackFrom3mf:
         assignment = _make_assignment(spool_id=2, ams_id=1, tray_id=3)
         archive = _make_archive(archive_id=10)
 
-        # db: archive, queue_item(None), assignment, spool
-        db = _mock_db_sequential([archive, None, assignment, spool])
+        # db: archive, assignment, spool
+        db = _mock_db_sequential([archive, assignment, spool])
 
         # tray_now=7 = (ams_id=1, tray_id=3), the ACTUAL tray used
         printer_manager = MagicMock()
@@ -691,6 +693,7 @@ class TestTrackFrom3mf:
                 handled_trays=handled_trays,
                 printer_manager=printer_manager,
                 db=db,
+                job_id="job-20",
             )
 
         assert len(results) == 1
@@ -746,6 +749,7 @@ class TestTrackFrom3mf:
                 handled_trays=handled_trays,
                 printer_manager=printer_manager,
                 db=db,
+                job_id="job-30",
             )
 
         assert len(results) == 2
@@ -765,8 +769,8 @@ class TestTrackFrom3mf:
         assignment = _make_assignment(spool_id=1, ams_id=0, tray_id=0)
         archive = _make_archive(archive_id=10)
 
-        # db: archive, queue_item(None), assignment, spool (2nd slot has no assignment)
-        db = _mock_db_sequential([archive, None, assignment, spool, None])
+        # db: archive, assignment, spool (2nd slot has no assignment)
+        db = _mock_db_sequential([archive, assignment, spool, None])
 
         printer_manager = MagicMock()
         printer_manager.get_status.return_value = SimpleNamespace(
@@ -869,8 +873,8 @@ class TestTrackFrom3mf:
         assignment = _make_assignment(spool_id=11, ams_id=2, tray_id=1)
         archive = _make_archive(archive_id=60)
 
-        # db: archive, queue_item(None), assignment, spool
-        db = _mock_db_sequential([archive, None, assignment, spool])
+        # db: archive, assignment, spool
+        db = _mock_db_sequential([archive, assignment, spool])
 
         # H2D scenario: tray_now=255 at completion, but last_loaded_tray=9
         printer_manager = MagicMock()
@@ -919,7 +923,7 @@ class TestTrackFrom3mf:
         assignment = _make_assignment(spool_id=3, ams_id=1, tray_id=1)
         archive = _make_archive(archive_id=70)
 
-        db = _mock_db_sequential([archive, None, assignment, spool])
+        db = _mock_db_sequential([archive, assignment, spool])
 
         # tray_now_at_start=5 (valid), last_loaded_tray=9 (different) — should use 5
         printer_manager = MagicMock()
@@ -973,8 +977,8 @@ class TestTrayChangeSplit:
         assign_b = _make_assignment(spool_id=20, ams_id=0, tray_id=0)
         archive = _make_archive(archive_id=100)
 
-        # db: archive, queue_item(None), then for each segment: assignment, spool
-        db = _mock_db_sequential([archive, None, assign_a, spool_a, assign_b, spool_b])
+        # db: archive, then for each segment: assignment, spool
+        db = _mock_db_sequential([archive, assign_a, spool_a, assign_b, spool_b])
 
         # Tray change log: started on tray 1, switched to tray 0 at layer 60
         printer_manager = MagicMock()
@@ -1053,7 +1057,7 @@ class TestTrayChangeSplit:
         assign_b = _make_assignment(spool_id=20, ams_id=0, tray_id=1)
         archive = _make_archive(archive_id=101)
 
-        db = _mock_db_sequential([archive, None, assign_a, spool_a, assign_b, spool_b])
+        db = _mock_db_sequential([archive, assign_a, spool_a, assign_b, spool_b])
 
         # Tray 2 from layer 0, switched to tray 1 at layer 40 (of 100 total)
         printer_manager = MagicMock()
@@ -1190,7 +1194,7 @@ class TestTrayChangeSplit:
         assignment = _make_assignment(spool_id=1, ams_id=0, tray_id=2)
         archive = _make_archive(archive_id=102)
 
-        db = _mock_db_sequential([archive, None, assignment, spool])
+        db = _mock_db_sequential([archive, assignment, spool])
 
         # Only one entry = no switch, should use normal path
         printer_manager = MagicMock()
@@ -1242,7 +1246,7 @@ class TestTrayChangeSplit:
         assignment = _make_assignment(spool_id=1, ams_id=0, tray_id=0)
         archive = _make_archive(archive_id=103)
 
-        db = _mock_db_sequential([archive, None, assignment, spool])
+        db = _mock_db_sequential([archive, assignment, spool])
 
         # Empty log (server restarted mid-print)
         printer_manager = MagicMock()
@@ -1291,8 +1295,8 @@ class TestTrayChangeSplit:
         assign_b = _make_assignment(spool_id=20, ams_id=0, tray_id=3)
         archive = _make_archive(archive_id=104)
 
-        # db: archive, queue_item(None), 1st segment: no assignment, 2nd segment: assignment, spool
-        db = _mock_db_sequential([archive, None, None, assign_b, spool_b])
+        # db: archive, 1st segment: no assignment, 2nd segment: assignment, spool
+        db = _mock_db_sequential([archive, None, assign_b, spool_b])
 
         # Tray 5 (no spool) from layer 0, switched to tray 3 at layer 50
         printer_manager = MagicMock()
@@ -1354,7 +1358,6 @@ class TestTrayChangeSplit:
         db = _mock_db_sequential(
             [
                 archive,
-                None,
                 assign_a,
                 spool_a,
                 assign_b,
@@ -1437,7 +1440,7 @@ class TestTrayChangeSplit:
         assign_b = _make_assignment(spool_id=20, ams_id=0, tray_id=1)
         archive = _make_archive(archive_id=171)
 
-        db = _mock_db_sequential([archive, None, assign_a, spool_a, assign_b, spool_b])
+        db = _mock_db_sequential([archive, assign_a, spool_a, assign_b, spool_b])
 
         # Firmware reset: state.total_layers is 0 by the time usage_tracker runs.
         # last_layer_num threaded in from on_print_complete is the survival value.
@@ -1505,7 +1508,7 @@ class TestTrayChangeSplit:
         assign_b = _make_assignment(spool_id=20, ams_id=0, tray_id=1)
         archive = _make_archive(archive_id=172)
 
-        db = _mock_db_sequential([archive, None, assign_a, spool_a, assign_b, spool_b])
+        db = _mock_db_sequential([archive, assign_a, spool_a, assign_b, spool_b])
 
         printer_manager = MagicMock()
         printer_manager.get_status.return_value = SimpleNamespace(
@@ -1770,13 +1773,11 @@ class TestMqttMappingIntegration:
         assign_red = _make_assignment(spool_id=3, ams_id=128, tray_id=0)
         archive = _make_archive(archive_id=12)
 
-        # db: archive, queue lookup (no queue item — this is a direct print),
-        # then 3 pairs of (assignment, spool). The queue mapping is consulted
-        # before the MQTT field because AMS backup rewrites the live one.
+        # db: archive, then 3 pairs of (assignment, spool). Direct prints have
+        # no queue projection; the MQTT field is the authoritative mapping.
         db = _mock_db_sequential(
             [
                 archive,
-                None,
                 assign_white,
                 spool_white,
                 assign_black,
@@ -1916,8 +1917,8 @@ class TestPositionBasedFallbackEmptyAmsSlot:
         assignment = _make_assignment(spool_id=42, ams_id=255, tray_id=0)
         archive = _make_archive(archive_id=70)
 
-        # db: archive, queue_item(None), assignment, spool
-        db = _mock_db_sequential([archive, None, assignment, spool])
+        # db: archive, assignment, spool
+        db = _mock_db_sequential([archive, assignment, spool])
 
         # AMS reports 4 physical tray slots but slot 3 has no spool (empty
         # tray_type); external spool is loaded in vt_tray.
@@ -1989,7 +1990,7 @@ class TestPositionBasedFallbackEmptyAmsSlot:
         assignment = _make_assignment(spool_id=99, ams_id=255, tray_id=0)
         archive = _make_archive(archive_id=71)
 
-        db = _mock_db_sequential([archive, None, assignment, spool])
+        db = _mock_db_sequential([archive, assignment, spool])
 
         printer_manager = MagicMock()
         printer_manager.get_status.return_value = SimpleNamespace(
@@ -2151,23 +2152,21 @@ class TestOnPrintStartAmsMapping:
 
     @pytest.mark.asyncio
     async def test_captures_queue_plate_id(self):
-        """on_print_start records the queue item's plate_id onto the session (#1697)."""
+        """on_print_start records the lifecycle-owned plate context (#1697)."""
         printer_manager = MagicMock()
         printer_manager.get_status.return_value = SimpleNamespace(
             raw_data={"ams": [{"id": 0, "tray": [{"id": 0, "remain": 80}]}]},
             tray_now=0,
         )
 
-        queue_item = _make_queue_item(plate_id=2)
-        # on_print_start now executes: SpoolAssignment lookup, then PrintQueueItem lookup.
+        # The lifecycle callback supplies this after strict PrintJob
+        # attribution; usage tracking must not select a row by printer/status.
         db = AsyncMock()
         assignment_result = MagicMock()
         assignment_result.scalars.return_value.all.return_value = []
-        queue_result = MagicMock()
-        queue_result.scalars.return_value.first.return_value = queue_item
-        db.execute = AsyncMock(side_effect=[assignment_result, queue_result])
+        db.execute = AsyncMock(return_value=assignment_result)
 
-        await on_print_start(1, {"subtask_name": "Test"}, printer_manager, db=db)
+        await on_print_start(1, {"subtask_name": "Test", "plate_id": 2}, printer_manager, db=db)
 
         assert _active_sessions[1].plate_id == 2
 

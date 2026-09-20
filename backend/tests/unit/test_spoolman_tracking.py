@@ -185,9 +185,8 @@ class TestStorePrintData:
     @pytest.mark.asyncio
     async def test_prefers_explicit_ams_mapping_over_queue_mapping(self):
         db = AsyncMock()
-        # store_print_data now queries the queue item unconditionally (to pick up
-        # plate_id for multi-plate 3MFs, #1697), then deletes any stale spoolman
-        # row before inserting the new one. Two execute calls in that order.
+        # A durable job identity selects the queue projection for plate/mapping,
+        # then deletes any stale job-owned snapshot before inserting.
         queue_item = SimpleNamespace(ams_mapping=json.dumps([2, -1, -1, -1]), plate_id=None)
         queue_result = MagicMock()
         queue_result.scalar_one_or_none.return_value = queue_item
@@ -223,6 +222,7 @@ class TestStorePrintData:
                 db=db,
                 printer_manager=printer_manager,
                 ams_mapping=[1, -1, -1, -1],
+                job_id="job-15",
             )
 
         db.add.assert_called_once()
@@ -268,6 +268,7 @@ class TestStorePrintData:
                 db=db,
                 printer_manager=printer_manager,
                 ams_mapping=[1, -1, -1, -1],
+                job_id="job-15",
             )
 
         # plate_id=2 must be passed as the second positional arg

@@ -18,14 +18,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.app.main import _timelapse_baselines
+from backend.app.main import _timelapse_baseline_job_ids, _timelapse_baselines
 
 
 @pytest.fixture(autouse=True)
 def _clear_baselines():
     _timelapse_baselines.clear()
+    _timelapse_baseline_job_ids.clear()
     yield
     _timelapse_baselines.clear()
+    _timelapse_baseline_job_ids.clear()
 
 
 @pytest.mark.asyncio

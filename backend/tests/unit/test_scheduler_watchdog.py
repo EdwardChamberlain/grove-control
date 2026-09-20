@@ -156,14 +156,11 @@ class TestDurableDispatchingState:
             client.force_reconnect_stale_session.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_unacknowledged_dispatch_keeps_its_expected_print(self, db_session):
-        from backend.app.main import _expected_prints, register_expected_print, unregister_expected_print
-
+    async def test_unacknowledged_dispatch_keeps_its_durable_job(self, db_session):
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
             await _make_dispatching(db, item)
 
-        register_expected_print(42, "test.3mf", archive_id=99)
         scheduler = PrintScheduler()
         with (
             patch.object(
@@ -181,8 +178,11 @@ class TestDurableDispatchingState:
                 dispatch_subtask_id="12345",
             )
 
-        assert any(key[0] == 42 for key in _expected_prints)
-        unregister_expected_print(42)
+        async with db_session() as db:
+            item = await db.get(PrintQueueItem, 1)
+            assert item.lifecycle_state == "dispatching"
+            assert item.job_id
+            assert item.uncertainty_status == "dispatch_confirmation_unresolved"
 
     @pytest.mark.asyncio
     async def test_correlated_terminal_dispatch_is_not_retried(self, db_session):
@@ -372,20 +372,21 @@ class TestDurableDispatchingState:
                 await asyncio.gather(*tasks)
 
             item = await db.get(PrintQueueItem, 1)
-            assert item.status == expected_status
-            assert item.completed_at is not None
-            complete.assert_awaited_once_with(
-                42,
-                {
-                    "status": expected_status,
-                    "filename": "completed-while-down.3mf",
-                    "subtask_name": "",
-                    "subtask_id": "12345",
-                    "raw_data": {"subtask_id": "12345"},
-                    "_reconciled": True,
-                    "_recovered_dispatch": True,
-                },
-            )
+            # Recovery only submits the strongly attributed terminal evidence
+            # to the lifecycle callback. That callback owns the transition and
+            # durable consequence atomically; the scheduler must not leave a
+            # terminal job without an effect if it stops between the two.
+            assert item.status == "dispatching"
+            assert item.completed_at is None
+            complete.assert_awaited_once()
+            assert complete.await_args.args[0] == 42
+            completion_data = complete.await_args.args[1]
+            assert completion_data["status"] == expected_status
+            assert completion_data["filename"] == "completed-while-down.3mf"
+            assert completion_data["subtask_id"] == "12345"
+            assert completion_data["raw_data"] == {"subtask_id": "12345"}
+            assert completion_data["_reconciled"] is True
+            assert completion_data["_recovered_dispatch"] is True
 
     @pytest.mark.asyncio
     async def test_current_process_dispatch_is_not_recovered_from_previous_terminal_state(self, db_session):

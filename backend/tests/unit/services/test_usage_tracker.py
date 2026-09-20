@@ -267,11 +267,10 @@ class TestTrackFrom3MF:
         archive.file_path = "archives/test.3mf"
 
         db = AsyncMock()
-        # archive, queue_item(None), assignment, spool
+        # archive, assignment, spool (direct print has no queue projection)
         db.execute = AsyncMock(
             side_effect=[
                 MagicMock(scalar_one_or_none=MagicMock(return_value=archive)),
-                MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
                 MagicMock(scalar_one_or_none=MagicMock(return_value=assignment)),
                 MagicMock(scalar_one_or_none=MagicMock(return_value=spool)),
             ]
@@ -313,11 +312,10 @@ class TestTrackFrom3MF:
         archive.file_path = "archives/test.3mf"
 
         db = AsyncMock()
-        # archive, queue_item(None), assignment, spool
+        # archive, assignment, spool (direct print has no queue projection)
         db.execute = AsyncMock(
             side_effect=[
                 MagicMock(scalar_one_or_none=MagicMock(return_value=archive)),
-                MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
                 MagicMock(scalar_one_or_none=MagicMock(return_value=assignment)),
                 MagicMock(scalar_one_or_none=MagicMock(return_value=spool)),
             ]
@@ -358,11 +356,10 @@ class TestTrackFrom3MF:
         archive.file_path = "archives/test.3mf"
 
         db = AsyncMock()
-        # archive, queue_item(None), assignment, spool
+        # archive, assignment, spool (direct print has no queue projection)
         db.execute = AsyncMock(
             side_effect=[
                 MagicMock(scalar_one_or_none=MagicMock(return_value=archive)),
-                MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
                 MagicMock(scalar_one_or_none=MagicMock(return_value=assignment)),
                 MagicMock(scalar_one_or_none=MagicMock(return_value=spool)),
             ]
@@ -400,11 +397,10 @@ class TestTrackFrom3MF:
         archive.file_path = "archives/test.3mf"
 
         db = AsyncMock()
-        # archive, queue_item(None)
+        # archive only; direct print has no queue projection
         db.execute = AsyncMock(
             side_effect=[
                 MagicMock(scalar_one_or_none=MagicMock(return_value=archive)),
-                MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
             ]
         )
 
@@ -441,11 +437,10 @@ class TestTrackFrom3MF:
         archive.file_path = "archives/test.3mf"
 
         db = AsyncMock()
-        # archive, queue_item(None), assignment, spool
+        # archive, assignment, spool (direct print has no queue projection)
         db.execute = AsyncMock(
             side_effect=[
                 MagicMock(scalar_one_or_none=MagicMock(return_value=archive)),
-                MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
                 MagicMock(scalar_one_or_none=MagicMock(return_value=assignment)),
                 MagicMock(scalar_one_or_none=MagicMock(return_value=spool)),
             ]
@@ -538,12 +533,11 @@ class TestSpoolAssignmentSnapshot:
         archive = MagicMock()
         archive.file_path = "archives/test.3mf"
 
-        # db: archive, queue_item(None), spool — NO assignment query needed
+        # db: archive, spool — NO queue or assignment query is needed
         db = AsyncMock()
         db.execute = AsyncMock(
             side_effect=[
                 MagicMock(scalar_one_or_none=MagicMock(return_value=archive)),
-                MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
                 MagicMock(scalar_one_or_none=MagicMock(return_value=spool)),
             ]
         )
@@ -582,12 +576,11 @@ class TestSpoolAssignmentSnapshot:
         archive = MagicMock()
         archive.file_path = "archives/test.3mf"
 
-        # db: archive, queue_item(None), assignment, spool
+        # db: archive, assignment, spool (direct print has no queue projection)
         db = AsyncMock()
         db.execute = AsyncMock(
             side_effect=[
                 MagicMock(scalar_one_or_none=MagicMock(return_value=archive)),
-                MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
                 MagicMock(scalar_one_or_none=MagicMock(return_value=assignment)),
                 MagicMock(scalar_one_or_none=MagicMock(return_value=spool)),
             ]
@@ -732,14 +725,13 @@ class TestSpoolAssignmentSnapshot:
 
         filament_usage = [{"slot_id": 1, "used_g": 14.2, "type": "PLA", "color": "#FF0000"}]
 
-        # db: archive, queue_item(None), live assignment(None), spool,
+        # db: archive, live assignment(None), spool,
         # then cost aggregation queries
         # NOTE: No assignment in db — it was deleted by on_ams_change mid-print!
         db = AsyncMock()
         db.execute = AsyncMock(
             side_effect=[
                 MagicMock(scalar_one_or_none=MagicMock(return_value=archive)),
-                MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
                 MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
                 MagicMock(scalar_one_or_none=MagicMock(return_value=spool)),
                 # Cost-update block re-selects the archive to mutate cost.
@@ -885,7 +877,6 @@ class TestArchiveFilamentColorRewrite:
         db.execute = AsyncMock(
             side_effect=[
                 MagicMock(scalar_one_or_none=MagicMock(return_value=archive)),
-                MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
                 MagicMock(scalar_one_or_none=MagicMock(return_value=assignment)),
                 MagicMock(scalar_one_or_none=MagicMock(return_value=spool)),
             ]

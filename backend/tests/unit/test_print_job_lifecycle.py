@@ -1,5 +1,7 @@
 """Focused invariants for Issue #168's durable PrintJob lifecycle."""
 
+from datetime import timedelta
+
 import pytest
 from sqlalchemy import select, update
 
@@ -34,6 +36,7 @@ from backend.app.services.print_job_lifecycle import (
     purge_delivered_effects,
     quarantine_device_event,
     resolve_job_for_device_event,
+    settle_terminal_event,
     transition_job,
 )
 
@@ -212,6 +215,11 @@ async def test_effect_leases_retry_and_expose_operational_health(db_session):
     assert health["processing"] == 0
     assert health["oldest_pending_at"] is not None
 
+    # Backoff is durable. Advance the persisted retry window rather than
+    # assuming a failed effect is immediately claimable.
+    await db_session.refresh(effect)
+    effect.next_attempt_at = effect.next_attempt_at - timedelta(seconds=2)
+    await db_session.flush()
     claimed = await claim_effect(db_session, effect_id=effect.id, lease_owner="worker-b")
     assert claimed and claimed.attempt_count == 2
     assert await complete_effect(db_session, effect_id=effect.id, lease_owner="worker-b")
@@ -284,8 +292,95 @@ async def test_device_events_require_one_durable_task_binding_and_quarantine_the
         device_subtask_id=None,
         reason="missing device identity",
     )
-    assert duplicate.id == first.id
-    assert (await db_session.scalars(select(PrintJobQuarantinedEvent))).all() == [first]
+    # Missing task identity is append-only evidence: two observations are not
+    # silently collapsed into one ambiguous bucket.
+    assert duplicate.id != first.id
+    assert len((await db_session.scalars(select(PrintJobQuarantinedEvent))).all()) == 2
+
+
+@pytest.mark.asyncio
+async def test_terminal_task_identity_survives_reconnect_and_duplicate_delivery(db_session):
+    item = await _item(db_session)
+    await transition_job(db_session, item, to_state=DISPATCHING, source="test")
+    await mark_dispatch_attempted(db_session, item, source="test")
+    await bind_device_task(
+        db_session,
+        item=item,
+        device_subtask_id="subtask-reconnect",
+        connection_epoch="old-connection",
+        event_sequence=None,
+    )
+    await db_session.commit()
+
+    first = await settle_terminal_event(
+        db_session,
+        printer_id=item.printer_id,
+        status="completed",
+        device_subtask_id="subtask-reconnect",
+        connection_epoch="new-connection",
+        event_sequence=42,
+        evidence={"physical_execution_observed": True},
+        effect_payload={"printer_id": item.printer_id, "status": "completed"},
+    )
+    assert first.resolved and first.changed and first.effect_id
+    assert first.physical_execution_observed is True
+
+    event_count = len(
+        (await db_session.scalars(select(PrintJobEvent).where(PrintJobEvent.job_id == item.job_id))).all()
+    )
+    effect_count = len(
+        (await db_session.scalars(select(PrintJobEffect).where(PrintJobEffect.job_id == item.job_id))).all()
+    )
+
+    duplicate = await settle_terminal_event(
+        db_session,
+        printer_id=item.printer_id,
+        status="completed",
+        device_subtask_id="subtask-reconnect",
+        connection_epoch="new-connection",
+        event_sequence=43,
+        evidence={"physical_execution_observed": True},
+        effect_payload={"printer_id": item.printer_id, "status": "completed"},
+    )
+    assert duplicate.resolved and duplicate.changed is False
+    assert duplicate.effect_id == first.effect_id
+    assert (
+        len((await db_session.scalars(select(PrintJobEvent).where(PrintJobEvent.job_id == item.job_id))).all())
+        == event_count
+    )
+    assert (
+        len((await db_session.scalars(select(PrintJobEffect).where(PrintJobEffect.job_id == item.job_id))).all())
+        == effect_count
+    )
+
+
+@pytest.mark.asyncio
+async def test_user_stop_resolution_is_scoped_to_the_exact_job(db_session):
+    item = await _item(db_session)
+    await transition_job(db_session, item, to_state=DISPATCHING, source="test")
+    await mark_dispatch_attempted(db_session, item, source="test")
+    await bind_device_task(
+        db_session,
+        item=item,
+        device_subtask_id="stop-task",
+        connection_epoch="connection-a",
+        event_sequence=1,
+    )
+
+    resolution = await settle_terminal_event(
+        db_session,
+        printer_id=item.printer_id,
+        status="failed",
+        device_subtask_id="stop-task",
+        connection_epoch="connection-b",
+        event_sequence=2,
+        evidence={"physical_execution_observed": True},
+        effect_payload={"printer_id": item.printer_id, "status": "failed"},
+        user_stopped_job_id=item.job_id,
+    )
+
+    assert resolution.status == "cancelled"
+    assert item.lifecycle_state == "cancelled"
 
 
 @pytest.mark.asyncio
@@ -310,6 +405,29 @@ async def test_out_of_band_print_is_adopted_as_hidden_durable_job(db_session):
         device_subtask_id="manual-task-1",
     )
     assert same is not None and same.job_id == adopted.job_id
+
+    terminal = await settle_terminal_event(
+        db_session,
+        printer_id=1,
+        status="completed",
+        device_subtask_id="manual-task-1",
+        connection_epoch=None,
+        event_sequence=None,
+        evidence={"physical_execution_observed": True},
+        effect_payload={"printer_id": 1, "status": "completed"},
+    )
+    assert terminal.resolved
+
+    duplicate_start = await adopt_observed_user_print(
+        db_session,
+        printer_id=1,
+        device_subtask_id="manual-task-1",
+    )
+    assert duplicate_start is None
+    quarantined = await db_session.scalars(
+        select(PrintJobQuarantinedEvent).where(PrintJobQuarantinedEvent.event_type == "observed_print_start")
+    )
+    assert len(quarantined.all()) == 1
 
 
 @pytest.mark.asyncio

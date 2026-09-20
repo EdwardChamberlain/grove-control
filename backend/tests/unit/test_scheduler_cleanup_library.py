@@ -326,13 +326,9 @@ async def test_command_boundary_holds_uncertain_dispatch_if_drying_starts_after_
     clear = SimpleNamespace(raw_data={"ams": [{"id": 0, "dry_time": 0}]})
     drying = SimpleNamespace(raw_data={"ams": [{"id": 0, "dry_time": 120}]})
 
-    with (
-        patch("backend.app.main.register_expected_print") as register_expected,
-        patch("backend.app.main.unregister_expected_print") as unregister_expected,
-        patch(
-            "backend.app.services.print_scheduler.printer_manager.clear_current_print_user"
-        ) as clear_current_print_user,
-    ):
+    with patch(
+        "backend.app.services.print_scheduler.printer_manager.clear_current_print_user"
+    ) as clear_current_print_user:
         await _dispatch_library_item(
             ctx,
             # First read: clear at the post-upload check. Second read: drying
@@ -364,8 +360,6 @@ async def test_command_boundary_holds_uncertain_dispatch_if_drying_starts_after_
     assert reservation is not None
     assert reservation.job_id == item.job_id
     assert hold is not None
-    register_expected.assert_called_once()
-    unregister_expected.assert_called_once()
     clear_current_print_user.assert_called_once_with(ctx.printer_id)
     if wait_for_drying_complete:
         ctx.stop_drying.assert_not_called()
