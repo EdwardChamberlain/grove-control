@@ -195,6 +195,13 @@ class QueueVariantSummary(BaseModel):
     position: int
 
 
+class PrintJobManualResolution(BaseModel):
+    """Explicit operator outcome for a held, uncertain PrintJob."""
+
+    outcome: Literal["failed", "cancelled"]
+    reason: str = Field(min_length=1, max_length=2000)
+
+
 class PrintQueueItemResponse(BaseModel):
     id: int
     # Additive opaque identity for lifecycle-aware consumers. The legacy

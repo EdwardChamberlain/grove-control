@@ -1056,6 +1056,7 @@ async def _migrate_print_job_lifecycle(conn) -> None:
     await _safe_execute(conn, f"ALTER TABLE printers ADD COLUMN heat_soak_shutdown_at {timestamp_type}")
     await _safe_execute(conn, "ALTER TABLE print_job_effects ADD COLUMN next_attempt_at TIMESTAMP")
     await _safe_execute(conn, "ALTER TABLE print_job_effects ADD COLUMN dead_lettered_at TIMESTAMP")
+    await _safe_execute(conn, "ALTER TABLE print_job_effects ADD COLUMN progress_json TEXT")
 
     rows = (
         (
@@ -1095,7 +1096,11 @@ async def _migrate_print_job_lifecycle(conn) -> None:
             "visibility": 0 if terminal else 1,
             "dispatch_attempted_at": row["dispatch_attempted_at"] or row["dispatched_at"],
             "physical_execution_observed": 1 if state == "printing" else 0,
-            "preheat_owner": operation_id if state == "heat_soaking" else row["preheat_owner"],
+            # A generated migration operation identifies the adopted active
+            # PrintJob, but it does not prove that this process owns the old
+            # heater timer. Legacy heat-soak rows must be recovered through
+            # the guarded abort/retry path, never resumed from stale state.
+            "preheat_owner": None if state == "heat_soaking" else row["preheat_owner"],
         }
         async with conn.begin_nested():
             await conn.execute(

@@ -312,6 +312,13 @@ class ChamberHeatSoak:
             if lifecycle_state(item) == DISPATCHING:
                 await db.rollback()
                 continue
+            if item.uncertainty_status == "legacy_heat_soak_identity_unverified":
+                await abort_heat_soak(
+                    db,
+                    item,
+                    "Legacy heat soak ownership is unverified; retry required after guarded recovery",
+                )
+                continue
             visible.add(item.printer_id)
             _show_preheating(item.printer_id, True)
             if item.preheat_owner != item.active_operation_id or not item.active_operation_id:

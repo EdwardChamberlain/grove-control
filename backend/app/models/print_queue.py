@@ -316,6 +316,9 @@ class PrintJobEffect(Base):
     delivery_policy: Mapped[str] = mapped_column(String(32), default="idempotent_retry")
     state: Mapped[str] = mapped_column(String(32), default="pending", index=True)
     payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Per-step completion markers make durable database consequences safe to
+    # retry after a process crash between the step and effect acknowledgement.
+    progress_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     attempt_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     lease_owner: Mapped[str | None] = mapped_column(String(64), nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

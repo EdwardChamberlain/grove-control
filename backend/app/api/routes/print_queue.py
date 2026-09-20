@@ -24,6 +24,7 @@ from backend.app.models.printer import Printer
 from backend.app.models.project import Project
 from backend.app.models.user import User
 from backend.app.schemas.print_queue import (
+    PrintJobManualResolution,
     PrintQueueBulkUpdate,
     PrintQueueBulkUpdateResponse,
     PrintQueueItemCreate,
@@ -43,8 +44,11 @@ from backend.app.services.filament_requirements import (
 from backend.app.services.notification_service import notification_service
 from backend.app.services.print_job_lifecycle import (
     CANCELLED,
+    LifecycleError,
     admit_job,
     mark_job_uncertain,
+    operation_is_current,
+    resolve_uncertain_job,
     transition_job,
 )
 from backend.app.utils.printer_models import is_gcode_compatible
@@ -1588,6 +1592,20 @@ async def stop_queue_item(
 
     # Capture values needed after sending the external command.
     printer_id = item.printer_id
+    stop_operation_id = item.active_operation_id
+    stop_lifecycle_version = item.lifecycle_version
+    if (
+        not printer_id
+        or not stop_operation_id
+        or not await operation_is_current(
+            db,
+            item_id=item.id,
+            job_id=item.job_id,
+            operation_id=stop_operation_id,
+            lifecycle_version=stop_lifecycle_version,
+        )
+    ):
+        raise HTTPException(409, "PrintJob changed before the stop command could be sent")
 
     # Try to send stop command to printer
     stop_sent = False
@@ -1614,6 +1632,50 @@ async def stop_queue_item(
         "message": "Stop requested; awaiting printer confirmation"
         if stop_sent
         else "Stop outcome unknown; printer remains reserved for resolution"
+    }
+
+
+@router.post("/{item_id}/resolve-uncertainty")
+async def resolve_queue_item_uncertainty(
+    item_id: int,
+    data: PrintJobManualResolution,
+    db: AsyncSession = Depends(get_db),
+    auth_result: tuple[User | None, bool] = Depends(
+        require_ownership_permission(
+            Permission.QUEUE_UPDATE_ALL,
+            Permission.QUEUE_UPDATE_OWN,
+        )
+    ),
+):
+    """Resolve an uncertain active PrintJob without guessing device history."""
+    user, can_modify_all = auth_result
+    item = await lock_queue_item(db, item_id)
+    if not item:
+        raise HTTPException(404, "Queue item not found")
+    await admit_job(db, item, source="queue_api_adoption")
+
+    if not can_modify_all and user is not None:
+        if item.created_by_id is None or item.created_by_id != user.id:
+            raise HTTPException(403, "You can only resolve your own queue items")
+
+    try:
+        effect = await resolve_uncertain_job(
+            db,
+            item,
+            outcome=data.outcome,
+            reason=data.reason,
+            operator_id=user.id if user else None,
+            evidence={"queue_item_id": item.id},
+        )
+    except LifecycleError as exc:
+        await db.rollback()
+        raise HTTPException(409, str(exc)) from exc
+
+    return {
+        "message": "Uncertain PrintJob resolved",
+        "job_id": item.job_id,
+        "status": item.status,
+        "effect_id": effect.id,
     }
 
 

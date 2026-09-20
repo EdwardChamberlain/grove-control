@@ -3015,13 +3015,21 @@ async def stop_print(
         raise HTTPException(400, "Printer not connected")
 
     from backend.app.models.print_queue import PrintJobReservation, PrintQueueItem
-    from backend.app.services.print_job_lifecycle import ACTIVE_STATES, lifecycle_state, mark_job_uncertain
+    from backend.app.services.print_job_lifecycle import (
+        ACTIVE_STATES,
+        lifecycle_state,
+        mark_job_uncertain,
+        operation_is_current,
+    )
 
     # Persist the unresolved stop against the exact durable PrintJob before
     # sending the external command.  A printer-wide stop marker is only a
     # compatibility hint; it must never be the source of ownership.
     reservation = await db.get(PrintJobReservation, printer_id)
     stop_job_id = reservation.job_id if reservation else None
+    stop_item_id = None
+    stop_operation_id = None
+    stop_lifecycle_version = None
     if stop_job_id:
         active_item = await db.scalar(select(PrintQueueItem).where(PrintQueueItem.job_id == stop_job_id))
         if active_item and lifecycle_state(active_item) in ACTIVE_STATES:
@@ -3036,6 +3044,18 @@ async def stop_print(
             )
             active_item.error_message = stop_reason
             await db.commit()
+            stop_item_id = active_item.id
+            stop_operation_id = active_item.active_operation_id
+            stop_lifecycle_version = active_item.lifecycle_version
+
+    if stop_item_id is not None and not await operation_is_current(
+        db,
+        item_id=stop_item_id,
+        job_id=stop_job_id,
+        operation_id=stop_operation_id,
+        lifecycle_version=stop_lifecycle_version,
+    ):
+        raise HTTPException(409, "PrintJob changed before the stop command could be sent")
 
     success = client.stop_print()
     if not success:

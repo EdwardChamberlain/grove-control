@@ -243,6 +243,7 @@ async def transition_job(
     allow_pre_send_requeue: bool = False,
     allow_pre_send_terminal: bool = False,
     allow_missed_start_terminal: bool = False,
+    allow_manual_terminal: bool = False,
     physical_execution_observed: bool | None = None,
     safety_hold_type: str | None = None,
     resolve_safety_hold_types: tuple[str, ...] = (),
@@ -261,7 +262,7 @@ async def transition_job(
         if not allow_pre_send_requeue or item.dispatch_attempted_at is not None:
             raise LifecycleError("Dispatching jobs may return to queued only before a possible command send")
     if current == DISPATCHING and to_state in TERMINAL_STATES:
-        if item.dispatch_attempted_at is None and allow_pre_send_terminal:
+        if (item.dispatch_attempted_at is None and allow_pre_send_terminal) or allow_manual_terminal:
             pass
         elif not allow_missed_start_terminal:
             raise LifecycleError("Direct terminal dispatch reconciliation requires strict attributed evidence")
@@ -578,7 +579,7 @@ async def settle_terminal_event(
             operation_id=event.operation_id,
             source_event_id=event.id,
             effect_type="terminal_consequences",
-            delivery_policy="idempotent_retry",
+            delivery_policy="reconcile_before_retry",
             payload=durable_payload,
         )
 
@@ -683,6 +684,67 @@ async def mark_job_uncertain(
     await db.flush()
     await db.refresh(item)
     return event
+
+
+async def resolve_uncertain_job(
+    db: AsyncSession,
+    item: PrintQueueItem,
+    *,
+    outcome: str,
+    reason: str,
+    operator_id: int | None = None,
+    evidence: dict | None = None,
+) -> PrintJobEffect:
+    """Resolve a held active PrintJob with explicit operator evidence.
+
+    Manual resolution is deliberately terminal and one-way. It is available
+    only for a job that is already marked uncertain, so an operator cannot use
+    it to bypass ordinary lifecycle attribution or reservation checks.
+    """
+    if outcome not in {FAILED, CANCELLED}:
+        raise LifecycleError("Manual resolution must end as failed or cancelled")
+    current = lifecycle_state(item)
+    if current not in ACTIVE_STATES or not item.uncertainty_status:
+        raise LifecycleError("Only an uncertain active PrintJob may be manually resolved")
+
+    prior_uncertainty = item.uncertainty_status
+    event = await transition_job(
+        db,
+        item,
+        to_state=outcome,
+        source="manual_resolution",
+        reason=reason,
+        evidence={
+            "operator_id": operator_id,
+            "prior_uncertainty": prior_uncertainty,
+            **(evidence or {}),
+        },
+        allow_manual_terminal=True,
+        physical_execution_observed=bool(item.physical_execution_observed or current == PRINTING),
+        resolve_safety_hold_types=(
+            "dispatch_resolution",
+            "stop_resolution",
+            "heat_soak_shutdown",
+            "legacy_active_identity_conflict",
+        ),
+    )
+    item.error_message = reason
+    effect = await enqueue_effect(
+        db,
+        job_id=item.job_id,
+        operation_id=event.operation_id,
+        source_event_id=event.id,
+        effect_type="terminal_consequences",
+        delivery_policy="reconcile_before_retry",
+        payload={
+            "printer_id": item.printer_id,
+            "status": outcome,
+            "manual_resolution": True,
+            "reason": reason,
+        },
+    )
+    await db.commit()
+    return effect
 
 
 async def mark_dispatch_attempted(
@@ -864,6 +926,30 @@ async def complete_effect(db: AsyncSession, *, effect_id: str, lease_owner: str)
     return result.rowcount == 1
 
 
+async def effect_step_completed(db: AsyncSession, *, effect_id: str | None, step: str) -> bool:
+    """Read and atomically mark a durable consequence step.
+
+    The caller performs the step in the same transaction after this returns
+    false. If that transaction is retried, both the marker and the database
+    consequence roll back together, preventing duplicate accounting.
+    """
+    if not effect_id:
+        return False
+    effect = await db.get(PrintJobEffect, effect_id)
+    if effect is None:
+        return False
+    try:
+        progress = json.loads(effect.progress_json or "{}")
+    except (TypeError, ValueError):
+        progress = {}
+    if progress.get(step) is True:
+        return True
+    progress[step] = True
+    effect.progress_json = _json(progress)
+    await db.flush()
+    return False
+
+
 async def fail_effect(
     db: AsyncSession,
     *,
@@ -939,7 +1025,7 @@ async def purge_delivered_effects(db: AsyncSession, *, retention_days: int = 30)
     cutoff = utcnow() - timedelta(days=retention_days)
     result = await db.execute(
         delete(PrintJobEffect).where(
-            PrintJobEffect.state.in_(["delivered", "dead_letter"]),
+            PrintJobEffect.state == "delivered",
             PrintJobEffect.updated_at < cutoff,
         )
     )
@@ -1069,7 +1155,16 @@ async def quarantine_device_event(
     """
     task_id = str(device_subtask_id).strip() if device_subtask_id is not None else ""
     if task_id in {"", "0"}:
-        correlation_key = f"missing-task-id:{uuid4()}"
+        # A reconnect snapshot can be delivered more than once. When the
+        # device supplies ordered connection evidence, use that evidence to
+        # deduplicate the observation while still keeping unsequenced
+        # observations individually reviewable.
+        if connection_epoch or event_sequence is not None:
+            correlation_key = (
+                f"missing-task-id:epoch:{connection_epoch or 'unknown'}:sequence:{event_sequence or 'unknown'}"
+            )
+        else:
+            correlation_key = f"missing-task-id:{uuid4()}"
     else:
         correlation_key = f"task:{task_id}:epoch:{connection_epoch or 'unknown'}:sequence:{event_sequence or 'unknown'}"
     existing = await db.scalar(
@@ -1144,18 +1239,56 @@ async def adopt_observed_user_print(
             evidence=evidence,
         )
         return None
-    if await _reservation_for_printer(db, printer_id):
-        await quarantine_device_event(
-            db,
-            printer_id=printer_id,
-            event_type="observed_print_start",
-            device_subtask_id=task_id,
-            connection_epoch=connection_epoch,
-            event_sequence=event_sequence,
-            reason="Printer is reserved by a different PrintJob",
-            evidence=evidence,
+    reservation = await _reservation_for_printer(db, printer_id)
+    if reservation:
+        owner = await db.scalar(select(PrintQueueItem).where(PrintQueueItem.job_id == reservation.job_id))
+        safe_pre_send_handoff = (
+            owner is not None
+            and lifecycle_state(owner) in {HEAT_SOAKING, DISPATCHING}
+            and owner.dispatch_attempted_at is None
+            and owner.active_operation_id == reservation.operation_id
         )
-        return None
+        if not safe_pre_send_handoff:
+            await quarantine_device_event(
+                db,
+                printer_id=printer_id,
+                event_type="observed_print_start",
+                device_subtask_id=task_id,
+                connection_epoch=connection_epoch,
+                event_sequence=event_sequence,
+                reason="Printer is reserved by a PrintJob whose physical attempt may have started",
+                evidence=evidence,
+            )
+            return None
+
+        previous_operation_id = owner.active_operation_id
+        was_heat_soaking = lifecycle_state(owner) == HEAT_SOAKING
+        handoff_reason = "Out-of-band print observed before Grove sent a dispatch command"
+        await transition_job(
+            db,
+            owner,
+            to_state=QUEUED,
+            source="out_of_band_print_handoff",
+            reason=handoff_reason,
+            evidence={"observed_device_subtask_id": task_id, **(evidence or {})},
+            allow_pre_send_requeue=True,
+            safety_hold_type="heat_soak_shutdown" if was_heat_soaking else None,
+            resolve_safety_hold_types=("dispatch_resolution", "stop_resolution"),
+        )
+        owner.queue_visible = True
+        owner.manual_start = True
+        owner.waiting_reason = handoff_reason
+        owner.error_message = handoff_reason
+        owner.preheat_owner = None
+        owner.preheat_started_at = None
+        owner.preheat_checked_at = None
+        if was_heat_soaking:
+            printer = await db.get(Printer, printer_id)
+            if printer is not None:
+                printer.heat_soak_shutdown_pending = True
+                printer.heat_soak_shutdown_at = utcnow()
+                printer.heat_soak_shutdown_job_id = owner.job_id
+                printer.heat_soak_shutdown_operation_id = previous_operation_id
 
     try:
         # The reservation primary key is the final concurrent-adoption fence.

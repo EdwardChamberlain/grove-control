@@ -1079,25 +1079,32 @@ async def on_printer_status_change(printer_id: int, state: PrinterState):
     state_known = bool(state.state) and state.state.upper() not in ("", "UNKNOWN")
     if state.connected and state_known and not _printer_reconciled_since_connect.get(printer_id, False):
         _printer_reconciled_since_connect[printer_id] = True
-        # This callback carries the first usable snapshot for the current
-        # connection. Open scheduling only after it is durably recorded; the
-        # reconciliation itself remains a separate, conservative operation.
-        spawn_background_task(
-            _persist_recovery_barrier(False),
-            name=f"open-recovery-barrier-{printer_id}",
-        )
         if _is_printer_actively_printing(state):
             _pending_stale_reconciliation.add(printer_id)
-        elif printer_id in _pending_stale_reconciliation:
-            # A reconnect can begin in a terminal state without producing a
-            # separate completion callback. This is the safe fallback for a
-            # deferred reconciliation left by an earlier active reconnect.
-            _schedule_pending_stale_reconciliation(printer_id)
         else:
-            spawn_background_task(
-                reconcile_stale_active_prints(printer_id),
-                name=f"reconcile-stale-prints-{printer_id}",
-            )
+            # A terminal snapshot may be the first usable state after a
+            # reconnect, including a deferred reconciliation from an earlier
+            # active snapshot. Consume that marker here; the helper below is
+            # now the only path that may reopen scheduling.
+            _pending_stale_reconciliation.discard(printer_id)
+
+        async def _reconcile_then_open_barrier() -> None:
+            try:
+                await reconcile_stale_active_prints(printer_id)
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "Failed to reconcile PrintJobs before reopening printer %s", printer_id
+                )
+            finally:
+                # Reconciliation either established exact terminal evidence or
+                # retained the active reservation/quarantined the ambiguous
+                # snapshot. Only then can scheduling resume for this epoch.
+                await _persist_recovery_barrier(False)
+
+        spawn_background_task(
+            _reconcile_then_open_barrier(),
+            name=f"reconcile-and-open-recovery-barrier-{printer_id}",
+        )
     elif not state.connected and _printer_reconciled_since_connect.get(printer_id, False):
         # Re-arm so the next reconnect triggers reconciliation again.
         _printer_reconciled_since_connect[printer_id] = False
@@ -3926,23 +3933,48 @@ async def reconcile_stale_active_prints(printer_id: int) -> int:
     raw_data = state.raw_data or {}
     observed_task_id = raw_data.get("subtask_id") if isinstance(raw_data, dict) else None
     event_sequence = raw_data.get("event_sequence") if isinstance(raw_data, dict) else None
+    from backend.app.services.print_job_lifecycle import quarantine_device_event
+
+    async def _quarantine(item, reason: str) -> None:
+        try:
+            async with async_session() as db:
+                await quarantine_device_event(
+                    db,
+                    printer_id=printer_id,
+                    event_type="reconnect_terminal_snapshot",
+                    device_subtask_id=observed_task_id,
+                    connection_epoch=connection_epoch,
+                    event_sequence=event_sequence,
+                    reason=reason,
+                    evidence={"job_id": item.job_id, "raw_data": raw_data},
+                )
+                await db.commit()
+        except Exception as exc:
+            logger.warning("[RECONCILE] Could not quarantine snapshot for job %s: %s", item.job_id, exc)
+
     for item in active:
         task_id = item.dispatch_subtask_id
-        if not task_id:
-            # There is no safe identity for a missed terminal event. Leave the
-            # job active and let the operator resolve the quarantined evidence.
-            continue
         current_state = (getattr(state, "state", "") or "").upper()
-        task_mismatch = observed_task_id not in (None, "", "0", str(task_id))
         terminal_snapshot = current_state in ("IDLE", "FINISH", "FAILED")
-        if not terminal_snapshot and not task_mismatch:
+        exact_task_binding = bool(task_id and observed_task_id == str(task_id))
+
+        # An idle/finish snapshot is not proof that this PrintJob ended. The
+        # device task ID must bind the snapshot to this exact attempt; without
+        # it, leave the reservation in place and retain the evidence for
+        # manual resolution. A mismatched task is equally unsafe because it
+        # may belong to a later or out-of-band physical print.
+        if not terminal_snapshot or not exact_task_binding:
+            if terminal_snapshot or observed_task_id not in (None, "", "0"):
+                await _quarantine(
+                    item,
+                    "Reconnect snapshot lacks an exact device task binding for this active PrintJob",
+                )
             continue
-        reason = "terminal printer snapshot" if terminal_snapshot else "printer reports a different task"
+
         logger.info(
-            "[RECONCILE] Printer %s: synthesising missed terminal event for job %s — %s",
+            "[RECONCILE] Printer %s: reconciling exact missed terminal event for job %s",
             printer_id,
             item.job_id,
-            reason,
         )
         try:
             completion_result = await on_print_complete(
@@ -4537,9 +4569,11 @@ async def _deliver_terminal_consequences(printer_id: int, data: dict):
     queue_item_owner_id = None
     queue_status = None
     queue_auto_off = False
+    queue_update_complete = False
     try:
         from backend.app.core.database import run_with_retry
         from backend.app.models.print_queue import PrintQueueItem
+        from backend.app.services.print_job_lifecycle import effect_step_completed
 
         async def _update_queue_status(db):
             nonlocal queue_item_id, queue_job_id, queue_item_owner_id, queue_status, queue_auto_off
@@ -4549,10 +4583,15 @@ async def _deliver_terminal_consequences(printer_id: int, data: dict):
                 return
             item = await db.get(PrintQueueItem, item_id)
             if item is None or item.job_id != data.get("_lifecycle_job_id"):
-                logger.error("Lifecycle consequence lost its owning PrintJob %s", data.get("_lifecycle_job_id"))
-                return
+                raise RuntimeError(f"Lifecycle consequence lost its owning PrintJob {data.get('_lifecycle_job_id')}")
             if physical_execution_observed:
-                await _bump_library_file_usage_if_completed(db, item, queue_status)
+                already_accounted = await effect_step_completed(
+                    db,
+                    effect_id=data.get("_lifecycle_effect_id"),
+                    step="library_usage",
+                )
+                if not already_accounted:
+                    await _bump_library_file_usage_if_completed(db, item, queue_status)
             await db.commit()
             queue_item_id = item.id
             queue_job_id = item.job_id
@@ -4561,6 +4600,7 @@ async def _deliver_terminal_consequences(printer_id: int, data: dict):
             logger.info("Updated queue item %s / job %s to %s", item.id, item.job_id, queue_status)
 
         await run_with_retry(_update_queue_status, label="queue status update")
+        queue_update_complete = True
 
         # Post-commit side effects (notifications, MQTT relay, auto-off) use
         # their own sessions and have their own error handling — no retry needed.
@@ -4619,7 +4659,13 @@ async def _deliver_terminal_consequences(printer_id: int, data: dict):
                 except Exception as e:
                     logger.warning("Failed to schedule queue auto-off for printer %s: %s", printer_id, e)
     except Exception as e:
-        logging.getLogger(__name__).warning(f"Queue item update failed: {e}")
+        logging.getLogger(__name__).warning("Queue item update failed: %s", e)
+        # The queue projection and library accounting are durable lifecycle
+        # consequences. If they fail, leave the effect retryable; peripheral
+        # notifications below are intentionally best-effort and must not hold
+        # the PrintJob effect hostage.
+        if not queue_update_complete and data.get("_lifecycle_queue_item_id") is not None:
+            raise
 
     log_timing("Queue item update")
 
