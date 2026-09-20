@@ -953,8 +953,11 @@ async def _delete_related_queue_items(db: AsyncSession, archive_id: int) -> int:
     items = list(result.scalars().all())
     changed = 0
     for item in items:
-        if not item.job_id:
-            await admit_job(db, item, source="archive_delete_adoption")
+        # A model default can assign job_id before the row has ever received
+        # lifecycle admission evidence. Always run idempotent admission here
+        # so a legacy-looking ``lifecycle_state='queued'`` cannot make an
+        # already-terminal PrintJob look cancellable.
+        await admit_job(db, item, source="archive_delete_adoption")
         if lifecycle_state(item) == QUEUED:
             await transition_job(
                 db,

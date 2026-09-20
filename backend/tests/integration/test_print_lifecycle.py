@@ -75,22 +75,18 @@ class TestPlateClearGate:
     def _setup_mocks(stack):
         mock_session_maker = stack.enter_context(patch("backend.app.main.async_session"))
         stack.enter_context(patch("backend.app.core.database.async_session"))
-        stack.enter_context(
-            patch(
-                "backend.app.core.database.run_with_retry",
-                new=AsyncMock(
-                    return_value=TerminalResolution(
-                        resolved=True,
-                        changed=True,
-                        job_id="job-1",
-                        queue_item_id=1,
-                        status="completed",
-                        effect_id="effect-1",
-                        physical_execution_observed=True,
-                    )
-                ),
+        mock_settle = AsyncMock(
+            return_value=TerminalResolution(
+                resolved=True,
+                changed=True,
+                job_id="job-1",
+                queue_item_id=1,
+                status="completed",
+                effect_id="effect-1",
+                physical_execution_observed=True,
             )
         )
+        stack.enter_context(patch("backend.app.core.database.run_with_retry", new=mock_settle))
         stack.enter_context(
             patch(
                 "backend.app.services.print_job_lifecycle.claim_effect",
@@ -117,6 +113,7 @@ class TestPlateClearGate:
         mock_session.__aexit__ = AsyncMock()
         mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
         mock_session_maker.return_value = mock_session
+        mock_pm._settle = mock_settle
         return mock_pm
 
     @pytest.mark.asyncio
@@ -170,6 +167,7 @@ class TestPlateClearGate:
 
         with ExitStack() as stack:
             mock_pm = self._setup_mocks(stack)
+            mock_pm._settle.return_value = TerminalResolution(resolved=False, changed=False)
 
             from backend.app.main import on_print_complete
 
