@@ -2390,7 +2390,9 @@ async def run_migrations(conn):
     # NOT NULL so the no-3MF branch can persist a remain-only tracking row.
     await _safe_execute(conn, "ALTER TABLE active_print_spoolman ADD COLUMN job_id VARCHAR(36)")
     await _safe_execute(conn, "ALTER TABLE active_print_spoolman ADD COLUMN tray_remain_start TEXT")
-    await _safe_execute(conn, "CREATE INDEX IF NOT EXISTS ix_active_print_spoolman_job_id ON active_print_spoolman (job_id)")
+    await _safe_execute(
+        conn, "CREATE INDEX IF NOT EXISTS ix_active_print_spoolman_job_id ON active_print_spoolman (job_id)"
+    )
     if is_sqlite():
         # SQLite can't ALTER COLUMN; patch sqlite_master directly. Mirrors the
         # users.password_hash NULL-relaxation a few hundred lines below — see

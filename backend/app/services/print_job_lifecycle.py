@@ -471,9 +471,8 @@ async def settle_terminal_event(
     # status, resolve that uncertainty as a user cancellation without using a
     # printer-wide flag that could belong to a later job.
     if (
-        (user_stopped_job_id == item.job_id or item.uncertainty_status == "stop_resolution_pending")
-        and normalized_status in ("failed", "aborted")
-    ):
+        user_stopped_job_id == item.job_id or item.uncertainty_status == "stop_resolution_pending"
+    ) and normalized_status in ("failed", "aborted"):
         normalized_status, target_state = "cancelled", CANCELLED
     if current == DISPATCHING:
         # A task-id match is necessary but not sufficient for a missed-start

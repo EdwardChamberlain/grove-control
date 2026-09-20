@@ -336,11 +336,7 @@ async def store_print_data(
     await db.execute(
         delete(ActivePrintSpoolman)
         .where(ActivePrintSpoolman.printer_id == printer_id)
-        .where(
-            ActivePrintSpoolman.job_id == job_id
-            if job_id
-            else ActivePrintSpoolman.archive_id == archive_id
-        )
+        .where(ActivePrintSpoolman.job_id == job_id if job_id else ActivePrintSpoolman.archive_id == archive_id)
     )
 
     # Insert new tracking data. ``filament_usage`` may be None for the
@@ -389,11 +385,7 @@ async def cleanup_tracking(
     result = await db.execute(
         select(ActivePrintSpoolman)
         .where(ActivePrintSpoolman.printer_id == printer_id)
-        .where(
-            ActivePrintSpoolman.job_id == job_id
-            if job_id
-            else ActivePrintSpoolman.archive_id == archive_id
-        )
+        .where(ActivePrintSpoolman.job_id == job_id if job_id else ActivePrintSpoolman.archive_id == archive_id)
     )
     tracking = result.scalar_one_or_none()
 
@@ -416,11 +408,7 @@ async def cleanup_tracking(
     await db.execute(
         delete(ActivePrintSpoolman)
         .where(ActivePrintSpoolman.printer_id == printer_id)
-        .where(
-            ActivePrintSpoolman.job_id == job_id
-            if job_id
-            else ActivePrintSpoolman.archive_id == archive_id
-        )
+        .where(ActivePrintSpoolman.job_id == job_id if job_id else ActivePrintSpoolman.archive_id == archive_id)
     )
     await db.commit()
     logger.debug("[SPOOLMAN] Cleaned up tracking data for printer=%s, archive=%s", printer_id, archive_id)
@@ -1061,11 +1049,7 @@ async def report_usage(printer_id: int, archive_id: int, job_id: str | None = No
         result = await db.execute(
             select(ActivePrintSpoolman)
             .where(ActivePrintSpoolman.printer_id == printer_id)
-            .where(
-                ActivePrintSpoolman.job_id == job_id
-                if job_id
-                else ActivePrintSpoolman.archive_id == archive_id
-            )
+            .where(ActivePrintSpoolman.job_id == job_id if job_id else ActivePrintSpoolman.archive_id == archive_id)
         )
         tracking = result.scalar_one_or_none()
 
