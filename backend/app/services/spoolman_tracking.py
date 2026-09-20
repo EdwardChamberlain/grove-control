@@ -238,6 +238,7 @@ async def store_print_data(
     printer_manager,
     ams_mapping: list[int] | None = None,
     plate_id: int | None = None,
+    job_id: str | None = None,
 ):
     """Store Spoolman tracking data at print start (persisted to database).
 
@@ -291,15 +292,11 @@ async def store_print_data(
     threemf_available = bool(file_path) and full_path.exists()
     queue_item = None
     if threemf_available:
-        # Resolve the queue item once — used both for the plate-scoped 3MF parsing
-        # fallback (#1697: multi-plate file dispatched for one plate must only count
-        # that plate's filament) and for the ams_mapping fallback below.
-        queue_result = await db.execute(
-            select(PrintQueueItem)
-            .where(PrintQueueItem.archive_id == archive_id)
-            .where(PrintQueueItem.status == "printing")
-        )
-        queue_item = queue_result.scalar_one_or_none()
+        # Resolve only the owning PrintJob. An Archive is reusable content and
+        # cannot identify which physical attempt owns this snapshot.
+        if job_id:
+            queue_result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.job_id == job_id))
+            queue_item = queue_result.scalar_one_or_none()
         # Caller-supplied plate_id wins (direct-Print path); fall back to the queue
         # item's plate_id (queue dispatch path).
         effective_plate_id = (
@@ -339,7 +336,11 @@ async def store_print_data(
     await db.execute(
         delete(ActivePrintSpoolman)
         .where(ActivePrintSpoolman.printer_id == printer_id)
-        .where(ActivePrintSpoolman.archive_id == archive_id)
+        .where(
+            ActivePrintSpoolman.job_id == job_id
+            if job_id
+            else ActivePrintSpoolman.archive_id == archive_id
+        )
     )
 
     # Insert new tracking data. ``filament_usage`` may be None for the
@@ -347,6 +348,7 @@ async def store_print_data(
     tracking = ActivePrintSpoolman(
         printer_id=printer_id,
         archive_id=archive_id,
+        job_id=job_id,
         filament_usage=filament_usage,
         ams_trays=ams_trays,
         slot_to_tray=slot_to_tray,
@@ -378,6 +380,7 @@ async def cleanup_tracking(
     db,
     last_layer_num: int | None = None,
     last_progress: int | None = None,
+    job_id: str | None = None,
 ):
     """Report partial usage and clean up Spoolman tracking data for failed/aborted prints."""
     from backend.app.models.active_print_spoolman import ActivePrintSpoolman
@@ -386,7 +389,11 @@ async def cleanup_tracking(
     result = await db.execute(
         select(ActivePrintSpoolman)
         .where(ActivePrintSpoolman.printer_id == printer_id)
-        .where(ActivePrintSpoolman.archive_id == archive_id)
+        .where(
+            ActivePrintSpoolman.job_id == job_id
+            if job_id
+            else ActivePrintSpoolman.archive_id == archive_id
+        )
     )
     tracking = result.scalar_one_or_none()
 
@@ -409,7 +416,11 @@ async def cleanup_tracking(
     await db.execute(
         delete(ActivePrintSpoolman)
         .where(ActivePrintSpoolman.printer_id == printer_id)
-        .where(ActivePrintSpoolman.archive_id == archive_id)
+        .where(
+            ActivePrintSpoolman.job_id == job_id
+            if job_id
+            else ActivePrintSpoolman.archive_id == archive_id
+        )
     )
     await db.commit()
     logger.debug("[SPOOLMAN] Cleaned up tracking data for printer=%s, archive=%s", printer_id, archive_id)
@@ -1029,7 +1040,7 @@ async def _report_partial_usage(
         logger.info("[SPOOLMAN] Reported partial usage to %s spool(s) using linear interpolation", spools_updated)
 
 
-async def report_usage(printer_id: int, archive_id: int):
+async def report_usage(printer_id: int, archive_id: int, job_id: str | None = None):
     """Report filament usage to Spoolman after print completion.
 
     Two writers, mirroring the internal-inventory split in usage_tracker:
@@ -1050,7 +1061,11 @@ async def report_usage(printer_id: int, archive_id: int):
         result = await db.execute(
             select(ActivePrintSpoolman)
             .where(ActivePrintSpoolman.printer_id == printer_id)
-            .where(ActivePrintSpoolman.archive_id == archive_id)
+            .where(
+                ActivePrintSpoolman.job_id == job_id
+                if job_id
+                else ActivePrintSpoolman.archive_id == archive_id
+            )
         )
         tracking = result.scalar_one_or_none()
 

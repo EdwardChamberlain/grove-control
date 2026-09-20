@@ -430,15 +430,35 @@ async def delete_printer(
     if active_preheat or printer.heat_soak_shutdown_pending:
         raise HTTPException(409, "Stop chamber heat soak and wait for heater shutdown before deleting this printer")
 
+    active_job = await db.scalar(
+        select(PrintQueueItem.id)
+        .where(
+            PrintQueueItem.printer_id == printer_id,
+            PrintQueueItem.lifecycle_state.in_(("heat_soaking", "dispatching", "printing")),
+        )
+        .limit(1)
+    )
+    if active_job:
+        raise HTTPException(409, "Cannot delete a printer while a PrintJob is active; stop the job first")
+
     printer_manager.disconnect_printer(printer_id)
+
+    from sqlalchemy import update
+
+    # Detach durable jobs before deleting replaceable printer/source rows.
+    # Their lifecycle evidence and queue visibility remain intact.
+    await db.execute(update(PrintQueueItem).where(PrintQueueItem.printer_id == printer_id).values(printer_id=None))
 
     if delete_archives:
         # Delete all archives for this printer
+        await db.execute(
+            update(PrintQueueItem)
+            .where(PrintQueueItem.archive_id.in_(select(PrintArchive.id).where(PrintArchive.printer_id == printer_id)))
+            .values(archive_id=None)
+        )
         await db.execute(sql_delete(PrintArchive).where(PrintArchive.printer_id == printer_id))
     else:
         # Orphan the archives instead of deleting them
-        from sqlalchemy import update
-
         await db.execute(update(PrintArchive).where(PrintArchive.printer_id == printer_id).values(printer_id=None))
 
     # Delete slot assignments for this printer (SQLite doesn't enforce FK cascades)
@@ -2936,41 +2956,41 @@ async def debug_simulate_print_complete(
     This triggers the same code path as a real print completion,
     without needing to wait for an actual print to finish.
     """
-    from backend.app.main import _active_prints, on_print_complete
-    from backend.app.models.archive import PrintArchive
+    from backend.app.main import on_print_complete
+    from backend.app.models.print_queue import PrintQueueItem
 
-    # Get the most recent archive for this printer
+    # Debug completion must exercise a durable PrintJob, not the retired
+    # filename-keyed archive map.
     result = await db.execute(
-        select(PrintArchive)
-        .where(PrintArchive.printer_id == printer_id)
-        .order_by(PrintArchive.created_at.desc())
+        select(PrintQueueItem)
+        .where(
+            PrintQueueItem.printer_id == printer_id,
+            PrintQueueItem.lifecycle_state.in_(("dispatching", "printing")),
+            PrintQueueItem.dispatch_subtask_id.is_not(None),
+        )
+        .order_by(PrintQueueItem.created_at.desc())
         .limit(1)
     )
-    archive = result.scalar_one_or_none()
+    item = result.scalar_one_or_none()
 
-    if not archive:
-        raise HTTPException(status_code=404, detail="No archives found for this printer")
-
-    # Register this archive as "active" so on_print_complete can find it
-    filename = archive.file_path.split("/")[-1] if archive.file_path else "test.3mf"
-    subtask_name = archive.print_name or "Test Print"
-    _active_prints[(printer_id, filename)] = archive.id
-    _active_prints[(printer_id, subtask_name)] = archive.id
+    if not item:
+        raise HTTPException(status_code=404, detail="No active durable PrintJob found for this printer")
 
     # Simulate print completion data
     data = {
         "status": "completed",
-        "filename": filename,
-        "subtask_name": subtask_name,
+        "filename": "",
+        "subtask_name": "",
+        "subtask_id": item.dispatch_subtask_id,
         "timelapse_was_active": False,
     }
 
-    logger.info("Simulating print complete for printer %s, archive %s", printer_id, archive.id)
+    logger.info("Simulating print complete for printer %s, job %s", printer_id, item.job_id)
 
     # Call the actual on_print_complete handler
     await on_print_complete(printer_id, data)
 
-    return {"success": True, "archive_id": archive.id, "message": "Print completion simulated"}
+    return {"success": True, "job_id": item.job_id, "message": "Print completion simulated"}
 
 
 # =============================================================================
@@ -2994,18 +3014,39 @@ async def stop_print(
     if not client:
         raise HTTPException(400, "Printer not connected")
 
+    from backend.app.models.print_queue import PrintJobReservation, PrintQueueItem
+    from backend.app.services.print_job_lifecycle import ACTIVE_STATES, lifecycle_state, mark_job_uncertain
+
+    # Persist the unresolved stop against the exact durable PrintJob before
+    # sending the external command.  A printer-wide stop marker is only a
+    # compatibility hint; it must never be the source of ownership.
+    reservation = await db.get(PrintJobReservation, printer_id)
+    stop_job_id = reservation.job_id if reservation else None
+    if stop_job_id:
+        active_item = await db.scalar(select(PrintQueueItem).where(PrintQueueItem.job_id == stop_job_id))
+        if active_item and lifecycle_state(active_item) in ACTIVE_STATES:
+            stop_reason = "Stop requested by user; awaiting printer confirmation"
+            await mark_job_uncertain(
+                db,
+                active_item,
+                uncertainty_status="stop_resolution_pending",
+                source="printer_stop_requested",
+                safety_hold_type="stop_resolution",
+                reason=stop_reason,
+            )
+            active_item.error_message = stop_reason
+            await db.commit()
+
     success = client.stop_print()
     if not success:
         raise HTTPException(500, "Failed to stop print")
 
-    # Mark this printer as user-stopped so on_print_complete reclassifies
-    # the resulting "failed"/"aborted" MQTT status as "cancelled" — otherwise
-    # the HMS heuristic in _dispatch_archive_update mislabels user-cancels
-    # (e.g. the H2D's cancel-sequence module-0x0C HMS) as "Layer shift".
+    # Mark the exact stopped PrintJob so its terminal failed/aborted report is
+    # resolved as cancelled without affecting a later job on this printer.
     try:
         from backend.app.main import mark_printer_stopped_by_user
 
-        mark_printer_stopped_by_user(printer_id)
+        mark_printer_stopped_by_user(printer_id, stop_job_id)
     except Exception as _mark_err:
         logger.warning("Failed to mark printer %s as user-stopped: %s", printer_id, _mark_err)
 

@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.tasks import spawn_background_task
-from backend.app.models.print_queue import PrinterSafetyHold, PrintQueueItem
+from backend.app.models.print_queue import PrinterSafetyHold, PrintJobReservation, PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services.print_job_lifecycle import (
     CANCELLED,
@@ -133,25 +133,27 @@ async def abort_heat_soak(db: AsyncSession, item: PrintQueueItem, reason: str, *
 
 
 async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> None:
-    """Release an active soak and let the queue dispatch the item normally.
+    """Skip the soak and hand the reserved job directly to dispatching.
 
-    Skipping is different from stopping: keep the printer's current heater
-    targets so the print can start immediately, but remove the preheating
-    reservation and disable the soak for this queue item.
+    Skipping is different from stopping: keep the printer reservation and
+    current heater targets, move the durable lifecycle to ``dispatching``,
+    and let the scheduler consume the explicit handoff marker immediately.
     """
     if not item.job_id:
         await admit_job(db, item, source="heat_soak_legacy_adoption")
     _show_preheating(item.printer_id, False)
     if lifecycle_state(item) != HEAT_SOAKING:
         raise LifecycleError("Only a heat-soaking PrintJob may skip heat soak")
-    await transition_job(db, item, to_state=QUEUED, source="heat_soak_skip", reason="Heat soak skipped")
+    await transition_job(db, item, to_state=DISPATCHING, source="heat_soak_skip", reason="Heat soak skipped")
     item.chamber_heat_soak = False
     item.manual_start = False
     item.error_message = None
     item.completed_at = None
-    item.preheat_owner = None
+    # ``preheat_owner`` is a durable dispatch handoff marker consumed by the
+    # scheduler. It is not a second reservation or lifecycle identity.
+    item.preheat_owner = item.active_operation_id
+    item.preheat_checked_at = utcnow()
     item.preheat_requested_at = None
-    item.preheat_checked_at = None
     item.preheat_started_at = None
     await db.commit()
 
@@ -276,7 +278,10 @@ class ChamberHeatSoak:
                             PrintQueueItem.lifecycle_state == HEAT_SOAKING,
                             and_(
                                 PrintQueueItem.lifecycle_state == DISPATCHING,
-                                PrintQueueItem.chamber_heat_soak.is_(True),
+                                or_(
+                                    PrintQueueItem.chamber_heat_soak.is_(True),
+                                    PrintQueueItem.preheat_owner.is_not(None),
+                                ),
                                 PrintQueueItem.dispatch_subtask_id.is_(None),
                             ),
                         )
@@ -292,6 +297,14 @@ class ChamberHeatSoak:
                 await db.rollback()
                 continue
             now = utcnow()
+            if lifecycle_state(item) == DISPATCHING and not item.chamber_heat_soak:
+                # Explicit skip handoff: dispatch immediately without treating
+                # the absent soak timer as an interruption.
+                _show_preheating(item.printer_id, False)
+                ready.append(item.id)
+                item.preheat_checked_at = now
+                await db.commit()
+                continue
             elapsed = (now - item.preheat_checked_at).total_seconds() if item.preheat_checked_at else HEARTBEAT_TIMEOUT
             if elapsed < 0 or elapsed >= HEARTBEAT_TIMEOUT:
                 await abort_heat_soak(db, item, "Heat soak interrupted by restart or scheduler timeout; retry required")
@@ -364,6 +377,22 @@ class ChamberHeatSoak:
             if not printer.heat_soak_shutdown_pending:
                 await db.rollback()
                 continue
+            shutdown_job_id = printer.heat_soak_shutdown_job_id
+            reservation = await db.get(PrintJobReservation, printer.id)
+            state = printer_manager.get_status(printer.id)
+            active_state = (getattr(state, "state", "") or "").upper()
+            if (reservation and reservation.job_id != shutdown_job_id) or active_state in {
+                "RUNNING",
+                "PAUSE",
+                "PREPARE",
+                "SLICING",
+            }:
+                # A later PrintJob or an out-of-band physical print owns this
+                # printer now. Never send heater-off for the old shutdown
+                # request into that newer operation; retain the hold and wait
+                # for a safe terminal/idle snapshot.
+                await db.commit()
+                continue
             _heaters_off(printer)
             client = printer_manager.get_client(printer.id)
             if client:
@@ -381,7 +410,6 @@ class ChamberHeatSoak:
             if confirmed:
                 printer.heat_soak_shutdown_pending = False
                 printer.heat_soak_shutdown_at = None
-                shutdown_job_id = printer.heat_soak_shutdown_job_id
                 shutdown_operation_id = printer.heat_soak_shutdown_operation_id
                 printer.heat_soak_shutdown_job_id = None
                 printer.heat_soak_shutdown_operation_id = None

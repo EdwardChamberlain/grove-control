@@ -913,6 +913,9 @@ class VirtualPrinterInstance:
                             nozzle_mapping=nozzle_mapping_json,
                         )
                         db.add(queue_item)
+                        from backend.app.services.print_job_lifecycle import admit_job
+
+                        await admit_job(db, queue_item, source="virtual_printer_queue_admission")
                         await db.flush()  # populate queue_item.id before logging
                         queue_item_ids.append(queue_item.id)
                     await db.commit()

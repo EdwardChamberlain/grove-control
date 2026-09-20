@@ -54,6 +54,11 @@ class Printer(Base):
     # a restart without relying on the viewer's ownership-scoped archive listing.
     awaiting_plate_clear_archive_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     awaiting_plate_clear_job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # Monotonic connection identity used to reject device evidence from a
+    # previous MQTT session.  The recovery barrier stays closed until the
+    # first fresh status snapshot for this epoch has been reconciled.
+    connection_epoch: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    recovery_barrier: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     # The job operation that requested heat soak shutdown. The simple pending
     # flag remains the compatibility projection used by existing clients.
     heat_soak_shutdown_job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)

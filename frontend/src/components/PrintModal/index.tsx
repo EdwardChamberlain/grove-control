@@ -46,6 +46,7 @@ export function PrintModal({
   libraryFileId,
   archiveName,
   queueItem,
+  previousJobId,
   initialSelectedPrinterIds,
   onClose,
   onSuccess,
@@ -899,6 +900,7 @@ export function PrintModal({
     const getQueueData = (printerId: number | null, plateOverride?: number | null): PrintQueueItemCreate => {
       const printerOverrides = getFilamentOverridesForPrinter(printerId);
       return {
+        previous_job_id: previousJobId,
         printer_id: assignmentMode === 'printer' ? printerId : null,
         target_model: assignmentMode === 'model' ? targetModel : null,
         target_location: assignmentMode === 'model' ? targetLocation : null,

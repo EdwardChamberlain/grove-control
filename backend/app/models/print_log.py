@@ -33,7 +33,9 @@ class PrintLogEntry(Base):
     )
     # Additive durable PrintJob link. Historical rows remain nullable when a
     # deterministic queue-item relationship cannot be proven.
-    job_id: Mapped[str | None] = mapped_column(String(36), nullable=True, unique=True, index=True)
+    job_id: Mapped[str | None] = mapped_column(
+        ForeignKey("print_queue.job_id", ondelete="SET NULL"), nullable=True, unique=True, index=True
+    )
     print_name: Mapped[str | None] = mapped_column(String(255))
     printer_name: Mapped[str | None] = mapped_column(String(255))
     printer_id: Mapped[int | None] = mapped_column(Integer)

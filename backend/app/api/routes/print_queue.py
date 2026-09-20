@@ -262,6 +262,7 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
         # card with later print consequences. Existing integer IDs and status
         # fields remain unchanged for compatibility.
         "job_id": item.job_id,
+        "previous_job_id": item.previous_job_id,
         "printer_id": item.printer_id,
         "target_model": item.target_model,
         "target_location": item.target_location,
@@ -609,6 +610,17 @@ async def add_to_queue(
 ):
     """Add an item to the print queue."""
     actor = current_user or api_key_owner
+    previous_job = None
+    if data.previous_job_id:
+        from backend.app.services.print_job_lifecycle import TERMINAL_STATES
+
+        previous_job = await db.scalar(select(PrintQueueItem).where(PrintQueueItem.job_id == data.previous_job_id))
+        if previous_job is None:
+            raise HTTPException(400, "Previous PrintJob not found")
+        if previous_job.lifecycle_state not in TERMINAL_STATES or (
+            previous_job.dispatch_attempted_at is None and not previous_job.physical_execution_observed
+        ):
+            raise HTTPException(400, "Only a dispatched terminal PrintJob can be retried")
     # Inserting a new item ahead of pending work is a separate privilege from
     # simply creating a queue item.  Keep the check here (rather than only in
     # the modal) so API callers cannot bypass the queue policy.
@@ -865,6 +877,7 @@ async def add_to_queue(
     items = []
     for i in range(quantity):
         item = PrintQueueItem(
+            previous_job_id=data.previous_job_id,
             printer_id=data.printer_id,
             target_model=target_model_norm,
             target_location=data.target_location,
@@ -1592,13 +1605,9 @@ async def stop_queue_item(
     try:
         from backend.app.main import mark_printer_stopped_by_user
 
-        mark_printer_stopped_by_user(printer_id)
+        mark_printer_stopped_by_user(printer_id, item.job_id)
     except Exception as _mark_err:
         logger.warning("Failed to mark printer %s as user-stopped: %s", printer_id, _mark_err)
-
-    from backend.app.main import unregister_expected_print
-
-    unregister_expected_print(printer_id)
 
     logger.info("Requested stop for queue item %s (command accepted locally: %s)", item_id, stop_sent)
     return {

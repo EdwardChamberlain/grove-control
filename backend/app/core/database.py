@@ -1037,8 +1037,16 @@ async def _migrate_print_job_lifecycle(conn) -> None:
     if has_print_log_entries:
         await _safe_execute(conn, "ALTER TABLE print_log_entries ADD COLUMN job_id VARCHAR(36)")
     await _safe_execute(conn, "ALTER TABLE printers ADD COLUMN awaiting_plate_clear_job_id VARCHAR(36)")
+    await _safe_execute(conn, "ALTER TABLE printers ADD COLUMN connection_epoch VARCHAR(36)")
+    await _safe_execute(conn, "ALTER TABLE printers ADD COLUMN recovery_barrier BOOLEAN DEFAULT true")
     await _safe_execute(conn, "ALTER TABLE printers ADD COLUMN heat_soak_shutdown_job_id VARCHAR(36)")
     await _safe_execute(conn, "ALTER TABLE printers ADD COLUMN heat_soak_shutdown_operation_id VARCHAR(36)")
+    # Some focused migration fixtures deliberately create only the tables they
+    # exercise.  The restart-session table is optional to those fixtures, so
+    # do not turn an otherwise valid migration into a hard failure merely
+    # because there is no table to extend.
+    if await _table_columns(conn, "active_print_sessions"):
+        await _safe_execute(conn, "ALTER TABLE active_print_sessions ADD COLUMN job_id VARCHAR(36)")
     # These columns are present on newer databases, but old exports can predate
     # the original heat-soak migration. Keep the lifecycle migration safe when
     # it is run directly in a recovery tool as well as normal startup.
@@ -1046,6 +1054,8 @@ async def _migrate_print_job_lifecycle(conn) -> None:
         conn, f"ALTER TABLE printers ADD COLUMN heat_soak_shutdown_pending BOOLEAN DEFAULT {boolean_default}"
     )
     await _safe_execute(conn, f"ALTER TABLE printers ADD COLUMN heat_soak_shutdown_at {timestamp_type}")
+    await _safe_execute(conn, "ALTER TABLE print_job_effects ADD COLUMN next_attempt_at TIMESTAMP")
+    await _safe_execute(conn, "ALTER TABLE print_job_effects ADD COLUMN dead_lettered_at TIMESTAMP")
 
     rows = (
         (
@@ -1227,6 +1237,11 @@ async def _migrate_print_job_lifecycle(conn) -> None:
     await _safe_execute(conn, "DROP INDEX IF EXISTS uq_print_queue_active_printer_heat_soak")
     await _safe_execute(conn, "CREATE UNIQUE INDEX IF NOT EXISTS uq_print_queue_job_id ON print_queue (job_id)")
     await _safe_execute(conn, "CREATE INDEX IF NOT EXISTS ix_print_queue_job_id ON print_queue (job_id)")
+    if await _table_columns(conn, "active_print_sessions"):
+        await _safe_execute(
+            conn,
+            "CREATE INDEX IF NOT EXISTS ix_active_print_sessions_job_id ON active_print_sessions (job_id)",
+        )
     if has_print_log_entries:
         await _safe_execute(
             conn, "CREATE INDEX IF NOT EXISTS ix_print_log_entries_job_id ON print_log_entries (job_id)"
@@ -2343,6 +2358,7 @@ async def run_migrations(conn):
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             printer_id INTEGER NOT NULL REFERENCES printers(id) ON DELETE CASCADE,
             archive_id INTEGER NOT NULL REFERENCES print_archives(id) ON DELETE CASCADE,
+            job_id VARCHAR(36),
             filament_usage TEXT,
             ams_trays TEXT NOT NULL,
             slot_to_tray TEXT,
@@ -2358,6 +2374,7 @@ async def run_migrations(conn):
             id SERIAL PRIMARY KEY,
             printer_id INTEGER NOT NULL REFERENCES printers(id) ON DELETE CASCADE,
             archive_id INTEGER NOT NULL REFERENCES print_archives(id) ON DELETE CASCADE,
+            job_id VARCHAR(36),
             filament_usage TEXT,
             ams_trays TEXT NOT NULL,
             slot_to_tray TEXT,
@@ -2369,9 +2386,11 @@ async def run_migrations(conn):
         """,
     )
     # Migration for installs that already created active_print_spoolman with
-    # the original schema: add tray_remain_start, and relax filament_usage's
+    # the original schema: add job identity/tray_remain_start, and relax filament_usage's
     # NOT NULL so the no-3MF branch can persist a remain-only tracking row.
+    await _safe_execute(conn, "ALTER TABLE active_print_spoolman ADD COLUMN job_id VARCHAR(36)")
     await _safe_execute(conn, "ALTER TABLE active_print_spoolman ADD COLUMN tray_remain_start TEXT")
+    await _safe_execute(conn, "CREATE INDEX IF NOT EXISTS ix_active_print_spoolman_job_id ON active_print_spoolman (job_id)")
     if is_sqlite():
         # SQLite can't ALTER COLUMN; patch sqlite_master directly. Mirrors the
         # users.password_hash NULL-relaxation a few hundred lines below — see

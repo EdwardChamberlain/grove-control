@@ -514,20 +514,10 @@ class PrintScheduler:
             # conservative manual-review boundary.
             terminal_status = getattr(printer_status, "state", None) if printer_status else None
             if telemetry_status in ("completed", "failed"):
-                # Commit the terminal observation before starting the normal
-                # completion side effects. A process stop after this point must
-                # not turn a printer-confirmed terminal job back into a retry.
-                await transition_job(
-                    db,
-                    item,
-                    to_state="completed" if telemetry_status == "completed" else FAILED,
-                    source="dispatch_reconnect_reconciliation",
-                    evidence={"submission_id": dispatch_subtask_id, "printer_state": terminal_status},
-                    allow_missed_start_terminal=True,
-                    physical_execution_observed=True,
-                    resolve_safety_hold_types=("dispatch_resolution", "stop_resolution"),
-                )
-                changed = True
+                # The terminal callback is the single lifecycle authority. Do
+                # not terminalize here first: that would leave a committed job
+                # with no terminal consequence if the process stopped before
+                # the callback could create its durable effect.
                 filename = getattr(printer_status, "gcode_file", None)
                 if not filename and item.archive_id is not None:
                     archive = await db.get(PrintArchive, item.archive_id)
@@ -548,6 +538,7 @@ class PrintScheduler:
                             "raw_data": raw_data,
                             "_reconciled": True,
                             "_recovered_dispatch": True,
+                            "_connection_epoch": printer_manager.get_connection_epoch(item.printer_id),
                         },
                     )
                 )
@@ -1841,7 +1832,7 @@ class PrintScheduler:
         This is the whole trick that keeps cross-model items cheap: the many-to-many
         never escapes the selection loop. By the time the pass commits, the row
         looks exactly like an ordinary single-file model-based item, so the upload,
-        archive creation, expected-print registration, print history and reprint
+        archive creation, durable PrintJob admission, print history and reprint
         paths need no knowledge that variants exist.
 
         No-ops for a non-variant candidate, which is already the item's own columns.
@@ -2559,6 +2550,14 @@ class PrintScheduler:
         """Check if a printer is connected and idle."""
         if not printer_manager.is_connected(printer_id):
             logger.debug("Printer %d: not connected", printer_id)
+            return False
+
+        # A reconnect is not schedulable until the first real status snapshot
+        # has been observed and the durable recovery/reconciliation barrier has
+        # opened.  This prevents a stale cached IDLE state from racing startup
+        # recovery and dispatching a second physical attempt.
+        if not printer_manager.is_recovery_ready(printer_id):
+            logger.debug("Printer %d: recovery barrier is still closed", printer_id)
             return False
 
         state = printer_manager.get_status(printer_id)
@@ -3935,11 +3934,12 @@ class PrintScheduler:
                 source="scheduler_publish_boundary",
                 evidence={"submission_id": dispatch_subtask_id},
             )
+            connection_epoch = printer_manager.get_connection_epoch(item.printer_id)
             await bind_device_task(
                 db,
                 item=item,
                 device_subtask_id=dispatch_subtask_id,
-                connection_epoch=None,
+                connection_epoch=connection_epoch if isinstance(connection_epoch, str) else None,
                 event_sequence=None,
             )
             await db.commit()
@@ -3956,21 +3956,6 @@ class PrintScheduler:
         ):
             await db.rollback()
             return
-
-        # Register only after the durable reservation succeeded. Otherwise a
-        # losing concurrent worker leaves a two-hour expected-print entry that
-        # could associate a later start event with the wrong job.
-        if archive:
-            from backend.app.main import register_expected_print
-
-            register_expected_print(
-                item.printer_id,
-                remote_filename,
-                archive.id,
-                ams_mapping=ams_mapping,
-                created_by_id=item.created_by_id,
-                plate_id=item.plate_id,
-            )
 
         for cleanup_path in cleanup_disk_paths:
             try:
@@ -4020,10 +4005,6 @@ class PrintScheduler:
                 active_ams_ids=command_boundary_drying,
                 release_dispatch_reservation=True,
             )
-            if archive:
-                from backend.app.main import unregister_expected_print
-
-                unregister_expected_print(item.printer_id, remote_filename)
             printer_manager.clear_current_print_user(item.printer_id)
             logger.info(
                 "Queue item %s: released dispatch reservation because printer %s began drying",
@@ -4090,10 +4071,6 @@ class PrintScheduler:
                 evidence={"submission_id": dispatch_subtask_id},
             )
             await db.commit()
-            if archive:
-                from backend.app.main import unregister_expected_print
-
-                unregister_expected_print(item.printer_id, remote_filename)
             logger.error(
                 f"Queue item {item.id}: Failed to start print on {printer.name} ({printer.model}) - "
                 f"printer_manager.start_print() returned False. "

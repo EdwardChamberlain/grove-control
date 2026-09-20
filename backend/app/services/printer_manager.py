@@ -3,6 +3,7 @@ import logging
 import re
 import traceback
 from collections.abc import Callable
+from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -281,6 +282,8 @@ class PrinterManager:
         self._clients: dict[int, BambuMQTTClient] = {}
         self._models: dict[int, str | None] = {}  # Cache printer models for feature detection
         self._printer_info: dict[int, PrinterInfo] = {}  # Cache printer name/serial for callbacks
+        self._connection_epochs: dict[int, str] = {}
+        self._recovery_barriers: dict[int, bool] = {}
         self._on_print_start: Callable[[int, dict], None] | None = None
         self._on_print_complete: Callable[[int, dict], None] | None = None
         self._on_print_running_observed: Callable[[int, dict], None] | None = None
@@ -309,6 +312,17 @@ class PrinterManager:
     def get_printer(self, printer_id: int) -> PrinterInfo | None:
         """Get printer info by ID."""
         return self._printer_info.get(printer_id)
+
+    def get_connection_epoch(self, printer_id: int) -> str | None:
+        """Return the durable identity of the current MQTT connection."""
+        return self._connection_epochs.get(printer_id)
+
+    def is_recovery_ready(self, printer_id: int) -> bool:
+        """Return whether a fresh status snapshot has opened this connection."""
+        return self._recovery_barriers.get(printer_id, True) is False
+
+    def set_recovery_barrier(self, printer_id: int, blocked: bool) -> None:
+        self._recovery_barriers[printer_id] = blocked
 
     def set_current_print_user(self, printer_id: int, user_id: int, username: str):
         """Track who started the current print (Issue #206)."""
@@ -623,6 +637,14 @@ class PrinterManager:
             self.disconnect_printer(printer.id)
 
         printer_id = printer.id
+        connection_epoch = str(uuid4())
+        self._connection_epochs[printer_id] = connection_epoch
+        self._recovery_barriers[printer_id] = True
+        # The caller owns the surrounding transaction.  On startup the
+        # connection bootstrap commits these fields before scheduling opens;
+        # route-driven reconnects are committed by the request dependency.
+        printer.connection_epoch = connection_epoch
+        printer.recovery_barrier = True
 
         def on_state_change(state: PrinterState):
             if self._on_status_change:
@@ -630,19 +652,25 @@ class PrinterManager:
 
         def on_print_start(data: dict):
             if self._on_print_start:
-                self._schedule_async(self._on_print_start(printer_id, data))
+                self._schedule_async(self._on_print_start(printer_id, {**data, "_connection_epoch": connection_epoch}))
 
         def on_print_complete(data: dict):
             if self._on_print_complete:
-                self._schedule_async(self._on_print_complete(printer_id, data))
+                self._schedule_async(
+                    self._on_print_complete(printer_id, {**data, "_connection_epoch": connection_epoch})
+                )
 
         def on_print_running_observed(data: dict):
             if self._on_print_running_observed:
-                self._schedule_async(self._on_print_running_observed(printer_id, data))
+                self._schedule_async(
+                    self._on_print_running_observed(printer_id, {**data, "_connection_epoch": connection_epoch})
+                )
 
         def on_finish_photo_moment(data: dict):
             if self._on_finish_photo_moment:
-                self._schedule_async(self._on_finish_photo_moment(printer_id, data))
+                self._schedule_async(
+                    self._on_finish_photo_moment(printer_id, {**data, "_connection_epoch": connection_epoch})
+                )
 
         def on_ams_change(ams_data: list):
             if self._on_ams_change:
@@ -702,6 +730,8 @@ class PrinterManager:
             del self._clients[printer_id]
         self._models.pop(printer_id, None)  # Clean up model cache
         self._printer_info.pop(printer_id, None)  # Clean up printer info cache
+        self._connection_epochs.pop(printer_id, None)
+        self._recovery_barriers[printer_id] = True
 
     def disconnect_all(self, timeout: float = 0):
         """Disconnect from all printers."""
@@ -1520,3 +1550,6 @@ async def init_printer_connections(db: AsyncSession):
 
     for printer in printers:
         await printer_manager.connect_printer(printer)
+    # Persist the epoch and keep scheduling closed until the application's
+    # connected-edge handler has received a fresh status snapshot.
+    await db.commit()

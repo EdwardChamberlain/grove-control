@@ -2688,6 +2688,7 @@ class BambuMQTTClient:
                             "trigger": "stage_22",
                             "filename": self._previous_gcode_file or self.state.gcode_file,
                             "subtask_name": self.state.subtask_name,
+                            "subtask_id": self.state.subtask_id,
                             "timelapse_was_active": self._timelapse_during_print,
                         }
                     )
@@ -3807,6 +3808,7 @@ class BambuMQTTClient:
                         "trigger": "finish_state",
                         "filename": self._previous_gcode_file or current_file,
                         "subtask_name": self.state.subtask_name,
+                        "subtask_id": self.state.subtask_id,
                         "timelapse_was_active": timelapse_was_active,
                     }
                 )

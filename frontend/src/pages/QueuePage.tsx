@@ -2228,6 +2228,7 @@ export function QueuePage() {
       {requeueItem && (
         <PrintModal
           mode="create"
+          previousJobId={requeueItem.job_id}
           archiveId={requeueItem.archive_id ?? undefined}
           libraryFileId={requeueItem.library_file_id ?? undefined}
           archiveName={queueItemDisplayName(requeueItem, (n) => t('common.plusNMore', { count: n }))}

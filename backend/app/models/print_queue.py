@@ -31,7 +31,10 @@ class PrintQueueItem(Base):
     physical_execution_observed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     # Links
-    printer_id: Mapped[int | None] = mapped_column(ForeignKey("printers.id", ondelete="CASCADE"), nullable=True)
+    # A printer is a replaceable execution target, not the owner of job
+    # history.  Removing a printer must detach queued jobs and preserve their
+    # durable lifecycle evidence.
+    printer_id: Mapped[int | None] = mapped_column(ForeignKey("printers.id", ondelete="SET NULL"), nullable=True)
     # Target printer model for model-based assignment (mutually exclusive with printer_id)
     # When set, scheduler assigns to any idle printer of matching model
     target_model: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -45,9 +48,11 @@ class PrintQueueItem(Base):
     # Set by scheduler when no matching printer is available
     waiting_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Either archive_id OR library_file_id must be set (archive created at print start from library file)
-    archive_id: Mapped[int | None] = mapped_column(ForeignKey("print_archives.id", ondelete="CASCADE"), nullable=True)
+    # Archives are reusable content; deleting one must not delete the jobs that
+    # attempted to print it.
+    archive_id: Mapped[int | None] = mapped_column(ForeignKey("print_archives.id", ondelete="SET NULL"), nullable=True)
     library_file_id: Mapped[int | None] = mapped_column(
-        ForeignKey("library_files.id", ondelete="CASCADE"), nullable=True
+        ForeignKey("library_files.id", ondelete="SET NULL"), nullable=True
     )
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
     # Scheduling
@@ -189,6 +194,13 @@ class PrintQueueItem(Base):
     )
 
 
+# Domain name for the durable row.  The physical table and compatibility ORM
+# class remain ``print_queue``/``PrintQueueItem`` for this migration, but new
+# lifecycle code should speak in terms of PrintJob rather than inventing a
+# second identity model.
+PrintJob = PrintQueueItem
+
+
 class PrintQueueVariant(Base):
     """One candidate file for a queue item that may print on several models (#671).
 
@@ -308,6 +320,8 @@ class PrintJobEffect(Base):
     lease_owner: Mapped[str | None] = mapped_column(String(64), nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    dead_lettered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 

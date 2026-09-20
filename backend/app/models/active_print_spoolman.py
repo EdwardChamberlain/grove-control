@@ -1,6 +1,6 @@
 """Track Spoolman data for active prints."""
 
-from sqlalchemy import JSON, ForeignKey, UniqueConstraint
+from sqlalchemy import JSON, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.core.database import Base
@@ -13,7 +13,9 @@ class ActivePrintSpoolman(Base):
     to report per-filament usage to the correct Spoolman spools.
     Rows are deleted after print completes.
 
-    Key: (printer_id, archive_id) - allows same archive on different printers
+    ``job_id`` is the physical-attempt owner. ``archive_id`` remains the
+    reusable content projection and is retained for reporting compatibility.
+    Legacy rows may have no job_id until they are naturally retired.
     """
 
     __tablename__ = "active_print_spoolman"
@@ -22,6 +24,7 @@ class ActivePrintSpoolman(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     printer_id: Mapped[int] = mapped_column(ForeignKey("printers.id", ondelete="CASCADE"))
     archive_id: Mapped[int] = mapped_column(ForeignKey("print_archives.id", ondelete="CASCADE"))
+    job_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
 
     # Per-filament usage from 3MF: [{"slot_id": 1, "used_g": 50.5, "type": "PLA"}, ...]
     # Nullable for the no-3MF case ("Untitled" prints where Bambu didn't keep a

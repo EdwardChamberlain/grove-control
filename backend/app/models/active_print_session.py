@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey
+from sqlalchemy import JSON, DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.core.database import Base
@@ -32,6 +32,10 @@ class ActivePrintSession(Base):
     __tablename__ = "active_print_sessions"
 
     printer_id: Mapped[int] = mapped_column(ForeignKey("printers.id", ondelete="CASCADE"), primary_key=True)
+    # A printer has one live attribution session, but that session belongs to
+    # one durable physical PrintJob.  This prevents a late completion or
+    # restart recovery from consuming the next job's usage context.
+    job_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
 
     print_name: Mapped[str] = mapped_column(default="")
     started_at: Mapped[datetime] = mapped_column(DateTime)
