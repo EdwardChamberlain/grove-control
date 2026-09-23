@@ -151,7 +151,7 @@ function InlineMappingEditor({
           disabled={isRefreshing}
         >
           <RefreshCw className={`w-3 h-3 ${isRefreshing ? 'animate-spin' : ''}`} />
-          <span>Re-read</span>
+          <span>{t('printModal.printerSelector.reRead')}</span>
         </button>
       </div>
 
@@ -211,12 +211,15 @@ export function PrinterSelector({
   // State for showing all printers vs only matching model
   const [showAllPrinters, setShowAllPrinters] = useState(false);
 
-  // Filter printers based on showInactive flag
-  const activePrinters = showInactive ? printers : printers.filter((p) => p.is_active);
+  // Inactive printers are listed only when showInactive is set (so an edited
+  // item's original printer stays visible), but model-based assignment only
+  // ever targets active printers — the backend rejects a model without one.
+  const assignablePrinters = useMemo(() => printers.filter((p) => p.is_active), [printers]);
+  const listedPrinters = showInactive ? printers : assignablePrinters;
 
   // Fetch printer statuses to determine busy/idle state
   const statusQueries = useQueries({
-    queries: activePrinters.map((printer) => ({
+    queries: listedPrinters.map((printer) => ({
       queryKey: ['printerStatus', printer.id],
       queryFn: () => api.getPrinterStatus(printer.id),
       staleTime: 5000,
@@ -226,14 +229,14 @@ export function PrinterSelector({
   // Build a map of printer ID -> status for quick lookup
   const printerStatusMap = useMemo(() => {
     const map = new Map<number, PrinterStatus>();
-    activePrinters.forEach((printer, idx) => {
+    listedPrinters.forEach((printer, idx) => {
       const query = statusQueries[idx];
       if (query?.data) {
         map.set(printer.id, query.data);
       }
     });
     return map;
-  }, [activePrinters, statusQueries]);
+  }, [listedPrinters, statusQueries]);
 
   const isPrinterBusy = (printerId: number): boolean => {
     const status = printerStatusMap.get(printerId);
@@ -245,39 +248,39 @@ export function PrinterSelector({
   const getPrinterStateLabel = (printerId: number): string | null => {
     const status = printerStatusMap.get(printerId);
     if (!status) return null;
-    if (!status.connected) return 'Offline';
+    if (!status.connected) return t('printModal.printerSelector.stateOffline');
     const state = status.state;
     if (!state) return null;
-    if (state === 'RUNNING') return status.stg_cur_name || 'Printing';
-    if (state === 'PREPARE') return 'Preparing';
-    if (state === 'PAUSE') return 'Paused';
-    if (state === 'IDLE') return 'Idle';
-    if (state === 'FINISH') return 'Finished';
-    if (state === 'FAILED') return 'Failed';
+    if (state === 'RUNNING') return status.stg_cur_name || t('printModal.printerSelector.statePrinting');
+    if (state === 'PREPARE') return t('printModal.printerSelector.statePreparing');
+    if (state === 'PAUSE') return t('printModal.printerSelector.statePaused');
+    if (state === 'IDLE') return t('printModal.printerSelector.stateIdle');
+    if (state === 'FINISH') return t('printModal.printerSelector.stateFinished');
+    if (state === 'FAILED') return t('printModal.printerSelector.stateFailed');
     return state;
   };
 
   // Filter by sliced model (only in printer mode, when slicedForModel is set)
   const displayPrinters = useMemo(() => {
     if (assignmentMode !== 'printer' || !slicedForModel || showAllPrinters) {
-      return activePrinters;
+      return listedPrinters;
     }
     // Filter to only show printers matching the sliced model
-    const matching = activePrinters.filter((p) => p.model === slicedForModel);
+    const matching = listedPrinters.filter((p) => p.model === slicedForModel);
     // If no matching printers, show all
-    return matching.length > 0 ? matching : activePrinters;
-  }, [activePrinters, assignmentMode, slicedForModel, showAllPrinters]);
+    return matching.length > 0 ? matching : listedPrinters;
+  }, [listedPrinters, assignmentMode, slicedForModel, showAllPrinters]);
 
   // Check if there are hidden printers due to model filtering
-  const hiddenPrinterCount = activePrinters.length - displayPrinters.length;
+  const hiddenPrinterCount = listedPrinters.length - displayPrinters.length;
 
   // Get unique models from available printers (for model-based assignment)
   const uniqueModels = useMemo(() => {
-    const models = activePrinters
+    const models = assignablePrinters
       .map(p => p.model)
       .filter((m): m is string => Boolean(m));
     return [...new Set(models)].sort();
-  }, [activePrinters]);
+  }, [assignablePrinters]);
 
   // Keep model-based assignment aligned with the sliced file when possible.
   // For files without a known target model, preserve the existing first-model
@@ -287,22 +290,19 @@ export function PrinterSelector({
     return uniqueModels[0] ?? null;
   }, [slicedForModel, uniqueModels]);
 
-  const previousDefaultModel = useRef<string | null>(null);
+  // The model this component last picked on the user's behalf. Only that
+  // pick may be replaced automatically — a model the user chose, or one
+  // loaded from an existing queue item, is left alone.
+  const autoSelectedModel = useRef<string | null>(null);
 
   useEffect(() => {
-    if (assignmentMode !== 'model' || !onTargetModelChange) {
-      previousDefaultModel.current = defaultModel;
-      return;
-    }
+    if (assignmentMode !== 'model' || !onTargetModelChange || !defaultModel) return;
 
-    // Replace a fallback if sliced metadata arrives after the printer list,
-    // but preserve a model the user selected explicitly in the meantime.
-    const canUpdateSelection = !targetModel || targetModel === previousDefaultModel.current;
-    if (defaultModel && canUpdateSelection) {
-      onTargetModelChange(defaultModel);
+    // Replace a fallback if sliced metadata arrives after the printer list.
+    if (!targetModel || targetModel === autoSelectedModel.current) {
+      autoSelectedModel.current = defaultModel;
+      if (targetModel !== defaultModel) onTargetModelChange(defaultModel);
     }
-
-    previousDefaultModel.current = defaultModel;
   }, [assignmentMode, defaultModel, onTargetModelChange, targetModel]);
 
   // A printer may not have a model until it has reported one. Keep those
@@ -311,23 +311,23 @@ export function PrinterSelector({
   useEffect(() => {
     if (
       assignmentMode === 'model'
-      && activePrinters.length > 0
+      && listedPrinters.length > 0
       && uniqueModels.length === 0
       && onAssignmentModeChange
     ) {
       onAssignmentModeChange('printer');
     }
-  }, [activePrinters.length, assignmentMode, onAssignmentModeChange, uniqueModels.length]);
+  }, [listedPrinters.length, assignmentMode, onAssignmentModeChange, uniqueModels.length]);
 
   // Get unique locations for the selected target model (for location filtering)
   const uniqueLocations = useMemo(() => {
     if (!targetModel) return [];
-    const locations = activePrinters
+    const locations = assignablePrinters
       .filter(p => p.model === targetModel && p.location)
       .map(p => p.location)
       .filter((l): l is string => Boolean(l));
     return [...new Set(locations)].sort();
-  }, [activePrinters, targetModel]);
+  }, [assignablePrinters, targetModel]);
 
   // Check if model-based assignment is available (need callbacks and multiple printers of same model)
   const modelAssignmentAvailable = onAssignmentModeChange && onTargetModelChange && uniqueModels.length > 0;
@@ -352,7 +352,7 @@ export function PrinterSelector({
     return (
       <div className="flex items-center gap-2 text-red-400 text-sm mb-4">
         <AlertCircle className="w-4 h-4" />
-        No {showInactive ? '' : 'active '}printers available
+        {showInactive ? t('printModal.printerSelector.noPrinters') : t('printModal.printerSelector.noActivePrinters')}
       </div>
     );
   }
@@ -399,7 +399,7 @@ export function PrinterSelector({
 
   const isSelected = (printerId: number) => selectedPrinterIds.includes(printerId);
   const selectedCount = selectedPrinterIds.length;
-  const selectedModelLabel = targetModel || defaultModel || slicedForModel || 'Model';
+  const selectedModelLabel = targetModel || defaultModel || slicedForModel;
 
   const getPrinterMappingResult = (printerId: number) => {
     return printerMappingResults?.find((r) => r.printerId === printerId);
@@ -415,6 +415,7 @@ export function PrinterSelector({
             onClick={() => {
               onAssignmentModeChange!('model');
               onMultiSelect([]);
+              autoSelectedModel.current = defaultModel;
               onTargetModelChange!(defaultModel);
             }}
             className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
@@ -424,7 +425,11 @@ export function PrinterSelector({
             }`}
           >
             <Users className="w-4 h-4" />
-            <span className="text-sm">{`Any ${selectedModelLabel}`}</span>
+            <span className="text-sm">
+              {selectedModelLabel
+                ? t('printModal.printerSelector.anyModel', { model: selectedModelLabel })
+                : t('printModal.printerSelector.anyModelGeneric')}
+            </span>
           </button>
           <button
             type="button"
@@ -439,7 +444,7 @@ export function PrinterSelector({
             }`}
           >
             <PrinterIcon className="w-4 h-4" />
-            <span className="text-sm">Specific Printer</span>
+            <span className="text-sm">{t('printModal.printerSelector.specificPrinter')}</span>
           </button>
         </div>
       )}
@@ -450,10 +455,12 @@ export function PrinterSelector({
           {/* Model selector — only show when sliced model is unknown */}
           {!slicedForModel && (
             <div>
-              <label className="block text-xs text-bambu-gray mb-1">Target Model</label>
+              <label htmlFor="printer-selector-target-model" className="block text-xs text-bambu-gray mb-1">
+                {t('printModal.printerSelector.targetModel')}
+              </label>
               <ReactSelect
+                id="printer-selector-target-model"
                 value={targetModel || ''}
-                aria-label="Target Model"
                 onChange={(e) => {
                   onTargetModelChange!(e.target.value || null);
                   // Clear location when model changes
@@ -463,7 +470,7 @@ export function PrinterSelector({
                 }}
                 className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
               >
-                <option value="">Select a model...</option>
+                <option value="">{t('printModal.printerSelector.selectModel')}</option>
                 {uniqueModels.map((model) => (
                   <option key={model} value={model}>
                     {model}
@@ -476,13 +483,16 @@ export function PrinterSelector({
           {/* Location filter (only show when target model is selected and locations exist) */}
           {targetModel && uniqueLocations.length > 0 && onTargetLocationChange && (
             <div>
-              <label className="block text-xs text-bambu-gray mb-1">Location Filter (optional)</label>
+              <label htmlFor="printer-selector-target-location" className="block text-xs text-bambu-gray mb-1">
+                {t('printModal.printerSelector.locationFilter')}
+              </label>
               <ReactSelect
+                id="printer-selector-target-location"
                 value={targetLocation || ''}
                 onChange={(e) => onTargetLocationChange(e.target.value || null)}
                 className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none text-sm"
               >
-                <option value="">Any location</option>
+                <option value="">{t('printModal.printerSelector.anyLocation')}</option>
                 {uniqueLocations.map((location) => (
                   <option key={location} value={location}>
                     {location}
@@ -495,8 +505,9 @@ export function PrinterSelector({
           {/* Info text */}
           {targetModel && (
             <p className="text-xs text-bambu-gray">
-              Scheduler will assign to first available idle {targetModel} printer
-              {targetLocation ? ` in ${targetLocation}` : ''}
+              {targetLocation
+                ? t('printModal.printerSelector.schedulerAssignsInLocation', { model: targetModel, location: targetLocation })
+                : t('printModal.printerSelector.schedulerAssigns', { model: targetModel })}
             </p>
           )}
         </div>
@@ -507,8 +518,8 @@ export function PrinterSelector({
         <div className="flex items-center justify-between text-xs text-bambu-gray mb-2">
           <span>
             {selectedCount === 0
-              ? 'Select printers'
-              : `${selectedCount} printer${selectedCount !== 1 ? 's' : ''} selected`}
+              ? t('printModal.printerSelector.selectPrinters')
+              : t('printModal.printerSelector.printersSelected', { count: selectedCount })}
           </span>
           <div className="flex gap-2">
             {selectedCount < displayPrinters.length && (
@@ -517,7 +528,7 @@ export function PrinterSelector({
                 onClick={handleSelectAll}
                 className="text-bambu-green hover:text-bambu-green/80 transition-colors"
               >
-                Select all
+                {t('printModal.printerSelector.selectAll')}
               </button>
             )}
             {selectedCount > 0 && (
@@ -526,7 +537,7 @@ export function PrinterSelector({
                 onClick={handleDeselectAll}
                 className="text-bambu-gray hover:text-white transition-colors"
               >
-                Clear
+                {t('printModal.printerSelector.clear')}
               </button>
             )}
           </div>
@@ -571,10 +582,10 @@ export function PrinterSelector({
               <div className="text-left flex-1">
                 <p className={`font-medium ${disabled ? 'text-bambu-gray' : 'text-white'}`}>
                   {printer.name}
-                  {!printer.is_active && <span className="text-bambu-gray text-xs ml-2">(inactive)</span>}
+                  {!printer.is_active && <span className="text-bambu-gray text-xs ml-2">{t('printModal.printerSelector.inactive')}</span>}
                 </p>
                 <p className="text-xs text-bambu-gray">
-                  {printer.model || 'Unknown model'} • {printer.ip_address}
+                  {printer.model || t('printModal.printerSelector.unknownModel')} • {printer.ip_address}
                 </p>
               </div>
               {stateLabel && (
@@ -627,7 +638,7 @@ export function PrinterSelector({
                       ? 'text-yellow-400'
                       : 'text-orange-400'
                   }`}>
-                    ({mappingResult.exactMatches}/{mappingResult.totalSlots} matched)
+                    {t('printModal.printerSelector.matched', { matched: mappingResult.exactMatches, total: mappingResult.totalSlots })}
                   </span>
 
                   {/* Loading indicator */}
@@ -646,7 +657,7 @@ export function PrinterSelector({
                       className="ml-auto flex items-center gap-1 px-2 py-0.5 text-xs rounded border border-bambu-gray/30 hover:border-bambu-gray hover:bg-bambu-dark-tertiary transition-colors text-bambu-gray hover:text-white"
                     >
                       <Wand2 className="w-3 h-3" />
-                      Auto
+                      {t('printModal.printerSelector.auto')}
                     </button>
                   )}
                 </div>
@@ -673,8 +684,8 @@ export function PrinterSelector({
           className="text-xs text-bambu-gray hover:text-white transition-colors mt-2 flex items-center gap-1"
         >
           <AlertTriangle className="w-3 h-3 text-yellow-400" />
-          {hiddenPrinterCount} other printer{hiddenPrinterCount > 1 ? 's' : ''} hidden (different model) —
-          <span className="underline">show all</span>
+          {t('printModal.printerSelector.hiddenPrinters', { count: hiddenPrinterCount })}
+          <span className="underline">{t('printModal.printerSelector.showAll')}</span>
         </button>
       )}
 
@@ -685,7 +696,7 @@ export function PrinterSelector({
           onClick={() => setShowAllPrinters(false)}
           className="text-xs text-bambu-gray hover:text-white transition-colors mt-2"
         >
-          <span className="underline">Show only {slicedForModel} printers</span>
+          <span className="underline">{t('printModal.printerSelector.showOnlyModel', { model: slicedForModel })}</span>
         </button>
       )}
 
@@ -693,7 +704,7 @@ export function PrinterSelector({
       {assignmentMode === 'printer' && selectedCount === 0 && (
         <p className="text-xs text-orange-400 mt-1 flex items-center gap-1">
           <AlertCircle className="w-3 h-3" />
-          Select at least one printer
+          {t('printModal.printerSelector.selectAtLeastOnePrinter')}
         </p>
       )}
 
@@ -701,7 +712,7 @@ export function PrinterSelector({
       {assignmentMode === 'model' && !targetModel && (
         <p className="text-xs text-orange-400 mt-1 flex items-center gap-1">
           <AlertCircle className="w-3 h-3" />
-          Select a target printer model
+          {t('printModal.printerSelector.selectTargetModel')}
         </p>
       )}
     </div>

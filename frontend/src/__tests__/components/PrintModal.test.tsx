@@ -3,7 +3,7 @@
  *
  * The PrintModal supports two modes:
  * - 'create': Create a print queue item
- * - 'edit-queue-item': Edit existing queue item (single printer)
+ * - 'edit-queue-item': Edit an existing queue item
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -1498,6 +1498,150 @@ describe('PrintModal', () => {
       // PrinterSelector shows printer names directly
       await waitFor(() => {
         expect(screen.getByText('P1S')).toBeInTheDocument();
+      });
+    });
+
+    describe('retargeting (#184)', () => {
+      const capturePatch = () => {
+        const captured: { body: Record<string, unknown> | null } = { body: null };
+        server.use(
+          http.patch('/api/v1/queue/:id', async ({ request }) => {
+            captured.body = (await request.json()) as Record<string, unknown>;
+            return HttpResponse.json({ id: 1, status: 'pending' });
+          }),
+        );
+        return captured;
+      };
+
+      const renderEdit = (item: PrintQueueItem, onClose = mockOnClose) =>
+        render(
+          <PrintModal
+            mode="edit-queue-item"
+            archiveId={1}
+            archiveName="Test Print"
+            queueItem={item}
+            onClose={onClose}
+          />,
+        );
+
+      it('moves a specific-printer item to any printer of a model and drops its slot mapping', async () => {
+        const captured = capturePatch();
+        const user = userEvent.setup();
+        renderEdit(createMockQueueItem({ printer_id: 1, ams_mapping: [0, 1] }));
+
+        await user.click(await screen.findByRole('button', { name: /^any /i }));
+        await user.click(await screen.findByRole('combobox', { name: /target model/i }));
+        await user.click(await screen.findByRole('option', { name: 'P1S' }));
+        await user.click(screen.getByRole('button', { name: /save/i }));
+
+        await waitFor(() => expect(captured.body).not.toBeNull());
+        expect(captured.body).toMatchObject({ printer_id: null, target_model: 'P1S', ams_mapping: null });
+      });
+
+      it('moves a model-based item to a specific printer', async () => {
+        const captured = capturePatch();
+        const user = userEvent.setup();
+        renderEdit(createMockQueueItem({ printer_id: null, target_model: 'X1C', target_location: 'Workshop' }));
+
+        await user.click(await screen.findByRole('button', { name: /specific printer/i }));
+        await user.click(await screen.findByRole('button', { name: /P1S/ }));
+        await user.click(screen.getByRole('button', { name: /save/i }));
+
+        await waitFor(() => expect(captured.body).not.toBeNull());
+        expect(captured.body).toMatchObject({ printer_id: 2, target_model: null, target_location: null });
+      });
+
+      it('keeps the saved target model when the sliced model loads afterwards', async () => {
+        server.use(
+          http.get('/api/v1/archives/:id', () => HttpResponse.json({ id: 1, sliced_for_model: 'P1S' })),
+        );
+        const captured = capturePatch();
+        const user = userEvent.setup();
+        renderEdit(createMockQueueItem({ printer_id: null, target_model: 'X1C' }));
+
+        await screen.findByRole('button', { name: /any x1c/i });
+        await user.click(screen.getByRole('button', { name: /save/i }));
+
+        await waitFor(() => expect(captured.body).not.toBeNull());
+        expect(captured.body).toMatchObject({ target_model: 'X1C' });
+      });
+
+      it('lists an inactive original printer but does not offer its model as a target', async () => {
+        server.use(
+          http.get('/api/v1/printers/', () => HttpResponse.json([
+            ...mockPrinters,
+            { id: 4, name: 'Old H2D', model: 'H2D', ip_address: '192.168.1.104', enabled: true, is_active: false },
+          ])),
+        );
+        const user = userEvent.setup();
+        renderEdit(createMockQueueItem({ printer_id: 4 }));
+
+        expect(await screen.findByText('Old H2D')).toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: /^any /i }));
+        await user.click(await screen.findByRole('combobox', { name: /target model/i }));
+        expect(await screen.findByRole('option', { name: 'P1S' })).toBeInTheDocument();
+        expect(screen.queryByRole('option', { name: 'H2D' })).not.toBeInTheDocument();
+      });
+
+      it('keeps print options visible while no printer is selected', async () => {
+        const user = userEvent.setup();
+        renderEdit(createMockQueueItem({ printer_id: null, target_model: 'X1C' }));
+
+        await user.click(await screen.findByRole('button', { name: /specific printer/i }));
+
+        expect(screen.getByText(/select at least one printer/i)).toBeInTheDocument();
+        expect(screen.getByText(/print options/i)).toBeInTheDocument();
+      });
+
+      it('warns about insufficient filament when saving, as creating does', async () => {
+        server.use(
+          http.get('/api/v1/archives/:id/filament-requirements', () => HttpResponse.json({
+            filaments: [{ slot_id: 1, type: 'PLA', color: '#FF0000', used_grams: 100, used_meters: 30 }],
+          })),
+          http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+            connected: true,
+            state: 'IDLE',
+            ams: [{ id: 0, tray: [
+              { id: 0, tray_type: 'PLA', tray_color: 'FF0000FF', remain: 5 },
+              { id: 1, tray_type: 'PETG', tray_color: '000000FF', remain: 80 },
+            ] }],
+            vt_tray: [],
+          })),
+          http.get('/api/v1/inventory/assignments', () => {
+            assignmentRequests += 1;
+            return HttpResponse.json([
+              { id: 1, printer_id: 1, ams_id: 0, tray_id: 0, spool_id: 1, spool: { id: 1, label_weight: 1000, weight_used: 950 } },
+            ]);
+          }),
+        );
+        let assignmentRequests = 0;
+        const captured = capturePatch();
+        const user = userEvent.setup();
+        renderEdit(createMockQueueItem({ printer_id: 1 }));
+
+        // The modal and the mapping panel each load spool assignments. Picking
+        // the tray by its remaining weight proves printer status and spool data
+        // have both arrived before saving.
+        await waitFor(() => expect(assignmentRequests).toBeGreaterThanOrEqual(2));
+        await user.click(await screen.findByRole('button', { name: /filament mapping/i }));
+        await user.click(await screen.findByRole('combobox', { name: /PLA filament profile/i }));
+        await user.click(await screen.findByRole('option', { name: /50g left/i }));
+        await user.click(screen.getByRole('button', { name: /save/i }));
+
+        expect(await screen.findByText('Not enough filament')).toBeInTheDocument();
+        expect(captured.body).toBeNull();
+      });
+
+      it('closes once and shows a single toast after saving', async () => {
+        const onClose = vi.fn();
+        const user = userEvent.setup();
+        renderEdit(createMockQueueItem(), onClose);
+
+        await screen.findByText('X1 Carbon');
+        await user.click(screen.getByRole('button', { name: /save/i }));
+
+        await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+        expect(await screen.findAllByText('Queue item updated')).toHaveLength(1);
       });
     });
   });
