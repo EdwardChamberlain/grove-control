@@ -67,6 +67,7 @@ export function PrintModal({
   // Editing changes one existing queue item, so options that fan a single
   // submission out into several items are only offered when creating.
   const allowMultiplePlates = !isEditing;
+  const allowMultiplePrinters = !isEditing;
   const allowQuantity = !isEditing;
 
   // Cross-model alternatives (#671). One candidate is not a choice, so a
@@ -865,6 +866,49 @@ export function PrintModal({
       return;
     }
 
+    // Editing updates the one existing item and never creates new jobs, so it
+    // returns here rather than entering the plate × printer fan-out below.
+    if (isEditing) {
+      const printerId = assignmentMode === 'printer' ? selectedPrinters[0] : null;
+      const updateData: PrintQueueItemUpdate = {
+        printer_id: printerId,
+        target_model: assignmentMode === 'model' ? targetModel : null,
+        target_location: assignmentMode === 'model' ? targetLocation : null,
+        filament_overrides: getFilamentOverridesForPrinter(printerId) || null,
+        force_color_match: forceColorMatch,
+        require_previous_success: scheduleOptions.requirePreviousSuccess,
+        wait_for_drying_complete: scheduleOptions.waitForDryingComplete,
+        chamber_heat_soak: scheduleOptions.chamberHeatSoak,
+        heat_soak_temperature: scheduleOptions.chamberHeatSoak ? scheduleOptions.heatSoakTemperature : 60,
+        heat_soak_minutes: scheduleOptions.chamberHeatSoak ? scheduleOptions.heatSoakMinutes : 30,
+        auto_off_after: canAutoOffAfterPrint ? scheduleOptions.autoOffAfter : false,
+        gcode_injection: scheduleOptions.gcodeInjection,
+        manual_start: scheduleOptions.requireManualStart,
+        // A model-based item gets null so the scheduler maps against whichever
+        // printer picks it up, rather than a previous printer's slots (#184).
+        ams_mapping: printerId ? getMappingForPrinter(printerId) ?? null : null,
+        plate_id: selectedPlate,
+        scheduled_time: scheduleOptions.postponePrint && scheduleOptions.scheduledTime
+          ? new Date(scheduleOptions.scheduledTime).toISOString()
+          : null,
+        // Persist "Print Anyway" so the scheduler doesn't re-hold the item.
+        skip_filament_check: options?.skipFilamentCheck === true ? true : undefined,
+        ...printOptions,
+      };
+      try {
+        await updateQueueMutation.mutateAsync(updateData);
+        showToast(t('printModal.queueItemUpdated'));
+        queryClient.invalidateQueries({ queryKey: ['queue'] });
+        onSuccess?.();
+        onClose();
+      } catch (error) {
+        showToast(`Failed: ${(error as Error).message}`, 'error');
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
     const topInsertionCounts = new Map<string, number>();
 
     const applyTopInsertion = (
@@ -880,7 +924,7 @@ export function PrintModal({
       topInsertionCounts.set(scopeKey, insertPosition + itemCount - 1);
     };
 
-    // Common queue data for create and edit modes
+    // Queue data for each created item
     const getQueueData = (printerId: number | null, plateOverride?: number | null): PrintQueueItemCreate => {
       const printerOverrides = getFilamentOverridesForPrinter(printerId);
       return {
@@ -927,40 +971,11 @@ export function PrintModal({
         const plateId = plate ? plate.index : selectedPlate;
 
         try {
-          if (isEditing && !plate) {
-            // Edit mode - update with target_model (only for single plate)
-            const updateData: PrintQueueItemUpdate = {
-              printer_id: null,
-              target_model: targetModel,
-              target_location: targetLocation,
-              filament_overrides: filamentOverridesArray || null,
-              force_color_match: forceColorMatch,
-              require_previous_success: scheduleOptions.requirePreviousSuccess,
-              wait_for_drying_complete: scheduleOptions.waitForDryingComplete,
-              chamber_heat_soak: scheduleOptions.chamberHeatSoak,
-              heat_soak_temperature: scheduleOptions.chamberHeatSoak ? scheduleOptions.heatSoakTemperature : 60,
-              heat_soak_minutes: scheduleOptions.chamberHeatSoak ? scheduleOptions.heatSoakMinutes : 30,
-              auto_off_after: scheduleOptions.autoOffAfter,
-              gcode_injection: scheduleOptions.gcodeInjection,
-              manual_start: scheduleOptions.requireManualStart,
-              // Clear any mapping from a previous specific-printer assignment so the
-              // scheduler computes one for whichever printer picks the job up (#184).
-              ams_mapping: null,
-              plate_id: plateId,
-              scheduled_time: scheduleOptions.postponePrint && scheduleOptions.scheduledTime
-                ? new Date(scheduleOptions.scheduledTime).toISOString()
-                : null,
-              ...printOptions,
-            };
-            await updateQueueMutation.mutateAsync(updateData);
-          } else {
-            // Add-to-queue mode with model-based assignment
-            const queueData = getQueueData(null, plateId);
-            const plateQuantity = quantityForPlate(plateId);
-            if (plateQuantity > 1) queueData.quantity = plateQuantity;
-            applyTopInsertion(queueData, null, plateQuantity);
-            await addToQueueMutation.mutateAsync(queueData);
-          }
+          const queueData = getQueueData(null, plateId);
+          const plateQuantity = quantityForPlate(plateId);
+          if (plateQuantity > 1) queueData.quantity = plateQuantity;
+          applyTopInsertion(queueData, null, plateQuantity);
+          await addToQueueMutation.mutateAsync(queueData);
           results.success++;
         } catch (error) {
           results.failed++;
@@ -980,40 +995,11 @@ export function PrintModal({
           setSubmitProgress({ current: progressCounter, total: totalCount });
 
           try {
-            if (isEditing && progressCounter === 1) {
-              // Edit mode - update the original queue item for the first entry
-              const printerMapping = getMappingForPrinter(printerId);
-              const printerOverrides = getFilamentOverridesForPrinter(printerId);
-              const updateData: PrintQueueItemUpdate = {
-                printer_id: printerId,
-                target_model: null,
-                target_location: null,
-                filament_overrides: printerOverrides || null,
-                force_color_match: forceColorMatch,
-                require_previous_success: scheduleOptions.requirePreviousSuccess,
-                wait_for_drying_complete: scheduleOptions.waitForDryingComplete,
-                chamber_heat_soak: scheduleOptions.chamberHeatSoak,
-                heat_soak_temperature: scheduleOptions.chamberHeatSoak ? scheduleOptions.heatSoakTemperature : 60,
-                heat_soak_minutes: scheduleOptions.chamberHeatSoak ? scheduleOptions.heatSoakMinutes : 30,
-                auto_off_after: scheduleOptions.autoOffAfter,
-                gcode_injection: scheduleOptions.gcodeInjection,
-                manual_start: scheduleOptions.requireManualStart,
-                ams_mapping: printerMapping,
-                plate_id: plateId,
-                scheduled_time: scheduleOptions.postponePrint && scheduleOptions.scheduledTime
-                  ? new Date(scheduleOptions.scheduledTime).toISOString()
-                  : null,
-                ...printOptions,
-              };
-              await updateQueueMutation.mutateAsync(updateData);
-            } else {
-              // New print mode, staggered print, or edit mode with additional entries
-              const queueData = getQueueData(printerId, plateId);
-              const plateQuantity = quantityForPlate(plateId);
-              if (plateQuantity > 1) queueData.quantity = plateQuantity;
-              applyTopInsertion(queueData, printerId, plateQuantity);
-              await addToQueueMutation.mutateAsync(queueData);
-            }
+            const queueData = getQueueData(printerId, plateId);
+            const plateQuantity = quantityForPlate(plateId);
+            if (plateQuantity > 1) queueData.quantity = plateQuantity;
+            applyTopInsertion(queueData, printerId, plateQuantity);
+            await addToQueueMutation.mutateAsync(queueData);
             results.success++;
           } catch (error) {
             results.failed++;
@@ -1030,9 +1016,7 @@ export function PrintModal({
 
     // Show result toast
     if (results.failed === 0) {
-      if (isEditing) {
-        showToast(t('printModal.queueItemUpdated'));
-      } else if (results.success === 1) {
+      if (results.success === 1) {
         showToast(
           assignmentMode === 'model'
               ? `Queued for any ${targetModel}`
@@ -1148,9 +1132,7 @@ export function PrintModal({
       icon: Pencil,
       submitText: t('common.save'),
       submitIcon: Pencil,
-      loadingText: submitProgress.total > 1
-        ? t('queue.savingProgress', { current: submitProgress.current, total: submitProgress.total })
-        : t('common.saving'),
+      loadingText: t('common.saving'),
     };
   };
 
@@ -1297,7 +1279,7 @@ export function PrintModal({
                 selectedPrinterIds={selectedPrinters}
                 onMultiSelect={setSelectedPrinters}
                 isLoading={loadingPrinters}
-                allowMultiple={!initialSelectedPrinterIds?.length}
+                allowMultiple={allowMultiplePrinters && !initialSelectedPrinterIds?.length}
                 showInactive={isEditing}
                 disableBusy={false}
                 printerMappingResults={multiPrinterMapping.printerResults}

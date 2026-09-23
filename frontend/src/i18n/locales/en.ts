@@ -1096,7 +1096,6 @@ export default {
     sendingProgress: 'Sending {{current}}/{{total}}...',
     adding: 'Adding...',
     addingProgress: 'Adding {{current}}/{{total}}...',
-    savingProgress: 'Saving {{current}}/{{total}}...',
     clearQueue: 'Clear Queue',
     clearHistory: 'Clear History',
     emptyQueue: 'Queue is empty',

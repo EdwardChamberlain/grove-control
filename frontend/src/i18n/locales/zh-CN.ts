@@ -1082,7 +1082,6 @@ export default {
     sendingProgress: '发送中 {{current}}/{{total}}...',
     adding: '添加中...',
     addingProgress: '添加中 {{current}}/{{total}}...',
-    savingProgress: '保存中 {{current}}/{{total}}...',
     clearQueue: '清空队列',
     clearHistory: '清除历史',
     emptyQueue: '队列为空',

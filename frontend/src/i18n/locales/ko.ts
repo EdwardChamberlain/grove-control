@@ -1028,7 +1028,6 @@ export default {
     sendingProgress: '{{current}}/{{total}} 전송 중...',
     adding: '추가 중...',
     addingProgress: '{{current}}/{{total}} 추가 중...',
-    savingProgress: '{{current}}/{{total}} 저장 중...',
     clearQueue: '대기열 지우기',
     clearHistory: '기록 지우기',
     emptyQueue: '대기열이 비어 있습니다',

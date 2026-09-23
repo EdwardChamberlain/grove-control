@@ -1082,7 +1082,6 @@ export default {
     sendingProgress: 'Sende {{current}}/{{total}}...',
     adding: 'Wird hinzugefügt...',
     addingProgress: 'Füge hinzu {{current}}/{{total}}...',
-    savingProgress: 'Speichere {{current}}/{{total}}...',
     clearQueue: 'Warteschlange leeren',
     clearHistory: 'Verlauf löschen',
     emptyQueue: 'Warteschlange ist leer',

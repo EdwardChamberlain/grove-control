@@ -1082,7 +1082,6 @@ export default {
     sendingProgress: 'Gönderiliyor {{current}}/{{total}}...',
     adding: 'Ekleniyor...',
     addingProgress: 'Ekleniyor {{current}}/{{total}}...',
-    savingProgress: 'Kaydediliyor {{current}}/{{total}}...',
     clearQueue: 'Kuyruğu Temizle',
     clearHistory: 'Geçmişi Temizle',
     emptyQueue: 'Kuyruk boş',

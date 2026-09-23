@@ -329,6 +329,17 @@ export function PrinterSelector({
     return [...new Set(locations)].sort();
   }, [assignablePrinters, targetModel]);
 
+  // A location only applies while it names one of the target model's active
+  // printers. Clear any other (e.g. saved for a previous model) so the
+  // dropdown and the saved job never disagree — "Any location" on screen
+  // while a stale location that no printer matches is submitted.
+  useEffect(() => {
+    if (isLoading || !targetLocation || !onTargetLocationChange) return;
+    if (!targetModel || !uniqueLocations.includes(targetLocation)) {
+      onTargetLocationChange(null);
+    }
+  }, [isLoading, targetModel, targetLocation, uniqueLocations, onTargetLocationChange]);
+
   // Check if model-based assignment is available (need callbacks and multiple printers of same model)
   const modelAssignmentAvailable = onAssignmentModeChange && onTargetModelChange && uniqueModels.length > 0;
 

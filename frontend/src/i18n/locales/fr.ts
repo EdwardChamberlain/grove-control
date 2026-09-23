@@ -1082,7 +1082,6 @@ export default {
     sendingProgress: 'Envoi {{current}}/{{total}}...',
     adding: 'Ajout...',
     addingProgress: 'Ajout {{current}}/{{total}}...',
-    savingProgress: 'Enregistrement {{current}}/{{total}}...',
     clearQueue: 'Vider la file',
     clearHistory: 'Effacer l\'historique',
     emptyQueue: 'La file est vide',

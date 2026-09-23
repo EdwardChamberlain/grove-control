@@ -1082,7 +1082,6 @@ export default {
     sendingProgress: 'Enviando {{current}}/{{total}}...',
     adding: 'Adicionando...',
     addingProgress: 'Adicionando {{current}}/{{total}}...',
-    savingProgress: 'Salvando {{current}}/{{total}}...',
     clearQueue: 'Limpar Fila',
     clearHistory: 'Limpar Histórico',
     emptyQueue: 'Fila vazia',

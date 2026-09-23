@@ -161,6 +161,8 @@ class PrintQueueItemUpdate(BaseModel):
     require_previous_success: bool | None = None
     auto_off_after: bool | None = None
     manual_start: bool | None = None
+    # "Print Anyway" acknowledged from the edit dialog's filament warning
+    skip_filament_check: bool | None = None
     chamber_heat_soak: bool = False
     heat_soak_temperature: int = Field(default=60, ge=30, le=60, strict=True)
     heat_soak_minutes: int = Field(default=30, ge=1, le=120, strict=True)

@@ -1081,7 +1081,6 @@ export default {
     sendingProgress: '送信中 {{current}}/{{total}}...',
     adding: '追加中...',
     addingProgress: '追加中 {{current}}/{{total}}...',
-    savingProgress: '保存中 {{current}}/{{total}}...',
     clearQueue: 'キューをクリア',
     clearHistory: '履歴をクリア',
     emptyQueue: 'キューは空です',

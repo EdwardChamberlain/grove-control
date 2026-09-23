@@ -1630,6 +1630,83 @@ describe('PrintModal', () => {
 
         expect(await screen.findByText('Not enough filament')).toBeInTheDocument();
         expect(captured.body).toBeNull();
+
+        // Print Anyway must reach the saved item, or the scheduler re-holds it.
+        await user.click(screen.getByRole('button', { name: /print anyway/i }));
+        await waitFor(() => expect(captured.body).not.toBeNull());
+        expect(captured.body).toMatchObject({ skip_filament_check: true });
+      });
+
+      it('edits one item: picking another printer replaces the selection and creates no jobs', async () => {
+        const captured = capturePatch();
+        let created = 0;
+        server.use(
+          http.post('/api/v1/queue/', () => {
+            created += 1;
+            return HttpResponse.json({ id: 2, status: 'pending' });
+          }),
+        );
+        const user = userEvent.setup();
+        renderEdit(createMockQueueItem({ printer_id: 1 }));
+
+        await user.click(await screen.findByRole('button', { name: /P1S/ }));
+        await user.click(screen.getByRole('button', { name: /save/i }));
+
+        await waitFor(() => expect(captured.body).not.toBeNull());
+        expect(captured.body).toMatchObject({ printer_id: 2 });
+        expect(created).toBe(0);
+        expect(screen.queryByText(/select all/i)).not.toBeInTheDocument();
+      });
+
+      describe('target location', () => {
+        beforeEach(() => {
+          server.use(
+            http.get('/api/v1/printers/', () => HttpResponse.json([
+              { ...mockPrinters[0], location: 'Workshop' },
+              { ...mockPrinters[1], location: 'Office' },
+              mockPrinters[2],
+            ])),
+          );
+        });
+
+        it('clears the location when switching assignment mode', async () => {
+          const captured = capturePatch();
+          const user = userEvent.setup();
+          renderEdit(createMockQueueItem({ printer_id: null, target_model: 'X1C', target_location: 'Workshop' }));
+
+          // Back to "Any" lands on the default model (A1M), which has no
+          // printer in the Workshop — the old location must not come along.
+          await user.click(await screen.findByRole('button', { name: /specific printer/i }));
+          await user.click(screen.getByRole('button', { name: /^any /i }));
+          await user.click(screen.getByRole('button', { name: /save/i }));
+
+          await waitFor(() => expect(captured.body).not.toBeNull());
+          expect(captured.body).toMatchObject({ target_model: 'A1M', target_location: null });
+        });
+
+        it('drops a saved location that no printer of the target model is in', async () => {
+          const captured = capturePatch();
+          const user = userEvent.setup();
+          renderEdit(createMockQueueItem({ printer_id: null, target_model: 'P1S', target_location: 'Workshop' }));
+
+          await screen.findByRole('button', { name: /any p1s/i });
+          await user.click(screen.getByRole('button', { name: /save/i }));
+
+          await waitFor(() => expect(captured.body).not.toBeNull());
+          expect(captured.body).toMatchObject({ target_model: 'P1S', target_location: null });
+        });
+
+        it('keeps a saved location that is still valid', async () => {
+          const captured = capturePatch();
+          const user = userEvent.setup();
+          renderEdit(createMockQueueItem({ printer_id: null, target_model: 'X1C', target_location: 'Workshop' }));
+
+          await screen.findByRole('button', { name: /any x1c/i });
+          await user.click(screen.getByRole('button', { name: /save/i }));
+
+          await waitFor(() => expect(captured.body).not.toBeNull());
+          expect(captured.body).toMatchObject({ target_model: 'X1C', target_location: 'Workshop' });
+        });
       });
 
       it('closes once and shows a single toast after saving', async () => {

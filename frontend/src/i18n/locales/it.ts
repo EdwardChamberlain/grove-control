@@ -1082,7 +1082,6 @@ export default {
     sendingProgress: 'Invio {{current}}/{{total}}...',
     adding: 'Aggiunta...',
     addingProgress: 'Aggiunta {{current}}/{{total}}...',
-    savingProgress: 'Salvataggio {{current}}/{{total}}...',
     clearQueue: 'Svuota coda',
     clearHistory: 'Svuota cronologia',
     emptyQueue: 'La coda è vuota',
