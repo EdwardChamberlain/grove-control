@@ -65,14 +65,14 @@ async def queue_db():
         await engine.dispose()
 
 
-async def _add_print_item(ctx):
+async def _add_print_item(ctx, *, sliced_for_model="P2S"):
     async with ctx.session_maker() as db:
         lib = LibraryFile(
             filename="job.gcode.3mf",
             file_path="/library/job.gcode.3mf",
             file_size=10,
             file_type="gcode.3mf",
-            file_metadata={"sliced_for_model": "P2S"},
+            file_metadata={"sliced_for_model": sliced_for_model},
         )
         db.add(lib)
         await db.flush()
@@ -174,7 +174,7 @@ async def test_a_failed_row_does_not_stop_the_queue(queue_db):
         printer.model = "P1S"  # drying is screen-only here
         await db.commit()
     await _add_drying_row(queue_db)
-    await _add_print_item(queue_db)
+    await _add_print_item(queue_db, sliced_for_model="P1S")
     scheduler = PrintScheduler()
     started = await _run(queue_db, scheduler, state=_state())
 

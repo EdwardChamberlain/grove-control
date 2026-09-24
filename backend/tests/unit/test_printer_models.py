@@ -25,7 +25,13 @@ class TestGcodeCompatibility:
     @pytest.mark.parametrize(
         ("sliced_for", "target", "expected"),
         [
-            ("C11", "P1S", True),  # slicer C11 means X1 Carbon; printer C11 means P1S
+            ("C11", "P1P", True),  # slicer C11 means X1 Carbon; printer C11 means P1P
+            ("C12", "P1S", True),  # slicer C12 means X1; printer C12 means P1S
+            ("C13", "X1E", True),  # C13 identifies X1E in both slicer and printer metadata
+            ("C13", "P2S", False),
+            ("P2S", "N7", True),
+            ("N7", "P2S", True),
+            ("X1E", "N7", False),
             ("BL-P001", "Bambu Lab X1 Carbon", True),
             ("Bambu Lab X1 Carbon", "X1C", True),
             ("O1E", "H2D Pro", True),

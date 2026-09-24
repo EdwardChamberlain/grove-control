@@ -30,14 +30,14 @@ const SLICED_MODEL_CODES: Record<string, string> = {
   C11: 'X1C', C12: 'X1', C13: 'X1E',
   BLP001: 'X1C', BLP002: 'X1', BLP003: 'X1E',
   O1D: 'H2D', O1E: 'H2DPRO', O2D: 'H2DPRO', O1C: 'H2C', O1C2: 'H2C', O1S: 'H2S',
-  N6: 'X2D', N9: 'A2L', N2S: 'A1', N1: 'A1MINI', A11: 'A1', A12: 'A1MINI', A04: 'A1MINI',
+  N6: 'X2D', N7: 'P2S', N9: 'A2L', N2S: 'A1', N1: 'A1MINI', A11: 'A1', A12: 'A1MINI', A04: 'A1MINI',
 };
 
 const PRINTER_MODEL_CODES: Record<string, string> = {
   ...SLICED_MODEL_CODES,
   // Printer rows can store their SSDP model code. These differ from the
-  // slicer's internal IDs for C11/C12/C13, so use the printer-page mapping.
-  C11: 'P1S', C12: 'P1P', C13: 'P2S',
+  // slicer's internal IDs for C11/C12, so use the printer-page mapping.
+  C11: 'P1P', C12: 'P1S', C13: 'X1E',
 };
 
 const PRINTER_DISPLAY_MODEL_NAMES: Record<string, string> = {

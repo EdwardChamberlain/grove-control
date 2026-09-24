@@ -59,7 +59,7 @@ PRINTER_MODEL_ID_MAP = {
 
 # Printer rows may retain the SSDP model code, while sliced-file metadata uses
 # a normalized model name. Keep this map separate from PRINTER_MODEL_ID_MAP:
-# C11/C12/C13 have different meanings in the printer protocol and slicer data.
+# C11/C12 identify P1P/P1S here but X1C/X1 in slicer metadata.
 PRINTER_SSDP_MODEL_MAP = {
     "BL-P001": "X1C",
     "BL-P002": "X1",
@@ -72,21 +72,22 @@ PRINTER_SSDP_MODEL_MAP = {
     "O1S": "H2S",
     "N6": "X2D",
     "N9": "A2L",
-    "C11": "P1S",
-    "C12": "P1P",
-    "C13": "P2S",
+    "C11": "P1P",
+    "C12": "P1S",
+    "C13": "X1E",
+    "N7": "P2S",
     "N2S": "A1",
     "N1": "A1 Mini",
 }
 
-# Some slicer metadata uses the SSDP-style BL-P codes for the X1 family.
-# Keep the slicer interpretation separate so C11/C12/C13 remain X1C/X1/X1E
-# here while printer rows with those same codes resolve to P1S/P1P/P2S above.
+# Some slicer metadata uses SSDP-style codes. Keep the slicer interpretation
+# separate so C11/C12 remain X1C/X1 here while printer rows resolve to P1P/P1S.
 GCODE_SLICED_MODEL_CODE_MAP = {
     **PRINTER_MODEL_ID_MAP,
     "BLP001": "X1C",
     "BLP002": "X1",
     "BLP003": "X1E",
+    "N7": "P2S",
 }
 
 _PRINTER_DISPLAY_NAME_MAP = {
