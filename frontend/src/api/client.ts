@@ -2276,7 +2276,8 @@ export interface PrintQueueItemUpdate {
   heat_soak_minutes?: number;
   auto_off_after?: boolean;
   manual_start?: boolean;
-  ams_mapping?: number[];
+  skip_filament_check?: boolean;  // "Print Anyway" acknowledged from the edit dialog
+  ams_mapping?: number[] | null;
   plate_id?: number | null;  // Plate ID for multi-plate 3MF files
   // Print options
   bed_levelling?: CalibrationMode;

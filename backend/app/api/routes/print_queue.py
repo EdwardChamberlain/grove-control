@@ -1161,6 +1161,12 @@ async def update_queue_item(
         if not result.scalars().first():
             raise HTTPException(400, f"No active printers for model: {update_data['target_model']}")
 
+    # "Print Anyway" acknowledged while editing: persist it and clear any
+    # existing deficit block, as the start route does, so the scheduler does
+    # not re-flag the edited item on its next tick (#184).
+    if update_data.get("skip_filament_check"):
+        update_data["filament_short"] = False
+
     # Serialize ams_mapping to JSON for TEXT column storage
     if "ams_mapping" in update_data:
         update_data["ams_mapping"] = json.dumps(update_data["ams_mapping"]) if update_data["ams_mapping"] else None

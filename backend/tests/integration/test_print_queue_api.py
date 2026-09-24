@@ -557,6 +557,31 @@ class TestPrintQueueAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_update_queue_item_persists_print_anyway(
+        self, async_client: AsyncClient, queue_item_factory, db_session
+    ):
+        """Print Anyway from the edit dialog persists and clears a deficit block (#184)."""
+        item = await queue_item_factory(filament_short=True)
+        response = await async_client.patch(f"/api/v1/queue/{item.id}", json={"skip_filament_check": True})
+        assert response.status_code == 200
+        assert response.json()["skip_filament_check"] is True
+        await db_session.refresh(item)
+        assert item.skip_filament_check is True
+        assert item.filament_short is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_update_queue_item_keeps_print_anyway_when_omitted(
+        self, async_client: AsyncClient, queue_item_factory, db_session
+    ):
+        """An ordinary edit does not discard an earlier Print Anyway acknowledgement."""
+        item = await queue_item_factory(skip_filament_check=True)
+        response = await async_client.patch(f"/api/v1/queue/{item.id}", json={"plate_id": 2})
+        assert response.status_code == 200
+        assert response.json()["skip_filament_check"] is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_update_queue_item_print_options(self, async_client: AsyncClient, queue_item_factory, db_session):
         """Verify queue item print options can be updated."""
         item = await queue_item_factory()
