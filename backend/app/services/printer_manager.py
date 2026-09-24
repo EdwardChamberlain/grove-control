@@ -288,7 +288,7 @@ class PrinterManager:
         self._on_print_complete: Callable[[int, dict], None] | None = None
         self._on_print_running_observed: Callable[[int, dict], None] | None = None
         self._on_finish_photo_moment: Callable[[int, dict], None] | None = None
-        self._on_status_change: Callable[[int, PrinterState], None] | None = None
+        self._on_status_change: Callable[[int, PrinterState, str | None], None] | None = None
         self._on_ams_change: Callable[[int, list], None] | None = None
         self._on_fts_inlet_change: Callable[[int, int, str], None] | None = None
         self._on_layer_change: Callable[[int, int], None] | None = None
@@ -571,7 +571,7 @@ class PrinterManager:
         live-camera capture and timelapse last-frame extraction."""
         self._on_finish_photo_moment = callback
 
-    def set_status_change_callback(self, callback: Callable[[int, PrinterState], None]):
+    def set_status_change_callback(self, callback: Callable[[int, PrinterState, str | None], None]):
         """Set callback for status change events."""
         self._on_status_change = callback
 
@@ -648,7 +648,7 @@ class PrinterManager:
 
         def on_state_change(state: PrinterState):
             if self._on_status_change:
-                self._schedule_async(self._on_status_change(printer_id, state))
+                self._schedule_async(self._on_status_change(printer_id, state, connection_epoch))
 
         def on_print_start(data: dict):
             if self._on_print_start:
@@ -823,7 +823,13 @@ class PrinterManager:
                 logger.info("Marking printer %s as offline (smart plug power off)", printer_id)
                 # Trigger the status change callback to broadcast via WebSocket
                 if self._on_status_change:
-                    self._schedule_async(self._on_status_change(printer_id, client.state))
+                    self._schedule_async(
+                        self._on_status_change(
+                            printer_id,
+                            client.state,
+                            self._connection_epochs.get(printer_id),
+                        )
+                    )
 
     def start_print(
         self,

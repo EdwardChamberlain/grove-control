@@ -1671,6 +1671,13 @@ async def resolve_queue_item_uncertainty(
         await db.rollback()
         raise HTTPException(409, str(exc)) from exc
 
+    if item.physical_execution_observed and item.printer_id is not None:
+        from backend.app.services.printer_manager import printer_manager
+
+        printer_manager.set_awaiting_plate_clear(item.printer_id, True)
+        printer_manager.set_awaiting_plate_clear_archive_id(item.printer_id, item.archive_id)
+        printer_manager.set_awaiting_plate_clear_job_id(item.printer_id, item.job_id)
+
     return {
         "message": "Uncertain PrintJob resolved",
         "job_id": item.job_id,

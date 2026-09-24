@@ -194,6 +194,67 @@ class TestOfflineEdgeDetection:
         assert main_module._printer_last_connected[1] is False
 
     @pytest.mark.asyncio
+    async def test_disconnect_closes_scheduler_barrier_synchronously(self):
+        ws_mgr, relay, pm = self._patch_handler_deps()
+        scheduled = []
+        with (
+            patch("backend.app.main.ws_manager", ws_mgr),
+            patch("backend.app.main.mqtt_relay", relay),
+            patch("backend.app.main.printer_manager", pm),
+            patch("backend.app.main.spawn_background_task", side_effect=lambda coro, **_: scheduled.append(coro)),
+            patch("backend.app.main.printer_state_to_dict", return_value={}),
+        ):
+            await main_module.on_printer_status_change(1, _state(connected=False))
+
+        pm.set_recovery_barrier.assert_called_once_with(1, True)
+        for coro in scheduled:
+            coro.close()
+
+    @pytest.mark.asyncio
+    async def test_stale_connection_status_is_ignored(self):
+        ws_mgr, relay, pm = self._patch_handler_deps()
+        pm.get_connection_epoch.return_value = "new-epoch"
+        with (
+            patch("backend.app.main.ws_manager", ws_mgr),
+            patch("backend.app.main.mqtt_relay", relay),
+            patch("backend.app.main.printer_manager", pm),
+            patch("backend.app.main.spawn_background_task") as spawn,
+            patch("backend.app.main.printer_state_to_dict", return_value={}),
+        ):
+            await main_module.on_printer_status_change(
+                1,
+                _state(connected=False),
+                connection_epoch="retired-epoch",
+            )
+
+        spawn.assert_not_called()
+        pm.set_recovery_barrier.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_failed_reconciliation_keeps_scheduler_barrier_closed(self):
+        ws_mgr, relay, pm = self._patch_handler_deps()
+        pm.get_connection_epoch.return_value = "epoch-1"
+        scheduled = []
+        with (
+            patch("backend.app.main.ws_manager", ws_mgr),
+            patch("backend.app.main.mqtt_relay", relay),
+            patch("backend.app.main.printer_manager", pm),
+            patch("backend.app.main.spawn_background_task", side_effect=lambda coro, **_: scheduled.append(coro)),
+            patch("backend.app.main.printer_state_to_dict", return_value={}),
+            patch(
+                "backend.app.main.reconcile_stale_active_prints",
+                new=AsyncMock(side_effect=RuntimeError("database unavailable")),
+            ) as reconcile,
+            patch("backend.app.main.async_session") as session_factory,
+        ):
+            await main_module.on_printer_status_change(1, _state(connected=True, state="IDLE"))
+            await scheduled.pop()  # Run the captured reconciliation task.
+
+        reconcile.assert_awaited_once_with(1)
+        session_factory.assert_not_called()
+        pm.set_recovery_barrier.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_connected_to_disconnected_schedules_task(self):
         ws_mgr, relay, pm = self._patch_handler_deps()
         with (

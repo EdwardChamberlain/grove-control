@@ -728,6 +728,16 @@ async def resolve_uncertain_job(
             "legacy_active_identity_conflict",
         ),
     )
+    if item.physical_execution_observed and item.printer_id is not None:
+        await db.execute(
+            update(Printer)
+            .where(Printer.id == item.printer_id)
+            .values(
+                awaiting_plate_clear=True,
+                awaiting_plate_clear_archive_id=item.archive_id,
+                awaiting_plate_clear_job_id=item.job_id,
+            )
+        )
     item.error_message = reason
     effect = await enqueue_effect(
         db,

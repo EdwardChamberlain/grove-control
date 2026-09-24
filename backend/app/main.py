@@ -1021,19 +1021,29 @@ async def _maybe_notify_printer_offline(printer_id: int) -> None:
         _printer_offline_notify_tasks.pop(printer_id, None)
 
 
-async def on_printer_status_change(printer_id: int, state: PrinterState):
+async def on_printer_status_change(
+    printer_id: int,
+    state: PrinterState,
+    connection_epoch: str | None = None,
+):
     """Handle printer status changes - broadcast via WebSocket."""
+
+    current_epoch = printer_manager.get_connection_epoch(printer_id)
+    if connection_epoch is not None and current_epoch != connection_epoch:
+        # A delayed status callback from a retired MQTT client must not close
+        # or reopen the scheduler barrier for the replacement connection.
+        return
+    connection_epoch = connection_epoch or current_epoch
 
     async def _persist_recovery_barrier(blocked: bool) -> None:
         """Keep scheduler gating aligned with the current MQTT epoch."""
         try:
-            epoch = printer_manager.get_connection_epoch(printer_id)
             async with async_session() as db:
                 from backend.app.models.printer import Printer
 
                 query = update(Printer).where(Printer.id == printer_id)
-                if epoch:
-                    query = query.where(Printer.connection_epoch == epoch)
+                if connection_epoch:
+                    query = query.where(Printer.connection_epoch == connection_epoch)
                 result = await db.execute(query.values(recovery_barrier=blocked))
                 if result.rowcount:
                     await db.commit()
@@ -1044,6 +1054,11 @@ async def on_printer_status_change(printer_id: int, state: PrinterState):
     # Fail closed as soon as the connection becomes unavailable. A later
     # status snapshot for the new epoch is the only thing that may reopen it.
     if not state.connected:
+        # The scheduler shares this process and must stop immediately; waiting
+        # for the persistence task would leave a window in which a disconnect
+        # races with a new dispatch. The captured epoch below prevents a late
+        # write from an old connection from changing a replacement session.
+        printer_manager.set_recovery_barrier(printer_id, True)
         spawn_background_task(
             _persist_recovery_barrier(True),
             name=f"close-recovery-barrier-{printer_id}",
@@ -1093,13 +1108,14 @@ async def on_printer_status_change(printer_id: int, state: PrinterState):
                 await reconcile_stale_active_prints(printer_id)
             except Exception:
                 logging.getLogger(__name__).exception(
-                    "Failed to reconcile PrintJobs before reopening printer %s", printer_id
+                    "Failed to reconcile PrintJobs; keeping printer %s scheduling blocked", printer_id
                 )
-            finally:
-                # Reconciliation either established exact terminal evidence or
-                # retained the active reservation/quarantined the ambiguous
-                # snapshot. Only then can scheduling resume for this epoch.
-                await _persist_recovery_barrier(False)
+                return
+            # Reconciliation either established exact terminal evidence or
+            # retained the active reservation/quarantined the ambiguous
+            # snapshot. Only a successful pass may reopen scheduling for this
+            # epoch. Persistence failure also stays fail-closed.
+            await _persist_recovery_barrier(False)
 
         spawn_background_task(
             _reconcile_then_open_barrier(),

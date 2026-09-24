@@ -340,7 +340,7 @@ class TestPrinterManager:
         manager._clients[1] = mock_client
 
         # Callback must return a coroutine
-        async def async_callback(printer_id, state):
+        async def async_callback(printer_id, state, connection_epoch=None):
             pass
 
         manager._on_status_change = async_callback

@@ -391,6 +391,9 @@ async def test_manual_resolution_closes_uncertain_job_and_its_reservation(db_ses
     item = await _item(db_session)
     await transition_job(db_session, item, to_state=DISPATCHING, source="test")
     await mark_dispatch_attempted(db_session, item, source="test")
+    from backend.app.services.print_job_lifecycle import PRINTING
+
+    await transition_job(db_session, item, to_state=PRINTING, source="test")
     await mark_job_uncertain(
         db_session,
         item,
@@ -419,6 +422,10 @@ async def test_manual_resolution_closes_uncertain_job_and_its_reservation(db_ses
         )
     )
     assert hold is not None and hold.state == "resolved"
+    printer = await db_session.get(Printer, item.printer_id)
+    assert printer.awaiting_plate_clear is True
+    assert printer.awaiting_plate_clear_job_id == item.job_id
+    assert printer.awaiting_plate_clear_archive_id == item.archive_id
 
 
 @pytest.mark.asyncio
