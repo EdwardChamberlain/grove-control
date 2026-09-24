@@ -11,11 +11,30 @@ from backend.app.utils.printer_models import (
     has_ethernet,
     has_external_storage,
     is_dual_nozzle_model,
+    is_gcode_compatible,
     normalize_printer_model,
     normalize_printer_model_id,
     supports_nozzle_flow_type,
     uses_exhaust_fan_label,
 )
+
+
+class TestGcodeCompatibility:
+    """G-code model IDs are ambiguous across slicer and printer metadata."""
+
+    @pytest.mark.parametrize(
+        ("sliced_for", "target", "expected"),
+        [
+            ("C11", "P1S", True),  # slicer C11 means X1 Carbon; printer C11 means P1S
+            ("BL-P001", "Bambu Lab X1 Carbon", True),
+            ("Bambu Lab X1 Carbon", "X1C", True),
+            ("O1E", "H2D Pro", True),
+            ("H2D", "A1", False),
+            ("X1C", "A1", False),
+        ],
+    )
+    def test_normalizes_slicer_and_printer_model_codes(self, sliced_for, target, expected):
+        assert is_gcode_compatible(sliced_for, target) is expected
 
 
 class TestGetRodType:

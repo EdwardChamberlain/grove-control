@@ -649,9 +649,11 @@ async def add_to_queue(
         raise HTTPException(400, "Cannot specify both printer_id and target_model")
 
     # Validate printer exists (if assigned)
+    target_printer = None
     if data.printer_id is not None:
         result = await db.execute(select(Printer).where(Printer.id == data.printer_id))
-        if not result.scalar_one_or_none():
+        target_printer = result.scalar_one_or_none()
+        if not target_printer:
             raise HTTPException(400, "Printer not found")
 
     # Validate target_model has active printers. Skipped for cross-model items:
@@ -718,6 +720,21 @@ async def add_to_queue(
             validate_print_filename(library_file.filename)
         except InvalidFilenameError as e:
             raise HTTPException(400, str(e)) from e
+
+    # Explicit printer assignment must respect the same slice compatibility
+    # boundary as model-based queueing. The scheduler repeats this check for
+    # older rows and printer-model changes after queue creation.
+    if target_printer:
+        sliced_for_model = None
+        if archive:
+            sliced_for_model = archive.sliced_for_model
+        elif library_file:
+            sliced_for_model = (library_file.file_metadata or {}).get("sliced_for_model")
+        if sliced_for_model and not is_gcode_compatible(sliced_for_model, target_printer.model):
+            raise HTTPException(
+                400,
+                f"File was sliced for {sliced_for_model} and cannot be dispatched to {target_printer.model} printers",
+            )
 
     # Resolve the source once for both default force-colour overrides and
     # model-based material validation.

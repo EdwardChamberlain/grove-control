@@ -26,13 +26,40 @@ export function getWifiStrength(rssi: number): { labelKey: string; color: string
   return { labelKey: 'printers.wifiSignal.veryWeak', color: 'text-red-400', bars: 1 };
 }
 
+const SLICED_MODEL_CODES: Record<string, string> = {
+  C11: 'X1C', C12: 'X1', C13: 'X1E',
+  BLP001: 'X1C', BLP002: 'X1', BLP003: 'X1E',
+  O1D: 'H2D', O1E: 'H2DPRO', O2D: 'H2DPRO', O1C: 'H2C', O1C2: 'H2C', O1S: 'H2S',
+  N6: 'X2D', N9: 'A2L', N2S: 'A1', N1: 'A1MINI', A11: 'A1', A12: 'A1MINI', A04: 'A1MINI',
+};
+
+const PRINTER_MODEL_CODES: Record<string, string> = {
+  ...SLICED_MODEL_CODES,
+  // Printer rows can store their SSDP model code. These differ from the
+  // slicer's internal IDs for C11/C12/C13, so use the printer-page mapping.
+  C11: 'P1S', C12: 'P1P', C13: 'P2S',
+};
+
+const PRINTER_DISPLAY_MODEL_NAMES: Record<string, string> = {
+  BAMBULABX1CARBON: 'X1C', X1CARBON: 'X1C',
+  BAMBULABX1: 'X1', BAMBULABX1E: 'X1E',
+  BAMBULABP1S: 'P1S', BAMBULABP1P: 'P1P', BAMBULABP2S: 'P2S',
+  BAMBULABA1: 'A1', BAMBULABA1MINI: 'A1MINI', BAMBULABA1M: 'A1MINI',
+  BAMBULABH2D: 'H2D', BAMBULABH2DPRO: 'H2DPRO', BAMBULABH2C: 'H2C',
+  BAMBULABH2S: 'H2S', BAMBULABX2D: 'X2D', BAMBULABA2L: 'A2L',
+};
+
 /** Return whether a sliced file may be sent to the selected printer model. */
 export function isGcodeCompatible(slicedForModel: string | null | undefined, targetModel: string | null | undefined): boolean {
   if (!slicedForModel || !targetModel) return true;
 
-  const normalize = (model: string) => model.trim().toUpperCase().replace(/[ -]/g, '');
-  const sliced = normalize(slicedForModel);
-  const target = normalize(targetModel);
+  const normalize = (model: string, isTarget: boolean) => {
+    const code = model.trim().toUpperCase().replace(/[ -]/g, '');
+    const aliases = isTarget ? PRINTER_MODEL_CODES : SLICED_MODEL_CODES;
+    return aliases[code] ?? PRINTER_DISPLAY_MODEL_NAMES[code] ?? code;
+  };
+  const sliced = normalize(slicedForModel, false);
+  const target = normalize(targetModel, true);
   if (sliced === target) return true;
 
   const interchangeable = new Set(['X1', 'X1C', 'X1E', 'P1P', 'P1S']);

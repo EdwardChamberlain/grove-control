@@ -737,6 +737,7 @@ export default {
     developerModeWarning: '以下印表機未啟用開發者區域網路模式：{{names}}。某些功能可能無法使用。',
     howToEnable: '如何啟用',
     incompatibleFile: '此檔案是為 {{slicedFor}} 切片的，但該印表機是 {{printerModel}}',
+    directUploadLibraryNote: '上傳的檔案會先儲存到檔案管理員，再加入佇列。',
     dropNotPrintable: '只能列印 .gcode 和 .gcode.3mf 檔案',
     dropToPrint: '拖放以列印',
     cannotPrint: '印表機忙碌',
@@ -1203,6 +1204,7 @@ export default {
       startPrint: '開始列印',
       stopPrint: '停止列印',
       requeue: '重新佇列',
+      addJob: '新增工作',
     },
     // Bulk edit
     bulkEdit: {
@@ -3361,6 +3363,8 @@ export default {
     unlink: '取消連結',
     link: '連結',
     dragDropFiles: '將檔案拖放到此處',
+    singleFilePrompt: '將一個檔案拖放到此處',
+    selectOneFile: '一次只能選擇一個檔案',
     dropFilesHere: '將檔案放在此處',
     releaseToUpload: '釋放以上傳',
     orClickToBrowse: '或點選瀏覽',
@@ -4342,6 +4346,7 @@ export default {
 
   // Print modal
   printModal: {
+    directUploadRetained: '此檔案將用於多次列印，因此會保留在檔案管理員中。',
     variants: {
       editNote: '這些備選在工作加入佇列時確定。如需變更，請取消後重新加入佇列。',
       title: '印表機備選',

@@ -149,6 +149,95 @@ def _sliced_for_model(archive, library_file) -> str | None:
     return None
 
 
+def _incompatible_sliced_model_reason(sliced_for_model: str | None, printer) -> str | None:
+    """Return an actionable reason when a sliced file cannot target a printer."""
+    if not sliced_for_model or not printer or is_gcode_compatible(sliced_for_model, printer.model):
+        return None
+    return f"Incompatible sliced file: was sliced for {sliced_for_model}, but printer {printer.name} is {printer.model}"
+
+
+async def _defer_incompatible_dispatch(
+    db: AsyncSession,
+    item: PrintQueueItem,
+    printer,
+    sliced_for_model: str | None,
+    *,
+    heat_soak_complete: bool = False,
+    remote_path: str | None = None,
+    ftp_timeout: int | None = None,
+    transient_library_paths: list[Path] | None = None,
+) -> bool:
+    """Keep an incompatible job pending and clean up a file already uploaded."""
+    reason = _incompatible_sliced_model_reason(sliced_for_model, printer)
+    if not reason:
+        return False
+
+    current = await lock_queue_item(db, item.id)
+    if heat_soak_complete:
+        owns_handoff = bool(
+            current
+            and current.status == "dispatching"
+            and current.preheat_owner is None
+            and current.dispatch_subtask_id is None
+        )
+    else:
+        owns_handoff = bool(current and current.status == "pending")
+
+    if owns_handoff:
+        current.waiting_reason = reason
+        if heat_soak_complete:
+            # The heat-soak finalizer returns this item to pending and turns
+            # its heaters off. It must not immediately try the same bad target.
+            current.manual_start = True
+            current.error_message = reason
+        await db.commit()
+    else:
+        await db.rollback()
+
+    # For ordinary dispatches, the LibraryFile deletion is still in this
+    # transaction and was rolled back when another action took ownership. A
+    # heat-soak handoff commits before FTP, so its transient row may already be
+    # gone even if cancellation wins while the upload is in progress.
+    if transient_library_paths and (owns_handoff or heat_soak_complete):
+        for path in transient_library_paths:
+            try:
+                if path.exists():
+                    path.unlink()
+            except OSError as cleanup_error:
+                logger.warning(
+                    "TRANSIENT_LIBRARY_FILE_ORPHAN %s",
+                    json.dumps(
+                        {
+                            "queue_item_id": item.id,
+                            "path": str(path),
+                            "error": str(cleanup_error),
+                        },
+                        sort_keys=True,
+                    ),
+                )
+
+    if remote_path:
+        try:
+            await delete_file_async(
+                printer.ip_address,
+                printer.access_code,
+                remote_path,
+                socket_timeout=ftp_timeout,
+                printer_model=printer.model,
+                respect_handshake_cooloff=False,
+            )
+        except Exception as cleanup_error:
+            logger.warning(
+                "Queue item %s: failed to remove incompatible uploaded file %s: %s",
+                item.id,
+                remote_path,
+                cleanup_error,
+            )
+
+    logger.info("Queue item %s: dispatch deferred - %s", item.id, reason)
+    return True
+
+
 def _candidates_for(item: PrintQueueItem) -> list[_ModelCandidate]:
     """Candidate files for ``item``, best first.
 
@@ -620,6 +709,7 @@ class PrintScheduler:
                     .options(
                         selectinload(PrintQueueItem.archive),
                         selectinload(PrintQueueItem.library_file),
+                        selectinload(PrintQueueItem.printer),
                         # Cross-model candidates (#671), plus each candidate's file
                         # for the same cross-model gate. Lazy-loading either would
                         # raise in async.
@@ -641,6 +731,7 @@ class PrintScheduler:
                     .options(
                         selectinload(PrintQueueItem.archive),
                         selectinload(PrintQueueItem.library_file),
+                        selectinload(PrintQueueItem.printer),
                         # Cross-model candidates (#671), plus each candidate's file
                         # for the same cross-model gate. Lazy-loading either would
                         # raise in async.
@@ -803,6 +894,18 @@ class PrintScheduler:
                     continue
 
                 if item.printer_id:
+                    sliced_for_model = _sliced_for_model(item.archive, item.library_file)
+                    waiting_reason = _incompatible_sliced_model_reason(sliced_for_model, item.printer)
+                    if waiting_reason:
+                        if item.waiting_reason != waiting_reason:
+                            item.waiting_reason = waiting_reason
+                            await db.commit()
+                        skip_reasons["sliced_model_mismatch"] = skip_reasons.get("sliced_model_mismatch", 0) + 1
+                        continue
+                    if item.waiting_reason and item.waiting_reason.startswith("Incompatible sliced file:"):
+                        item.waiting_reason = None
+                        await db.commit()
+
                     interlock_reason = interlocked.get(item.printer_id)
                     if interlock_reason:
                         waiting_reason = f"Waiting on {interlock_reason}"
@@ -3522,6 +3625,15 @@ class PrintScheduler:
                 await self._power_off_if_needed(db, item)
                 return
 
+            if await _defer_incompatible_dispatch(
+                db,
+                item,
+                printer,
+                _sliced_for_model(archive, None),
+                heat_soak_complete=heat_soak_complete,
+            ):
+                return
+
             file_path = settings.base_dir / archive.file_path
             filename = archive.filename
 
@@ -3537,6 +3649,16 @@ class PrintScheduler:
                 logger.error("Queue item %s: Library file %s not found", item.id, item.library_file_id)
                 await self._power_off_if_needed(db, item)
                 return
+
+            if await _defer_incompatible_dispatch(
+                db,
+                item,
+                printer,
+                _sliced_for_model(None, library_file),
+                heat_soak_complete=heat_soak_complete,
+            ):
+                return
+
             # Library files store absolute paths
             lib_path = Path(library_file.file_path)
             file_path = lib_path if lib_path.is_absolute() else settings.base_dir / library_file.file_path
@@ -3794,6 +3916,22 @@ class PrintScheduler:
                 db=db,
             )
             await self._power_off_if_needed(db, item)
+            return
+
+        # The printer can be retargeted while a long FTP transfer is running.
+        # Re-read its model immediately after upload before creating a durable
+        # dispatch reservation or sending project_file.
+        await db.refresh(printer, attribute_names=["model"])
+        if await _defer_incompatible_dispatch(
+            db,
+            item,
+            printer,
+            _sliced_for_model(archive, library_file),
+            heat_soak_complete=heat_soak_complete,
+            remote_path=remote_path,
+            ftp_timeout=ftp_timeout,
+            transient_library_paths=cleanup_disk_paths,
+        ):
             return
 
         # Parse AMS mapping if stored

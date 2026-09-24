@@ -98,7 +98,7 @@ import { useToast } from '../contexts/ToastContext';
 import { ChamberLight } from '../components/icons/ChamberLight';
 import { PlateClearedIcon } from '../components/icons/PlateClearedIcon';
 import { SkipObjectsModal, SkipObjectsIcon } from '../components/SkipObjectsModal';
-import { FileUploadModal } from '../components/FileUploadModal';
+import { DirectPrintUploadModal } from '../components/DirectPrintUploadModal';
 import { PrintModal } from '../components/PrintModal';
 import { PrinterPowerControls } from '../components/printer/PrinterPowerControls';
 import { PrinterHealthMenu } from '../components/printer/PrinterHealthMenu';
@@ -128,7 +128,8 @@ import { DRYING_PRESETS, useAmsDryingControls } from '../hooks/useAmsDryingContr
 import type { DryingPresets } from '../hooks/useAmsDryingControls';
 import { PrinterInfoModal } from '../components/PrinterInfoModal';
 import { getAmsLabel, getGlobalTrayId, getSlotPresetKey, getFillBarColor, installedNozzleDiameters } from '../utils/amsHelpers';
-import { getPrinterImage, getWifiStrength, filterCompatibleQueueItems } from '../utils/printer';
+import { getPrinterImage, getWifiStrength, filterCompatibleQueueItems, isGcodeCompatible } from '../utils/printer';
+import { isDirectPrintFile } from '../utils/directPrint';
 import { FilamentSlotCircle } from '../components/FilamentSlotCircle';
 import { Collapsible } from '../components/Collapsible';
 import { ConnectionDiagnosticModal, DiagnosticChecklist } from '../components/ConnectionDiagnostic';
@@ -2766,22 +2767,12 @@ function SinglePrinterCockpit({
         </div>
       </div>
     {showUploadForPrint && (
-      <FileUploadModal
-        folderId={null}
+      <DirectPrintUploadModal
         onClose={() => setShowUploadForPrint(false)}
-        onUploadComplete={() => {}}
-        autoUpload
-        accept=".gcode,.3mf"
-        validateFile={(file) => {
-          const lower = file.name.toLowerCase();
-          if (!lower.endsWith('.gcode') && !lower.includes('.gcode.')) {
-            return t('printers.dropNotPrintable', 'Only .gcode and .gcode.3mf files can be printed');
-          }
-        }}
         onFileUploaded={(uploadedFile) => {
           const slicedFor = (uploadedFile.metadata as Record<string, unknown>)?.sliced_for_model as string | undefined;
           const printerModel = mapModelCode(printer.model);
-          if (slicedFor && printerModel && slicedFor.toLowerCase() !== printerModel.toLowerCase()) {
+          if (slicedFor && printerModel && !isGcodeCompatible(slicedFor, printerModel)) {
             api.deleteLibraryFile(uploadedFile.id).catch(() => {});
             return t('printers.incompatibleFile', 'This file was sliced for {{slicedFor}}, but this printer is a {{printerModel}}', { slicedFor, printerModel });
           }
@@ -4106,12 +4097,15 @@ function PrinterCard({
     if (!canDrop) return;
 
     const droppedFiles = Array.from(e.dataTransfer.files);
+    if (droppedFiles.length > 1) {
+      showToast(t('fileManager.selectOneFile', 'Select one file at a time'), 'error');
+      return;
+    }
     const file = droppedFiles[0];
     if (!file) return;
 
     // Only accept sliced/printable files (.gcode, .gcode.3mf, etc.)
-    const lower = file.name.toLowerCase();
-    if (!lower.endsWith('.gcode') && !lower.includes('.gcode.')) {
+    if (!isDirectPrintFile(file)) {
       showToast(t('printers.dropNotPrintable', 'Only .gcode and .gcode.3mf files can be printed'), 'error');
       return;
     }
@@ -4123,7 +4117,7 @@ function PrinterCard({
       // Check printer compatibility if sliced_for_model is available in metadata
       const slicedFor = (result.metadata as Record<string, unknown>)?.sliced_for_model as string | undefined;
       const printerModel = mapModelCode(printer.model);
-      if (slicedFor && printerModel && slicedFor.toLowerCase() !== printerModel.toLowerCase()) {
+      if (slicedFor && printerModel && !isGcodeCompatible(slicedFor, printerModel)) {
         await api.deleteLibraryFile(result.id).catch(() => {});
         showToast(
           t('printers.incompatibleFile', 'This file was sliced for {{slicedFor}}, but this printer is a {{printerModel}}', { slicedFor, printerModel }),
@@ -5544,23 +5538,13 @@ function PrinterCard({
 
       {/* Upload for Print Modal */}
       {showUploadForPrint && (
-        <FileUploadModal
-          folderId={null}
+        <DirectPrintUploadModal
           onClose={() => setShowUploadForPrint(false)}
-          onUploadComplete={() => {}}
-          autoUpload
-          accept=".gcode,.3mf"
-          validateFile={(file) => {
-            const lower = file.name.toLowerCase();
-            if (!lower.endsWith('.gcode') && !lower.includes('.gcode.')) {
-              return t('printers.dropNotPrintable', 'Only .gcode and .gcode.3mf files can be printed');
-            }
-          }}
           onFileUploaded={(uploadedFile) => {
             // Check printer compatibility if sliced_for_model is available in metadata
             const slicedFor = (uploadedFile.metadata as Record<string, unknown>)?.sliced_for_model as string | undefined;
             const printerModel = mapModelCode(printer.model);
-            if (slicedFor && printerModel && slicedFor.toLowerCase() !== printerModel.toLowerCase()) {
+            if (slicedFor && printerModel && !isGcodeCompatible(slicedFor, printerModel)) {
               api.deleteLibraryFile(uploadedFile.id).catch(() => {});
               return t('printers.incompatibleFile', 'This file was sliced for {{slicedFor}}, but this printer is a {{printerModel}}', { slicedFor, printerModel });
             }

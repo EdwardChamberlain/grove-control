@@ -737,6 +737,7 @@ export default {
     developerModeWarning: 'Geliştirici LAN modu şunlarda etkin değil: {{names}}. Bazı özellikler çalışmayabilir.',
     howToEnable: 'Nasıl etkinleştirilir',
     incompatibleFile: 'Bu dosya {{slicedFor}} için dilimlendi, ancak bu yazıcı bir {{printerModel}}',
+    directUploadLibraryNote: 'Yüklenen dosya kuyruğa eklenmeden önce Dosya Yöneticisi’ne kaydedilir.',
     dropNotPrintable: 'Yalnızca .gcode ve .gcode.3mf dosyaları yazdırılabilir',
     dropToPrint: 'Yazdırmak için bırakın',
     cannotPrint: 'Yazıcı meşgul',
@@ -1203,6 +1204,7 @@ export default {
       startPrint: 'Baskıyı Başlat',
       stopPrint: 'Baskıyı Durdur',
       requeue: 'Yeniden Kuyrukla',
+      addJob: 'İş Ekle',
     },
     // Toplu düzenleme
     bulkEdit: {
@@ -3369,6 +3371,8 @@ export default {
     unlink: 'Bağlantıyı Kaldır',
     link: 'Bağla',
     dragDropFiles: 'Dosyaları buraya sürükleyip bırakın',
+    singleFilePrompt: 'Buraya bir dosya bırakın',
+    selectOneFile: 'Her seferinde bir dosya seçin',
     dropFilesHere: 'Dosyaları buraya bırakın',
     releaseToUpload: 'Yüklemek için bırakın',
     orClickToBrowse: 'veya göz atmak için tıklayın',
@@ -4332,6 +4336,7 @@ export default {
 
   // Baskı modali
   printModal: {
+    directUploadRetained: 'Birden fazla baskıda kullanılacağı için bu dosya Dosya Yöneticisi’nde kalır.',
     variants: {
       editNote: 'Bu alternatifler iş kuyruğa alınırken belirlendi. Değiştirmek için iptal edip yeniden kuyruğa alın.',
       title: 'Yazıcı alternatifleri',

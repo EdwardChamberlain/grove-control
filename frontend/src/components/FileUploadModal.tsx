@@ -36,13 +36,17 @@ interface FileUploadModalProps {
   validateFile?: (file: File) => string | undefined;
   /** Restrict file picker to specific file types (e.g. ".gcode,.gcode.3mf") */
   accept?: string;
+  /** Restrict this upload to one file, including drag and drop. */
+  singleFile?: boolean;
+  /** Optional guidance for the drop zone in place of the general file-type hint. */
+  dropZoneHint?: ReactNode;
   /** Pre-seed the modal with files (e.g. from a page-wide drop) on first mount. */
   initialFiles?: File[];
   /** Optional actions shown above the drop zone. */
   beforeDropZone?: ReactNode;
 }
 
-export function FileUploadModal({ folderId, onClose, onUploadComplete, onFileUploaded, autoUpload, validateFile, accept, initialFiles, beforeDropZone }: FileUploadModalProps) {
+export function FileUploadModal({ folderId, onClose, onUploadComplete, onFileUploaded, autoUpload, validateFile, accept, singleFile = false, dropZoneHint, initialFiles, beforeDropZone }: FileUploadModalProps) {
   const { t } = useTranslation();
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -130,7 +134,13 @@ export function FileUploadModal({ folderId, onClose, onUploadComplete, onFileUpl
   };
 
   const addFiles = (newFiles: File[]) => {
+    if (newFiles.length === 0) return;
     setUploadError(null);
+    if (singleFile && newFiles.length !== 1) {
+      setUploadError(t('fileManager.selectOneFile', 'Select one file at a time'));
+      return;
+    }
+    if (singleFile && isUploading) return;
     if (validateFile) {
       for (const file of newFiles) {
         const error = validateFile(file);
@@ -146,7 +156,7 @@ export function FileUploadModal({ folderId, onClose, onUploadComplete, onFileUpl
       isZip: file.name.toLowerCase().endsWith('.zip'),
       is3mf: file.name.toLowerCase().endsWith('.3mf'),
     }));
-    setFiles((prev) => [...prev, ...toUpload]);
+    setFiles((prev) => singleFile ? toUpload : [...prev, ...toUpload]);
 
     if (autoUpload && newFiles.length > 0) {
       uploadFiles(toUpload);
@@ -179,7 +189,7 @@ export function FileUploadModal({ folderId, onClose, onUploadComplete, onFileUpl
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
       <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-lg flex-col rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary">
         <div className="p-4 border-b border-bambu-dark-tertiary flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-white">{t('fileManager.uploadFiles')}</h2>
+          <h2 className="text-lg font-semibold text-white">{singleFile ? t('common.upload') : t('fileManager.uploadFiles')}</h2>
           <button onClick={onClose} className="p-1 hover:bg-bambu-dark rounded">
             <X className="w-5 h-5 text-bambu-gray" />
           </button>
@@ -202,16 +212,20 @@ export function FileUploadModal({ folderId, onClose, onUploadComplete, onFileUpl
           >
             <Upload className={`w-10 h-10 mx-auto mb-3 ${isDragging ? 'text-bambu-green' : 'text-bambu-gray'}`} />
             <p className="text-white font-medium">
-              {isDragging ? t('fileManager.dropFilesHere') : t('fileManager.dragDropFiles')}
+              {singleFile
+                ? t('fileManager.singleFilePrompt', 'Drop one file here')
+                : isDragging
+                  ? t('fileManager.dropFilesHere')
+                  : t('fileManager.dragDropFiles')}
             </p>
             <p className="text-sm text-bambu-gray mt-1">{t('fileManager.orClickToBrowse')}</p>
-            <p className="text-xs text-bambu-gray/70 mt-2">{t('fileManager.allFileTypesSupported')}</p>
+            <p className="text-xs text-bambu-gray/70 mt-2">{dropZoneHint ?? t('fileManager.allFileTypesSupported')}</p>
           </div>
 
           <input
             ref={fileInputRef}
             type="file"
-            multiple
+            multiple={!singleFile}
             accept={accept}
             className="hidden"
             onChange={handleFileSelect}

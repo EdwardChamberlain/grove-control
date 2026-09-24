@@ -155,6 +155,23 @@ class TestPrintQueueAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_add_to_queue_rejects_sliced_file_for_incompatible_printer(
+        self, async_client: AsyncClient, printer_factory, archive_factory
+    ):
+        printer = await printer_factory(model="A1")
+        archive = await archive_factory(sliced_for_model="X1C")
+
+        response = await async_client.post(
+            "/api/v1/queue/",
+            json={"printer_id": printer.id, "archive_id": archive.id},
+        )
+
+        assert response.status_code == 400
+        assert "sliced for X1C" in response.json()["detail"]
+        assert "A1" in response.json()["detail"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_add_to_queue_rejects_malformed_filament_override(
         self, async_client: AsyncClient, printer_factory, archive_factory, db_session
     ):
