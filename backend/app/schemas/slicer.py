@@ -175,16 +175,3 @@ class SliceResponse(BaseModel):
     filament_used_g: float
     filament_used_mm: float
     used_embedded_settings: bool = False
-
-
-class SliceArchiveResponse(BaseModel):
-    """Response from `POST /archives/{archive_id}/slice`. The result lands
-    in the user's archives as a new ``PrintArchive`` row, inheriting
-    printer / project metadata from the source archive."""
-
-    archive_id: int
-    name: str
-    print_time_seconds: int
-    filament_used_g: float
-    filament_used_mm: float
-    used_embedded_settings: bool = False

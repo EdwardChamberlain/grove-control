@@ -68,6 +68,7 @@ async def queue_factory(tmp_path):
                 thumbnail_path=thumbnail_db_path,
                 file_metadata=None,
                 is_external=is_external,
+                queue_only=cleanup,
             )
             db.add_all([printer, library_file])
             await db.flush()
@@ -119,7 +120,19 @@ async def _dispatch_library_item(
 ):
     scheduler = PrintScheduler()
 
-    async def archive_print(self, *, printer_id, source_file, original_filename, created_by_id=None, project_id=None):
+    async def archive_print(
+        self,
+        *,
+        printer_id,
+        source_file,
+        original_filename,
+        print_data=None,
+        created_by_id=None,
+        project_id=None,
+        subtask_id=None,
+        prefer_filename_for_name=False,
+        commit=True,
+    ):
         if archive_failure:
             raise RuntimeError("archive copy failed")
 
@@ -137,7 +150,7 @@ async def _dispatch_library_item(
             thumbnail_path=None,
             timelapse_path=None,
             print_time_seconds=120,
-            status="completed",
+            status=(print_data or {}).get("status", "completed"),
             project_id=project_id,
             created_by_id=created_by_id,
         )
@@ -233,13 +246,13 @@ async def test_archive_creation_failure_skips_cleanup_and_dispatch(queue_factory
 
     item, library_file, archive = await _queue_snapshot(ctx)
     assert item.status == "failed"
-    assert item.error_message == "Failed to create archive from library file"
+    assert item.error_message == "Failed to create Archive record for dispatch"
     assert item.archive_id is None
     assert archive is None
     assert library_file is not None
     assert ctx.source_path.exists()
     assert ctx.thumbnail_path.exists()
-    ctx.upload.assert_not_awaited()
+    ctx.upload.assert_awaited_once()
     ctx.start_print.assert_not_called()
 
 
@@ -268,7 +281,7 @@ async def test_archive_copy_survives_library_cleanup(queue_factory):
     assert ctx.archive_path.exists()
     assert ctx.archive_path.read_bytes() == b"library source"
     uploaded_path = ctx.upload.await_args.args[2]
-    assert uploaded_path == ctx.archive_path
+    assert uploaded_path == ctx.source_path
 
 
 @pytest.mark.asyncio
@@ -283,7 +296,7 @@ async def test_final_dispatch_boundary_stops_new_drying_and_does_not_send_print(
     assert item.status == "pending"
     assert item.waiting_reason == "Stopping AMS drying before dispatch"
     assert library_file is not None
-    assert archive is not None
+    assert archive is None
     ctx.stop_drying.assert_called_once_with(ctx.printer_id, 0, 0, 0, mode=0)
     ctx.start_print.assert_not_called()
 
@@ -345,12 +358,14 @@ async def test_command_boundary_releases_reservation_if_drying_starts_after_fina
     assert item.dispatched_at is None
     assert item.dispatch_subtask_id is None
     assert item.waiting_reason == waiting_reason
-    assert item.library_file_id is None
-    assert item.archive_id == archive.id
-    assert library_file is None
-    assert ctx.archive_path.exists()
-    register_expected.assert_called_once()
-    unregister_expected.assert_called_once()
+    assert item.library_file_id == ctx.library_file_id
+    assert item.archive_id is None
+    assert library_file is not None
+    assert archive is None
+    assert ctx.source_path.exists()
+    assert ctx.archive_path is None
+    register_expected.assert_not_called()
+    unregister_expected.assert_not_called()
     clear_current_print_user.assert_called_once_with(ctx.printer_id)
     if wait_for_drying_complete:
         ctx.stop_drying.assert_not_called()
@@ -369,7 +384,7 @@ async def test_oserror_during_unlink_logs_orphan_path_and_does_not_crash_dispatc
             raise OSError("permission denied")
         return original_unlink(path, *args, **kwargs)
 
-    with caplog.at_level("WARNING", logger="backend.app.services.print_scheduler"):
+    with caplog.at_level("WARNING", logger="backend.app.services.queue_source_cleanup"):
         await _dispatch_library_item(ctx, unlink_side_effect=unlink_with_source_failure)
 
     item, library_file, archive = await _queue_snapshot(ctx)
@@ -380,6 +395,6 @@ async def test_oserror_during_unlink_logs_orphan_path_and_does_not_crash_dispatc
     assert ctx.source_path.exists()
     assert not ctx.thumbnail_path.exists()
     assert ctx.archive_path.exists()
-    assert "TRANSIENT_LIBRARY_FILE_ORPHAN" in caplog.text
+    assert "QUEUE_ONLY_SOURCE_ORPHAN" in caplog.text
     assert str(ctx.source_path) in caplog.text
     assert "permission denied" in caplog.text

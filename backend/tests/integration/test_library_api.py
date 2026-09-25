@@ -1745,35 +1745,18 @@ class TestPrintFileUploadValidation:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_archive_upload_rejects_non_zip(self, async_client: AsyncClient, db_session):
-        """``POST /archives/upload`` shares the same validator — covers the
-        manual archive-upload entry point too."""
+    async def test_archive_upload_is_retired(self, async_client: AsyncClient, db_session):
+        """Direct uploads belong in Files or Queue, not print history."""
         files = {"file": ("model.3mf", b"; raw gcode\nG28\n", "application/octet-stream")}
         response = await async_client.post("/api/v1/archives/upload", files=files)
-        assert response.status_code == 400
-        assert "ZIP container" in response.json()["detail"]
+        assert response.status_code == 410
+        assert "Files" in response.json()["detail"]
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_archive_bulk_upload_collects_per_file_errors(self, async_client: AsyncClient, db_session):
-        """The bulk-archive route reports validation failures per file and
-        continues processing the remaining items — one bad upload in a
-        10-file drag-drop must not abort the whole batch."""
-        good = self._valid_3mf_bytes()
-        bad = b"; raw gcode\nG28\n"
-        # httpx multipart with a list-of-tuples preserves order + same field name.
-        files = [
-            ("files", ("good.3mf", good, "application/zip")),
-            ("files", ("bad.3mf", bad, "application/octet-stream")),
-        ]
+    async def test_archive_bulk_upload_is_retired(self, async_client: AsyncClient, db_session):
+        """Bulk direct uploads cannot create unprinted Archive history."""
+        files = {"files": ("model.3mf", b"not relevant for a retired endpoint", "application/octet-stream")}
         response = await async_client.post("/api/v1/archives/upload-bulk", files=files)
-        assert response.status_code == 200
-        body = response.json()
-        # The bulk route's archive_print may still reject the "good" file
-        # downstream (no printer match, etc.) — we don't care about that
-        # here; what matters is the bad file lands in `errors` with the
-        # validator's message and the route didn't 500.
-        assert body["failed"] >= 1
-        bad_errors = [e for e in body["errors"] if e["filename"] == "bad.3mf"]
-        assert bad_errors, body
-        assert "ZIP container" in bad_errors[0]["error"]
+        assert response.status_code == 410
+        assert "Files" in response.json()["detail"]

@@ -98,6 +98,10 @@ class LibraryFile(Base):
 
     # External file flag
     is_external: Mapped[bool] = mapped_column(Boolean, default=False)
+    # One-off print uploads are staged for the Queue but are not part of the
+    # user-managed Files library. The queue lifecycle removes them once every
+    # consumer has an Archive copy or the item is discarded.
+    queue_only: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     # File info
     filename: Mapped[str] = mapped_column(String(255))  # Original filename
@@ -177,6 +181,11 @@ class LibraryFile(Base):
         must use ``select(LibraryFile)`` directly.
         """
         return select(cls).where(cls.deleted_at.is_(None))
+
+    @classmethod
+    def managed(cls) -> "Select[tuple[LibraryFile]]":
+        """Select user-managed Files entries, excluding Queue staging uploads."""
+        return cls.active().where(cls.queue_only.is_(False))
 
 
 class LibraryTag(Base):

@@ -63,13 +63,11 @@ import { openInSlicer, type SlicerType } from '../utils/slicer';
 import { formatDateTime, formatDateOnly, parseUTCDate, type TimeFormat, formatDuration } from '../utils/date';
 import { getCurrencySymbol } from '../utils/currency';
 import { getBedTypeInfo } from '../utils/bedType';
-import { usePageFileDrop } from '../hooks/usePageFileDrop';
 import type { Archive, PrintLogEntry, ProjectListItem } from '../api/client';
 import { Card, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
 import { ToolbarDropdown, ReactSelect } from '../components/ToolbarControls';
 import { PrintModal } from '../components/PrintModal';
-import { UploadModal } from '../components/UploadModal';
 import { PurgeArchivesModal } from '../components/PurgeArchivesModal';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { EditArchiveModal, FAILURE_REASON_KEYS } from '../components/EditArchiveModal';
@@ -397,7 +395,25 @@ function ArchiveCard({
 
   const isGcodeFile = isSlicedFile(archive);
 
+  const saveToFilesMutation = useMutation({
+    mutationFn: () => api.saveArchiveToFiles(archive.id),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['library-files'] });
+      showToast(t('archives.toast.savedToFiles', { filename: data.filename }));
+    },
+    onError: (error: Error) => {
+      showToast(error.message || t('archives.toast.failedSaveToFiles'), 'error');
+    },
+  });
+
   const contextMenuItems: ContextMenuItem[] = [
+    {
+      label: t('archives.menu.saveToFiles'),
+      icon: <FolderOpen className="w-4 h-4" />,
+      onClick: () => saveToFilesMutation.mutate(),
+      disabled: saveToFilesMutation.isPending || !hasPermission('library:upload'),
+      title: !hasPermission('library:upload') ? t('archives.permission.noUploadFiles') : undefined,
+    },
     // For gcode files: show Print option
     // For source files: show Slice as the primary action
     ...(isGcodeFile ? [
@@ -1750,7 +1766,25 @@ function ArchiveListRow({
 
   const isGcodeFile = isSlicedFile(archive);
 
+  const saveToFilesMutation = useMutation({
+    mutationFn: () => api.saveArchiveToFiles(archive.id),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['library-files'] });
+      showToast(t('archives.toast.savedToFiles', { filename: data.filename }));
+    },
+    onError: (error: Error) => {
+      showToast(error.message || t('archives.toast.failedSaveToFiles'), 'error');
+    },
+  });
+
   const contextMenuItems: ContextMenuItem[] = [
+    {
+      label: t('archives.menu.saveToFiles'),
+      icon: <FolderOpen className="w-4 h-4" />,
+      onClick: () => saveToFilesMutation.mutate(),
+      disabled: saveToFilesMutation.isPending || !hasPermission('library:upload'),
+      title: !hasPermission('library:upload') ? t('archives.permission.noUploadFiles') : undefined,
+    },
     ...(isGcodeFile ? [
       {
         label: t('common.print'),
@@ -2574,8 +2608,6 @@ export function ArchivesPage() {
   const [filterFileType, setFilterFileType] = useState<'all' | 'gcode' | 'source'>(() =>
     (localStorage.getItem('archiveFilterFileType') as 'all' | 'gcode' | 'source') || 'all'
   );
-  const [showUpload, setShowUpload] = useState(false);
-  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   // Install-step-4 nudge — covers the slicer-side variant of "Store sent files
   // on external storage" that the connection diagnostic can't detect (printer
@@ -3079,21 +3111,6 @@ export function ArchivesPage() {
 
   const hasTopFilters = search || filterPrinter || filterMaterial || filterFavorites || hideFailed || hideDuplicates || filterTag || filterFileType !== 'all';
 
-  // Page-wide drag-and-drop upload (#1510). The hook covers the three cancel
-  // paths the previous inline implementation missed (drag-out-of-window, Escape,
-  // dragend outside any drop target). Disabled while the upload modal is open
-  // so drags into the modal's own drop zone don't bubble up and flash the page
-  // overlay behind it.
-  const { isDraggingOver, dragHandlers } = usePageFileDrop({
-    disabled: showUpload,
-    extensions: ['.3mf'],
-    onFiles: (files) => {
-      setUploadFiles(files);
-      setShowUpload(true);
-    },
-    onRejected: () => showToast(t('archives.page.only3mfSupported'), 'warning'),
-  });
-
   // Keyboard shortcuts
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     const target = e.target as HTMLElement;
@@ -3110,13 +3127,6 @@ export function ArchivesPage() {
         e.preventDefault();
         searchInputRef.current?.focus();
         break;
-      case 'u':
-      case 'U':
-        if (!e.metaKey && !e.ctrlKey) {
-          e.preventDefault();
-          setShowUpload(true);
-        }
-        break;
       case 'Escape':
         if (selectionMode) {
           clearSelection();
@@ -3131,20 +3141,7 @@ export function ArchivesPage() {
   }, [handleKeyDown]);
 
   return (
-    <div
-      className="p-4 md:p-8 relative"
-      {...dragHandlers}
-    >
-      {/* Drag & Drop Overlay */}
-      {isDraggingOver && (
-        <div className="fixed inset-0 z-50 bg-bambu-dark/90 flex items-center justify-center pointer-events-none">
-          <div className="border-4 border-dashed border-bambu-green rounded-xl p-12 text-center">
-            <Upload className="w-16 h-16 mx-auto mb-4 text-bambu-green" />
-            <p className="text-2xl font-semibold text-white mb-2">{t('archives.page.dropFilesHere')}</p>
-            <p className="text-bambu-gray">{t('archives.releaseToUpload')}</p>
-          </div>
-        </div>
-      )}
+    <div className="p-4 md:p-8 relative">
 
       {/* Selection Toolbar */}
       {selectionMode && (
@@ -3353,14 +3350,6 @@ export function ArchivesPage() {
               Select
             </Button>
           )}
-          <Button
-            onClick={() => setShowUpload(true)}
-            disabled={!hasPermission('archives:create')}
-            title={!hasPermission('archives:create') ? t('archives.permission.noCreate') : undefined}
-          >
-            <Upload className="w-4 h-4" />
-            Upload 3MF
-          </Button>
           {hasPermission('archives:purge') && (
             <Button
               variant="secondary"
@@ -3606,7 +3595,7 @@ export function ArchivesPage() {
               {search ? t('archives.noArchivesSearch') : t('archives.noArchivesYet')}
             </p>
             <p className="text-sm text-bambu-gray mt-2">
-              Archives are created automatically when prints complete
+              Archive history starts when a print is dispatched and records its final outcome.
             </p>
           </CardContent>
         </Card>
@@ -3966,17 +3955,6 @@ export function ArchivesPage() {
 
         </div>
       ) : null}
-
-      {/* Upload Modal */}
-      {showUpload && (
-        <UploadModal
-          onClose={() => {
-            setShowUpload(false);
-            setUploadFiles([]);
-          }}
-          initialFiles={uploadFiles}
-        />
-      )}
 
       {/* Archive bulk-purge modal (#1008 follow-up) */}
       {showPurgeModal && (

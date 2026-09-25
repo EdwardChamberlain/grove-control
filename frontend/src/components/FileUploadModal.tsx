@@ -30,6 +30,8 @@ interface FileUploadModalProps {
   onUploadComplete: () => void;
   /** Called after each file is successfully uploaded with its response data. Return a string to show an error and prevent modal from closing. */
   onFileUploaded?: (file: LibraryFileUploadResponse) => string | void;
+  /** Override the destination for print flows that upload directly to Queue. */
+  uploadFile?: (file: File, generateStlThumbnails: boolean) => Promise<LibraryFileUploadResponse>;
   /** When true, automatically uploads the file as soon as it's added and closes the modal */
   autoUpload?: boolean;
   /** Validate files before adding. Return a string to reject with an error message. */
@@ -46,7 +48,7 @@ interface FileUploadModalProps {
   beforeDropZone?: ReactNode;
 }
 
-export function FileUploadModal({ folderId, onClose, onUploadComplete, onFileUploaded, autoUpload, validateFile, accept, singleFile = false, dropZoneHint, initialFiles, beforeDropZone }: FileUploadModalProps) {
+export function FileUploadModal({ folderId, onClose, onUploadComplete, onFileUploaded, uploadFile, autoUpload, validateFile, accept, singleFile = false, dropZoneHint, initialFiles, beforeDropZone }: FileUploadModalProps) {
   const { t } = useTranslation();
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -100,7 +102,9 @@ export function FileUploadModal({ folderId, onClose, onUploadComplete, onFileUpl
             error: result.errors.length > 0 ? t('fileManager.zipFilesFailed', '{{count}} files failed', { count: result.errors.length }) : undefined,
           });
         } else {
-          const result = await api.uploadLibraryFile(uf.file, folderId, generateStlThumbnails);
+          const result = uploadFile
+            ? await uploadFile(uf.file, generateStlThumbnails)
+            : await api.uploadLibraryFile(uf.file, folderId, generateStlThumbnails);
           updateFileStatus(uf.file, { status: 'success' });
           const error = onFileUploaded?.(result);
           if (error) {

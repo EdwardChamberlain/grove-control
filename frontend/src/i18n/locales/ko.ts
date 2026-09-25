@@ -691,7 +691,7 @@ export default {
     developerModeWarning: '개발자 LAN 모드가 활성화되지 않음: {{names}}. 일부 기능이 작동하지 않을 수 있습니다.',
     howToEnable: '활성화 방법',
     incompatibleFile: '이 파일은 {{slicedFor}}용으로 슬라이싱되었지만, 이 프린터는 {{printerModel}}입니다',
-    directUploadLibraryNote: '업로드한 파일은 대기열에 추가하기 전에 파일 관리자에 저장됩니다.',
+    directUploadLibraryNote: '업로드한 파일은 대기열에 추가되며 파일 관리자에는 저장되지 않습니다.',
     dropNotPrintable: '.gcode 및 .gcode.3mf 파일만 인쇄할 수 있습니다',
     dropToPrint: '놓아서 인쇄',
     cannotPrint: '프린터 사용 중',
@@ -4655,12 +4655,12 @@ export default {
     },
     mode: {
       title: '모드',
-      archive: '아카이브',
-      archiveDesc: '파일 즉시 아카이브',
+      archive: '파일',
+      archiveDesc: '업로드를 파일에 저장',
       review: '검토',
-      reviewDesc: '아카이브 전 검토',
+      reviewDesc: '파일에 저장하기 전에 업로드 검토',
       queue: '대기열',
-      queueDesc: '아카이브 후 대기열 추가',
+      queueDesc: '업로드를 인쇄 대기열에 추가',
       proxy: '프록시',
       proxyDesc: '실제 프린터로 릴레이'
     },
@@ -4686,15 +4686,15 @@ export default {
       readGuide: '활성화 전에 설정 가이드를 읽으세요'
     },
     archiveNameSource: {
-      title: '아카이브 이름 출처',
-      description: '가상 프린터를 통해 파일이 도착할 때 새 아카이브의 이름 지정 방법을 선택합니다. "메타데이터"는 3MF의 슬라이서 내장 제목을 사용합니다(기본값). "파일 이름"은 Bambu Studio가 FTP를 통해 전송한 파일 이름을 사용합니다. 참고: Bambu Studio는 3MF에 제목 필드가 있을 경우 "프린터로 보내기" 대화 상자에 입력한 이름을 해당 값으로 덮어쓰므로, 두 모드 모두 동일한 문자열이 표시되는 경우가 많습니다.',
+      title: '업로드 표시 이름',
+      description: '검토 목록에서 업로드를 표시할 방식을 선택합니다. “메타데이터”는 3MF에 포함된 제목을 사용하고, “파일 이름”은 FTP로 받은 파일 이름을 사용합니다.',
       metadata: '메타데이터',
       filename: '파일 이름'
     },
     howItWorks: {
       title: '작동 방식',
       step1: '같은 LAN에서 가상 프린터는 검색을 통해 슬라이서(Bambu Studio / OrcaSlicer)에 자동으로 나타납니다. 다른 네트워크에서는 IP 주소와 액세스 코드로 수동으로 추가하세요.',
-      step2: '아카이브, 검토, 대기열 모드에서 슬라이서의 "전송" 버튼을 사용하여 3MF 파일을 Grove Control에 업로드하세요. 슬라이서는 "인쇄 성공"을 표시하지만 파일은 저장되고 인쇄되지 않습니다.',
+      step2: '파일, 검토, 대기열 모드에서 슬라이서의 “보내기” 버튼으로 3MF 파일을 Grove Control에 업로드합니다. 파일 모드는 파일에 저장하고, 검토 모드는 저장하거나 폐기할 수 있으며, 대기열 모드는 인쇄 작업을 추가합니다. “인쇄 성공”은 업로드가 완료되었다는 뜻입니다.',
       step3: '프록시 모드에서 가상 프린터는 모든 트래픽을 실제 프린터로 릴레이합니다 — 직접 연결된 것처럼 즉시 인쇄가 시작됩니다.'
     },
     status: {

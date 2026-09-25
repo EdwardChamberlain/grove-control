@@ -2774,7 +2774,7 @@ function SinglePrinterCockpit({
           const slicedFor = (uploadedFile.metadata as Record<string, unknown>)?.sliced_for_model as string | undefined;
           const printerModel = mapModelCode(printer.model);
           if (slicedFor && printerModel && !isGcodeCompatible(slicedFor, printerModel)) {
-            api.deleteLibraryFile(uploadedFile.id).catch(() => {});
+            api.discardQueueSource(uploadedFile.id).catch(() => {});
             return t('printers.incompatibleFile', 'This file was sliced for {{slicedFor}}, but this printer is a {{printerModel}}', { slicedFor, printerModel });
           }
           setShowUploadForPrint(false);
@@ -2811,7 +2811,10 @@ function SinglePrinterCockpit({
         libraryFileId={printAfterUpload.id}
         archiveName={printAfterUpload.filename}
         initialSelectedPrinterIds={[printer.id]}
-        onClose={() => setPrintAfterUpload(null)}
+        onClose={() => {
+          api.discardQueueSource(printAfterUpload.id).catch(() => {});
+          setPrintAfterUpload(null);
+        }}
         onSuccess={() => setPrintAfterUpload(null)}
         cleanupLibraryAfterDispatch
       />
@@ -5546,7 +5549,7 @@ function PrinterCard({
             const slicedFor = (uploadedFile.metadata as Record<string, unknown>)?.sliced_for_model as string | undefined;
             const printerModel = mapModelCode(printer.model);
             if (slicedFor && printerModel && !isGcodeCompatible(slicedFor, printerModel)) {
-              api.deleteLibraryFile(uploadedFile.id).catch(() => {});
+              api.discardQueueSource(uploadedFile.id).catch(() => {});
               return t('printers.incompatibleFile', 'This file was sliced for {{slicedFor}}, but this printer is a {{printerModel}}', { slicedFor, printerModel });
             }
             setPrintAfterUpload({ id: uploadedFile.id, filename: uploadedFile.filename });
@@ -5561,7 +5564,10 @@ function PrinterCard({
           libraryFileId={printAfterUpload.id}
           archiveName={printAfterUpload.filename}
           initialSelectedPrinterIds={[printer.id]}
-          onClose={() => setPrintAfterUpload(null)}
+          onClose={() => {
+            api.discardQueueSource(printAfterUpload.id).catch(() => {});
+            setPrintAfterUpload(null);
+          }}
           onSuccess={() => setPrintAfterUpload(null)}
           cleanupLibraryAfterDispatch
         />

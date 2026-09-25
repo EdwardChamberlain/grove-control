@@ -4,12 +4,25 @@ Tests the virtual printer manager, FTP server, and SSDP server components.
 """
 
 import asyncio
+import itertools
 import json
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def mock_virtual_printer_library_upload(monkeypatch):
+    """Give virtual-printer tests transient File ids without invoking upload IO."""
+    next_id = itertools.count(1)
+
+    async def upload_file(*, file, **_kwargs):
+        return SimpleNamespace(id=next(next_id), filename=file.filename)
+
+    monkeypatch.setattr("backend.app.api.routes.library.upload_file", upload_file)
 
 
 def _write_3mf_with_filaments(file_path: Path, filaments: list[dict], plate_index: int = 1) -> None:
@@ -173,7 +186,7 @@ class TestVirtualPrinterInstance:
         """Verify file is archived in immediate mode."""
         file_path = Path("/tmp/test.3mf")  # nosec B108
 
-        with patch.object(instance, "_archive_file", new_callable=AsyncMock) as mock_archive:
+        with patch.object(instance, "_save_file_to_library", new_callable=AsyncMock) as mock_archive:
             await instance.on_file_received(file_path, "192.168.1.100")
 
             mock_archive.assert_called_once_with(file_path, "192.168.1.100")
@@ -194,7 +207,7 @@ class TestVirtualPrinterInstance:
         instance._mqtt.set_gcode_state = MagicMock()
         file_path = Path("/tmp/test.3mf")  # nosec B108
 
-        with patch.object(instance, "_archive_file", new_callable=AsyncMock):
+        with patch.object(instance, "_save_file_to_library", new_callable=AsyncMock):
             await instance.on_file_received(file_path, "192.168.1.100")
 
         instance._mqtt.set_gcode_state.assert_called_once_with("FINISH", filename="test.3mf", prepare_percent="100")
@@ -208,7 +221,7 @@ class TestVirtualPrinterInstance:
         instance._mqtt.set_gcode_state = MagicMock()
         file_path = Path("/tmp/test.gcode")  # nosec B108
 
-        with patch.object(instance, "_archive_file", new_callable=AsyncMock):
+        with patch.object(instance, "_save_file_to_library", new_callable=AsyncMock):
             await instance.on_file_received(file_path, "192.168.1.100")
 
         instance._mqtt.set_gcode_state.assert_not_called()
@@ -312,22 +325,19 @@ class TestVirtualPrinterInstance:
         mock_delayed.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_archive_file_skips_non_3mf(self, instance):
-        """Verify non-3MF files are skipped and cleaned up."""
+    async def test_save_file_to_library_always_cleans_temp_upload(self, instance):
+        """Verify temp uploads are cleaned up when the Files save fails."""
         instance._session_factory = MagicMock()
         instance._pending_files["verify_job"] = Path("/tmp/verify_job")  # nosec B108
 
         with patch("pathlib.Path.unlink"):
-            await instance._archive_file(Path("/tmp/verify_job"), "192.168.1.100")  # nosec B108
+            await instance._save_file_to_library(Path("/tmp/verify_job"), "192.168.1.100")  # nosec B108
 
             assert "verify_job" not in instance._pending_files
 
     @pytest.mark.asyncio
-    async def test_archive_file_broadcasts_archive_created(self, tmp_path):
-        """#1282: VP immediate-mode archives must broadcast archive_created so
-        the Archives page refreshes without a tab switch. Real-printer prints
-        get this via main.py's MQTT print_start handler; the VP path used to
-        skip the broadcast entirely."""
+    async def test_save_file_to_library_does_not_create_archive_history(self, tmp_path):
+        """Virtual Printer Files mode saves user files without adding history."""
         from backend.app.services.virtual_printer.manager import VirtualPrinterInstance
 
         mock_db = AsyncMock()
@@ -352,36 +362,19 @@ class TestVirtualPrinterInstance:
         file_path = tmp_path / "test.3mf"
         file_path.write_bytes(b"fake3mf")
 
-        mock_archive = MagicMock()
-        mock_archive.id = 99
-        mock_archive.printer_id = None
-        mock_archive.filename = "test.3mf"
-        mock_archive.print_name = "test"
-        mock_archive.status = "archived"
-
         with (
-            patch(
-                "backend.app.api.routes.settings.get_setting",
-                new_callable=AsyncMock,
-                return_value=None,
-            ),
             patch(
                 "backend.app.services.archive.ArchiveService.archive_print",
                 new_callable=AsyncMock,
-                return_value=mock_archive,
             ),
             patch(
                 "backend.app.core.websocket.ws_manager.send_archive_created",
                 new_callable=AsyncMock,
             ) as mock_broadcast,
         ):
-            await inst._archive_file(file_path, "192.168.1.100")
+            await inst._save_file_to_library(file_path, "192.168.1.100")
 
-        mock_broadcast.assert_awaited_once()
-        payload = mock_broadcast.await_args.args[0]
-        assert payload["id"] == 99
-        assert payload["filename"] == "test.3mf"
-        assert payload["status"] == "archived"
+        mock_broadcast.assert_not_awaited()
 
     # ========================================================================
     # Tests for auto_dispatch
@@ -461,10 +454,8 @@ class TestVirtualPrinterInstance:
         assert queue_item.manual_start is False
 
     @pytest.mark.asyncio
-    async def test_add_to_print_queue_broadcasts_archive_created(self, tmp_path):
-        """#1282: VP queue-mode uploads must broadcast archive_created so the
-        Archives page picks up the new entry live. Pre-fix the page only
-        refreshed when the user manually switched tabs."""
+    async def test_add_to_print_queue_does_not_create_archive_before_dispatch(self, tmp_path):
+        """Queue admission creates no Archive history or archive event."""
         from backend.app.services.virtual_printer.manager import VirtualPrinterInstance
 
         mock_db = AsyncMock()
@@ -491,23 +482,10 @@ class TestVirtualPrinterInstance:
         file_path = tmp_path / "test.3mf"
         file_path.write_bytes(b"fake3mf")
 
-        mock_archive = MagicMock()
-        mock_archive.id = 77
-        mock_archive.printer_id = None
-        mock_archive.filename = "test.3mf"
-        mock_archive.print_name = "test"
-        mock_archive.status = "archived"
-
         with (
-            patch(
-                "backend.app.api.routes.settings.get_setting",
-                new_callable=AsyncMock,
-                return_value=None,
-            ),
             patch(
                 "backend.app.services.archive.ArchiveService.archive_print",
                 new_callable=AsyncMock,
-                return_value=mock_archive,
             ),
             patch(
                 "backend.app.core.websocket.ws_manager.send_archive_created",
@@ -516,11 +494,7 @@ class TestVirtualPrinterInstance:
         ):
             await inst._add_to_print_queue(file_path, "192.168.1.100")
 
-        mock_broadcast.assert_awaited_once()
-        payload = mock_broadcast.await_args.args[0]
-        assert payload["id"] == 77
-        assert payload["print_name"] == "test"
-        assert payload["status"] == "archived"
+        mock_broadcast.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_add_to_print_queue_with_auto_dispatch_off(self, tmp_path):
@@ -1254,24 +1228,12 @@ class TestVirtualPrinterInstance:
         assert queue_item.force_color_match is True
 
     # ========================================================================
-    # Tests for archive_name_source setting (#1152)
+    # Files mode does not create print history.
     # ========================================================================
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        ("setting_value", "expected_prefer_filename"),
-        [
-            ("filename", True),
-            ("metadata", False),
-            (None, False),  # Default when setting unset
-            ("", False),  # Defensive: empty string is not "filename"
-        ],
-    )
-    async def test_archive_file_passes_prefer_filename_per_setting(
-        self, tmp_path, setting_value, expected_prefer_filename
-    ):
-        """_archive_file reads `virtual_printer_archive_name_source` and forwards
-        prefer_filename_for_name=True only when it equals 'filename' (#1152)."""
+    async def test_save_file_to_library_does_not_create_archive(self, tmp_path):
+        """Files mode never creates a print-history Archive row."""
         from backend.app.services.virtual_printer.manager import VirtualPrinterInstance
 
         mock_db = AsyncMock()
@@ -1295,41 +1257,30 @@ class TestVirtualPrinterInstance:
         file_path = tmp_path / "user-renamed-job.3mf"
         file_path.write_bytes(b"fake3mf")
 
-        mock_archive = MagicMock()
-        mock_archive.id = 1
-        mock_archive.print_name = "user-renamed-job"
-
-        archive_print_mock = AsyncMock(return_value=mock_archive)
+        archive_print_mock = AsyncMock()
 
         with (
-            patch(
-                "backend.app.api.routes.settings.get_setting",
-                new_callable=AsyncMock,
-                return_value=setting_value,
-            ),
             patch(
                 "backend.app.services.archive.ArchiveService.archive_print",
                 archive_print_mock,
             ),
         ):
-            await inst._archive_file(file_path, "192.168.1.100")
+            await inst._save_file_to_library(file_path, "192.168.1.100")
 
-        assert archive_print_mock.await_count == 1
-        kwargs = archive_print_mock.await_args.kwargs
-        assert kwargs.get("prefer_filename_for_name") is expected_prefer_filename
+        archive_print_mock.assert_not_awaited()
 
     # ========================================================================
     # Tests for failure-path cleanup (#audit-R2-1)
     # ========================================================================
     #
-    # All three file handlers (_archive_file, _queue_file, _add_to_print_queue)
+    # All three file handlers (_save_file_to_library, _queue_file, _add_to_print_queue)
     # previously only popped _pending_files and unlinked the temp file on the
     # success branch. Failure paths leaked the marker (blocking same-name
     # retries via the FTP layer) and the temp file on disk. The cleanup must
     # ALWAYS run, even when archival / queue insert raises.
 
     @pytest.mark.asyncio
-    async def test_archive_file_failure_path_pops_pending_and_unlinks(self, tmp_path):
+    async def test_save_file_to_library_failure_path_pops_pending_and_unlinks(self, tmp_path):
         """When the archive layer raises, `_pending_files[filename]` must still
         be popped and the temp file must be unlinked. Otherwise the FTP layer's
         same-name retry guard would silently reject the slicer's next attempt
@@ -1364,12 +1315,12 @@ class TestVirtualPrinterInstance:
                 return_value=None,
             ),
             patch(
-                "backend.app.services.archive.ArchiveService.archive_print",
+                "backend.app.api.routes.library.upload_file",
                 new_callable=AsyncMock,
-                side_effect=RuntimeError("archive blew up"),
+                side_effect=RuntimeError("File upload failed"),
             ),
         ):
-            await inst._archive_file(file_path, "192.168.1.100")
+            await inst._save_file_to_library(file_path, "192.168.1.100")
 
         assert file_path.name not in inst._pending_files
         assert not file_path.exists()
@@ -1661,8 +1612,9 @@ class TestVirtualPrinterInstance:
         assert plate_ids == [1, 2, 3], f"plate_ids should preserve slice_info order, got {plate_ids}"
         positions = [q.position for q in added_items]
         assert positions == [1, 2, 3], f"positions should be consecutive, got {positions}"
-        archive_ids = {q.archive_id for q in added_items}
-        assert archive_ids == {999}, f"All queue items must share the single backing archive, got {archive_ids}"
+        file_ids = {q.library_file_id for q in added_items}
+        assert len(file_ids) == 3, f"Each plate needs its own transient File source, got {file_ids}"
+        assert all(q.archive_id is None for q in added_items)
         # auto_dispatch=False on the VP → every item is manual_start.
         assert all(q.manual_start for q in added_items)
 

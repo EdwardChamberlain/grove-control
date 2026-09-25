@@ -1152,6 +1152,7 @@ class ArchiveService:
         project_id: int | None = None,
         subtask_id: str | None = None,
         prefer_filename_for_name: bool = False,
+        commit: bool = True,
     ) -> PrintArchive | None:
         """Archive a 3MF file with metadata.
 
@@ -1172,6 +1173,9 @@ class ArchiveService:
                 metadata. Used by virtual-printer flows so users who rename a job in
                 BambuStudio's "send to printer" dialog see that name instead of the
                 creator-baked title (#1152).
+            commit: When False, flush the row but leave the transaction to the caller.
+                Dispatch uses this to save the Archive event and its PrintQueue link
+                atomically before publishing the print command.
         """
         # Verify printer exists if specified
         if printer_id is not None:
@@ -1327,8 +1331,11 @@ class ArchiveService:
         )
 
         self.db.add(archive)
-        await self.db.commit()
-        await self.db.refresh(archive)
+        if commit:
+            await self.db.commit()
+            await self.db.refresh(archive)
+        else:
+            await self.db.flush()
 
         return archive
 

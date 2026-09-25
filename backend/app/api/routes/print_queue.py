@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import defusedxml.ElementTree as ET
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import and_, func, inspect, or_, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +24,7 @@ from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
 from backend.app.models.printer import Printer
 from backend.app.models.project import Project
 from backend.app.models.user import User
+from backend.app.schemas.library import FileUploadResponse
 from backend.app.schemas.print_queue import (
     PrintQueueBulkUpdate,
     PrintQueueBulkUpdateResponse,
@@ -42,6 +43,10 @@ from backend.app.services.filament_requirements import (
     overrides_for_plate,
 )
 from backend.app.services.notification_service import notification_service
+from backend.app.services.queue_source_cleanup import (
+    remove_queue_only_artifacts,
+    remove_queue_only_source_if_unused,
+)
 from backend.app.utils.printer_models import is_gcode_compatible
 from backend.app.utils.threemf_tools import (
     extract_bed_type_from_3mf,
@@ -52,6 +57,58 @@ from backend.app.utils.threemf_tools import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/queue", tags=["queue"])
+
+
+@router.post("/upload-source", response_model=FileUploadResponse)
+async def upload_queue_source(
+    file: UploadFile = File(...),
+    generate_stl_thumbnails: bool = Query(default=True),
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_CREATE),
+    api_key_owner: User | None = Depends(resolve_api_key_owner),
+):
+    """Upload a one-off print source for the Queue without adding it to Files."""
+    from backend.app.api.routes.library import upload_file
+
+    response = await upload_file(
+        file=file,
+        folder_id=None,
+        generate_stl_thumbnails=generate_stl_thumbnails,
+        db=db,
+        current_user=current_user,
+        api_key_owner=api_key_owner,
+    )
+    library_file = await db.get(LibraryFile, response.id)
+    if library_file is None:
+        raise HTTPException(status_code=500, detail="Queue source could not be loaded")
+    library_file.queue_only = True
+    await db.commit()
+    return response
+
+
+@router.delete("/upload-source/{file_id}")
+async def discard_queue_source(
+    file_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_CREATE),
+    api_key_owner: User | None = Depends(resolve_api_key_owner),
+):
+    """Discard an unqueued temporary print source after closing the print modal."""
+    actor = current_user or api_key_owner
+    library_file = await db.get(LibraryFile, file_id)
+    if library_file is None:
+        return {"deleted": True}
+    if not library_file.queue_only:
+        raise HTTPException(status_code=404, detail="Queue source not found")
+    if actor is not None and library_file.created_by_id != actor.id:
+        raise HTTPException(status_code=404, detail="Queue source not found")
+
+    paths = await remove_queue_only_source_if_unused(db, file_id)
+    await db.flush()
+    deleted = await db.get(LibraryFile, file_id) is None
+    await db.commit()
+    remove_queue_only_artifacts(paths)
+    return {"deleted": deleted}
 
 
 def _variant_summaries(item: PrintQueueItem) -> list[QueueVariantSummary]:
@@ -487,6 +544,8 @@ async def _resolve_queue_variants(
             and library_file.created_by_id != current_user.id
         ):
             raise HTTPException(404, f"Library file not found: {spec.library_file_id}")
+        if library_file.queue_only:
+            raise HTTPException(400, "Queue-only upload sources cannot be used as cross-model variants")
 
         from backend.app.utils.filename import InvalidFilenameError, validate_print_filename
 
@@ -899,7 +958,10 @@ async def add_to_queue(
             use_ams=data.use_ams,
             nozzle_offset_cali=data.nozzle_offset_cali,
             gcode_injection=data.gcode_injection,
-            cleanup_library_after_dispatch=data.cleanup_library_after_dispatch,
+            # Queue-only uploads are removed once all queued jobs have made
+            # Archive copies. Never let a caller mark a user-managed File for
+            # automatic deletion.
+            cleanup_library_after_dispatch=bool(library_file and library_file.queue_only),
             project_id=data.project_id,
             position=start_position + i,
             status="pending",
@@ -1290,6 +1352,20 @@ async def update_queue_item(
     return _enrich_response(item)
 
 
+async def _cleanup_transient_library_source(
+    db: AsyncSession,
+    library_file_id: int,
+    *,
+    exclude_item_id: int,
+) -> list[Path]:
+    """Remove an auto-uploaded Queue source once no queue item needs it."""
+    return await remove_queue_only_source_if_unused(
+        db,
+        library_file_id,
+        exclude_item_id=exclude_item_id,
+    )
+
+
 @router.delete("/{item_id}")
 async def delete_queue_item(
     item_id: int,
@@ -1319,8 +1395,13 @@ async def delete_queue_item(
     if item.status == "preheating":
         await abort_heat_soak(db, item, "Heat soak deleted", status="cancelled")
         item = await lock_queue_item(db, item_id)
+    library_file_id = item.library_file_id if item.cleanup_library_after_dispatch else None
     await db.delete(item)
+    cleanup_paths: list[Path] = []
+    if library_file_id is not None:
+        cleanup_paths = await _cleanup_transient_library_source(db, library_file_id, exclude_item_id=item_id)
     await db.commit()
+    remove_queue_only_artifacts(cleanup_paths)
 
     from backend.app.services.print_scheduler import scheduler
 
@@ -1491,14 +1572,28 @@ async def cancel_queue_item(
 
     if item.status == "preheating":
         await abort_heat_soak(db, item, "Heat soak cancelled by user", status="cancelled")
+        item = await lock_queue_item(db, item_id)
+        if item is not None and item.cleanup_library_after_dispatch and item.library_file_id is not None:
+            cleanup_paths = await _cleanup_transient_library_source(
+                db,
+                item.library_file_id,
+                exclude_item_id=item_id,
+            )
+            await db.commit()
+            remove_queue_only_artifacts(cleanup_paths)
         return {"message": "Heat soak cancelled"}
 
     if item.status not in ("pending",):
         raise HTTPException(400, f"Cannot cancel item with status '{item.status}'")
 
+    library_file_id = item.library_file_id if item.cleanup_library_after_dispatch else None
     item.status = "cancelled"
     item.completed_at = datetime.now(timezone.utc)
+    cleanup_paths = []
+    if library_file_id is not None:
+        cleanup_paths = await _cleanup_transient_library_source(db, library_file_id, exclude_item_id=item_id)
     await db.commit()
+    remove_queue_only_artifacts(cleanup_paths)
 
     from backend.app.services.print_scheduler import scheduler
 

@@ -1229,7 +1229,6 @@ export interface AppSettings {
   location_sensor_poll_interval: number;
   location_sensor_alert_defaults: string;
   // File Manager / Library settings
-  library_archive_mode: 'always' | 'never' | 'ask';
   library_disk_warning_gb: number;
   // Camera view settings
   camera_view_mode: 'window' | 'embedded';
@@ -1644,15 +1643,6 @@ export interface SliceResponse {
   used_embedded_settings: boolean;
 }
 
-export interface SliceArchiveResponse {
-  archive_id: number;
-  name: string;
-  print_time_seconds: number;
-  filament_used_g: number;
-  filament_used_mm: number;
-  used_embedded_settings: boolean;
-}
-
 // Background slice-job lifecycle. POST /slice returns 202 + this shape;
 // the frontend polls /slice-jobs/{id} until status is terminal.
 export type SliceJobStatus = 'pending' | 'running' | 'completed' | 'failed';
@@ -1693,7 +1683,7 @@ export interface SliceJobState {
    * slicer emits its first frame (early "Initializing" phase) or when
    * the sidecar doesn't support progress. */
   progress: SliceJobProgress | null;
-  result?: SliceResponse | SliceArchiveResponse;
+  result?: SliceResponse;
   error_status?: number;
   error_detail?: string;
 }
@@ -2140,7 +2130,7 @@ export interface PrintQueueItem {
     target_model: string;
     position: number;
   }>;
-  // Either archive_id OR library_file_id must be set (archive created at print start)
+  // Either archive_id OR library_file_id must be set; dispatch links the attempt Archive here.
   archive_id: number | null;
   library_file_id: number | null;
   position: number;
@@ -4793,6 +4783,10 @@ export const api = {
     }
     return response.json();
   },
+  saveArchiveToFiles: (archiveId: number) =>
+    request<{ library_file_id: number; filename: string }>(`/archives/${archiveId}/save-to-files`, {
+      method: 'POST',
+    }),
 
   // Print Log
   getPrintLog: (params?: {
@@ -6412,6 +6406,28 @@ export const api = {
     }
     return response.json();
   },
+  uploadQueueSource: async (
+    file: File,
+    generateStlThumbnails: boolean = true
+  ): Promise<LibraryFileUploadResponse> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const params = new URLSearchParams({ generate_stl_thumbnails: String(generateStlThumbnails) });
+    const headers: Record<string, string> = {};
+    if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+    const response = await fetch(`${API_BASE}/queue/upload-source?${params}`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || `HTTP ${response.status}`);
+    }
+    return response.json();
+  },
+  discardQueueSource: (fileId: number) =>
+    request<{ deleted: boolean }>(`/queue/upload-source/${fileId}`, { method: 'DELETE' }),
   extractZipFile: async (
     file: File,
     folderId?: number | null,
@@ -7265,10 +7281,8 @@ export interface VirtualPrinterModels {
 export interface PendingUpload {
   id: number;
   filename: string;
-  // Resolved name the review card should show — mirrors what archive_print
-  // will eventually write to PrintArchive.print_name (#1152 follow-up). Falls
-  // back to the stripped filename stem when the 3MF has no embedded title or
-  // the operator has chosen the "filename" archive-name source.
+  // Resolved display name; falls back to the filename stem when the 3MF has
+  // no embedded title or the operator prefers the filename.
   display_name: string;
   file_size: number;
   source_ip: string | null;
@@ -7444,8 +7458,8 @@ export const pendingUploadsApi = {
 
   get: (id: number) => request<PendingUpload>(`/pending-uploads/${id}`),
 
-  archive: (id: number, data?: { tags?: string; notes?: string; project_id?: number }) =>
-    request<{ id: number; print_name: string; filename: string }>(`/pending-uploads/${id}/archive`, {
+  saveToFiles: (id: number, data?: { tags?: string; notes?: string; project_id?: number }) =>
+    request<{ library_file_id: number; filename: string }>(`/pending-uploads/${id}/save-to-files`, {
       method: 'POST',
       body: JSON.stringify(data || {}),
     }),
@@ -7453,8 +7467,8 @@ export const pendingUploadsApi = {
   discard: (id: number) =>
     request<{ success: boolean }>(`/pending-uploads/${id}`, { method: 'DELETE' }),
 
-  archiveAll: () =>
-    request<{ archived: number; failed: number }>('/pending-uploads/archive-all', { method: 'POST' }),
+  saveAllToFiles: () =>
+    request<{ saved: number; failed: number }>('/pending-uploads/save-to-files-all', { method: 'POST' }),
 
   discardAll: () =>
     request<{ discarded: number }>('/pending-uploads/discard-all', { method: 'DELETE' }),

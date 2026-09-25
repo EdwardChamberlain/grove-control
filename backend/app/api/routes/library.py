@@ -761,7 +761,11 @@ async def list_folders(
     # Get file counts per folder
     file_counts_result = await db.execute(
         select(LibraryFile.folder_id, func.count(LibraryFile.id))
-        .where(LibraryFile.folder_id.isnot(None), LibraryFile.deleted_at.is_(None))
+        .where(
+            LibraryFile.folder_id.isnot(None),
+            LibraryFile.deleted_at.is_(None),
+            LibraryFile.queue_only.is_(False),
+        )
         .group_by(LibraryFile.folder_id)
     )
     file_counts = dict(file_counts_result.all())
@@ -772,7 +776,11 @@ async def list_folders(
     # "sort by recent activity" mode is satisfied by immediate-parent bubble.
     latest_file_activity_result = await db.execute(
         select(LibraryFile.folder_id, func.max(LibraryFile.updated_at))
-        .where(LibraryFile.folder_id.isnot(None), LibraryFile.deleted_at.is_(None))
+        .where(
+            LibraryFile.folder_id.isnot(None),
+            LibraryFile.deleted_at.is_(None),
+            LibraryFile.queue_only.is_(False),
+        )
         .group_by(LibraryFile.folder_id)
     )
     latest_file_activity = dict(latest_file_activity_result.all())
@@ -1875,7 +1883,7 @@ async def list_files(
         )
 
     user, can_read_all = auth_result
-    query = LibraryFile.active().options(
+    query = LibraryFile.managed().options(
         selectinload(LibraryFile.created_by),
         selectinload(LibraryFile.tags),
     )
@@ -1929,7 +1937,11 @@ async def list_files(
         if hashes:
             dup_result = await db.execute(
                 select(LibraryFile.file_hash, func.count(LibraryFile.id))
-                .where(LibraryFile.file_hash.in_(hashes), LibraryFile.deleted_at.is_(None))
+                .where(
+                    LibraryFile.file_hash.in_(hashes),
+                    LibraryFile.deleted_at.is_(None),
+                    LibraryFile.queue_only.is_(False),
+                )
                 .group_by(LibraryFile.file_hash)
             )
             hash_counts = {h: c - 1 for h, c in dup_result.all()}  # -1 to exclude self
@@ -1943,7 +1955,11 @@ async def list_files(
     if group_ids:
         count_result = await db.execute(
             select(LibraryFile.variant_group_id, func.count(LibraryFile.id))
-            .where(LibraryFile.variant_group_id.in_(group_ids), LibraryFile.deleted_at.is_(None))
+            .where(
+                LibraryFile.variant_group_id.in_(group_ids),
+                LibraryFile.deleted_at.is_(None),
+                LibraryFile.queue_only.is_(False),
+            )
             .group_by(LibraryFile.variant_group_id)
         )
         variant_counts = dict(count_result.all())
@@ -2051,7 +2067,13 @@ async def upload_file(
 
         # Check for duplicates
         dup_result = await db.execute(
-            select(LibraryFile.id).where(LibraryFile.file_hash == file_hash, LibraryFile.deleted_at.is_(None)).limit(1)
+            select(LibraryFile.id)
+            .where(
+                LibraryFile.file_hash == file_hash,
+                LibraryFile.deleted_at.is_(None),
+                LibraryFile.queue_only.is_(False),
+            )
+            .limit(1)
         )
         duplicate_of = dup_result.scalar()
 
@@ -2588,7 +2610,7 @@ async def add_files_to_queue(
     """Add library files to the print queue.
 
     Only sliced files (.gcode or .gcode.3mf) can be added to the queue.
-    The archive will be created automatically when the print starts.
+    Archive history is created when the scheduler dispatches the print.
     """
     added: list[AddToQueueResult] = []
     errors: list[AddToQueueError] = []
@@ -3910,6 +3932,7 @@ async def slice_and_persist(
     request: SliceRequest,
     current_user_id: int | None,
     job_id: int | None = None,
+    project_id: int | None = None,
 ) -> SliceResponse:
     """Slice a model and save the result as a new ``LibraryFile`` in
     ``folder_id`` (same folder as the source by convention).
@@ -3987,6 +4010,7 @@ async def slice_and_persist(
 
     new_file = LibraryFile(
         folder_id=folder_id,
+        project_id=project_id,
         filename=out_filename,
         file_path=to_relative_path(out_path),
         # The on-disk payload is a ZIP container — the file_type must
@@ -4012,192 +4036,6 @@ async def slice_and_persist(
     return SliceResponse(
         library_file_id=new_file.id,
         name=new_file.filename,
-        print_time_seconds=result.print_time_seconds,
-        filament_used_g=filament_g,
-        filament_used_mm=filament_mm,
-        used_embedded_settings=used_embedded_settings,
-    )
-
-
-async def slice_and_persist_as_archive(
-    db: AsyncSession,
-    *,
-    model_bytes: bytes,
-    model_filename: str,
-    request: SliceRequest,
-    source_archive,  # PrintArchive — hint kept loose to avoid cyclic import
-    current_user_id: int | None,
-    job_id: int | None = None,
-):
-    """Slice a model and save the result as a new ``PrintArchive`` row,
-    inheriting printer / project / makerworld metadata from the source
-    archive. Always exports as a `.gcode.3mf` so the existing thumbnail
-    and plates infrastructure (which expects a zip-shaped 3MF) works on
-    the new archive. Returns ``SliceArchiveResponse``.
-    """
-    from backend.app.models.archive import PrintArchive
-    from backend.app.schemas.slicer import SliceArchiveResponse
-    from backend.app.services.archive import ThreeMFParser
-
-    # Archive sinks always want a 3MF. The library route still respects the
-    # caller's `export_3mf` flag; here we override.
-    archive_request = request.model_copy(update={"export_3mf": True})
-
-    result, used_embedded_settings = await _run_slicer_with_fallback(
-        db,
-        model_bytes=model_bytes,
-        model_filename=model_filename,
-        request=archive_request,
-        job_id=job_id,
-        current_user_id=current_user_id,
-    )
-
-    base_name = model_filename.rsplit(".", 1)[0]
-    out_filename = f"{base_name}.gcode.3mf"
-
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    printer_folder = str(source_archive.printer_id) if source_archive.printer_id is not None else "unassigned"
-    archive_subdir = f"{timestamp}_{base_name}_sliced"
-    archive_dir = (
-        app_settings.archive_dir / printer_folder / archive_subdir
-    )  # SEC-PATH-OK: printer_folder = str(int|None), archive_subdir = f"{timestamp}_{base_name}_sliced" where base_name went through _safe_filename
-    archive_dir.mkdir(parents=True, exist_ok=True)
-    out_path = (
-        archive_dir / out_filename
-    )  # SEC-PATH-OK: out_filename = f"{base_name}.gcode.3mf" where base_name went through _safe_filename
-    # See library-slice path: BS/Orca sidecar CLIs don't embed plate_N.png
-    # in headless --export-3mf, so the produced 3MF often has no thumbnail
-    # at all. Server-side render fills the gap; no-op when the slicer did
-    # embed (desktop Studio path) and best-effort on any render error.
-    result = result._replace(content=inject_plate_thumbnails_if_missing(result.content))
-    out_path.write_bytes(result.content)
-
-    # Extract a thumbnail for the new archive card. Priority order:
-    #   1. Source archive's ``Metadata/plate_{N}.png`` — the GUI-rendered
-    #      preview of the same plate the user is re-slicing. Closer to
-    #      "what's actually printing" than any other available image
-    #      (with --arrange the layout may differ slightly, but objects
-    #      and colours match).
-    #   2. ``ThreeMFParser`` fallback chain on the sliced output: the
-    #      slicer's own per-plate render if it wrote one, then the
-    #      project-wide thumbnail under ``Auxiliaries/.thumbnails/``.
-    # BambuStudio CLI frequently doesn't emit a fresh per-plate render
-    # (slice writes the new gcode but leaves the preview slot empty),
-    # so without (1) the card falls all the way through to the
-    # MakerWorld-style cover art — visually unrelated to what the user
-    # picked, see #1493 follow-up. Failures don't fail the slice — the
-    # archive row is still useful without a thumbnail.
-    plate_num = request.plate or 1
-    thumbnail_path: str | None = None
-    parsed_metadata: dict = {}
-
-    src_3mf_path = app_settings.base_dir / source_archive.file_path
-    source_plate_bytes = _read_3mf_entry(src_3mf_path, f"Metadata/plate_{plate_num}.png")
-    if source_plate_bytes:
-        thumb_dest = archive_dir / "thumbnail.png"
-        thumb_dest.write_bytes(source_plate_bytes)
-        thumbnail_path = str(thumb_dest.relative_to(app_settings.base_dir))
-
-    try:
-        parser = ThreeMFParser(str(out_path), plate_number=plate_num)
-        parsed = parser.parse()
-        if thumbnail_path is None:
-            thumb_data = parsed.get("_thumbnail_data")
-            thumb_ext = parsed.get("_thumbnail_ext", ".png")
-            if thumb_data:
-                thumb_dest = archive_dir / f"thumbnail{thumb_ext}"
-                thumb_dest.write_bytes(thumb_data)
-                thumbnail_path = str(thumb_dest.relative_to(app_settings.base_dir))
-        parsed_metadata = {k: v for k, v in parsed.items() if not k.startswith("_")}
-    except Exception as exc:
-        logger.warning("Failed to parse sliced 3MF metadata for %s: %s", out_filename, exc)
-
-    metadata = dict(source_archive.extra_data) if source_archive.extra_data else {}
-    metadata.update(parsed_metadata)
-    # Fall back to the produced 3MF's G-code-header totals when the sidecar
-    # leaves the X-Filament-Used-* headers unset (result.filament_used_g == 0
-    # even for a real multi-hour print).
-    filament_g = result.filament_used_g or parsed_metadata.get("filament_used_grams") or 0.0
-    filament_mm = result.filament_used_mm or parsed_metadata.get("filament_used_mm") or 0.0
-    metadata.update(
-        {
-            "sliced_from_archive_id": source_archive.id,
-            "print_time_seconds": result.print_time_seconds,
-            "filament_used_g": filament_g,
-            "filament_used_mm": filament_mm,
-        }
-    )
-    if used_embedded_settings:
-        metadata["used_embedded_settings"] = True
-
-    # Prefer the actually-used filament list from the sliced output's
-    # slice_info.config (parsed_metadata.filament_* — only entries with
-    # used_g > 0). Falling back to the source_archive's list would
-    # surface every project-wide AMS slot, including ones the picked
-    # plate doesn't use (16+ swatches on the card for a 2-color print).
-    new_filament_type = parsed_metadata.get("filament_type") or source_archive.filament_type
-    new_filament_color = parsed_metadata.get("filament_color") or source_archive.filament_color
-
-    # When the user re-slices for a different printer model than the source,
-    # the source's printer_id (e.g. an H2D's "Workshop H2C") no longer
-    # represents where the new archive can be reprinted. The archive card
-    # and reprint modal both read printer_id first and only fall back to
-    # sliced_for_model when it's None, so leaving the inherited id makes
-    # the X1C-sliced card display the source H2D's printer name.
-    # Same pitfall as the sliced_for_model copy a few lines below.
-    new_target_model = parsed_metadata.get("sliced_for_model") or source_archive.sliced_for_model
-    is_cross_model_reslice = (
-        new_target_model is not None
-        and source_archive.sliced_for_model is not None
-        and new_target_model != source_archive.sliced_for_model
-    )
-    new_printer_id = None if is_cross_model_reslice else source_archive.printer_id
-
-    new_archive = PrintArchive(
-        printer_id=new_printer_id,
-        project_id=source_archive.project_id,
-        filename=out_filename,
-        file_path=str(out_path.relative_to(app_settings.base_dir)),
-        file_size=len(result.content),
-        content_hash=hashlib.sha256(result.content).hexdigest(),
-        thumbnail_path=thumbnail_path,
-        # Inherit identity from the source archive so the new entry shows
-        # up alongside its sibling in the archives list.
-        print_name=(source_archive.print_name or base_name) + " (re-sliced)",
-        print_time_seconds=result.print_time_seconds,
-        filament_used_grams=filament_g or None,
-        filament_type=new_filament_type,
-        filament_color=new_filament_color,
-        layer_height=source_archive.layer_height,
-        nozzle_diameter=source_archive.nozzle_diameter,
-        # The re-sliced output is for whatever printer the user just picked,
-        # not the source archive's printer — read the model the slicer baked
-        # into the new 3MF, falling back to the source only if it's absent.
-        # (Copying source_archive.sliced_for_model kept a cross-printer
-        # re-slice, e.g. X1C→H2D, showing the old "X1C sliced" model.)
-        sliced_for_model=parsed_metadata.get("sliced_for_model") or source_archive.sliced_for_model,
-        # Build plate type that the sliced output was produced for (#1493
-        # follow-up): the frontend's ArchiveCard reads ``archive.bed_type``
-        # off the top-level column, not extra_data, so without this lift the
-        # re-sliced card had no plate badge. ThreeMFParser pulls it from the
-        # sliced 3MF's ``slice_info.config`` ``curr_bed_type``; if that's
-        # absent (older sidecar / older slice profile) the source archive's
-        # bed_type is the right default.
-        bed_type=parsed_metadata.get("bed_type") or source_archive.bed_type,
-        makerworld_url=source_archive.makerworld_url,
-        designer=source_archive.designer,
-        # Sliced-but-not-printed: keep status default ("completed") so it
-        # surfaces in the normal archives list, but do not stamp
-        # started/completed_at — the user hasn't actually printed it yet.
-        extra_data=metadata,
-        created_by_id=current_user_id,
-    )
-    db.add(new_archive)
-    await db.commit()
-
-    return SliceArchiveResponse(
-        archive_id=new_archive.id,
-        name=new_archive.print_name or out_filename,
         print_time_seconds=result.print_time_seconds,
         filament_used_g=filament_g,
         filament_used_mm=filament_mm,
@@ -4936,7 +4774,7 @@ async def get_library_stats(
     # Stats exclude trashed files — users see counts/sizes for what's actually in the library.
     # Without LIBRARY_READ_ALL the stats reflect only the caller's own files —
     # match what the file list endpoint shows so the numbers stay consistent.
-    file_filters = [LibraryFile.deleted_at.is_(None)]
+    file_filters = [LibraryFile.deleted_at.is_(None), LibraryFile.queue_only.is_(False)]
     if user is not None and not can_read_all:
         file_filters.append(LibraryFile.created_by_id == user.id)
 
