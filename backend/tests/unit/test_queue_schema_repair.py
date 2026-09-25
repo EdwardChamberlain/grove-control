@@ -74,7 +74,7 @@ async def test_queue_schema_repair_reports_columns_that_could_not_be_added(tmp_p
                     "backend.app.core.database._safe_execute",
                     side_effect=OperationalError("ALTER TABLE", {}, RuntimeError("read-only database")),
                 ),
-                pytest.raises(RuntimeError, match="printer_id.*read-only database"),
+                pytest.raises(RuntimeError, match="job_id.*read-only database"),
             ):
                 await ensure_queue_insert_schema(conn)
     finally:

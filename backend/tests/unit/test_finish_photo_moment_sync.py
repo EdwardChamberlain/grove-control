@@ -52,9 +52,15 @@ def _clean_state():
     """Don't leak event/cache dict entries across tests."""
     main_module._stage22_finish_in_flight.clear()
     main_module._stage22_finish_frames.clear()
+    main_module._stage22_finish_in_flight_job_ids.clear()
+    main_module._stage22_finish_frame_job_ids.clear()
+    main_module._stage22_finish_frames_by_job.clear()
     yield
     main_module._stage22_finish_in_flight.clear()
     main_module._stage22_finish_frames.clear()
+    main_module._stage22_finish_in_flight_job_ids.clear()
+    main_module._stage22_finish_frame_job_ids.clear()
+    main_module._stage22_finish_frames_by_job.clear()
 
 
 @pytest.fixture

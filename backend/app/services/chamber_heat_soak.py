@@ -8,15 +8,26 @@ abort an expired attempt, never resume its timer or dispatch its job.
 import logging
 import time
 from datetime import datetime, timezone
-from uuid import uuid4
 
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.tasks import spawn_background_task
-from backend.app.models.print_queue import PrintQueueItem
+from backend.app.models.print_queue import PrinterSafetyHold, PrintJobReservation, PrintQueueItem
 from backend.app.models.printer import Printer
+from backend.app.services.print_job_lifecycle import (
+    CANCELLED,
+    DISPATCHING,
+    HEAT_SOAKING,
+    QUEUED,
+    LifecycleError,
+    admit_job,
+    create_safety_hold,
+    lifecycle_state,
+    operation_is_current,
+    transition_job,
+)
 from backend.app.services.printer_manager import printer_manager, supports_chamber_heater
 
 logger = logging.getLogger(__name__)
@@ -83,16 +94,36 @@ def _heaters_off(printer: Printer) -> None:
 
 
 async def abort_heat_soak(db: AsyncSession, item: PrintQueueItem, reason: str, *, status: str = "pending") -> None:
-    """Caller holds the queue write lock. Persist cleanup even if the item is deleted."""
+    """Stop a soak without letting heater shutdown race a later PrintJob.
+
+    The shutdown hold is committed before sending the heater-off command. The
+    job may then leave ``heat_soaking``, but scheduling remains blocked until
+    fresh zero-target telemetry resolves the hold.
+    """
+    if not item.job_id:
+        await admit_job(db, item, source="heat_soak_legacy_adoption")
     printer = await db.get(Printer, item.printer_id)
     if printer:
         printer.heat_soak_shutdown_pending = True
         printer.heat_soak_shutdown_at = utcnow()
+        printer.heat_soak_shutdown_job_id = item.job_id
+        printer.heat_soak_shutdown_operation_id = item.active_operation_id
+        await create_safety_hold(
+            db,
+            printer_id=printer.id,
+            hold_type="heat_soak_shutdown",
+            job_id=item.job_id,
+            operation_id=item.active_operation_id,
+            reason=reason,
+            evidence={"target_status": status},
+        )
+        await db.commit()
         _heaters_off(printer)
     _show_preheating(item.printer_id, False)
-    item.status = status
+    target = QUEUED if status == "pending" else CANCELLED
+    if lifecycle_state(item) == HEAT_SOAKING:
+        await transition_job(db, item, to_state=target, source="heat_soak_abort", reason=reason)
     item.error_message = reason
-    item.completed_at = utcnow()
     item.preheat_owner = None
     item.preheat_started_at = None
     item.preheat_checked_at = None
@@ -102,67 +133,79 @@ async def abort_heat_soak(db: AsyncSession, item: PrintQueueItem, reason: str, *
 
 
 async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> None:
-    """Release an active soak and let the queue dispatch the item normally.
+    """Skip the soak and hand the reserved job directly to dispatching.
 
-    Skipping is different from stopping: keep the printer's current heater
-    targets so the print can start immediately, but remove the preheating
-    reservation and disable the soak for this queue item.
+    Skipping is different from stopping: keep the printer reservation and
+    current heater targets, move the durable lifecycle to ``dispatching``,
+    and let the scheduler consume the explicit handoff marker immediately.
     """
+    if not item.job_id:
+        await admit_job(db, item, source="heat_soak_legacy_adoption")
     _show_preheating(item.printer_id, False)
-    item.status = "pending"
+    if lifecycle_state(item) != HEAT_SOAKING:
+        raise LifecycleError("Only a heat-soaking PrintJob may skip heat soak")
+    await transition_job(db, item, to_state=DISPATCHING, source="heat_soak_skip", reason="Heat soak skipped")
     item.chamber_heat_soak = False
     item.manual_start = False
     item.error_message = None
     item.completed_at = None
-    item.preheat_owner = None
+    # ``preheat_owner`` is a durable dispatch handoff marker consumed by the
+    # scheduler. It is not a second reservation or lifecycle identity.
+    item.preheat_owner = item.active_operation_id
+    item.preheat_checked_at = utcnow()
     item.preheat_requested_at = None
-    item.preheat_checked_at = None
     item.preheat_started_at = None
     await db.commit()
 
 
 class ChamberHeatSoak:
     def __init__(self):
-        self.owner = str(uuid4())
         self._visible_printers: set[int] = set()
 
     async def stage(self, db: AsyncSession, item: PrintQueueItem) -> bool:
         item_id, printer_id = item.id, item.printer_id
         item = await lock_queue_item(db, item_id)
-        if not item or item.status != "pending":
+        if not item:
             await db.rollback()
             return False
-        # Preserve the selected printer for model-based queue items, but claim
-        # only a still-pending row. Concurrent workers cannot reassign a winner.
+        if not item.job_id:
+            await admit_job(db, item, source="heat_soak_legacy_adoption")
+        if lifecycle_state(item) != QUEUED:
+            await db.rollback()
+            return False
+        # Reserve the printer before sending any heater command. The operation
+        # UUID (not this worker's process UUID) is the authority for every
+        # subsequent timer and cleanup action.
         now = utcnow()
         try:
-            result = await db.execute(
-                update(PrintQueueItem)
-                .where(PrintQueueItem.id == item_id, PrintQueueItem.status == "pending")
-                .values(
-                    status="preheating",
-                    printer_id=printer_id,
-                    preheat_owner=self.owner,
-                    preheat_requested_at=now,
-                    preheat_checked_at=now,
-                    preheat_started_at=None,
-                    dispatched_at=None,
-                    dispatch_subtask_id=None,
-                    error_message=None,
-                    waiting_reason=None,
-                )
-                .execution_options(synchronize_session=False)
+            await transition_job(
+                db,
+                item,
+                to_state=HEAT_SOAKING,
+                source="heat_soak_stage",
+                evidence={"temperature": item.heat_soak_temperature, "minutes": item.heat_soak_minutes},
             )
+            item.preheat_owner = item.active_operation_id
+            item.preheat_requested_at = now
+            item.preheat_checked_at = now
+            item.preheat_started_at = None
+            item.dispatched_at = None
+            item.dispatch_subtask_id = None
+            item.error_message = None
+            item.waiting_reason = None
             await db.commit()
-        except IntegrityError:
+        except (IntegrityError, LifecycleError):
             await db.rollback()
-            return False
-        if not result.rowcount:
             return False
         # Reservation is durable before any heater command. Re-lock to ensure
         # a cancellation during commit cannot be followed by heater-on commands.
         item = await lock_queue_item(db, item_id)
-        if not item or item.status != "preheating" or item.preheat_owner != self.owner:
+        if (
+            not item
+            or lifecycle_state(item) != HEAT_SOAKING
+            or item.preheat_owner != item.active_operation_id
+            or not item.active_operation_id
+        ):
             await db.rollback()
             return False
         printer = await db.get(Printer, printer_id, populate_existing=True)
@@ -177,6 +220,15 @@ class ChamberHeatSoak:
             or state.state not in ("IDLE", "FINISH", "FAILED")
         ):
             await abort_heat_soak(db, item, "Heat soak could not start: printer unavailable or heater shutdown pending")
+            return False
+        if not await operation_is_current(
+            db,
+            item_id=item.id,
+            job_id=item.job_id,
+            operation_id=item.active_operation_id,
+            lifecycle_version=item.lifecycle_version,
+        ):
+            await db.rollback()
             return False
         # The soak duration is measured from the heater command, not from a
         # later telemetry update. Target telemetry can lag or be omitted by
@@ -196,7 +248,20 @@ class ChamberHeatSoak:
             logger.exception("Could not start heat soak for queue item %s", item_id)
             await abort_heat_soak(db, item, "Heat-soak heating commands failed; retry required")
             return False
-        item.preheat_started_at = heating_started_at
+        result = await db.execute(
+            update(PrintQueueItem)
+            .where(
+                PrintQueueItem.id == item.id,
+                PrintQueueItem.job_id == item.job_id,
+                PrintQueueItem.lifecycle_state == HEAT_SOAKING,
+                PrintQueueItem.active_operation_id == item.active_operation_id,
+                PrintQueueItem.lifecycle_version == item.lifecycle_version,
+            )
+            .values(preheat_started_at=heating_started_at)
+        )
+        if result.rowcount != 1:
+            await db.rollback()
+            return False
         await db.commit()
         _show_preheating(printer_id, True)
         self._visible_printers.add(printer_id)
@@ -210,10 +275,13 @@ class ChamberHeatSoak:
                 await db.scalars(
                     select(PrintQueueItem.id).where(
                         or_(
-                            PrintQueueItem.status == "preheating",
+                            PrintQueueItem.lifecycle_state == HEAT_SOAKING,
                             and_(
-                                PrintQueueItem.status == "dispatching",
-                                PrintQueueItem.chamber_heat_soak.is_(True),
+                                PrintQueueItem.lifecycle_state == DISPATCHING,
+                                or_(
+                                    PrintQueueItem.chamber_heat_soak.is_(True),
+                                    PrintQueueItem.preheat_owner.is_not(None),
+                                ),
                                 PrintQueueItem.dispatch_subtask_id.is_(None),
                             ),
                         )
@@ -225,22 +293,37 @@ class ChamberHeatSoak:
         visible: set[int] = set()
         for item_id in ids:
             item = await lock_queue_item(db, item_id)
-            if not item or item.status not in ("preheating", "dispatching") or item.dispatch_subtask_id:
+            if not item or lifecycle_state(item) not in (HEAT_SOAKING, DISPATCHING) or item.dispatch_subtask_id:
                 await db.rollback()
                 continue
             now = utcnow()
+            if lifecycle_state(item) == DISPATCHING and not item.chamber_heat_soak:
+                # Explicit skip handoff: dispatch immediately without treating
+                # the absent soak timer as an interruption.
+                _show_preheating(item.printer_id, False)
+                ready.append(item.id)
+                item.preheat_checked_at = now
+                await db.commit()
+                continue
             elapsed = (now - item.preheat_checked_at).total_seconds() if item.preheat_checked_at else HEARTBEAT_TIMEOUT
             if elapsed < 0 or elapsed >= HEARTBEAT_TIMEOUT:
                 await abort_heat_soak(db, item, "Heat soak interrupted by restart or scheduler timeout; retry required")
                 continue
-            if item.status == "dispatching":
+            if lifecycle_state(item) == DISPATCHING:
                 await db.rollback()
+                continue
+            if item.uncertainty_status == "legacy_heat_soak_identity_unverified":
+                await abort_heat_soak(
+                    db,
+                    item,
+                    "Legacy heat soak ownership is unverified; retry required after guarded recovery",
+                )
                 continue
             visible.add(item.printer_id)
             _show_preheating(item.printer_id, True)
-            if item.preheat_owner != self.owner:
-                # A second live worker may own this reservation. The heartbeat
-                # timeout above is the restart/recovery boundary.
+            if item.preheat_owner != item.active_operation_id or not item.active_operation_id:
+                # The lifecycle operation identity is inconsistent. Do not let
+                # a worker infer that it owns the heater from row recency.
                 await db.rollback()
                 continue
             printer = await db.get(Printer, item.printer_id)
@@ -265,7 +348,17 @@ class ChamberHeatSoak:
                 continue
             if (now - item.preheat_started_at).total_seconds() >= item.heat_soak_minutes * 60:
                 _show_preheating(item.printer_id, False)
-                item.status = "dispatching"
+                await transition_job(
+                    db,
+                    item,
+                    to_state=DISPATCHING,
+                    source="heat_soak_complete",
+                    evidence={"preheat_operation_id": item.active_operation_id},
+                )
+                # Compatibility handoff marker for the scheduler. Its value is
+                # the *new dispatch* operation, never a process-local worker
+                # token; the durable reservation remains the authority.
+                item.preheat_owner = item.active_operation_id
                 item.dispatched_at = now
                 ready.append(item.id)
             client = printer_manager.get_client(item.printer_id)
@@ -291,6 +384,22 @@ class ChamberHeatSoak:
             if not printer.heat_soak_shutdown_pending:
                 await db.rollback()
                 continue
+            shutdown_job_id = printer.heat_soak_shutdown_job_id
+            reservation = await db.get(PrintJobReservation, printer.id)
+            state = printer_manager.get_status(printer.id)
+            active_state = (getattr(state, "state", "") or "").upper()
+            if (reservation and reservation.job_id != shutdown_job_id) or active_state in {
+                "RUNNING",
+                "PAUSE",
+                "PREPARE",
+                "SLICING",
+            }:
+                # A later PrintJob or an out-of-band physical print owns this
+                # printer now. Never send heater-off for the old shutdown
+                # request into that newer operation; retain the hold and wait
+                # for a safe terminal/idle snapshot.
+                await db.commit()
+                continue
             _heaters_off(printer)
             client = printer_manager.get_client(printer.id)
             if client:
@@ -308,4 +417,19 @@ class ChamberHeatSoak:
             if confirmed:
                 printer.heat_soak_shutdown_pending = False
                 printer.heat_soak_shutdown_at = None
+                shutdown_operation_id = printer.heat_soak_shutdown_operation_id
+                printer.heat_soak_shutdown_job_id = None
+                printer.heat_soak_shutdown_operation_id = None
+                if shutdown_job_id:
+                    await db.execute(
+                        update(PrinterSafetyHold)
+                        .where(
+                            PrinterSafetyHold.printer_id == printer.id,
+                            PrinterSafetyHold.job_id == shutdown_job_id,
+                            PrinterSafetyHold.operation_id == shutdown_operation_id,
+                            PrinterSafetyHold.hold_type == "heat_soak_shutdown",
+                            PrinterSafetyHold.state == "active",
+                        )
+                        .values(state="resolved", resolved_at=utcnow())
+                    )
             await db.commit()

@@ -181,8 +181,9 @@ class TestCostCalculation:
             tray_now=0,
         )
 
-        # db returns: archive, queue_item(None), assignment, spool
-        db = _mock_db_sequential([archive, None, assignment, spool])
+        # db returns: archive, assignment, spool. Direct prints have no queue
+        # projection to consult.
+        db = _mock_db_sequential([archive, assignment, spool])
 
         # 20g used from 3MF
         filament_usage = [{"slot_id": 1, "used_g": 20.0, "type": "PLA", "color": "#FF0000"}]
@@ -238,8 +239,9 @@ class TestCostCalculation:
             tray_now=0,
         )
 
-        # db returns: archive, queue_item(None), assignment, spool
-        db = _mock_db_sequential([archive, None, assignment, spool])
+        # db returns: archive, assignment, spool. Direct prints have no queue
+        # projection to consult.
+        db = _mock_db_sequential([archive, assignment, spool])
 
         # 30g used from 3MF
         filament_usage = [{"slot_id": 1, "used_g": 30.0, "type": "PLA", "color": "#FF0000"}]
@@ -295,8 +297,9 @@ class TestCostCalculation:
             tray_now=0,
         )
 
-        # db returns: archive, queue_item(None), assignment, spool
-        db = _mock_db_sequential([archive, None, assignment, spool])
+        # db returns: archive, assignment, spool. Direct prints have no queue
+        # projection to consult.
+        db = _mock_db_sequential([archive, assignment, spool])
 
         filament_usage = [{"slot_id": 1, "used_g": 10.0, "type": "PLA", "color": "#FF0000"}]
 
@@ -348,8 +351,9 @@ class TestCostCalculation:
             tray_now=0,
         )
 
-        # db returns: archive, queue_item(None), assignment, spool
-        db = _mock_db_sequential([archive, None, assignment, spool])
+        # db returns: archive, assignment, spool. Direct prints have no queue
+        # projection to consult.
+        db = _mock_db_sequential([archive, assignment, spool])
 
         # 40g total, but only 50% used
         filament_usage = [{"slot_id": 1, "used_g": 40.0, "type": "PLA", "color": "#FF0000"}]
@@ -555,9 +559,7 @@ class TestCostAggregation:
         responses = []
         # 1. select(PrintArchive) → archive
         responses.append(("scalar_one_or_none", archive))
-        # 2. select(PrintQueueItem) → None
-        responses.append(("scalar_one_or_none", None))
-        # 3. select(SpoolAssignment) → assignment
+        # 2. select(SpoolAssignment) → assignment
         responses.append(("scalar_one_or_none", assignment))
         # 4. select(Spool) → spool
         responses.append(("scalar_one_or_none", spool))
@@ -644,7 +646,6 @@ class TestCostAggregation:
 
         responses = []
         responses.append(("scalar_one_or_none", archive))
-        responses.append(("scalar_one_or_none", None))  # queue item
         responses.append(("scalar_one_or_none", assignment))
         responses.append(("scalar_one_or_none", spool))
         # cost aggregation: select archive to update cost
@@ -724,7 +725,6 @@ class TestCostAggregation:
 
         responses = [
             ("scalar_one_or_none", archive),
-            ("scalar_one_or_none", None),  # queue item
             ("scalar_one_or_none", assignment),
             ("scalar_one_or_none", spool),
             ("scalar_one_or_none", archive),  # cost-update select
@@ -810,7 +810,6 @@ class TestCostAggregation:
 
         responses = [
             ("scalar_one_or_none", archive),
-            ("scalar_one_or_none", None),
             ("scalar_one_or_none", assignment),
             ("scalar_one_or_none", spool),
             ("scalar_one_or_none", archive),
@@ -875,7 +874,7 @@ class TestCostAggregation:
             tray_now=0,
         )
 
-        db = _mock_db_sequential([archive_new, None, assignment_new, spool_new])
+        db = _mock_db_sequential([archive_new, assignment_new, spool_new])
 
         with (
             patch("backend.app.core.config.settings") as mock_settings,

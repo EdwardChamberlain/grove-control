@@ -18,6 +18,7 @@ from backend.app.services.filament_requirements import (
     build_queue_filament_overrides,
     extract_filament_requirements,
 )
+from backend.app.services.print_job_lifecycle import admit_job
 from backend.app.services.printer_manager import printer_manager
 
 logger = logging.getLogger(__name__)
@@ -144,6 +145,7 @@ async def webhook_add_to_queue(
         force_color_match=data.force_color_match,
     )
     db.add(queue_item)
+    await admit_job(db, queue_item, source="webhook_queue_admission")
     await db.commit()
     await db.refresh(queue_item)
 

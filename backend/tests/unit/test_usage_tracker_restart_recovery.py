@@ -195,6 +195,21 @@ class TestPersistedSessionRoundTrip:
         assert _active_sessions[printer.id].spool_assignments == {(1, 0): 60}
 
     @pytest.mark.asyncio
+    async def test_provisional_print_start_does_not_erase_durable_job_owner(self, db_session, printer):
+        owned = self._session(printer.id)
+        owned.job_id = "job-1"
+        await persist_session(db_session, owned, [(2, 0)])
+
+        provisional = self._session(printer.id)
+        provisional.print_name = "Unattributed"
+        provisional.job_id = None
+        await persist_session(db_session, provisional, [(5, 0)])
+
+        row = await db_session.get(ActivePrintSession, printer.id)
+        assert row.job_id == "job-1"
+        assert row.print_name == "Unattributed"
+
+    @pytest.mark.asyncio
     async def test_clear_removes_the_row(self, db_session, printer):
         await persist_session(db_session, self._session(printer.id), [(2, 0)])
 
@@ -284,6 +299,7 @@ class TestPlateIdRecovery:
                 printer_manager=printer_manager,
                 db=db,
                 plate_id=None,
+                job_id="job-plate-2",
             )
 
         assert seen_plate_ids == [1]
@@ -327,6 +343,7 @@ class TestPlateIdRecovery:
                 printer_manager=printer_manager,
                 db=db,
                 plate_id=None,
+                job_id="job-plate-2",
             )
 
         assert seen_plate_ids == [2]
@@ -415,6 +432,7 @@ class TestMappingPriority:
                 printer_manager=printer_manager,
                 db=db,
                 plate_id=1,
+                job_id="job-ams-2",
             )
 
         assert len(results) == 1
@@ -427,7 +445,7 @@ class TestMappingPriority:
         archive = _make_archive(archive_id=400, plate_id=1)
         spool = _make_spool(spool_id=68)
         assignment = _make_assignment(spool_id=68, ams_id=0, tray_id=3)
-        db = _mock_db_sequential([archive, None, assignment, spool])
+        db = _mock_db_sequential([archive, assignment, spool])
 
         printer_manager = MagicMock()
         printer_manager.get_status.return_value = SimpleNamespace(
@@ -492,9 +510,10 @@ class TestRestoreOnRestartRecovery:
             setattr(state, key, value)
         return state
 
-    def _session(self, printer_id, print_name="AMS_Rack"):
+    def _session(self, printer_id, print_name="AMS_Rack", job_id="job-1"):
         return PrintSession(
             printer_id=printer_id,
+            job_id=job_id,
             print_name=print_name,
             started_at=datetime(2026, 8, 11, 9, 25, 6, tzinfo=timezone.utc),
             tray_now_at_start=2,
@@ -511,7 +530,7 @@ class TestRestoreOnRestartRecovery:
         _active_sessions.clear()
         state = self._state()
 
-        await _restore_usage_tracking_session(printer.id, state, db_session, MagicMock())
+        await _restore_usage_tracking_session(printer.id, state, db_session, MagicMock(), "job-1")
 
         assert state.tray_change_log == [(2, 0)]
         assert _active_sessions[printer.id].plate_id == 1
@@ -523,7 +542,7 @@ class TestRestoreOnRestartRecovery:
         await persist_session(db_session, self._session(printer.id), [(2, 0)])
         state = self._state(tray_change_log=[(3, 675)])
 
-        await _restore_usage_tracking_session(printer.id, state, db_session, MagicMock())
+        await _restore_usage_tracking_session(printer.id, state, db_session, MagicMock(), "job-1")
 
         assert state.tray_change_log == [(2, 0), (3, 675)]
 
@@ -535,7 +554,7 @@ class TestRestoreOnRestartRecovery:
 
         state = self._state()
 
-        await _restore_usage_tracking_session(printer.id, state, db_session, MagicMock())
+        await _restore_usage_tracking_session(printer.id, state, db_session, MagicMock(), "job-1")
 
         assert state.tray_change_log == [(3, 700)]
         assert state.last_loaded_tray == 3
@@ -546,7 +565,7 @@ class TestRestoreOnRestartRecovery:
 
         state = self._state(tray_now=255)
 
-        await _restore_usage_tracking_session(printer.id, state, db_session, MagicMock())
+        await _restore_usage_tracking_session(printer.id, state, db_session, MagicMock(), "job-1")
 
         assert state.tray_change_log == []
 
@@ -556,11 +575,11 @@ class TestRestoreOnRestartRecovery:
         attach itself to whatever is running now."""
         from backend.app.main import _restore_usage_tracking_session
 
-        await persist_session(db_session, self._session(printer.id, print_name="Old_Print"), [(2, 0)])
+        await persist_session(db_session, self._session(printer.id, print_name="Old_Print", job_id="old-job"), [(2, 0)])
         _active_sessions.clear()
         state = self._state(subtask_name="AMS_Rack")
 
-        await _restore_usage_tracking_session(printer.id, state, db_session, MagicMock())
+        await _restore_usage_tracking_session(printer.id, state, db_session, MagicMock(), "new-job")
 
         assert printer.id not in _active_sessions
         assert await restore_session(db_session, printer.id) is None
@@ -575,7 +594,7 @@ class TestRestoreOnRestartRecovery:
 
         state = self._state(tray_now=255, last_loaded_tray=2)
 
-        await _restore_usage_tracking_session(printer.id, state, db_session, MagicMock())
+        await _restore_usage_tracking_session(printer.id, state, db_session, MagicMock(), "job-1")
 
         assert state.last_loaded_tray == 2
 
@@ -587,7 +606,7 @@ class TestRestoreOnRestartRecovery:
 
         broken = SimpleNamespace()  # no subtask_name, no tray fields at all
 
-        await _restore_usage_tracking_session(printer.id, broken, db_session, MagicMock())
+        await _restore_usage_tracking_session(printer.id, broken, db_session, MagicMock(), "job-1")
 
 
 class TestPlateNotInTheFile:
@@ -636,6 +655,7 @@ class TestPlateNotInTheFile:
                 printer_manager=printer_manager,
                 db=db,
                 plate_id=None,
+                job_id="job-plate-7",
             )
 
         assert calls == [7, None]

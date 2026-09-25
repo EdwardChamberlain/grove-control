@@ -1,9 +1,14 @@
 from datetime import datetime
+from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.core.database import Base
+
+
+def _new_uuid() -> str:
+    return str(uuid4())
 
 
 class PrintQueueItem(Base):
@@ -12,8 +17,24 @@ class PrintQueueItem(Base):
     __tablename__ = "print_queue"
     id: Mapped[int] = mapped_column(primary_key=True)
 
+    # Durable public identity. The physical table remains ``print_queue`` for
+    # compatibility, but all lifecycle ownership is keyed by this opaque UUID.
+    job_id: Mapped[str] = mapped_column(String(36), default=_new_uuid, unique=True, index=True)
+    previous_job_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    lifecycle_state: Mapped[str] = mapped_column(String(20), default="queued", server_default="queued", index=True)
+    lifecycle_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    uncertainty_status: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    terminal_reason: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    queue_visible: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    active_operation_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    dispatch_attempted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    physical_execution_observed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
     # Links
-    printer_id: Mapped[int | None] = mapped_column(ForeignKey("printers.id", ondelete="CASCADE"), nullable=True)
+    # A printer is a replaceable execution target, not the owner of job
+    # history.  Removing a printer must detach queued jobs and preserve their
+    # durable lifecycle evidence.
+    printer_id: Mapped[int | None] = mapped_column(ForeignKey("printers.id", ondelete="SET NULL"), nullable=True)
     # Target printer model for model-based assignment (mutually exclusive with printer_id)
     # When set, scheduler assigns to any idle printer of matching model
     target_model: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -27,9 +48,11 @@ class PrintQueueItem(Base):
     # Set by scheduler when no matching printer is available
     waiting_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Either archive_id OR library_file_id must be set (archive created at print start from library file)
-    archive_id: Mapped[int | None] = mapped_column(ForeignKey("print_archives.id", ondelete="CASCADE"), nullable=True)
+    # Archives are reusable content; deleting one must not delete the jobs that
+    # attempted to print it.
+    archive_id: Mapped[int | None] = mapped_column(ForeignKey("print_archives.id", ondelete="SET NULL"), nullable=True)
     library_file_id: Mapped[int | None] = mapped_column(
-        ForeignKey("library_files.id", ondelete="CASCADE"), nullable=True
+        ForeignKey("library_files.id", ondelete="SET NULL"), nullable=True
     )
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
     # Scheduling
@@ -171,6 +194,13 @@ class PrintQueueItem(Base):
     )
 
 
+# Domain name for the durable row.  The physical table and compatibility ORM
+# class remain ``print_queue``/``PrintQueueItem`` for this migration, but new
+# lifecycle code should speak in terms of PrintJob rather than inventing a
+# second identity model.
+PrintJob = PrintQueueItem
+
+
 class PrintQueueVariant(Base):
     """One candidate file for a queue item that may print on several models (#671).
 
@@ -240,6 +270,139 @@ class PrintQueueVariant(Base):
 
     queue_item: Mapped["PrintQueueItem"] = relationship(back_populates="variants")
     library_file: Mapped["LibraryFile"] = relationship()
+
+
+class PrintJobEvent(Base):
+    """Immutable evidence for a committed PrintJob lifecycle transition."""
+
+    __tablename__ = "print_job_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    job_id: Mapped[str] = mapped_column(String(36), index=True)
+    queue_item_id: Mapped[int | None] = mapped_column(
+        ForeignKey("print_queue.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    operation_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    lifecycle_version: Mapped[int] = mapped_column(Integer)
+    event_type: Mapped[str] = mapped_column(String(64))
+    from_state: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    to_state: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    source: Mapped[str] = mapped_column(String(64))
+    evidence_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class PrintJobEffect(Base):
+    """Durable consequence of a PrintJob event.
+
+    Effects are claimed separately from the state transition. Their operation
+    identity fences late workers from acting on a reused queue row.
+    """
+
+    __tablename__ = "print_job_effects"
+    __table_args__ = (
+        UniqueConstraint("job_id", "operation_id", "source_event_id", "effect_type", name="uq_print_job_effect"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    job_id: Mapped[str] = mapped_column(String(36), index=True)
+    # Empty string is the durable key for effects that are job-scoped rather
+    # than tied to a currently active operation. It must not be NULL: SQL
+    # unique constraints treat NULL values as distinct and would otherwise
+    # allow duplicate effects on PostgreSQL and SQLite.
+    operation_id: Mapped[str] = mapped_column(String(36), nullable=False, default="", server_default="", index=True)
+    source_event_id: Mapped[str] = mapped_column(String(36), index=True)
+    effect_type: Mapped[str] = mapped_column(String(80))
+    delivery_policy: Mapped[str] = mapped_column(String(32), default="idempotent_retry")
+    state: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Per-step completion markers make durable database consequences safe to
+    # retry after a process crash between the step and effect acknowledgement.
+    progress_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    lease_owner: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    dead_lettered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class PrintJobReservation(Base):
+    """The single active execution reservation for a printer."""
+
+    __tablename__ = "print_job_reservations"
+
+    printer_id: Mapped[int] = mapped_column(ForeignKey("printers.id", ondelete="CASCADE"), primary_key=True)
+    job_id: Mapped[str] = mapped_column(String(36), index=True)
+    operation_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    lifecycle_version: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class PrintJobBinding(Base):
+    """A retained immutable generation of printer task identity evidence."""
+
+    __tablename__ = "print_job_bindings"
+    __table_args__ = (
+        UniqueConstraint("printer_id", "device_subtask_id", "generation", name="uq_print_job_binding_generation"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    job_id: Mapped[str] = mapped_column(String(36), index=True)
+    printer_id: Mapped[int] = mapped_column(ForeignKey("printers.id", ondelete="CASCADE"), index=True)
+    device_subtask_id: Mapped[str] = mapped_column(String(64), index=True)
+    generation: Mapped[int] = mapped_column(Integer, default=1)
+    first_connection_epoch: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    last_connection_epoch: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    first_event_sequence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_event_sequence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class PrintJobQuarantinedEvent(Base):
+    """Device event retained when Grove cannot prove its owning PrintJob.
+
+    This deliberately has no ``job_id``: attaching an ambiguous event to a
+    plausible job would make the evidence look stronger than it is.
+    """
+
+    __tablename__ = "print_job_quarantined_events"
+    __table_args__ = (
+        UniqueConstraint("printer_id", "event_type", "correlation_key", name="uq_print_job_quarantined_event"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    printer_id: Mapped[int] = mapped_column(ForeignKey("printers.id", ondelete="CASCADE"), index=True)
+    event_type: Mapped[str] = mapped_column(String(64))
+    correlation_key: Mapped[str] = mapped_column(String(128))
+    reason: Mapped[str] = mapped_column(Text)
+    evidence_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    state: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class PrinterSafetyHold(Base):
+    """A durable scheduling block, normally owned by a job operation.
+
+    Legacy migration may create an unattributed hold when the original queue
+    row no longer exists. New holds must always carry job and operation IDs.
+    """
+
+    __tablename__ = "printer_safety_holds"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    printer_id: Mapped[int] = mapped_column(ForeignKey("printers.id", ondelete="CASCADE"), index=True)
+    job_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    operation_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    hold_type: Mapped[str] = mapped_column(String(64))
+    state: Mapped[str] = mapped_column(String(20), default="active", index=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 from backend.app.models.archive import PrintArchive  # noqa: E402

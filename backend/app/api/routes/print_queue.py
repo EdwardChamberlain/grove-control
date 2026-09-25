@@ -3,7 +3,6 @@
 import json
 import logging
 import zipfile
-from datetime import datetime, timezone
 from pathlib import Path
 
 import defusedxml.ElementTree as ET
@@ -25,6 +24,7 @@ from backend.app.models.printer import Printer
 from backend.app.models.project import Project
 from backend.app.models.user import User
 from backend.app.schemas.print_queue import (
+    PrintJobManualResolution,
     PrintQueueBulkUpdate,
     PrintQueueBulkUpdateResponse,
     PrintQueueItemCreate,
@@ -42,6 +42,15 @@ from backend.app.services.filament_requirements import (
     overrides_for_plate,
 )
 from backend.app.services.notification_service import notification_service
+from backend.app.services.print_job_lifecycle import (
+    CANCELLED,
+    LifecycleError,
+    admit_job,
+    mark_job_uncertain,
+    operation_is_current,
+    resolve_uncertain_job,
+    transition_job,
+)
 from backend.app.utils.printer_models import is_gcode_compatible
 from backend.app.utils.threemf_tools import (
     extract_bed_type_from_3mf,
@@ -253,6 +262,11 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
     # Create response with parsed ams_mapping
     item_dict = {
         "id": item.id,
+        # Opaque durable identity for clients that need to correlate a queue
+        # card with later print consequences. Existing integer IDs and status
+        # fields remain unchanged for compatibility.
+        "job_id": item.job_id,
+        "previous_job_id": item.previous_job_id,
         "printer_id": item.printer_id,
         "target_model": item.target_model,
         "target_location": item.target_location,
@@ -407,6 +421,7 @@ async def list_queue(
             # Cross-model candidates (#671) and their files, for the card label.
             selectinload(PrintQueueItem.variants).selectinload(PrintQueueVariant.library_file),
         )
+        .where(PrintQueueItem.queue_visible.is_(True))
         .order_by(PrintQueueItem.printer_id.nulls_first(), PrintQueueItem.position)
     )
     if user is not None and not can_read_all:
@@ -599,6 +614,17 @@ async def add_to_queue(
 ):
     """Add an item to the print queue."""
     actor = current_user or api_key_owner
+    previous_job = None
+    if data.previous_job_id:
+        from backend.app.services.print_job_lifecycle import TERMINAL_STATES
+
+        previous_job = await db.scalar(select(PrintQueueItem).where(PrintQueueItem.job_id == data.previous_job_id))
+        if previous_job is None:
+            raise HTTPException(400, "Previous PrintJob not found")
+        if previous_job.lifecycle_state not in TERMINAL_STATES or (
+            previous_job.dispatch_attempted_at is None and not previous_job.physical_execution_observed
+        ):
+            raise HTTPException(400, "Only a dispatched terminal PrintJob can be retried")
     # Inserting a new item ahead of pending work is a separate privilege from
     # simply creating a queue item.  Keep the check here (rather than only in
     # the modal) so API callers cannot bypass the queue policy.
@@ -872,6 +898,7 @@ async def add_to_queue(
     items = []
     for i in range(quantity):
         item = PrintQueueItem(
+            previous_job_id=data.previous_job_id,
             printer_id=data.printer_id,
             target_model=target_model_norm,
             target_location=data.target_location,
@@ -923,6 +950,13 @@ async def add_to_queue(
             # per-item, and copies must be free to land on different printers.
             item.variants.extend(PrintQueueVariant(**values) for values in variant_values)
             item.print_time_seconds = min(estimates) if estimates else None
+
+    # A new PrintJob becomes durable at queue admission. The row remains in
+    # the long-lived `print_queue` table, but its UUID and admission evidence
+    # are created before the transaction commits so no accepted queue item is
+    # ever missing lifecycle identity.
+    for item in items:
+        await admit_job(db, item, evidence={"requested_quantity": quantity})
 
     try:
         await db.commit()
@@ -1081,6 +1115,7 @@ async def get_queue_item(
             selectinload(PrintQueueItem.variants).selectinload(PrintQueueVariant.library_file),
         )
         .where(PrintQueueItem.id == item_id)
+        .where(PrintQueueItem.queue_visible.is_(True))
     )
     item = result.scalar_one_or_none()
     if not item:
@@ -1121,6 +1156,7 @@ async def update_queue_item(
         item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(404, "Queue item not found")
+    await admit_job(db, item, source="queue_api_adoption")
 
     # Ownership check
     if not can_modify_all:
@@ -1307,6 +1343,7 @@ async def delete_queue_item(
     item = await lock_queue_item(db, item_id)
     if not item:
         raise HTTPException(404, "Queue item not found")
+    await admit_job(db, item, source="queue_api_adoption")
 
     # Ownership check
     if not can_modify_all:
@@ -1319,14 +1356,18 @@ async def delete_queue_item(
     if item.status == "preheating":
         await abort_heat_soak(db, item, "Heat soak deleted", status="cancelled")
         item = await lock_queue_item(db, item_id)
-    await db.delete(item)
+    if item.lifecycle_state == "queued":
+        await transition_job(db, item, to_state=CANCELLED, source="queue_delete", reason="Deleted by user")
+    # Deletion is a queue-view action. The durable job, its evidence, and any
+    # terminal consequence stay available for recovery and audit.
+    item.queue_visible = False
     await db.commit()
 
     from backend.app.services.print_scheduler import scheduler
 
     scheduler.cancel_inflight(item_id)
 
-    logger.info("Deleted queue item %s", item_id)
+    logger.info("Removed queue item %s from queue view", item_id)
     return {"message": "Queue item deleted", "deleted": True}
 
 
@@ -1484,6 +1525,8 @@ async def cancel_queue_item(
     if not item:
         raise HTTPException(404, "Queue item not found")
 
+    await admit_job(db, item, source="queue_api_adoption")
+
     # Ownership check
     if not can_modify_all:
         if item.created_by_id != user.id:
@@ -1496,8 +1539,7 @@ async def cancel_queue_item(
     if item.status not in ("pending",):
         raise HTTPException(400, f"Cannot cancel item with status '{item.status}'")
 
-    item.status = "cancelled"
-    item.completed_at = datetime.now(timezone.utc)
+    await transition_job(db, item, to_state=CANCELLED, source="queue_cancel", reason="Cancelled by user")
     await db.commit()
 
     from backend.app.services.print_scheduler import scheduler
@@ -1534,6 +1576,7 @@ async def stop_queue_item(
     item = await lock_queue_item(db, item_id)
     if not item:
         raise HTTPException(404, "Queue item not found")
+    await admit_job(db, item, source="queue_api_adoption")
 
     # Ownership check — mirrors /cancel. Ownerless items (created_by_id IS NULL)
     # require _ALL: stop is destructive and an _OWN holder can't claim "they
@@ -1554,9 +1597,38 @@ async def stop_queue_item(
             f"Can only stop items that are dispatching or printing, current status: '{item.status}'",
         )
 
-    # Capture values we need for background task
+    # A local stop result cannot prove whether the printer received the
+    # command. Persist this unresolved condition before the external effect so
+    # the job remains reserved until strict terminal telemetry resolves it.
+    stop_reason = "Stop requested by user; awaiting printer confirmation"
+    await mark_job_uncertain(
+        db,
+        item,
+        uncertainty_status="stop_resolution_pending",
+        source="queue_stop_requested",
+        safety_hold_type="stop_resolution",
+        reason=stop_reason,
+        evidence={"requested_by": user.id if user else None},
+    )
+    item.error_message = stop_reason
+    await db.commit()
+
+    # Capture values needed after sending the external command.
     printer_id = item.printer_id
-    auto_off_after = item.auto_off_after
+    stop_operation_id = item.active_operation_id
+    stop_lifecycle_version = item.lifecycle_version
+    if (
+        not printer_id
+        or not stop_operation_id
+        or not await operation_is_current(
+            db,
+            item_id=item.id,
+            job_id=item.job_id,
+            operation_id=stop_operation_id,
+            lifecycle_version=stop_lifecycle_version,
+        )
+    ):
+        raise HTTPException(409, "PrintJob changed before the stop command could be sent")
 
     # Try to send stop command to printer
     stop_sent = False
@@ -1574,41 +1646,67 @@ async def stop_queue_item(
     try:
         from backend.app.main import mark_printer_stopped_by_user
 
-        mark_printer_stopped_by_user(printer_id)
+        mark_printer_stopped_by_user(printer_id, item.job_id)
     except Exception as _mark_err:
         logger.warning("Failed to mark printer %s as user-stopped: %s", printer_id, _mark_err)
 
-    # Update queue item status regardless - if printer is off, print is already stopped
-    item.status = "cancelled"
-    item.completed_at = datetime.now(timezone.utc)
-    item.error_message = "Stopped by user" if stop_sent else "Stopped by user (printer was offline)"
-    await db.commit()
+    logger.info("Requested stop for queue item %s (command accepted locally: %s)", item_id, stop_sent)
+    return {
+        "message": "Stop requested; awaiting printer confirmation"
+        if stop_sent
+        else "Stop outcome unknown; printer remains reserved for resolution"
+    }
 
-    from backend.app.main import unregister_expected_print
 
-    unregister_expected_print(printer_id)
+@router.post("/{item_id}/resolve-uncertainty")
+async def resolve_queue_item_uncertainty(
+    item_id: int,
+    data: PrintJobManualResolution,
+    db: AsyncSession = Depends(get_db),
+    auth_result: tuple[User | None, bool] = Depends(
+        require_ownership_permission(
+            Permission.QUEUE_UPDATE_ALL,
+            Permission.QUEUE_UPDATE_OWN,
+        )
+    ),
+):
+    """Resolve an uncertain active PrintJob without guessing device history."""
+    user, can_modify_all = auth_result
+    item = await lock_queue_item(db, item_id)
+    if not item:
+        raise HTTPException(404, "Queue item not found")
+    await admit_job(db, item, source="queue_api_adoption")
 
-    if item.chamber_heat_soak:
-        item = await lock_queue_item(db, item_id)
-        await abort_heat_soak(db, item, item.error_message, status="cancelled")
+    if not can_modify_all and user is not None:
+        if item.created_by_id is None or item.created_by_id != user.id:
+            raise HTTPException(403, "You can only resolve your own queue items")
 
-    logger.info("Stopped printing queue item %s (stop command sent: %s)", item_id, stop_sent)
+    try:
+        effect = await resolve_uncertain_job(
+            db,
+            item,
+            outcome=data.outcome,
+            reason=data.reason,
+            operator_id=user.id if user else None,
+            evidence={"queue_item_id": item.id},
+        )
+    except LifecycleError as exc:
+        await db.rollback()
+        raise HTTPException(409, str(exc)) from exc
 
-    # Schedule power-off if the queue item opted in. Delegates to the smart-plug
-    # manager so the off honours each plug's configured strategy (time delay or
-    # temperature threshold), is cancelled if the printer starts printing again,
-    # and never cuts power on a loaded print (#1890). Previously an inline block
-    # hardcoded a 50°C / 600s cooldown wait and powered off on the timeout
-    # regardless of print state.
-    if auto_off_after:
-        from backend.app.services.smart_plug_manager import smart_plug_manager
+    if item.physical_execution_observed and item.printer_id is not None:
+        from backend.app.services.printer_manager import printer_manager
 
-        try:
-            await smart_plug_manager.schedule_off_after_queue_job(printer_id, db)
-        except Exception as e:
-            logger.warning("Auto-off: Failed to schedule power-off for printer %s: %s", printer_id, e)
+        printer_manager.set_awaiting_plate_clear(item.printer_id, True)
+        printer_manager.set_awaiting_plate_clear_archive_id(item.printer_id, item.archive_id)
+        printer_manager.set_awaiting_plate_clear_job_id(item.printer_id, item.job_id)
 
-    return {"message": "Print stopped" if stop_sent else "Queue item cancelled (printer was offline)"}
+    return {
+        "message": "Uncertain PrintJob resolved",
+        "job_id": item.job_id,
+        "status": item.status,
+        "effect_id": effect.id,
+    }
 
 
 @router.post("/{item_id}/skip-heat-soak")
@@ -1628,6 +1726,7 @@ async def skip_queue_item_heat_soak(
     item = await lock_queue_item(db, item_id)
     if not item:
         raise HTTPException(404, "Queue item not found")
+    await admit_job(db, item, source="queue_api_adoption")
 
     if not can_modify_all and user is not None:
         if item.created_by_id is None or item.created_by_id != user.id:

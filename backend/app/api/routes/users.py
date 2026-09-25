@@ -4,7 +4,7 @@ from typing import Annotated
 import jwt as _jwt
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.security import HTTPAuthorizationCredentials
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -379,15 +379,35 @@ async def delete_user(
         )
 
     if delete_items:
-        # Delete all items created by this user
+        # Source content may be deleted, but PrintJobs are durable physical
+        # attempts. Hide/detach their queue projection before removing the
+        # archive/library rows; never delete the lifecycle identity itself.
+        archive_ids = list(
+            (await db.execute(select(PrintArchive.id).where(PrintArchive.created_by_id == user_id))).scalars()
+        )
+        from backend.app.services.archive import _delete_related_queue_items
+
+        for archive_id in archive_ids:
+            await _delete_related_queue_items(db, archive_id)
+
+        library_ids = list(
+            (await db.execute(select(LibraryFile.id).where(LibraryFile.created_by_id == user_id))).scalars()
+        )
+        if library_ids:
+            from backend.app.services.library_trash import release_queue_references
+
+            await release_queue_references(db, library_ids)
+
         await db.execute(delete(PrintArchive).where(PrintArchive.created_by_id == user_id))
-        await db.execute(delete(PrintQueueItem).where(PrintQueueItem.created_by_id == user_id))
+        await db.execute(
+            update(PrintQueueItem)
+            .where(PrintQueueItem.created_by_id == user_id)
+            .values(created_by_id=None, queue_visible=False, archive_id=None, library_file_id=None)
+        )
         await db.execute(delete(LibraryFile).where(LibraryFile.created_by_id == user_id))
     else:
         # Explicitly set created_by_id to NULL for all items (ensures consistent behavior
         # across different database backends, including SQLite without foreign key support).
-        from sqlalchemy import update
-
         await db.execute(update(PrintArchive).where(PrintArchive.created_by_id == user_id).values(created_by_id=None))
         await db.execute(
             update(PrintQueueItem).where(PrintQueueItem.created_by_id == user_id).values(created_by_id=None)

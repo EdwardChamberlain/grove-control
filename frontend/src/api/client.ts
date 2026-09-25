@@ -2126,6 +2126,8 @@ export interface DiscoveredTasmotaDevice {
 // Print Queue types
 export interface PrintQueueItem {
   id: number;
+  job_id: string;
+  previous_job_id?: string | null;
   printer_id: number | null;  // null = unassigned
   target_model: string | null;  // Target printer model for model-based assignment
   target_location: string | null;  // Target location filter for model-based assignment
@@ -2205,6 +2207,7 @@ export interface PrintQueueItem {
 }
 
 export interface PrintQueueItemCreate {
+  previous_job_id?: string | null;
   printer_id?: number | null;  // null = unassigned
   target_model?: string | null;  // Target printer model (mutually exclusive with printer_id)
   target_location?: string | null;  // Target location filter (only used with target_model)

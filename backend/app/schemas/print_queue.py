@@ -82,6 +82,9 @@ class QueueVariantCreate(BaseModel):
 
 
 class PrintQueueItemCreate(BaseModel):
+    # Retry lineage: a new physical attempt may point at the terminal job it
+    # follows, but a job is never rewound in place.
+    previous_job_id: str | None = None
     printer_id: int | None = None  # None = unassigned, user assigns later
     target_model: str | None = None  # Target printer model (mutually exclusive with printer_id)
     target_location: str | None = None  # Target location filter (only used with target_model)
@@ -194,8 +197,19 @@ class QueueVariantSummary(BaseModel):
     position: int
 
 
+class PrintJobManualResolution(BaseModel):
+    """Explicit operator outcome for a held, uncertain PrintJob."""
+
+    outcome: Literal["failed", "cancelled"]
+    reason: str = Field(min_length=1, max_length=2000)
+
+
 class PrintQueueItemResponse(BaseModel):
     id: int
+    # Additive opaque identity for lifecycle-aware consumers. The legacy
+    # numeric row ID remains the primary UI identifier in this release.
+    job_id: str
+    previous_job_id: str | None = None
     printer_id: int | None  # None = unassigned
     target_model: str | None = None  # Target printer model for model-based assignment
     target_location: str | None = None  # Target location filter for model-based assignment

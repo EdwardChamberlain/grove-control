@@ -29,6 +29,8 @@ export interface PrintModalProps {
   archiveName: string;
   /** Existing queue item (only for edit-queue-item mode) */
   queueItem?: PrintQueueItem;
+  /** Terminal job identity that this new physical attempt retries. */
+  previousJobId?: string;
   /** Pre-select specific printers when opening the modal */
   initialSelectedPrinterIds?: number[];
   /** Handler for closing the modal */

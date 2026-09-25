@@ -6,9 +6,18 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy.exc import IntegrityError
 
 from backend.app.models.print_queue import PrintQueueItem
+from backend.app.services.print_job_lifecycle import (
+    DISPATCHING,
+    QUEUED,
+    ReservationConflict,
+    admit_job,
+    bind_device_task,
+    lifecycle_state,
+    mark_dispatch_attempted,
+    transition_job,
+)
 from backend.app.services.print_scheduler import PrintScheduler
 
 
@@ -40,15 +49,39 @@ def _status(state: str, subtask_id: str | None = None, gcode_file: str | None = 
     return SimpleNamespace(state=state, subtask_id=subtask_id, gcode_file=gcode_file)
 
 
+async def _make_dispatching(
+    db,
+    item: PrintQueueItem,
+    *,
+    subtask_id: str | None = "12345",
+    dispatched_at: datetime | None = None,
+) -> None:
+    """Cross the durable admission, reservation and send boundary for a test."""
+    await admit_job(db, item, source="test_setup")
+    if lifecycle_state(item) == QUEUED:
+        await transition_job(db, item, to_state=DISPATCHING, source="test_setup")
+    assert lifecycle_state(item) == DISPATCHING
+    item.dispatched_at = dispatched_at or datetime.now(timezone.utc)
+    item.dispatch_subtask_id = subtask_id
+    await db.flush()
+    await mark_dispatch_attempted(db, item, source="test_setup")
+    if subtask_id:
+        await bind_device_task(
+            db,
+            item=item,
+            device_subtask_id=subtask_id,
+            connection_epoch="test",
+            event_sequence=1,
+        )
+    await db.commit()
+
+
 class TestDurableDispatchingState:
     @pytest.mark.asyncio
     async def test_confirmation_promotes_only_after_active_telemetry(self, db_session):
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            item.status = "dispatching"
-            item.dispatched_at = datetime.now(timezone.utc)
-            item.dispatch_subtask_id = "12345"
-            await db.commit()
+            await _make_dispatching(db, item)
 
         scheduler = PrintScheduler()
         publish = AsyncMock()
@@ -91,9 +124,7 @@ class TestDurableDispatchingState:
     ):
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            item.status = "dispatching"
-            item.dispatched_at = datetime.now(timezone.utc)
-            await db.commit()
+            await _make_dispatching(db, item)
 
         scheduler = PrintScheduler()
         client = MagicMock()
@@ -125,16 +156,11 @@ class TestDurableDispatchingState:
             client.force_reconnect_stale_session.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_unacknowledged_dispatch_keeps_its_expected_print(self, db_session):
-        from backend.app.main import _expected_prints, register_expected_print, unregister_expected_print
-
+    async def test_unacknowledged_dispatch_keeps_its_durable_job(self, db_session):
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            item.status = "dispatching"
-            item.dispatched_at = datetime.now(timezone.utc)
-            await db.commit()
+            await _make_dispatching(db, item)
 
-        register_expected_print(42, "test.3mf", archive_id=99)
         scheduler = PrintScheduler()
         with (
             patch.object(
@@ -152,17 +178,17 @@ class TestDurableDispatchingState:
                 dispatch_subtask_id="12345",
             )
 
-        assert any(key[0] == 42 for key in _expected_prints)
-        unregister_expected_print(42)
+        async with db_session() as db:
+            item = await db.get(PrintQueueItem, 1)
+            assert item.lifecycle_state == "dispatching"
+            assert item.job_id
+            assert item.uncertainty_status == "dispatch_confirmation_unresolved"
 
     @pytest.mark.asyncio
     async def test_correlated_terminal_dispatch_is_not_retried(self, db_session):
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            item.status = "dispatching"
-            item.dispatched_at = datetime.now(timezone.utc)
-            item.dispatch_subtask_id = "12345"
-            await db.commit()
+            await _make_dispatching(db, item)
 
         scheduler = PrintScheduler()
         with (
@@ -189,10 +215,7 @@ class TestDurableDispatchingState:
     async def test_restart_recovery_publishes_the_normal_start_event(self, db_session):
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            item.status = "dispatching"
-            item.dispatched_at = datetime.now(timezone.utc)
-            item.dispatch_subtask_id = "12345"
-            await db.commit()
+            await _make_dispatching(db, item)
 
             scheduler = PrintScheduler()
             publish = AsyncMock()
@@ -224,10 +247,7 @@ class TestDurableDispatchingState:
         """An unrelated manual print must not acknowledge a durable dispatch."""
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            item.status = "dispatching"
-            item.dispatched_at = datetime.now(timezone.utc)
-            item.dispatch_subtask_id = "12345"
-            await db.commit()
+            await _make_dispatching(db, item)
 
             with patch(
                 "backend.app.services.print_scheduler.printer_manager.get_status",
@@ -244,10 +264,7 @@ class TestDurableDispatchingState:
         """Legacy rows without an id must not accept an uncorrelated active print."""
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            item.status = "dispatching"
-            item.dispatched_at = datetime.now(timezone.utc)
-            item.dispatch_subtask_id = None
-            await db.commit()
+            await _make_dispatching(db, item, subtask_id=None)
 
             with patch(
                 "backend.app.services.print_scheduler.printer_manager.get_status",
@@ -267,10 +284,7 @@ class TestDurableDispatchingState:
         """An uncorrelated active printer is unsafe to requeue automatically."""
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            item.status = "dispatching"
-            item.dispatched_at = datetime.now(timezone.utc) - timedelta(seconds=300)
-            item.dispatch_subtask_id = "12345"
-            await db.commit()
+            await _make_dispatching(db, item, dispatched_at=datetime.now(timezone.utc) - timedelta(seconds=300))
 
             with patch(
                 "backend.app.services.print_scheduler.printer_manager.get_status",
@@ -288,10 +302,7 @@ class TestDurableDispatchingState:
     async def test_restart_recovery_holds_stale_uncertain_dispatch(self, db_session, printer_status):
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            item.status = "dispatching"
-            item.dispatched_at = datetime.now(timezone.utc) - timedelta(seconds=300)
-            item.dispatch_subtask_id = "12345"
-            await db.commit()
+            await _make_dispatching(db, item, dispatched_at=datetime.now(timezone.utc) - timedelta(seconds=300))
 
             with patch(
                 "backend.app.services.print_scheduler.printer_manager.get_status",
@@ -309,10 +320,7 @@ class TestDurableDispatchingState:
         """Unknown terminal telemetry must not cause a duplicate retry."""
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            item.status = "dispatching"
-            item.dispatched_at = datetime.now(timezone.utc) - timedelta(seconds=300)
-            item.dispatch_subtask_id = "12345"
-            await db.commit()
+            await _make_dispatching(db, item, dispatched_at=datetime.now(timezone.utc) - timedelta(seconds=300))
 
             # This is the shape the MQTT parser exposes when a terminal push
             # carries subtask_id=0 after a restart.
@@ -343,10 +351,7 @@ class TestDurableDispatchingState:
         """
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            item.status = "dispatching"
-            item.dispatched_at = datetime.now(timezone.utc) - timedelta(seconds=300)
-            item.dispatch_subtask_id = "12345"
-            await db.commit()
+            await _make_dispatching(db, item, dispatched_at=datetime.now(timezone.utc) - timedelta(seconds=300))
 
             complete = AsyncMock()
             status = _status(printer_state, "12345", "completed-while-down.3mf")
@@ -367,20 +372,21 @@ class TestDurableDispatchingState:
                 await asyncio.gather(*tasks)
 
             item = await db.get(PrintQueueItem, 1)
-            assert item.status == expected_status
-            assert item.completed_at is not None
-            complete.assert_awaited_once_with(
-                42,
-                {
-                    "status": expected_status,
-                    "filename": "completed-while-down.3mf",
-                    "subtask_name": "",
-                    "subtask_id": "12345",
-                    "raw_data": {"subtask_id": "12345"},
-                    "_reconciled": True,
-                    "_recovered_dispatch": True,
-                },
-            )
+            # Recovery only submits the strongly attributed terminal evidence
+            # to the lifecycle callback. That callback owns the transition and
+            # durable consequence atomically; the scheduler must not leave a
+            # terminal job without an effect if it stops between the two.
+            assert item.status == "dispatching"
+            assert item.completed_at is None
+            complete.assert_awaited_once()
+            assert complete.await_args.args[0] == 42
+            completion_data = complete.await_args.args[1]
+            assert completion_data["status"] == expected_status
+            assert completion_data["filename"] == "completed-while-down.3mf"
+            assert completion_data["subtask_id"] == "12345"
+            assert completion_data["raw_data"] == {"subtask_id": "12345"}
+            assert completion_data["_reconciled"] is True
+            assert completion_data["_recovered_dispatch"] is True
 
     @pytest.mark.asyncio
     async def test_current_process_dispatch_is_not_recovered_from_previous_terminal_state(self, db_session):
@@ -394,10 +400,7 @@ class TestDurableDispatchingState:
         dispatched_at = datetime.now(timezone.utc)
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            item.status = "dispatching"
-            item.dispatched_at = dispatched_at
-            item.dispatch_subtask_id = "NEW_SUBTASK"
-            await db.commit()
+            await _make_dispatching(db, item, subtask_id="NEW_SUBTASK", dispatched_at=dispatched_at)
 
             scheduler = PrintScheduler()
             scheduler._recovery_started_at = dispatched_at - timedelta(seconds=1)
@@ -498,13 +501,13 @@ class TestActivePrinterReservation:
     async def test_database_allows_only_one_active_queue_item_per_printer(self, db_session):
         async with db_session() as db:
             first = await db.get(PrintQueueItem, 1)
-            first.status = "dispatching"
-            await db.commit()
+            await _make_dispatching(db, first)
 
-            db.add(PrintQueueItem(id=2, printer_id=42, archive_id=100, status="dispatching"))
-            with pytest.raises(IntegrityError):
-                await db.commit()
-            await db.rollback()
+            second = PrintQueueItem(id=2, printer_id=42, archive_id=100, status="pending")
+            db.add(second)
+            await admit_job(db, second, source="test_setup")
+            with pytest.raises(ReservationConflict):
+                await transition_job(db, second, to_state=DISPATCHING, source="test_setup")
 
     @pytest.mark.asyncio
     async def test_terminal_telemetry_does_not_confirm_dispatch(self):

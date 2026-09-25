@@ -11,6 +11,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from backend.app.models.print_queue import PrintQueueItem
+
 
 def _write_3mf_with_filaments(file_path: Path, filaments: list[dict], plate_index: int = 1) -> None:
     """Build a minimal 3MF zip with `Metadata/slice_info.config` carrying the
@@ -1553,7 +1555,8 @@ class TestVirtualPrinterInstance:
                 self._next_id = 1000
 
                 def _add(item):
-                    added_items.append(item)
+                    if isinstance(item, PrintQueueItem):
+                        added_items.append(item)
 
                 self.add = _add
                 self.commit = AsyncMock()
@@ -1570,6 +1573,11 @@ class TestVirtualPrinterInstance:
                     if getattr(item, "id", None) is None:
                         item.id = self._next_id
                         self._next_id += 1
+
+            async def scalar(self, query):  # noqa: ARG002
+                # Durable PrintJob admission checks for an existing
+                # admission event before appending one.
+                return None
 
         mock_db = _RecordingDb()
         mock_session_factory = MagicMock()

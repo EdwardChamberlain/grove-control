@@ -34,10 +34,14 @@ def registered_client():
     client.state.connected = True
     client.state.state = "FINISH"
     printer_manager._clients[PRINTER_ID] = client
+    # A hand-built test client does not pass through the normal connect path;
+    # explicitly model the fresh-status recovery barrier as open.
+    printer_manager.set_recovery_barrier(PRINTER_ID, False)
     try:
         yield client
     finally:
         printer_manager._clients.pop(PRINTER_ID, None)
+        printer_manager.set_recovery_barrier(PRINTER_ID, True)
 
 
 def _partial_push(client: BambuMQTTClient) -> None:

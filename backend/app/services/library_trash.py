@@ -427,7 +427,6 @@ async def release_queue_references(db: AsyncSession, file_ids: list[int]) -> int
     names = dict(
         (await db.execute(select(LibraryFile.id, LibraryFile.filename).where(LibraryFile.id.in_(file_ids)))).all()
     )
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
     cancelled = 0
     reason_by_file = {
         file_id: f"'{names.get(file_id, 'The library file')}' was deleted from the library" for file_id in file_ids
@@ -436,11 +435,14 @@ async def release_queue_references(db: AsyncSession, file_ids: list[int]) -> int
     # A live heat-soak must be aborted through its service so heater shutdown,
     # reservation cleanup, and queue status are persisted together.
     from backend.app.services.chamber_heat_soak import abort_heat_soak, lock_queue_item
+    from backend.app.services.print_job_lifecycle import CANCELLED, QUEUED, admit_job, lifecycle_state, transition_job
 
     for item_id, _library_file_id, _status, _chamber_heat_soak, _dispatch_subtask_id in rows:
         item = await lock_queue_item(db, item_id)
         if not item or item.library_file_id not in file_ids or item.archive_id is not None:
             continue
+        if not item.job_id:
+            await admit_job(db, item, source="library_delete_adoption")
         if item.status == "preheating" or (
             item.status == "dispatching" and item.chamber_heat_soak and item.dispatch_subtask_id is None
         ):
@@ -451,9 +453,14 @@ async def release_queue_references(db: AsyncSession, file_ids: list[int]) -> int
                 status="cancelled",
             )
             cancelled += 1
-        elif item.status in ("pending", "skipped"):
-            item.status = "cancelled"
-            item.completed_at = now
+        elif lifecycle_state(item) == QUEUED:
+            await transition_job(
+                db,
+                item,
+                to_state=CANCELLED,
+                source="library_delete",
+                reason=reason_by_file.get(item.library_file_id, "The library file was deleted"),
+            )
             item.error_message = reason_by_file.get(item.library_file_id, "The library file was deleted")
             cancelled += 1
 

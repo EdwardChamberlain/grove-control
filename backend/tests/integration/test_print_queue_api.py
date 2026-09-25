@@ -797,10 +797,11 @@ class TestPrintQueueAPI:
         assert response.status_code == 200, response.text
         assert response.json()["message"] == "Heat soak skipped"
         await db_session.refresh(item)
-        assert item.status == "pending"
+        assert item.status == "dispatching"
+        assert item.lifecycle_state == "dispatching"
         assert item.chamber_heat_soak is False
         assert item.manual_start is False
-        assert item.preheat_owner is None
+        assert item.preheat_owner == item.active_operation_id
         assert item.preheat_started_at is None
 
     @pytest.mark.parametrize("action", ["cancel", "stop", "edit", "delete"])
@@ -1203,7 +1204,8 @@ class TestQueueCancelEndpoint:
     @pytest.mark.integration
     async def test_cancel_non_pending_queue_item(self, async_client: AsyncClient, queue_item_factory, db_session):
         """Verify 400 error when trying to cancel a non-pending queue item."""
-        item = await queue_item_factory(status="printing")
+        item = await queue_item_factory(status="printing", dispatch_subtask_id="task-aborted")
+        item.lifecycle_state = "printing"
 
         response = await async_client.post(f"/api/v1/queue/{item.id}/cancel")
         assert response.status_code == 400
@@ -1958,6 +1960,11 @@ class TestAbortedStatusNormalisation:
 
         tasks_before = set(asyncio.all_tasks())
 
+        async def transition(db, queue_item, *, to_state, **_kwargs):
+            queue_item.lifecycle_state = to_state
+            queue_item.status = to_state
+            return MagicMock(id="terminal-event", operation_id=None)
+
         with (
             patch("backend.app.main.async_session", return_value=mock_session),
             patch("backend.app.core.database.async_session", return_value=mock_session),
@@ -1966,6 +1973,11 @@ class TestAbortedStatusNormalisation:
             patch("backend.app.main.notification_service") as mock_notif,
             patch("backend.app.main.smart_plug_manager") as mock_plug,
             patch("backend.app.main.printer_manager") as mock_pm,
+            patch(
+                "backend.app.services.print_job_lifecycle.resolve_job_for_device_event",
+                new=AsyncMock(return_value=item),
+            ),
+            patch("backend.app.services.print_job_lifecycle.transition_job", new=transition),
         ):
             mock_ws.send_print_complete = AsyncMock()
             mock_ws.broadcast = AsyncMock()
@@ -1983,6 +1995,7 @@ class TestAbortedStatusNormalisation:
                     "status": "aborted",
                     "filename": "test.gcode",
                     "subtask_name": "Test",
+                    "subtask_id": "task-aborted",
                     "timelapse_was_active": False,
                 },
             )
@@ -2100,7 +2113,8 @@ class TestAbortedStatusNormalisation:
         import asyncio
         from unittest.mock import AsyncMock, MagicMock, patch
 
-        item = await queue_item_factory(status="printing")
+        item = await queue_item_factory(status="printing", dispatch_subtask_id="task-completed")
+        item.lifecycle_state = "printing"
 
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = [item]
@@ -2113,6 +2127,11 @@ class TestAbortedStatusNormalisation:
 
         tasks_before = set(asyncio.all_tasks())
 
+        async def transition(db, queue_item, *, to_state, **_kwargs):
+            queue_item.lifecycle_state = to_state
+            queue_item.status = to_state
+            return MagicMock(id="terminal-event", operation_id=None)
+
         with (
             patch("backend.app.main.async_session", return_value=mock_session),
             patch("backend.app.core.database.async_session", return_value=mock_session),
@@ -2121,6 +2140,11 @@ class TestAbortedStatusNormalisation:
             patch("backend.app.main.notification_service") as mock_notif,
             patch("backend.app.main.smart_plug_manager") as mock_plug,
             patch("backend.app.main.printer_manager") as mock_pm,
+            patch(
+                "backend.app.services.print_job_lifecycle.resolve_job_for_device_event",
+                new=AsyncMock(return_value=item),
+            ),
+            patch("backend.app.services.print_job_lifecycle.transition_job", new=transition),
         ):
             mock_ws.send_print_complete = AsyncMock()
             mock_ws.broadcast = AsyncMock()
@@ -2138,6 +2162,7 @@ class TestAbortedStatusNormalisation:
                     "status": "completed",
                     "filename": "test.gcode",
                     "subtask_name": "Test",
+                    "subtask_id": "task-completed",
                     "timelapse_was_active": False,
                 },
             )
@@ -2632,18 +2657,21 @@ class TestAbortedStatusNormalisation:
         service = ArchiveService(db_session)
         assert await service.soft_delete_archive(archive.id) is True
 
-        # Every queue row that referenced this archive is gone — both the
-        # pending and the completed rows. Print history (PrintLogEntry) is
-        # the authoritative record and is preserved by the FK SET NULL.
+        # Queue rows are durable PrintJobs, not disposable archive children.
+        # The queue projection is hidden and the content association is
+        # detached, while the physical-attempt identity remains available for
+        # audit and recovery.
         remaining = (
             (await db_session.execute(select(PrintQueueItem).where(PrintQueueItem.id.in_([pending.id, completed.id]))))
             .scalars()
             .all()
         )
-        assert remaining == [], (
-            "Soft-deleting the archive must delete every related queue row, "
-            f"got {[(r.id, r.status) for r in remaining]} still present"
-        )
+        assert {row.id for row in remaining} == {pending.id, completed.id}
+        by_id = {row.id: row for row in remaining}
+        assert by_id[pending.id].status == "cancelled"
+        assert by_id[completed.id].status == "completed"
+        assert all(row.queue_visible is False and row.archive_id is None for row in remaining)
+        assert all(row.job_id for row in remaining)
 
     @pytest.mark.asyncio
     @pytest.mark.integration

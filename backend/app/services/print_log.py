@@ -6,6 +6,7 @@ Log entries are written to a separate table and never touch archives or queue it
 import logging
 from datetime import datetime
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models.print_log import PrintLogEntry
@@ -17,6 +18,7 @@ async def write_log_entry(
     db: AsyncSession,
     *,
     status: str,
+    job_id: str | None = None,
     archive_id: int | None = None,
     queue_item_id: int | None = None,
     print_name: str | None = None,
@@ -35,12 +37,17 @@ async def write_log_entry(
     created_by_id: int | None = None,
     created_by_username: str | None = None,
 ) -> PrintLogEntry:
-    """Write a print log entry."""
+    """Write one idempotent print log entry for a physical PrintJob."""
+    if job_id:
+        existing = await db.scalar(select(PrintLogEntry).where(PrintLogEntry.job_id == job_id))
+        if existing is not None:
+            return existing
     duration = None
     if started_at and completed_at:
         duration = int((completed_at - started_at).total_seconds())
 
     entry = PrintLogEntry(
+        job_id=job_id,
         archive_id=archive_id,
         queue_item_id=queue_item_id,
         print_name=print_name,

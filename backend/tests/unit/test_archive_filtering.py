@@ -363,8 +363,8 @@ class TestScanForTimelapseWithRetries:
         mock_service.attach_timelapse.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_name_match_fallback(self):
-        """When no new file appears, should fall back to name matching."""
+    async def test_name_match_is_not_used_without_new_media(self):
+        """A filename resemblance cannot attribute old media to this job."""
         mock_archive, mock_printer = self._make_mocks()
 
         baseline_files = [
@@ -400,10 +400,7 @@ class TestScanForTimelapseWithRetries:
 
             await _scan_for_timelapse_with_retries(1)
 
-        # Name-match fallback: "benchy" is in "benchy_20240101.mp4"
-        mock_service.attach_timelapse.assert_called_once()
-        attached_filename = mock_service.attach_timelapse.call_args[0][2]
-        assert attached_filename == "benchy_20240101.mp4"
+        mock_service.attach_timelapse.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_stops_when_archive_already_has_timelapse(self):

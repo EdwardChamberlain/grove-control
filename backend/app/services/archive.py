@@ -938,34 +938,40 @@ async def _null_print_log_thumbnail_paths(db: AsyncSession, archive_id: int) -> 
 
 
 async def _delete_related_queue_items(db: AsyncSession, archive_id: int) -> int:
-    """Delete every queue item pointing at *archive_id* (#1734).
+    """Hide and detach queue projections without deleting PrintJobs.
 
-    Called from ``soft_delete_archive``. Hard-delete is covered by the
-    ``ON DELETE CASCADE`` on ``print_queue.archive_id`` — same end state
-    via the FK. Pre-#1734 this helper merely flipped pending rows to
-    ``status='cancelled'`` while leaving every other status alone and
-    leaving the rows in the DB, which surprised users who expected the
-    queue lines to disappear when their backing archive went away. Worse,
-    a Send-All archive backed N queue items (one per plate, #1733) — soft-
-    deleting that archive left N "cancelled" rows behind, none of which
-    could ever dispatch.
-
-    Now we delete unconditionally regardless of status. ``printing`` rows
-    are blocked one layer up at the route (``delete_archive`` returns 409
-    when a related row is mid-print) so we never delete an actively-
-    running queue row out from under the dispatcher. Completed / failed
-    / cancelled rows go too — they're queue history, not print history.
-    PrintLogEntry rows are the authoritative print history and are
-    untouched (FK ``ON DELETE SET NULL``).
-
-    Returns the number of rows removed so the caller can report it.
+    An archive is reusable content, while the queue row is the durable
+    physical-attempt identity. Archive deletion therefore cancels only a
+    still-queued attempt, hides it from the queue view, and clears the content
+    association. Terminal evidence, bindings, reservations and effects stay
+    available for audit and recovery.
     """
-    from sqlalchemy import delete as sa_delete
-
     from backend.app.models.print_queue import PrintQueueItem
+    from backend.app.services.print_job_lifecycle import CANCELLED, QUEUED, admit_job, lifecycle_state, transition_job
 
-    result = await db.execute(sa_delete(PrintQueueItem).where(PrintQueueItem.archive_id == archive_id))
-    return result.rowcount or 0
+    result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.archive_id == archive_id))
+    items = list(result.scalars().all())
+    changed = 0
+    for item in items:
+        # A model default can assign job_id before the row has ever received
+        # lifecycle admission evidence. Always run idempotent admission here
+        # so a legacy-looking ``lifecycle_state='queued'`` cannot make an
+        # already-terminal PrintJob look cancellable.
+        await admit_job(db, item, source="archive_delete_adoption")
+        if lifecycle_state(item) == QUEUED:
+            await transition_job(
+                db,
+                item,
+                to_state=CANCELLED,
+                source="archive_delete",
+                reason="Source archive deleted",
+            )
+        if lifecycle_state(item) not in {"heat_soaking", "dispatching", "printing"}:
+            item.queue_visible = False
+            item.archive_id = None
+            changed += 1
+    await db.flush()
+    return changed
 
 
 async def _count_related_queue_items(db: AsyncSession, archive_id: int) -> tuple[int, int]:
@@ -1531,6 +1537,7 @@ class ArchiveService:
         # gets SET NULL by the FK) would otherwise point at a missing file
         # and produce 404 storms in the print-log view (#1348-followup).
         await _null_print_log_thumbnail_paths(self.db, archive_id)
+        await _delete_related_queue_items(self.db, archive_id)
 
         # Delete database record FIRST — if the commit fails (e.g. database locked
         # during concurrent bulk deletes), the files stay on disk and nothing is lost.

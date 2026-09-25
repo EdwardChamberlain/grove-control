@@ -2647,6 +2647,9 @@ async def add_files_to_queue(
             db.add(queue_item)
 
             await db.flush()  # Get queue_item.id
+            from backend.app.services.print_job_lifecycle import admit_job
+
+            await admit_job(db, queue_item, source="library_queue_admission")
 
             added.append(
                 AddToQueueResult(

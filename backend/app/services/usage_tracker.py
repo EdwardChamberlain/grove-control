@@ -250,6 +250,7 @@ class PrintSession:
     printer_id: int
     print_name: str
     started_at: datetime
+    job_id: str | None = None
     tray_remain_start: dict[tuple[int, int], int] = field(default_factory=dict)
     # tray_now at print start (correct value, unlike at completion where it's 255)
     tray_now_at_start: int = -1
@@ -317,6 +318,13 @@ async def persist_session(
         db.add(row)
 
     row.print_name = session.print_name or ""
+    # The first print-start callback captures tray context before the
+    # lifecycle callback has necessarily adopted the device task.  Never let
+    # that provisional, unowned session erase a durable job owner left by a
+    # previous callback or restart; the lifecycle path will attach the fresh
+    # job with ``update_persisted_session_context`` once attribution is proven.
+    if session.job_id is not None or row.job_id is None:
+        row.job_id = session.job_id
     row.started_at = session.started_at.replace(tzinfo=None)
     row.tray_now_at_start = session.tray_now_at_start
     row.plate_id = session.plate_id
@@ -332,17 +340,18 @@ async def update_persisted_session_context(
     db: AsyncSession,
     printer_id: int,
     *,
+    job_id: str | None = None,
     ams_mapping: list[int] | None = None,
     plate_id: int | None = None,
 ) -> bool:
-    """Persist context learned while promoting an expected print.
+    """Persist context learned while correlating a physical PrintJob.
 
     ``on_print_start`` persists its session before the later archive lookup can
     promote a queue/reprint registration. Keep that late-added mapping and
     plate durable as well as updating the in-memory session, otherwise a
     restart between print start and completion loses the attribution context.
     Existing values win because the queue session may already contain a more
-    authoritative value than the process-local expected-print registry.
+    authoritative value than transient callback data.
     """
     from backend.app.models.active_print_session import ActivePrintSession
 
@@ -350,7 +359,13 @@ async def update_persisted_session_context(
     if row is None:
         return False
 
+    if job_id and row.job_id not in (None, job_id):
+        return False
+
     changed = False
+    if job_id and row.job_id is None:
+        row.job_id = job_id
+        changed = True
     if ams_mapping and not row.ams_mapping:
         row.ams_mapping = list(ams_mapping)
         changed = True
@@ -397,7 +412,12 @@ async def get_persisted_print_name(db: AsyncSession, printer_id: int) -> str | N
     return row.print_name if row is not None else None
 
 
-async def restore_session(db: AsyncSession, printer_id: int, register_active: bool = True) -> list[list[int]] | None:
+async def restore_session(
+    db: AsyncSession,
+    printer_id: int,
+    register_active: bool = True,
+    job_id: str | None = None,
+) -> list[list[int]] | None:
     """Rebuild the in-memory session for ``printer_id`` from the persisted row.
 
     Returns the persisted tray-change log so the caller can put it back on
@@ -413,6 +433,8 @@ async def restore_session(db: AsyncSession, printer_id: int, register_active: bo
     row = await db.get(ActivePrintSession, printer_id)
     if row is None:
         return None
+    if job_id is not None and row.job_id != job_id:
+        return None
 
     started_at = row.started_at
     if started_at.tzinfo is None:
@@ -420,6 +442,7 @@ async def restore_session(db: AsyncSession, printer_id: int, register_active: bo
 
     session = PrintSession(
         printer_id=printer_id,
+        job_id=row.job_id,
         print_name=row.print_name or "",
         started_at=started_at,
         tray_remain_start=_tray_map_from_json(row.tray_remain_start),
@@ -444,26 +467,29 @@ async def restore_session(db: AsyncSession, printer_id: int, register_active: bo
     return log
 
 
-async def clear_persisted_session(db: AsyncSession, printer_id: int) -> None:
+async def clear_persisted_session(db: AsyncSession, printer_id: int, job_id: str | None = None) -> None:
     """Drop the persisted print-start row once the print is closed out."""
     from backend.app.models.active_print_session import ActivePrintSession
 
     row = await db.get(ActivePrintSession, printer_id)
-    if row is not None:
+    if row is not None and (job_id is None or row.job_id == job_id):
         await db.delete(row)
         await db.commit()
 
 
-async def discard_session(db: AsyncSession, printer_id: int) -> None:
+async def discard_session(db: AsyncSession, printer_id: int, job_id: str | None = None) -> None:
     """Forget a printer's print-start context, in memory and on disk.
 
     The completion path calls this for every print, including the ones whose
     usage Spoolman owns: the context is captured for both backends, but only
     the internal tracker's ``on_print_complete`` consumes (and pops) it.
     """
+    session = _active_sessions.get(printer_id)
+    if session is not None and job_id is not None and session.job_id != job_id:
+        return
     _active_sessions.pop(printer_id, None)
     _tray_change_locks.pop(printer_id, None)
-    await clear_persisted_session(db, printer_id)
+    await clear_persisted_session(db, printer_id, job_id=job_id)
 
 
 def _to_epoch_seconds(value: datetime | None) -> float | None:
@@ -645,25 +671,17 @@ async def on_print_start(
                 {f"{k[0]}-{k[1]}": v for k, v in spool_assignments.items()},
             )
 
-    # Capture the queue item's plate_id so 3MF parsing at completion is scoped to
-    # the plate that actually ran, not the whole multi-plate file (#1697).
-    plate_id: int | None = None
-    if db:
-        from backend.app.models.print_queue import PrintQueueItem
-
-        queue_result = await db.execute(
-            select(PrintQueueItem)
-            .where(PrintQueueItem.printer_id == printer_id)
-            .where(PrintQueueItem.status == "printing")
-        )
-        queue_item = queue_result.scalars().first()
-        if queue_item is not None:
-            plate_id = queue_item.plate_id
+    # The lifecycle callback copies the owning PrintJob's plate into this
+    # session after strict device attribution. Never choose a row by printer
+    # and status here, because a late callback could otherwise borrow the next
+    # job's plate.
+    plate_id: int | None = data.get("plate_id")
 
     # Always create session (even without valid remain data) so print_name
     # is available at completion for 3MF-based tracking
     session = PrintSession(
         printer_id=printer_id,
+        job_id=data.get("_lifecycle_job_id"),
         print_name=print_name,
         started_at=datetime.now(timezone.utc),
         tray_remain_start=tray_remain_start,
@@ -704,6 +722,7 @@ async def on_print_complete(
     db: AsyncSession,
     archive_id: int | None = None,
     ams_mapping: list[int] | None = None,
+    job_id: str | None = None,
 ) -> list[dict]:
     """Compute consumption deltas and update spool weight_used/last_used.
 
@@ -718,17 +737,26 @@ async def on_print_complete(
     from backend.app.api.routes.settings import get_setting
     from backend.app.models.spool_usage_history import SpoolUsageHistory
 
-    session = _active_sessions.pop(printer_id, None)
+    session = _active_sessions.get(printer_id)
+    if session is not None and job_id is not None and session.job_id != job_id:
+        # A late completion must never consume the next job's in-memory
+        # attribution context. Leave the newer session available to its own
+        # terminal consequence and fail closed for this one.
+        session = None
+    elif session is not None:
+        _active_sessions.pop(printer_id, None)
     if session is None:
         # Restart mid-print: the in-memory session is gone but the print-start
         # row survived. Without this the completion path loses the plate, the
         # dispatched mapping and the assignment snapshot, and attributes the
         # whole print to whichever tray happened to finish it.
         try:
-            await restore_session(db, printer_id)
+            await restore_session(db, printer_id, job_id=job_id)
         except Exception:
             logger.exception("[UsageTracker] Failed to restore print session for printer %d", printer_id)
         session = _active_sessions.pop(printer_id, None)
+        if session is not None and job_id is not None and session.job_id != job_id:
+            session = None
     status = data.get("status", "completed")
     results = []
     handled_trays: set[tuple[int, int]] = set()
@@ -738,7 +766,7 @@ async def on_print_complete(
     default_filament_cost = float(default_cost_str) if default_cost_str else 0.0
 
     # Fall back to ams_mapping captured at print start (needed when auto-archive is off
-    # and the caller can't retrieve the mapping from _print_ams_mappings without archive_id)
+    # and the caller cannot recover the owning PrintJob after a restart.
     if not ams_mapping and session and session.ams_mapping:
         ams_mapping = session.ams_mapping
 
@@ -808,6 +836,7 @@ async def on_print_complete(
             print_started_at=session.started_at if session else None,
             threemf_path=threemf_path,
             plate_id=session.plate_id if session else None,
+            job_id=job_id,
         )
         results.extend(threemf_results)
 
@@ -1252,6 +1281,7 @@ async def _track_from_3mf(
     print_started_at: datetime | None = None,
     threemf_path=None,
     plate_id: int | None = None,
+    job_id: str | None = None,
 ) -> list[dict]:
     """Track usage from 3MF per-filament slicer data (primary path).
 
@@ -1306,23 +1336,18 @@ async def _track_from_3mf(
         logger.info("[UsageTracker] 3MF: no file available for archive %s, skipping", archive_id)
         return []
 
-    # The queue item carries both the plate and the dispatched mapping; look it
-    # up at most once. ``.first()`` rather than ``.scalar_one_or_none()``
-    # because a batch dispatches one archive as several queue items, and
-    # raising there would cost the print all of its usage tracking.
+    # The owning PrintJob carries both the plate and the dispatched mapping;
+    # never select a queue row by reusable archive identity. Direct prints have
+    # no job_id and therefore deliberately have no queue fallback.
     _queue_item_lookup: list = []
 
     async def _dispatch_queue_item():
         if not _queue_item_lookup:
-            if not archive_id:
+            if not job_id:
                 _queue_item_lookup.append(None)
             else:
-                queue_result = await db.execute(
-                    select(PrintQueueItem)
-                    .where(PrintQueueItem.archive_id == archive_id)
-                    .where(PrintQueueItem.status.in_(["printing", "completed", "failed"]))
-                )
-                _queue_item_lookup.append(queue_result.scalars().first())
+                queue_result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.job_id == job_id))
+                _queue_item_lookup.append(queue_result.scalar_one_or_none())
         return _queue_item_lookup[0]
 
     # The caller's plate_id comes from the in-memory session, which a restart
