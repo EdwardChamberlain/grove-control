@@ -29,7 +29,7 @@ from backend.app.services.virtual_printer.mqtt_bridge import MQTTBridge
 from backend.app.services.virtual_printer.mqtt_server import SimpleMQTTServer
 from backend.app.services.virtual_printer.ssdp_server import SSDPProxy, VirtualPrinterSSDPServer
 from backend.app.services.virtual_printer.tcp_proxy import SlicerProxyManager, TCPProxy
-from backend.app.utils.safe_path import assert_under, safe_join_under
+from backend.app.utils.safe_path import safe_join_under
 
 if TYPE_CHECKING:
     from backend.app.services.printer_manager import PrinterManager
@@ -973,7 +973,7 @@ class VirtualPrinterInstance:
                                 if stored_path:
                                     stored = Path(stored_path)
                                     path = (
-                                        assert_under(Path(app_settings.base_dir), stored, http=False)
+                                        stored
                                         if stored.is_absolute()
                                         else safe_join_under(Path(app_settings.base_dir), stored_path, http=False)
                                     )
