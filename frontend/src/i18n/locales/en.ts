@@ -751,6 +751,7 @@ export default {
     developerModeWarning: 'Developer LAN mode is not enabled on: {{names}}. Some features may not work.',
     howToEnable: 'How to enable',
     incompatibleFile: 'This file was sliced for {{slicedFor}}, but this printer is a {{printerModel}}',
+    directUploadLibraryNote: 'The uploaded file is added to File Manager before you queue it.',
     dropNotPrintable: 'Only .gcode and .gcode.3mf files can be printed',
     dropToPrint: 'Drop to print',
     cannotPrint: 'Printer busy',
@@ -1223,6 +1224,7 @@ export default {
       startPrint: 'Start Print',
       stopPrint: 'Stop Print',
       requeue: 'Re-queue',
+      addJob: 'Add Job',
     },
     // Bulk edit
     bulkEdit: {
@@ -3398,6 +3400,8 @@ export default {
     unlink: 'Unlink',
     link: 'Link',
     dragDropFiles: 'Drag & drop files here',
+    singleFilePrompt: 'Drop one file here',
+    selectOneFile: 'Select one file at a time',
     dropFilesHere: 'Drop files here',
     releaseToUpload: 'Release to upload',
     orClickToBrowse: 'or click to browse',
@@ -4388,6 +4392,7 @@ export default {
 
   // Print modal
   printModal: {
+    directUploadRetained: 'This upload will stay in File Manager because it is used for multiple prints.',
     variants: {
       editNote: 'These alternatives were set when the job was queued. Cancel and re-queue to change them.',
       title: 'Printer alternatives',

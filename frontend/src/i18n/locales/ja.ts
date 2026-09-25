@@ -736,6 +736,7 @@ export default {
     developerModeWarning: '開発者LANモードが有効になっていません: {{names}}。一部の機能が動作しない可能性があります。',
     howToEnable: '有効化方法',
     incompatibleFile: 'このファイルは{{slicedFor}}用にスライスされていますが、このプリンターは{{printerModel}}です',
+    directUploadLibraryNote: 'アップロードしたファイルは、キューに追加する前にファイルマネージャーへ保存されます。',
     dropNotPrintable: '.gcodeおよび.gcode.3mfファイルのみ印刷できます',
     dropToPrint: 'ドロップして印刷',
     cannotPrint: 'プリンター使用中',
@@ -1202,6 +1203,7 @@ export default {
       startPrint: '印刷を開始',
       stopPrint: '印刷を停止',
       requeue: '再キュー',
+      addJob: 'ジョブを追加',
     },
     // Bulk edit
     bulkEdit: {
@@ -3374,6 +3376,8 @@ export default {
     unlink: 'リンク解除',
     link: 'リンク',
     dragDropFiles: 'ファイルをここにドラッグ＆ドロップ',
+    singleFilePrompt: 'ここにファイルを1つドロップ',
+    selectOneFile: '一度に選択できるファイルは1つだけです',
     dropFilesHere: 'ここにファイルをドロップ',
     releaseToUpload: '離してアップロード',
     orClickToBrowse: 'またはクリックして選択',
@@ -4355,6 +4359,7 @@ export default {
 
   // Print modal
   printModal: {
+    directUploadRetained: '複数回の印刷に使用するため、このファイルはファイルマネージャーに残ります。',
     variants: {
       editNote: 'これらの候補はキュー追加時に決まります。変更するにはキャンセルして追加し直してください。',
       title: 'プリンターの候補',

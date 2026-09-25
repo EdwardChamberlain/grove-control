@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { filterCompatibleQueueItems, getPrinterImage } from '../../utils/printer';
+import { filterCompatibleQueueItems, getPrinterImage, isGcodeCompatible } from '../../utils/printer';
 import type { PrintQueueItem } from '../../api/client';
 
 const preferenceOnlyJob = {
@@ -37,6 +37,27 @@ describe('filterCompatibleQueueItems', () => {
     );
 
     expect(result).toEqual([]);
+  });
+});
+
+describe('isGcodeCompatible', () => {
+  const cases = [
+    ['C11', 'P1P', true], // slicer C11 means X1 Carbon; printer C11 means P1P
+    ['C12', 'P1S', true], // slicer C12 means X1; printer C12 means P1S
+    ['C13', 'X1E', true],
+    ['C13', 'P2S', false],
+    ['P2S', 'N7', true],
+    ['N7', 'P2S', true],
+    ['X1E', 'N7', false],
+    ['BL-P001', 'Bambu Lab X1 Carbon', true],
+    ['Bambu Lab X1 Carbon', 'X1C', true],
+    ['O1E', 'H2D Pro', true],
+    ['H2D', 'A1', false],
+    ['X1C', 'A1', false],
+  ] as const;
+
+  it.each(cases)('normalizes sliced model %s against printer model %s', (slicedFor, target, expected) => {
+    expect(isGcodeCompatible(slicedFor, target)).toBe(expected);
   });
 });
 

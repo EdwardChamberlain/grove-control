@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Play, Clock, Timer, Weight, CheckCircle } from 'lucide-react';
 import { formatDuration } from '../utils/date';
 
@@ -13,6 +14,7 @@ export function QueueStatsBar({
   totalWeight,
   historyCount,
   t,
+  action,
 }: {
   printingCount: number;
   queuedCount: number;
@@ -20,6 +22,7 @@ export function QueueStatsBar({
   totalWeight: number;
   historyCount: number;
   t: (key: string) => string;
+  action?: ReactNode;
 }) {
   const stats = [
     { key: 'printing', icon: Play, value: printingCount, label: t('queue.summary.printing'), color: 'text-blue-400' },
@@ -41,6 +44,12 @@ export function QueueStatsBar({
           </div>
         </div>
       ))}
+      {action && (
+        <div className="ml-auto flex items-center gap-3">
+          <span className="hidden sm:block text-bambu-dark-tertiary">|</span>
+          {action}
+        </div>
+      )}
     </div>
   );
 }

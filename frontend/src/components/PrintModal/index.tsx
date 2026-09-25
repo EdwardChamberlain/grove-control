@@ -357,6 +357,14 @@ export function PrintModal({
   // Get sliced_for_model from archive or library file
   const slicedForModel = archiveDetails?.sliced_for_model || libraryFileDetails?.sliced_for_model || null;
 
+  const incompatibleSelectedPrinters = useMemo(() => {
+    if (assignmentMode !== 'printer' || !slicedForModel) return [];
+    return selectedPrinters.flatMap((printerId) => {
+      const printer = printers?.find((candidate) => candidate.id === printerId);
+      return printer?.model && !isGcodeCompatible(slicedForModel, printer.model) ? [printer] : [];
+    });
+  }, [assignmentMode, printers, selectedPrinters, slicedForModel]);
+
   // Fetch plates for archives
   const { data: archivePlatesData, isError: archivePlatesError } = useQuery({
     queryKey: ['archive-plates', archiveId],
@@ -724,6 +732,16 @@ export function PrintModal({
       showToast('Please select at least one printer', 'error');
       return;
     }
+    if (assignmentMode === 'printer' && incompatibleSelectedPrinters.length > 0) {
+      showToast(
+        t('printers.incompatibleFile', 'This file was sliced for {{slicedFor}}, but this printer is a {{printerModel}}', {
+          slicedFor: slicedForModel,
+          printerModel: incompatibleSelectedPrinters[0].model,
+        }),
+        'error',
+      );
+      return;
+    }
     // A cross-model job has no single target model — each candidate carries its
     // own, and the backend gates each of them separately. Both checks below are
     // about the one-model case only.
@@ -958,7 +976,12 @@ export function PrintModal({
           : undefined,
         ...printOptions,
         project_id: projectId ?? undefined,
-        cleanup_library_after_dispatch: cleanupLibraryAfterDispatch,
+        // Separate printer/plate requests can begin dispatching before the
+        // remaining requests have been created. Keep their shared source in
+        // the library; a single request (including quantity > 1) is atomic.
+        cleanup_library_after_dispatch: cleanupLibraryAfterDispatch
+          && totalCount === 1
+          && quantityForPlate(plateOverride !== undefined ? plateOverride : selectedPlate) === 1,
       };
     };
 
@@ -1045,6 +1068,7 @@ export function PrintModal({
 
     // Need valid printer/model selection
     if (assignmentMode === 'printer' && selectedPrinters.length === 0) return false;
+    if (assignmentMode === 'printer' && incompatibleSelectedPrinters.length > 0) return false;
     // Both are about the single-model case. A cross-model job has no one target
     // model, and each candidate is gated against its own by the backend (#671).
     if (!isCrossModel && assignmentMode === 'model' && !targetModel) return false;
@@ -1074,6 +1098,7 @@ export function PrintModal({
     selectedPlates.size,
     isPending,
     isCrossModel,
+    incompatibleSelectedPrinters.length,
     scheduleOptions.postponePrint,
     scheduleOptions.scheduledTime,
     scheduleOptions.chamberHeatSoak,
@@ -1098,6 +1123,13 @@ export function PrintModal({
     if (assignmentMode === 'printer' && selectedPrinters.length > 1) return 1;
     return Math.max(1, plateQuantities[plateIndex] ?? 1);
   };
+
+  const directUploadWillBeRetained = cleanupLibraryAfterDispatch && (
+    (assignmentMode === 'printer' && selectedPrinters.length > 1)
+    || selectedPlates.size > 1
+    || quantityForPlate(selectedPlate) > 1
+    || (usePerPlateQuantities && [...selectedPlates].some((plateIndex) => quantityForPlate(plateIndex) > 1))
+  );
 
   // Clear gcode_injection if the admin removes all snippets while the modal
   // is open — the checkbox itself hides via hasGcodeSnippets in
@@ -1345,21 +1377,27 @@ export function PrintModal({
               </section>
             )}
 
-            {/* Compatibility warning when sliced model doesn't match selected printer */}
-            {slicedForModel && assignmentMode === 'printer' && selectedPrinters.length === 1 && (() => {
-              const selectedPrinter = printers?.find(p => p.id === selectedPrinters[0]);
-              if (selectedPrinter && selectedPrinter.model && slicedForModel !== selectedPrinter.model) {
-                return (
-                  <div className="p-3 mb-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 text-yellow-400 flex-shrink-0" />
-                    <span className="text-sm text-yellow-400">
-                      File was sliced for {slicedForModel}, but printing on {selectedPrinter.model}
-                    </span>
-                  </div>
-                );
-              }
-              return null;
-            })()}
+            {incompatibleSelectedPrinters.length > 0 && (
+              <div role="alert" className="p-3 mb-2 bg-red-500/10 border border-red-500/30 rounded-lg flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                <div className="text-sm text-red-300">
+                  {incompatibleSelectedPrinters.map((printer) => (
+                    <p key={printer.id}>
+                      {t('printers.incompatibleFile', 'This file was sliced for {{slicedFor}}, but this printer is a {{printerModel}}', {
+                        slicedFor: slicedForModel,
+                        printerModel: printer.model,
+                      })}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {directUploadWillBeRetained && (
+              <p className="mb-3 rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 text-sm text-blue-200">
+                {t('printModal.directUploadRetained', 'This upload will stay in File Manager because it is being used by multiple queue items.')}
+              </p>
+            )}
 
             {/* Warning when archive data couldn't be loaded */}
             {archiveDataMissing && (

@@ -177,6 +177,19 @@ describe('QueuePage', () => {
       });
     });
 
+    it('keeps Add Job in the queue summary row and opens direct upload', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+
+      const addJobButton = await screen.findByRole('button', { name: 'Add Job' });
+      const summaryRow = screen.getByTestId('queue-stat-history').parentElement;
+      expect(summaryRow).toContainElement(addJobButton);
+
+      await user.click(addJobButton);
+      expect(await screen.findByText('Drop one file here')).toBeInTheDocument();
+      expect(document.querySelector('input[type="file"]')).not.toHaveAttribute('multiple');
+    });
+
     it('shows filter dropdowns', async () => {
       render(<QueuePage />);
 

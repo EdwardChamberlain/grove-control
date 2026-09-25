@@ -737,6 +737,7 @@ export default {
     developerModeWarning: '以下打印机未启用开发者局域网模式：{{names}}。某些功能可能无法使用。',
     howToEnable: '如何启用',
     incompatibleFile: '此文件是为 {{slicedFor}} 切片的，但该打印机是 {{printerModel}}',
+    directUploadLibraryNote: '上传的文件会先保存到文件管理器，再加入队列。',
     dropNotPrintable: '只能打印 .gcode 和 .gcode.3mf 文件',
     dropToPrint: '拖放以打印',
     cannotPrint: '打印机忙碌',
@@ -1203,6 +1204,7 @@ export default {
       startPrint: '开始打印',
       stopPrint: '停止打印',
       requeue: '重新排队',
+      addJob: '添加任务',
     },
     // Bulk edit
     bulkEdit: {
@@ -3361,6 +3363,8 @@ export default {
     unlink: '取消链接',
     link: '链接',
     dragDropFiles: '将文件拖放到此处',
+    singleFilePrompt: '将一个文件拖放到此处',
+    selectOneFile: '一次只能选择一个文件',
     dropFilesHere: '将文件放在此处',
     releaseToUpload: '释放以上传',
     orClickToBrowse: '或点击浏览',
@@ -4342,6 +4346,7 @@ export default {
 
   // Print modal
   printModal: {
+    directUploadRetained: '此文件将用于多次打印，因此会保留在文件管理器中。',
     variants: {
       editNote: '这些备选在任务加入队列时确定。如需更改，请取消后重新加入队列。',
       title: '打印机备选',

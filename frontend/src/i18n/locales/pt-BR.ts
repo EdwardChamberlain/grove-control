@@ -737,6 +737,7 @@ export default {
     developerModeWarning: 'O modo desenvolvedor LAN não está ativado em: {{names}}. Alguns recursos podem não funcionar.',
     howToEnable: 'Como ativar',
     incompatibleFile: 'Este arquivo foi fatiado para {{slicedFor}}, mas esta impressora é uma {{printerModel}}',
+    directUploadLibraryNote: 'O arquivo enviado é salvo no Gerenciador de Arquivos antes de entrar na fila.',
     dropNotPrintable: 'Apenas arquivos .gcode e .gcode.3mf podem ser impressos',
     dropToPrint: 'Solte para imprimir',
     cannotPrint: 'Impressora ocupada',
@@ -1203,6 +1204,7 @@ export default {
       startPrint: 'Iniciar Impressão',
       stopPrint: 'Parar Impressão',
       requeue: 'Reenfileirar',
+      addJob: 'Adicionar trabalho',
     },
     // Bulk edit
     bulkEdit: {
@@ -3362,6 +3364,8 @@ export default {
     unlink: 'Desvincular',
     link: 'Vincular',
     dragDropFiles: 'Arraste e solte os arquivos aqui',
+    singleFilePrompt: 'Solte um arquivo aqui',
+    selectOneFile: 'Selecione um arquivo por vez',
     dropFilesHere: 'Solte os arquivos aqui',
     releaseToUpload: 'Solte para enviar',
     orClickToBrowse: 'ou clique para procurar',
@@ -4343,6 +4347,7 @@ export default {
 
   // Print modal
   printModal: {
+    directUploadRetained: 'O arquivo ficará no Gerenciador de Arquivos porque será usado em várias impressões.',
     variants: {
       editNote: 'Estas alternativas foram definidas ao enfileirar o trabalho. Cancele e enfileire de novo para alterá-las.',
       title: 'Alternativas de impressora',

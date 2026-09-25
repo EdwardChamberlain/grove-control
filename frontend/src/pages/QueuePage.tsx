@@ -56,6 +56,7 @@ import {
   PlayCircle,
   ChevronDown,
   ChevronUp,
+  Plus,
 } from 'lucide-react';
 import { api, ApiError } from '../api/client';
 import { type TimeFormat, formatDate, formatETA, formatDuration, formatRelativeTime, parseUTCDate } from '../utils/date';
@@ -65,6 +66,7 @@ import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { PrintModal } from '../components/PrintModal';
+import { DirectPrintUploadModal } from '../components/DirectPrintUploadModal';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { QueueStatsBar } from '../components/QueueStatsBar';
@@ -1058,6 +1060,8 @@ export function QueuePage() {
   const [showClearHistoryConfirm, setShowClearHistoryConfirm] = useState(false);
   const [editItem, setEditItem] = useState<PrintQueueItem | null>(null);
   const [requeueItem, setRequeueItem] = useState<PrintQueueItem | null>(null);
+  const [showQueueUpload, setShowQueueUpload] = useState(false);
+  const [uploadedQueueFile, setUploadedQueueFile] = useState<{ id: number; filename: string } | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
     type: 'cancel' | 'remove' | 'stop';
     item: PrintQueueItem;
@@ -1765,14 +1769,12 @@ export function QueuePage() {
   return (
     <div className="p-4 md:p-8">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-3">
-            <ListOrdered className="w-7 h-7 text-bambu-green" />
-            {t('queue.title')}
-          </h1>
-          <p className="text-bambu-gray mt-1">{t('queue.subtitle')}</p>
-        </div>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-white flex items-center gap-3">
+          <ListOrdered className="w-7 h-7 text-bambu-green" />
+          {t('queue.title')}
+        </h1>
+        <p className="text-bambu-gray mt-1">{t('queue.subtitle')}</p>
       </div>
 
       {/* Tab strip — Active queue is the main view; History and Timeline
@@ -1813,6 +1815,24 @@ export function QueuePage() {
         totalWeight={totalWeight}
         historyCount={historyItems.length}
         t={t}
+        action={(
+          <Button
+            onClick={() => setShowQueueUpload(true)}
+            disabled={!hasPermission('queue:create') || !hasPermission('library:upload')}
+            title={
+              !hasPermission('library:upload')
+                ? t('fileManager.noPermissionUpload')
+                : !hasPermission('queue:create')
+                  ? t('fileManager.noPermissionAddToQueue')
+                  : undefined
+            }
+            size="sm"
+            className="shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            {t('queue.actions.addJob')}
+          </Button>
+        )}
       />
 
       {/* #1818: Resume-after-failure banner. One row per printer whose queue
@@ -2210,6 +2230,28 @@ export function QueuePage() {
             </div>
           )}
         </div>
+      )}
+
+      {/* Add Job: upload a sliced file, then configure it in the print modal. */}
+      {showQueueUpload && (
+        <DirectPrintUploadModal
+          onClose={() => setShowQueueUpload(false)}
+          onFileUploaded={(uploadedFile) => {
+            setShowQueueUpload(false);
+            setUploadedQueueFile({ id: uploadedFile.id, filename: uploadedFile.filename });
+          }}
+        />
+      )}
+
+      {uploadedQueueFile && (
+        <PrintModal
+          mode="create"
+          libraryFileId={uploadedQueueFile.id}
+          archiveName={uploadedQueueFile.filename}
+          onClose={() => setUploadedQueueFile(null)}
+          onSuccess={() => setUploadedQueueFile(null)}
+          cleanupLibraryAfterDispatch
+        />
       )}
 
       {/* Edit Modal */}

@@ -880,6 +880,38 @@ describe('PrintersPage', () => {
       await waitFor(() => expect(uploadRequests).toBe(1));
     });
 
+    it('rejects multiple dropped files on an expanded card without uploading either', async () => {
+      let uploadRequests = 0;
+      server.use(
+        http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+          ...mockPrinterStatus,
+          state: 'RUNNING',
+          current_print: 'test-print.3mf',
+        })),
+        http.post('/api/v1/library/files', () => {
+          uploadRequests += 1;
+          return HttpResponse.json({ id: 42, filename: 'queued-print.gcode.3mf', metadata: {} });
+        }),
+      );
+
+      render(<PrintersPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Detail cards' }));
+
+      const card = (await screen.findByText('X1 Carbon')).closest('[id="printer-card-1"]');
+      expect(card).toBeInTheDocument();
+      fireEvent.drop(card!, {
+        dataTransfer: {
+          files: [
+            new File(['one'], 'one.gcode', { type: 'application/octet-stream' }),
+            new File(['two'], 'two.gcode.3mf', { type: 'application/octet-stream' }),
+          ],
+        },
+      });
+
+      expect(await screen.findByText('Select one file at a time')).toBeInTheDocument();
+      expect(uploadRequests).toBe(0);
+    });
+
     it('shows the active print owner above the job name in the cockpit', async () => {
       server.use(
         http.get('/api/v1/printers/:id/status', () => HttpResponse.json({

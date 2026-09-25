@@ -57,6 +57,44 @@ PRINTER_MODEL_ID_MAP = {
     "O1S": "H2S",
 }
 
+# Printer rows may retain the SSDP model code, while sliced-file metadata uses
+# a normalized model name. Keep this map separate from PRINTER_MODEL_ID_MAP:
+# C11/C12 identify P1P/P1S here but X1C/X1 in slicer metadata.
+PRINTER_SSDP_MODEL_MAP = {
+    "BL-P001": "X1C",
+    "BL-P002": "X1",
+    "BL-P003": "X1E",
+    "O1D": "H2D",
+    "O1E": "H2D Pro",
+    "O2D": "H2D Pro",
+    "O1C": "H2C",
+    "O1C2": "H2C",
+    "O1S": "H2S",
+    "N6": "X2D",
+    "N9": "A2L",
+    "C11": "P1P",
+    "C12": "P1S",
+    "C13": "X1E",
+    "N7": "P2S",
+    "N2S": "A1",
+    "N1": "A1 Mini",
+}
+
+# Some slicer metadata uses SSDP-style codes. Keep the slicer interpretation
+# separate so C11/C12 remain X1C/X1 here while printer rows resolve to P1P/P1S.
+GCODE_SLICED_MODEL_CODE_MAP = {
+    **PRINTER_MODEL_ID_MAP,
+    "BLP001": "X1C",
+    "BLP002": "X1",
+    "BLP003": "X1E",
+    "N7": "P2S",
+}
+
+_PRINTER_DISPLAY_NAME_MAP = {
+    name.strip().upper().replace(" ", "").replace("-", ""): model for name, model in PRINTER_MODEL_MAP.items()
+}
+_PRINTER_DISPLAY_NAME_MAP.update({"X1CARBON": "X1C", "A1MINI": "A1 Mini"})
+
 
 # Rod/rail type classification for maintenance tasks.
 # Carbon rods: X1, P1 series (CoreXY with carbon fiber rods)
@@ -383,12 +421,25 @@ def is_gcode_compatible(sliced_for_model: str | None, target_model: str | None) 
     if not sliced_for_model or not target_model:
         return True
 
-    def _norm(model: str) -> str:
-        resolved = PRINTER_MODEL_ID_MAP.get(model.strip(), model)
+    def _norm(model: str, *, is_target: bool) -> str:
+        raw = model.strip()
+        key = raw.upper()
+        compact_key = key.replace(" ", "").replace("-", "")
+        if is_target:
+            resolved = PRINTER_SSDP_MODEL_MAP.get(key)
+        else:
+            resolved = None
+        if resolved is None:
+            resolved = GCODE_SLICED_MODEL_CODE_MAP.get(
+                raw,
+                GCODE_SLICED_MODEL_CODE_MAP.get(key, GCODE_SLICED_MODEL_CODE_MAP.get(compact_key, raw)),
+            )
+        if resolved == raw:
+            resolved = _PRINTER_DISPLAY_NAME_MAP.get(compact_key, raw)
         return resolved.strip().upper().replace(" ", "").replace("-", "")
 
-    sliced = _norm(sliced_for_model)
-    target = _norm(target_model)
+    sliced = _norm(sliced_for_model, is_target=False)
+    target = _norm(target_model, is_target=True)
     if sliced == target:
         return True
     return any(sliced in family and target in family for family in GCODE_COMPAT_FAMILIES)

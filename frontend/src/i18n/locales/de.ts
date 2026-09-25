@@ -737,6 +737,7 @@ export default {
     developerModeWarning: 'Der Entwickler-LAN-Modus ist nicht aktiviert auf: {{names}}. Einige Funktionen funktionieren möglicherweise nicht.',
     howToEnable: 'Aktivieren',
     incompatibleFile: 'Diese Datei wurde für {{slicedFor}} geslicet, aber dieser Drucker ist ein {{printerModel}}',
+    directUploadLibraryNote: 'Die hochgeladene Datei wird vor dem Einreihen im Dateimanager gespeichert.',
     dropNotPrintable: 'Nur .gcode- und .gcode.3mf-Dateien können gedruckt werden',
     dropToPrint: 'Zum Drucken ablegen',
     cannotPrint: 'Drucker beschäftigt',
@@ -1203,6 +1204,7 @@ export default {
       startPrint: 'Druck starten',
       stopPrint: 'Druck stoppen',
       requeue: 'Erneut einreihen',
+      addJob: 'Druckauftrag hinzufügen',
     },
     // Bulk edit
     bulkEdit: {
@@ -3374,6 +3376,8 @@ export default {
     unlink: 'Verknüpfung aufheben',
     link: 'Verknüpfen',
     dragDropFiles: 'Dateien hierher ziehen',
+    singleFilePrompt: 'Eine Datei hier ablegen',
+    selectOneFile: 'Bitte jeweils nur eine Datei auswählen',
     dropFilesHere: 'Dateien hier ablegen',
     releaseToUpload: 'Loslassen zum Hochladen',
     orClickToBrowse: 'oder klicken zum Durchsuchen',
@@ -4355,6 +4359,7 @@ export default {
 
   // Print modal
   printModal: {
+    directUploadRetained: 'Diese Datei bleibt im Dateimanager, da sie für mehrere Drucke verwendet wird.',
     variants: {
       editNote: 'Diese Alternativen wurden beim Einreihen festgelegt. Zum Ändern abbrechen und neu einreihen.',
       title: 'Drucker-Alternativen',

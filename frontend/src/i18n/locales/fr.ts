@@ -737,6 +737,7 @@ export default {
     developerModeWarning: 'Le mode développeur LAN n\'est pas activé sur : {{names}}. Certaines fonctionnalités peuvent ne pas fonctionner.',
     howToEnable: 'Comment activer',
     incompatibleFile: 'Ce fichier a été tranché pour {{slicedFor}}, mais cette imprimante est une {{printerModel}}',
+    directUploadLibraryNote: 'Le fichier importé est ajouté au gestionnaire de fichiers avant sa mise en file d’attente.',
     dropNotPrintable: 'Seuls les fichiers .gcode et .gcode.3mf peuvent être imprimés',
     dropToPrint: 'Déposer pour imprimer',
     cannotPrint: 'Imprimante occupée',
@@ -1203,6 +1204,7 @@ export default {
       startPrint: 'Démarrer',
       stopPrint: 'Arrêter',
       requeue: 'Remettre en file',
+      addJob: 'Ajouter un travail',
     },
     // Bulk edit
     bulkEdit: {
@@ -3363,6 +3365,8 @@ export default {
     unlink: 'Délier',
     link: 'Lier',
     dragDropFiles: 'Glissez les fichiers ici',
+    singleFilePrompt: 'Déposez un fichier ici',
+    selectOneFile: 'Sélectionnez un seul fichier à la fois',
     dropFilesHere: 'Déposez ici',
     releaseToUpload: 'Relâcher pour téléverser',
     orClickToBrowse: 'ou cliquez pour parcourir',
@@ -4344,6 +4348,7 @@ export default {
 
   // Print modal
   printModal: {
+    directUploadRetained: 'Ce fichier restera dans le gestionnaire de fichiers, car il est utilisé pour plusieurs impressions.',
     variants: {
       editNote: 'Ces alternatives ont été définies lors de la mise en file. Annulez et remettez en file pour les modifier.',
       title: 'Alternatives d\'imprimante',
