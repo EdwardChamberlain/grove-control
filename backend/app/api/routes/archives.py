@@ -4058,6 +4058,7 @@ async def slice_archive(
                     current_user_id=user_id,
                     job_id=job_id,
                     project_id=src_archive.project_id,
+                    fallback_metadata={"bed_type": src_archive.bed_type},
                 )
             except HTTPException as exc:
                 raise http_exception_to_job_error(exc) from exc

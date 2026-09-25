@@ -835,6 +835,8 @@ export default {
       failedUpdateFavorites: 'Échec mise à jour favoris',
       exportDownloaded: 'Export téléchargé',
       exportFailed: 'Échec export',
+      savedToFiles: '{{filename}} enregistré dans Fichiers',
+      failedSaveToFiles: 'Impossible d’enregistrer le fichier d’impression dans Fichiers',
     },
     menu: {
       print: 'Imprimer',
@@ -874,6 +876,7 @@ export default {
       select: 'Sélectionner',
       deselect: 'Désélectionner',
       delete: 'Supprimer',
+      saveToFiles: 'Enregistrer dans Fichiers',
     },
     permission: {
       noReprint: 'Pas d\'autorisation de réimpression',
@@ -1840,12 +1843,6 @@ export default {
     saveThumbnails: 'Enregistrer les vignettes',
     captureFinishPhoto: 'Prendre une photo à la fin',
     noPrintersConfigured: 'Aucune imprimante configurée',
-    // Archive settings
-    archiveMode: {
-      always: 'Toujours créer une archive',
-      never: 'Ne jamais créer d\'archive',
-      ask: 'Demander à chaque fois',
-    },
     // Updates
     checkForUpdatesLabel: 'Vérifier les mises à jour',
     checkPrinterFirmware: 'Vérifier le firmware imprimante',
@@ -2349,8 +2346,6 @@ export default {
     energyModePrintDescription: 'Le tableau de bord affiche la somme de l\'énergie utilisée pendant les impressions',
     energyModeTotalDescription: 'Le tableau de bord affiche l\'énergie totale des prises connectées',
     fileManager: 'Gestionnaire de fichiers',
-    createArchiveEntry: 'Créer une entrée d\'archive lors de l\'impression',
-    createArchiveEntryDescription: 'Lors de l\'impression depuis le gestionnaire de fichiers, créer optionnellement une entrée d\'archive',
     lowDiskSpaceWarning: 'Avertissement espace disque faible',
     lowDiskSpaceDescription: 'Afficher un avertissement lorsque l\'espace disque libre descend sous ce seuil',
     printerFirmware: 'Firmware imprimante',

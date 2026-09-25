@@ -1422,6 +1422,9 @@ class TestVirtualPrinterInstance:
                 self.add = lambda item: added_items.append(item)
                 self.commit = AsyncMock()
 
+            async def get(self, model, file_id):  # noqa: ARG002
+                return SimpleNamespace(id=file_id, queue_only=False)
+
             async def execute(self, query):  # noqa: ARG002
                 """Return a stub result whose `.scalar()` reports the existing
                 MAX(position) for the target. Returning 7 means the new item
@@ -1521,6 +1524,9 @@ class TestVirtualPrinterInstance:
                     if getattr(item, "id", None) is None:
                         item.id = self._next_id
                         self._next_id += 1
+
+            async def get(self, model, file_id):  # noqa: ARG002
+                return SimpleNamespace(id=file_id, queue_only=False)
 
         mock_db = _RecordingDb()
         mock_session_factory = MagicMock()

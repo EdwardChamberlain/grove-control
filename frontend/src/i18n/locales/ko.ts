@@ -792,7 +792,9 @@ export default {
       failedDeleteArchives: '아카이브 삭제 실패',
       failedUpdateFavorites: '즐겨찾기 업데이트 실패',
       exportDownloaded: '내보내기 다운로드됨',
-      exportFailed: '내보내기 실패'
+      exportFailed: '내보내기 실패',
+      savedToFiles: '{{filename}}을(를) 파일에 저장했습니다',
+      failedSaveToFiles: '인쇄 파일을 파일에 저장하지 못했습니다',
     },
     menu: {
       print: '인쇄',
@@ -831,7 +833,8 @@ export default {
       select: '선택',
       deselect: '선택 해제',
       delete: '삭제',
-      printLog: '인쇄 기록'
+      printLog: '인쇄 기록',
+      saveToFiles: '파일에 저장',
     },
     permission: {
       noReprint: '이 아카이브를 재인쇄할 권한이 없습니다',
@@ -1744,11 +1747,6 @@ export default {
     saveThumbnails: '썸네일 저장',
     captureFinishPhoto: '완료 사진 캡처',
     noPrintersConfigured: '설정된 프린터 없음',
-    archiveMode: {
-      always: '항상 아카이브 항목 생성',
-      never: '아카이브 항목 생성 안 함',
-      ask: '매번 묻기'
-    },
     checkForUpdatesLabel: '업데이트 확인',
     checkPrinterFirmware: '프린터 펌웨어 확인',
     includeBetaUpdates: '베타 버전 포함',
@@ -2223,8 +2221,6 @@ export default {
     energyModePrintDescription: '대시보드가 인쇄 중 사용된 에너지 합계를 표시',
     energyModeTotalDescription: '대시보드가 스마트 플러그의 전체 에너지를 표시',
     fileManager: '파일 관리자',
-    createArchiveEntry: '인쇄 시 아카이브 항목 생성',
-    createArchiveEntryDescription: '파일 관리자에서 인쇄할 때 선택적으로 아카이브 항목 생성',
     lowDiskSpaceWarning: '디스크 공간 부족 경고',
     lowDiskSpaceDescription: '여유 디스크 공간이 이 임계값 아래로 떨어지면 경고 표시',
     printerFirmware: '프린터 펌웨어',

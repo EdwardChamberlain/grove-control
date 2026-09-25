@@ -835,6 +835,8 @@ export default {
       failedUpdateFavorites: 'Aggiornamento preferiti non riuscito',
       exportDownloaded: 'Export scaricato',
       exportFailed: 'Export non riuscito',
+      savedToFiles: '{{filename}} salvato in File',
+      failedSaveToFiles: 'Impossibile salvare il file di stampa in File',
     },
     menu: {
       print: 'Stampa',
@@ -874,6 +876,7 @@ export default {
       select: 'Seleziona',
       deselect: 'Deseleziona',
       delete: 'Elimina',
+      saveToFiles: 'Salva in File',
     },
     permission: {
       noReprint: 'Non hai il permesso di ristampare questo archivio',
@@ -1840,12 +1843,6 @@ export default {
     saveThumbnails: 'Salva miniature',
     captureFinishPhoto: 'Acquisisci foto finale',
     noPrintersConfigured: 'Nessuna stampante configurata',
-    // Archive settings
-    archiveMode: {
-      always: 'Crea sempre voce archivio',
-      never: 'Non creare mai voce archivio',
-      ask: 'Chiedi ogni volta',
-    },
     // Updates
     checkForUpdatesLabel: 'Controlla aggiornamenti',
     checkPrinterFirmware: 'Controlla firmware stampante',
@@ -2348,8 +2345,6 @@ export default {
     energyModePrintDescription: 'La dashboard mostra la somma dell\'energia usata durante le stampe',
     energyModeTotalDescription: 'La dashboard mostra l\'energia totale dalle prese smart',
     fileManager: 'Gestore file',
-    createArchiveEntry: 'Crea voce archivio durante la stampa',
-    createArchiveEntryDescription: 'Quando si stampa dal gestore file, crea opzionalmente una voce di archivio',
     lowDiskSpaceWarning: 'Avviso spazio disco insufficiente',
     lowDiskSpaceDescription: 'Mostra avviso quando lo spazio disco scende sotto questa soglia',
     printerFirmware: 'Firmware stampante',

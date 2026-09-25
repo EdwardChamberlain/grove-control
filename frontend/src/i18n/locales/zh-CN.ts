@@ -835,6 +835,8 @@ export default {
       failedUpdateFavorites: '更新收藏失败',
       exportDownloaded: '导出已下载',
       exportFailed: '导出失败',
+      savedToFiles: '已将 {{filename}} 保存到文件',
+      failedSaveToFiles: '无法将打印文件保存到文件',
     },
     menu: {
       print: '打印',
@@ -874,6 +876,7 @@ export default {
       select: '选择',
       deselect: '取消选择',
       delete: '删除',
+      saveToFiles: '保存到文件',
     },
     permission: {
       noReprint: '您没有重新打印此归档的权限',
@@ -1840,12 +1843,6 @@ export default {
     saveThumbnails: '保存缩略图',
     captureFinishPhoto: '拍摄完成照片',
     noPrintersConfigured: '未配置打印机',
-    // Archive settings
-    archiveMode: {
-      always: '始终创建归档条目',
-      never: '从不创建归档条目',
-      ask: '每次询问',
-    },
     // Updates
     checkForUpdatesLabel: '检查更新',
     checkPrinterFirmware: '检查打印机固件',
@@ -2348,8 +2345,6 @@ export default {
     energyModePrintDescription: '仪表板显示打印期间使用的能源总和',
     energyModeTotalDescription: '仪表板显示智能插座的累计能源',
     fileManager: '文件管理器',
-    createArchiveEntry: '打印时创建归档条目',
-    createArchiveEntryDescription: '从文件管理器打印时，可选择创建归档条目',
     lowDiskSpaceWarning: '磁盘空间不足警告',
     lowDiskSpaceDescription: '当可用磁盘空间低于此阈值时显示警告',
     printerFirmware: '打印机固件',

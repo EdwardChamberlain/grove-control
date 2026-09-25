@@ -835,6 +835,8 @@ export default {
       failedUpdateFavorites: 'Favoriler güncellenemedi',
       exportDownloaded: 'Dışa aktarma indirildi',
       exportFailed: 'Dışa aktarma başarısız',
+      savedToFiles: '{{filename}} Dosyalar’a kaydedildi',
+      failedSaveToFiles: 'Baskı dosyası Dosyalar’a kaydedilemedi',
     },
     menu: {
       print: 'Yazdır',
@@ -874,6 +876,7 @@ export default {
       select: 'Seç',
       deselect: 'Seçimi Kaldır',
       delete: 'Sil',
+      saveToFiles: 'Dosyalara Kaydet',
     },
     permission: {
       noReprint: 'Bu arşivi yeniden yazdırma izniniz yok',
@@ -1844,11 +1847,6 @@ export default {
     captureFinishPhoto: 'Bitiş fotoğrafı çek',
     noPrintersConfigured: 'Yapılandırılmış yazıcı yok',
     // Arşiv ayarları
-    archiveMode: {
-      always: 'Her zaman arşiv girişi oluştur',
-      never: 'Asla arşiv girişi oluşturma',
-      ask: 'Her seferinde sor',
-    },
     // Güncellemeler
     checkForUpdatesLabel: 'Güncellemeleri kontrol et',
     checkPrinterFirmware: 'Yazıcı firmware\'ini kontrol et',
@@ -2357,8 +2355,6 @@ export default {
     energyModeTotalDescription: 'Gösterge paneli, akıllı prizlerden ömür boyu enerjiyi gösterir',
     // Dosya Yöneticisi
     fileManager: 'Dosya Yöneticisi',
-    createArchiveEntry: 'Yazdırırken Arşiv Girişi Oluştur',
-    createArchiveEntryDescription: 'Dosya Yöneticisinden yazdırırken isteğe bağlı olarak bir arşiv girişi oluştur',
     lowDiskSpaceWarning: 'Düşük Disk Alanı Uyarısı',
     lowDiskSpaceDescription: 'Boş disk alanı bu eşiğin altına düştüğünde uyarı göster',
     // Güncellemeler

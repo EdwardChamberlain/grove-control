@@ -29,6 +29,7 @@ from backend.app.services.virtual_printer.mqtt_bridge import MQTTBridge
 from backend.app.services.virtual_printer.mqtt_server import SimpleMQTTServer
 from backend.app.services.virtual_printer.ssdp_server import SSDPProxy, VirtualPrinterSSDPServer
 from backend.app.services.virtual_printer.tcp_proxy import SlicerProxyManager, TCPProxy
+from backend.app.utils.safe_path import assert_under, safe_join_under
 
 if TYPE_CHECKING:
     from backend.app.services.printer_manager import PrinterManager
@@ -970,9 +971,12 @@ class VirtualPrinterInstance:
                                 continue
                             for stored_path in (library_file.file_path, library_file.thumbnail_path):
                                 if stored_path:
-                                    path = Path(stored_path)
-                                    if not path.is_absolute():
-                                        path = app_settings.base_dir / path
+                                    stored = Path(stored_path)
+                                    path = (
+                                        assert_under(Path(app_settings.base_dir), stored, http=False)
+                                        if stored.is_absolute()
+                                        else safe_join_under(Path(app_settings.base_dir), stored_path, http=False)
+                                    )
                                     path.unlink(missing_ok=True)
                             await cleanup_db.delete(library_file)
                         if library_file_ids_to_cleanup:

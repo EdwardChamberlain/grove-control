@@ -834,6 +834,8 @@ export default {
       failedUpdateFavorites: 'お気に入りの更新に失敗しました',
       exportDownloaded: 'エクスポートをダウンロードしました',
       exportFailed: 'エクスポートに失敗しました',
+      savedToFiles: '{{filename}} をファイルに保存しました',
+      failedSaveToFiles: '印刷ファイルをファイルに保存できませんでした',
     },
     menu: {
       print: '印刷',
@@ -873,6 +875,7 @@ export default {
       select: '選択',
       deselect: '選択解除',
       delete: '削除',
+      saveToFiles: 'ファイルに保存',
     },
     permission: {
       noReprint: 'このアーカイブを再印刷する権限がありません',
@@ -1839,12 +1842,6 @@ export default {
     saveThumbnails: 'サムネイルを保存',
     captureFinishPhoto: '完了写真を撮影',
     noPrintersConfigured: 'プリンターが設定されていません',
-    // Archive settings
-    archiveMode: {
-      always: '常にアーカイブを作成',
-      never: 'アーカイブを作成しない',
-      ask: '毎回確認',
-    },
     // Updates
     checkForUpdatesLabel: 'アップデートを確認',
     checkPrinterFirmware: 'プリンターファームウェアの確認',
@@ -2353,8 +2350,6 @@ export default {
     energyModeTotalDescription: 'ダッシュボードにスマートプラグの累計エネルギーを表示',
     // File Manager
     fileManager: 'ファイルマネージャー',
-    createArchiveEntry: '印刷時にアーカイブエントリを作成',
-    createArchiveEntryDescription: 'ファイルマネージャーから印刷時に、オプションでアーカイブエントリを作成',
     lowDiskSpaceWarning: 'ディスク容量不足の警告',
     lowDiskSpaceDescription: '空きディスク容量がこのしきい値を下回った場合に警告を表示',
     // Updates

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.core.config import settings
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem
+from backend.app.utils.safe_path import assert_under, safe_join_under
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +52,12 @@ async def remove_queue_only_source_if_unused(
     paths: list[Path] = []
     for stored_path in (library_file.file_path, library_file.thumbnail_path):
         if stored_path:
-            path = Path(stored_path)
-            if not path.is_absolute():
-                path = settings.base_dir / path
+            stored = Path(stored_path)
+            path = (
+                assert_under(Path(settings.base_dir), stored, http=False)
+                if stored.is_absolute()
+                else safe_join_under(Path(settings.base_dir), stored_path, http=False)
+            )
             paths.append(path)
     await db.delete(library_file)
     return paths

@@ -53,6 +53,7 @@ from backend.app.services.smart_plug_manager import smart_plug_manager
 from backend.app.utils.filename import derive_remote_filename
 from backend.app.utils.local_time import utcnow_naive
 from backend.app.utils.printer_models import is_gcode_compatible, normalize_printer_model
+from backend.app.utils.safe_path import assert_under, safe_join_under
 
 logger = logging.getLogger(__name__)
 
@@ -4092,7 +4093,12 @@ class PrintScheduler:
                 extra_data["source_archive_id"] = source_archive_id
                 archive.extra_data = extra_data
 
-            if library_file and item.cleanup_library_after_dispatch and library_file.queue_only:
+            if (
+                library_file
+                and item.cleanup_library_after_dispatch
+                and library_file.queue_only
+                and not library_file.is_external
+            ):
                 item.library_file_id = None
                 cleanup_disk_paths.extend(
                     await remove_queue_only_source_if_unused(
@@ -4114,9 +4120,12 @@ class PrintScheduler:
             if attempt_archive:
                 for stored_path in (attempt_archive.file_path, attempt_archive.thumbnail_path):
                     if stored_path:
-                        path = Path(stored_path)
-                        if not path.is_absolute():
-                            path = settings.base_dir / path
+                        stored = Path(stored_path)
+                        path = (
+                            assert_under(Path(settings.archive_dir), stored, http=False)
+                            if stored.is_absolute()
+                            else safe_join_under(Path(settings.base_dir), stored_path, http=False)
+                        )
                         try:
                             path.unlink(missing_ok=True)
                         except OSError:

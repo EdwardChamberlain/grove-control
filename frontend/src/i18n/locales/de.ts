@@ -835,6 +835,8 @@ export default {
       failedUpdateFavorites: 'Fehler beim Aktualisieren der Favoriten',
       exportDownloaded: 'Export heruntergeladen',
       exportFailed: 'Export fehlgeschlagen',
+      savedToFiles: '{{filename}} wurde in Dateien gespeichert',
+      failedSaveToFiles: 'Druckdatei konnte nicht in Dateien gespeichert werden',
     },
     menu: {
       print: 'Drucken',
@@ -874,6 +876,7 @@ export default {
       select: 'Auswählen',
       deselect: 'Abwählen',
       delete: 'Löschen',
+      saveToFiles: 'In Dateien speichern',
     },
     permission: {
       noReprint: 'Sie haben keine Berechtigung, dieses Archiv erneut zu drucken',
@@ -1840,12 +1843,6 @@ export default {
     saveThumbnails: 'Vorschaubilder speichern',
     captureFinishPhoto: 'Abschlussfoto aufnehmen',
     noPrintersConfigured: 'Keine Drucker konfiguriert',
-    // Archive settings
-    archiveMode: {
-      always: 'Immer Archiveintrag erstellen',
-      never: 'Nie Archiveintrag erstellen',
-      ask: 'Jedes Mal fragen',
-    },
     // Updates
     checkForUpdatesLabel: 'Nach Updates suchen',
     checkPrinterFirmware: 'Drucker-Firmware prüfen',
@@ -2354,8 +2351,6 @@ export default {
     energyModeTotalDescription: 'Dashboard zeigt Gesamtenergie der Smart Plugs',
     // File Manager
     fileManager: 'Dateimanager',
-    createArchiveEntry: 'Archiveintrag beim Drucken erstellen',
-    createArchiveEntryDescription: 'Beim Drucken aus dem Dateimanager optional einen Archiveintrag erstellen',
     lowDiskSpaceWarning: 'Warnung bei wenig Speicherplatz',
     lowDiskSpaceDescription: 'Warnung anzeigen, wenn freier Speicherplatz unter diesen Schwellenwert fällt',
     // Updates

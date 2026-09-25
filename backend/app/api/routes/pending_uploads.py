@@ -227,7 +227,9 @@ async def save_all_pending_to_files(
 
 
 @router.post("/archive-all")
-async def archive_all_pending():
+async def archive_all_pending(
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.ARCHIVES_CREATE),
+):
     """Removed: pending uploads can be saved to Files, not Archive."""
     raise HTTPException(status_code=410, detail="Save pending uploads to Files instead")
 
@@ -302,7 +304,10 @@ async def save_pending_to_files(
 
 
 @router.post("/{upload_id}/archive")
-async def archive_pending_upload(upload_id: int):
+async def archive_pending_upload(
+    upload_id: int,
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.ARCHIVES_CREATE),
+):
     """Removed: pending uploads can be saved to Files, not Archive."""
     raise HTTPException(status_code=410, detail="Save pending uploads to Files instead")
 

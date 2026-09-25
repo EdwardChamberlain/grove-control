@@ -835,6 +835,8 @@ export default {
       failedUpdateFavorites: 'Error al actualizar los favoritos',
       exportDownloaded: 'Exportación descargada',
       exportFailed: 'Error en la exportación',
+      savedToFiles: '{{filename}} se guardó en Archivos',
+      failedSaveToFiles: 'No se pudo guardar el archivo de impresión en Archivos',
     },
     menu: {
       print: 'Imprimir',
@@ -874,6 +876,7 @@ export default {
       select: 'Seleccionar',
       deselect: 'Deseleccionar',
       delete: 'Eliminar',
+      saveToFiles: 'Guardar en Archivos',
     },
     permission: {
       noReprint: 'No tiene permiso para reimprimir este archivo',
@@ -1842,12 +1845,6 @@ export default {
     saveThumbnails: 'Guardar miniaturas',
     captureFinishPhoto: 'Capturar foto de finalización',
     noPrintersConfigured: 'No hay impresoras configuradas',
-    // Archive settings
-    archiveMode: {
-      always: 'Crear siempre una entrada de archivo',
-      never: 'No crear nunca una entrada de archivo',
-      ask: 'Preguntar cada vez',
-    },
     // Updates
     checkForUpdatesLabel: 'Buscar actualizaciones',
     checkPrinterFirmware: 'Comprobar el firmware de la impresora',
@@ -2356,8 +2353,6 @@ export default {
     energyModeTotalDescription: 'El panel muestra la energía total de los enchufes inteligentes',
     // File Manager
     fileManager: 'Gestor de archivos',
-    createArchiveEntry: 'Crear una entrada de archivo al imprimir',
-    createArchiveEntryDescription: 'Al imprimir desde el gestor de archivos, crear opcionalmente una entrada de archivo',
     lowDiskSpaceWarning: 'Advertencia de poco espacio en disco',
     lowDiskSpaceDescription: 'Mostrar una advertencia cuando el espacio libre en disco caiga por debajo de este umbral',
     // Updates

@@ -835,6 +835,8 @@ export default {
       failedUpdateFavorites: '更新收藏失敗',
       exportDownloaded: '匯出已下載',
       exportFailed: '匯出失敗',
+      savedToFiles: '已將 {{filename}} 儲存至檔案',
+      failedSaveToFiles: '無法將列印檔案儲存至檔案',
     },
     menu: {
       print: '列印',
@@ -874,6 +876,7 @@ export default {
       select: '選擇',
       deselect: '取消選擇',
       delete: '刪除',
+      saveToFiles: '儲存至檔案',
     },
     permission: {
       noReprint: '您沒有重新列印此歸檔的權限',
@@ -1840,12 +1843,6 @@ export default {
     saveThumbnails: '儲存縮圖',
     captureFinishPhoto: '拍攝完成照片',
     noPrintersConfigured: '未設定印表機',
-    // Archive settings
-    archiveMode: {
-      always: '始終建立歸檔條目',
-      never: '從不建立歸檔條目',
-      ask: '每次詢問',
-    },
     // Updates
     checkForUpdatesLabel: '檢查更新',
     checkPrinterFirmware: '檢查印表機韌體',
@@ -2348,8 +2345,6 @@ export default {
     energyModePrintDescription: '儀表板顯示列印期間使用的能源總和',
     energyModeTotalDescription: '儀表板顯示智慧插座的累計能源',
     fileManager: '檔案管理器',
-    createArchiveEntry: '列印時建立歸檔條目',
-    createArchiveEntryDescription: '從檔案管理器列印時，可選擇建立歸檔條目',
     lowDiskSpaceWarning: '磁碟空間不足警告',
     lowDiskSpaceDescription: '當可用磁碟空間低於此閾值時顯示警告',
     printerFirmware: '印表機韌體',

@@ -303,6 +303,7 @@ async def test_final_dispatch_boundary_stops_new_drying_and_does_not_send_print(
 
 @pytest.mark.asyncio
 async def test_final_dispatch_boundary_can_wait_for_natural_drying_completion(queue_factory):
+    """A job held for natural drying has not crossed the dispatch boundary."""
     ctx = await queue_factory(cleanup=False, wait_for_drying_complete=True)
     status = SimpleNamespace(raw_data={"ams": [{"id": 128, "dry_time": 45}]})
 
@@ -312,7 +313,7 @@ async def test_final_dispatch_boundary_can_wait_for_natural_drying_completion(qu
     assert item.status == "pending"
     assert item.waiting_reason == "Waiting for AMS drying to complete"
     assert library_file is not None
-    assert archive is not None
+    assert archive is None
     ctx.stop_drying.assert_not_called()
     ctx.start_print.assert_not_called()
 

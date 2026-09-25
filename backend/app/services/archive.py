@@ -23,6 +23,20 @@ from backend.app.utils.safe_path import PathTraversalError, safe_join_under
 logger = logging.getLogger(__name__)
 
 
+def _stored_archive_path(path: Path) -> str:
+    """Store archive paths relative to ``base_dir`` when possible.
+
+    ``archive_dir`` is configurable independently from ``base_dir``. A
+    deployment may keep Archives on a separate mounted volume, so preserve
+    that valid location as an absolute path when it is outside ``base_dir``.
+    Readers already support legacy absolute archive paths.
+    """
+    try:
+        return str(path.relative_to(Path(settings.base_dir)))
+    except ValueError:
+        return str(path)
+
+
 def _copy_and_fsync(src: Path, dst: Path, chunk_size: int = 1024 * 1024) -> None:
     """Copy src to dst with an explicit chunked read/write and fsync the dst.
 
@@ -1256,7 +1270,7 @@ class ArchiveService:
         if "_thumbnail_data" in metadata:
             thumb_file = archive_dir / f"thumbnail{metadata['_thumbnail_ext']}"
             thumb_file.write_bytes(metadata["_thumbnail_data"])
-            thumbnail_path = str(thumb_file.relative_to(settings.base_dir))
+            thumbnail_path = _stored_archive_path(thumb_file)
             del metadata["_thumbnail_data"]
             del metadata["_thumbnail_ext"]
 
@@ -1301,7 +1315,7 @@ class ArchiveService:
         archive = PrintArchive(
             printer_id=printer_id,
             filename=original_filename or source_file.name,
-            file_path=str(dest_file.relative_to(settings.base_dir)),
+            file_path=_stored_archive_path(dest_file),
             file_size=dest_file.stat().st_size,
             content_hash=content_hash,
             thumbnail_path=thumbnail_path,

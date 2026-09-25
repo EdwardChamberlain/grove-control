@@ -12,6 +12,7 @@ import shutil
 import uuid
 import zipfile
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
@@ -3922,6 +3923,16 @@ async def guard_nozzle_class_reslice(
     return None
 
 
+def _extract_source_plate_thumbnail(model_bytes: bytes, plate_index: int | None) -> bytes | None:
+    """Return the source's selected per-plate render, if it has one."""
+    plate_number = (plate_index or 0) + 1
+    try:
+        with zipfile.ZipFile(BytesIO(model_bytes), "r") as source:
+            return source.read(f"Metadata/plate_{plate_number}.png")
+    except (KeyError, OSError, zipfile.BadZipFile):
+        return None
+
+
 async def slice_and_persist(
     db: AsyncSession,
     *,
@@ -3933,6 +3944,7 @@ async def slice_and_persist(
     current_user_id: int | None,
     job_id: int | None = None,
     project_id: int | None = None,
+    fallback_metadata: dict | None = None,
 ) -> SliceResponse:
     """Slice a model and save the result as a new ``LibraryFile`` in
     ``folder_id`` (same folder as the source by convention).
@@ -3970,11 +3982,21 @@ async def slice_and_persist(
     # without a thumbnail.
     thumbnail_relative: str | None = None
     parsed_metadata: dict = {}
+    source_plate_thumbnail = _extract_source_plate_thumbnail(model_bytes, request.plate)
     try:
-        parser = ThreeMFParser(str(out_path))
+        plate_number = (request.plate or 0) + 1
+        parser = ThreeMFParser(str(out_path), plate_number=plate_number)
         parsed = parser.parse()
         thumb_data = parsed.get("_thumbnail_data")
         thumb_ext = parsed.get("_thumbnail_ext", ".png")
+        if source_plate_thumbnail:
+            with zipfile.ZipFile(out_path, "r") as sliced_output:
+                if f"Metadata/plate_{plate_number}.png" not in sliced_output.namelist():
+                    # A project-wide Auxiliaries image is marketing cover art;
+                    # prefer the source's actual plate render when the CLI
+                    # didn't produce a new plate-specific preview.
+                    thumb_data = source_plate_thumbnail
+                    thumb_ext = ".png"
         if thumb_data:
             thumb_filename = f"{uuid.uuid4().hex}{thumb_ext}"
             thumb_path = get_library_thumbnails_dir() / thumb_filename
@@ -4007,6 +4029,10 @@ async def slice_and_persist(
         metadata["used_embedded_settings"] = True
     if extra_metadata:
         metadata.update(extra_metadata)
+    if fallback_metadata:
+        for key, value in fallback_metadata.items():
+            if value is not None and metadata.get(key) in (None, ""):
+                metadata[key] = value
 
     new_file = LibraryFile(
         folder_id=folder_id,
