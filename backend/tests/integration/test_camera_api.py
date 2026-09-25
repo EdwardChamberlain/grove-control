@@ -351,75 +351,6 @@ class TestCameraAPI:
         # The fresh-capture path must NOT have been taken — that's the whole point.
         mock_capture.assert_not_called()
 
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_camera_snapshot_external_camera_success(self, async_client: AsyncClient, printer_factory):
-        """Verify snapshot uses external camera when configured."""
-        printer = await printer_factory(
-            external_camera_enabled=True,
-            external_camera_url="http://192.168.1.50/mjpeg",
-            external_camera_type="mjpeg",
-        )
-
-        fake_jpeg = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
-
-        with patch(
-            "backend.app.services.external_camera.capture_frame",
-            new_callable=AsyncMock,
-            return_value=fake_jpeg,
-        ):
-            response = await async_client.get(f"/api/v1/printers/{printer.id}/camera/snapshot")
-
-        assert response.status_code == 200
-        assert response.headers["content-type"] == "image/jpeg"
-        assert response.content == fake_jpeg
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_camera_snapshot_external_reuses_live_buffer(self, async_client: AsyncClient, printer_factory):
-        """An external snapshot must reuse a live stream's buffered frame."""
-        printer = await printer_factory(
-            external_camera_enabled=True,
-            external_camera_url="http://192.168.1.50/mjpeg",
-            external_camera_type="mjpeg",
-        )
-        fake_jpeg = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
-
-        with (
-            patch("backend.app.api.routes.camera._active_external_streams", {printer.id: 1}),
-            patch("backend.app.api.routes.camera._last_frames", {printer.id: fake_jpeg}),
-            patch(
-                "backend.app.services.external_camera.capture_frame",
-                new_callable=AsyncMock,
-                return_value=None,
-            ) as mock_capture,
-        ):
-            response = await async_client.get(f"/api/v1/printers/{printer.id}/camera/snapshot")
-
-        assert response.status_code == 200
-        assert response.content == fake_jpeg
-        mock_capture.assert_not_called()
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_camera_snapshot_external_camera_failure(self, async_client: AsyncClient, printer_factory):
-        """Verify 503 when external camera capture fails."""
-        printer = await printer_factory(
-            external_camera_enabled=True,
-            external_camera_url="http://192.168.1.50/mjpeg",
-            external_camera_type="mjpeg",
-        )
-
-        with patch(
-            "backend.app.services.external_camera.capture_frame",
-            new_callable=AsyncMock,
-            return_value=None,
-        ):
-            response = await async_client.get(f"/api/v1/printers/{printer.id}/camera/snapshot")
-
-        assert response.status_code == 503
-        assert "external camera" in response.json()["detail"].lower()
-
     # ========================================================================
     # Camera Stream Endpoint
     # ========================================================================
@@ -568,137 +499,15 @@ class TestCameraAPI:
         assert result["success"] is True
         assert "index" in result
 
-    # ------------------------------------------------------------------
-    # Regression: #1359 — the manual UI check/calibrate routes must derive
-    # use_external from the printer's external_camera_enabled setting when
-    # the caller omits the flag. Otherwise the UI calibrates against the
-    # built-in camera while the runtime auto-check at print start uses the
-    # external one, producing a permanent "build plate not empty".
-    # ------------------------------------------------------------------
-
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_check_plate_defaults_use_external_when_external_camera_enabled(
-        self, async_client: AsyncClient, printer_factory
-    ):
-        """Omitting use_external on a printer with external camera enabled
-        must call the service with use_external=True."""
-        printer = await printer_factory(
-            external_camera_enabled=True,
-            external_camera_url="http://192.168.1.50/mjpeg",
-            external_camera_type="mjpeg",
-        )
+    async def test_old_external_plate_request_returns_migration_error(self, async_client: AsyncClient, printer_factory):
+        printer = await printer_factory()
 
-        mock_result = MagicMock()
-        mock_result.to_dict.return_value = {
-            "is_empty": True,
-            "confidence": 0.95,
-            "difference_percent": 0.5,
-            "message": "Plate appears empty",
-            "has_debug_image": False,
-            "needs_calibration": False,
-        }
-        mock_result.debug_image = None
+        response = await async_client.get(f"/api/v1/printers/{printer.id}/camera/check-plate?use_external=true")
 
-        mock_detector = MagicMock()
-        mock_detector.get_calibration_count.return_value = 0
-        mock_detector.MAX_REFERENCES = 5
-
-        with (
-            patch("backend.app.services.plate_detection.is_plate_detection_available", return_value=True),
-            patch("backend.app.services.plate_detection.check_plate_empty", new_callable=AsyncMock) as mock_check,
-            patch("backend.app.services.plate_detection.PlateDetector", return_value=mock_detector),
-        ):
-            mock_check.return_value = mock_result
-            response = await async_client.get(f"/api/v1/printers/{printer.id}/camera/check-plate")
-
-        assert response.status_code == 200
-        assert mock_check.await_args.kwargs["use_external"] is True
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_check_plate_defaults_use_external_false_when_external_camera_disabled(
-        self, async_client: AsyncClient, printer_factory
-    ):
-        """Omitting use_external on a printer without an external camera
-        must call the service with use_external=False (built-in)."""
-        printer = await printer_factory()  # external_camera_enabled defaults to False
-
-        mock_result = MagicMock()
-        mock_result.to_dict.return_value = {
-            "is_empty": True,
-            "confidence": 0.95,
-            "difference_percent": 0.5,
-            "message": "Plate appears empty",
-            "has_debug_image": False,
-            "needs_calibration": False,
-        }
-        mock_result.debug_image = None
-
-        mock_detector = MagicMock()
-        mock_detector.get_calibration_count.return_value = 0
-        mock_detector.MAX_REFERENCES = 5
-
-        with (
-            patch("backend.app.services.plate_detection.is_plate_detection_available", return_value=True),
-            patch("backend.app.services.plate_detection.check_plate_empty", new_callable=AsyncMock) as mock_check,
-            patch("backend.app.services.plate_detection.PlateDetector", return_value=mock_detector),
-        ):
-            mock_check.return_value = mock_result
-            response = await async_client.get(f"/api/v1/printers/{printer.id}/camera/check-plate")
-
-        assert response.status_code == 200
-        assert mock_check.await_args.kwargs["use_external"] is False
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_calibrate_plate_defaults_use_external_when_external_camera_enabled(
-        self, async_client: AsyncClient, printer_factory
-    ):
-        """Calibrating with use_external omitted on an external-camera-enabled
-        printer captures the reference from the external camera — matching
-        what the runtime check at print start will compare against (#1359)."""
-        printer = await printer_factory(
-            external_camera_enabled=True,
-            external_camera_url="http://192.168.1.50/mjpeg",
-            external_camera_type="mjpeg",
-        )
-
-        with (
-            patch("backend.app.services.plate_detection.is_plate_detection_available", return_value=True),
-            patch("backend.app.services.plate_detection.calibrate_plate", new_callable=AsyncMock) as mock_calibrate,
-        ):
-            mock_calibrate.return_value = (True, "Calibration saved (1/5 references)", 0)
-            response = await async_client.post(f"/api/v1/printers/{printer.id}/camera/plate-detection/calibrate")
-
-        assert response.status_code == 200
-        assert mock_calibrate.await_args.kwargs["use_external"] is True
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_calibrate_plate_explicit_use_external_false_overrides_default(
-        self, async_client: AsyncClient, printer_factory
-    ):
-        """An explicit use_external=false from the caller still wins even
-        when the printer has an external camera configured, so power users
-        can force a built-in-camera reference if they ever need to."""
-        printer = await printer_factory(
-            external_camera_enabled=True,
-            external_camera_url="http://192.168.1.50/mjpeg",
-            external_camera_type="mjpeg",
-        )
-
-        with (
-            patch("backend.app.services.plate_detection.is_plate_detection_available", return_value=True),
-            patch("backend.app.services.plate_detection.calibrate_plate", new_callable=AsyncMock) as mock_calibrate,
-        ):
-            mock_calibrate.return_value = (True, "Calibration saved (1/5 references)", 0)
-            response = await async_client.post(
-                f"/api/v1/printers/{printer.id}/camera/plate-detection/calibrate?use_external=false"
-            )
-
-        assert response.status_code == 200
-        assert mock_calibrate.await_args.kwargs["use_external"] is False
+        assert response.status_code == 410
+        assert "native Bambu camera" in response.json()["detail"]
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -790,50 +599,20 @@ class TestCameraAPI:
 
         assert response.status_code == 404
 
-    # ========================================================================
-    # USB Camera Endpoint
-    # ========================================================================
-
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_list_usb_cameras_returns_list(self, async_client: AsyncClient):
-        """Verify USB cameras endpoint returns a list of cameras."""
-        response = await async_client.get("/api/v1/printers/usb-cameras")
+    async def test_external_camera_routes_are_absent(self, async_client: AsyncClient, printer_factory):
+        printer = await printer_factory()
 
-        assert response.status_code == 200
-        result = response.json()
-        assert "cameras" in result
-        assert isinstance(result["cameras"], list)
+        usb_response = await async_client.get("/api/v1/printers/usb-cameras")
+        external_test_response = await async_client.post(
+            f"/api/v1/printers/{printer.id}/camera/external/test",
+            params={"url": "http://camera.invalid/stream", "camera_type": "mjpeg"},
+        )
 
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_list_usb_cameras_structure(self, async_client: AsyncClient):
-        """Verify USB cameras endpoint returns proper structure for each camera."""
-        with patch("backend.app.services.external_camera.list_usb_cameras") as mock_list:
-            mock_list.return_value = [
-                {"device": "/dev/video0", "name": "Logitech Webcam C920", "index": 0},
-                {"device": "/dev/video2", "name": "USB Camera", "index": 2},
-            ]
-
-            response = await async_client.get("/api/v1/printers/usb-cameras")
-
-        assert response.status_code == 200
-        result = response.json()
-        assert len(result["cameras"]) == 2
-        assert result["cameras"][0]["device"] == "/dev/video0"
-        assert result["cameras"][0]["name"] == "Logitech Webcam C920"
-        assert result["cameras"][1]["device"] == "/dev/video2"
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_list_usb_cameras_empty_on_non_linux(self, async_client: AsyncClient):
-        """Verify USB cameras endpoint returns empty list on non-Linux systems."""
-        with patch("backend.app.services.external_camera.list_usb_cameras") as mock_list:
-            # Simulate non-Linux system (no /dev/video* devices)
-            mock_list.return_value = []
-
-            response = await async_client.get("/api/v1/printers/usb-cameras")
-
-        assert response.status_code == 200
-        result = response.json()
-        assert result["cameras"] == []
+        # The removed path can fall through to the typed /{printer_id} route,
+        # which FastAPI reports as 422 instead of 404.
+        assert usb_response.status_code in {404, 422}
+        # The removed API path falls through to the SPA GET catch-all, which
+        # reports a POST as 405 rather than 404 in the full application.
+        assert external_test_response.status_code in {404, 405}

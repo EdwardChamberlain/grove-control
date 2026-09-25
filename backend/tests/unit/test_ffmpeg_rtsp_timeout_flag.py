@@ -117,10 +117,7 @@ class TestRtspArgvUsesProbe:
     # runs it). __file__ lives at backend/tests/unit/, so the repo root
     # is three parents up.
     _REPO_ROOT = Path(__file__).resolve().parents[3]
-    _RTSP_FFMPEG_CALLERS = (
-        "backend/app/api/routes/camera.py",
-        "backend/app/services/external_camera.py",
-    )
+    _RTSP_FFMPEG_CALLERS = ("backend/app/api/routes/camera.py",)
 
     @pytest.mark.parametrize("rel", _RTSP_FFMPEG_CALLERS)
     def test_no_hard_coded_timeout_literal(self, rel):

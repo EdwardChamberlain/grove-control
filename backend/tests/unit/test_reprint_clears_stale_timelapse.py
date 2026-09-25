@@ -100,8 +100,6 @@ async def test_reprint_clears_timelapse_path_and_unlinks_stale_file(tmp_path):
     mock_printer = MagicMock()
     mock_printer.id = 1
     mock_printer.auto_archive = True
-    mock_printer.external_camera_enabled = False
-    mock_printer.external_camera_url = None
     mock_printer.name = "TestP2S"
 
     # Lay down a fake stale timelapse under a tmp base_dir so the unlink
@@ -187,8 +185,6 @@ async def test_reprint_with_no_timelapse_path_is_noop(tmp_path):
     mock_printer = MagicMock()
     mock_printer.id = 1
     mock_printer.auto_archive = True
-    mock_printer.external_camera_enabled = False
-    mock_printer.external_camera_url = None
     mock_printer.name = "TestP2S"
 
     mock_archive = MagicMock()
@@ -260,8 +256,6 @@ async def test_reprint_with_missing_stale_file_does_not_raise(tmp_path):
     mock_printer = MagicMock()
     mock_printer.id = 1
     mock_printer.auto_archive = True
-    mock_printer.external_camera_enabled = False
-    mock_printer.external_camera_url = None
     mock_printer.name = "TestP2S"
 
     mock_archive = MagicMock()

@@ -1784,6 +1784,47 @@ async def run_migrations(conn):
     await _safe_execute(conn, "ALTER TABLE printers ADD COLUMN external_camera_enabled BOOLEAN DEFAULT 0")
     await _safe_execute(conn, "ALTER TABLE printers ADD COLUMN external_camera_snapshot_url VARCHAR(500)")
 
+    # Grove Control now supports native Bambu printer cameras only. Keep the
+    # old columns physically present so upgrades remain schema-compatible, but
+    # clear their values explicitly instead of silently treating an old
+    # external source as a healthy native camera. Print records and camera
+    # rotation are deliberately untouched.
+    legacy_camera_result = await conn.execute(
+        text(
+            """
+            SELECT COUNT(*)
+            FROM printers
+            WHERE external_camera_enabled = TRUE
+               OR external_camera_url IS NOT NULL
+               OR external_camera_type IS NOT NULL
+               OR external_camera_snapshot_url IS NOT NULL
+            """
+        )
+    )
+    legacy_camera_count = legacy_camera_result.scalar()
+    if legacy_camera_count:
+        async with conn.begin_nested():
+            await conn.execute(
+                text(
+                    """
+                    UPDATE printers
+                    SET external_camera_url = NULL,
+                        external_camera_type = NULL,
+                        external_camera_enabled = FALSE,
+                        external_camera_snapshot_url = NULL
+                    WHERE external_camera_enabled = TRUE
+                       OR external_camera_url IS NOT NULL
+                       OR external_camera_type IS NOT NULL
+                       OR external_camera_snapshot_url IS NOT NULL
+                    """
+                )
+            )
+        logger.warning(
+            "Cleared legacy external camera configuration for %s printer(s); "
+            "Grove Control now uses native Bambu cameras only. Print archives were preserved.",
+            legacy_camera_count,
+        )
+
     # Migration: Add external_url column to print_archives for user-defined links (Printables, etc.)
     await _safe_execute(conn, "ALTER TABLE print_archives ADD COLUMN external_url VARCHAR(500)")
 

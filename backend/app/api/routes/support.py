@@ -782,7 +782,7 @@ async def _collect_support_info() -> dict:
                     "ams_unit_count": ams_unit_count,
                     "ams_tray_count": ams_tray_count,
                     "has_vt_tray": has_vt_tray,
-                    "external_camera_configured": bool(printer.external_camera_url),
+                    "camera_source": "native_bambu",
                     "plate_detection_enabled": printer.plate_detection_enabled,
                     "obico_enabled": printer.id in obico_enabled_set,
                     "hms_error_count": len(state.hms_errors) if state else 0,
