@@ -256,7 +256,10 @@ class TestQueueUploadSourceLifecycle:
             cancelled = await async_client.post(f"/api/v1/queue/{pending_item.id}/cancel")
             assert cancelled.status_code == 200, cancelled.text
 
-        assert await db_session.get(LibraryFile, library_file_id) is None
+        remaining_sources = await db_session.scalar(
+            select(func.count(LibraryFile.id)).where(LibraryFile.id == library_file_id)
+        )
+        assert remaining_sources == 0
         assert not source_path.exists()
 
     @pytest.mark.asyncio
