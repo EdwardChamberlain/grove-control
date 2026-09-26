@@ -142,7 +142,7 @@ class TestArchiveSaveToFilesPaths:
         monkeypatch,
         tmp_path: Path,
     ):
-        _base_dir, archive_dir = _configure_storage(monkeypatch, tmp_path)
+        base_dir, archive_dir = _configure_storage(monkeypatch, tmp_path)
         artifact = archive_dir / "legacy" / "print.3mf"
         artifact.parent.mkdir(parents=True)
         artifact.write_bytes(_three_mf_bytes())
@@ -154,7 +154,7 @@ class TestArchiveSaveToFilesPaths:
         assert response.status_code == 201, response.text
         saved = await db_session.get(LibraryFile, response.json()["library_file_id"])
         assert saved is not None
-        assert Path(saved.file_path).is_file()
+        assert (base_dir / saved.file_path).is_file()
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -200,7 +200,7 @@ class TestQueueUploadSourceLifecycle:
         library_file_id = response.json()["id"]
         source = await db_session.get(LibraryFile, library_file_id)
         assert source is not None and source.queue_only is True and source.queue_source_sealed is False
-        source_path = Path(source.file_path)
+        source_path = Path(settings.base_dir) / source.file_path
         assert source_path.is_file()
 
         listing = await async_client.get("/api/v1/library/files")
