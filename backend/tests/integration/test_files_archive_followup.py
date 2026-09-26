@@ -201,6 +201,108 @@ class TestArchiveSaveToFilesPaths:
 class TestQueueUploadSourceLifecycle:
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_requeue_failed_direct_upload_while_sealed_source_is_retained(
+        self,
+        async_client: AsyncClient,
+        db_session: AsyncSession,
+        printer_factory,
+        monkeypatch,
+        tmp_path: Path,
+    ):
+        _configure_storage(monkeypatch, tmp_path)
+        uploaded = await async_client.post(
+            "/api/v1/queue/upload-source",
+            files={"file": ("ftp-retry.gcode.3mf", _three_mf_bytes(), "application/octet-stream")},
+        )
+        assert uploaded.status_code == 200, uploaded.text
+        library_file_id = uploaded.json()["id"]
+        source = await db_session.get(LibraryFile, library_file_id)
+        assert source is not None
+        source_path = Path(settings.base_dir) / source.file_path
+        printer = await printer_factory()
+        failed_item = PrintQueueItem(
+            printer_id=printer.id,
+            library_file_id=library_file_id,
+            position=1,
+            status="failed",
+            error_message="FTP upload failed",
+            cleanup_library_after_dispatch=True,
+        )
+        db_session.add(failed_item)
+        await db_session.commit()
+
+        sealed = await async_client.delete(f"/api/v1/queue/upload-source/{library_file_id}")
+        assert sealed.status_code == 200, sealed.text
+        assert sealed.json()["deleted"] is False
+        assert source_path.is_file()
+
+        requeued = await async_client.post(
+            "/api/v1/queue/",
+            json={"printer_id": printer.id, "library_file_id": library_file_id},
+        )
+
+        assert requeued.status_code == 200, requeued.text
+        assert requeued.json()["library_file_id"] == library_file_id
+        assert requeued.json()["status"] == "pending"
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_skipped_queue_item_keeps_sealed_source_until_resume(
+        self,
+        async_client: AsyncClient,
+        db_session: AsyncSession,
+        printer_factory,
+        monkeypatch,
+        tmp_path: Path,
+    ):
+        _configure_storage(monkeypatch, tmp_path)
+        uploaded = await async_client.post(
+            "/api/v1/queue/upload-source",
+            files={"file": ("skipped.gcode.3mf", _three_mf_bytes(), "application/octet-stream")},
+        )
+        assert uploaded.status_code == 200, uploaded.text
+        library_file_id = uploaded.json()["id"]
+        source = await db_session.get(LibraryFile, library_file_id)
+        assert source is not None
+        source.queue_source_sealed = True
+        source_path = Path(settings.base_dir) / source.file_path
+
+        printer = await printer_factory()
+        skipped_item = PrintQueueItem(
+            printer_id=printer.id,
+            library_file_id=library_file_id,
+            position=1,
+            status="skipped",
+            error_message="Previous print failed or was aborted",
+            cleanup_library_after_dispatch=True,
+        )
+        deleted_item = PrintQueueItem(
+            printer_id=printer.id,
+            library_file_id=library_file_id,
+            position=2,
+            status="skipped",
+            error_message="Previous print failed or was aborted",
+            cleanup_library_after_dispatch=True,
+        )
+        db_session.add_all([skipped_item, deleted_item])
+        await db_session.commit()
+
+        deleted = await async_client.delete(f"/api/v1/queue/{deleted_item.id}")
+
+        assert deleted.status_code == 200, deleted.text
+        assert await db_session.scalar(select(func.count(LibraryFile.id)).where(LibraryFile.id == library_file_id)) == 1
+        assert source_path.is_file()
+
+        resumed = await async_client.post(f"/api/v1/queue/printer/{printer.id}/resume")
+
+        assert resumed.status_code == 200, resumed.text
+        await db_session.refresh(skipped_item)
+        assert skipped_item.status == "pending"
+        assert skipped_item.library_file_id == library_file_id
+        assert source_path.is_file()
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     @pytest.mark.parametrize("keep_for_active_item", [False, True])
     async def test_stale_source_sweep_seals_abandoned_uploads_and_preserves_active_items(
         self,

@@ -15,7 +15,7 @@ from backend.app.utils.safe_path import safe_join_under
 
 logger = logging.getLogger(__name__)
 
-_SOURCE_NEEDED_STATUSES = ("pending", "preheating", "dispatching", "printing")
+_SOURCE_NEEDED_STATUSES = ("pending", "preheating", "dispatching", "printing", "skipped")
 _UNSEALED_SOURCE_MAX_AGE = timedelta(hours=24)
 _SOURCE_SWEEP_INTERVAL_SECONDS = 60 * 60
 _queue_source_cleanup_task: asyncio.Task | None = None
