@@ -737,7 +737,7 @@ export default {
     developerModeWarning: 'Der Entwickler-LAN-Modus ist nicht aktiviert auf: {{names}}. Einige Funktionen funktionieren möglicherweise nicht.',
     howToEnable: 'Aktivieren',
     incompatibleFile: 'Diese Datei wurde für {{slicedFor}} geslicet, aber dieser Drucker ist ein {{printerModel}}',
-    directUploadLibraryNote: 'Die hochgeladene Datei wird vor dem Einreihen im Dateimanager gespeichert.',
+    directUploadLibraryNote: 'Der Upload wird zur Warteschlange hinzugefügt und nicht im Dateimanager gespeichert.',
     dropNotPrintable: 'Nur .gcode- und .gcode.3mf-Dateien können gedruckt werden',
     dropToPrint: 'Zum Drucken ablegen',
     cannotPrint: 'Drucker beschäftigt',
@@ -835,6 +835,8 @@ export default {
       failedUpdateFavorites: 'Fehler beim Aktualisieren der Favoriten',
       exportDownloaded: 'Export heruntergeladen',
       exportFailed: 'Export fehlgeschlagen',
+      savedToFiles: '{{filename}} wurde in Dateien gespeichert',
+      failedSaveToFiles: 'Druckdatei konnte nicht in Dateien gespeichert werden',
     },
     menu: {
       print: 'Drucken',
@@ -874,6 +876,7 @@ export default {
       select: 'Auswählen',
       deselect: 'Abwählen',
       delete: 'Löschen',
+      saveToFiles: 'In Dateien speichern',
     },
     permission: {
       noReprint: 'Sie haben keine Berechtigung, dieses Archiv erneut zu drucken',
@@ -1840,12 +1843,6 @@ export default {
     saveThumbnails: 'Vorschaubilder speichern',
     captureFinishPhoto: 'Abschlussfoto aufnehmen',
     noPrintersConfigured: 'Keine Drucker konfiguriert',
-    // Archive settings
-    archiveMode: {
-      always: 'Immer Archiveintrag erstellen',
-      never: 'Nie Archiveintrag erstellen',
-      ask: 'Jedes Mal fragen',
-    },
     // Updates
     checkForUpdatesLabel: 'Nach Updates suchen',
     checkPrinterFirmware: 'Drucker-Firmware prüfen',
@@ -2354,8 +2351,6 @@ export default {
     energyModeTotalDescription: 'Dashboard zeigt Gesamtenergie der Smart Plugs',
     // File Manager
     fileManager: 'Dateimanager',
-    createArchiveEntry: 'Archiveintrag beim Drucken erstellen',
-    createArchiveEntryDescription: 'Beim Drucken aus dem Dateimanager optional einen Archiveintrag erstellen',
     lowDiskSpaceWarning: 'Warnung bei wenig Speicherplatz',
     lowDiskSpaceDescription: 'Warnung anzeigen, wenn freier Speicherplatz unter diesen Schwellenwert fällt',
     // Updates
@@ -3828,6 +3823,7 @@ export default {
     runningWithProgress: '{{name}} – {{stage}} ({{percent}} %) – {{elapsed}}',
     runningWithProgressMultiPlate: 'Plate {{plateIndex}} von {{plateCount}} • {{name}} – {{stage}} ({{percent}} %) – {{elapsed}}',
     completedToast: '{{name}} wurde gesliced',
+    completedToFilesToast: '{{name}} wurde gesliced und in Dateien gespeichert',
     failedTitle: 'Slicen fehlgeschlagen',
     failedToast: 'Slicen von {{name}} fehlgeschlagen: {{detail}}',
     tier: {
@@ -4912,12 +4908,12 @@ export default {
     },
     mode: {
       title: 'Modus',
-      archive: 'Archivieren',
-      archiveDesc: 'Dateien sofort archivieren',
+      archive: 'Dateien',
+      archiveDesc: 'Uploads in Dateien speichern',
       review: 'Überprüfen',
-      reviewDesc: 'Vor dem Archivieren überprüfen',
+      reviewDesc: 'Uploads vor dem Speichern in Dateien prüfen',
       queue: 'Warteschlange',
-      queueDesc: 'Archivieren und zur Warteschlange hinzufügen',
+      queueDesc: 'Uploads zur Druckwarteschlange hinzufügen',
       proxy: 'Proxy',
       proxyDesc: 'An echten Drucker weiterleiten',
     },
@@ -4943,8 +4939,8 @@ export default {
       readGuide: 'Lese die Einrichtungsanleitung vor dem Aktivieren',
     },
     archiveNameSource: {
-      title: 'Quelle des Archivnamens',
-      description: 'Lege fest, wie neue Archive benannt werden, wenn Dateien über den virtuellen Drucker eintreffen. "Metadaten" verwendet den im 3MF eingebetteten Titel des Slicers (Standard). "Dateiname" nutzt den Dateinamen, den Bambu Studio per FTP gesendet hat. Hinweis: Bambu Studio überschreibt den im Dialog "Zum Drucker senden" eingegebenen Namen mit dem Titelfeld der 3MF, sofern eines vorhanden ist — beide Modi liefern daher oft denselben Wert.',
+      title: 'Upload-Anzeigename',
+      description: 'Lege fest, wie Uploads in der Überprüfungsliste angezeigt werden. „Metadaten“ verwendet den im 3MF eingebetteten Titel; „Dateiname“ verwendet den per FTP empfangenen Dateinamen.',
       metadata: 'Metadaten',
       filename: 'Dateiname',
     },
@@ -4959,7 +4955,7 @@ export default {
     howItWorks: {
       title: 'So funktioniert es',
       step1: 'Im selben LAN erscheinen virtuelle Drucker automatisch in deinem Slicer (Bambu Studio / OrcaSlicer). Aus anderen Netzwerken füge sie manuell per IP-Adresse und Zugangscode hinzu.',
-      step2: 'Im Archiv-, Überprüfungs- und Warteschlangen-Modus verwende die "Senden"-Funktion im Slicer, um 3MF-Dateien an Grove Control zu senden. Der Slicer zeigt "Druck erfolgreich" — die Datei wird gespeichert, nicht gedruckt.',
+      step2: 'Im Dateien-, Überprüfungs- und Warteschlangen-Modus verwende die Schaltfläche „Senden“ im Slicer, um 3MF-Dateien an Grove Control zu übertragen. Dateien-Modus speichert in Dateien, Überprüfung hält Uploads zum Speichern oder Verwerfen bereit, Queue erstellt Druckaufträge. „Druck erfolgreich“ bedeutet, dass der Upload abgeschlossen ist.',
       step3: 'Im Proxy-Modus leitet der virtuelle Drucker den gesamten Datenverkehr an einen echten Drucker weiter — Drucke starten sofort wie bei einer direkten Verbindung.',
     },
     status: {

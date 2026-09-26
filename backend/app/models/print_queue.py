@@ -26,7 +26,7 @@ class PrintQueueItem(Base):
     # Waiting reason - explains why a model-based job hasn't started yet
     # Set by scheduler when no matching printer is available
     waiting_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Either archive_id OR library_file_id must be set (archive created at print start from library file)
+    # Either archive_id OR library_file_id must be set; dispatch links the attempt Archive here.
     archive_id: Mapped[int | None] = mapped_column(ForeignKey("print_archives.id", ondelete="CASCADE"), nullable=True)
     library_file_id: Mapped[int | None] = mapped_column(
         ForeignKey("library_files.id", ondelete="CASCADE"), nullable=True
@@ -90,8 +90,8 @@ class PrintQueueItem(Base):
     nozzle_mapping: Mapped[str | None] = mapped_column(Text, nullable=True)
     nozzles_info: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Printer-card direct uploads create transient library rows. When this is
-    # true, the scheduler deletes the source row/files after archiving a copy.
+    # Queue-only uploads use a hidden LibraryFile row as temporary source
+    # storage. The scheduler clears this marker on ordinary user-managed Files.
     cleanup_library_after_dispatch: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Print options. bed_levelling / flow_cali / nozzle_offset_cali are tri-state

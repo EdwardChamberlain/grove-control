@@ -2919,6 +2919,36 @@ async def run_migrations(conn):
         "CREATE INDEX IF NOT EXISTS ix_library_files_source_url ON library_files(source_url)",
     )
 
+    # Migration: distinguish one-off Queue staging uploads from user-managed
+    # Files entries. Existing direct-print staging rows can be identified by
+    # the queue cleanup marker that was already set by the printer-card flow.
+    if is_sqlite():
+        await _safe_execute(conn, "ALTER TABLE library_files ADD COLUMN queue_only BOOLEAN DEFAULT 0")
+        await _safe_execute(
+            conn,
+            "UPDATE library_files SET queue_only = 1 WHERE id IN "
+            "(SELECT library_file_id FROM print_queue WHERE cleanup_library_after_dispatch = 1 "
+            "AND library_file_id IS NOT NULL)",
+        )
+    else:
+        await _safe_execute(conn, "ALTER TABLE library_files ADD COLUMN queue_only BOOLEAN DEFAULT false")
+        await _safe_execute(
+            conn,
+            "UPDATE library_files SET queue_only = true WHERE id IN "
+            "(SELECT library_file_id FROM print_queue WHERE cleanup_library_after_dispatch = true "
+            "AND library_file_id IS NOT NULL)",
+        )
+
+    # Direct Queue uploads are unsealed until the client closes the print
+    # setup flow. This prevents the first fast dispatch from deleting its
+    # source while the client is still posting the remaining fan-out rows.
+    # Existing rows are sealed because their complete queue-item set predates
+    # this submission boundary.
+    if is_sqlite():
+        await _safe_execute(conn, "ALTER TABLE library_files ADD COLUMN queue_source_sealed BOOLEAN DEFAULT 1")
+    else:
+        await _safe_execute(conn, "ALTER TABLE library_files ADD COLUMN queue_source_sealed BOOLEAN DEFAULT true")
+
     # Migration: Cache metadata title on pending uploads (#1152 follow-up).
     # Without this column the review card always shows the FTP filename while
     # the eventual archive's print_name comes from the 3MF metadata title,

@@ -1,25 +1,29 @@
 """API routes for pending uploads (virtual printer queue mode)."""
 
-from datetime import datetime, timezone
+from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from backend.app.core.auth import RequirePermissionIfAuthEnabled, require_ownership_permission
+from backend.app.core.auth import RequirePermissionIfAuthEnabled, require_ownership_permission, resolve_api_key_owner
 from backend.app.core.database import get_db
 from backend.app.core.permissions import Permission
+from backend.app.models.library import LibraryFile, LibraryTag
 from backend.app.models.pending_upload import PendingUpload
+from backend.app.models.project import Project
 from backend.app.models.user import User
-from backend.app.services.archive import ArchiveService, resolve_display_stem
+from backend.app.services.archive import resolve_display_stem
 
 router = APIRouter(prefix="/pending-uploads", tags=["pending-uploads"])
 
 
-class ArchiveRequest(BaseModel):
-    """Request to archive a pending upload."""
+class SaveToFilesRequest(BaseModel):
+    """Optional File Manager details for a pending upload."""
 
     tags: str | None = None
     notes: str | None = None
@@ -31,7 +35,7 @@ class PendingUploadResponse(BaseModel):
 
     id: int
     filename: str
-    display_name: str  # Resolved name that mirrors the eventual archive's print_name (#1152 follow-up)
+    display_name: str
     file_size: int
     source_ip: str | None
     status: str
@@ -45,11 +49,9 @@ class PendingUploadResponse(BaseModel):
 
 
 def _resolve_display_name(pending: PendingUpload, prefer_filename: bool) -> str:
-    """Compute the name the review card should show, matching what archive_print
-    will eventually write to ``PrintArchive.print_name`` so the user sees the
-    same name in both places (#1152 follow-up).
+    """Compute the name the review card should show.
 
-    Mirrors ``ArchiveService.archive_print``:
+    Mirrors the virtual-printer display-name setting:
       - ``prefer_filename=True`` → stripped filename stem.
       - ``prefer_filename=False`` → ``metadata_print_name`` if set, else stem.
     """
@@ -123,68 +125,117 @@ async def get_pending_count(
     return {"count": count}
 
 
-# Note: Bulk operations must be defined BEFORE parameterized routes
-# to prevent FastAPI from matching /archive-all as /{upload_id}
+# Note: Bulk operations must be defined BEFORE parameterized routes.
+
+
+async def _save_pending_to_files(
+    db: AsyncSession,
+    pending: PendingUpload,
+    request: SaveToFilesRequest | None,
+    current_user: User | None,
+    api_key_owner: User | None,
+) -> LibraryFile:
+    """Copy a virtual-printer upload into Files and mark it processed."""
+    file_path = Path(pending.file_path)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Upload file not found on disk")
+
+    project_id = request.project_id if request and request.project_id is not None else pending.project_id
+    if project_id is not None:
+        project = await db.get(Project, project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+    raw_tags = request.tags if request and request.tags is not None else pending.tags
+    tag_names = list(dict.fromkeys(name.strip() for name in (raw_tags or "").split(",") if name.strip()))
+    if any(len(name) > 64 for name in tag_names):
+        raise HTTPException(status_code=400, detail="File tags must be 64 characters or fewer")
+
+    notes = request.notes if request and request.notes is not None else pending.notes
+
+    # Reuse the regular File Manager upload validation, metadata parsing, and
+    # thumbnail handling. Directly uploaded queue files remain ordinary Files.
+    from backend.app.api.routes.library import upload_file
+
+    upload = UploadFile(file=BytesIO(file_path.read_bytes()), filename=pending.filename)
+    response = await upload_file(
+        file=upload,
+        folder_id=None,
+        generate_stl_thumbnails=True,
+        db=db,
+        current_user=current_user,
+        api_key_owner=api_key_owner,
+    )
+    library_file_result = await db.execute(
+        select(LibraryFile).options(selectinload(LibraryFile.tags)).where(LibraryFile.id == response.id)
+    )
+    library_file = library_file_result.scalar_one_or_none()
+    if library_file is None:
+        raise HTTPException(status_code=500, detail="Saved File could not be loaded")
+
+    library_file.project_id = project_id
+    library_file.notes = notes
+    library_file.tags = []
+    for name in tag_names:
+        name_key = name.strip().lower()
+        result = await db.execute(select(LibraryTag).where(LibraryTag.name_key == name_key))
+        tag = result.scalar_one_or_none()
+        if tag is None:
+            tag = LibraryTag(name=name, name_key=name_key)
+            db.add(tag)
+            await db.flush()
+        library_file.tags.append(tag)
+
+    pending.tags = ", ".join(tag_names) or None
+    pending.notes = notes
+    pending.project_id = project_id
+    pending.status = "saved_to_files"
+    await db.commit()
+
+    try:
+        file_path.unlink(missing_ok=True)
+    except OSError:
+        pass  # Best-effort cleanup after the File Manager copy is committed.
+
+    return library_file
+
+
+@router.post("/save-to-files-all")
+async def save_all_pending_to_files(
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = RequirePermissionIfAuthEnabled(Permission.LIBRARY_UPLOAD),
+    api_key_owner: User | None = Depends(resolve_api_key_owner),
+):
+    """Save all pending uploads to Files."""
+    result = await db.execute(select(PendingUpload).where(PendingUpload.status == "pending"))
+    pending_uploads = result.scalars().all()
+
+    saved = 0
+    failed = 0
+
+    for pending in pending_uploads:
+        try:
+            await _save_pending_to_files(db, pending, None, current_user, api_key_owner)
+            saved += 1
+        except HTTPException:
+            failed += 1
+            if not Path(pending.file_path).exists():
+                pending.status = "discarded"
+        except Exception:
+            failed += 1
+            await db.rollback()
+
+    await db.commit()
+
+    return {"saved": saved, "failed": failed}
 
 
 @router.post("/archive-all")
 async def archive_all_pending(
-    db: AsyncSession = Depends(get_db),
-    _: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_CREATE),
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.ARCHIVES_CREATE),
 ):
-    """Archive all pending uploads."""
-    from backend.app.api.routes.settings import get_setting
-
-    result = await db.execute(select(PendingUpload).where(PendingUpload.status == "pending"))
-    pending_uploads = result.scalars().all()
-
-    archived = 0
-    failed = 0
-
-    service = ArchiveService(db)
-    prefer_filename = (await get_setting(db, "virtual_printer_archive_name_source")) == "filename"
-
-    for pending in pending_uploads:
-        file_path = Path(pending.file_path)
-        if not file_path.exists():
-            pending.status = "discarded"
-            failed += 1
-            continue
-
-        try:
-            archive = await service.archive_print(
-                printer_id=None,
-                source_file=file_path,
-                print_data={
-                    "status": "archived",
-                    "source": "virtual_printer",
-                    "source_ip": pending.source_ip,
-                },
-                prefer_filename_for_name=prefer_filename,
-            )
-
-            if archive:
-                pending.status = "archived"
-                pending.archived_id = archive.id
-                pending.archived_at = datetime.now(timezone.utc)
-                archived += 1
-
-                # Clean up temp file
-                try:
-                    file_path.unlink()
-                except OSError:
-                    pass  # Best-effort temp file cleanup after archiving
-            else:
-                failed += 1
-        except Exception:  # Mixed async DB + archive operations
-            failed += 1
-
-    await db.commit()
-
-    return {
-        "archived": archived,
-        "failed": failed,
-    }
+    """Removed: pending uploads can be saved to Files, not Archive."""
+    raise HTTPException(status_code=410, detail="Save pending uploads to Files instead")
 
 
 @router.delete("/discard-all")
@@ -235,14 +286,15 @@ async def get_pending_upload(
     return (await _augment_with_display_name(db, [pending]))[0]
 
 
-@router.post("/{upload_id}/archive")
-async def archive_pending_upload(
+@router.post("/{upload_id}/save-to-files")
+async def save_pending_to_files(
     upload_id: int,
-    request: ArchiveRequest = None,
+    request: SaveToFilesRequest | None = None,
     db: AsyncSession = Depends(get_db),
-    _: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_CREATE),
+    current_user: User | None = RequirePermissionIfAuthEnabled(Permission.LIBRARY_UPLOAD),
+    api_key_owner: User | None = Depends(resolve_api_key_owner),
 ):
-    """Archive a pending upload."""
+    """Save one pending upload to Files."""
     result = await db.execute(select(PendingUpload).where(PendingUpload.id == upload_id))
     pending = result.scalar_one_or_none()
 
@@ -251,61 +303,17 @@ async def archive_pending_upload(
     if pending.status != "pending":
         raise HTTPException(status_code=400, detail="Upload already processed")
 
-    # Check file exists
-    file_path = Path(pending.file_path)
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="Upload file not found on disk")
+    library_file = await _save_pending_to_files(db, pending, request, current_user, api_key_owner)
+    return {"library_file_id": library_file.id, "filename": library_file.filename}
 
-    # Archive the file
-    from backend.app.api.routes.settings import get_setting
 
-    prefer_filename = (await get_setting(db, "virtual_printer_archive_name_source")) == "filename"
-    service = ArchiveService(db)
-    archive = await service.archive_print(
-        printer_id=None,
-        source_file=file_path,
-        print_data={
-            "status": "archived",
-            "source": "virtual_printer",
-            "source_ip": pending.source_ip,
-        },
-        prefer_filename_for_name=prefer_filename,
-    )
-
-    if not archive:
-        raise HTTPException(status_code=500, detail="Failed to archive file")
-
-    # Apply tags/notes/project from request
-    if request:
-        if request.tags:
-            archive.tags = request.tags
-        if request.notes:
-            archive.notes = request.notes
-        if request.project_id:
-            archive.project_id = request.project_id
-
-    # Update pending record
-    pending.status = "archived"
-    pending.archived_id = archive.id
-    pending.archived_at = datetime.now(timezone.utc)
-    if request:
-        pending.tags = request.tags
-        pending.notes = request.notes
-        pending.project_id = request.project_id
-
-    await db.commit()
-
-    # Clean up temp file
-    try:
-        file_path.unlink()
-    except OSError:
-        pass  # Best-effort temp file cleanup after successful archive
-
-    return {
-        "id": archive.id,
-        "print_name": archive.print_name,
-        "filename": archive.filename,
-    }
+@router.post("/{upload_id}/archive")
+async def archive_pending_upload(
+    upload_id: int,
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.ARCHIVES_CREATE),
+):
+    """Removed: pending uploads can be saved to Files, not Archive."""
+    raise HTTPException(status_code=410, detail="Save pending uploads to Files instead")
 
 
 @router.delete("/{upload_id}")
@@ -314,7 +322,7 @@ async def discard_pending_upload(
     db: AsyncSession = Depends(get_db),
     _: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_DELETE_ALL),
 ):
-    """Discard a pending upload without archiving."""
+    """Discard a pending upload without saving it."""
     result = await db.execute(select(PendingUpload).where(PendingUpload.id == upload_id))
     pending = result.scalar_one_or_none()
 
@@ -328,7 +336,6 @@ async def discard_pending_upload(
     except OSError:
         pass  # Best-effort file deletion on discard
 
-    # Update status
     pending.status = "discarded"
     await db.commit()
 

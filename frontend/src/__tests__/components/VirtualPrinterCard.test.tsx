@@ -451,7 +451,7 @@ describe('VirtualPrinterCard - access code inherits from target', () => {
     expect(screen.getByText('Inherited from target')).toBeInTheDocument();
     // Save button must NOT exist in the readonly path — the field is
     // managed via the target printer's settings, not this card.
-    expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save', exact: true })).not.toBeInTheDocument();
     expect(codeInput.readOnly).toBe(true);
     expect(codeInput.type).toBe('password');
   });
@@ -483,6 +483,6 @@ describe('VirtualPrinterCard - access code inherits from target', () => {
     // Inheritance badge must NOT appear when there's no target.
     expect(screen.queryByText('Inherited from target')).not.toBeInTheDocument();
     // Save button IS present in the editable path (disabled until 8 chars typed).
-    expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save', exact: true })).toBeInTheDocument();
   });
 });

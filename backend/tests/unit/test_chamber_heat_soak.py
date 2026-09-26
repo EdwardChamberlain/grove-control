@@ -342,7 +342,7 @@ async def test_no_upload_or_print_until_soak_then_normal_correlated_dispatch(soa
     scheduler._propagate_owner_to_printer_manager = AsyncMock()
     scheduler._schedule_dispatch_confirmation = MagicMock()
     upload = AsyncMock(return_value=True)
-    archiving = AsyncMock()
+    archiving = AsyncMock(return_value=archive)
     monkeypatch.setattr(scheduling, "printer_manager", soak.manager)
     monkeypatch.setattr(scheduling, "upload_file_async", upload)
     monkeypatch.setattr(scheduling, "delete_file_async", AsyncMock())

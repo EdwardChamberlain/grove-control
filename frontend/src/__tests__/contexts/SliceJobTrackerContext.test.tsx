@@ -39,10 +39,10 @@ function Wrapper({ children }: { children: ReactNode }) {
   );
 }
 
-function TrackTrigger({ id, name }: { id: number; name: string }) {
+function TrackTrigger({ id, name, kind = 'libraryFile' }: { id: number; name: string; kind?: 'libraryFile' | 'archive' }) {
   const { trackJob } = useSliceJobTracker();
   return (
-    <button onClick={() => trackJob(id, 'libraryFile', name)}>
+    <button onClick={() => trackJob(id, kind, name)}>
       track-{id}
     </button>
   );
@@ -199,6 +199,36 @@ describe('SliceJobTrackerProvider — persistent progress toast', () => {
     expect(screen.queryByText(/Slicing Done\.stl —/)).toBeNull();
     expect(screen.queryByText(/Queued: Done\.stl/)).toBeNull();
     expect(screen.getByText(/Sliced Done\.stl/)).toBeDefined();
+  });
+
+  it('says archive slices were saved to Files', async () => {
+    mockApi.getSliceJob.mockResolvedValue({
+      job_id: 33,
+      status: 'completed',
+      kind: 'archive',
+      source_id: 103,
+      source_name: 'Archived.stl',
+      created_at: new Date().toISOString(),
+      started_at: new Date().toISOString(),
+      completed_at: new Date().toISOString(),
+    });
+
+    render(
+      <Wrapper>
+        <TrackTrigger id={33} name="Archived.stl" kind="archive" />
+      </Wrapper>,
+    );
+
+    act(() => {
+      screen.getByText('track-33').click();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(1500);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText(/Sliced Archived\.stl and saved to Files/)).toBeDefined();
   });
 
   it('replaces the persistent toast with a transient error toast on failure', async () => {

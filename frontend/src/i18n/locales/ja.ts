@@ -736,7 +736,7 @@ export default {
     developerModeWarning: '開発者LANモードが有効になっていません: {{names}}。一部の機能が動作しない可能性があります。',
     howToEnable: '有効化方法',
     incompatibleFile: 'このファイルは{{slicedFor}}用にスライスされていますが、このプリンターは{{printerModel}}です',
-    directUploadLibraryNote: 'アップロードしたファイルは、キューに追加する前にファイルマネージャーへ保存されます。',
+    directUploadLibraryNote: 'アップロードしたファイルはキューに追加され、ファイル管理には保存されません。',
     dropNotPrintable: '.gcodeおよび.gcode.3mfファイルのみ印刷できます',
     dropToPrint: 'ドロップして印刷',
     cannotPrint: 'プリンター使用中',
@@ -834,6 +834,8 @@ export default {
       failedUpdateFavorites: 'お気に入りの更新に失敗しました',
       exportDownloaded: 'エクスポートをダウンロードしました',
       exportFailed: 'エクスポートに失敗しました',
+      savedToFiles: '{{filename}} をファイルに保存しました',
+      failedSaveToFiles: '印刷ファイルをファイルに保存できませんでした',
     },
     menu: {
       print: '印刷',
@@ -873,6 +875,7 @@ export default {
       select: '選択',
       deselect: '選択解除',
       delete: '削除',
+      saveToFiles: 'ファイルに保存',
     },
     permission: {
       noReprint: 'このアーカイブを再印刷する権限がありません',
@@ -1839,12 +1842,6 @@ export default {
     saveThumbnails: 'サムネイルを保存',
     captureFinishPhoto: '完了写真を撮影',
     noPrintersConfigured: 'プリンターが設定されていません',
-    // Archive settings
-    archiveMode: {
-      always: '常にアーカイブを作成',
-      never: 'アーカイブを作成しない',
-      ask: '毎回確認',
-    },
     // Updates
     checkForUpdatesLabel: 'アップデートを確認',
     checkPrinterFirmware: 'プリンターファームウェアの確認',
@@ -2353,8 +2350,6 @@ export default {
     energyModeTotalDescription: 'ダッシュボードにスマートプラグの累計エネルギーを表示',
     // File Manager
     fileManager: 'ファイルマネージャー',
-    createArchiveEntry: '印刷時にアーカイブエントリを作成',
-    createArchiveEntryDescription: 'ファイルマネージャーから印刷時に、オプションでアーカイブエントリを作成',
     lowDiskSpaceWarning: 'ディスク容量不足の警告',
     lowDiskSpaceDescription: '空きディスク容量がこのしきい値を下回った場合に警告を表示',
     // Updates
@@ -3828,6 +3823,7 @@ export default {
     runningWithProgress: '{{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     runningWithProgressMultiPlate: 'プレート {{plateIndex}} / {{plateCount}} • {{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     completedToast: '{{name}}をスライス済み',
+    completedToFilesToast: '{{name}}をスライスしてファイルに保存しました',
     failedTitle: 'スライスに失敗しました',
     failedToast: '{{name}}のスライスに失敗: {{detail}}',
     tier: {
@@ -4913,12 +4909,12 @@ export default {
     },
     mode: {
       title: 'モード',
-      archive: 'アーカイブ',
-      archiveDesc: 'ファイルを即座にアーカイブ',
+      archive: 'ファイル',
+      archiveDesc: 'アップロードをファイルに保存',
       review: 'レビュー',
-      reviewDesc: 'アーカイブ前にレビュー',
+      reviewDesc: '保存前にアップロードを確認',
       queue: 'キュー',
-      queueDesc: 'アーカイブしてキューに追加',
+      queueDesc: 'アップロードを印刷キューに追加',
       proxy: 'プロキシ',
       proxyDesc: '実際のプリンターに転送',
     },
@@ -4946,7 +4942,7 @@ export default {
     howItWorks: {
       title: '仕組み',
       step1: '同じLAN上では、仮想プリンターはスライサー（Bambu Studio / OrcaSlicer）に自動的に表示されます。他のネットワークからは、IPアドレスとアクセスコードで手動で追加してください。',
-      step2: 'アーカイブ、レビュー、キューモードでは、スライサーの「送信」ボタンを使用して3MFファイルをGrove Controlにアップロードします。スライサーは「印刷成功」と表示しますが、ファイルは保存され、印刷はされません。',
+      step2: 'ファイル、レビュー、キューの各モードでは、スライサーの「送信」ボタンで3MFをGrove Controlにアップロードします。ファイルモードはファイルに保存し、レビューでは保存または破棄を選べ、キューモードは印刷ジョブを追加します。「印刷成功」はアップロード完了を意味します。',
       step3: 'プロキシモードでは、仮想プリンターはすべてのトラフィックを実際のプリンターに転送します。直接接続されているかのように印刷がすぐに開始されます。',
     },
     status: {
@@ -5002,8 +4998,8 @@ export default {
       message: '「{{name}}」を削除してもよろしいですか？このプリンターのすべてのサービスが停止されます。',
     },
     archiveNameSource: {
-      title: 'アーカイブ名のソース',
-      description: '仮想プリンター経由でファイルが到着したときに、新しいアーカイブをどのように命名するかを選択します。「メタデータ」は3MFに埋め込まれたスライサータイトル（デフォルト）を使用します。「ファイル名」はBambu StudioがFTPで送信したファイル名を使用します。注: Bambu Studioは、3MFにタイトルフィールドが存在する場合、「プリンターに送信」ダイアログで入力した名前をその値で上書きするため、両方のモードで同じ文字列になることが多くあります。',
+      title: 'アップロード表示名',
+      description: 'レビュー一覧でアップロードをどう表示するか選びます。「メタデータ」は3MFに埋め込まれたタイトルを使い、「ファイル名」はFTPで受信した名前を使います。',
       metadata: 'メタデータ',
       filename: 'ファイル名',
     },

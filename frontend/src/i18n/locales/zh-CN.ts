@@ -737,7 +737,7 @@ export default {
     developerModeWarning: '以下打印机未启用开发者局域网模式：{{names}}。某些功能可能无法使用。',
     howToEnable: '如何启用',
     incompatibleFile: '此文件是为 {{slicedFor}} 切片的，但该打印机是 {{printerModel}}',
-    directUploadLibraryNote: '上传的文件会先保存到文件管理器，再加入队列。',
+    directUploadLibraryNote: '此上传会添加到队列，不会保存到文件管理器。',
     dropNotPrintable: '只能打印 .gcode 和 .gcode.3mf 文件',
     dropToPrint: '拖放以打印',
     cannotPrint: '打印机忙碌',
@@ -835,6 +835,8 @@ export default {
       failedUpdateFavorites: '更新收藏失败',
       exportDownloaded: '导出已下载',
       exportFailed: '导出失败',
+      savedToFiles: '已将 {{filename}} 保存到文件',
+      failedSaveToFiles: '无法将打印文件保存到文件',
     },
     menu: {
       print: '打印',
@@ -874,6 +876,7 @@ export default {
       select: '选择',
       deselect: '取消选择',
       delete: '删除',
+      saveToFiles: '保存到文件',
     },
     permission: {
       noReprint: '您没有重新打印此归档的权限',
@@ -1840,12 +1843,6 @@ export default {
     saveThumbnails: '保存缩略图',
     captureFinishPhoto: '拍摄完成照片',
     noPrintersConfigured: '未配置打印机',
-    // Archive settings
-    archiveMode: {
-      always: '始终创建归档条目',
-      never: '从不创建归档条目',
-      ask: '每次询问',
-    },
     // Updates
     checkForUpdatesLabel: '检查更新',
     checkPrinterFirmware: '检查打印机固件',
@@ -2348,8 +2345,6 @@ export default {
     energyModePrintDescription: '仪表板显示打印期间使用的能源总和',
     energyModeTotalDescription: '仪表板显示智能插座的累计能源',
     fileManager: '文件管理器',
-    createArchiveEntry: '打印时创建归档条目',
-    createArchiveEntryDescription: '从文件管理器打印时，可选择创建归档条目',
     lowDiskSpaceWarning: '磁盘空间不足警告',
     lowDiskSpaceDescription: '当可用磁盘空间低于此阈值时显示警告',
     printerFirmware: '打印机固件',
@@ -3815,6 +3810,7 @@ export default {
     runningWithProgress: '{{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     runningWithProgressMultiPlate: '盘面 {{plateIndex}} / {{plateCount}} • {{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     completedToast: '已切片 {{name}}',
+    completedToFilesToast: '已切片 {{name}} 并保存到文件',
     failedTitle: '切片失败',
     failedToast: '切片 {{name}} 失败：{{detail}}',
     tier: {
@@ -4900,12 +4896,12 @@ export default {
     },
     mode: {
       title: '模式',
-      archive: '归档',
-      archiveDesc: '立即归档文件',
+      archive: '文件',
+      archiveDesc: '将上传保存到文件',
       review: '审核',
-      reviewDesc: '归档前审核',
+      reviewDesc: '保存到文件前审核上传',
       queue: '队列',
-      queueDesc: '归档并添加到队列',
+      queueDesc: '将上传添加到打印队列',
       proxy: '代理',
       proxyDesc: '中继到真实打印机',
     },
@@ -4931,8 +4927,8 @@ export default {
       readGuide: '启用前请阅读设置指南',
     },
     archiveNameSource: {
-      title: '存档名称来源',
-      description: '选择通过虚拟打印机接收文件时新存档的命名方式。"元数据"使用 3MF 中嵌入的切片标题（默认）。"文件名"使用 Bambu Studio 通过 FTP 发送的文件名。注意：当 3MF 包含标题字段时，Bambu Studio 会用该字段覆盖您在"发送到打印机"对话框中输入的名称，因此两种模式通常会产生相同的字符串。',
+      title: '上传显示名称',
+      description: '选择上传内容在审核列表中的显示方式。“元数据”使用3MF中嵌入的标题；“文件名”使用通过FTP接收的文件名。',
       metadata: '元数据',
       filename: '文件名',
     },
@@ -4947,7 +4943,7 @@ export default {
     howItWorks: {
       title: '工作原理',
       step1: '在同一局域网中，虚拟打印机会通过发现机制自动出现在您的切片软件（Bambu Studio / OrcaSlicer）中。从其他网络，通过 IP 地址和访问码手动添加。',
-      step2: '在归档、审核和队列模式下，使用切片软件中的"发送"按钮将 3MF 文件上传到 Grove Control。切片软件会显示"打印成功"— 文件已存储，未打印。',
+      step2: '在文件、审核和队列模式下，使用切片软件中的“发送”按钮将3MF文件上传到Grove Control。文件模式会保存到文件，审核模式可选择保存或丢弃，队列模式会添加打印任务。“打印成功”表示上传已完成。',
       step3: '在代理模式下，虚拟打印机将所有流量中继到真实打印机 — 打印会立即开始，就像直接连接一样。',
     },
     status: {

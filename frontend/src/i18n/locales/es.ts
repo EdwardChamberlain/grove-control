@@ -737,7 +737,7 @@ export default {
     developerModeWarning: 'El modo desarrollador LAN no está activado en: {{names}}. Es posible que algunas funciones no funcionen.',
     howToEnable: 'Cómo activarlo',
     incompatibleFile: 'Este archivo se laminó para {{slicedFor}}, pero esta impresora es una {{printerModel}}',
-    directUploadLibraryNote: 'El archivo subido se guarda en el Administrador de archivos antes de ponerlo en cola.',
+    directUploadLibraryNote: 'El archivo se agrega a la cola y no se guarda en el Administrador de archivos.',
     dropNotPrintable: 'Solo se pueden imprimir archivos .gcode y .gcode.3mf',
     dropToPrint: 'Suelte para imprimir',
     cannotPrint: 'Impresora ocupada',
@@ -835,6 +835,8 @@ export default {
       failedUpdateFavorites: 'Error al actualizar los favoritos',
       exportDownloaded: 'Exportación descargada',
       exportFailed: 'Error en la exportación',
+      savedToFiles: '{{filename}} se guardó en Archivos',
+      failedSaveToFiles: 'No se pudo guardar el archivo de impresión en Archivos',
     },
     menu: {
       print: 'Imprimir',
@@ -874,6 +876,7 @@ export default {
       select: 'Seleccionar',
       deselect: 'Deseleccionar',
       delete: 'Eliminar',
+      saveToFiles: 'Guardar en Archivos',
     },
     permission: {
       noReprint: 'No tiene permiso para reimprimir este archivo',
@@ -1842,12 +1845,6 @@ export default {
     saveThumbnails: 'Guardar miniaturas',
     captureFinishPhoto: 'Capturar foto de finalización',
     noPrintersConfigured: 'No hay impresoras configuradas',
-    // Archive settings
-    archiveMode: {
-      always: 'Crear siempre una entrada de archivo',
-      never: 'No crear nunca una entrada de archivo',
-      ask: 'Preguntar cada vez',
-    },
     // Updates
     checkForUpdatesLabel: 'Buscar actualizaciones',
     checkPrinterFirmware: 'Comprobar el firmware de la impresora',
@@ -2356,8 +2353,6 @@ export default {
     energyModeTotalDescription: 'El panel muestra la energía total de los enchufes inteligentes',
     // File Manager
     fileManager: 'Gestor de archivos',
-    createArchiveEntry: 'Crear una entrada de archivo al imprimir',
-    createArchiveEntryDescription: 'Al imprimir desde el gestor de archivos, crear opcionalmente una entrada de archivo',
     lowDiskSpaceWarning: 'Advertencia de poco espacio en disco',
     lowDiskSpaceDescription: 'Mostrar una advertencia cuando el espacio libre en disco caiga por debajo de este umbral',
     // Updates
@@ -3830,6 +3825,7 @@ export default {
     runningWithProgress: '{{name}} — {{stage}} ({{percent}}%) — {{elapsed}}',
     runningWithProgressMultiPlate: 'Bandeja {{plateIndex}} de {{plateCount}} • {{name}} — {{stage}} ({{percent}}%) — {{elapsed}}',
     completedToast: '{{name}} laminado',
+    completedToFilesToast: '{{name}} laminado y guardado en Archivos',
     failedTitle: 'Error al laminar',
     failedToast: 'Error al laminar {{name}}: {{detail}}',
     tier: {
@@ -4920,12 +4916,12 @@ export default {
     },
     mode: {
       title: 'Modo',
-      archive: 'Archivar',
-      archiveDesc: 'Archivar los archivos inmediatamente',
+      archive: 'Archivos',
+      archiveDesc: 'Guardar cargas en Archivos',
       review: 'Revisar',
-      reviewDesc: 'Revisar antes de archivar',
+      reviewDesc: 'Revisar las cargas antes de guardarlas en Archivos',
       queue: 'Encolar',
-      queueDesc: 'Archivar y añadir a la cola',
+      queueDesc: 'Añadir cargas a la cola de impresión',
       proxy: 'Proxy',
       proxyDesc: 'Retransmitir a una impresora real',
     },
@@ -4951,8 +4947,8 @@ export default {
       readGuide: 'Lea la guía de configuración antes de activarla',
     },
     archiveNameSource: {
-      title: 'Origen del nombre del archivo',
-      description: 'Elija cómo se nombran los archivos nuevos cuando llegan a través de la impresora virtual. «Metadatos» usa el título incrustado por el laminador del 3MF (predeterminado). «Nombre de archivo» usa el nombre de archivo que Bambu Studio envió por FTP. Nota: Bambu Studio sobrescribe el nombre que escribe en el diálogo «enviar a la impresora» con el campo Título del 3MF cuando existe, por lo que ambos modos suelen producir la misma cadena.',
+      title: 'Nombre visible de la carga',
+      description: 'Elija cómo se muestran las cargas en la lista de revisión. «Metadatos» usa el título integrado en el 3MF; «Nombre de archivo» usa el nombre recibido por FTP.',
       metadata: 'Metadatos',
       filename: 'Nombre de archivo',
     },
@@ -4967,7 +4963,7 @@ export default {
     howItWorks: {
       title: 'Cómo funciona',
       step1: 'En la misma LAN, las impresoras virtuales aparecen automáticamente en su laminador (Bambu Studio / OrcaSlicer) mediante detección. Desde otras redes, añádalas manualmente por dirección IP y código de acceso.',
-      step2: 'En los modos Archivar, Revisar y Encolar, use el botón «Enviar» de su laminador para subir archivos 3MF a Grove Control. El laminador mostrará «Impresión correcta» — el archivo se almacena, no se imprime.',
+      step2: 'En los modos Archivos, Revisar y Encolar, use el botón «Enviar» del laminador para subir archivos 3MF a Grove Control. Archivos los guarda en Archivos, Revisar permite guardarlos o descartarlos y Encolar añade trabajos de impresión. «Impresión correcta» significa que la carga terminó.',
       step3: 'En el modo Proxy, la impresora virtual retransmite todo el tráfico a una impresora real — las impresiones comienzan inmediatamente como si estuviera conectada directamente.',
     },
     status: {

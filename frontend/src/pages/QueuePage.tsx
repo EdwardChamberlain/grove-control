@@ -2248,9 +2248,11 @@ export function QueuePage() {
           mode="create"
           libraryFileId={uploadedQueueFile.id}
           archiveName={uploadedQueueFile.filename}
-          onClose={() => setUploadedQueueFile(null)}
+          onClose={() => {
+            api.discardQueueSource(uploadedQueueFile.id).catch(() => {});
+            setUploadedQueueFile(null);
+          }}
           onSuccess={() => setUploadedQueueFile(null)}
-          cleanupLibraryAfterDispatch
         />
       )}
 

@@ -23,6 +23,20 @@ from backend.app.utils.safe_path import PathTraversalError, safe_join_under
 logger = logging.getLogger(__name__)
 
 
+def _stored_archive_path(path: Path) -> str:
+    """Store archive paths relative to ``base_dir`` when possible.
+
+    ``archive_dir`` is configurable independently from ``base_dir``. A
+    deployment may keep Archives on a separate mounted volume, so preserve
+    that valid location as an absolute path when it is outside ``base_dir``.
+    Readers already support legacy absolute archive paths.
+    """
+    try:
+        return str(path.relative_to(Path(settings.base_dir)))
+    except ValueError:
+        return str(path)
+
+
 def _copy_and_fsync(src: Path, dst: Path, chunk_size: int = 1024 * 1024) -> None:
     """Copy src to dst with an explicit chunked read/write and fsync the dst.
 
@@ -1152,6 +1166,7 @@ class ArchiveService:
         project_id: int | None = None,
         subtask_id: str | None = None,
         prefer_filename_for_name: bool = False,
+        commit: bool = True,
     ) -> PrintArchive | None:
         """Archive a 3MF file with metadata.
 
@@ -1172,6 +1187,9 @@ class ArchiveService:
                 metadata. Used by virtual-printer flows so users who rename a job in
                 BambuStudio's "send to printer" dialog see that name instead of the
                 creator-baked title (#1152).
+            commit: When False, flush the row but leave the transaction to the caller.
+                Dispatch uses this to save the Archive event and its PrintQueue link
+                atomically before publishing the print command.
         """
         # Verify printer exists if specified
         if printer_id is not None:
@@ -1252,7 +1270,7 @@ class ArchiveService:
         if "_thumbnail_data" in metadata:
             thumb_file = archive_dir / f"thumbnail{metadata['_thumbnail_ext']}"
             thumb_file.write_bytes(metadata["_thumbnail_data"])
-            thumbnail_path = str(thumb_file.relative_to(settings.base_dir))
+            thumbnail_path = _stored_archive_path(thumb_file)
             del metadata["_thumbnail_data"]
             del metadata["_thumbnail_ext"]
 
@@ -1297,7 +1315,7 @@ class ArchiveService:
         archive = PrintArchive(
             printer_id=printer_id,
             filename=original_filename or source_file.name,
-            file_path=str(dest_file.relative_to(settings.base_dir)),
+            file_path=_stored_archive_path(dest_file),
             file_size=dest_file.stat().st_size,
             content_hash=content_hash,
             thumbnail_path=thumbnail_path,
@@ -1327,8 +1345,11 @@ class ArchiveService:
         )
 
         self.db.add(archive)
-        await self.db.commit()
-        await self.db.refresh(archive)
+        if commit:
+            await self.db.commit()
+            await self.db.refresh(archive)
+        else:
+            await self.db.flush()
 
         return archive
 

@@ -50,7 +50,6 @@ export function PrintModal({
   onClose,
   onSuccess,
   projectId,
-  cleanupLibraryAfterDispatch,
   variantFiles,
 }: PrintModalProps) {
   const { t } = useTranslation();
@@ -976,12 +975,6 @@ export function PrintModal({
           : undefined,
         ...printOptions,
         project_id: projectId ?? undefined,
-        // Separate printer/plate requests can begin dispatching before the
-        // remaining requests have been created. Keep their shared source in
-        // the library; a single request (including quantity > 1) is atomic.
-        cleanup_library_after_dispatch: cleanupLibraryAfterDispatch
-          && totalCount === 1
-          && quantityForPlate(plateOverride !== undefined ? plateOverride : selectedPlate) === 1,
       };
     };
 
@@ -1123,13 +1116,6 @@ export function PrintModal({
     if (assignmentMode === 'printer' && selectedPrinters.length > 1) return 1;
     return Math.max(1, plateQuantities[plateIndex] ?? 1);
   };
-
-  const directUploadWillBeRetained = cleanupLibraryAfterDispatch && (
-    (assignmentMode === 'printer' && selectedPrinters.length > 1)
-    || selectedPlates.size > 1
-    || quantityForPlate(selectedPlate) > 1
-    || (usePerPlateQuantities && [...selectedPlates].some((plateIndex) => quantityForPlate(plateIndex) > 1))
-  );
 
   // Clear gcode_injection if the admin removes all snippets while the modal
   // is open — the checkbox itself hides via hasGcodeSnippets in
@@ -1391,12 +1377,6 @@ export function PrintModal({
                   ))}
                 </div>
               </div>
-            )}
-
-            {directUploadWillBeRetained && (
-              <p className="mb-3 rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 text-sm text-blue-200">
-                {t('printModal.directUploadRetained', 'This upload will stay in File Manager because it is being used by multiple queue items.')}
-              </p>
             )}
 
             {/* Warning when archive data couldn't be loaded */}

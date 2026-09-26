@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, Select, String, Text, func, select
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, Select, String, Text, false, func, select, true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.core.database import Base
@@ -98,6 +98,14 @@ class LibraryFile(Base):
 
     # External file flag
     is_external: Mapped[bool] = mapped_column(Boolean, default=False)
+    # One-off print uploads are staged for the Queue but are not part of the
+    # user-managed Files library. The queue lifecycle removes them once every
+    # consumer has an Archive copy or the item is discarded.
+    queue_only: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # A direct Queue upload remains protected from cleanup until the client
+    # finishes creating every fan-out queue item. Legacy rows are sealed by
+    # default so existing cleanup behavior is preserved.
+    queue_source_sealed: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
 
     # File info
     filename: Mapped[str] = mapped_column(String(255))  # Original filename
@@ -177,6 +185,11 @@ class LibraryFile(Base):
         must use ``select(LibraryFile)`` directly.
         """
         return select(cls).where(cls.deleted_at.is_(None))
+
+    @classmethod
+    def managed(cls) -> "Select[tuple[LibraryFile]]":
+        """Select user-managed Files entries, excluding Queue staging uploads."""
+        return cls.active().where(cls.queue_only.is_(False))
 
 
 class LibraryTag(Base):

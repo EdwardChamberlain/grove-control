@@ -130,9 +130,6 @@ class PrintQueueItemCreate(BaseModel):
     quantity: int = 1
     # Project to associate the resulting archive with
     project_id: int | None = None
-    # Direct printer-card uploads are temporary library files. The scheduler
-    # deletes them after creating the durable archive copy.
-    cleanup_library_after_dispatch: bool = False
     # Cross-model alternatives (#671): several sliced files, one job, whichever
     # printer frees up first. Mutually exclusive with printer_id (a specific
     # printer defeats the purpose) and with archive_id/library_file_id (the

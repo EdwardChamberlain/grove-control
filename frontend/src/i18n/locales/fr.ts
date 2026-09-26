@@ -737,7 +737,7 @@ export default {
     developerModeWarning: 'Le mode développeur LAN n\'est pas activé sur : {{names}}. Certaines fonctionnalités peuvent ne pas fonctionner.',
     howToEnable: 'Comment activer',
     incompatibleFile: 'Ce fichier a été tranché pour {{slicedFor}}, mais cette imprimante est une {{printerModel}}',
-    directUploadLibraryNote: 'Le fichier importé est ajouté au gestionnaire de fichiers avant sa mise en file d’attente.',
+    directUploadLibraryNote: 'Le fichier est ajouté à la file d’attente sans être enregistré dans le gestionnaire de fichiers.',
     dropNotPrintable: 'Seuls les fichiers .gcode et .gcode.3mf peuvent être imprimés',
     dropToPrint: 'Déposer pour imprimer',
     cannotPrint: 'Imprimante occupée',
@@ -835,6 +835,8 @@ export default {
       failedUpdateFavorites: 'Échec mise à jour favoris',
       exportDownloaded: 'Export téléchargé',
       exportFailed: 'Échec export',
+      savedToFiles: '{{filename}} enregistré dans Fichiers',
+      failedSaveToFiles: 'Impossible d’enregistrer le fichier d’impression dans Fichiers',
     },
     menu: {
       print: 'Imprimer',
@@ -874,6 +876,7 @@ export default {
       select: 'Sélectionner',
       deselect: 'Désélectionner',
       delete: 'Supprimer',
+      saveToFiles: 'Enregistrer dans Fichiers',
     },
     permission: {
       noReprint: 'Pas d\'autorisation de réimpression',
@@ -1840,12 +1843,6 @@ export default {
     saveThumbnails: 'Enregistrer les vignettes',
     captureFinishPhoto: 'Prendre une photo à la fin',
     noPrintersConfigured: 'Aucune imprimante configurée',
-    // Archive settings
-    archiveMode: {
-      always: 'Toujours créer une archive',
-      never: 'Ne jamais créer d\'archive',
-      ask: 'Demander à chaque fois',
-    },
     // Updates
     checkForUpdatesLabel: 'Vérifier les mises à jour',
     checkPrinterFirmware: 'Vérifier le firmware imprimante',
@@ -2349,8 +2346,6 @@ export default {
     energyModePrintDescription: 'Le tableau de bord affiche la somme de l\'énergie utilisée pendant les impressions',
     energyModeTotalDescription: 'Le tableau de bord affiche l\'énergie totale des prises connectées',
     fileManager: 'Gestionnaire de fichiers',
-    createArchiveEntry: 'Créer une entrée d\'archive lors de l\'impression',
-    createArchiveEntryDescription: 'Lors de l\'impression depuis le gestionnaire de fichiers, créer optionnellement une entrée d\'archive',
     lowDiskSpaceWarning: 'Avertissement espace disque faible',
     lowDiskSpaceDescription: 'Afficher un avertissement lorsque l\'espace disque libre descend sous ce seuil',
     printerFirmware: 'Firmware imprimante',
@@ -3817,6 +3812,7 @@ export default {
     runningWithProgress: '{{name}} – {{stage}} ({{percent}} %) – {{elapsed}}',
     runningWithProgressMultiPlate: 'Plateau {{plateIndex}} sur {{plateCount}} • {{name}} – {{stage}} ({{percent}} %) – {{elapsed}}',
     completedToast: '{{name}} découpé',
+    completedToFilesToast: '{{name}} découpé et enregistré dans Fichiers',
     failedTitle: 'Échec du découpage',
     failedToast: 'Échec du découpage de {{name}} : {{detail}}',
     tier: {
@@ -4902,12 +4898,12 @@ export default {
     },
     mode: {
       title: 'Mode',
-      archive: 'Archiver',
-      archiveDesc: 'Archive immédiatement',
+      archive: 'Fichiers',
+      archiveDesc: 'Enregistrer les téléversements dans Fichiers',
       review: 'Revue',
-      reviewDesc: 'Attendre revue avant archive',
+      reviewDesc: 'Examiner les téléversements avant de les enregistrer dans Fichiers',
       queue: 'File',
-      queueDesc: 'Archiver et ajouter à la file',
+      queueDesc: 'Ajouter les téléversements à la file d’impression',
       proxy: 'Proxy',
       proxyDesc: 'Relais vers imprimante réelle',
     },
@@ -4935,7 +4931,7 @@ export default {
     howItWorks: {
       title: 'Fonctionnement',
       step1: 'Sur le même LAN, les imprimantes virtuelles apparaissent automatiquement dans votre slicer (Bambu Studio / OrcaSlicer). Depuis d\'autres réseaux, ajoutez-les manuellement par adresse IP et code d\'accès.',
-      step2: 'En mode Archive, Revue et File d\'attente, utilisez le bouton "Envoyer" dans votre slicer pour envoyer des fichiers 3MF à Grove Control. Le slicer affichera "Impression réussie" — le fichier est stocké, pas imprimé.',
+      step2: 'Dans les modes Fichiers, Revue et File, utilisez le bouton « Envoyer » du slicer pour transférer les fichiers 3MF vers Grove Control. Le mode Fichiers les enregistre, Revue permet de les enregistrer ou de les supprimer, et File ajoute des travaux d’impression. « Impression réussie » signifie que le transfert est terminé.',
       step3: 'En mode Proxy, l\'imprimante virtuelle relaie tout le trafic vers une vraie imprimante — les impressions démarrent immédiatement comme en connexion directe.',
     },
     status: {
@@ -4991,8 +4987,8 @@ export default {
       message: 'Êtes-vous sûr de vouloir supprimer "{{name}}" ? Cela arrêtera tous les services de cette imprimante.',
     },
     archiveNameSource: {
-      title: 'Source du nom d\'archive',
-      description: 'Choisissez comment les nouvelles archives sont nommées lorsque les fichiers arrivent via l\'imprimante virtuelle. "Métadonnées" utilise le titre intégré par le slicer dans le 3MF (par défaut). "Nom de fichier" utilise le nom envoyé par Bambu Studio en FTP. Note : Bambu Studio écrase le nom que vous saisissez dans la boîte "envoyer à l\'imprimante" avec le champ Titre du 3MF lorsque celui-ci est présent, les deux modes produisent donc souvent la même chaîne.',
+      title: 'Nom affiché du téléversement',
+      description: 'Choisissez comment les téléversements apparaissent dans la liste de revue. « Métadonnées » utilise le titre intégré au 3MF ; « Nom de fichier » utilise le nom reçu par FTP.',
       metadata: 'Métadonnées',
       filename: 'Nom de fichier',
     },

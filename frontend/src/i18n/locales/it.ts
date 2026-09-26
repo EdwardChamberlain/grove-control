@@ -737,7 +737,7 @@ export default {
     developerModeWarning: 'La modalità sviluppatore LAN non è attivata su: {{names}}. Alcune funzionalità potrebbero non funzionare.',
     howToEnable: 'Come attivare',
     incompatibleFile: 'Questo file è stato preparato per {{slicedFor}}, ma questa stampante è una {{printerModel}}',
-    directUploadLibraryNote: 'Il file caricato viene aggiunto a Gestione file prima di essere messo in coda.',
+    directUploadLibraryNote: 'Il file viene aggiunto alla coda e non viene salvato in Gestione file.',
     dropNotPrintable: 'Solo i file .gcode e .gcode.3mf possono essere stampati',
     dropToPrint: 'Rilascia per stampare',
     cannotPrint: 'Stampante occupata',
@@ -835,6 +835,8 @@ export default {
       failedUpdateFavorites: 'Aggiornamento preferiti non riuscito',
       exportDownloaded: 'Export scaricato',
       exportFailed: 'Export non riuscito',
+      savedToFiles: '{{filename}} salvato in File',
+      failedSaveToFiles: 'Impossibile salvare il file di stampa in File',
     },
     menu: {
       print: 'Stampa',
@@ -874,6 +876,7 @@ export default {
       select: 'Seleziona',
       deselect: 'Deseleziona',
       delete: 'Elimina',
+      saveToFiles: 'Salva in File',
     },
     permission: {
       noReprint: 'Non hai il permesso di ristampare questo archivio',
@@ -1840,12 +1843,6 @@ export default {
     saveThumbnails: 'Salva miniature',
     captureFinishPhoto: 'Acquisisci foto finale',
     noPrintersConfigured: 'Nessuna stampante configurata',
-    // Archive settings
-    archiveMode: {
-      always: 'Crea sempre voce archivio',
-      never: 'Non creare mai voce archivio',
-      ask: 'Chiedi ogni volta',
-    },
     // Updates
     checkForUpdatesLabel: 'Controlla aggiornamenti',
     checkPrinterFirmware: 'Controlla firmware stampante',
@@ -2348,8 +2345,6 @@ export default {
     energyModePrintDescription: 'La dashboard mostra la somma dell\'energia usata durante le stampe',
     energyModeTotalDescription: 'La dashboard mostra l\'energia totale dalle prese smart',
     fileManager: 'Gestore file',
-    createArchiveEntry: 'Crea voce archivio durante la stampa',
-    createArchiveEntryDescription: 'Quando si stampa dal gestore file, crea opzionalmente una voce di archivio',
     lowDiskSpaceWarning: 'Avviso spazio disco insufficiente',
     lowDiskSpaceDescription: 'Mostra avviso quando lo spazio disco scende sotto questa soglia',
     printerFirmware: 'Firmware stampante',
@@ -3816,6 +3811,7 @@ export default {
     runningWithProgress: '{{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     runningWithProgressMultiPlate: 'Piatto {{plateIndex}} di {{plateCount}} • {{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     completedToast: '{{name}} sezionato',
+    completedToFilesToast: '{{name}} sezionato e salvato in File',
     failedTitle: 'Slicing fallito',
     failedToast: 'Slicing di {{name}} fallito: {{detail}}',
     tier: {
@@ -4901,12 +4897,12 @@ export default {
     },
     mode: {
       title: 'Modalita',
-      archive: 'Archivio',
-      archiveDesc: 'Archivia subito i file',
+      archive: 'File',
+      archiveDesc: 'Salva i caricamenti in File',
       review: 'Revisione',
-      reviewDesc: 'Rivedi prima di archiviare',
+      reviewDesc: 'Rivedi i caricamenti prima di salvarli in File',
       queue: 'Coda',
-      queueDesc: 'Archivia e aggiungi alla coda',
+      queueDesc: 'Aggiungi i caricamenti alla coda di stampa',
       proxy: 'Proxy',
       proxyDesc: 'Inoltra a stampante reale',
     },
@@ -4934,7 +4930,7 @@ export default {
     howItWorks: {
       title: 'Come funziona',
       step1: 'Sulla stessa LAN, le stampanti virtuali appaiono automaticamente nel tuo slicer (Bambu Studio / OrcaSlicer). Da altre reti, aggiungile manualmente tramite indirizzo IP e codice di accesso.',
-      step2: 'In modalità Archivio, Revisione e Coda, usa il pulsante "Invia" nel tuo slicer per caricare file 3MF su Grove Control. Lo slicer mostrerà "Stampa riuscita" — il file viene salvato, non stampato.',
+      step2: 'Nei modi File, Revisione e Coda, usa il pulsante «Invia» dello slicer per caricare file 3MF in Grove Control. File li salva in File, Revisione permette di salvarli o scartarli e Coda aggiunge lavori di stampa. «Stampa riuscita» significa che il caricamento è terminato.',
       step3: 'In modalità Proxy, la stampante virtuale inoltra tutto il traffico a una stampante reale — le stampe partono immediatamente come con una connessione diretta.',
     },
     status: {
@@ -4990,8 +4986,8 @@ export default {
       message: 'Sei sicuro di voler eliminare "{{name}}"? Tutti i servizi di questa stampante verranno interrotti.',
     },
     archiveNameSource: {
-      title: 'Origine nome archivio',
-      description: 'Scegli come vengono nominati i nuovi archivi quando i file arrivano tramite la stampante virtuale. "Metadati" utilizza il titolo incorporato nello slicer dal 3MF (default). "Nome file" utilizza il nome che Bambu Studio ha inviato via FTP. Nota: Bambu Studio sovrascrive il nome digitato nella finestra "invia a stampante" con il campo Titolo del 3MF quando presente, quindi entrambe le modalità producono spesso la stessa stringa.',
+      title: 'Nome visualizzato del caricamento',
+      description: 'Scegli come mostrare i caricamenti nell’elenco di revisione. «Metadati» usa il titolo incorporato nel 3MF; «Nome file» usa il nome ricevuto via FTP.',
       metadata: 'Metadati',
       filename: 'Nome file',
     },

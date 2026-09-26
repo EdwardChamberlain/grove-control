@@ -103,7 +103,6 @@ const AUTOSAVE_SETTING_KEYS = [
   'ha_enabled',
   'ha_url',
   'ha_token',
-  'library_archive_mode',
   'library_disk_warning_gb',
   'camera_view_mode',
   'preferred_slicer',
@@ -159,8 +158,6 @@ function comparableAutosaveValue(settings: AppSettings, key: AutosaveSettingKey)
       return settings[key] ?? '';
     case 'slicer_stall_timeout_minutes':
       return Number(settings[key] ?? 15);
-    case 'library_archive_mode':
-      return settings[key] ?? 'ask';
     case 'library_disk_warning_gb':
       return Number(settings[key] ?? 5);
     case 'camera_view_mode':
@@ -2155,25 +2152,6 @@ export function SettingsPage() {
               </h2>
             </CardHeader>
             <CardContent className="space-y-3">
-              {/* Archive Mode */}
-              <div>
-                <label className="block text-sm text-bambu-gray mb-1">
-                  {t('settings.createArchiveEntry')}
-                </label>
-                <ReactSelect
-                  value={localSettings.library_archive_mode ?? 'ask'}
-                  onChange={(e) => updateSetting('library_archive_mode', e.target.value as 'always' | 'never' | 'ask')}
-                  className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
-                >
-                  <option value="always">{t('settings.archiveMode.always')}</option>
-                  <option value="never">{t('settings.archiveMode.never')}</option>
-                  <option value="ask">{t('settings.archiveMode.ask')}</option>
-                </ReactSelect>
-                <p className="text-xs text-bambu-gray mt-1">
-                  {t('settings.createArchiveEntryDescription')}
-                </p>
-              </div>
-
               {/* Disk Space Warning Threshold */}
               <div>
                 <label className="block text-sm text-bambu-gray mb-1">

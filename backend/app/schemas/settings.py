@@ -208,10 +208,6 @@ class AppSettings(BaseModel):
     )
 
     # File Manager / Library settings
-    library_archive_mode: str = Field(
-        default="ask",
-        description="When printing from File Manager, create archive entry: 'always', 'never', or 'ask'",
-    )
     library_disk_warning_gb: float = Field(
         default=5.0,
         description="Show warning when free disk space falls below this threshold (GB)",
@@ -523,7 +519,6 @@ class AppSettingsUpdate(BaseModel):
     ha_enabled: bool | None = None
     ha_url: str | None = None
     ha_token: str | None = None
-    library_archive_mode: str | None = None
     library_disk_warning_gb: float | None = None
     camera_view_mode: str | None = None
     preferred_slicer: str | None = None

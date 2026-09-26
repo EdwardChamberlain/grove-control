@@ -751,7 +751,7 @@ export default {
     developerModeWarning: 'Developer LAN mode is not enabled on: {{names}}. Some features may not work.',
     howToEnable: 'How to enable',
     incompatibleFile: 'This file was sliced for {{slicedFor}}, but this printer is a {{printerModel}}',
-    directUploadLibraryNote: 'The uploaded file is added to File Manager before you queue it.',
+    directUploadLibraryNote: 'This upload is added to Queue and is not saved in Files.',
     dropNotPrintable: 'Only .gcode and .gcode.3mf files can be printed',
     dropToPrint: 'Drop to print',
     cannotPrint: 'Printer busy',
@@ -837,6 +837,8 @@ export default {
       failedUploadTimelapse: 'Failed to upload timelapse',
       archiveDeleted: 'Archive deleted',
       failedDeleteArchive: 'Failed to delete archive',
+      savedToFiles: 'Saved {{filename}} to Files',
+      failedSaveToFiles: 'Failed to save print artifact to Files',
       addedToFavorites: 'Added to favorites',
       removedFromFavorites: 'Removed from favorites',
       projectUpdated: 'Project updated',
@@ -870,6 +872,7 @@ export default {
       downloadF3d: 'Download F3D',
       removeF3d: 'Remove F3D',
       download: 'Download',
+      saveToFiles: 'Save to Files',
       copyDownloadLink: 'Copy Download Link',
       qrCode: 'QR Code',
       viewPhotos: 'View Photos',
@@ -1863,12 +1866,6 @@ export default {
     saveThumbnails: 'Save thumbnails',
     captureFinishPhoto: 'Capture finish photo',
     noPrintersConfigured: 'No printers configured',
-    // Archive settings
-    archiveMode: {
-      always: 'Always create archive entry',
-      never: 'Never create archive entry',
-      ask: 'Ask each time',
-    },
     // Updates
     checkForUpdatesLabel: 'Check for updates',
     checkPrinterFirmware: 'Check printer firmware',
@@ -2377,8 +2374,6 @@ export default {
     energyModeTotalDescription: 'Dashboard shows lifetime energy from smart plugs',
     // File Manager
     fileManager: 'File Manager',
-    createArchiveEntry: 'Create Archive Entry When Printing',
-    createArchiveEntryDescription: 'When printing from File Manager, optionally create an archive entry',
     lowDiskSpaceWarning: 'Low Disk Space Warning',
     lowDiskSpaceDescription: 'Show warning when free disk space falls below this threshold',
     // Updates
@@ -3852,6 +3847,7 @@ export default {
     runningWithProgress: '{{name}} — {{stage}} ({{percent}}%) — {{elapsed}}',
     runningWithProgressMultiPlate: 'Plate {{plateIndex}} of {{plateCount}} • {{name}} — {{stage}} ({{percent}}%) — {{elapsed}}',
     completedToast: 'Sliced {{name}}',
+    completedToFilesToast: 'Sliced {{name}} and saved to Files',
     failedTitle: 'Slicing failed',
     failedToast: 'Slicing {{name}} failed: {{detail}}',
     tier: {
@@ -4902,7 +4898,7 @@ export default {
     running: 'Running',
     stopped: 'Stopped',
     description: {
-      default: 'Enable a virtual printer that appears in Bambu Studio and OrcaSlicer. Files sent to this printer will be archived directly without printing.',
+      default: 'Enable a virtual printer that appears in Bambu Studio and OrcaSlicer. Files sent to this printer can be saved to Files, reviewed, or added to the print queue.',
       proxy: 'Enable a proxy that relays slicer traffic to a real printer, allowing remote printing over any network.',
     },
     enable: {
@@ -4946,12 +4942,12 @@ export default {
     },
     mode: {
       title: 'Mode',
-      archive: 'Archive',
-      archiveDesc: 'Archive files immediately',
+      archive: 'Files',
+      archiveDesc: 'Save uploads to Files',
       review: 'Review',
-      reviewDesc: 'Review before archiving',
+      reviewDesc: 'Review uploads before saving to Files',
       queue: 'Queue',
-      queueDesc: 'Archive and add to queue',
+      queueDesc: 'Add uploads to the print queue',
       proxy: 'Proxy',
       proxyDesc: 'Relay to real printer',
     },
@@ -4977,8 +4973,8 @@ export default {
       readGuide: 'Read the setup guide before enabling',
     },
     archiveNameSource: {
-      title: 'Archive name source',
-      description: 'Choose how new archives are named when files arrive via the virtual printer. "Metadata" uses the slicer-embedded Title from the 3MF (default). "Filename" uses the filename Bambu Studio sent over FTP. Note: Bambu Studio overwrites the name you type in the "send to printer" dialog with the 3MF\'s Title field whenever one is present, so both modes often produce the same string.',
+      title: 'Upload display name',
+      description: 'Choose how virtual-printer uploads are named in the review list. "Metadata" uses the slicer-embedded Title from the 3MF (default). "Filename" uses the filename Bambu Studio sent over FTP.',
       metadata: 'Metadata',
       filename: 'Filename',
     },
@@ -4993,7 +4989,7 @@ export default {
     howItWorks: {
       title: 'How it works',
       step1: 'On the same LAN, virtual printers appear in your slicer (Bambu Studio / OrcaSlicer) automatically via discovery. From other networks, add them manually by IP address and access code.',
-      step2: 'In Archive, Review, and Queue modes, use the "Send" button in your slicer to upload 3MF files to Grove Control. The slicer will show "Print success" — the file is stored, not printed.',
+      step2: 'In Files, Review, and Queue modes, use the "Send" button in your slicer to upload 3MF files to Grove Control. Files mode saves to Files, Review holds uploads for you to save or discard, and Queue adds print jobs. The slicer will show "Print success" because upload has finished.',
       step3: 'In Proxy mode, the virtual printer relays all traffic to a real printer — prints start immediately as if connected directly.',
     },
     status: {
