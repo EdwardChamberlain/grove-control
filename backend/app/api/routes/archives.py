@@ -3392,7 +3392,11 @@ async def save_archive_to_files(
         raise HTTPException(status_code=404, detail="This print has no retained artifact to save")
 
     stored_path = Path(archive.file_path)
-    source_path = stored_path if stored_path.is_absolute() else Path(settings.base_dir) / stored_path
+    source_path = (
+        stored_path
+        if stored_path.is_absolute()
+        else safe_join_under(Path(settings.base_dir), archive.file_path, http=False)
+    )
     try:
         source_path = assert_under(Path(settings.archive_dir), source_path, http=False)
     except ValueError as exc:
