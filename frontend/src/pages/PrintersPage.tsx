@@ -2816,7 +2816,6 @@ function SinglePrinterCockpit({
           setPrintAfterUpload(null);
         }}
         onSuccess={() => setPrintAfterUpload(null)}
-        cleanupLibraryAfterDispatch
       />
     )}
     {reprintEntry?.archive_id && (
@@ -5569,7 +5568,6 @@ function PrinterCard({
             setPrintAfterUpload(null);
           }}
           onSuccess={() => setPrintAfterUpload(null)}
-          cleanupLibraryAfterDispatch
         />
       )}
 

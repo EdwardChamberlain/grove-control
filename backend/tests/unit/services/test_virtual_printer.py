@@ -1489,7 +1489,8 @@ class TestVirtualPrinterInstance:
     @pytest.mark.asyncio
     async def test_add_to_print_queue_multi_plate_send_all_enqueues_one_per_plate(self, tmp_path):
         """#1733: BambuStudio / OrcaSlicer "Send All" of a multi-plate project
-        uploads ONE 3MF containing every plate. Pre-fix only the first plate
+        uploads ONE 3MF containing every plate. The queue shares that one
+        Queue-only File across all plate rows. Pre-fix only the first plate
         index was extracted and one queue item was created; plates 2..N were
         silently dropped. Post-fix every `<plate>` block in `slice_info.config`
         produces its own PrintQueueItem with the correct ``plate_id``, sharing
@@ -1619,7 +1620,7 @@ class TestVirtualPrinterInstance:
         positions = [q.position for q in added_items]
         assert positions == [1, 2, 3], f"positions should be consecutive, got {positions}"
         file_ids = {q.library_file_id for q in added_items}
-        assert len(file_ids) == 3, f"Each plate needs its own transient File source, got {file_ids}"
+        assert len(file_ids) == 1, f"Every plate should share one transient File source, got {file_ids}"
         assert all(q.archive_id is None for q in added_items)
         # auto_dispatch=False on the VP → every item is manual_start.
         assert all(q.manual_start for q in added_items)

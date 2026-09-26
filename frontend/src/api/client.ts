@@ -803,13 +803,6 @@ export interface FailureAnalysis {
   }>;
 }
 
-export interface BulkUploadResult {
-  uploaded: number;
-  failed: number;
-  results: Array<{ filename: string; id: number; status: string }>;
-  errors: Array<{ filename: string; error: string }>;
-}
-
 // Archive Comparison types
 export interface ComparisonArchiveInfo {
   id: number;
@@ -2231,8 +2224,6 @@ export interface PrintQueueItemCreate {
   quantity?: number;
   // Project to associate the resulting archive with
   project_id?: number;
-  // Delete transient uploaded library file after scheduler creates the archive
-  cleanup_library_after_dispatch?: boolean;
   // Cross-model alternatives (#671): several sliced files, one job, whichever
   // printer frees up first. Mutually exclusive with printer_id (a named printer
   // defeats the point) and with archive_id/library_file_id (these ARE the files).
@@ -4740,48 +4731,6 @@ export const api = {
         used_in_plate?: boolean;
       }>;
     }>(`/archives/${archiveId}/filament-requirements${qs.toString() ? `?${qs}` : ''}`);
-  },
-  uploadArchive: async (file: File, printerId?: number): Promise<Archive> => {
-    const formData = new FormData();
-    formData.append('file', file);
-    const url = printerId
-      ? `${API_BASE}/archives/upload?printer_id=${printerId}`
-      : `${API_BASE}/archives/upload`;
-    const headers: Record<string, string> = {};
-    if (authToken) {
-      headers['Authorization'] = `Bearer ${authToken}`;
-    }
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: formData,
-    });
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.detail || `HTTP ${response.status}`);
-    }
-    return response.json();
-  },
-  uploadArchivesBulk: async (files: File[], printerId?: number): Promise<BulkUploadResult> => {
-    const formData = new FormData();
-    files.forEach((file) => formData.append('files', file));
-    const url = printerId
-      ? `${API_BASE}/archives/upload-bulk?printer_id=${printerId}`
-      : `${API_BASE}/archives/upload-bulk`;
-    const headers: Record<string, string> = {};
-    if (authToken) {
-      headers['Authorization'] = `Bearer ${authToken}`;
-    }
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: formData,
-    });
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.detail || `HTTP ${response.status}`);
-    }
-    return response.json();
   },
   saveArchiveToFiles: (archiveId: number) =>
     request<{ library_file_id: number; filename: string }>(`/archives/${archiveId}/save-to-files`, {

@@ -2939,6 +2939,16 @@ async def run_migrations(conn):
             "AND library_file_id IS NOT NULL)",
         )
 
+    # Direct Queue uploads are unsealed until the client closes the print
+    # setup flow. This prevents the first fast dispatch from deleting its
+    # source while the client is still posting the remaining fan-out rows.
+    # Existing rows are sealed because their complete queue-item set predates
+    # this submission boundary.
+    if is_sqlite():
+        await _safe_execute(conn, "ALTER TABLE library_files ADD COLUMN queue_source_sealed BOOLEAN DEFAULT 1")
+    else:
+        await _safe_execute(conn, "ALTER TABLE library_files ADD COLUMN queue_source_sealed BOOLEAN DEFAULT true")
+
     # Migration: Cache metadata title on pending uploads (#1152 follow-up).
     # Without this column the review card always shows the FTP filename while
     # the eventual archive's print_name comes from the 3MF metadata title,

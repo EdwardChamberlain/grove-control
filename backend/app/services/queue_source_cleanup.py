@@ -29,7 +29,12 @@ async def remove_queue_only_source_if_unused(
     FK's cascade cannot erase queue history.
     """
     library_file = await db.get(LibraryFile, library_file_id)
-    if library_file is None or not library_file.queue_only or library_file.is_external:
+    if (
+        library_file is None
+        or not library_file.queue_only
+        or library_file.is_external
+        or not library_file.queue_source_sealed
+    ):
         return []
 
     source_filters = [

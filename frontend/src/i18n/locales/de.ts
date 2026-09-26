@@ -3823,6 +3823,7 @@ export default {
     runningWithProgress: '{{name}} – {{stage}} ({{percent}} %) – {{elapsed}}',
     runningWithProgressMultiPlate: 'Plate {{plateIndex}} von {{plateCount}} • {{name}} – {{stage}} ({{percent}} %) – {{elapsed}}',
     completedToast: '{{name}} wurde gesliced',
+    completedToFilesToast: '{{name}} wurde gesliced und in Dateien gespeichert',
     failedTitle: 'Slicen fehlgeschlagen',
     failedToast: 'Slicen von {{name}} fehlgeschlagen: {{detail}}',
     tier: {

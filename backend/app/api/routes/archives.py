@@ -30,7 +30,7 @@ from backend.app.schemas.print_log import PrintLogResponse
 from backend.app.schemas.slicer import SliceRequest
 from backend.app.services.archive import ArchiveService
 from backend.app.utils.http import build_content_disposition
-from backend.app.utils.safe_path import safe_join_under
+from backend.app.utils.safe_path import assert_under, safe_join_under
 from backend.app.utils.threemf_tools import (
     extract_embedded_presets_from_3mf,
     extract_nozzle_mapping_from_3mf,
@@ -3391,9 +3391,10 @@ async def save_archive_to_files(
     if not archive.file_path:
         raise HTTPException(status_code=404, detail="This print has no retained artifact to save")
 
-    source_path = Path(settings.base_dir) / archive.file_path
+    stored_path = Path(archive.file_path)
+    source_path = stored_path if stored_path.is_absolute() else Path(settings.base_dir) / stored_path
     try:
-        source_path.resolve().relative_to(Path(settings.base_dir).resolve())
+        source_path = assert_under(Path(settings.archive_dir), source_path, http=False)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="Archive artifact path is invalid") from exc
     if not source_path.is_file():

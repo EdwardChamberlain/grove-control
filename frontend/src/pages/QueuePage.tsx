@@ -2253,7 +2253,6 @@ export function QueuePage() {
             setUploadedQueueFile(null);
           }}
           onSuccess={() => setUploadedQueueFile(null)}
-          cleanupLibraryAfterDispatch
         />
       )}
 

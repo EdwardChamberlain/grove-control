@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from backend.app.core.auth import RequirePermissionIfAuthEnabled, require_ownership_permission, resolve_api_key_owner
 from backend.app.core.database import get_db
@@ -165,7 +166,10 @@ async def _save_pending_to_files(
         current_user=current_user,
         api_key_owner=api_key_owner,
     )
-    library_file = await db.get(LibraryFile, response.id)
+    library_file_result = await db.execute(
+        select(LibraryFile).options(selectinload(LibraryFile.tags)).where(LibraryFile.id == response.id)
+    )
+    library_file = library_file_result.scalar_one_or_none()
     if library_file is None:
         raise HTTPException(status_code=500, detail="Saved File could not be loaded")
 

@@ -2009,17 +2009,18 @@ async def list_files(
     return file_list
 
 
-@router.post("/files", response_model=FileUploadResponse)
-@router.post("/files/", response_model=FileUploadResponse)
 async def upload_file(
-    file: UploadFile = File(...),
-    folder_id: int | None = None,
-    generate_stl_thumbnails: bool = Query(default=True),
-    db: AsyncSession = Depends(get_db),
-    current_user: User | None = Depends(require_permission_if_auth_enabled(Permission.LIBRARY_UPLOAD)),
-    api_key_owner: User | None = Depends(resolve_api_key_owner),
+    file: UploadFile,
+    folder_id: int | None,
+    generate_stl_thumbnails: bool,
+    db: AsyncSession,
+    current_user: User | None,
+    api_key_owner: User | None,
+    *,
+    queue_only: bool = False,
+    queue_source_sealed: bool = True,
 ):
-    """Upload a file to the library."""
+    """Persist an uploaded file, optionally staging it as a Queue-only source."""
     try:
         if not file.filename:
             raise HTTPException(status_code=400, detail="Filename is required")
@@ -2156,6 +2157,8 @@ async def upload_file(
         library_file = LibraryFile(
             folder_id=folder_id,
             is_external=is_external_upload,
+            queue_only=queue_only,
+            queue_source_sealed=queue_source_sealed,
             filename=filename,
             file_path=_stored_file_path(file_path, is_external_upload),
             file_type=file_type,
@@ -2183,6 +2186,27 @@ async def upload_file(
     except Exception as e:
         logger.error("Upload failed for %s: %s", file.filename, e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+
+@router.post("/files", response_model=FileUploadResponse)
+@router.post("/files/", response_model=FileUploadResponse)
+async def upload_library_file(
+    file: UploadFile = File(...),
+    folder_id: int | None = None,
+    generate_stl_thumbnails: bool = Query(default=True),
+    db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(require_permission_if_auth_enabled(Permission.LIBRARY_UPLOAD)),
+    api_key_owner: User | None = Depends(resolve_api_key_owner),
+):
+    """Upload a user-managed file to Files."""
+    return await upload_file(
+        file=file,
+        folder_id=folder_id,
+        generate_stl_thumbnails=generate_stl_thumbnails,
+        db=db,
+        current_user=current_user,
+        api_key_owner=api_key_owner,
+    )
 
 
 @router.post("/files/extract-zip", response_model=ZipExtractResponse)

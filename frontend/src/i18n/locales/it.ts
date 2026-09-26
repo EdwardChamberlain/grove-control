@@ -3811,6 +3811,7 @@ export default {
     runningWithProgress: '{{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     runningWithProgressMultiPlate: 'Piatto {{plateIndex}} di {{plateCount}} • {{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     completedToast: '{{name}} sezionato',
+    completedToFilesToast: '{{name}} sezionato e salvato in File',
     failedTitle: 'Slicing fallito',
     failedToast: 'Slicing di {{name}} fallito: {{detail}}',
     tier: {

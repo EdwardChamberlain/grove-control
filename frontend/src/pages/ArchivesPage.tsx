@@ -822,6 +822,11 @@ function ArchiveCard({
             {archive.status === 'aborted' ? t('archives.card.cancelled') : t('archives.card.failed')}
           </div>
         )}
+        {archive.status === 'dispatching' && (
+          <div className="absolute top-2 left-12 px-2 py-1 rounded text-xs bg-amber-500/90 text-white">
+            {t('queue.status.dispatching')}
+          </div>
+        )}
         {/* Duplicate badge */}
         {archive.duplicate_count > 0 && duplicateSequence > 0 && originalArchiveId && (
           <button
@@ -2090,6 +2095,11 @@ function ArchiveListRow({
             {(archive.status === 'failed' || archive.status === 'aborted') && (
               <span className="px-1.5 py-0.5 rounded text-[10px] leading-tight bg-status-error/80 text-white flex-shrink-0">
                 {archive.status === 'aborted' ? t('archives.card.cancelled') : t('archives.card.failed')}
+              </span>
+            )}
+            {archive.status === 'dispatching' && (
+              <span className="px-1.5 py-0.5 rounded text-[10px] leading-tight bg-amber-500/90 text-white flex-shrink-0">
+                {t('queue.status.dispatching')}
               </span>
             )}
             {archive.duplicate_count > 0 && duplicateSequence > 0 && originalArchiveId && (

@@ -77,12 +77,9 @@ async def upload_queue_source(
         db=db,
         current_user=current_user,
         api_key_owner=api_key_owner,
+        queue_only=True,
+        queue_source_sealed=False,
     )
-    library_file = await db.get(LibraryFile, response.id)
-    if library_file is None:
-        raise HTTPException(status_code=500, detail="Queue source could not be loaded")
-    library_file.queue_only = True
-    await db.commit()
     return response
 
 
@@ -103,6 +100,9 @@ async def discard_queue_source(
     if actor is not None and library_file.created_by_id != actor.id:
         raise HTTPException(status_code=404, detail="Queue source not found")
 
+    # Closing the setup modal means no more fan-out requests can arrive. The
+    # cleanup helper still protects any queue items already using this source.
+    library_file.queue_source_sealed = True
     paths = await remove_queue_only_source_if_unused(db, file_id)
     await db.flush()
     deleted = await db.get(LibraryFile, file_id) is None
@@ -1677,6 +1677,12 @@ async def stop_queue_item(
     item.status = "cancelled"
     item.completed_at = datetime.now(timezone.utc)
     item.error_message = "Stopped by user" if stop_sent else "Stopped by user (printer was offline)"
+    if item.archive_id:
+        archive = await db.get(PrintArchive, item.archive_id)
+        if archive and (archive.extra_data or {}).get("queue_item_id") == item.id:
+            archive.status = "aborted"
+            archive.completed_at = item.completed_at
+            archive.failure_reason = None
     await db.commit()
 
     from backend.app.main import unregister_expected_print

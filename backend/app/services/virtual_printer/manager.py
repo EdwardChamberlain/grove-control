@@ -786,15 +786,6 @@ class VirtualPrinterInstance:
                         if raw is not None:
                             nozzle_mapping_json = json.dumps(raw)
 
-                async def mark_queue_only_source(file_id: int) -> None:
-                    from backend.app.models.library import LibraryFile
-
-                    source = await db.get(LibraryFile, file_id)
-                    if source is None:
-                        raise RuntimeError("Virtual-printer Queue source could not be loaded")
-                    source.queue_only = True
-                    await db.commit()
-
                 uploaded_file = await upload_file(
                     file=UploadFile(file=BytesIO(file_path.read_bytes()), filename=file_path.name),
                     folder_id=None,
@@ -802,6 +793,8 @@ class VirtualPrinterInstance:
                     db=db,
                     current_user=None,
                     api_key_owner=None,
+                    queue_only=True,
+                    queue_source_sealed=True,
                 )
                 if uploaded_file:
                     logger.info("[VP %s] Prepared queue-only source: %s", self.name, uploaded_file.id)
@@ -816,22 +809,7 @@ class VirtualPrinterInstance:
                     # comes through as `[N]` (one plate index) so the loop
                     # below runs once and the existing behaviour is preserved.
                     plate_ids = self._extract_plate_ids(file_path)
-                    uploaded_files = [uploaded_file]
-                    uploaded_file_bytes = file_path.read_bytes()
                     library_file_ids_to_cleanup.append(uploaded_file.id)
-                    await mark_queue_only_source(uploaded_file.id)
-                    for _ in plate_ids[1:]:
-                        plate_upload = await upload_file(
-                            file=UploadFile(file=BytesIO(uploaded_file_bytes), filename=file_path.name),
-                            folder_id=None,
-                            generate_stl_thumbnails=True,
-                            db=db,
-                            current_user=None,
-                            api_key_owner=None,
-                        )
-                        uploaded_files.append(plate_upload)
-                        library_file_ids_to_cleanup.append(plate_upload.id)
-                        await mark_queue_only_source(plate_upload.id)
 
                     # Pick a base position the same way the manual /print-queue/
                     # POST does, then hand consecutive positions to each plate
@@ -886,7 +864,7 @@ class VirtualPrinterInstance:
                         queue_item = PrintQueueItem(
                             printer_id=self.target_printer_id,
                             target_model=target_model,
-                            library_file_id=uploaded_files[offset - 1].id,
+                            library_file_id=uploaded_file.id,
                             plate_id=plate_id,
                             position=max_pos + offset,
                             status="pending",

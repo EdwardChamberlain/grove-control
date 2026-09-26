@@ -3825,6 +3825,7 @@ export default {
     runningWithProgress: '{{name}} — {{stage}} ({{percent}}%) — {{elapsed}}',
     runningWithProgressMultiPlate: 'Bandeja {{plateIndex}} de {{plateCount}} • {{name}} — {{stage}} ({{percent}}%) — {{elapsed}}',
     completedToast: '{{name}} laminado',
+    completedToFilesToast: '{{name}} laminado y guardado en Archivos',
     failedTitle: 'Error al laminar',
     failedToast: 'Error al laminar {{name}}: {{detail}}',
     tier: {

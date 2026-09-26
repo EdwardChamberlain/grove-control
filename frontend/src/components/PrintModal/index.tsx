@@ -50,7 +50,6 @@ export function PrintModal({
   onClose,
   onSuccess,
   projectId,
-  cleanupLibraryAfterDispatch,
   variantFiles,
 }: PrintModalProps) {
   const { t } = useTranslation();
@@ -976,9 +975,6 @@ export function PrintModal({
           : undefined,
         ...printOptions,
         project_id: projectId ?? undefined,
-        // The server only enables cleanup for a queue-only upload source.
-        // It keeps the source while any fan-out item still needs it.
-        cleanup_library_after_dispatch: cleanupLibraryAfterDispatch,
       };
     };
 

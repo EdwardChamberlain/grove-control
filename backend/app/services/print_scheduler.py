@@ -4312,7 +4312,7 @@ class PrintScheduler:
             )
         except Exception:
             logger.exception("Queue item %s: dispatch confirmation crashed", queue_item_id)
-            return
+            telemetry_status, last_status = None, None
         if telemetry_status == "printing":
 
             async def _promote(db: AsyncSession) -> bool:

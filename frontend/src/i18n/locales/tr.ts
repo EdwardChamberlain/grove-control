@@ -3813,6 +3813,7 @@ export default {
     runningWithProgress: '{{name}} — {{stage}} (%{{percent}}) — {{elapsed}}',
     runningWithProgressMultiPlate: '{{plateCount}}/{{plateIndex}} plaka • {{name}} — {{stage}} (%{{percent}}) — {{elapsed}}',
     completedToast: '{{name}} dilimlendi',
+    completedToFilesToast: '{{name}} dilimlendi ve Dosyalar’a kaydedildi',
     failedTitle: 'Dilimleme başarısız',
     failedToast: '{{name}} dilimleme başarısız: {{detail}}',
     tier: {

@@ -3811,6 +3811,7 @@ export default {
     runningWithProgress: '{{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     runningWithProgressMultiPlate: 'Bandeja {{plateIndex}} de {{plateCount}} • {{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     completedToast: '{{name}} fatiado',
+    completedToFilesToast: '{{name}} fatiado e salvo em Arquivos',
     failedTitle: 'Falha ao fatiar',
     failedToast: 'Falha ao fatiar {{name}}: {{detail}}',
     tier: {

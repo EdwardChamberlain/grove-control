@@ -179,7 +179,11 @@ export function SliceJobTrackerProvider({ children }: { children: ReactNode }) {
         // embedded-settings fallback as a normal path) and just added
         // noise — see the trailing yellow toast complaint, removed.
         showToast(
-          t('slice.completedToast', 'Sliced {{name}}', { name: prettifyFilename(job.sourceName) }),
+          t(
+            job.kind === 'archive' ? 'slice.completedToFilesToast' : 'slice.completedToast',
+            job.kind === 'archive' ? 'Sliced {{name}} and saved to Files' : 'Sliced {{name}}',
+            { name: prettifyFilename(job.sourceName) },
+          ),
           'success',
         );
       } else if (state.status === 'failed') {

@@ -3810,6 +3810,7 @@ export default {
     runningWithProgress: '{{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     runningWithProgressMultiPlate: '盘面 {{plateIndex}} / {{plateCount}} • {{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     completedToast: '已切片 {{name}}',
+    completedToFilesToast: '已切片 {{name}} 并保存到文件',
     failedTitle: '切片失败',
     failedToast: '切片 {{name}} 失败：{{detail}}',
     tier: {
