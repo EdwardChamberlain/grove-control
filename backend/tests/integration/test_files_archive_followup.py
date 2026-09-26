@@ -252,7 +252,10 @@ class TestQueueUploadSourceLifecycle:
         assert source.queue_source_sealed is True
         assert source_path.is_file()
 
-        terminal = await async_client.post(f"/api/v1/queue/{later_item.id}/{terminal_action}")
+        if terminal_action == "cancel":
+            terminal = await async_client.post(f"/api/v1/queue/{later_item.id}/cancel")
+        else:
+            terminal = await async_client.delete(f"/api/v1/queue/{later_item.id}")
         assert terminal.status_code == 200
         assert await db_session.scalar(select(func.count(LibraryFile.id)).where(LibraryFile.id == library_file_id)) == 0
         assert not source_path.exists()
