@@ -108,6 +108,7 @@ from backend.app.services.printer_manager import (
     printer_manager,
     printer_state_to_dict,
 )
+from backend.app.services.queue_source_cleanup import start_queue_source_cleanup, stop_queue_source_cleanup
 from backend.app.services.slot_nozzle import (
     resolve_slot_nozzle,
 )
@@ -6887,6 +6888,10 @@ async def lifespan(app: FastAPI):
     # L-2: Start periodic auth cleanup (stale TOTP + expired revoked JTIs)
     start_auth_cleanup()
 
+    # Seal abandoned Queue upload intake after 24 hours and clean its source
+    # File if no active or retryable queue item still needs it.
+    start_queue_source_cleanup()
+
     # Event-loop stall watchdog: dumps all thread stacks to stderr if the loop
     # freezes (#1486 — silent "container hangs after adding a printer" reports).
     from backend.app.services.loop_watchdog import start_loop_watchdog
@@ -6935,6 +6940,7 @@ async def lifespan(app: FastAPI):
         logging.warning("Failed to shut down camera broadcasters: %s", e)
     stop_expected_prints_cleanup()
     stop_auth_cleanup()
+    stop_queue_source_cleanup()
     printer_manager.disconnect_all()
     await close_spoolman_client()
 

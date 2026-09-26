@@ -770,6 +770,21 @@ async def add_to_queue(
         if not library_file:
             raise HTTPException(400, "Library file not found")
         _assert_can_queue_library_file(library_file, actor)
+        if library_file.queue_only:
+            # Serialize new queue references against discard/stale-source
+            # cleanup. Once intake is sealed, no more fan-out items may attach.
+            result = await db.execute(
+                LibraryFile.active()
+                .where(LibraryFile.id == data.library_file_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            library_file = result.scalar_one_or_none()
+            if not library_file:
+                raise HTTPException(400, "Library file not found")
+            _assert_can_queue_library_file(library_file, actor)
+            if not library_file.queue_only or library_file.queue_source_sealed:
+                raise HTTPException(400, "Queue upload source is no longer accepting queue items")
         # Bambu SD card is FAT32/exFAT — illegal filename chars would 553 at
         # FTP upload time (#1540). Reject at queue time so the user gets the
         # actionable error before waiting in queue.

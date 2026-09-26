@@ -3391,15 +3391,15 @@ async def save_archive_to_files(
     if not archive.file_path:
         raise HTTPException(status_code=404, detail="This print has no retained artifact to save")
 
-    stored_path = Path(archive.file_path)
-    source_path = (
-        stored_path
-        if stored_path.is_absolute()
-        else safe_join_under(Path(settings.base_dir), archive.file_path, http=False)
-    )
     try:
+        stored_path = Path(archive.file_path)
+        source_path = (
+            stored_path
+            if stored_path.is_absolute()
+            else safe_join_under(Path(settings.base_dir), archive.file_path, http=False)
+        )
         source_path = assert_under(Path(settings.archive_dir), source_path, http=False)
-    except ValueError as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=404, detail="Archive artifact path is invalid") from exc
     if not source_path.is_file():
         raise HTTPException(status_code=404, detail="Archive artifact is missing from disk")

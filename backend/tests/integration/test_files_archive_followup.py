@@ -1,5 +1,6 @@
 """Regression coverage for the Files/Archive follow-up fixes on PR #189."""
 
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile
@@ -14,7 +15,7 @@ from backend.app.core.config import settings
 from backend.app.models.library import LibraryFile
 from backend.app.models.pending_upload import PendingUpload
 from backend.app.models.print_queue import PrintQueueItem
-from backend.app.services.queue_source_cleanup import remove_queue_only_source_if_unused
+from backend.app.services.queue_source_cleanup import remove_queue_only_source_if_unused, sweep_stale_queue_sources
 
 
 def _configure_storage(monkeypatch, tmp_path: Path) -> tuple[Path, Path]:
@@ -177,8 +178,87 @@ class TestArchiveSaveToFilesPaths:
         assert response.status_code == 404
         assert response.json()["detail"] == "Archive artifact path is invalid"
 
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_save_rejects_malformed_relative_artifact_with_not_found(
+        self,
+        async_client: AsyncClient,
+        archive_factory,
+        printer_factory,
+        monkeypatch,
+        tmp_path: Path,
+    ):
+        _configure_storage(monkeypatch, tmp_path)
+        printer = await printer_factory()
+        archive = await archive_factory(printer.id, filename="invalid.3mf", file_path="../outside.3mf")
+
+        response = await async_client.post(f"/api/v1/archives/{archive.id}/save-to-files")
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Archive artifact path is invalid"
+
 
 class TestQueueUploadSourceLifecycle:
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    @pytest.mark.parametrize("keep_for_active_item", [False, True])
+    async def test_stale_source_sweep_seals_abandoned_uploads_and_preserves_active_items(
+        self,
+        async_client: AsyncClient,
+        db_session: AsyncSession,
+        printer_factory,
+        monkeypatch,
+        tmp_path: Path,
+        keep_for_active_item: bool,
+    ):
+        _configure_storage(monkeypatch, tmp_path)
+        response = await async_client.post(
+            "/api/v1/queue/upload-source",
+            files={"file": ("abandoned.gcode.3mf", _three_mf_bytes(), "application/octet-stream")},
+        )
+        assert response.status_code == 200, response.text
+        library_file_id = response.json()["id"]
+        source = await db_session.get(LibraryFile, library_file_id)
+        assert source is not None
+        source_path = Path(settings.base_dir) / source.file_path
+        assert source_path.is_file()
+
+        if keep_for_active_item:
+            printer = await printer_factory()
+            pending_item = PrintQueueItem(
+                printer_id=printer.id,
+                library_file_id=library_file_id,
+                position=1,
+                status="pending",
+                cleanup_library_after_dispatch=True,
+            )
+            db_session.add(pending_item)
+
+        source.created_at = datetime.now(timezone.utc) - timedelta(hours=25)
+        await db_session.commit()
+
+        sealed_count = await sweep_stale_queue_sources(db_session)
+
+        assert sealed_count == 1
+        source = await db_session.get(LibraryFile, library_file_id)
+        if keep_for_active_item:
+            assert source is not None and source.queue_source_sealed is True
+            assert source_path.is_file()
+            assert pending_item.library_file_id == library_file_id
+
+            late_item = await async_client.post(
+                "/api/v1/queue/",
+                json={"printer_id": pending_item.printer_id, "library_file_id": library_file_id},
+            )
+            assert late_item.status_code == 400
+            assert late_item.json()["detail"] == "Queue upload source is no longer accepting queue items"
+
+            cancelled = await async_client.post(f"/api/v1/queue/{pending_item.id}/cancel")
+            assert cancelled.status_code == 200, cancelled.text
+
+        assert await db_session.get(LibraryFile, library_file_id) is None
+        assert not source_path.exists()
+
     @pytest.mark.asyncio
     @pytest.mark.integration
     @pytest.mark.parametrize("terminal_action", ["cancel", "delete"])
