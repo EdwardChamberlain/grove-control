@@ -160,7 +160,7 @@ class PrintQueueItem(Base):
 
     # Relationships
     printer: Mapped["Printer"] = relationship()
-    archive: Mapped["PrintArchive | None"] = relationship()
+    archive: Mapped["PrintArchive | None"] = relationship(foreign_keys=[archive_id])
     library_file: Mapped["LibraryFile | None"] = relationship()
     project: Mapped["Project | None"] = relationship(back_populates="queue_items")
     created_by: Mapped["User | None"] = relationship()
