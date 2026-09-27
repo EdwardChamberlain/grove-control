@@ -464,13 +464,15 @@ class TestDispatchArchiveLifecycle:
         db_session.add(item)
         await db_session.commit()
         await db_session.refresh(item)
+        item_id = item.id
 
         archive = await archive_factory(
             printer.id,
             status="dispatching",
-            dispatched_queue_item_id=item.id,
+            dispatched_queue_item_id=item_id,
             extra_data={"source": "queue_dispatch"},
         )
+        archive_id = archive.id
         item.archive_id = archive.id
         await db_session.commit()
 
@@ -480,17 +482,17 @@ class TestDispatchArchiveLifecycle:
             file_path="archives/duplicate.3mf",
             file_size=1,
             status="dispatching",
-            dispatched_queue_item_id=item.id,
+            dispatched_queue_item_id=item_id,
         )
         db_session.add(duplicate)
         with pytest.raises(IntegrityError):
             await db_session.commit()
         await db_session.rollback()
 
-        item = await db_session.get(PrintQueueItem, item.id)
-        archive = await db_session.get(PrintArchive, archive.id)
+        item = await db_session.get(PrintQueueItem, item_id)
+        archive = await db_session.get(PrintArchive, archive_id)
         assert item is not None and archive is not None
-        response = await async_client.delete(f"/api/v1/queue/{item.id}")
+        response = await async_client.delete(f"/api/v1/queue/{item_id}")
         assert response.status_code == 200, response.text
         await db_session.refresh(archive)
         assert archive.dispatched_queue_item_id is None
