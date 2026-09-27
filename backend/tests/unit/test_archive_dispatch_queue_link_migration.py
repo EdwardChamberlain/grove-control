@@ -17,15 +17,15 @@ async def test_archive_dispatch_queue_link_backfills_only_unambiguous_rows(monke
             await conn.execute(text("CREATE TABLE print_archives (id INTEGER PRIMARY KEY, extra_data JSON)"))
             await conn.execute(text("INSERT INTO print_queue (id) VALUES (10), (20)"))
             await conn.execute(
-                text(
-                    "INSERT INTO print_archives (id, extra_data) VALUES "
-                    "(1, '{\"queue_item_id\":10}'), "
-                    "(2, '{\"queue_item_id\":20}'), "
-                    "(3, '{\"queue_item_id\":20}'), "
-                    "(4, '{\"queue_item_id\":99}'), "
-                    '(5, \'{"queue_item_id":"10"}\'), '
-                    "(6, 'not-json')"
-                )
+                text("INSERT INTO print_archives (id, extra_data) VALUES (:id, :extra_data)"),
+                [
+                    {"id": 1, "extra_data": '{"queue_item_id":10}'},
+                    {"id": 2, "extra_data": '{"queue_item_id":20}'},
+                    {"id": 3, "extra_data": '{"queue_item_id":20}'},
+                    {"id": 4, "extra_data": '{"queue_item_id":99}'},
+                    {"id": 5, "extra_data": '{"queue_item_id":"10"}'},
+                    {"id": 6, "extra_data": "not-json"},
+                ],
             )
 
             await database._migrate_archive_dispatch_queue_link(conn)
