@@ -130,6 +130,7 @@ async def _dispatch_library_item(
         created_by_id=None,
         project_id=None,
         subtask_id=None,
+        dispatched_queue_item_id=None,
         prefer_filename_for_name=False,
         commit=True,
     ):
@@ -153,6 +154,7 @@ async def _dispatch_library_item(
             status=(print_data or {}).get("status", "completed"),
             project_id=project_id,
             created_by_id=created_by_id,
+            dispatched_queue_item_id=dispatched_queue_item_id,
         )
         self.db.add(archive)
         await self.db.flush()

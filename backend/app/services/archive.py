@@ -10,7 +10,7 @@ from datetime import date, datetime, time, timezone
 from pathlib import Path
 
 from defusedxml import ElementTree as ET
-from sqlalchemy import and_, or_, select, text
+from sqlalchemy import and_, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.config import settings
@@ -21,6 +21,72 @@ from backend.app.models.printer import Printer
 from backend.app.utils.safe_path import PathTraversalError, safe_join_under
 
 logger = logging.getLogger(__name__)
+
+
+async def record_dispatch_outcome(
+    db: AsyncSession,
+    *,
+    status: str,
+    dispatched_queue_item_id: int | None = None,
+    archive_id: int | None = None,
+    started_at: datetime | None = None,
+    completed_at: datetime | None = None,
+    failure_reason: str | None = None,
+    preserve_failure_reason: bool = False,
+    clear_failure_reason: bool = False,
+    clear_completed_at: bool = False,
+) -> PrintArchive | None:
+    """Record one dispatch lifecycle outcome on its exact Archive attempt.
+
+    Queue outcomes are resolved through the durable, unique queue-item link.
+    ``archive_id`` further constrains that lookup when available, preventing a
+    stale queue row from mutating another attempt. For non-queue printer events
+    the explicit Archive ID remains a valid target. The caller owns commit.
+    """
+    query = select(PrintArchive)
+    if dispatched_queue_item_id is not None:
+        query = query.where(PrintArchive.dispatched_queue_item_id == dispatched_queue_item_id)
+        if archive_id is not None:
+            query = query.where(PrintArchive.id == archive_id)
+    elif archive_id is not None:
+        query = query.where(PrintArchive.id == archive_id)
+    else:
+        return None
+
+    result = await db.execute(query)
+    archive = result.scalar_one_or_none()
+    if archive is None:
+        return None
+
+    archive.status = status
+    if started_at is not None:
+        archive.started_at = started_at
+    if completed_at is not None:
+        archive.completed_at = completed_at
+    elif clear_completed_at:
+        archive.completed_at = None
+    if failure_reason is not None:
+        if not preserve_failure_reason or not archive.failure_reason:
+            archive.failure_reason = failure_reason
+    elif clear_failure_reason:
+        archive.failure_reason = None
+    return archive
+
+
+async def detach_dispatch_archive_links(db: AsyncSession, queue_item_ids: list[int]) -> None:
+    """Clear Archive links before deleting queue rows.
+
+    PostgreSQL enforces the foreign key's ON DELETE action. SQLite deployments
+    do not enable foreign-key enforcement on every legacy connection, so
+    application deletion paths also perform the same update explicitly.
+    """
+    if not queue_item_ids:
+        return
+    await db.execute(
+        update(PrintArchive)
+        .where(PrintArchive.dispatched_queue_item_id.in_(queue_item_ids))
+        .values(dispatched_queue_item_id=None)
+    )
 
 
 def _stored_archive_path(path: Path) -> str:
@@ -978,6 +1044,10 @@ async def _delete_related_queue_items(db: AsyncSession, archive_id: int) -> int:
 
     from backend.app.models.print_queue import PrintQueueItem
 
+    queue_item_ids = list(
+        (await db.scalars(select(PrintQueueItem.id).where(PrintQueueItem.archive_id == archive_id))).all()
+    )
+    await detach_dispatch_archive_links(db, queue_item_ids)
     result = await db.execute(sa_delete(PrintQueueItem).where(PrintQueueItem.archive_id == archive_id))
     return result.rowcount or 0
 
@@ -1167,6 +1237,7 @@ class ArchiveService:
         subtask_id: str | None = None,
         prefer_filename_for_name: bool = False,
         commit: bool = True,
+        dispatched_queue_item_id: int | None = None,
     ) -> PrintArchive | None:
         """Archive a 3MF file with metadata.
 
@@ -1182,6 +1253,9 @@ class ArchiveService:
             subtask_id: MQTT-provided task identifier (optional). Used to match an
                 existing archive across a backend restart mid-print so the
                 original row can be resumed instead of cancelled (#972).
+            dispatched_queue_item_id: Queue item that created this dispatch
+                attempt, stored as a real unique foreign key for exact outcome
+                updates.
             prefer_filename_for_name: When True, use the uploaded filename stem as the
                 archive's display name even if the 3MF embeds a `print_name` in its
                 metadata. Used by virtual-printer flows so users who rename a job in
@@ -1342,6 +1416,7 @@ class ArchiveService:
             created_by_id=created_by_id,
             project_id=project_id,
             subtask_id=subtask_id,
+            dispatched_queue_item_id=dispatched_queue_item_id,
         )
 
         self.db.add(archive)

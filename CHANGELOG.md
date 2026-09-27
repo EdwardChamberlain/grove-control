@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Queue dispatches now create an Archive attempt linked to its queue item by a
+  unique database foreign key. Existing unambiguous links are backfilled during
+  startup migration, and deleting a queue item clears the link while retaining
+  the Archive history.
+- G-code injection now wraps Grove snippets in markers. Reprinting an archived
+  snapshot removes old Grove-marked snippets before applying the current
+  settings, so each snippet runs once and the saved snapshot remains unchanged.
+- Added operator guidance for Files, Queue-only upload sources, and Archive
+  attempts in [the workflow guide](docs/files-queue-archive.md).
+
+### Fixed
+
+- Queue-only uploads are excluded from automatic Files purging and serialize
+  cleanup against queue submissions.
+
+### Upgrade notes
+
+- The new nullable Archive-to-queue link is added and safely backfilled
+  automatically at startup for existing databases. No manual migration is
+  required; keep a backup until the upgraded service has started successfully.
+
 ## 1.0.0
 
 Grove Control 1.0.0 is the stable release line.

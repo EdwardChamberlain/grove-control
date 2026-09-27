@@ -620,6 +620,25 @@ _HEADER_KEY_RE = re.compile(r"^;\s*([^:]+?)\s*:\s*(.+?)\s*$")
 _PLACEHOLDER_RE = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 _START_GCODE_END_MARKER = "; MACHINE_START_GCODE_END"
 _EXECUTABLE_BLOCK_END_MARKER = "; EXECUTABLE_BLOCK_END"
+_GROVE_START_GCODE_BEGIN = "; GROVE_INJECT_START_BEGIN"
+_GROVE_START_GCODE_END = "; GROVE_INJECT_START_END"
+_GROVE_END_GCODE_BEGIN = "; GROVE_INJECT_END_BEGIN"
+_GROVE_END_GCODE_END = "; GROVE_INJECT_END_END"
+_GROVE_INJECTION_BLOCKS = (
+    re.compile(r"(?ms)^; GROVE_INJECT_START_BEGIN\r?\n.*?^; GROVE_INJECT_START_END(?:\r?\n|$)"),
+    re.compile(r"(?ms)^; GROVE_INJECT_END_BEGIN\r?\n.*?^; GROVE_INJECT_END_END(?:\r?\n|$)"),
+)
+
+
+def _remove_grove_injected_blocks(content: str) -> str:
+    """Remove only complete, marker-bounded snippets previously added by Grove."""
+    for pattern in _GROVE_INJECTION_BLOCKS:
+        content = pattern.sub("", content)
+    return content
+
+
+def _marked_gcode_block(snippet: str, begin_marker: str, end_marker: str) -> str:
+    return f"{begin_marker}\n{snippet.rstrip()}\n{end_marker}\n"
 
 
 def _parse_3mf_gcode_header(content: str) -> dict[str, str]:
@@ -681,15 +700,16 @@ def _inject_start_at_marker(content: str, snippet: str) -> str:
     prepending if the marker isn't present (older files / non-Bambu slicers).
     """
     marker_idx = content.find(_START_GCODE_END_MARKER)
+    marked_snippet = _marked_gcode_block(snippet, _GROVE_START_GCODE_BEGIN, _GROVE_START_GCODE_END)
     if marker_idx == -1:
         logger.warning(
             "G-code injection: '%s' not found, prepending start snippet to whole file",
             _START_GCODE_END_MARKER,
         )
-        return snippet.rstrip("\n") + "\n" + content
+        return marked_snippet + content
     line_start = content.rfind("\n", 0, marker_idx)
     line_start = 0 if line_start == -1 else line_start + 1
-    return content[:line_start] + snippet.rstrip("\n") + "\n" + content[line_start:]
+    return content[:line_start] + marked_snippet + content[line_start:]
 
 
 def _inject_end_before_marker(content: str, snippet: str) -> str:
@@ -704,15 +724,16 @@ def _inject_end_before_marker(content: str, snippet: str) -> str:
     the marker isn't present.
     """
     marker_idx = content.find(_EXECUTABLE_BLOCK_END_MARKER)
+    marked_snippet = _marked_gcode_block(snippet, _GROVE_END_GCODE_BEGIN, _GROVE_END_GCODE_END)
     if marker_idx == -1:
         logger.warning(
             "G-code injection: '%s' not found, appending end snippet to file end",
             _EXECUTABLE_BLOCK_END_MARKER,
         )
-        return content.rstrip("\n") + "\n" + snippet.rstrip("\n") + "\n"
+        return content.rstrip("\n") + "\n" + marked_snippet
     line_start = content.rfind("\n", 0, marker_idx)
     line_start = 0 if line_start == -1 else line_start + 1
-    return content[:line_start] + snippet.rstrip("\n") + "\n" + content[line_start:]
+    return content[:line_start] + marked_snippet + content[line_start:]
 
 
 def _plate_number_of(name: str) -> int | None:
@@ -778,9 +799,6 @@ def inject_gcode_into_3mf(
     """
     import tempfile
 
-    if not start_gcode and not end_gcode:
-        return None
-
     try:
         # Find the target gcode file inside the 3MF
         with zipfile.ZipFile(source_path, "r") as zf:
@@ -801,7 +819,11 @@ def inject_gcode_into_3mf(
                 target_gcode = all_gcode[0]
 
             # Read and modify gcode content
-            gcode_content = zf.read(target_gcode).decode("utf-8", errors="ignore")
+            original_gcode = zf.read(target_gcode).decode("utf-8", errors="ignore")
+            gcode_content = _remove_grove_injected_blocks(original_gcode)
+            has_existing_injection = gcode_content != original_gcode
+            if not start_gcode and not end_gcode and not has_existing_injection:
+                return None
             header = _parse_3mf_gcode_header(gcode_content)
 
             if start_gcode:

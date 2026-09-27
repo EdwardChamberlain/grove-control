@@ -31,7 +31,7 @@ Grove Control brings together printer monitoring, scheduling, automation, and pr
 
 - **Printer monitoring and control**: View live printer status, camera feeds, temperatures, fan states, AMS data, HMS errors, and job progress from a central dashboard.
 - **Production scheduling**: Queue, schedule, and dispatch prints across multiple printers with support for batch jobs, model-based assignment, filament validation, and clear-plate workflows.
-- **Print archive and history**: Automatically archive completed prints with metadata, thumbnails, reprint support, print logs, cost tracking, and failure history.
+- **Print archive and history**: Archive dispatched print attempts with the exact file sent to the printer, metadata, thumbnails, reprint support, print logs, cost tracking, and failure history.
 - **Multi-printer fleet management**: Manage multiple Bambu Lab printers from one interface, with filtering, search, bulk actions, and per-printer configuration.
 - **File and project management**: Organise sliced files, library folders, MakerWorld imports, project groups, plates, parts, and related print assets.
 - **Spool and filament tracking**: Track spool inventory, AMS assignments, filament usage, remaining weight, material profiles, costs, and low-stock alerts.
@@ -44,6 +44,8 @@ Grove Control brings together printer monitoring, scheduling, automation, and pr
 
 For upgrade and release guidance, see [UPDATING.md](UPDATING.md),
 [CHANGELOG.md](CHANGELOG.md), and the [Docker install guide](install/README.md).
+For how Files, Queue uploads, and print Archives fit together, see
+[Files, Queue, and Archives](docs/files-queue-archive.md).
 
 ---
 

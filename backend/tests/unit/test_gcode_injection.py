@@ -47,7 +47,7 @@ class TestInjectGcodeInto3mf:
             with zipfile.ZipFile(result, "r") as zf:
                 gcode = zf.read("Metadata/plate_1.gcode").decode("utf-8")
 
-            assert gcode.startswith("M117 Start\nG92 E0\n")
+            assert "; GROVE_INJECT_START_BEGIN\nM117 Start\nG92 E0\n; GROVE_INJECT_START_END\n" in gcode
             assert "G28\nM400\n" in gcode
         finally:
             source.unlink(missing_ok=True)
@@ -64,7 +64,7 @@ class TestInjectGcodeInto3mf:
             with zipfile.ZipFile(result, "r") as zf:
                 gcode = zf.read("Metadata/plate_1.gcode").decode("utf-8")
 
-            assert gcode.endswith("M104 S0\nG28 X\n")
+            assert "; GROVE_INJECT_END_BEGIN\nM104 S0\nG28 X\n; GROVE_INJECT_END_END\n" in gcode
             assert gcode.startswith("G28\nM400")
         finally:
             source.unlink(missing_ok=True)
@@ -81,8 +81,8 @@ class TestInjectGcodeInto3mf:
             with zipfile.ZipFile(result, "r") as zf:
                 gcode = zf.read("Metadata/plate_1.gcode").decode("utf-8")
 
-            assert gcode.startswith("; START\n")
-            assert gcode.endswith("; END\n")
+            assert "; GROVE_INJECT_START_BEGIN\n; START\n; GROVE_INJECT_START_END\n" in gcode
+            assert "; GROVE_INJECT_END_BEGIN\n; END\n; GROVE_INJECT_END_END\n" in gcode
             assert "G28" in gcode
         finally:
             source.unlink(missing_ok=True)
@@ -125,7 +125,7 @@ class TestInjectGcodeInto3mf:
 
             # Only plate 2 should be modified
             assert plate1 == "PLATE1\n"
-            assert plate2.startswith("; INJECTED\n")
+            assert plate2.startswith("; GROVE_INJECT_START_BEGIN\n; INJECTED\n; GROVE_INJECT_START_END\n")
         finally:
             source.unlink(missing_ok=True)
             if result:
@@ -188,7 +188,7 @@ class TestInjectGcodeInto3mf:
             with zipfile.ZipFile(result, "r") as zf:
                 gcode = zf.read("Metadata/plate_1.gcode").decode("utf-8")
 
-            assert gcode.startswith("; INJECTED\n")
+            assert gcode.startswith("; GROVE_INJECT_START_BEGIN\n; INJECTED\n; GROVE_INJECT_START_END\n")
         finally:
             source.unlink(missing_ok=True)
             if result:
@@ -324,6 +324,66 @@ class TestMd5SidecarRecompute:
 class TestStartAnchoredInjection:
     """Tests for #422 follow-up: start g-code injected at MACHINE_START_GCODE_END."""
 
+    def test_reprinting_archive_snapshot_replaces_marked_snippets_once(self):
+        """A saved dispatch snapshot keeps its bytes while replay uses current snippets once."""
+        snapshot_gcode = _BAMBU_GCODE_TEMPLATE.replace(
+            "; MACHINE_START_GCODE_END",
+            "; GROVE_INJECT_START_BEGIN\nOLD_START\n; GROVE_INJECT_START_END\n; MACHINE_START_GCODE_END",
+        )
+        snapshot_gcode += (
+            "; EXECUTABLE_BLOCK_START\n"
+            "; GROVE_INJECT_END_BEGIN\nOLD_END\n; GROVE_INJECT_END_END\n"
+            "; EXECUTABLE_BLOCK_END\n"
+        )
+        snapshot = _make_test_3mf(snapshot_gcode)
+        original_bytes = snapshot.read_bytes()
+        first_reprint = None
+        second_reprint = None
+        try:
+            first_reprint = inject_gcode_into_3mf(snapshot, 1, "NEW_START", "NEW_END")
+            assert first_reprint is not None
+            second_reprint = inject_gcode_into_3mf(first_reprint, 1, "NEW_START", "NEW_END")
+            assert second_reprint is not None
+
+            with zipfile.ZipFile(second_reprint, "r") as zf:
+                replayed = zf.read("Metadata/plate_1.gcode").decode("utf-8")
+
+            assert replayed.count("; GROVE_INJECT_START_BEGIN") == 1
+            assert replayed.count("; GROVE_INJECT_END_BEGIN") == 1
+            assert replayed.count("NEW_START") == 1
+            assert replayed.count("NEW_END") == 1
+            assert "OLD_START" not in replayed
+            assert "OLD_END" not in replayed
+            assert snapshot.read_bytes() == original_bytes
+        finally:
+            snapshot.unlink(missing_ok=True)
+            if first_reprint:
+                first_reprint.unlink(missing_ok=True)
+            if second_reprint:
+                second_reprint.unlink(missing_ok=True)
+
+    def test_reprint_removes_marked_snapshot_snippets_when_current_snippets_are_empty(self):
+        snapshot_gcode = _BAMBU_GCODE_TEMPLATE.replace(
+            "; MACHINE_START_GCODE_END",
+            "; GROVE_INJECT_START_BEGIN\nOLD_START\n; GROVE_INJECT_START_END\n; MACHINE_START_GCODE_END",
+        )
+        snapshot = _make_test_3mf(snapshot_gcode)
+        result = None
+        try:
+            result = inject_gcode_into_3mf(snapshot, 1, None, None)
+            assert result is not None
+
+            with zipfile.ZipFile(result, "r") as zf:
+                replayed = zf.read("Metadata/plate_1.gcode").decode("utf-8")
+
+            assert "GROVE_INJECT" not in replayed
+            assert "OLD_START" not in replayed
+            assert "M109 S220" in replayed
+        finally:
+            snapshot.unlink(missing_ok=True)
+            if result:
+                result.unlink(missing_ok=True)
+
     def test_start_lands_after_printer_startup(self):
         """Start snippet sits immediately before MACHINE_START_GCODE_END, not at file head."""
         source = _make_test_3mf(_BAMBU_GCODE_TEMPLATE)
@@ -338,14 +398,14 @@ class TestStartAnchoredInjection:
             assert gcode.startswith("; HEADER_BLOCK_START\n")
             # Snippet sits right above the marker.
             marker_idx = gcode.index("; MACHINE_START_GCODE_END")
-            snippet_idx = gcode.index("; SWAPMOD-START")
-            assert snippet_idx < marker_idx
-            # Nothing else between snippet and marker except the trailing newline.
-            between = gcode[snippet_idx:marker_idx]
-            assert between == "; SWAPMOD-START\n"
+            block_idx = gcode.index("; GROVE_INJECT_START_BEGIN")
+            assert block_idx < marker_idx
+            # The marked snippet sits immediately above the printer marker.
+            between = gcode[block_idx:marker_idx]
+            assert between == ("; GROVE_INJECT_START_BEGIN\n; SWAPMOD-START\n; GROVE_INJECT_START_END\n")
             # Printer's own startup commands still come BEFORE the snippet.
             startup_idx = gcode.index("M109 S220")
-            assert startup_idx < snippet_idx
+            assert startup_idx < block_idx
         finally:
             source.unlink(missing_ok=True)
             if result:
@@ -361,7 +421,7 @@ class TestStartAnchoredInjection:
             with zipfile.ZipFile(result, "r") as zf:
                 gcode = zf.read("Metadata/plate_1.gcode").decode("utf-8")
 
-            assert gcode.startswith("; LEGACY-START\n")
+            assert gcode.startswith("; GROVE_INJECT_START_BEGIN\n; LEGACY-START\n; GROVE_INJECT_START_END\n")
             assert "G28" in gcode
         finally:
             source.unlink(missing_ok=True)
@@ -379,7 +439,7 @@ class TestStartAnchoredInjection:
             with zipfile.ZipFile(result, "r") as zf:
                 gcode = zf.read("Metadata/plate_1.gcode").decode("utf-8")
 
-            assert gcode.endswith("; SWAPMOD-END\n")
+            assert gcode.endswith("; GROVE_INJECT_END_BEGIN\n; SWAPMOD-END\n; GROVE_INJECT_END_END\n")
         finally:
             source.unlink(missing_ok=True)
             if result:
@@ -485,7 +545,7 @@ class TestPlaceholderSubstitution:
             with zipfile.ZipFile(result, "r") as zf:
                 gcode = zf.read("Metadata/plate_1.gcode").decode("utf-8")
 
-            assert gcode.startswith("; PLAIN\n")
+            assert gcode.startswith("; GROVE_INJECT_START_BEGIN\n; PLAIN\n; GROVE_INJECT_START_END\n")
         finally:
             source.unlink(missing_ok=True)
             if result:
@@ -531,14 +591,21 @@ class TestStartMarkerHelper:
     def test_inserts_before_marker_line(self):
         content = "first\nsecond\n; MACHINE_START_GCODE_END\ntail\n"
         result = _inject_start_at_marker(content, "INJECTED")
-        assert result == "first\nsecond\nINJECTED\n; MACHINE_START_GCODE_END\ntail\n"
+        assert result == (
+            "first\nsecond\n"
+            "; GROVE_INJECT_START_BEGIN\nINJECTED\n; GROVE_INJECT_START_END\n"
+            "; MACHINE_START_GCODE_END\ntail\n"
+        )
 
     def test_marker_at_start_of_file(self):
         content = "; MACHINE_START_GCODE_END\nrest\n"
         result = _inject_start_at_marker(content, "INJECTED")
-        assert result == "INJECTED\n; MACHINE_START_GCODE_END\nrest\n"
+        assert (
+            result
+            == "; GROVE_INJECT_START_BEGIN\nINJECTED\n; GROVE_INJECT_START_END\n; MACHINE_START_GCODE_END\nrest\n"
+        )
 
     def test_missing_marker_falls_back_to_prepend(self):
         content = "G28\nG1 X0\n"
         result = _inject_start_at_marker(content, "INJECTED")
-        assert result == "INJECTED\nG28\nG1 X0\n"
+        assert result == "; GROVE_INJECT_START_BEGIN\nINJECTED\n; GROVE_INJECT_START_END\nG28\nG1 X0\n"

@@ -2810,9 +2810,17 @@ async def on_print_start(printer_id: int, data: dict):
             archive = result.scalar_one_or_none()
 
             if archive:
-                # Update archive status to printing
-                archive.status = "printing"
-                archive.started_at = datetime.now(timezone.utc)
+                from backend.app.services.archive import record_dispatch_outcome
+
+                await record_dispatch_outcome(
+                    db,
+                    status="printing",
+                    dispatched_queue_item_id=archive.dispatched_queue_item_id,
+                    archive_id=archive.id,
+                    started_at=datetime.now(timezone.utc),
+                    clear_failure_reason=True,
+                    clear_completed_at=True,
+                )
 
                 # Reprint of an archive reuses the source row. Without resetting
                 # ``timelapse_path`` _scan_for_timelapse_with_retries early-returns
@@ -3039,8 +3047,15 @@ async def on_print_start(printer_id: int, data: dict):
                         existing_archive.id,
                         subtask_id,
                     )
-                    existing_archive.status = "printing"
-                    existing_archive.failure_reason = None
+                    from backend.app.services.archive import record_dispatch_outcome
+
+                    await record_dispatch_outcome(
+                        db,
+                        status="printing",
+                        dispatched_queue_item_id=existing_archive.dispatched_queue_item_id,
+                        archive_id=existing_archive.id,
+                        clear_failure_reason=True,
+                    )
                     await db.commit()
                 else:
                     logger.info("Resuming archive %s on subtask_id match (%s)", existing_archive.id, subtask_id)
@@ -3077,8 +3092,15 @@ async def on_print_start(printer_id: int, data: dict):
                     f"Found stale 'printing' archive {existing_archive.id} (age: {archive_age}, "
                     f"printer progress {live_progress:.0f}%) — marking cancelled and creating new archive"
                 )
-                existing_archive.status = "cancelled"
-                existing_archive.failure_reason = "Stale - print likely cancelled or failed without status update"
+                from backend.app.services.archive import record_dispatch_outcome
+
+                await record_dispatch_outcome(
+                    db,
+                    status="cancelled",
+                    dispatched_queue_item_id=existing_archive.dispatched_queue_item_id,
+                    archive_id=existing_archive.id,
+                    failure_reason="Stale - print likely cancelled or failed without status update",
+                )
                 await db.commit()
                 # Fall through to create new archive (don't return)
             else:
@@ -4762,18 +4784,23 @@ async def on_print_complete(printer_id: int, data: dict):
                     item.error_message = _format_hms_error_summary(data.get("hms_errors") or [])
 
                 # The linked Archive is the dispatch attempt, not necessarily
-                # the source Archive used to queue a reprint. Its queue_item_id
-                # provenance makes terminalization safe and atomic with the
-                # queue row even if the later archive callback fails.
+                # the source Archive used to queue a reprint. Its durable queue
+                # item foreign key makes terminalization exact and atomic with
+                # the queue row even if the later archive callback fails.
                 if queue_status in ("completed", "failed", "cancelled") and item.archive_id:
-                    from backend.app.models.archive import PrintArchive
+                    from backend.app.services.archive import record_dispatch_outcome
 
-                    attempt_archive = await db.get(PrintArchive, item.archive_id)
-                    if attempt_archive and (attempt_archive.extra_data or {}).get("queue_item_id") == item.id:
-                        attempt_archive.status = "aborted" if queue_status == "cancelled" else queue_status
-                        attempt_archive.completed_at = item.completed_at
-                        if queue_status == "failed" and not attempt_archive.failure_reason:
-                            attempt_archive.failure_reason = (item.error_message or "Print failed")[:100]
+                    await record_dispatch_outcome(
+                        db,
+                        status="aborted" if queue_status == "cancelled" else queue_status,
+                        dispatched_queue_item_id=item.id,
+                        archive_id=item.archive_id,
+                        completed_at=item.completed_at,
+                        failure_reason=(item.error_message or "Print failed")[:100]
+                        if queue_status == "failed"
+                        else None,
+                        preserve_failure_reason=True,
+                    )
 
                 # Bump usage counters on the source library file so admins can
                 # sort by "last printed" and (eventually) auto-purge stale

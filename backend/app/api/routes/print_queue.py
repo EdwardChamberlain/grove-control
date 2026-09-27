@@ -1423,6 +1423,9 @@ async def delete_queue_item(
         await abort_heat_soak(db, item, "Heat soak deleted", status="cancelled")
         item = await lock_queue_item(db, item_id)
     library_file_id = item.library_file_id if item.cleanup_library_after_dispatch else None
+    from backend.app.services.archive import detach_dispatch_archive_links
+
+    await detach_dispatch_archive_links(db, [item.id])
     await db.delete(item)
     cleanup_paths: list[Path] = []
     if library_file_id is not None:
@@ -1704,12 +1707,16 @@ async def stop_queue_item(
     item.status = "cancelled"
     item.completed_at = datetime.now(timezone.utc)
     item.error_message = "Stopped by user" if stop_sent else "Stopped by user (printer was offline)"
-    if item.archive_id:
-        archive = await db.get(PrintArchive, item.archive_id)
-        if archive and (archive.extra_data or {}).get("queue_item_id") == item.id:
-            archive.status = "aborted"
-            archive.completed_at = item.completed_at
-            archive.failure_reason = None
+    from backend.app.services.archive import record_dispatch_outcome
+
+    await record_dispatch_outcome(
+        db,
+        status="aborted",
+        dispatched_queue_item_id=item.id,
+        archive_id=item.archive_id,
+        completed_at=item.completed_at,
+        clear_failure_reason=True,
+    )
     await db.commit()
 
     from backend.app.main import unregister_expected_print

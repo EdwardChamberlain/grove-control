@@ -33,7 +33,13 @@ async def remove_queue_only_source_if_unused(
     Historical queue rows are detached before deleting the library row so the
     FK's cascade cannot erase queue history.
     """
-    library_file = await db.get(LibraryFile, library_file_id)
+    result = await db.execute(
+        select(LibraryFile)
+        .where(LibraryFile.id == library_file_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    library_file = result.scalar_one_or_none()
     if (
         library_file is None
         or not library_file.queue_only

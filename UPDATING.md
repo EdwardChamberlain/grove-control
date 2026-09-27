@@ -98,6 +98,11 @@ schema and data migrations for SQLite or PostgreSQL, and then starts the
 background services. No separate migration command is required for a normal
 `1.0.0` upgrade.
 
+The Files and Archive workflow update adds a nullable, unique link from each
+dispatch-attempt Archive to its queue item. Startup backfills only unambiguous
+links from the earlier `extra_data` field; deleting a queue item clears the
+link and keeps its Archive history. No manual database step is needed.
+
 Keep the backup until the service starts successfully and you have checked the
 printer list, archive, queue, and settings. If startup reports a migration
 failure, stop the service, keep the original database and backup intact, and

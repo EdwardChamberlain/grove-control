@@ -3732,24 +3732,29 @@ class PrintScheduler:
         if item.gcode_injection:
             try:
                 snippets_raw = await self._get_setting(db, "gcode_snippets")
+                start_gc = ""
+                end_gc = ""
                 if snippets_raw:
                     snippets = json.loads(snippets_raw)
                     model_snippets = snippets.get(printer.model, {})
                     start_gc = (model_snippets.get("start_gcode") or "").strip()
                     end_gc = (model_snippets.get("end_gcode") or "").strip()
-                    if start_gc or end_gc:
-                        from backend.app.utils.threemf_tools import inject_gcode_into_3mf
+                # Run the idempotent transformation even with empty current
+                # snippets: an Archive snapshot may contain a marked block
+                # from an earlier attempt that must be removed on replay.
+                from backend.app.utils.threemf_tools import inject_gcode_into_3mf
 
-                        injected_path = inject_gcode_into_3mf(
-                            file_path, item.plate_id or 1, start_gc or None, end_gc or None
-                        )
-                        if injected_path:
-                            file_path = injected_path
-                            logger.info("Queue item %s: G-code injected for model %s", item.id, printer.model)
-                        else:
-                            logger.warning(
-                                "Queue item %s: G-code injection returned no result, using original", item.id
-                            )
+                injected_path = inject_gcode_into_3mf(
+                    file_path,
+                    item.plate_id or 1,
+                    start_gc or None,
+                    end_gc or None,
+                )
+                if injected_path:
+                    file_path = injected_path
+                    logger.info("Queue item %s: G-code injection updated for model %s", item.id, printer.model)
+                elif start_gc or end_gc:
+                    logger.warning("Queue item %s: G-code injection returned no result, using original", item.id)
             except Exception as e:
                 logger.warning("Queue item %s: G-code injection failed, using original: %s", item.id, e)
 
@@ -4073,7 +4078,6 @@ class PrintScheduler:
                 print_data={
                     "status": "dispatching",
                     "source": "queue_dispatch",
-                    "queue_item_id": item.id,
                     "source_archive_id": source_archive_id,
                     "dispatch_subtask_id": dispatch_subtask_id,
                 },
@@ -4081,6 +4085,7 @@ class PrintScheduler:
                 original_filename=filename,
                 project_id=item.project_id or (source_archive.project_id if source_archive else None),
                 subtask_id=dispatch_subtask_id,
+                dispatched_queue_item_id=item.id,
                 commit=False,
             )
             if not attempt_archive:
@@ -4249,9 +4254,16 @@ class PrintScheduler:
             item.error_message = "Failed to send print command to printer"
             item.completed_at = datetime.now(timezone.utc)
             if archive:
-                archive.status = "failed"
-                archive.failure_reason = "Failed to send print command"
-                archive.completed_at = item.completed_at
+                from backend.app.services.archive import record_dispatch_outcome
+
+                await record_dispatch_outcome(
+                    db,
+                    status="failed",
+                    dispatched_queue_item_id=item.id,
+                    archive_id=item.archive_id,
+                    completed_at=item.completed_at,
+                    failure_reason="Failed to send print command",
+                )
             await db.commit()
             if archive:
                 from backend.app.main import unregister_expected_print

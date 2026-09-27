@@ -381,6 +381,12 @@ async def delete_user(
     if delete_items:
         # Delete all items created by this user
         await db.execute(delete(PrintArchive).where(PrintArchive.created_by_id == user_id))
+        queue_item_ids = list(
+            (await db.scalars(select(PrintQueueItem.id).where(PrintQueueItem.created_by_id == user_id))).all()
+        )
+        from backend.app.services.archive import detach_dispatch_archive_links
+
+        await detach_dispatch_archive_links(db, queue_item_ids)
         await db.execute(delete(PrintQueueItem).where(PrintQueueItem.created_by_id == user_id))
         await db.execute(delete(LibraryFile).where(LibraryFile.created_by_id == user_id))
     else:
