@@ -27,9 +27,11 @@ the print started, completed, failed, or was stopped. A reprint creates a new
 dispatch attempt when submitted through the Queue.
 
 When G-code injection is enabled, Grove Control surrounds its injected start
-and end snippets with `GROVE_INJECT_*` marker comments. Reprinting a snapshot
-removes only those marked blocks and applies the snippets currently configured
-for that queue item, once. The saved Archive artifact is left unchanged.
+and end snippets with `GROVE_INJECT_*` marker comments. Every dispatch removes
+those marked blocks from Archive and Files copies, including when injection is
+off. If injection is on, Grove Control then applies the snippets currently
+configured for that queue item, once. The saved source artifact is left
+unchanged.
 
 Use **Save to Files** on an Archive or a virtual-printer upload when the file
 should become a persistent, operator-managed library file.

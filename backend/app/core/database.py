@@ -506,53 +506,12 @@ async def _safe_execute(conn, sql):
 
 
 async def _migrate_archive_dispatch_queue_link(conn) -> None:
-    """Add and safely backfill the exact queue-item link on dispatch Archives."""
-    from sqlalchemy import text
-
+    """Add the nullable, unique queue-item link for new dispatch Archives."""
     await _safe_execute(
         conn,
         "ALTER TABLE print_archives ADD COLUMN dispatched_queue_item_id "
         "INTEGER REFERENCES print_queue(id) ON DELETE SET NULL",
     )
-    if is_sqlite():
-        async with conn.begin_nested():
-            await conn.execute(
-                text(
-                    "UPDATE print_archives "
-                    "SET dispatched_queue_item_id = CAST(json_extract(extra_data, '$.queue_item_id') AS INTEGER) "
-                    "WHERE dispatched_queue_item_id IS NULL "
-                    "AND extra_data IS NOT NULL AND json_valid(extra_data) "
-                    "AND json_type(extra_data, '$.queue_item_id') = 'integer' "
-                    "AND EXISTS (SELECT 1 FROM print_queue q "
-                    "WHERE q.id = CAST(json_extract(extra_data, '$.queue_item_id') AS INTEGER)) "
-                    "AND (SELECT COUNT(*) FROM print_archives other "
-                    "WHERE json_valid(other.extra_data) "
-                    "AND json_type(other.extra_data, '$.queue_item_id') = 'integer' "
-                    "AND CAST(json_extract(other.extra_data, '$.queue_item_id') AS INTEGER) = "
-                    "CAST(json_extract(print_archives.extra_data, '$.queue_item_id') AS INTEGER)) = 1"
-                )
-            )
-    else:
-        async with conn.begin_nested():
-            await conn.execute(
-                text(
-                    "WITH candidates AS ("
-                    " SELECT id, CASE WHEN jsonb_typeof(extra_data::jsonb->'queue_item_id') = 'number' "
-                    " AND extra_data::jsonb->>'queue_item_id' ~ '^[0-9]+$' "
-                    " THEN (extra_data::jsonb->>'queue_item_id')::integer END AS queue_item_id "
-                    " FROM print_archives WHERE extra_data IS NOT NULL"
-                    "), unambiguous AS ("
-                    " SELECT id, queue_item_id FROM candidates c "
-                    " WHERE queue_item_id IS NOT NULL AND ("
-                    "  SELECT COUNT(*) FROM candidates other "
-                    "  WHERE other.queue_item_id = c.queue_item_id"
-                    " ) = 1"
-                    ") UPDATE print_archives a SET dispatched_queue_item_id = u.queue_item_id "
-                    "FROM unambiguous u WHERE a.id = u.id "
-                    "AND a.dispatched_queue_item_id IS NULL "
-                    "AND EXISTS (SELECT 1 FROM print_queue q WHERE q.id = u.queue_item_id)"
-                )
-            )
     await _safe_execute(
         conn,
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_print_archives_dispatched_queue_item_id "
@@ -2809,9 +2768,8 @@ async def run_migrations(conn):
         f"ALTER TABLE print_archives ADD COLUMN bambuddy_forced_timelapse BOOLEAN DEFAULT {_bool_false_literal}",
     )
 
-    # Migration: Link dispatch-attempt Archives to their exact queue item.
-    # Older PR #189 rows stored this relation in extra_data; only backfill
-    # unambiguous, still-existing queue references before enforcing uniqueness.
+    # Migration: Link new dispatch-attempt Archives to their exact queue item.
+    # No released Archive rows carry this field, so existing rows stay NULL.
     await _migrate_archive_dispatch_queue_link(conn)
 
     # Migration: Create smart_plug_energy_snapshots table (#941)

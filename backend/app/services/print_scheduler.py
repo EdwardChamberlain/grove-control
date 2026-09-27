@@ -3727,36 +3727,35 @@ class PrintScheduler:
                 await self._power_off_if_needed(db, item)
                 return
 
-        # G-code injection for auto-print systems (#422)
+        # Strip Grove snippets from every source before dispatch. Archive and
+        # Files copies can contain snippets from an earlier print, even when
+        # this queue item has injection disabled. Only add current snippets
+        # when the user opted in for this attempt.
         injected_path = None
+        start_gc = None
+        end_gc = None
         if item.gcode_injection:
             try:
                 snippets_raw = await self._get_setting(db, "gcode_snippets")
-                start_gc = ""
-                end_gc = ""
                 if snippets_raw:
                     snippets = json.loads(snippets_raw)
                     model_snippets = snippets.get(printer.model, {})
-                    start_gc = (model_snippets.get("start_gcode") or "").strip()
-                    end_gc = (model_snippets.get("end_gcode") or "").strip()
-                # Run the idempotent transformation even with empty current
-                # snippets: an Archive snapshot may contain a marked block
-                # from an earlier attempt that must be removed on replay.
-                from backend.app.utils.threemf_tools import inject_gcode_into_3mf
-
-                injected_path = inject_gcode_into_3mf(
-                    file_path,
-                    item.plate_id or 1,
-                    start_gc or None,
-                    end_gc or None,
-                )
-                if injected_path:
-                    file_path = injected_path
-                    logger.info("Queue item %s: G-code injection updated for model %s", item.id, printer.model)
-                elif start_gc or end_gc:
-                    logger.warning("Queue item %s: G-code injection returned no result, using original", item.id)
+                    start_gc = (model_snippets.get("start_gcode") or "").strip() or None
+                    end_gc = (model_snippets.get("end_gcode") or "").strip() or None
             except Exception as e:
-                logger.warning("Queue item %s: G-code injection failed, using original: %s", item.id, e)
+                logger.warning("Queue item %s: Could not load G-code snippets: %s", item.id, e)
+
+        try:
+            from backend.app.utils.threemf_tools import inject_gcode_into_3mf
+
+            injected_path = inject_gcode_into_3mf(file_path, item.plate_id or 1, start_gc, end_gc)
+            if injected_path:
+                file_path = injected_path
+                logger.info("Queue item %s: Grove G-code prepared for model %s", item.id, printer.model)
+            elif start_gc or end_gc:
+                logger.warning("Queue item %s: G-code injection returned no result, using original", item.id)
+        except Exception as e:
+            logger.warning("Queue item %s: G-code preparation failed, using original: %s", item.id, e)
 
         # Upload to root directory (not /cache/) - the start_print command references
         # files by name only (ftp://{filename}), so they must be in the root

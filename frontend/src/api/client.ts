@@ -2184,7 +2184,6 @@ export interface PrintQueueItem {
   been_jumped?: boolean;
   // Auto-print G-code injection
   gcode_injection?: boolean;
-  cleanup_library_after_dispatch?: boolean;
 }
 
 export interface PrintQueueItemCreate {

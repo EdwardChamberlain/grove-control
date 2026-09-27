@@ -6,25 +6,20 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 
 @pytest.mark.asyncio
-async def test_archive_dispatch_queue_link_backfills_only_unambiguous_rows(monkeypatch):
+async def test_archive_dispatch_queue_link_adds_schema_without_guessing_from_json():
     from backend.app.core import database
 
-    monkeypatch.setattr(database, "is_sqlite", lambda: True)
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     try:
         async with engine.begin() as conn:
             await conn.execute(text("CREATE TABLE print_queue (id INTEGER PRIMARY KEY)"))
             await conn.execute(text("CREATE TABLE print_archives (id INTEGER PRIMARY KEY, extra_data JSON)"))
-            await conn.execute(text("INSERT INTO print_queue (id) VALUES (10), (20)"))
+            await conn.execute(text("INSERT INTO print_queue (id) VALUES (10)"))
             await conn.execute(
                 text("INSERT INTO print_archives (id, extra_data) VALUES (:id, :extra_data)"),
                 [
                     {"id": 1, "extra_data": '{"queue_item_id":10}'},
-                    {"id": 2, "extra_data": '{"queue_item_id":20}'},
-                    {"id": 3, "extra_data": '{"queue_item_id":20}'},
-                    {"id": 4, "extra_data": '{"queue_item_id":99}'},
-                    {"id": 5, "extra_data": '{"queue_item_id":"10"}'},
-                    {"id": 6, "extra_data": "not-json"},
+                    {"id": 2, "extra_data": '{"_print_data":{"queue_item_id":10}}'},
                 ],
             )
 
@@ -32,7 +27,7 @@ async def test_archive_dispatch_queue_link_backfills_only_unambiguous_rows(monke
             await database._migrate_archive_dispatch_queue_link(conn)
 
             links = dict((await conn.execute(text("SELECT id, dispatched_queue_item_id FROM print_archives"))).all())
-            assert links == {1: 10, 2: None, 3: None, 4: None, 5: None, 6: None}
+            assert links == {1: None, 2: None}
 
             indexes = {row[1] for row in await conn.execute(text("PRAGMA index_list(print_archives)"))}
             assert "uq_print_archives_dispatched_queue_item_id" in indexes

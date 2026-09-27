@@ -356,7 +356,6 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
         # H2C rack-swap nozzle pick (#1780)
         "nozzle_mapping": nozzle_mapping_parsed,
         "nozzles_info": nozzles_info_parsed,
-        "cleanup_library_after_dispatch": item.cleanup_library_after_dispatch,
         # Cross-model alternatives (#671). Guarded rather than read directly:
         # every route that reaches here eager-loads the relationship, but a
         # caller that forgets would trigger a lazy load, and a lazy load on an

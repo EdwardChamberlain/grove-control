@@ -1,3 +1,4 @@
+import zipfile
 from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
@@ -284,6 +285,63 @@ async def test_archive_copy_survives_library_cleanup(queue_factory):
     assert ctx.archive_path.read_bytes() == b"library source"
     uploaded_path = ctx.upload.await_args.args[2]
     assert uploaded_path == ctx.source_path
+
+
+@pytest.mark.parametrize("source_kind", ["archive", "files"])
+@pytest.mark.asyncio
+async def test_dispatch_strips_saved_grove_snippets_with_injection_off(queue_factory, source_kind):
+    """Reprints and Files copies must not replay snippets from an earlier printer."""
+    ctx = await queue_factory(cleanup=False)
+    source_path = ctx.source_path
+    if source_kind == "archive":
+        source_path = ctx.base_dir / "archives" / "saved-snapshot.3mf"
+        source_path.parent.mkdir()
+
+    with zipfile.ZipFile(source_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(
+            "Metadata/plate_1.gcode",
+            "; MACHINE_START_GCODE_END\n"
+            "; GROVE_INJECT_START_BEGIN\nOLD_START\n; GROVE_INJECT_START_END\n"
+            "G1 X1\n"
+            "; GROVE_INJECT_END_BEGIN\nOLD_END\n; GROVE_INJECT_END_END\n"
+            "; EXECUTABLE_BLOCK_END\n",
+        )
+    original_bytes = source_path.read_bytes()
+
+    if source_kind == "archive":
+        async with ctx.session_maker() as db:
+            source_archive = PrintArchive(
+                printer_id=ctx.printer_id,
+                filename=source_path.name,
+                file_path=str(source_path.relative_to(ctx.base_dir)),
+                file_size=len(original_bytes),
+                status="completed",
+            )
+            db.add(source_archive)
+            await db.flush()
+            item = await db.get(PrintQueueItem, ctx.queue_item_id)
+            item.archive_id = source_archive.id
+            item.library_file_id = None
+            await db.commit()
+
+    uploaded_bytes = []
+
+    async def capture_upload(*args, **kwargs):
+        uploaded_bytes.append(Path(args[2]).read_bytes())
+        return True
+
+    ctx.upload.side_effect = capture_upload
+    await _dispatch_library_item(ctx)
+
+    assert ctx.upload.await_count == 1
+    assert ctx.archive_path.read_bytes() == uploaded_bytes[0]
+    assert source_path.read_bytes() == original_bytes
+    with zipfile.ZipFile(ctx.archive_path) as zf:
+        dispatched_gcode = zf.read("Metadata/plate_1.gcode").decode("utf-8")
+    assert "OLD_START" not in dispatched_gcode
+    assert "OLD_END" not in dispatched_gcode
+    assert "GROVE_INJECT" not in dispatched_gcode
+    assert "G1 X1" in dispatched_gcode
 
 
 @pytest.mark.asyncio
