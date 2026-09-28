@@ -25,6 +25,13 @@ cannot be reassigned or selected by another worker. Cancellation and deletion
 cancel the matching worker, and a final compare-and-set prevents a cancelled
 or removed row from publishing an MQTT print command.
 
+Every queue status change, including that final reservation, goes through
+`transition_queue_item()` in `backend/app/services/queue_lifecycle.py`. It
+checks the move against the module's allowed-transitions table and applies it
+only if the row is still in the status the caller acted on. A writer that loses
+a race changes nothing and leaves side effects to the writer that won.
+Assigning `status` directly on a stored queue row raises an error.
+
 ## Rollout
 
 1. Leave the setting at `1` after deployment and confirm normal queue dispatch

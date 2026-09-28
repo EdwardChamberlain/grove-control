@@ -436,7 +436,8 @@ async def release_queue_references(db: AsyncSession, file_ids: list[int]) -> int
 
     # A live heat-soak must be aborted through its service so heater shutdown,
     # reservation cleanup, and queue status are persisted together.
-    from backend.app.services.chamber_heat_soak import abort_heat_soak, lock_queue_item
+    from backend.app.services.chamber_heat_soak import abort_heat_soak
+    from backend.app.services.queue_lifecycle import lock_queue_item, transition_queue_item
 
     for item_id, _library_file_id, _status, _chamber_heat_soak, _dispatch_subtask_id in rows:
         item = await lock_queue_item(db, item_id)
@@ -453,9 +454,13 @@ async def release_queue_references(db: AsyncSession, file_ids: list[int]) -> int
             )
             cancelled += 1
         elif item.status in ("pending", "skipped"):
-            item.status = "cancelled"
-            item.completed_at = now
-            item.error_message = reason_by_file.get(item.library_file_id, "The library file was deleted")
+            await transition_queue_item(
+                db,
+                item,
+                "cancelled",
+                completed_at=now,
+                error_message=reason_by_file.get(item.library_file_id, "The library file was deleted"),
+            )
             cancelled += 1
 
     await db.execute(

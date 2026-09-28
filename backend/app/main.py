@@ -4719,6 +4719,7 @@ async def on_print_complete(printer_id: int, data: dict):
     try:
         from backend.app.core.database import run_with_retry
         from backend.app.models.print_queue import PrintQueueItem
+        from backend.app.services.queue_lifecycle import transition_queue_item
 
         async def _update_queue_status(db):
             nonlocal queue_item_id, queue_item_owner_id, queue_status, queue_auto_off
@@ -4778,10 +4779,12 @@ async def on_print_complete(printer_id: int, data: dict):
                 # "cancelled" so it matches the queue schema Literal.
                 if queue_status == "aborted":
                     queue_status = "cancelled"
-                item.status = queue_status
-                item.completed_at = datetime.now(timezone.utc)
+                terminal_values = {"completed_at": datetime.now(timezone.utc)}
                 if queue_status == "failed" and not item.error_message:
-                    item.error_message = _format_hms_error_summary(data.get("hms_errors") or [])
+                    terminal_values["error_message"] = _format_hms_error_summary(data.get("hms_errors") or [])
+                if not await transition_queue_item(db, item, queue_status, **terminal_values):
+                    # Another writer, such as a user stop, ended this item first.
+                    return
 
                 # The linked Archive is the dispatch attempt, not necessarily
                 # the source Archive used to queue a reprint. Its durable queue
@@ -6658,12 +6661,13 @@ async def lifespan(app: FastAPI):
     try:
         async with async_session() as db:
             from backend.app.models.print_queue import PrintQueueItem
+            from backend.app.services.queue_lifecycle import transition_queue_item
 
             result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.status == "aborted"))
             aborted_items = result.scalars().all()
             if aborted_items:
                 for item in aborted_items:
-                    item.status = "cancelled"
+                    await transition_queue_item(db, item, "cancelled")
                 await db.commit()
                 logging.info("Fixed %d queue item(s) with invalid 'aborted' status → 'cancelled'", len(aborted_items))
     except Exception as e:

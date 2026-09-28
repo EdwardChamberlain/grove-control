@@ -35,7 +35,7 @@ from backend.app.schemas.print_queue import (
     QueueVariantCreate,
     QueueVariantSummary,
 )
-from backend.app.services.chamber_heat_soak import abort_heat_soak, lock_queue_item, skip_heat_soak
+from backend.app.services.chamber_heat_soak import abort_heat_soak, skip_heat_soak
 from backend.app.services.filament_deficit import compute_deficit_for_queue_item
 from backend.app.services.filament_requirements import (
     build_queue_filament_overrides,
@@ -43,6 +43,7 @@ from backend.app.services.filament_requirements import (
     overrides_for_plate,
 )
 from backend.app.services.notification_service import notification_service
+from backend.app.services.queue_lifecycle import lock_queue_item, transition_queue_item
 from backend.app.services.queue_source_cleanup import (
     remove_queue_only_artifacts,
     remove_queue_only_source_if_unused,
@@ -1559,11 +1560,10 @@ async def resume_queue_after_failure(
         .where(PrintQueueItem.status == "skipped")
         .where(PrintQueueItem.error_message == "Previous print failed or was aborted")
     )
-    to_restore = restore_result.scalars().all()
-    for skipped_item in to_restore:
-        skipped_item.status = "pending"
-        skipped_item.error_message = None
-        skipped_item.completed_at = None
+    restored = 0
+    for skipped_item in restore_result.scalars().all():
+        if await transition_queue_item(db, skipped_item, "pending", error_message=None, completed_at=None):
+            restored += 1
 
     await db.commit()
 
@@ -1571,9 +1571,9 @@ async def resume_queue_after_failure(
         "Resume after failure on printer %s: acknowledged %d failure(s), restored %d skipped item(s)",
         printer_id,
         len(to_ack),
-        len(to_restore),
+        restored,
     )
-    return {"acknowledged": len(to_ack), "restored": len(to_restore)}
+    return {"acknowledged": len(to_ack), "restored": restored}
 
 
 @router.post("/{item_id}/cancel")
@@ -1616,8 +1616,7 @@ async def cancel_queue_item(
         raise HTTPException(400, f"Cannot cancel item with status '{item.status}'")
 
     library_file_id = item.library_file_id if item.cleanup_library_after_dispatch else None
-    item.status = "cancelled"
-    item.completed_at = datetime.now(timezone.utc)
+    await transition_queue_item(db, item, "cancelled", completed_at=datetime.now(timezone.utc))
     cleanup_paths = []
     if library_file_id is not None:
         cleanup_paths = await _cleanup_transient_library_source(db, library_file_id, exclude_item_id=item_id)
@@ -1703,9 +1702,13 @@ async def stop_queue_item(
         logger.warning("Failed to mark printer %s as user-stopped: %s", printer_id, _mark_err)
 
     # Update queue item status regardless - if printer is off, print is already stopped
-    item.status = "cancelled"
-    item.completed_at = datetime.now(timezone.utc)
-    item.error_message = "Stopped by user" if stop_sent else "Stopped by user (printer was offline)"
+    await transition_queue_item(
+        db,
+        item,
+        "cancelled",
+        completed_at=datetime.now(timezone.utc),
+        error_message="Stopped by user" if stop_sent else "Stopped by user (printer was offline)",
+    )
     from backend.app.services.archive import record_dispatch_outcome
 
     await record_dispatch_outcome(

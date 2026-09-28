@@ -1939,28 +1939,23 @@ class TestAbortedStatusNormalisation:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_on_print_complete_normalises_aborted_to_cancelled(self, queue_item_factory, db_session):
+    async def test_on_print_complete_normalises_aborted_to_cancelled(self, queue_item_factory, db_session, test_engine):
         """Verify the completion handler maps 'aborted' → 'cancelled' for queue items."""
         import asyncio
-        from unittest.mock import AsyncMock, MagicMock, patch
+        from unittest.mock import AsyncMock, patch
+
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
         item = await queue_item_factory(status="printing")
-
-        # Build a mock session whose execute returns our item
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [item]
-
-        mock_session = AsyncMock()
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=False)
-        mock_session.execute = AsyncMock(return_value=mock_result)
-        mock_session.commit = AsyncMock()
+        # The completion handler runs against the real test database, so its
+        # queue update goes through the real transition function.
+        session_maker = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
 
         tasks_before = set(asyncio.all_tasks())
 
         with (
-            patch("backend.app.main.async_session", return_value=mock_session),
-            patch("backend.app.core.database.async_session", return_value=mock_session),
+            patch("backend.app.main.async_session", session_maker),
+            patch("backend.app.core.database.async_session", session_maker),
             patch("backend.app.main.ws_manager") as mock_ws,
             patch("backend.app.main.mqtt_relay") as mock_relay,
             patch("backend.app.main.notification_service") as mock_notif,
@@ -1996,6 +1991,7 @@ class TestAbortedStatusNormalisation:
                     pass
 
         # The item status should be normalised to 'cancelled', not 'aborted'
+        await db_session.refresh(item)
         assert item.status == "cancelled"
 
     @pytest.mark.asyncio
@@ -2064,21 +2060,17 @@ class TestAbortedStatusNormalisation:
         from sqlalchemy import select
 
         from backend.app.models.print_queue import PrintQueueItem
+        from backend.app.services.queue_lifecycle import transition_queue_item
 
-        # Create items with various statuses including 'aborted'
-        item_aborted = await queue_item_factory(status="pending")
+        # Create items with various statuses, including the legacy 'aborted'
+        item_aborted = await queue_item_factory(status="aborted")
         item_pending = await queue_item_factory(status="pending")
-
-        # Manually set the invalid status
-        item_aborted.status = "aborted"
-        db_session.add(item_aborted)
-        await db_session.commit()
 
         # Run the fixup query (same logic as lifespan)
         result = await db_session.execute(select(PrintQueueItem).where(PrintQueueItem.status == "aborted"))
         aborted_items = result.scalars().all()
         for i in aborted_items:
-            i.status = "cancelled"
+            await transition_queue_item(db_session, i, "cancelled")
         await db_session.commit()
 
         # Verify: no more 'aborted' items
@@ -2095,27 +2087,23 @@ class TestAbortedStatusNormalisation:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_completed_status_passes_through_unchanged(self, queue_item_factory, db_session):
+    async def test_completed_status_passes_through_unchanged(self, queue_item_factory, db_session, test_engine):
         """Verify normal statuses like 'completed' are not affected by normalisation."""
         import asyncio
-        from unittest.mock import AsyncMock, MagicMock, patch
+        from unittest.mock import AsyncMock, patch
+
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
         item = await queue_item_factory(status="printing")
-
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [item]
-
-        mock_session = AsyncMock()
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=False)
-        mock_session.execute = AsyncMock(return_value=mock_result)
-        mock_session.commit = AsyncMock()
+        # The completion handler runs against the real test database, so its
+        # queue update goes through the real transition function.
+        session_maker = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
 
         tasks_before = set(asyncio.all_tasks())
 
         with (
-            patch("backend.app.main.async_session", return_value=mock_session),
-            patch("backend.app.core.database.async_session", return_value=mock_session),
+            patch("backend.app.main.async_session", session_maker),
+            patch("backend.app.core.database.async_session", session_maker),
             patch("backend.app.main.ws_manager") as mock_ws,
             patch("backend.app.main.mqtt_relay") as mock_relay,
             patch("backend.app.main.notification_service") as mock_notif,
@@ -2150,6 +2138,7 @@ class TestAbortedStatusNormalisation:
                 except (asyncio.CancelledError, Exception):
                     pass
 
+        await db_session.refresh(item)
         assert item.status == "completed"
 
     # ========================================================================

@@ -32,6 +32,12 @@
 - The `library_archive_mode` setting and the public Queue
   `cleanup_library_after_dispatch` field were removed. Grove Control now
   manages temporary Queue source cleanup itself.
+- Every queue status change now goes through one transition function that
+  checks an allowed-transitions table (#194, phase 1). Queue states and
+  behaviour are unchanged. When two changes race, the later one no longer
+  overwrites the earlier one. For example, a dispatch that fails after the
+  user cancelled the job now leaves it cancelled and sends no failure
+  notification.
 
 ### Fixed
 

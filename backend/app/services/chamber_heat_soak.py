@@ -18,6 +18,7 @@ from backend.app.core.tasks import spawn_background_task
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services.printer_manager import printer_manager, supports_chamber_heater
+from backend.app.services.queue_lifecycle import lock_queue_item, transition_queue_item
 
 logger = logging.getLogger(__name__)
 HEARTBEAT_TIMEOUT = 90
@@ -30,20 +31,6 @@ def utcnow() -> datetime:
 
 def supports_airduct(model: str | None) -> bool:
     return supports_chamber_heater(model) or (model or "").strip().upper() in {"P2S", "N7"}
-
-
-async def lock_queue_item(db: AsyncSession, item_id: int) -> PrintQueueItem | None:
-    """Take a write lock on both SQLite and PostgreSQL, then discard stale ORM state."""
-    with db.no_autoflush:
-        result = await db.execute(
-            update(PrintQueueItem)
-            .where(PrintQueueItem.id == item_id)
-            .values(status=PrintQueueItem.status)
-            .execution_options(synchronize_session=False)
-        )
-        if not result.rowcount:
-            return None
-        return await db.get(PrintQueueItem, item_id, populate_existing=True)
 
 
 def _reported(state, key: str, value: int, since: datetime) -> bool:
@@ -90,14 +77,18 @@ async def abort_heat_soak(db: AsyncSession, item: PrintQueueItem, reason: str, *
         printer.heat_soak_shutdown_at = utcnow()
         _heaters_off(printer)
     _show_preheating(item.printer_id, False)
-    item.status = status
-    item.error_message = reason
-    item.completed_at = utcnow()
-    item.preheat_owner = None
-    item.preheat_started_at = None
-    item.preheat_checked_at = None
-    # An explicit retry must repeat the complete soak.
-    item.manual_start = True
+    await transition_queue_item(
+        db,
+        item,
+        status,
+        error_message=reason,
+        completed_at=utcnow(),
+        preheat_owner=None,
+        preheat_started_at=None,
+        preheat_checked_at=None,
+        # An explicit retry must repeat the complete soak.
+        manual_start=True,
+    )
     await db.commit()
 
 
@@ -109,15 +100,19 @@ async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> None:
     reservation and disable the soak for this queue item.
     """
     _show_preheating(item.printer_id, False)
-    item.status = "pending"
-    item.chamber_heat_soak = False
-    item.manual_start = False
-    item.error_message = None
-    item.completed_at = None
-    item.preheat_owner = None
-    item.preheat_requested_at = None
-    item.preheat_checked_at = None
-    item.preheat_started_at = None
+    await transition_queue_item(
+        db,
+        item,
+        "pending",
+        chamber_heat_soak=False,
+        manual_start=False,
+        error_message=None,
+        completed_at=None,
+        preheat_owner=None,
+        preheat_requested_at=None,
+        preheat_checked_at=None,
+        preheat_started_at=None,
+    )
     await db.commit()
 
 
@@ -136,28 +131,25 @@ class ChamberHeatSoak:
         # only a still-pending row. Concurrent workers cannot reassign a winner.
         now = utcnow()
         try:
-            result = await db.execute(
-                update(PrintQueueItem)
-                .where(PrintQueueItem.id == item_id, PrintQueueItem.status == "pending")
-                .values(
-                    status="preheating",
-                    printer_id=printer_id,
-                    preheat_owner=self.owner,
-                    preheat_requested_at=now,
-                    preheat_checked_at=now,
-                    preheat_started_at=None,
-                    dispatched_at=None,
-                    dispatch_subtask_id=None,
-                    error_message=None,
-                    waiting_reason=None,
-                )
-                .execution_options(synchronize_session=False)
+            staged = await transition_queue_item(
+                db,
+                item,
+                "preheating",
+                printer_id=printer_id,
+                preheat_owner=self.owner,
+                preheat_requested_at=now,
+                preheat_checked_at=now,
+                preheat_started_at=None,
+                dispatched_at=None,
+                dispatch_subtask_id=None,
+                error_message=None,
+                waiting_reason=None,
             )
             await db.commit()
         except IntegrityError:
             await db.rollback()
             return False
-        if not result.rowcount:
+        if not staged:
             return False
         # Reservation is durable before any heater command. Re-lock to ensure
         # a cancellation during commit cannot be followed by heater-on commands.
@@ -265,8 +257,7 @@ class ChamberHeatSoak:
                 continue
             if (now - item.preheat_started_at).total_seconds() >= item.heat_soak_minutes * 60:
                 _show_preheating(item.printer_id, False)
-                item.status = "dispatching"
-                item.dispatched_at = now
+                await transition_queue_item(db, item, "dispatching", dispatched_at=now)
                 ready.append(item.id)
             client = printer_manager.get_client(item.printer_id)
             if client:
