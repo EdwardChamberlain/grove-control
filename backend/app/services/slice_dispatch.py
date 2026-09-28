@@ -38,8 +38,7 @@ class SliceJob:
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     started_at: datetime | None = None
     completed_at: datetime | None = None
-    # On success: the body returned to the caller — usually a SliceResponse
-    # or SliceArchiveResponse dict.
+    # On success: the body returned to the caller — a SliceResponse dict.
     result: dict[str, Any] | None = None
     # On failure: HTTP status + error message.
     error_status: int | None = None

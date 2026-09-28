@@ -264,12 +264,12 @@ describe('VirtualPrinterSettings', () => {
   });
 
   describe('mode selection', () => {
-    it('renders Archive mode option', async () => {
+    it('renders Files mode option', async () => {
       render(<VirtualPrinterSettings />);
 
       await waitFor(() => {
-        expect(screen.getByText('Archive')).toBeInTheDocument();
-        expect(screen.getByText('Archive files immediately')).toBeInTheDocument();
+        expect(screen.getByText('Files')).toBeInTheDocument();
+        expect(screen.getByText('Save uploads to Files')).toBeInTheDocument();
       });
     });
 
@@ -278,7 +278,7 @@ describe('VirtualPrinterSettings', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Review')).toBeInTheDocument();
-        expect(screen.getByText('Review before archiving')).toBeInTheDocument();
+        expect(screen.getByText('Review uploads before saving to Files')).toBeInTheDocument();
       });
     });
 
@@ -287,7 +287,7 @@ describe('VirtualPrinterSettings', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Queue')).toBeInTheDocument();
-        expect(screen.getByText('Archive and add to queue')).toBeInTheDocument();
+        expect(screen.getByText('Add uploads to the print queue')).toBeInTheDocument();
       });
     });
 
@@ -304,7 +304,7 @@ describe('VirtualPrinterSettings', () => {
       });
     });
 
-    it('highlights current mode (legacy immediate maps to archive button)', async () => {
+    it('highlights current Files mode (legacy immediate maps to Files button)', async () => {
       // Pre-#1429 the wire value was `immediate` but the UI button was
       // labeled "Archive". Backend migration rewrites stored rows, but a
       // stale-cached settings payload may still carry the legacy value —
@@ -316,8 +316,8 @@ describe('VirtualPrinterSettings', () => {
       render(<VirtualPrinterSettings />);
 
       await waitFor(() => {
-        const archiveButton = screen.getByText('Archive').closest('button');
-        expect(archiveButton?.className).toContain('border-bambu-green');
+        const filesButton = screen.getByText('Files').closest('button');
+        expect(filesButton?.className).toContain('border-bambu-green');
       });
     });
 

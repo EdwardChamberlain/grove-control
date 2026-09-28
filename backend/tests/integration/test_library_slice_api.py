@@ -849,7 +849,7 @@ class TestSliceJobs:
 
 
 # ---------------------------------------------------------------------------
-# POST /archives/{id}/slice — re-sliced archive reflects the target printer
+# POST /archives/{id}/slice — re-sliced output is saved as a managed File
 # ---------------------------------------------------------------------------
 
 
@@ -944,6 +944,7 @@ class TestCrossClassSliceAllLoop:
         self, async_client: AsyncClient, db_session, slice_test_setup, printer_factory, archive_factory, monkeypatch
     ):
         from backend.app.models.archive import PrintArchive
+        from backend.app.models.library import LibraryFile
 
         tmp_path = slice_test_setup["tmp_path"]
         monkeypatch.setattr(app_settings, "archive_dir", tmp_path / "archive")
@@ -1069,23 +1070,22 @@ class TestCrossClassSliceAllLoop:
         assert b'"name": "Test filament 3"' not in captured_requests[1]["body"]
         assert b'"name": "Test filament 3"' in captured_requests[2]["body"]
 
-        # The merged archive has plate_1..plate_3.gcode inside its one
-        # output 3MF (single Grove Control archive, three plates).
-        new_archive = await _get_committed_row(db_session, PrintArchive, final["result"]["archive_id"])
+        # The saved File has plate_1..plate_3.gcode inside its one
+        # output 3MF (single File, three plates).
+        new_archive = await _get_committed_row(db_session, LibraryFile, final["result"]["library_file_id"])
         archive_path = tmp_path / new_archive.file_path
         with zipfile.ZipFile(archive_path, "r") as zf:
             entries = set(zf.namelist())
         assert "Metadata/plate_1.gcode" in entries
         assert "Metadata/plate_2.gcode" in entries
         assert "Metadata/plate_3.gcode" in entries
-        # Per-plate-result totals are summed onto the merged archive.
-        assert new_archive.print_time_seconds == 600 * 3
-        assert new_archive.filament_used_grams == pytest.approx(5.0 * 3)
+        # Per-plate-result totals are stored with the sliced File metadata.
+        assert new_archive.file_metadata["print_time_seconds"] == 600 * 3
+        assert new_archive.file_metadata["filament_used_g"] == pytest.approx(5.0 * 3)
 
 
 class TestSliceArchiveResliceModel:
-    """Re-slicing an archive for a different printer must stamp the new
-    archive with the printer it was sliced FOR, not the source's printer."""
+    """Re-slicing an archive saves a File stamped with the target model."""
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -1093,6 +1093,7 @@ class TestSliceArchiveResliceModel:
         self, async_client: AsyncClient, db_session, slice_test_setup, printer_factory, archive_factory, monkeypatch
     ):
         from backend.app.models.archive import PrintArchive
+        from backend.app.models.library import LibraryFile
 
         tmp_path = slice_test_setup["tmp_path"]
         # archive_dir is a static path off the real data dir; point it under
@@ -1141,13 +1142,13 @@ class TestSliceArchiveResliceModel:
         final = await _wait_for_job(async_client, resp.json()["job_id"])
         assert final["status"] == "completed", final
 
-        new_id = final["result"]["archive_id"]
+        new_id = final["result"]["library_file_id"]
         assert new_id != source_id
 
-        new_archive = await _get_committed_row(db_session, PrintArchive, new_id)
-        # The fix: the re-sliced archive reflects H2D — the printer it was
-        # sliced for — instead of inheriting X1C from the source archive.
-        assert new_archive.sliced_for_model == "H2D"
+        new_archive = await _get_committed_row(db_session, LibraryFile, new_id)
+        # The saved File reflects H2D — the printer it was sliced for —
+        # instead of inheriting X1C from the source archive.
+        assert new_archive.file_metadata["sliced_for_model"] == "H2D"
 
         # Source archive is untouched.
         source_reloaded = await db_session.get(PrintArchive, source_id)
@@ -1155,15 +1156,12 @@ class TestSliceArchiveResliceModel:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_cross_model_reslice_drops_source_printer_id(
+    async def test_cross_model_reslice_file_uses_target_model(
         self, async_client: AsyncClient, db_session, slice_test_setup, printer_factory, archive_factory, monkeypatch
     ):
-        """A cross-model re-slice (source's X1C → target's H2D) must not carry
-        over ``source.printer_id``. The archive card and reprint modal both
-        read ``printer_id`` first and only fall back to ``sliced_for_model``
-        when it's None, so leaving the inherited id makes the H2D-sliced card
-        display the source's X1C printer name (the "Workshop H2C" bug)."""
+        """A cross-model re-slice saves output metadata for the target model."""
         from backend.app.models.archive import PrintArchive
+        from backend.app.models.library import LibraryFile
 
         tmp_path = slice_test_setup["tmp_path"]
         monkeypatch.setattr(app_settings, "archive_dir", tmp_path / "archive")
@@ -1208,11 +1206,8 @@ class TestSliceArchiveResliceModel:
         final = await _wait_for_job(async_client, resp.json()["job_id"])
         assert final["status"] == "completed", final
 
-        new_archive = await _get_committed_row(db_session, PrintArchive, final["result"]["archive_id"])
-        assert new_archive.sliced_for_model == "H2D"
-        # Card / reprint modal will now fall back to the sliced_for_model
-        # badge instead of showing the source printer's name.
-        assert new_archive.printer_id is None
+        new_archive = await _get_committed_row(db_session, LibraryFile, final["result"]["library_file_id"])
+        assert new_archive.file_metadata["sliced_for_model"] == "H2D"
 
         # Source untouched: still bound to its original printer.
         source_reloaded = await db_session.get(PrintArchive, source_id)
@@ -1220,13 +1215,12 @@ class TestSliceArchiveResliceModel:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_same_model_reslice_preserves_source_printer_id(
+    async def test_same_model_reslice_file_uses_target_model(
         self, async_client: AsyncClient, db_session, slice_test_setup, printer_factory, archive_factory, monkeypatch
     ):
-        """Same-model re-slice (X1C → X1C, e.g. just swapped a process preset)
-        keeps ``printer_id`` so the reprint modal pre-selects the original
-        printer. Only cross-model re-slices null it out."""
+        """Same-model re-slice stores the model from the produced 3MF."""
         from backend.app.models.archive import PrintArchive
+        from backend.app.models.library import LibraryFile
 
         tmp_path = slice_test_setup["tmp_path"]
         monkeypatch.setattr(app_settings, "archive_dir", tmp_path / "archive")
@@ -1243,7 +1237,6 @@ class TestSliceArchiveResliceModel:
             sliced_for_model="X1C",
             with_run=False,
         )
-        source_printer_id = source_printer.id
 
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(
@@ -1270,22 +1263,17 @@ class TestSliceArchiveResliceModel:
         final = await _wait_for_job(async_client, resp.json()["job_id"])
         assert final["status"] == "completed", final
 
-        new_archive = await _get_committed_row(db_session, PrintArchive, final["result"]["archive_id"])
-        assert new_archive.sliced_for_model == "X1C"
-        # Same-model: keep the source's printer assignment so reprint pre-selects it.
-        assert new_archive.printer_id == source_printer_id
+        new_archive = await _get_committed_row(db_session, LibraryFile, final["result"]["library_file_id"])
+        assert new_archive.file_metadata["sliced_for_model"] == "X1C"
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_reslice_with_unknown_source_model_preserves_printer_id(
+    async def test_reslice_with_unknown_source_model_uses_output_model(
         self, async_client: AsyncClient, db_session, slice_test_setup, printer_factory, archive_factory, monkeypatch
     ):
-        """When ``source.sliced_for_model`` is None (older archive that
-        predates that column being populated), the backend can't tell whether
-        this is a cross-model re-slice. Fail open and preserve ``printer_id``
-        rather than spuriously nulling it — current pre-fix behaviour, kept
-        as a deliberate edge case."""
+        """A missing source model does not override the produced 3MF model."""
         from backend.app.models.archive import PrintArchive
+        from backend.app.models.library import LibraryFile
 
         tmp_path = slice_test_setup["tmp_path"]
         monkeypatch.setattr(app_settings, "archive_dir", tmp_path / "archive")
@@ -1302,7 +1290,6 @@ class TestSliceArchiveResliceModel:
             sliced_for_model=None,
             with_run=False,
         )
-        source_printer_id = source_printer.id
 
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(
@@ -1329,13 +1316,13 @@ class TestSliceArchiveResliceModel:
         final = await _wait_for_job(async_client, resp.json()["job_id"])
         assert final["status"] == "completed", final
 
-        new_archive = await _get_committed_row(db_session, PrintArchive, final["result"]["archive_id"])
-        # Insufficient info to decide cross-model → preserve printer_id.
-        assert new_archive.printer_id == source_printer_id
+        new_archive = await _get_committed_row(db_session, LibraryFile, final["result"]["library_file_id"])
+        # The produced File uses the model embedded in the slice result.
+        assert new_archive.file_metadata["sliced_for_model"] == "H2D"
 
 
 class TestSliceArchiveReslicedThumbnail:
-    """#1493 follow-up: the re-sliced archive's cover image preference order is
+    """#1493 follow-up: the saved File cover image preference order is
     source's per-plate render > sliced output's per-plate render >
     Auxiliaries marketing thumbnail. BS CLI rarely writes a fresh
     ``Metadata/plate_N.png`` on the sliced output, so the source's render
@@ -1361,6 +1348,7 @@ class TestSliceArchiveReslicedThumbnail:
         with --arrange). The source's plate_1.png must win over the
         sliced output's Auxiliaries fallback."""
         from backend.app.models.archive import PrintArchive
+        from backend.app.models.library import LibraryFile
 
         tmp_path = slice_test_setup["tmp_path"]
         monkeypatch.setattr(app_settings, "archive_dir", tmp_path / "archive")
@@ -1415,11 +1403,11 @@ class TestSliceArchiveReslicedThumbnail:
         final = await _wait_for_job(async_client, resp.json()["job_id"])
         assert final["status"] == "completed", final
 
-        new = await _get_committed_row(db_session, PrintArchive, final["result"]["archive_id"])
+        new = await _get_committed_row(db_session, LibraryFile, final["result"]["library_file_id"])
         assert new.thumbnail_path is not None
         thumb_full = tmp_path / new.thumbnail_path
         assert thumb_full.read_bytes() == source_plate_marker, (
-            "Re-sliced archive's thumbnail should be the source's per-plate render, not the Auxiliaries cover art."
+            "Re-sliced File's thumbnail should be the source's per-plate render, not the Auxiliaries cover art."
         )
 
     @pytest.mark.asyncio
@@ -1431,6 +1419,7 @@ class TestSliceArchiveReslicedThumbnail:
         the Auxiliaries marketing image from the sliced output is the
         next-best preview — better than no card thumbnail at all."""
         from backend.app.models.archive import PrintArchive
+        from backend.app.models.library import LibraryFile
 
         tmp_path = slice_test_setup["tmp_path"]
         monkeypatch.setattr(app_settings, "archive_dir", tmp_path / "archive")
@@ -1485,17 +1474,14 @@ class TestSliceArchiveReslicedThumbnail:
         final = await _wait_for_job(async_client, resp.json()["job_id"])
         assert final["status"] == "completed", final
 
-        new = await _get_committed_row(db_session, PrintArchive, final["result"]["archive_id"])
+        new = await _get_committed_row(db_session, LibraryFile, final["result"]["library_file_id"])
         assert new.thumbnail_path is not None
         thumb_full = tmp_path / new.thumbnail_path
         assert thumb_full.read_bytes() == b"COVER_ART_FALLBACK"
 
 
 class TestSliceArchiveReslicedBedType:
-    """#1493 follow-up: the re-sliced archive's ``bed_type`` column must be
-    set from the produced 3MF's ``curr_bed_type`` so the frontend's archive
-    card shows the right build-plate badge (the card reads the column, not
-    extra_data, so the value was previously invisible after a re-slice)."""
+    """#1493 follow-up: save the produced 3MF's bed type in File metadata."""
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -1503,6 +1489,7 @@ class TestSliceArchiveReslicedBedType:
         self, async_client: AsyncClient, db_session, slice_test_setup, printer_factory, archive_factory, monkeypatch
     ):
         from backend.app.models.archive import PrintArchive
+        from backend.app.models.library import LibraryFile
 
         tmp_path = slice_test_setup["tmp_path"]
         monkeypatch.setattr(app_settings, "archive_dir", tmp_path / "archive")
@@ -1522,9 +1509,8 @@ class TestSliceArchiveReslicedBedType:
         )
 
         # Mock slicer: produced 3MF declares a different plate type than
-        # the source archive's ``Cool Plate``. The new column must reflect
-        # the slicer's value (the user picked a different plate in the
-        # SliceModal) instead of inheriting the source's.
+        # the source archive's ``Cool Plate``. File metadata must reflect
+        # the slicer's value instead of inheriting the source's.
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(
                 status_code=200,
@@ -1551,8 +1537,8 @@ class TestSliceArchiveReslicedBedType:
         final = await _wait_for_job(async_client, resp.json()["job_id"])
         assert final["status"] == "completed", final
 
-        new = await _get_committed_row(db_session, PrintArchive, final["result"]["archive_id"])
-        assert new.bed_type == "Textured PEI Plate"
+        new = await _get_committed_row(db_session, LibraryFile, final["result"]["library_file_id"])
+        assert new.file_metadata["bed_type"] == "Textured PEI Plate"
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -1563,6 +1549,7 @@ class TestSliceArchiveReslicedBedType:
         ``curr_bed_type``. The source archive's ``bed_type`` is the right
         default in that case — better than leaving the badge blank."""
         from backend.app.models.archive import PrintArchive
+        from backend.app.models.library import LibraryFile
 
         tmp_path = slice_test_setup["tmp_path"]
         monkeypatch.setattr(app_settings, "archive_dir", tmp_path / "archive")
@@ -1608,8 +1595,8 @@ class TestSliceArchiveReslicedBedType:
         final = await _wait_for_job(async_client, resp.json()["job_id"])
         assert final["status"] == "completed", final
 
-        new = await _get_committed_row(db_session, PrintArchive, final["result"]["archive_id"])
-        assert new.bed_type == "Cool Plate"
+        new = await _get_committed_row(db_session, LibraryFile, final["result"]["library_file_id"])
+        assert new.file_metadata["bed_type"] == "Cool Plate"
 
 
 # ---------------------------------------------------------------------------

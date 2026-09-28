@@ -37,9 +37,6 @@ export interface PrintModalProps {
   onSuccess?: () => void;
   /** Project ID to associate the resulting archive with (only when triggered from project view) */
   projectId?: number;
-  /** Delete a transient LibraryFile after a single queue item dispatches.
-   *  Multi-item uploads stay in File Manager so every queue item can use the source. */
-  cleanupLibraryAfterDispatch?: boolean;
   /**
    * Cross-model alternatives (#671): the same job sliced for several printers,
    * to be queued as ONE item that runs on whichever frees up first.

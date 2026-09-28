@@ -505,6 +505,20 @@ async def _safe_execute(conn, sql):
             raise
 
 
+async def _migrate_archive_dispatch_queue_link(conn) -> None:
+    """Add the nullable, unique queue-item link for new dispatch Archives."""
+    await _safe_execute(
+        conn,
+        "ALTER TABLE print_archives ADD COLUMN dispatched_queue_item_id "
+        "INTEGER REFERENCES print_queue(id) ON DELETE SET NULL",
+    )
+    await _safe_execute(
+        conn,
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_print_archives_dispatched_queue_item_id "
+        "ON print_archives (dispatched_queue_item_id)",
+    )
+
+
 async def _migrate_retired_pipeline_runs(conn) -> None:
     """Safely finish pipeline runs that never created ordinary queue items.
 
@@ -2754,6 +2768,10 @@ async def run_migrations(conn):
         f"ALTER TABLE print_archives ADD COLUMN bambuddy_forced_timelapse BOOLEAN DEFAULT {_bool_false_literal}",
     )
 
+    # Migration: Link new dispatch-attempt Archives to their exact queue item.
+    # No released Archive rows carry this field, so existing rows stay NULL.
+    await _migrate_archive_dispatch_queue_link(conn)
+
     # Migration: Create smart_plug_energy_snapshots table (#941)
     # Hourly snapshots of each plug's lifetime counter, so date-range queries in
     # "total consumption" energy mode can compute (last - first) deltas.
@@ -2918,6 +2936,36 @@ async def run_migrations(conn):
         conn,
         "CREATE INDEX IF NOT EXISTS ix_library_files_source_url ON library_files(source_url)",
     )
+
+    # Migration: distinguish one-off Queue staging uploads from user-managed
+    # Files entries. Existing direct-print staging rows can be identified by
+    # the queue cleanup marker that was already set by the printer-card flow.
+    if is_sqlite():
+        await _safe_execute(conn, "ALTER TABLE library_files ADD COLUMN queue_only BOOLEAN DEFAULT 0")
+        await _safe_execute(
+            conn,
+            "UPDATE library_files SET queue_only = 1 WHERE id IN "
+            "(SELECT library_file_id FROM print_queue WHERE cleanup_library_after_dispatch = 1 "
+            "AND library_file_id IS NOT NULL)",
+        )
+    else:
+        await _safe_execute(conn, "ALTER TABLE library_files ADD COLUMN queue_only BOOLEAN DEFAULT false")
+        await _safe_execute(
+            conn,
+            "UPDATE library_files SET queue_only = true WHERE id IN "
+            "(SELECT library_file_id FROM print_queue WHERE cleanup_library_after_dispatch = true "
+            "AND library_file_id IS NOT NULL)",
+        )
+
+    # Direct Queue uploads are unsealed until the client closes the print
+    # setup flow. This prevents the first fast dispatch from deleting its
+    # source while the client is still posting the remaining fan-out rows.
+    # Existing rows are sealed because their complete queue-item set predates
+    # this submission boundary.
+    if is_sqlite():
+        await _safe_execute(conn, "ALTER TABLE library_files ADD COLUMN queue_source_sealed BOOLEAN DEFAULT 1")
+    else:
+        await _safe_execute(conn, "ALTER TABLE library_files ADD COLUMN queue_source_sealed BOOLEAN DEFAULT true")
 
     # Migration: Cache metadata title on pending uploads (#1152 follow-up).
     # Without this column the review card always shows the FTP filename while

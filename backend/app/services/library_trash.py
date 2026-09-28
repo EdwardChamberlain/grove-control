@@ -96,6 +96,7 @@ def _purge_filter(cutoff: datetime, include_never_printed: bool):
     return and_(
         LibraryFile.deleted_at.is_(None),
         LibraryFile.is_external.is_(False),
+        LibraryFile.queue_only.is_(False),
         age_clause,
     )
 

@@ -1,5 +1,50 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Every Queue dispatch, including a reprint, creates its own Archive attempt.
+  It records the print outcome and stores the exact file uploaded to the
+  printer, including any G-code injection used for that attempt.
+- Archive artifacts and pending virtual-printer uploads can be saved to Files.
+  Slicing an Archive artifact also saves the result in Files.
+- Direct Queue uploads use hidden, temporary sources. They do not appear in
+  Files and are retained while queued, skipped, or retryable work needs them.
+  Abandoned uploads are closed after 24 hours.
+- Dispatch Archives link to their exact queue items through a nullable, unique
+  database foreign key. Deleting a queue item clears the link and keeps the
+  Archive history.
+- G-code injection now wraps Grove snippets in markers. Every dispatch removes
+  old Grove-marked snippets from Archive or Files copies; current snippets are
+  added only when injection is enabled for that queue item.
+- Added operator guidance for Files, Queue-only upload sources, and Archive
+  attempts in [the workflow guide](docs/files-queue-archive.md).
+
+### Changed
+
+- The virtual printer's former **Archive** mode now saves uploads to Files.
+- `POST /api/v1/archives/upload` and `/api/v1/archives/upload-bulk` now return
+  HTTP 410. Upload to Files to retain a file or to Queue to print it.
+- Pending-upload `POST /api/v1/pending-uploads/{id}/archive` and
+  `POST /api/v1/pending-uploads/archive-all` now return HTTP 410. Use
+  `/{id}/save-to-files` and `/save-to-files-all` instead.
+- The `library_archive_mode` setting and the public Queue
+  `cleanup_library_after_dispatch` field were removed. Grove Control now
+  manages temporary Queue source cleanup itself.
+
+### Fixed
+
+- Queue-only uploads are excluded from automatic Files purging and serialize
+  cleanup against queue submissions.
+
+### Upgrade notes
+
+- The nullable Archive-to-queue link and unique index are added automatically
+  at startup. Existing Archive rows keep a NULL link; no released database has
+  dispatch-attempt links to backfill. No manual migration is required. Keep a
+  backup until the upgraded service has started successfully.
+
 ## 1.0.0
 
 Grove Control 1.0.0 is the stable release line.

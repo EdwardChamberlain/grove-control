@@ -108,6 +108,7 @@ from backend.app.services.printer_manager import (
     printer_manager,
     printer_state_to_dict,
 )
+from backend.app.services.queue_source_cleanup import start_queue_source_cleanup, stop_queue_source_cleanup
 from backend.app.services.slot_nozzle import (
     resolve_slot_nozzle,
 )
@@ -2809,9 +2810,17 @@ async def on_print_start(printer_id: int, data: dict):
             archive = result.scalar_one_or_none()
 
             if archive:
-                # Update archive status to printing
-                archive.status = "printing"
-                archive.started_at = datetime.now(timezone.utc)
+                from backend.app.services.archive import record_dispatch_outcome
+
+                await record_dispatch_outcome(
+                    db,
+                    status="printing",
+                    dispatched_queue_item_id=archive.dispatched_queue_item_id,
+                    archive_id=archive.id,
+                    started_at=datetime.now(timezone.utc),
+                    clear_failure_reason=True,
+                    clear_completed_at=True,
+                )
 
                 # Reprint of an archive reuses the source row. Without resetting
                 # ``timelapse_path`` _scan_for_timelapse_with_retries early-returns
@@ -3038,8 +3047,15 @@ async def on_print_start(printer_id: int, data: dict):
                         existing_archive.id,
                         subtask_id,
                     )
-                    existing_archive.status = "printing"
-                    existing_archive.failure_reason = None
+                    from backend.app.services.archive import record_dispatch_outcome
+
+                    await record_dispatch_outcome(
+                        db,
+                        status="printing",
+                        dispatched_queue_item_id=existing_archive.dispatched_queue_item_id,
+                        archive_id=existing_archive.id,
+                        clear_failure_reason=True,
+                    )
                     await db.commit()
                 else:
                     logger.info("Resuming archive %s on subtask_id match (%s)", existing_archive.id, subtask_id)
@@ -3076,8 +3092,15 @@ async def on_print_start(printer_id: int, data: dict):
                     f"Found stale 'printing' archive {existing_archive.id} (age: {archive_age}, "
                     f"printer progress {live_progress:.0f}%) — marking cancelled and creating new archive"
                 )
-                existing_archive.status = "cancelled"
-                existing_archive.failure_reason = "Stale - print likely cancelled or failed without status update"
+                from backend.app.services.archive import record_dispatch_outcome
+
+                await record_dispatch_outcome(
+                    db,
+                    status="cancelled",
+                    dispatched_queue_item_id=existing_archive.dispatched_queue_item_id,
+                    archive_id=existing_archive.id,
+                    failure_reason="Stale - print likely cancelled or failed without status update",
+                )
                 await db.commit()
                 # Fall through to create new archive (don't return)
             else:
@@ -4760,6 +4783,25 @@ async def on_print_complete(printer_id: int, data: dict):
                 if queue_status == "failed" and not item.error_message:
                     item.error_message = _format_hms_error_summary(data.get("hms_errors") or [])
 
+                # The linked Archive is the dispatch attempt, not necessarily
+                # the source Archive used to queue a reprint. Its durable queue
+                # item foreign key makes terminalization exact and atomic with
+                # the queue row even if the later archive callback fails.
+                if queue_status in ("completed", "failed", "cancelled") and item.archive_id:
+                    from backend.app.services.archive import record_dispatch_outcome
+
+                    await record_dispatch_outcome(
+                        db,
+                        status="aborted" if queue_status == "cancelled" else queue_status,
+                        dispatched_queue_item_id=item.id,
+                        archive_id=item.archive_id,
+                        completed_at=item.completed_at,
+                        failure_reason=(item.error_message or "Print failed")[:100]
+                        if queue_status == "failed"
+                        else None,
+                        preserve_failure_reason=True,
+                    )
+
                 # Bump usage counters on the source library file so admins can
                 # sort by "last printed" and (eventually) auto-purge stale
                 # files — #1008.
@@ -5063,8 +5105,9 @@ async def on_print_complete(printer_id: int, data: dict):
         async with async_session() as db:
             service = ArchiveService(db)
             status = data.get("status", "completed")
+            archive_status = "aborted" if status == "cancelled" else status
 
-            hms_errors = data.get("hms_errors", []) if status == "failed" else None
+            hms_errors = data.get("hms_errors", []) if archive_status == "failed" else None
             if hms_errors:
                 logger.info("[ARCHIVE] HMS errors at failure: %s", hms_errors)
             failure_reason = derive_failure_reason(status, hms_errors)
@@ -5075,20 +5118,25 @@ async def on_print_complete(printer_id: int, data: dict):
 
             await service.update_archive_status(
                 archive_id,
-                status=status,
+                status=archive_status,
                 completed_at=(
-                    datetime.now(timezone.utc) if status in ("completed", "failed", "aborted", "cancelled") else None
+                    datetime.now(timezone.utc)
+                    if archive_status in ("completed", "failed", "aborted", "cancelled")
+                    else None
                 ),
                 failure_reason=failure_reason,
             )
             logger.info(
-                "[ARCHIVE] Archive %s status updated to %s, failure_reason=%s", archive_id, status, failure_reason
+                "[ARCHIVE] Archive %s status updated to %s, failure_reason=%s",
+                archive_id,
+                archive_status,
+                failure_reason,
             )
 
             await ws_manager.send_archive_updated(
                 {
                     "id": archive_id,
-                    "status": status,
+                    "status": archive_status,
                 }
             )
             logger.info("[ARCHIVE] WebSocket notification sent for archive %s", archive_id)
@@ -5098,7 +5146,7 @@ async def on_print_complete(printer_id: int, data: dict):
                 await mqtt_relay.on_archive_updated(
                     archive_id=archive_id,
                     print_name=filename or subtask_name,
-                    status=status,
+                    status=archive_status,
                 )
             except Exception:
                 pass  # Don't fail if MQTT fails
@@ -6867,6 +6915,10 @@ async def lifespan(app: FastAPI):
     # L-2: Start periodic auth cleanup (stale TOTP + expired revoked JTIs)
     start_auth_cleanup()
 
+    # Seal abandoned Queue upload intake after 24 hours and clean its source
+    # File if no active or retryable queue item still needs it.
+    start_queue_source_cleanup()
+
     # Event-loop stall watchdog: dumps all thread stacks to stderr if the loop
     # freezes (#1486 — silent "container hangs after adding a printer" reports).
     from backend.app.services.loop_watchdog import start_loop_watchdog
@@ -6915,6 +6967,7 @@ async def lifespan(app: FastAPI):
         logging.warning("Failed to shut down camera broadcasters: %s", e)
     stop_expected_prints_cleanup()
     stop_auth_cleanup()
+    stop_queue_source_cleanup()
     printer_manager.disconnect_all()
     await close_spoolman_client()
 

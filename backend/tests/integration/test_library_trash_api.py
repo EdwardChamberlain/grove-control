@@ -248,6 +248,64 @@ async def test_purge_skips_external_files(async_client: AsyncClient, file_factor
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_purge_skips_queue_only_source_needed_for_retry(
+    async_client: AsyncClient,
+    file_factory,
+    db_session,
+    printer_factory,
+):
+    """Queue-only sources stay hidden from Files and available to failed jobs."""
+    from backend.app.models.print_queue import PrintQueueItem
+
+    long_ago = datetime.now(timezone.utc) - timedelta(days=300)
+    source = await file_factory(
+        queue_only=True,
+        queue_source_sealed=True,
+        created_at=long_ago,
+    )
+    printer = await printer_factory()
+    failed_item = PrintQueueItem(
+        printer_id=printer.id,
+        library_file_id=source.id,
+        position=1,
+        status="failed",
+        error_message="FTP upload failed",
+        cleanup_library_after_dispatch=True,
+    )
+    db_session.add(failed_item)
+    await db_session.commit()
+
+    files = await async_client.get("/api/v1/library/files")
+    assert files.status_code == 200
+    assert source.id not in {item["id"] for item in files.json()}
+
+    preview = await async_client.get(
+        "/api/v1/library/purge/preview",
+        params={"older_than_days": 90, "include_never_printed": True},
+    )
+    assert preview.status_code == 200
+    assert preview.json()["count"] == 0
+
+    purge = await async_client.post(
+        "/api/v1/library/purge",
+        json={"older_than_days": 90, "include_never_printed": True},
+    )
+    assert purge.status_code == 200
+    assert purge.json()["moved_to_trash"] == 0
+
+    await db_session.refresh(source)
+    assert source.deleted_at is None
+
+    requeued = await async_client.post(
+        "/api/v1/queue/",
+        json={"printer_id": printer.id, "library_file_id": source.id},
+    )
+    assert requeued.status_code == 200, requeued.text
+    assert requeued.json()["library_file_id"] == source.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_trash_settings_roundtrip(async_client: AsyncClient):
     """Retention setting persists and is clamped to [MIN, MAX]."""
     resp = await async_client.get("/api/v1/library/trash/settings")

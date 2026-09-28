@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Archive, Trash2, FileBox, Clock, Upload, ChevronDown, ChevronUp } from 'lucide-react';
+import { Loader2, FolderOpen, Trash2, FileBox, Clock, Upload, ChevronDown, ChevronUp } from 'lucide-react';
 import { pendingUploadsApi } from '../api/client';
 import type { PendingUpload, ProjectListItem } from '../api/client';
 import { api } from '../api/client';
@@ -28,18 +28,18 @@ function formatTimeAgo(dateStr: string): string {
 interface PendingUploadItemProps {
   upload: PendingUpload;
   projects: ProjectListItem[];
-  onArchive: (id: number, data?: { tags?: string; notes?: string; project_id?: number }) => void;
+  onSaveToFiles: (id: number, data?: { tags?: string; notes?: string; project_id?: number }) => void;
   onDiscard: (id: number) => void;
-  isArchiving: boolean;
+  isSaving: boolean;
   isDiscarding: boolean;
 }
 
 function PendingUploadItem({
   upload,
   projects,
-  onArchive,
+  onSaveToFiles,
   onDiscard,
-  isArchiving,
+  isSaving,
   isDiscarding,
 }: PendingUploadItemProps) {
   const [expanded, setExpanded] = useState(false);
@@ -82,15 +82,15 @@ function PendingUploadItem({
             <Button
               variant="primary"
               size="sm"
-              onClick={() => onArchive(upload.id, { tags, notes, project_id: projectId || undefined })}
-              disabled={isArchiving}
+              onClick={() => onSaveToFiles(upload.id, { tags, notes, project_id: projectId || undefined })}
+              disabled={isSaving}
             >
-              {isArchiving ? (
+              {isSaving ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
                 <>
-                  <Archive className="w-4 h-4" />
-                  Archive
+                  <FolderOpen className="w-4 h-4" />
+                  Save to Files
                 </>
               )}
             </Button>
@@ -172,9 +172,9 @@ function PendingUploadItem({
 export function PendingUploadsPanel() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
-  const [showArchiveAllConfirm, setShowArchiveAllConfirm] = useState(false);
+  const [showSaveAllConfirm, setShowSaveAllConfirm] = useState(false);
   const [showDiscardAllConfirm, setShowDiscardAllConfirm] = useState(false);
-  const [archivingIds, setArchivingIds] = useState<Set<number>>(new Set());
+  const [savingIds, setSavingIds] = useState<Set<number>>(new Set());
   const [discardingIds, setDiscardingIds] = useState<Set<number>>(new Set());
 
   // Fetch pending uploads
@@ -191,15 +191,15 @@ export function PendingUploadsPanel() {
     select: (rows) => [...rows].sort((a, b) => a.name.localeCompare(b.name)),
   });
 
-  // Archive mutation
-  const archiveMutation = useMutation({
+  // Save to Files mutation
+  const saveToFilesMutation = useMutation({
     mutationFn: ({ id, data }: { id: number; data?: { tags?: string; notes?: string; project_id?: number } }) =>
-      pendingUploadsApi.archive(id, data),
+      pendingUploadsApi.saveToFiles(id, data),
     onMutate: ({ id }) => {
-      setArchivingIds((prev) => new Set(prev).add(id));
+      setSavingIds((prev) => new Set(prev).add(id));
     },
     onSettled: (_, __, { id }) => {
-      setArchivingIds((prev) => {
+      setSavingIds((prev) => {
         const next = new Set(prev);
         next.delete(id);
         return next;
@@ -207,11 +207,11 @@ export function PendingUploadsPanel() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['pending-uploads'] });
-      queryClient.invalidateQueries({ queryKey: ['archives'] });
-      showToast(`Archived: ${data.print_name}`);
+      queryClient.invalidateQueries({ queryKey: ['library-files'] });
+      showToast(`Saved to Files: ${data.filename}`);
     },
     onError: (error: Error) => {
-      showToast(error.message || 'Failed to archive', 'error');
+      showToast(error.message || 'Failed to save to Files', 'error');
     },
   });
 
@@ -237,16 +237,16 @@ export function PendingUploadsPanel() {
     },
   });
 
-  // Archive all mutation
-  const archiveAllMutation = useMutation({
-    mutationFn: pendingUploadsApi.archiveAll,
+  // Save all mutation
+  const saveAllMutation = useMutation({
+    mutationFn: pendingUploadsApi.saveAllToFiles,
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['pending-uploads'] });
-      queryClient.invalidateQueries({ queryKey: ['archives'] });
-      showToast(`Archived ${data.archived} files${data.failed > 0 ? `, ${data.failed} failed` : ''}`);
+      queryClient.invalidateQueries({ queryKey: ['library-files'] });
+      showToast(`Saved ${data.saved} files to Files${data.failed > 0 ? `, ${data.failed} failed` : ''}`);
     },
     onError: (error: Error) => {
-      showToast(error.message || 'Failed to archive all', 'error');
+      showToast(error.message || 'Failed to save uploads to Files', 'error');
     },
   });
 
@@ -291,15 +291,15 @@ export function PendingUploadsPanel() {
               <Button
                 variant="primary"
                 size="sm"
-                onClick={() => setShowArchiveAllConfirm(true)}
-                disabled={archiveAllMutation.isPending}
+                onClick={() => setShowSaveAllConfirm(true)}
+                disabled={saveAllMutation.isPending}
               >
-                {archiveAllMutation.isPending ? (
+                {saveAllMutation.isPending ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
                   <>
-                    <Archive className="w-4 h-4" />
-                    Archive All
+                    <FolderOpen className="w-4 h-4" />
+                    Save All to Files
                   </>
                 )}
               </Button>
@@ -323,7 +323,7 @@ export function PendingUploadsPanel() {
         </CardHeader>
         <CardContent>
           <p className="text-sm text-bambu-gray mb-4">
-            These files were uploaded via the virtual printer. Review and archive them to add to your collection.
+            These files were uploaded via the virtual printer. Save the files you want to keep, or discard them.
           </p>
           <div className="space-y-3">
             {uploads.map((upload) => (
@@ -331,9 +331,9 @@ export function PendingUploadsPanel() {
                 key={upload.id}
                 upload={upload}
                 projects={projects || []}
-                onArchive={(id, data) => archiveMutation.mutate({ id, data })}
+                onSaveToFiles={(id, data) => saveToFilesMutation.mutate({ id, data })}
                 onDiscard={(id) => discardMutation.mutate(id)}
-                isArchiving={archivingIds.has(upload.id)}
+                isSaving={savingIds.has(upload.id)}
                 isDiscarding={discardingIds.has(upload.id)}
               />
             ))}
@@ -341,17 +341,17 @@ export function PendingUploadsPanel() {
         </CardContent>
       </Card>
 
-      {/* Archive All Confirmation */}
-      {showArchiveAllConfirm && (
+      {/* Save All Confirmation */}
+      {showSaveAllConfirm && (
         <ConfirmModal
-          title="Archive All Uploads"
-          message={`Are you sure you want to archive all ${uploads.length} pending uploads?`}
-          confirmText="Archive All"
+          title="Save All Uploads to Files"
+          message={`Are you sure you want to save all ${uploads.length} pending uploads to Files?`}
+          confirmText="Save All to Files"
           onConfirm={() => {
-            archiveAllMutation.mutate();
-            setShowArchiveAllConfirm(false);
+            saveAllMutation.mutate();
+            setShowSaveAllConfirm(false);
           }}
-          onCancel={() => setShowArchiveAllConfirm(false)}
+          onCancel={() => setShowSaveAllConfirm(false)}
         />
       )}
 

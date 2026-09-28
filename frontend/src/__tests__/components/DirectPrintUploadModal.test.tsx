@@ -15,7 +15,7 @@ describe('DirectPrintUploadModal', () => {
     vi.clearAllMocks();
     uploadRequests = 0;
     server.use(
-      http.post('/api/v1/library/files', () => {
+      http.post('/api/v1/queue/upload-source', () => {
         uploadRequests += 1;
         return HttpResponse.json({
           id: 41,

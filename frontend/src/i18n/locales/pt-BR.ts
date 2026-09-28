@@ -737,7 +737,7 @@ export default {
     developerModeWarning: 'O modo desenvolvedor LAN não está ativado em: {{names}}. Alguns recursos podem não funcionar.',
     howToEnable: 'Como ativar',
     incompatibleFile: 'Este arquivo foi fatiado para {{slicedFor}}, mas esta impressora é uma {{printerModel}}',
-    directUploadLibraryNote: 'O arquivo enviado é salvo no Gerenciador de Arquivos antes de entrar na fila.',
+    directUploadLibraryNote: 'O envio é adicionado à fila e não é salvo no Gerenciador de Arquivos.',
     dropNotPrintable: 'Apenas arquivos .gcode e .gcode.3mf podem ser impressos',
     dropToPrint: 'Solte para imprimir',
     cannotPrint: 'Impressora ocupada',
@@ -835,6 +835,8 @@ export default {
       failedUpdateFavorites: 'Falha ao atualizar favoritos',
       exportDownloaded: 'Exportação baixada',
       exportFailed: 'Falha na exportação',
+      savedToFiles: '{{filename}} salvo em Arquivos',
+      failedSaveToFiles: 'Falha ao salvar o arquivo de impressão em Arquivos',
     },
     menu: {
       print: 'Imprimir',
@@ -874,6 +876,7 @@ export default {
       select: 'Selecionar',
       deselect: 'Desmarcar',
       delete: 'Excluir',
+      saveToFiles: 'Salvar em Arquivos',
     },
     permission: {
       noReprint: 'Você não tem permissão para reimprimir este arquivo',
@@ -1840,12 +1843,6 @@ export default {
     saveThumbnails: 'Salvar miniaturas',
     captureFinishPhoto: 'Capturar foto de conclusão',
     noPrintersConfigured: 'Nenhuma impressora configurada',
-    // Archive settings
-    archiveMode: {
-      always: 'Sempre criar entrada de arquivo',
-      never: 'Nunca criar entrada de arquivo',
-      ask: 'Perguntar a cada vez',
-    },
     // Updates
     checkForUpdatesLabel: 'Verificar atualizações',
     checkPrinterFirmware: 'Verificar firmware da impressora',
@@ -2348,8 +2345,6 @@ export default {
     energyModePrintDescription: 'O painel mostra a soma da energia usada durante as impressões',
     energyModeTotalDescription: 'O painel mostra a energia total dos plugues inteligentes',
     fileManager: 'Gerenciador de arquivos',
-    createArchiveEntry: 'Criar entrada de arquivo ao imprimir',
-    createArchiveEntryDescription: 'Ao imprimir pelo gerenciador de arquivos, criar opcionalmente uma entrada de arquivo',
     lowDiskSpaceWarning: 'Aviso de pouco espaço em disco',
     lowDiskSpaceDescription: 'Mostrar aviso quando o espaço livre em disco ficar abaixo deste limite',
     printerFirmware: 'Firmware da impressora',
@@ -3816,6 +3811,7 @@ export default {
     runningWithProgress: '{{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     runningWithProgressMultiPlate: 'Bandeja {{plateIndex}} de {{plateCount}} • {{name}} – {{stage}} ({{percent}}%) – {{elapsed}}',
     completedToast: '{{name}} fatiado',
+    completedToFilesToast: '{{name}} fatiado e salvo em Arquivos',
     failedTitle: 'Falha ao fatiar',
     failedToast: 'Falha ao fatiar {{name}}: {{detail}}',
     tier: {
@@ -4901,12 +4897,12 @@ export default {
     },
     mode: {
       title: 'Modo',
-      archive: 'Arquivar',
-      archiveDesc: 'Arquivar arquivos imediatamente',
+      archive: 'Arquivos',
+      archiveDesc: 'Salvar envios em Arquivos',
       review: 'Revisar',
-      reviewDesc: 'Revisar antes de arquivar',
+      reviewDesc: 'Revisar envios antes de salvar em Arquivos',
       queue: 'Fila',
-      queueDesc: 'Arquivar e adicionar à fila',
+      queueDesc: 'Adicionar envios à fila de impressão',
       proxy: 'Proxy',
       proxyDesc: 'Retransmitir para impressora real',
     },
@@ -4934,7 +4930,7 @@ export default {
     howItWorks: {
       title: 'Como funciona',
       step1: 'Complete o guia de configuração para sua plataforma',
-      step2: 'Ative a impressora virtual e defina um código de acesso',
+      step2: 'Nos modos Arquivos, Revisar e Fila, use o botão “Enviar” do fatiador para carregar arquivos 3MF no Grove Control. Arquivos salva em Arquivos, Revisar permite salvar ou descartar e Fila adiciona trabalhos de impressão. “Impressão bem-sucedida” significa que o envio terminou.',
       step3: 'No Bambu Studio ou OrcaSlicer, vá para "Adicionar Impressora"',
     },
     status: {
@@ -4990,8 +4986,8 @@ export default {
       message: 'Tem certeza que deseja excluir "{{name}}"? Isso irá parar todos os serviços desta impressora.',
     },
     archiveNameSource: {
-      title: 'Origem do nome do arquivo',
-      description: 'Escolha como os novos arquivos são nomeados quando chegam pela impressora virtual. "Metadados" usa o título embutido pelo slicer no 3MF (padrão). "Nome do arquivo" usa o nome que o Bambu Studio enviou via FTP. Nota: o Bambu Studio sobrescreve o nome digitado no diálogo "enviar para impressora" com o campo Título do 3MF quando presente, portanto ambos os modos costumam produzir a mesma string.',
+      title: 'Nome de exibição do envio',
+      description: 'Escolha como os envios aparecem na lista de revisão. “Metadados” usa o título incorporado no 3MF; “Nome do arquivo” usa o nome recebido por FTP.',
       metadata: 'Metadados',
       filename: 'Nome do arquivo',
     },

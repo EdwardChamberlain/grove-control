@@ -98,6 +98,12 @@ schema and data migrations for SQLite or PostgreSQL, and then starts the
 background services. No separate migration command is required for a normal
 `1.0.0` upgrade.
 
+The Files and Archive workflow update adds a nullable, unique link from each
+new dispatch-attempt Archive to its queue item. Existing Archive rows keep a
+NULL link; no released database contains dispatch-attempt links to backfill.
+Deleting a queue item clears its link and keeps the Archive history. No manual
+database step is needed.
+
 Keep the backup until the service starts successfully and you have checked the
 printer list, archive, queue, and settings. If startup reports a migration
 failure, stop the service, keep the original database and backup intact, and
@@ -109,6 +115,27 @@ problems, not routine upgrade steps; see the recovery notes in
 An older SQLite installation that has only `bambutrack.db` is renamed to
 `bambuddy.db` automatically on startup when the new filename does not already
 exist. Back up the data directory before starting that upgrade.
+
+## Files, Queue, and Archive workflow changes
+
+Each print that reaches dispatch, including a reprint, now creates its own
+Archive entry containing the exact file sent to the printer. Direct Queue
+uploads are held as temporary sources and no longer appear in Files. Use
+**Save to Files** on an Archive or pending virtual-printer upload when the
+file should be kept in the user-managed library. The virtual printer's former
+**Archive** mode now saves to Files.
+
+API clients should replace `POST /api/v1/archives/upload` and
+`POST /api/v1/archives/upload-bulk` with Files or Queue uploads; both old
+Archive routes return HTTP 410. Pending-upload routes
+`POST /api/v1/pending-uploads/{id}/archive` and
+`POST /api/v1/pending-uploads/archive-all` also return HTTP 410. Replace them
+with `POST /api/v1/pending-uploads/{id}/save-to-files` and
+`POST /api/v1/pending-uploads/save-to-files-all`.
+
+The `library_archive_mode` setting has been removed. Queue-create requests and
+responses no longer have the `cleanup_library_after_dispatch` field; the
+server derives cleanup from whether the source is a hidden Queue upload.
 
 ## Timezone
 

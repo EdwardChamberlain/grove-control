@@ -71,7 +71,6 @@ const mockSettings = {
   ha_url_from_env: false,
   ha_token_from_env: false,
   ha_env_managed: false,
-  library_archive_mode: 'ask',
   library_disk_warning_gb: 5.0,
   camera_view_mode: 'window',
   preferred_slicer: 'bambu_studio',

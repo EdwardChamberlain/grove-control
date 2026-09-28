@@ -20,24 +20,22 @@ class PendingUpload(Base):
     file_path: Mapped[str] = mapped_column(String(500))  # Temp storage path
     file_size: Mapped[int] = mapped_column(Integer)
 
-    # Embedded 3MF Title metadata, captured at FTP-receive time so the review
-    # card and the eventual archive's print_name agree on which name to show
-    # (#1152 follow-up). NULL when the 3MF has no title or the metadata read
-    # failed — the response model falls back to the filename stem in that case.
+    # Embedded 3MF Title metadata, captured at FTP-receive time for the review
+    # card. NULL when the 3MF has no title or metadata parsing failed.
     metadata_print_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Source info
     source_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
 
-    # Status: pending, archived, discarded
+    # Status: pending, saved_to_files, discarded (archived is legacy)
     status: Mapped[str] = mapped_column(String(20), default="pending")
 
-    # User additions (before archiving)
+    # User additions (before saving to Files)
     tags: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
 
-    # After archiving - link to created archive
+    # Legacy link for rows archived before the Files/Archive boundary changed.
     archived_id: Mapped[int | None] = mapped_column(ForeignKey("print_archives.id", ondelete="SET NULL"), nullable=True)
 
     # Timestamps

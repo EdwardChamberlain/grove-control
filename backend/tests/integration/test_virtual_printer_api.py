@@ -241,11 +241,11 @@ class TestPendingUploadsAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_archive_nonexistent_upload(self, async_client: AsyncClient):
-        """Verify archiving non-existent upload returns 404."""
+    async def test_pending_upload_archive_endpoint_is_retired(self, async_client: AsyncClient):
+        """Pending uploads are saved to Files rather than Archive."""
         response = await async_client.post("/api/v1/pending-uploads/99999/archive")
 
-        assert response.status_code == 404
+        assert response.status_code == 410
 
     # ========================================================================
     # Discard pending upload
@@ -265,14 +265,11 @@ class TestPendingUploadsAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_archive_all_empty(self, async_client: AsyncClient):
-        """Verify archive all with no pending uploads."""
+    async def test_pending_upload_archive_all_endpoint_is_retired(self, async_client: AsyncClient):
+        """Bulk pending-upload archival is retired."""
         response = await async_client.post("/api/v1/pending-uploads/archive-all")
 
-        assert response.status_code == 200
-        result = response.json()
-        assert "archived" in result
-        assert "failed" in result
+        assert response.status_code == 410
 
     @pytest.mark.asyncio
     @pytest.mark.integration
