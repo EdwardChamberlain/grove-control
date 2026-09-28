@@ -29,6 +29,7 @@ from backend.app.core.database import async_session
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
 from backend.app.models.settings import Settings
+from backend.app.services.queue_transitions import transition_queue_item
 
 logger = logging.getLogger(__name__)
 
@@ -453,7 +454,7 @@ async def release_queue_references(db: AsyncSession, file_ids: list[int]) -> int
             )
             cancelled += 1
         elif item.status in ("pending", "skipped"):
-            item.status = "cancelled"
+            await transition_queue_item(db, item, item.status, "cancelled")
             item.completed_at = now
             item.error_message = reason_by_file.get(item.library_file_id, "The library file was deleted")
             cancelled += 1

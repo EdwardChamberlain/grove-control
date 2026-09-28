@@ -12,8 +12,8 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import delete, or_, select, text
 
@@ -109,6 +109,7 @@ from backend.app.services.printer_manager import (
     printer_state_to_dict,
 )
 from backend.app.services.queue_source_cleanup import start_queue_source_cleanup, stop_queue_source_cleanup
+from backend.app.services.queue_transitions import QueueTransitionConflict, transition_queue_item
 from backend.app.services.slot_nozzle import (
     resolve_slot_nozzle,
 )
@@ -4778,7 +4779,7 @@ async def on_print_complete(printer_id: int, data: dict):
                 # "cancelled" so it matches the queue schema Literal.
                 if queue_status == "aborted":
                     queue_status = "cancelled"
-                item.status = queue_status
+                await transition_queue_item(db, item, item.status, queue_status)
                 item.completed_at = datetime.now(timezone.utc)
                 if queue_status == "failed" and not item.error_message:
                     item.error_message = _format_hms_error_summary(data.get("hms_errors") or [])
@@ -6663,7 +6664,7 @@ async def lifespan(app: FastAPI):
             aborted_items = result.scalars().all()
             if aborted_items:
                 for item in aborted_items:
-                    item.status = "cancelled"
+                    await transition_queue_item(db, item, item.status, "cancelled")
                 await db.commit()
                 logging.info("Fixed %d queue item(s) with invalid 'aborted' status → 'cancelled'", len(aborted_items))
     except Exception as e:
@@ -7006,6 +7007,11 @@ app = FastAPI(
     version=APP_VERSION,
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(QueueTransitionConflict)
+async def queue_transition_conflict_handler(request: Request, exc: QueueTransitionConflict):
+    return JSONResponse(status_code=409, content={"detail": "Queue item changed concurrently; refresh and try again"})
 
 
 # =============================================================================

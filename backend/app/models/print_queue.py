@@ -107,6 +107,7 @@ class PrintQueueItem(Base):
     nozzle_offset_cali: Mapped[str] = mapped_column(String(8), default="auto")
 
     # Status: pending, preheating, dispatching, printing, completed, failed, skipped, cancelled
+    # Persisted status changes go through services.queue_transitions.transition_queue_item.
     status: Mapped[str] = mapped_column(String(20), default="pending")
 
     # Durable dispatch claim. A queue worker stamps this before slow source

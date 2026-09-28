@@ -1942,25 +1942,21 @@ class TestAbortedStatusNormalisation:
     async def test_on_print_complete_normalises_aborted_to_cancelled(self, queue_item_factory, db_session):
         """Verify the completion handler maps 'aborted' → 'cancelled' for queue items."""
         import asyncio
-        from unittest.mock import AsyncMock, MagicMock, patch
+        from contextlib import asynccontextmanager
+        from unittest.mock import AsyncMock, patch
 
         item = await queue_item_factory(status="printing")
 
-        # Build a mock session whose execute returns our item
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [item]
-
-        mock_session = AsyncMock()
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=False)
-        mock_session.execute = AsyncMock(return_value=mock_result)
-        mock_session.commit = AsyncMock()
+        # Exercise completion matching and the transition against the real database.
+        @asynccontextmanager
+        async def completion_session():
+            yield db_session
 
         tasks_before = set(asyncio.all_tasks())
 
         with (
-            patch("backend.app.main.async_session", return_value=mock_session),
-            patch("backend.app.core.database.async_session", return_value=mock_session),
+            patch("backend.app.main.async_session", completion_session),
+            patch("backend.app.core.database.async_session", completion_session),
             patch("backend.app.main.ws_manager") as mock_ws,
             patch("backend.app.main.mqtt_relay") as mock_relay,
             patch("backend.app.main.notification_service") as mock_notif,
@@ -1995,6 +1991,7 @@ class TestAbortedStatusNormalisation:
                 except (asyncio.CancelledError, Exception):
                     pass
 
+        await db_session.refresh(item)
         # The item status should be normalised to 'cancelled', not 'aborted'
         assert item.status == "cancelled"
 
@@ -2003,25 +2000,21 @@ class TestAbortedStatusNormalisation:
     async def test_on_print_complete_does_not_complete_a_dispatching_item(self, queue_item_factory, db_session):
         """A delayed completion for another file must not claim an unconfirmed dispatch."""
         import asyncio
-        from unittest.mock import AsyncMock, MagicMock, patch
+        from contextlib import asynccontextmanager
+        from unittest.mock import AsyncMock, patch
 
         item = await queue_item_factory(status="dispatching")
 
-        # Keep the completion lookup isolated from external services. The event
-        # has no matching expected-print registration, so the dispatch must
-        # remain untouched.
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = []
-        mock_session = AsyncMock()
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=False)
-        mock_session.execute = AsyncMock(return_value=mock_result)
-        mock_session.commit = AsyncMock()
+        # Exercise completion matching and the transition against the real database.
+        @asynccontextmanager
+        async def completion_session():
+            yield db_session
+
         tasks_before = set(asyncio.all_tasks())
 
         with (
-            patch("backend.app.main.async_session", return_value=mock_session),
-            patch("backend.app.core.database.async_session", return_value=mock_session),
+            patch("backend.app.main.async_session", completion_session),
+            patch("backend.app.core.database.async_session", completion_session),
             patch("backend.app.main.ws_manager") as mock_ws,
             patch("backend.app.main.mqtt_relay") as mock_relay,
             patch("backend.app.main.notification_service") as mock_notif,
@@ -2055,6 +2048,7 @@ class TestAbortedStatusNormalisation:
                 except (asyncio.CancelledError, Exception):
                     pass
 
+        await db_session.refresh(item)
         assert item.status == "dispatching"
 
     @pytest.mark.asyncio
@@ -2077,8 +2071,10 @@ class TestAbortedStatusNormalisation:
         # Run the fixup query (same logic as lifespan)
         result = await db_session.execute(select(PrintQueueItem).where(PrintQueueItem.status == "aborted"))
         aborted_items = result.scalars().all()
+        from backend.app.services.queue_transitions import transition_queue_item
+
         for i in aborted_items:
-            i.status = "cancelled"
+            await transition_queue_item(db_session, i, "aborted", "cancelled")
         await db_session.commit()
 
         # Verify: no more 'aborted' items
@@ -2098,24 +2094,21 @@ class TestAbortedStatusNormalisation:
     async def test_completed_status_passes_through_unchanged(self, queue_item_factory, db_session):
         """Verify normal statuses like 'completed' are not affected by normalisation."""
         import asyncio
-        from unittest.mock import AsyncMock, MagicMock, patch
+        from contextlib import asynccontextmanager
+        from unittest.mock import AsyncMock, patch
 
         item = await queue_item_factory(status="printing")
 
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [item]
-
-        mock_session = AsyncMock()
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=False)
-        mock_session.execute = AsyncMock(return_value=mock_result)
-        mock_session.commit = AsyncMock()
+        # Exercise completion matching and the transition against the real database.
+        @asynccontextmanager
+        async def completion_session():
+            yield db_session
 
         tasks_before = set(asyncio.all_tasks())
 
         with (
-            patch("backend.app.main.async_session", return_value=mock_session),
-            patch("backend.app.core.database.async_session", return_value=mock_session),
+            patch("backend.app.main.async_session", completion_session),
+            patch("backend.app.core.database.async_session", completion_session),
             patch("backend.app.main.ws_manager") as mock_ws,
             patch("backend.app.main.mqtt_relay") as mock_relay,
             patch("backend.app.main.notification_service") as mock_notif,
@@ -2150,6 +2143,7 @@ class TestAbortedStatusNormalisation:
                 except (asyncio.CancelledError, Exception):
                     pass
 
+        await db_session.refresh(item)
         assert item.status == "completed"
 
     # ========================================================================

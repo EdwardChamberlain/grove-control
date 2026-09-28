@@ -1,0 +1,52 @@
+# Queue status transitions (issue #194, stage 1)
+
+Stage 1 centralizes writes to the existing queue status column. It does not
+introduce the later lifecycle names, change plate-clear behavior, remove the
+previous-success gate, or change retry, Archive, notification or heater policy.
+There is no schema change or new data migration. Existing startup repairs keep
+their current selection rules and use the same status writer.
+
+## Current transitions
+
+| From | Allowed destinations |
+| --- | --- |
+| `pending` | `preheating`, `dispatching`, `failed`, `skipped`, `cancelled` |
+| `preheating` | `pending`, `dispatching`, `failed`, `cancelled` |
+| `dispatching` | `pending`, `printing`, `completed`, `failed`, `cancelled` |
+| `printing` | `completed`, `failed`, `cancelled` |
+| `skipped` | `pending`, `cancelled` |
+| `failed` | `pending` (existing heat-soak dispatch cleanup) |
+| `completed`, `cancelled` | No different destination |
+| `aborted` (legacy rows only) | `cancelled` (startup repair) |
+
+Reapplying the same known status is a guarded write: heat-soak handoff and
+cleanup, and recovered completion callbacks already need this behavior. It
+still requires the database status to match. These are today's edges, not the
+future state table in #194. For example, a preflight failure can still fail a
+pending job and a heat-soak interruption still returns it to manual-start pending.
+
+## Writing a transition
+
+Use `backend.app.services.queue_transitions.transition_queue_item` with the
+observed expected status and desired destination. Its conditional SQL update
+matches both ID and expected status. Dispatch also supplies its existing claim
+timestamp condition. Metadata that must change in that statement goes in
+`values`; the writer synchronizes the ORM object without marking status dirty
+and producing an unconditional second update during flush.
+
+The caller owns the transaction. Commit before running the existing post-commit
+effects; roll back on `QueueTransitionConflict` and do not continue the losing
+operation. HTTP callers receive 409 with a refresh/retry message. An invalid
+edge raises `InvalidQueueTransition` before any update. Reasons remain ordinary
+metadata; the writer never parses them to decide whether an edge is allowed.
+
+New queue rows still start with their normal `pending` initial value. Creation
+is not a transition. Existing rows, including those repaired at startup, must
+use the writer. The heat-soak row-lock helper updates only the row ID to itself;
+it does not write status. Archive and scheduled-drying statuses belong to their
+own models and are outside this queue refactor.
+
+The database-backed tests exercise allowed workflows, invalid edges, stale
+sessions, deletion, replaced claims, rollback, ORM flush behavior, and a Stop
+racing dispatch confirmation. Completion callback tests use real database
+matching and transitions. No existing tests were removed.

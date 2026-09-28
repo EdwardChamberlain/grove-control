@@ -997,28 +997,40 @@ async def _ensure_active_queue_printer_reservation(conn) -> None:
     recovery_message = (
         "Recovered duplicate active queue reservation during startup; manual retry required to avoid a duplicate print."
     )
+    from sqlalchemy import func
+
+    from backend.app.services.queue_transitions import transition_queue_item
+
     async with conn.begin_nested():
         result = await conn.execute(
             text(
                 "WITH ranked_active_queue AS ("
-                " SELECT id, ROW_NUMBER() OVER ("
+                " SELECT id, status, ROW_NUMBER() OVER ("
                 "   PARTITION BY printer_id"
                 "   ORDER BY CASE status WHEN 'printing' THEN 0 WHEN 'dispatching' THEN 1 ELSE 2 END,"
                 "            COALESCE(started_at, dispatched_at, created_at) DESC, id DESC"
                 " ) AS reservation_rank"
                 " FROM print_queue"
                 " WHERE printer_id IS NOT NULL AND status IN ('preheating', 'dispatching', 'printing')"
-                ")"
-                " UPDATE print_queue"
-                " SET status = 'failed', dispatched_at = NULL, started_at = NULL,"
-                "     completed_at = CURRENT_TIMESTAMP, error_message = :recovery_message"
-                " WHERE id IN (SELECT id FROM ranked_active_queue WHERE reservation_rank > 1)"
-            ),
-            {"recovery_message": recovery_message},
+                ") SELECT id, status FROM ranked_active_queue WHERE reservation_rank > 1"
+            )
         )
-    recovered_count = result.rowcount
-    if isinstance(recovered_count, int) and recovered_count > 0:
-        logger.warning("Recovered %d duplicate active print_queue reservation(s)", recovered_count)
+        duplicates = result.all()
+        for row in duplicates:
+            await transition_queue_item(
+                conn,
+                row.id,
+                row.status,
+                "failed",
+                values={
+                    "dispatched_at": None,
+                    "started_at": None,
+                    "completed_at": func.current_timestamp(),
+                    "error_message": recovery_message,
+                },
+            )
+    if duplicates:
+        logger.warning("Recovered %d duplicate active print_queue reservation(s)", len(duplicates))
 
     # A new name upgrades the old predicate without dropping the existing guard.
     await _safe_execute(
@@ -2517,27 +2529,12 @@ async def run_migrations(conn):
             "Queue cancellation-cascade migration (#1667): resetting %d skipped item(s) to pending",
             len(stuck_ids),
         )
-        await conn.execute(
-            text(
-                "UPDATE print_queue "
-                "SET status = 'pending', error_message = NULL, completed_at = NULL "
-                "WHERE id IN ("
-                "  SELECT pq.id FROM print_queue pq "
-                "  WHERE pq.status = 'skipped' "
-                "    AND pq.error_message = 'Previous print failed or was aborted' "
-                "    AND pq.completed_at IS NOT NULL "
-                "    AND ("
-                "      SELECT prev.status FROM print_queue prev "
-                "      WHERE prev.printer_id = pq.printer_id "
-                "        AND prev.id != pq.id "
-                "        AND prev.status IN ('completed', 'failed', 'cancelled', 'aborted') "
-                "        AND prev.completed_at IS NOT NULL "
-                "        AND prev.completed_at < pq.completed_at "
-                "      ORDER BY prev.completed_at DESC LIMIT 1"
-                "    ) = 'cancelled'"
-                ")"
+        from backend.app.services.queue_transitions import transition_queue_item
+
+        for item_id in stuck_ids:
+            await transition_queue_item(
+                conn, item_id, "skipped", "pending", values={"error_message": None, "completed_at": None}
             )
-        )
 
     # Migration: Unify `LibraryFile.file_type` across ingest paths (#1600).
     # Pre-#1600, only the external-folder scan path stored `gcode.3mf` for
