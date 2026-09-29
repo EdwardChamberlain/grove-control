@@ -170,13 +170,15 @@ async def test_flush_does_not_emit_an_unconditional_status_write(sessions):
     assert len(statements) == 2  # Subsequent metadata flush must not rewrite status.
 
 
-async def test_staged_direct_status_write_is_rejected_before_autoflush(sessions):
+@pytest.mark.parametrize("detached", [False, True])
+async def test_direct_status_write_is_rejected_without_calling_helper(sessions, detached):
     item_id = await make_item(sessions)
     async with sessions() as db:
         item = await db.get(PrintQueueItem, item_id)
-        item.status = "printing"
-        with pytest.raises(ValueError, match="only be changed"):
-            await transition_queue_item(db, item, "pending", "dispatching")
+        if detached:
+            db.expunge(item)
+        with pytest.raises(InvalidQueueTransition, match="only be changed"):
+            item.status = "printing"
         await db.rollback()
         assert await db.scalar(select(PrintQueueItem.status).where(PrintQueueItem.id == item_id)) == "pending"
 
@@ -243,3 +245,53 @@ async def test_stop_winning_confirmation_race_does_not_publish_job_started(sessi
         item = await db.get(PrintQueueItem, item_id)
         assert item.status == "cancelled"
         assert item.started_at is None
+
+
+async def test_conflict_does_not_autoflush_dirty_metadata(sessions):
+    item_id = await make_item(sessions)
+    statements = []
+    async with sessions() as worker, sessions() as user:
+        stale = await worker.get(PrintQueueItem, item_id)
+        await worker.commit()
+        current = await user.get(PrintQueueItem, item_id)
+        await transition_queue_item(user, current, "pending", "cancelled", values={"error_message": "Stopped by user"})
+        await user.commit()
+        stale.error_message = "Stale upload failure"
+
+        def capture(conn, cursor, statement, parameters, context, executemany):
+            if statement.startswith("UPDATE print_queue"):
+                statements.append(statement)
+
+        engine = worker.bind.sync_engine
+        event.listen(engine, "before_cursor_execute", capture)
+        try:
+            with pytest.raises(QueueTransitionConflict):
+                await transition_queue_item(worker, stale, "pending", "failed")
+        finally:
+            event.remove(engine, "before_cursor_execute", capture)
+            await worker.rollback()
+        # Even a rolled-back unconditional metadata write would break the
+        # helper's no-write-on-conflict contract and could trigger DB effects.
+        assert len(statements) == 1
+        assert "print_queue.status =" in statements[0].split(" WHERE ")[1]
+    async with sessions() as db:
+        item = await db.get(PrintQueueItem, item_id)
+        assert (item.status, item.error_message) == ("cancelled", "Stopped by user")
+
+
+async def test_drying_reservation_release_cannot_overwrite_cancellation(sessions):
+    item_id = await make_item(sessions, "dispatching", wait_for_drying_complete=True)
+    async with sessions() as worker, sessions() as user:
+        stale = await worker.get(PrintQueueItem, item_id)
+        await worker.commit()
+        current = await user.get(PrintQueueItem, item_id)
+        await transition_queue_item(user, current, "dispatching", "cancelled")
+        await user.commit()
+        with pytest.raises(QueueTransitionConflict):
+            await PrintScheduler()._prepare_drying_for_dispatch(
+                worker, stale, 1, active_ams_ids=(0,), release_dispatch_reservation=True
+            )
+        await worker.rollback()
+    async with sessions() as db:
+        item = await db.get(PrintQueueItem, item_id)
+        assert (item.status, item.waiting_reason) == ("cancelled", None)

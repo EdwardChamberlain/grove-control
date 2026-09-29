@@ -3402,6 +3402,21 @@ class PrintScheduler:
 
         return prev_item.status in ("completed", "cancelled")
 
+    async def _fail_queue_item(self, db: AsyncSession, item: PrintQueueItem, message: str, **values) -> None:
+        """Commit a dispatch failure before callers publish effects.
+
+        A conflicting writer raises before any metadata or effects can change.
+        Callers needing a joint Archive transaction use the writer directly.
+        """
+        await transition_queue_item(
+            db,
+            item,
+            item.status,
+            "failed",
+            values={"error_message": message, "completed_at": datetime.now(timezone.utc), **values},
+        )
+        await db.commit()
+
     async def _power_off_if_needed(self, db: AsyncSession, item: PrintQueueItem):
         """Schedule power-off if the queue item enabled auto_off_after.
 
@@ -3596,20 +3611,14 @@ class PrintScheduler:
         result = await db.execute(select(Printer).where(Printer.id == item.printer_id))
         printer = result.scalar_one_or_none()
         if not printer:
-            await transition_queue_item(db, item, item.status, "failed")
-            item.error_message = "Printer not found"
-            item.completed_at = datetime.now(timezone.utc)
-            await db.commit()
+            await self._fail_queue_item(db, item, "Printer not found")
             logger.error("Queue item %s: Printer %s not found", item.id, item.printer_id)
             await self._power_off_if_needed(db, item)
             return
 
         # Check printer is connected
         if not printer_manager.is_connected(item.printer_id):
-            await transition_queue_item(db, item, item.status, "failed")
-            item.error_message = "Printer not connected"
-            item.completed_at = datetime.now(timezone.utc)
-            await db.commit()
+            await self._fail_queue_item(db, item, "Printer not connected")
             logger.error("Queue item %s: Printer %s not connected", item.id, item.printer_id)
             await self._power_off_if_needed(db, item)
             return
@@ -3626,10 +3635,7 @@ class PrintScheduler:
             result = await db.execute(select(PrintArchive).where(PrintArchive.id == item.archive_id))
             archive = result.scalar_one_or_none()
             if not archive:
-                await transition_queue_item(db, item, item.status, "failed")
-                item.error_message = "Archive not found"
-                item.completed_at = datetime.now(timezone.utc)
-                await db.commit()
+                await self._fail_queue_item(db, item, "Archive not found")
                 logger.error("Queue item %s: Archive %s not found", item.id, item.archive_id)
                 await self._power_off_if_needed(db, item)
                 return
@@ -3651,10 +3657,7 @@ class PrintScheduler:
             result = await db.execute(LibraryFile.active().where(LibraryFile.id == item.library_file_id))
             library_file = result.scalar_one_or_none()
             if not library_file:
-                await transition_queue_item(db, item, item.status, "failed")
-                item.error_message = "Library file not found"
-                item.completed_at = datetime.now(timezone.utc)
-                await db.commit()
+                await self._fail_queue_item(db, item, "Library file not found")
                 logger.error("Queue item %s: Library file %s not found", item.id, item.library_file_id)
                 await self._power_off_if_needed(db, item)
                 return
@@ -3675,20 +3678,14 @@ class PrintScheduler:
 
         else:
             # Neither archive nor library file specified
-            await transition_queue_item(db, item, item.status, "failed")
-            item.error_message = "No source file specified"
-            item.completed_at = datetime.now(timezone.utc)
-            await db.commit()
+            await self._fail_queue_item(db, item, "No source file specified")
             logger.error("Queue item %s: No archive_id or library_file_id specified", item.id)
             await self._power_off_if_needed(db, item)
             return
 
         # Check file exists on disk
         if not file_path.exists():
-            await transition_queue_item(db, item, item.status, "failed")
-            item.error_message = "Source file not found on disk"
-            item.completed_at = datetime.now(timezone.utc)
-            await db.commit()
+            await self._fail_queue_item(db, item, "Source file not found on disk")
             logger.error("Queue item %s: File not found: %s", item.id, file_path)
             await self._power_off_if_needed(db, item)
             return
@@ -3716,10 +3713,7 @@ class PrintScheduler:
             rack = _rack_nozzle_diameters(nozzle_status)
             mismatch_msg = _nozzle_mismatch_message(sliced_nozzle, installed, rack)
             if mismatch_msg:
-                await transition_queue_item(db, item, item.status, "failed")
-                item.error_message = mismatch_msg
-                item.completed_at = datetime.now(timezone.utc)
-                await db.commit()
+                await self._fail_queue_item(db, item, mismatch_msg)
                 logger.warning("Queue item %s: nozzle mismatch — %s", item.id, mismatch_msg)
                 await notification_service.on_queue_job_failed(
                     job_name=filename.replace(".gcode.3mf", "").replace(".3mf", ""),
@@ -3854,10 +3848,7 @@ class PrintScheduler:
                     "See server logs for detailed diagnostics."
                 )
             )
-            await transition_queue_item(db, item, item.status, "failed")
-            item.error_message = error_msg
-            item.completed_at = datetime.now(timezone.utc)
-            await db.commit()
+            await self._fail_queue_item(db, item, error_msg)
             logger.error(
                 f"Queue item {item.id}: FTP upload failed - printer={printer.name}, model={printer.model}, "
                 f"ip={printer.ip_address}. Check logs above for storage diagnostics and specific error codes."
@@ -4123,12 +4114,13 @@ class PrintScheduler:
                 injected_path.unlink(missing_ok=True)
             item = await db.get(PrintQueueItem, queue_item_id)
             if item:
-                await transition_queue_item(db, item, item.status, "failed")
-                item.dispatched_at = None
-                item.dispatch_subtask_id = None
-                item.error_message = "Failed to create Archive record for dispatch"
-                item.completed_at = datetime.now(timezone.utc)
-                await db.commit()
+                await self._fail_queue_item(
+                    db,
+                    item,
+                    "Failed to create Archive record for dispatch",
+                    dispatched_at=None,
+                    dispatch_subtask_id=None,
+                )
                 await self._power_off_if_needed(db, item)
             return
 

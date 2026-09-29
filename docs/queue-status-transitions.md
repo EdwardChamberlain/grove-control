@@ -42,11 +42,22 @@ metadata; the writer never parses them to decide whether an edge is allowed.
 
 New queue rows still start with their normal `pending` initial value. Creation
 is not a transition. Existing rows, including those repaired at startup, must
-use the writer. The heat-soak row-lock helper updates only the row ID to itself;
+use the writer. The model rejects direct status assignments on persisted or
+detached rows, even if the transition module has not been imported. Architecture
+tests check SQLAlchemy bulk status updates and raw SQL status repairs outside
+the writer, and require the table to cover every API status.
+
+The heat-soak row-lock helper updates only the row ID to itself;
 it does not write status. Archive and scheduled-drying statuses belong to their
 own models and are outside this queue refactor.
 
+Repeated scheduler failure paths share a helper that writes the reason and
+completion time atomically with the status, then commits before side effects.
+Paths that also update an Archive keep their joint transaction.
+
 The database-backed tests exercise allowed workflows, invalid edges, stale
-sessions, deletion, replaced claims, rollback, ORM flush behavior, and a Stop
-racing dispatch confirmation. Completion callback tests use real database
-matching and transitions. No existing tests were removed.
+sessions, deletion, replaced claims, rollback, ORM flush behavior, dirty metadata
+on conflict, drying reservation release after cancellation, and a Stop racing
+dispatch confirmation. Completion callback tests use real database matching and
+transitions, independent sessions, mocked printer FTP, and scoped background-task
+cleanup. No existing tests were removed.

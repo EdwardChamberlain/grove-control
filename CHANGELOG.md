@@ -25,7 +25,8 @@
 
 - Centralized existing Queue status changes behind a validated, conditional
   database update (issue #194, stage 1). Status names and workflows are unchanged;
-  stale writes cannot overwrite a concurrent status change. See the
+  stale writes cannot overwrite a concurrent status change, and direct status
+  assignments on stored queue rows are rejected. See the
   [transition guide](docs/queue-status-transitions.md).
 
 - The virtual printer's former **Archive** mode now saves uploads to Files.

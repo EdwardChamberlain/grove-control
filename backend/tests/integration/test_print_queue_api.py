@@ -2032,13 +2032,8 @@ class TestAbortedStatusNormalisation:
         from backend.app.models.print_queue import PrintQueueItem
 
         # Create items with various statuses including 'aborted'
-        item_aborted = await queue_item_factory(status="pending")
+        item_aborted = await queue_item_factory(status="aborted")
         item_pending = await queue_item_factory(status="pending")
-
-        # Manually set the invalid status
-        item_aborted.status = "aborted"
-        db_session.add(item_aborted)
-        await db_session.commit()
 
         # Run the fixup query (same logic as lifespan)
         result = await db_session.execute(select(PrintQueueItem).where(PrintQueueItem.status == "aborted"))

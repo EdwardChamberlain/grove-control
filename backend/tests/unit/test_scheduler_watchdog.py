@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.services.print_scheduler import PrintScheduler
+from backend.app.services.queue_transitions import transition_queue_item
 
 
 @pytest.fixture
@@ -45,7 +46,7 @@ class TestDurableDispatchingState:
     async def test_confirmation_promotes_only_after_active_telemetry(self, db_session):
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            item.status = "dispatching"
+            await transition_queue_item(db, item, item.status, "dispatching")
             item.dispatched_at = datetime.now(timezone.utc)
             item.dispatch_subtask_id = "12345"
             await db.commit()
@@ -91,7 +92,7 @@ class TestDurableDispatchingState:
     ):
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            item.status = "dispatching"
+            await transition_queue_item(db, item, item.status, "dispatching")
             item.dispatched_at = datetime.now(timezone.utc)
             await db.commit()
 
@@ -130,7 +131,7 @@ class TestDurableDispatchingState:
 
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            item.status = "dispatching"
+            await transition_queue_item(db, item, item.status, "dispatching")
             item.dispatched_at = datetime.now(timezone.utc)
             await db.commit()
 
@@ -159,7 +160,7 @@ class TestDurableDispatchingState:
     async def test_correlated_terminal_dispatch_is_not_retried(self, db_session):
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            item.status = "dispatching"
+            await transition_queue_item(db, item, item.status, "dispatching")
             item.dispatched_at = datetime.now(timezone.utc)
             item.dispatch_subtask_id = "12345"
             await db.commit()
@@ -189,7 +190,7 @@ class TestDurableDispatchingState:
     async def test_restart_recovery_publishes_the_normal_start_event(self, db_session):
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            item.status = "dispatching"
+            await transition_queue_item(db, item, item.status, "dispatching")
             item.dispatched_at = datetime.now(timezone.utc)
             item.dispatch_subtask_id = "12345"
             await db.commit()
@@ -224,7 +225,7 @@ class TestDurableDispatchingState:
         """An unrelated manual print must not acknowledge a durable dispatch."""
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            item.status = "dispatching"
+            await transition_queue_item(db, item, item.status, "dispatching")
             item.dispatched_at = datetime.now(timezone.utc)
             item.dispatch_subtask_id = "12345"
             await db.commit()
@@ -244,7 +245,7 @@ class TestDurableDispatchingState:
         """Legacy rows without an id must not accept an uncorrelated active print."""
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            item.status = "dispatching"
+            await transition_queue_item(db, item, item.status, "dispatching")
             item.dispatched_at = datetime.now(timezone.utc)
             item.dispatch_subtask_id = None
             await db.commit()
@@ -267,7 +268,7 @@ class TestDurableDispatchingState:
         """An uncorrelated active printer is unsafe to requeue automatically."""
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            item.status = "dispatching"
+            await transition_queue_item(db, item, item.status, "dispatching")
             item.dispatched_at = datetime.now(timezone.utc) - timedelta(seconds=300)
             item.dispatch_subtask_id = "12345"
             await db.commit()
@@ -288,7 +289,7 @@ class TestDurableDispatchingState:
     async def test_restart_recovery_holds_stale_uncertain_dispatch(self, db_session, printer_status):
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            item.status = "dispatching"
+            await transition_queue_item(db, item, item.status, "dispatching")
             item.dispatched_at = datetime.now(timezone.utc) - timedelta(seconds=300)
             item.dispatch_subtask_id = "12345"
             await db.commit()
@@ -309,7 +310,7 @@ class TestDurableDispatchingState:
         """Unknown terminal telemetry must not cause a duplicate retry."""
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            item.status = "dispatching"
+            await transition_queue_item(db, item, item.status, "dispatching")
             item.dispatched_at = datetime.now(timezone.utc) - timedelta(seconds=300)
             item.dispatch_subtask_id = "12345"
             await db.commit()
@@ -343,7 +344,7 @@ class TestDurableDispatchingState:
         """
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            item.status = "dispatching"
+            await transition_queue_item(db, item, item.status, "dispatching")
             item.dispatched_at = datetime.now(timezone.utc) - timedelta(seconds=300)
             item.dispatch_subtask_id = "12345"
             await db.commit()
@@ -394,7 +395,7 @@ class TestDurableDispatchingState:
         dispatched_at = datetime.now(timezone.utc)
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            item.status = "dispatching"
+            await transition_queue_item(db, item, item.status, "dispatching")
             item.dispatched_at = dispatched_at
             item.dispatch_subtask_id = "NEW_SUBTASK"
             await db.commit()
@@ -498,7 +499,7 @@ class TestActivePrinterReservation:
     async def test_database_allows_only_one_active_queue_item_per_printer(self, db_session):
         async with db_session() as db:
             first = await db.get(PrintQueueItem, 1)
-            first.status = "dispatching"
+            await transition_queue_item(db, first, first.status, "dispatching")
             await db.commit()
 
             db.add(PrintQueueItem(id=2, printer_id=42, archive_id=100, status="dispatching"))

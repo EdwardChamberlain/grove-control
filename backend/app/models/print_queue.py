@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, event, func, inspect
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.core.database import Base
@@ -241,6 +241,16 @@ class PrintQueueVariant(Base):
 
     queue_item: Mapped["PrintQueueItem"] = relationship(back_populates="variants")
     library_file: Mapped["LibraryFile"] = relationship()
+
+
+@event.listens_for(PrintQueueItem.status, "set")
+def _reject_direct_status_write(target: PrintQueueItem, value, oldvalue, initiator) -> None:
+    # Register with the model so the guard also applies when no service has
+    # imported the transition helper yet. New rows may set their initial state.
+    if inspect(target).has_identity:
+        from backend.app.services.queue_transitions import InvalidQueueTransition
+
+        raise InvalidQueueTransition("Queue status must only be changed through transition_queue_item")
 
 
 from backend.app.models.archive import PrintArchive  # noqa: E402
