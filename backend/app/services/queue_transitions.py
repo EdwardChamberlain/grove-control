@@ -8,6 +8,7 @@ not a commit; callers must commit before publishing their existing effects.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import inspect
@@ -79,12 +80,16 @@ async def transition_queue_item(
         raise ValueError("Queue status must only be changed through transition_queue_item")
 
     table = PrintQueueItem.__table__
-    result = await db.execute(
-        table.update()
-        .where(table.c.id == item_id, table.c.status == expected_status, *conditions)
-        .values(status=status, **metadata)
-        .execution_options(autoflush=False)
-    )
+    # SQLAlchemy 2.1 autoflushes Core statements regardless of their statement
+    # execution options. Suppress it at the session boundary so a losing CAS
+    # cannot flush stale metadata first. Startup repairs use AsyncConnection.
+    with db.no_autoflush if isinstance(db, AsyncSession) else nullcontext():
+        result = await db.execute(
+            table.update()
+            .where(table.c.id == item_id, table.c.status == expected_status, *conditions)
+            .values(status=status, **metadata)
+            .execution_options(autoflush=False)
+        )
     if result.rowcount != 1:
         raise QueueTransitionConflict(f"Queue item {item_id} no longer matches expected status {expected_status}")
     if not isinstance(item, int):
