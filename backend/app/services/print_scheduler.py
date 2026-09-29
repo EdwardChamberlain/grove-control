@@ -599,8 +599,8 @@ class PrintScheduler:
                 # Commit the terminal observation before starting the normal
                 # completion side effects. A process stop after this point must
                 # not turn a printer-confirmed terminal job back into a retry.
-                await transition_queue_item(db, item, item.status, telemetry_status)
-                item.completed_at = now
+                if not await self._transition_or_skip(db, item, telemetry_status, completed_at=now):
+                    continue
                 changed = True
                 filename = getattr(printer_status, "gcode_file", None)
                 if not filename and item.archive_id is not None:
@@ -633,9 +633,8 @@ class PrintScheduler:
                 continue
 
             if telemetry_status == "printing":
-                await transition_queue_item(db, item, item.status, "printing")
-                item.started_at = now
-                item.error_message = None
+                if not await self._transition_or_skip(db, item, "printing", started_at=now, error_message=None):
+                    continue
                 changed = True
                 promoted_ids.append(item.id)
                 logger.info("Recovered dispatched queue item %s as printer-confirmed printing", item.id)
@@ -986,9 +985,14 @@ class PrintScheduler:
                     # Check condition (previous print success)
                     if item.require_previous_success:
                         if not await self._check_previous_success(db, item):
-                            await transition_queue_item(db, item, item.status, "skipped")
-                            item.error_message = "Previous print failed or was aborted"
-                            item.completed_at = datetime.now(timezone.utc)
+                            if not await self._transition_or_skip(
+                                db,
+                                item,
+                                "skipped",
+                                error_message="Previous print failed or was aborted",
+                                completed_at=datetime.now(timezone.utc),
+                            ):
+                                continue
                             await db.commit()
                             logger.info("Skipped queue item %s - previous print failed", item.id)
 
@@ -1242,9 +1246,14 @@ class PrintScheduler:
                         # Check condition (previous print success) before assigning
                         if item.require_previous_success:
                             if not await self._check_previous_success(db, item):
-                                await transition_queue_item(db, item, item.status, "skipped")
-                                item.error_message = "Previous print failed or was aborted"
-                                item.completed_at = datetime.now(timezone.utc)
+                                if not await self._transition_or_skip(
+                                    db,
+                                    item,
+                                    "skipped",
+                                    error_message="Previous print failed or was aborted",
+                                    completed_at=datetime.now(timezone.utc),
+                                ):
+                                    continue
                                 await db.commit()
                                 logger.info("Skipped queue item %s - previous print failed", item.id)
 
@@ -3417,6 +3426,20 @@ class PrintScheduler:
         )
         await db.commit()
 
+    async def _transition_or_skip(self, db: AsyncSession, item: PrintQueueItem, status: str, **values) -> bool:
+        """Apply one item's transition within a scheduler pass.
+
+        Returns False when another writer changed the item first. The
+        conditional update wrote nothing, so the pass skips this item and
+        carries on with the others instead of aborting.
+        """
+        try:
+            await transition_queue_item(db, item, item.status, status, values=values)
+        except QueueTransitionConflict:
+            logger.info("Queue item %s changed concurrently; skipping it this pass", item.id)
+            return False
+        return True
+
     async def _power_off_if_needed(self, db: AsyncSession, item: PrintQueueItem):
         """Schedule power-off if the queue item enabled auto_off_after.
 
@@ -3561,6 +3584,10 @@ class PrintScheduler:
             await db.commit()
             try:
                 await self._start_print(db, item, heat_soak_complete=True)
+            except QueueTransitionConflict:
+                # A cancel or delete won during file preparation. The cleanup
+                # below still turns the heaters off for whatever state it left.
+                logger.info("Queue item %s changed during heat-soak dispatch", item_id)
             finally:
                 # Any failure/defer before project_file must turn the heaters off.
                 await db.rollback()

@@ -11,7 +11,6 @@ from collections.abc import Mapping, Sequence
 from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.sql.elements import ColumnElement
@@ -61,10 +60,12 @@ async def transition_queue_item(
     are metadata that must change atomically with the status. Integer IDs let
     legacy migrations use this same writer on their existing connection.
 
-    On conflict the caller must roll back (or let its session context close)
-    and must not run effects. This function never commits or rolls back the
-    caller's transaction. ORM status is synchronized without a second,
-    unconditional status UPDATE at flush time.
+    On conflict nothing is written and the caller must not run effects. It
+    either rolls back (or lets its session context close) or, when handling
+    several items in one transaction, skips this item and continues. This
+    function never commits or rolls back the caller's transaction. ORM status
+    is synchronized without a second, unconditional status UPDATE at flush
+    time.
     """
     from backend.app.models.print_queue import PrintQueueItem
 
@@ -76,8 +77,6 @@ async def transition_queue_item(
     if "status" in metadata or "id" in metadata:
         raise ValueError("Transition metadata cannot override status or id")
     item_id = item if isinstance(item, int) else item.id
-    if not isinstance(item, int) and inspect(item).attrs.status.history.has_changes():
-        raise ValueError("Queue status must only be changed through transition_queue_item")
 
     table = PrintQueueItem.__table__
     # SQLAlchemy 2.1 autoflushes Core statements regardless of their statement

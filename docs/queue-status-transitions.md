@@ -35,10 +35,18 @@ timestamp condition. Metadata that must change in that statement goes in
 and producing an unconditional second update during flush.
 
 The caller owns the transaction. Commit before running the existing post-commit
-effects; roll back on `QueueTransitionConflict` and do not continue the losing
-operation. HTTP callers receive 409 with a refresh/retry message. An invalid
-edge raises `InvalidQueueTransition` before any update. Reasons remain ordinary
-metadata; the writer never parses them to decide whether an edge is allowed.
+effects. On `QueueTransitionConflict` nothing was written: do not continue the
+losing operation. A single-item operation rolls back, and HTTP callers receive
+409 with a refresh/retry message. Work that handles several items in one
+transaction skips the changed item and continues with the rest. The scheduler
+pass does this for restart recovery and the previous-success skip, and
+"Resume after failure" restores every item that is still skipped and reports
+that count. A heat-soak dispatch that loses the race still turns its heaters
+off.
+
+An invalid edge raises `InvalidQueueTransition` before any update. Reasons
+remain ordinary metadata; the writer never parses them to decide whether an
+edge is allowed.
 
 New queue rows still start with their normal `pending` initial value. Creation
 is not a transition. Existing rows, including those repaired at startup, must
@@ -57,7 +65,8 @@ Paths that also update an Archive keep their joint transaction.
 
 The database-backed tests exercise allowed workflows, invalid edges, stale
 sessions, deletion, replaced claims, rollback, ORM flush behavior, dirty metadata
-on conflict, drying reservation release after cancellation, and a Stop racing
-dispatch confirmation. Completion callback tests use real database matching and
-transitions, independent sessions, mocked printer FTP, and scoped background-task
-cleanup. No existing tests were removed.
+on conflict, drying reservation release after cancellation, a Stop racing
+dispatch confirmation, and a cancellation racing restart recovery, a heat-soak
+dispatch and "Resume after failure". Completion callback tests use real
+database matching and transitions, independent sessions, mocked printer FTP,
+and scoped background-task cleanup. No existing tests were removed.
