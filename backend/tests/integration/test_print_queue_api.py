@@ -1849,6 +1849,11 @@ class TestAbortedStatusNormalisation:
     """Tests for issue #558: 'aborted' queue status causes 500 error."""
 
     @pytest.fixture
+    def test_database_url(self, tmp_path):
+        # Callback and background tasks own separate connections, as in production.
+        return f"sqlite+aiosqlite:///{tmp_path / 'completion.db'}"
+
+    @pytest.fixture
     async def printer_factory(self, db_session):
         """Factory to create test printers."""
         _counter = [0]
@@ -1937,125 +1942,86 @@ class TestAbortedStatusNormalisation:
 
         return _create_queue_item
 
+    @pytest.fixture
+    async def completion_environment(self, test_engine):
+        """Real matching/transactions; isolate device I/O and own only our tasks."""
+        import asyncio
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, patch
+
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+
+        from backend.app.main import on_print_complete
+        from backend.app.services.bambu_ftp import DeleteResult
+
+        session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
+        tasks = []
+
+        def spawn(coro, *, name=None):
+            task = asyncio.create_task(coro, name=name)
+            tasks.append(task)
+            return task
+
+        with (
+            patch("backend.app.main.async_session", session_maker),
+            patch("backend.app.core.database.async_session", session_maker),
+            patch("backend.app.main.spawn_background_task", spawn),
+            patch(
+                "backend.app.services.bambu_ftp.delete_file_async", AsyncMock(return_value=DeleteResult.NOT_FOUND)
+            ) as ftp,
+            patch("backend.app.main.ws_manager", AsyncMock()),
+            patch("backend.app.main.mqtt_relay", AsyncMock()) as relay,
+            patch("backend.app.main.notification_service", AsyncMock()),
+            patch("backend.app.main.smart_plug_manager", AsyncMock()),
+            patch("backend.app.main.printer_manager") as manager,
+        ):
+            manager.get_printer.return_value = None
+            manager.get_status.return_value = None
+            manager.get_current_print_user.return_value = None
+            try:
+                yield SimpleNamespace(complete=on_print_complete, ftp=ftp, relay=relay)
+            finally:
+                # Never cancel asyncio.all_tasks(): it includes SQLAlchemy's
+                # internal session-close tasks, whose cancellation can strand I/O.
+                if tasks:
+                    await asyncio.wait_for(asyncio.gather(*tasks), timeout=5)
+
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_on_print_complete_normalises_aborted_to_cancelled(self, queue_item_factory, db_session):
+    async def test_on_print_complete_normalises_aborted_to_cancelled(
+        self, queue_item_factory, db_session, completion_environment
+    ):
         """Verify the completion handler maps 'aborted' → 'cancelled' for queue items."""
-        import asyncio
-        from unittest.mock import AsyncMock, MagicMock, patch
-
         item = await queue_item_factory(status="printing")
-
-        # Build a mock session whose execute returns our item
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [item]
-
-        mock_session = AsyncMock()
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=False)
-        mock_session.execute = AsyncMock(return_value=mock_result)
-        mock_session.commit = AsyncMock()
-
-        tasks_before = set(asyncio.all_tasks())
-
-        with (
-            patch("backend.app.main.async_session", return_value=mock_session),
-            patch("backend.app.core.database.async_session", return_value=mock_session),
-            patch("backend.app.main.ws_manager") as mock_ws,
-            patch("backend.app.main.mqtt_relay") as mock_relay,
-            patch("backend.app.main.notification_service") as mock_notif,
-            patch("backend.app.main.smart_plug_manager") as mock_plug,
-            patch("backend.app.main.printer_manager") as mock_pm,
-        ):
-            mock_ws.send_print_complete = AsyncMock()
-            mock_ws.broadcast = AsyncMock()
-            mock_relay.on_print_complete = AsyncMock()
-            mock_relay.on_queue_job_completed = AsyncMock()
-            mock_notif.on_print_complete = AsyncMock()
-            mock_plug.on_print_complete = AsyncMock()
-            mock_pm.get_printer.return_value = None
-
-            from backend.app.main import on_print_complete
-
-            await on_print_complete(
-                item.printer_id,
-                {
-                    "status": "aborted",
-                    "filename": "test.gcode",
-                    "subtask_name": "Test",
-                    "timelapse_was_active": False,
-                },
-            )
-
-            # Cancel background tasks before leaving mock context
-            for task in asyncio.all_tasks() - tasks_before:
-                task.cancel()
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):
-                    pass
-
-        # The item status should be normalised to 'cancelled', not 'aborted'
+        await completion_environment.complete(
+            item.printer_id,
+            {"status": "aborted", "filename": "test.gcode", "subtask_name": "Test", "timelapse_was_active": False},
+        )
+        await db_session.refresh(item)
         assert item.status == "cancelled"
+        completion_environment.ftp.assert_awaited()
+        assert completion_environment.relay.on_queue_job_completed.await_args.kwargs["status"] == "cancelled"
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_on_print_complete_does_not_complete_a_dispatching_item(self, queue_item_factory, db_session):
+    async def test_on_print_complete_does_not_complete_a_dispatching_item(
+        self, queue_item_factory, db_session, completion_environment
+    ):
         """A delayed completion for another file must not claim an unconfirmed dispatch."""
-        import asyncio
-        from unittest.mock import AsyncMock, MagicMock, patch
-
         item = await queue_item_factory(status="dispatching")
-
-        # Keep the completion lookup isolated from external services. The event
-        # has no matching expected-print registration, so the dispatch must
-        # remain untouched.
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = []
-        mock_session = AsyncMock()
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=False)
-        mock_session.execute = AsyncMock(return_value=mock_result)
-        mock_session.commit = AsyncMock()
-        tasks_before = set(asyncio.all_tasks())
-
-        with (
-            patch("backend.app.main.async_session", return_value=mock_session),
-            patch("backend.app.core.database.async_session", return_value=mock_session),
-            patch("backend.app.main.ws_manager") as mock_ws,
-            patch("backend.app.main.mqtt_relay") as mock_relay,
-            patch("backend.app.main.notification_service") as mock_notif,
-            patch("backend.app.main.smart_plug_manager") as mock_plug,
-            patch("backend.app.main.printer_manager") as mock_pm,
-        ):
-            mock_ws.send_print_complete = AsyncMock()
-            mock_ws.broadcast = AsyncMock()
-            mock_relay.on_print_complete = AsyncMock()
-            mock_relay.on_queue_job_completed = AsyncMock()
-            mock_notif.on_print_complete = AsyncMock()
-            mock_plug.on_print_complete = AsyncMock()
-            mock_pm.get_printer.return_value = None
-
-            from backend.app.main import on_print_complete
-
-            await on_print_complete(
-                item.printer_id,
-                {
-                    "status": "completed",
-                    "filename": "previous-job.gcode",
-                    "subtask_name": "Previous job",
-                    "timelapse_was_active": False,
-                },
-            )
-
-            for task in asyncio.all_tasks() - tasks_before:
-                task.cancel()
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):
-                    pass
-
+        await completion_environment.complete(
+            item.printer_id,
+            {
+                "status": "completed",
+                "filename": "previous-job.gcode",
+                "subtask_name": "Previous job",
+                "timelapse_was_active": False,
+            },
+        )
+        await db_session.refresh(item)
         assert item.status == "dispatching"
+        completion_environment.ftp.assert_awaited()
+        completion_environment.relay.on_queue_job_completed.assert_not_awaited()
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -2066,19 +2032,16 @@ class TestAbortedStatusNormalisation:
         from backend.app.models.print_queue import PrintQueueItem
 
         # Create items with various statuses including 'aborted'
-        item_aborted = await queue_item_factory(status="pending")
+        item_aborted = await queue_item_factory(status="aborted")
         item_pending = await queue_item_factory(status="pending")
-
-        # Manually set the invalid status
-        item_aborted.status = "aborted"
-        db_session.add(item_aborted)
-        await db_session.commit()
 
         # Run the fixup query (same logic as lifespan)
         result = await db_session.execute(select(PrintQueueItem).where(PrintQueueItem.status == "aborted"))
         aborted_items = result.scalars().all()
+        from backend.app.services.queue_transitions import transition_queue_item
+
         for i in aborted_items:
-            i.status = "cancelled"
+            await transition_queue_item(db_session, i, "aborted", "cancelled")
         await db_session.commit()
 
         # Verify: no more 'aborted' items
@@ -2095,62 +2058,19 @@ class TestAbortedStatusNormalisation:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_completed_status_passes_through_unchanged(self, queue_item_factory, db_session):
+    async def test_completed_status_passes_through_unchanged(
+        self, queue_item_factory, db_session, completion_environment
+    ):
         """Verify normal statuses like 'completed' are not affected by normalisation."""
-        import asyncio
-        from unittest.mock import AsyncMock, MagicMock, patch
-
         item = await queue_item_factory(status="printing")
-
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [item]
-
-        mock_session = AsyncMock()
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=False)
-        mock_session.execute = AsyncMock(return_value=mock_result)
-        mock_session.commit = AsyncMock()
-
-        tasks_before = set(asyncio.all_tasks())
-
-        with (
-            patch("backend.app.main.async_session", return_value=mock_session),
-            patch("backend.app.core.database.async_session", return_value=mock_session),
-            patch("backend.app.main.ws_manager") as mock_ws,
-            patch("backend.app.main.mqtt_relay") as mock_relay,
-            patch("backend.app.main.notification_service") as mock_notif,
-            patch("backend.app.main.smart_plug_manager") as mock_plug,
-            patch("backend.app.main.printer_manager") as mock_pm,
-        ):
-            mock_ws.send_print_complete = AsyncMock()
-            mock_ws.broadcast = AsyncMock()
-            mock_relay.on_print_complete = AsyncMock()
-            mock_relay.on_queue_job_completed = AsyncMock()
-            mock_notif.on_print_complete = AsyncMock()
-            mock_plug.on_print_complete = AsyncMock()
-            mock_pm.get_printer.return_value = None
-
-            from backend.app.main import on_print_complete
-
-            await on_print_complete(
-                item.printer_id,
-                {
-                    "status": "completed",
-                    "filename": "test.gcode",
-                    "subtask_name": "Test",
-                    "timelapse_was_active": False,
-                },
-            )
-
-            # Cancel background tasks before leaving mock context
-            for task in asyncio.all_tasks() - tasks_before:
-                task.cancel()
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):
-                    pass
-
+        await completion_environment.complete(
+            item.printer_id,
+            {"status": "completed", "filename": "test.gcode", "subtask_name": "Test", "timelapse_was_active": False},
+        )
+        await db_session.refresh(item)
         assert item.status == "completed"
+        completion_environment.ftp.assert_awaited()
+        assert completion_environment.relay.on_queue_job_completed.await_args.kwargs["status"] == "completed"
 
     # ========================================================================
     # Library file usage tracking on print completion (#1008)

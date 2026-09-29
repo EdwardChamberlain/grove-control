@@ -23,6 +23,12 @@
 
 ### Changed
 
+- Centralized existing Queue status changes behind a validated, conditional
+  database update (issue #194, stage 1). Status names and workflows are unchanged;
+  stale writes cannot overwrite a concurrent status change, and direct status
+  assignments on stored queue rows are rejected. See the
+  [transition guide](docs/queue-status-transitions.md).
+
 - The virtual printer's former **Archive** mode now saves uploads to Files.
 - `POST /api/v1/archives/upload` and `/api/v1/archives/upload-bulk` now return
   HTTP 410. Upload to Files to retain a file or to Queue to print it.
@@ -39,6 +45,8 @@
   cleanup against queue submissions.
 
 ### Upgrade notes
+
+- Queue transition centralization requires no schema migration or manual action.
 
 - The nullable Archive-to-queue link and unique index are added automatically
   at startup. Existing Archive rows keep a NULL link; no released database has

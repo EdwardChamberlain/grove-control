@@ -47,6 +47,7 @@ from backend.app.services.queue_source_cleanup import (
     remove_queue_only_artifacts,
     remove_queue_only_source_if_unused,
 )
+from backend.app.services.queue_transitions import QueueTransitionConflict, transition_queue_item
 from backend.app.utils.printer_models import is_gcode_compatible
 from backend.app.utils.threemf_tools import (
     extract_bed_type_from_3mf,
@@ -1533,7 +1534,8 @@ async def resume_queue_after_failure(
       so the next ``_check_previous_success`` call ignores them.
     * Restores ``skipped`` items whose ``error_message`` matches the
       scheduler's exact "Previous print failed or was aborted" gate string
-      back to ``pending`` (clears ``error_message`` + ``completed_at``).
+      back to ``pending`` (clears ``error_message`` + ``completed_at``). An
+      item another request changed first is left alone and not counted.
 
     Returns counts so the UI can render a precise toast. No-op endpoint
     (zero counts) when called against a printer with no gate to clear.
@@ -1559,11 +1561,20 @@ async def resume_queue_after_failure(
         .where(PrintQueueItem.status == "skipped")
         .where(PrintQueueItem.error_message == "Previous print failed or was aborted")
     )
-    to_restore = restore_result.scalars().all()
-    for skipped_item in to_restore:
-        skipped_item.status = "pending"
-        skipped_item.error_message = None
-        skipped_item.completed_at = None
+    restored = 0
+    for skipped_item in restore_result.scalars().all():
+        try:
+            await transition_queue_item(
+                db,
+                skipped_item,
+                "skipped",
+                "pending",
+                values={"error_message": None, "completed_at": None},
+            )
+        except QueueTransitionConflict:
+            # Cancelled or restored concurrently; restore the others.
+            continue
+        restored += 1
 
     await db.commit()
 
@@ -1571,9 +1582,9 @@ async def resume_queue_after_failure(
         "Resume after failure on printer %s: acknowledged %d failure(s), restored %d skipped item(s)",
         printer_id,
         len(to_ack),
-        len(to_restore),
+        restored,
     )
-    return {"acknowledged": len(to_ack), "restored": len(to_restore)}
+    return {"acknowledged": len(to_ack), "restored": restored}
 
 
 @router.post("/{item_id}/cancel")
@@ -1616,7 +1627,7 @@ async def cancel_queue_item(
         raise HTTPException(400, f"Cannot cancel item with status '{item.status}'")
 
     library_file_id = item.library_file_id if item.cleanup_library_after_dispatch else None
-    item.status = "cancelled"
+    await transition_queue_item(db, item, item.status, "cancelled")
     item.completed_at = datetime.now(timezone.utc)
     cleanup_paths = []
     if library_file_id is not None:
@@ -1703,7 +1714,7 @@ async def stop_queue_item(
         logger.warning("Failed to mark printer %s as user-stopped: %s", printer_id, _mark_err)
 
     # Update queue item status regardless - if printer is off, print is already stopped
-    item.status = "cancelled"
+    await transition_queue_item(db, item, item.status, "cancelled")
     item.completed_at = datetime.now(timezone.utc)
     item.error_message = "Stopped by user" if stop_sent else "Stopped by user (printer was offline)"
     from backend.app.services.archive import record_dispatch_outcome

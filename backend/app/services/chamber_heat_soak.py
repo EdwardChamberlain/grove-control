@@ -18,6 +18,7 @@ from backend.app.core.tasks import spawn_background_task
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services.printer_manager import printer_manager, supports_chamber_heater
+from backend.app.services.queue_transitions import QueueTransitionConflict, transition_queue_item
 
 logger = logging.getLogger(__name__)
 HEARTBEAT_TIMEOUT = 90
@@ -38,7 +39,7 @@ async def lock_queue_item(db: AsyncSession, item_id: int) -> PrintQueueItem | No
         result = await db.execute(
             update(PrintQueueItem)
             .where(PrintQueueItem.id == item_id)
-            .values(status=PrintQueueItem.status)
+            .values(id=PrintQueueItem.id)
             .execution_options(synchronize_session=False)
         )
         if not result.rowcount:
@@ -84,13 +85,13 @@ def _heaters_off(printer: Printer) -> None:
 
 async def abort_heat_soak(db: AsyncSession, item: PrintQueueItem, reason: str, *, status: str = "pending") -> None:
     """Caller holds the queue write lock. Persist cleanup even if the item is deleted."""
+    await transition_queue_item(db, item, item.status, status)
     printer = await db.get(Printer, item.printer_id)
     if printer:
         printer.heat_soak_shutdown_pending = True
         printer.heat_soak_shutdown_at = utcnow()
         _heaters_off(printer)
     _show_preheating(item.printer_id, False)
-    item.status = status
     item.error_message = reason
     item.completed_at = utcnow()
     item.preheat_owner = None
@@ -109,7 +110,7 @@ async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> None:
     reservation and disable the soak for this queue item.
     """
     _show_preheating(item.printer_id, False)
-    item.status = "pending"
+    await transition_queue_item(db, item, item.status, "pending")
     item.chamber_heat_soak = False
     item.manual_start = False
     item.error_message = None
@@ -136,28 +137,26 @@ class ChamberHeatSoak:
         # only a still-pending row. Concurrent workers cannot reassign a winner.
         now = utcnow()
         try:
-            result = await db.execute(
-                update(PrintQueueItem)
-                .where(PrintQueueItem.id == item_id, PrintQueueItem.status == "pending")
-                .values(
-                    status="preheating",
-                    printer_id=printer_id,
-                    preheat_owner=self.owner,
-                    preheat_requested_at=now,
-                    preheat_checked_at=now,
-                    preheat_started_at=None,
-                    dispatched_at=None,
-                    dispatch_subtask_id=None,
-                    error_message=None,
-                    waiting_reason=None,
-                )
-                .execution_options(synchronize_session=False)
+            await transition_queue_item(
+                db,
+                item,
+                "pending",
+                "preheating",
+                values={
+                    "printer_id": printer_id,
+                    "preheat_owner": self.owner,
+                    "preheat_requested_at": now,
+                    "preheat_checked_at": now,
+                    "preheat_started_at": None,
+                    "dispatched_at": None,
+                    "dispatch_subtask_id": None,
+                    "error_message": None,
+                    "waiting_reason": None,
+                },
             )
             await db.commit()
-        except IntegrityError:
+        except (IntegrityError, QueueTransitionConflict):
             await db.rollback()
-            return False
-        if not result.rowcount:
             return False
         # Reservation is durable before any heater command. Re-lock to ensure
         # a cancellation during commit cannot be followed by heater-on commands.
@@ -265,7 +264,7 @@ class ChamberHeatSoak:
                 continue
             if (now - item.preheat_started_at).total_seconds() >= item.heat_soak_minutes * 60:
                 _show_preheating(item.printer_id, False)
-                item.status = "dispatching"
+                await transition_queue_item(db, item, item.status, "dispatching")
                 item.dispatched_at = now
                 ready.append(item.id)
             client = printer_manager.get_client(item.printer_id)
