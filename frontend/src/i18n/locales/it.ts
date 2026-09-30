@@ -6363,6 +6363,8 @@ export default {
     days: 'giorni',
     maxCountLabel: 'Numero massimo di file archivio da conservare',
     countDescription: 'Conserva gli archivi più recenti indipendentemente dall’età. Gli archivi delle stampe in corso non vengono mai rimossi.',
+    countDraftHint: 'Le modifiche hanno effetto quando selezioni Applica.',
+    countValidationError: 'Inserisci un numero intero tra 1 e 100.000.',
     countPreviewSummary: 'La prossima esecuzione rimuoverebbe {{count}} archivi.',
     countPreviewNone: 'Nessun archivio supera attualmente questo limite.',
     purgeStatsLabel: 'Rimuovi anche dalle statistiche',

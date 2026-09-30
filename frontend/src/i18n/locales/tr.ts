@@ -6321,6 +6321,8 @@ export default {
     days: 'gün',
     maxCountLabel: 'Saklanacak en fazla arşiv dosyası sayısı',
     countDescription: 'Yaşına bakmadan en yeni arşivleri tutar. Devam eden baskıların arşivleri silinmez.',
+    countDraftHint: 'Değişiklikler Uygula seçildiğinde geçerli olur.',
+    countValidationError: '1 ile 100.000 arasında bir tam sayı girin.',
     countPreviewSummary: 'Bir sonraki çalıştırmada {{count}} arşiv kaldırılacak.',
     countPreviewNone: 'Şu anda bu sınırı aşan arşiv yok.',
     purgeStatsLabel: 'Ayrıca istatistiklerden kaldır',

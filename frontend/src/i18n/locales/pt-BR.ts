@@ -6363,6 +6363,8 @@ export default {
     days: 'dias',
     maxCountLabel: 'Número máximo de arquivos de arquivo para manter',
     countDescription: 'Mantém os arquivos mais recentes, independentemente da idade. Arquivos de impressões em andamento nunca são removidos.',
+    countDraftHint: 'As alterações entram em vigor ao selecionar Aplicar.',
+    countValidationError: 'Insira um número inteiro de 1 a 100.000.',
     countPreviewSummary: '{{count}} arquivo(s) seriam removidos na próxima execução.',
     countPreviewNone: 'Nenhum arquivo excede este limite no momento.',
     purgeStatsLabel: 'Remover também das estatísticas',

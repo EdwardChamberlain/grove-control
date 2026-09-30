@@ -6376,6 +6376,8 @@ export default {
     days: 'Tage',
     maxCountLabel: 'Maximale Anzahl aufzubewahrender Archivdateien',
     countDescription: 'Behält die neuesten Archive unabhängig vom Alter. Archive laufender Drucke werden nie entfernt.',
+    countDraftHint: 'Änderungen werden wirksam, wenn Sie Anwenden auswählen.',
+    countValidationError: 'Geben Sie eine ganze Zahl zwischen 1 und 100.000 ein.',
     countPreviewSummary: 'Beim nächsten Durchlauf würden {{count}} Archive entfernt.',
     countPreviewNone: 'Derzeit überschreiten keine Archive dieses Limit.',
     purgeStatsLabel: 'Auch aus Statistiken entfernen',

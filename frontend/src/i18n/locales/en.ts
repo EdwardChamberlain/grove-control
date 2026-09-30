@@ -6410,6 +6410,8 @@ export default {
     days: 'days',
     maxCountLabel: 'Maximum number of archive files to keep',
     countDescription: 'Keeps the newest archives regardless of age. Archives for prints that are still running are never removed.',
+    countDraftHint: 'Changes take effect when you select Apply.',
+    countValidationError: 'Enter a whole number from 1 to 100,000.',
     countPreviewSummary: '{{count}} archive(s) would be removed at the next run.',
     countPreviewNone: 'No archives currently exceed this limit.',
     purgeStatsLabel: 'Also remove from statistics',
