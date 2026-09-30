@@ -290,7 +290,7 @@ class ArchivePurgeService:
     ) -> dict:
         """Count + size of the oldest archive files that exceed ``keep_count``.
 
-        Count retention ranks files by archive creation/dispatch time, then by
+        Count retention ranks files by last print activity, then by
         archive ID so equal timestamps always produce the same preview and
         purge set. Soft-deleted rows no longer have files and do not count
         toward the limit. Active prints count toward the limit, but are skipped
@@ -316,7 +316,7 @@ class ArchivePurgeService:
         sample_result = await db.execute(
             select(PrintArchive.filename)
             .where(excess_filter)
-            .order_by(PrintArchive.created_at.asc(), PrintArchive.id.asc())
+            .order_by(_last_activity_expr().asc(), PrintArchive.id.asc())
             .limit(sample_limit)
         )
         samples = [row[0] for row in sample_result.all()]
@@ -346,7 +346,7 @@ class ArchivePurgeService:
         result = await db.execute(
             select(PrintArchive.id)
             .where(PrintArchive.id.in_(select(excess_ids.c.id)), PrintArchive.status != "printing")
-            .order_by(PrintArchive.created_at.asc(), PrintArchive.id.asc())
+            .order_by(_last_activity_expr().asc(), PrintArchive.id.asc())
         )
         ids = [row[0] for row in result.all()]
         deleted = await self._delete_archive_ids(ids, purge_stats=purge_stats)
@@ -366,7 +366,7 @@ class ArchivePurgeService:
         return (
             select(PrintArchive.id)
             .where(PrintArchive.deleted_at.is_(None))
-            .order_by(PrintArchive.created_at.desc(), PrintArchive.id.desc())
+            .order_by(_last_activity_expr().desc(), PrintArchive.id.desc())
             .offset(keep_count)
             .subquery()
         )
