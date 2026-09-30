@@ -292,7 +292,9 @@ test('postponed print submits its UTC start time and remains queued until then',
 
   await page.goto('/queue');
   await expect(page.getByText("Queued", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText(/Dec 31, 2099, 09:30 AM/)).toBeVisible();
+  // The start time is shown once, on the Scheduled badge.
+  await expect(page.getByTestId(/^queue-badge-scheduled-/)).toContainText('Scheduled · Dec 31, 2099, 09:30 AM');
+  await expect(page.getByText(/Dec 31, 2099, 09:30 AM/)).toHaveCount(1);
 });
 
 test('invalid postponed dates cannot create a queue item', async ({ page }) => {

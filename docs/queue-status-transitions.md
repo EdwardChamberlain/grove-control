@@ -35,10 +35,19 @@ cross-model alternatives) instead, and has no printer while it waits.
 
 The scheduler picks a free, compatible printer for an Any machine job and hands
 that choice, with the tray mapping computed for it, to the dispatch worker in
-memory. The worker writes both in the same conditional update that moves the
-job to `preheating` or `dispatching`, which requires the row to still be
-unassigned. If the attempt backs out before that update, nothing was written,
-and the next pass may choose any compatible printer. Retry of an Any machine
+memory. Specific machine jobs get their tray mapping the same way, so the
+scheduler never overwrites a waiting job's mapping. The worker writes both in
+the same conditional update that moves the job to `preheating` or
+`dispatching`, which requires an Any machine row to still be unassigned. If the
+attempt backs out before that update, nothing was written, and the next pass may
+choose any compatible printer.
+
+A waiting job stays editable until its worker claims it; the claim then refuses
+further edits until the worker finishes. After claiming, the worker compares
+every editable field with what selection read. If an edit was accepted in
+between (a new target model, tray mapping, Manual start or start time, for
+example), it releases the claim without sending anything, and the next pass
+decides again from the edited job. Retry of an Any machine
 job returns it to the pool the same way, with its printer and tray mapping
 chosen again.
 

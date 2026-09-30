@@ -643,7 +643,8 @@ function SortableQueueItem({
                 {item.created_by_username}
               </span>
             )}
-            {isPending && !item.manual_start && (
+            {/* A future start time is shown once, by the Scheduled badge. */}
+            {isPending && !item.manual_start && !isScheduled && (
               <span className="flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5" />
                 {item.scheduled_time

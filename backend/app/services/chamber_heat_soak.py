@@ -136,16 +136,23 @@ class ChamberHeatSoak:
         self._visible_printers: set[int] = set()
 
     async def stage(
-        self, db: AsyncSession, item: PrintQueueItem, *, bind_values: Mapping[str, Any] | None = None
+        self,
+        db: AsyncSession,
+        item: PrintQueueItem,
+        *,
+        bind_values: Mapping[str, Any] | None = None,
+        unassigned: bool = False,
     ) -> bool:
         """Hold the printer and start heating.
 
-        ``bind_values`` assigns an "Any machine" job to the printer the worker
-        selected (``item.printer_id`` in memory); the row itself must still be
-        unassigned. Otherwise the row must still require that printer.
+        ``bind_values`` records the scheduler's decision (printer and tray
+        mapping) with the hold. With ``unassigned``, an "Any machine" job is
+        assigned the printer the worker selected (``item.printer_id`` in
+        memory) and the row must still be unassigned; otherwise the row must
+        still require that printer.
         """
         item_id, printer_id, claim = item.id, item.printer_id, item.dispatching_at
-        required_printer_id = None if bind_values is not None else printer_id
+        required_printer_id = None if unassigned else printer_id
         item = await lock_queue_item(db, item_id)
         if not item or item.status != "queued" or item.printer_id != required_printer_id:
             await db.rollback()

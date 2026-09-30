@@ -26,6 +26,7 @@ from backend.app.models.settings import Settings
 from backend.app.models.smart_plug import SmartPlug
 from backend.app.models.spool_assignment import SpoolAssignment
 from backend.app.models.spoolman_slot_assignment import SpoolmanSlotAssignment
+from backend.app.schemas.print_queue import PrintQueueItemUpdate
 from backend.app.services import drying_preflight
 from backend.app.services.bambu_ftp import (
     UploadCancelled,
@@ -143,21 +144,38 @@ class _ModelCandidate:
     variant: "PrintQueueVariant | None" = None
 
 
-@dataclass(frozen=True, slots=True)
-class _PoolBinding:
-    """The printer chosen for an "Any machine" job, and its tray mapping.
+# Every field a Queue edit can change (single or bulk). Selection decisions
+# depend on them, so a worker only proceeds if none changed since selection.
+_EDITABLE_FIELDS = tuple(name for name in PrintQueueItemUpdate.model_fields if name in PrintQueueItem.__table__.columns)
 
-    Queued pool jobs carry no printer: ``printer_id`` on a queued row is only
-    a "Specific machine" requirement. The scheduler hands its choice to the
-    dispatch worker in memory, and the worker writes it in the same
-    conditional update that moves the job out of ``queued``.
+
+@dataclass(frozen=True, slots=True)
+class _DispatchBinding:
+    """A selection decision handed to its dispatch worker.
+
+    Queued jobs carry no printer-specific decision: ``printer_id`` on a queued
+    row is only a "Specific machine" requirement, and the tray mapping is
+    computed for the printer chosen. The worker writes both in the same
+    conditional update that moves the job out of ``queued``. ``selected`` is
+    every editable field as selection read it; a job edited in between is
+    left for the next pass, which decides again from the edit.
     """
 
     printer_id: int
     ams_mapping: str | None
+    unassigned: bool
+    selected: tuple[tuple[str, object], ...] = ()
+
+    @classmethod
+    def for_item(cls, item: PrintQueueItem, printer_id: int, ams_mapping: str | None, *, unassigned: bool):
+        selected = tuple((name, getattr(item, name)) for name in _EDITABLE_FIELDS if hasattr(item, name))
+        return cls(printer_id, ams_mapping, unassigned, selected)
 
     def values(self) -> dict[str, int | str | None]:
         return {"printer_id": self.printer_id, "ams_mapping": self.ams_mapping}
+
+    def edited_fields(self, item: PrintQueueItem) -> list[str]:
+        return [name for name, value in self.selected if getattr(item, name) != value]
 
 
 def _bind_in_memory(item: PrintQueueItem, printer_id: int | None, ams_mapping: str | None) -> None:
@@ -868,10 +886,10 @@ class PrintScheduler:
             # Selection is synchronous; the actual upload/session work is
             # launched after all queue decisions have been committed.
             dispatch_ids: list[int] = []
-            # Printer each selected job will be sent to. For "Any machine"
-            # jobs the choice lives only here and in the worker's binding.
+            # Printer and tray mapping each selected job will be sent with.
+            # They live only here and in the worker's binding until its hold.
             selected_printers: dict[int, int] = {}
-            pool_bindings: dict[int, _PoolBinding] = {}
+            selected_mappings: dict[int, str | None] = {}
             waiting_reason_changed = False
             variant_resolved = False
 
@@ -1059,6 +1077,10 @@ class PrintScheduler:
                     # Compute AMS mapping if not already set
                     # Recompute forced jobs even when an older/manual mapping
                     # exists so the selected tray also uses the required colour.
+                    # The result goes to the worker, which writes it with the
+                    # hold: the scheduler never overwrites a waiting job's
+                    # mapping, so a tray edit made meanwhile is not lost.
+                    bound_mapping = item.ams_mapping
                     mapping_is_material_safe = self._ams_mapping_uses_compatible_materials(
                         item.printer_id,
                         item.ams_mapping,
@@ -1074,17 +1096,18 @@ class PrintScheduler:
                             await db.commit()
                             continue
                         if computed_mapping:
-                            item.ams_mapping = json.dumps(computed_mapping)
+                            bound_mapping = json.dumps(computed_mapping)
                             logger.info(
                                 f"Queue item {item.id}: Computed AMS mapping for printer {item.printer_id}: {computed_mapping}"
                             )
-                            await db.commit()
 
                     # Filament-deficit pre-dispatch check (#1496). If the
                     # assigned spool can't satisfy any required slot grams,
                     # promote the item to manual_start so the user must
                     # acknowledge via the ▶ button (which re-checks live).
-                    if await self._block_on_filament_deficit(db, item):
+                    if await self._block_on_filament_deficit(
+                        db, item, printer_id=item.printer_id, ams_mapping=bound_mapping
+                    ):
                         continue
 
                     # Apply drying policy only after every other dispatch gate
@@ -1119,6 +1142,7 @@ class PrintScheduler:
                         waiting_reason_changed = True
                     dispatch_ids.append(item.id)
                     selected_printers[item.id] = item.printer_id
+                    selected_mappings[item.id] = bound_mapping
                     busy_printers.add(item.printer_id)
 
                     # SJF starvation guard: mark items that were jumped
@@ -1330,7 +1354,7 @@ class PrintScheduler:
                         _claim_library_row(item)
                         dispatch_ids.append(item.id)
                         selected_printers[item.id] = printer_id
-                        pool_bindings[item.id] = _PoolBinding(printer_id, bound_mapping)
+                        selected_mappings[item.id] = bound_mapping
                         busy_printers.add(printer_id)
 
                         # SJF starvation guard: mark model-based items that were jumped
@@ -1378,7 +1402,19 @@ class PrintScheduler:
                 await db.commit()
 
             if dispatch_ids:
-                self._launch_uploads(dispatch_ids, selected_printers, upload_limit, pool_bindings)
+                # Record what each decision read only after the commit above,
+                # so the worker compares against the committed row.
+                items_by_id = {item.id: item for item in items}
+                bindings = {
+                    item_id: _DispatchBinding.for_item(
+                        items_by_id[item_id],
+                        selected_printers[item_id],
+                        selected_mappings.get(item_id),
+                        unassigned=items_by_id[item_id].printer_id is None,
+                    )
+                    for item_id in dispatch_ids
+                }
+                self._launch_uploads(dispatch_ids, selected_printers, upload_limit, bindings)
                 # Give newly-created workers one turn to acquire their own
                 # sessions and reach the first I/O await. The scheduler still
                 # returns without waiting for uploads to finish.
@@ -1396,16 +1432,16 @@ class PrintScheduler:
         item_ids: list[int],
         item_printers: dict[int, int | None],
         limit: int,
-        pool_bindings: dict[int, _PoolBinding] | None = None,
+        bindings: dict[int, _DispatchBinding] | None = None,
     ) -> None:
         """Launch independent queue workers into the bounded upload pool.
 
         Each worker owns its database session. The pool is refillable across
         scheduler ticks, so a slow printer cannot hold an unused slot hostage
         while other printers wait, and a worker failure cannot cancel siblings.
-        ``pool_bindings`` carries the printer chosen for each "Any machine" job.
+        ``bindings`` carries each selection decision to its worker.
         """
-        pool_bindings = pool_bindings or {}
+        bindings = bindings or {}
         occupied_printers = {printer_id for _task, printer_id in self._inflight.values() if printer_id is not None}
         candidates: list[int] = []
         reserved_printers = set(occupied_printers)
@@ -1439,7 +1475,7 @@ class PrintScheduler:
             async def _run_dispatch(
                 selected_item_id: int = item_id,
                 selected_printer_id: int | None = item_printers.get(item_id),
-                binding: _PoolBinding | None = pool_bindings.get(item_id),
+                binding: _DispatchBinding | None = bindings.get(item_id),
             ) -> None:
                 await self._dispatch_one(selected_item_id, selected_printer_id, binding=binding)
 
@@ -1463,11 +1499,12 @@ class PrintScheduler:
         item_id: int,
         selected_printer_id: int | None = None,
         *,
-        binding: _PoolBinding | None = None,
+        binding: _DispatchBinding | None = None,
     ) -> None:
         """Run one upload/dispatch with an isolated session."""
         async with async_session() as item_db:
-            if not await self._claim_for_dispatch(item_db, item_id, selected_printer_id, pool=binding is not None):
+            pool = binding is not None and binding.unassigned
+            if not await self._claim_for_dispatch(item_db, item_id, selected_printer_id, pool=pool):
                 logger.info(
                     "Queue item %s is no longer claimable for dispatch; skipping",
                     item_id,
@@ -1477,6 +1514,16 @@ class PrintScheduler:
                 item = await item_db.get(PrintQueueItem, item_id)
                 if not item:
                     logger.info("Queue item %s vanished after dispatch claim", item_id)
+                    return
+                # The claim now refuses further edits; one accepted between
+                # selection and the claim invalidates this decision.
+                edited = binding.edited_fields(item) if binding is not None else []
+                if edited:
+                    logger.info(
+                        "Queue item %s was edited after selection (%s); leaving it for the next pass",
+                        item_id,
+                        ", ".join(edited),
+                    )
                     return
                 current_task = asyncio.current_task()
                 if current_task is not None and item_id in self._inflight:
@@ -3680,7 +3727,7 @@ class PrintScheduler:
         item: PrintQueueItem,
         *,
         heat_soak_complete: bool = False,
-        binding: _PoolBinding | None = None,
+        binding: _DispatchBinding | None = None,
     ):
         """Upload file and start print for a queue item.
 
@@ -3690,8 +3737,9 @@ class PrintScheduler:
 
         Nothing before the hold transition can fail a queued job: it was not
         sent anywhere, so it stays in the pool with a reason. ``binding`` is
-        the printer chosen for an "Any machine" job; the hold transition is
-        the only write that assigns it.
+        the scheduler's decision: the printer (chosen, for an "Any machine"
+        job) and its tray mapping. The hold transition is the only write that
+        records them on the job.
         """
         logger.info("Starting queue item %s", item.id)
 
@@ -3839,17 +3887,22 @@ class PrintScheduler:
 
         if getattr(item, "chamber_heat_soak", False) is True and not heat_soak_complete:
             staged = await self._heat_soak.stage(
-                db, item, bind_values=binding.values() if binding is not None else None
+                db,
+                item,
+                bind_values=binding.values() if binding is not None else None,
+                unassigned=binding is not None and binding.unassigned,
             )
-            if staged and binding is not None:
+            if staged and binding is not None and binding.unassigned:
                 await self._notify_pool_assignment(db, item)
             return
 
         if not heat_soak_complete:
             # The database hold precedes FTP. A broken printer stops at this
             # first attempt, even when plate-clear confirmation is disabled.
-            # An "Any machine" job gets its printer in this same update.
+            # An "Any machine" job gets its printer in this same update, and
+            # every job its tray mapping for that printer.
             item_id, printer_id = item.id, item.printer_id
+            unassigned = binding is not None and binding.unassigned
             if not self._is_printer_idle(printer_id):
                 return
             try:
@@ -3859,9 +3912,7 @@ class PrintScheduler:
                     "queued",
                     "dispatching",
                     conditions=(
-                        PrintQueueItem.printer_id.is_(None)
-                        if binding is not None
-                        else PrintQueueItem.printer_id == printer_id,
+                        PrintQueueItem.printer_id.is_(None) if unassigned else PrintQueueItem.printer_id == printer_id,
                         PrintQueueItem.dispatching_at == item.dispatching_at,
                     ),
                     values={"waiting_reason": None, **(binding.values() if binding is not None else {})},
@@ -3871,7 +3922,7 @@ class PrintScheduler:
                 await db.rollback()
                 logger.info("Printer %s was reserved concurrently; job %s remains queued", printer_id, item_id)
                 return
-            if binding is not None:
+            if unassigned:
                 await self._notify_pool_assignment(db, item)
 
         # Strip Grove snippets from every source before dispatch. Archive and

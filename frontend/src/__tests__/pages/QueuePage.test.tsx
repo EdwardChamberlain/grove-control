@@ -368,6 +368,8 @@ describe('QueuePage', () => {
       expect(screen.getAllByText('Queued').length).toBeGreaterThan(0);
       expect(screen.getByTestId(`queue-badge-scheduled-${mockQueueItems[0].id}`))
         .toHaveTextContent('Scheduled · Jan 1, 2099');
+      // The badge carries the start time; the row does not repeat it.
+      expect(screen.getAllByText(/Jan 1, 2099/)).toHaveLength(1);
     });
 
     it('does not badge a queued job whose scheduled time has passed', async () => {

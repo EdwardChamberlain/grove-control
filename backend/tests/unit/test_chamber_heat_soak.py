@@ -101,7 +101,9 @@ async def test_any_machine_job_is_bound_to_its_printer_only_by_the_soak_hold(soa
     await soak.db.refresh(soak.item)
     _bind_in_memory(soak.item, 1, "[3]")
 
-    assert await soak.service.stage(soak.db, soak.item, bind_values={"printer_id": 1, "ams_mapping": "[3]"})
+    assert await soak.service.stage(
+        soak.db, soak.item, bind_values={"printer_id": 1, "ams_mapping": "[3]"}, unassigned=True
+    )
 
     row = (await soak.db.execute(select(PrintQueueItem.__table__).where(PrintQueueItem.id == 1))).mappings().one()
     assert (row["status"], row["printer_id"], row["ams_mapping"]) == ("preheating", 1, "[3]")
@@ -123,7 +125,9 @@ async def test_any_machine_soak_refuses_a_job_that_gained_a_printer_requirement(
     )
     await soak.db.commit()
 
-    assert not await soak.service.stage(soak.db, soak.item, bind_values={"printer_id": 1, "ams_mapping": None})
+    assert not await soak.service.stage(
+        soak.db, soak.item, bind_values={"printer_id": 1, "ams_mapping": None}, unassigned=True
+    )
 
     row = (await soak.db.execute(select(PrintQueueItem.__table__).where(PrintQueueItem.id == 1))).mappings().one()
     assert (row["status"], row["printer_id"]) == ("queued", 2)

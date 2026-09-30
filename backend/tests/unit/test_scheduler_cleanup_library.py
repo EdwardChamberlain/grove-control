@@ -767,7 +767,7 @@ async def _row(ctx):
 
 @pytest.mark.asyncio
 async def test_any_machine_job_gets_its_printer_only_from_the_hold_transition(queue_factory):
-    from backend.app.services.print_scheduler import _PoolBinding
+    from backend.app.services.print_scheduler import _DispatchBinding
 
     ctx = await queue_factory(cleanup=False)
     await _make_any_machine_job(ctx)
@@ -780,7 +780,9 @@ async def test_any_machine_job_gets_its_printer_only_from_the_hold_transition(qu
 
     ctx.upload.side_effect = upload
     assigned = AsyncMock()
-    await _dispatch_library_item(ctx, binding=_PoolBinding(ctx.printer_id, "[4]"), assigned_notification=assigned)
+    await _dispatch_library_item(
+        ctx, binding=_DispatchBinding(ctx.printer_id, "[4]", unassigned=True), assigned_notification=assigned
+    )
 
     # The printer and its tray mapping were written with the move out of the
     # queue, before the upload, and nowhere earlier.
@@ -795,12 +797,12 @@ async def test_any_machine_job_gets_its_printer_only_from_the_hold_transition(qu
 @pytest.mark.parametrize("pool", [True, False], ids=["any-machine", "specific-machine"])
 @pytest.mark.asyncio
 async def test_disconnected_printer_leaves_the_job_queued_and_unheld(queue_factory, pool):
-    from backend.app.services.print_scheduler import _PoolBinding
+    from backend.app.services.print_scheduler import _DispatchBinding
 
     ctx = await queue_factory(cleanup=False)
     if pool:
         await _make_any_machine_job(ctx)
-    binding = _PoolBinding(ctx.printer_id, None) if pool else None
+    binding = _DispatchBinding(ctx.printer_id, None, unassigned=True) if pool else None
 
     await _dispatch_library_item(ctx, binding=binding, connected=False)
 
@@ -823,14 +825,14 @@ async def test_disconnected_printer_leaves_the_job_queued_and_unheld(queue_facto
 @pytest.mark.parametrize("pool", [True, False], ids=["any-machine", "specific-machine"])
 @pytest.mark.asyncio
 async def test_missing_source_parks_the_job_in_the_queue(queue_factory, pool):
-    from backend.app.services.print_scheduler import _PoolBinding
+    from backend.app.services.print_scheduler import _DispatchBinding
 
     ctx = await queue_factory(cleanup=False)
     if pool:
         await _make_any_machine_job(ctx)
     ctx.source_path.unlink()
 
-    await _dispatch_library_item(ctx, binding=_PoolBinding(ctx.printer_id, None) if pool else None)
+    await _dispatch_library_item(ctx, binding=_DispatchBinding(ctx.printer_id, None, unassigned=True) if pool else None)
 
     row = await _row(ctx)
     assert row.status == "queued"
@@ -840,3 +842,81 @@ async def test_missing_source_parks_the_job_in_the_queue(queue_factory, pool):
     # blocks the jobs behind it by being retried every tick.
     assert row.manual_start is True
     ctx.upload.assert_not_awaited()
+
+
+async def _selection_binding(ctx, printer_id, ams_mapping, *, unassigned):
+    """The decision a selection pass hands its worker, from the row it read."""
+    from backend.app.services.print_scheduler import _DispatchBinding
+
+    async with ctx.session_maker() as db:
+        item = await db.get(PrintQueueItem, ctx.queue_item_id)
+        return _DispatchBinding.for_item(item, printer_id, ams_mapping, unassigned=unassigned)
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        {"target_model": "X1E"},
+        {"ams_mapping": "[1]"},
+        {"manual_start": True},
+        {"scheduled_time": "future"},
+    ],
+    ids=["retargeted-model", "tray-mapping", "manual-start", "postponed"],
+)
+@pytest.mark.asyncio
+async def test_edit_accepted_after_selection_is_not_dispatched_with_the_stale_decision(queue_factory, edit):
+    from datetime import datetime, timedelta
+
+    ctx = await queue_factory(cleanup=False)
+    await _make_any_machine_job(ctx)
+    # Selection chose this X1C printer and computed a tray mapping for it.
+    binding = await _selection_binding(ctx, ctx.printer_id, "[4]", unassigned=True)
+    async with ctx.session_maker() as db:
+        item = await db.get(PrintQueueItem, ctx.queue_item_id)
+        for name, value in edit.items():
+            setattr(item, name, datetime.now() + timedelta(days=1) if value == "future" else value)
+        await db.commit()
+
+    await _dispatch_library_item(ctx, binding=binding)
+
+    row = await _row(ctx)
+    assert (row.status, row.printer_id, row.dispatching_at) == ("queued", None, None)
+    for name, value in edit.items():
+        if value != "future":
+            assert getattr(row, name) == value, "the accepted edit is kept"
+    ctx.upload.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_specific_machine_edit_after_selection_is_honoured(queue_factory):
+    ctx = await queue_factory(cleanup=False)
+    binding = await _selection_binding(ctx, ctx.printer_id, "[4]", unassigned=False)
+    async with ctx.session_maker() as db:
+        item = await db.get(PrintQueueItem, ctx.queue_item_id)
+        item.ams_mapping = "[1]"
+        await db.commit()
+
+    await _dispatch_library_item(ctx, binding=binding)
+
+    row = await _row(ctx)
+    assert (row.status, row.printer_id, row.ams_mapping) == ("queued", ctx.printer_id, "[1]")
+    ctx.upload.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unedited_job_with_a_start_time_is_dispatched_with_its_decision(queue_factory):
+    from datetime import datetime, timedelta
+
+    ctx = await queue_factory(cleanup=False)
+    await _make_any_machine_job(ctx)
+    async with ctx.session_maker() as db:
+        item = await db.get(PrintQueueItem, ctx.queue_item_id)
+        item.scheduled_time = datetime.now() - timedelta(minutes=5)  # Due; compared after a reload.
+        await db.commit()
+    binding = await _selection_binding(ctx, ctx.printer_id, "[4]", unassigned=True)
+
+    await _dispatch_library_item(ctx, binding=binding)
+
+    row = await _row(ctx)
+    assert (row.status, row.printer_id, row.ams_mapping) == ("dispatching", ctx.printer_id, "[4]")
+    ctx.upload.assert_awaited_once()
