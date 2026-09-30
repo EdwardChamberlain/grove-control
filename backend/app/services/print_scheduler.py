@@ -39,6 +39,7 @@ from backend.app.services.chamber_heat_soak import ChamberHeatSoak, abort_heat_s
 from backend.app.services.filament_deficit import compute_deficit_for_queue_item
 from backend.app.services.filament_requirements import canonical_filament_type
 from backend.app.services.ha_sensor_manager import ha_sensor_manager
+from backend.app.services.job_identity import telemetry_identity
 from backend.app.services.notification_service import notification_service
 from backend.app.services.printer_manager import (
     printer_manager,
@@ -99,8 +100,7 @@ _EMPTY_NOZZLE_SERIAL = "N/A"
 def _queue_status_from_dispatch_telemetry(printer_status, dispatch_subtask_id: str | None) -> str | None:
     """Map telemetry for this exact dispatch to its queue lifecycle state."""
     expected_id = str(dispatch_subtask_id).strip() if dispatch_subtask_id is not None else ""
-    reported_id = getattr(printer_status, "subtask_id", None) if printer_status else None
-    reported_id = str(reported_id).strip() if reported_id is not None else ""
+    reported_id = telemetry_identity(printer_status) if printer_status else None
     if not expected_id or expected_id == "0" or reported_id != expected_id:
         return None
 
@@ -560,7 +560,7 @@ class PrintScheduler:
         telemetry cannot prove rejection, so stale attempts remain held for
         manual review rather than risking an automatic duplicate print.
         """
-        result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.status == "dispatching"))
+        result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.status.in_(("dispatching", "printing"))))
         dispatches = list(result.scalars().all())
         if not dispatches:
             return
@@ -571,18 +571,16 @@ class PrintScheduler:
         promoted_ids: list[int] = []
         terminal_dispatches: list[tuple[int, int, dict]] = []
         for item in dispatches:
-            if self._recovery_started_at is not None and item.dispatched_at is not None:
-                dispatched_at = item.dispatched_at
-                if dispatched_at.tzinfo is None:
-                    dispatched_at = dispatched_at.replace(tzinfo=timezone.utc)
-                if dispatched_at >= self._recovery_started_at:
-                    # This row was created after the current scheduler loop
-                    # started. Its confirmation task owns the dispatch; using
-                    # the previous terminal state here can complete a fresh
-                    # job before the printer has entered PREPARE/RUNNING.
-                    continue
-
+            if item.status == "dispatching" and self._recovery_started_at and item.dispatched_at:
+                sent = item.dispatched_at.replace(tzinfo=timezone.utc)
+                if sent >= self._recovery_started_at and (now - sent).total_seconds() < 270:
+                    continue  # Live acknowledgement owns fresh dispatches.
             printer_status = printer_manager.get_status(item.printer_id) if item.printer_id is not None else None
+            if printer_status and (
+                not getattr(printer_status, "connected", False)
+                or not getattr(printer_status, "job_telemetry_ready", True)
+            ):
+                printer_status = None
             dispatch_subtask_id = str(item.dispatch_subtask_id).strip() if item.dispatch_subtask_id else None
             telemetry_status = _queue_status_from_dispatch_telemetry(printer_status, dispatch_subtask_id)
 
@@ -601,6 +599,25 @@ class PrintScheduler:
                 # not turn a printer-confirmed terminal job back into a retry.
                 if not await self._transition_or_skip(db, item, telemetry_status, completed_at=now):
                     continue
+                # Persist the existing plate gate before releasing the active
+                # reservation, including a crash before the completion callback.
+                await db.execute(
+                    update(Printer)
+                    .where(Printer.id == item.printer_id)
+                    .values(
+                        awaiting_plate_clear=True,
+                        awaiting_plate_clear_archive_id=item.archive_id,
+                    )
+                )
+                from backend.app.services.archive import record_dispatch_outcome
+
+                await record_dispatch_outcome(
+                    db,
+                    status=telemetry_status,
+                    dispatched_queue_item_id=item.id,
+                    archive_id=item.archive_id,
+                    completed_at=now,
+                )
                 changed = True
                 filename = getattr(printer_status, "gcode_file", None)
                 if not filename and item.archive_id is not None:
@@ -632,7 +649,7 @@ class PrintScheduler:
                 )
                 continue
 
-            if telemetry_status == "printing":
+            if telemetry_status == "printing" and item.status == "dispatching":
                 if not await self._transition_or_skip(db, item, "printing", started_at=now, error_message=None):
                     continue
                 changed = True
@@ -640,6 +657,8 @@ class PrintScheduler:
                 logger.info("Recovered dispatched queue item %s as printer-confirmed printing", item.id)
                 continue
 
+            if item.status != "dispatching":
+                continue
             dispatched_at = item.dispatched_at
             if dispatched_at is not None:
                 if dispatched_at.tzinfo is None:
@@ -667,6 +686,7 @@ class PrintScheduler:
                 name=f"publish-recovered-queue-start-{queue_item_id}",
             )
         for queue_item_id, printer_id, completion_data in terminal_dispatches:
+            printer_manager.set_awaiting_plate_clear(printer_id, True)
             if queue_item_id in self._terminal_dispatch_recoveries:
                 continue
             self._terminal_dispatch_recoveries.add(queue_item_id)
@@ -3951,7 +3971,9 @@ class PrintScheduler:
         # landed, without claiming the printer is already printing.
         # Keep the same bounded numeric submission id in the row and MQTT
         # command so a terminal event remains attributable after restart.
-        dispatch_subtask_id = str(int(time.time() * 1000) % 2_147_483_647 or 1)
+        from secrets import randbelow
+
+        dispatch_subtask_id = str(randbelow(2_147_483_646) + 1)
         now_utc = datetime.now(timezone.utc)
         claim_timestamp = item.dispatching_at
         dispatch_item_id, dispatch_printer_id = item.id, item.printer_id

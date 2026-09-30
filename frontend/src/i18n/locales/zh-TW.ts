@@ -1064,6 +1064,11 @@ export default {
 
   // Queue page
   queue: {
+    resolveDispatch: {
+      prompt: "印表機尚未確認此工作。選擇前請檢查印表機：",
+      printing: "正在列印",
+      failed: "尚未開始列印",
+    },
     filamentShort: {
       rowBadge: '所分配料盤的線材不足',
       rowTooltip: '調度程式已標記此項目。點擊播放查看各槽位的不足量，並決定是否仍要列印。',

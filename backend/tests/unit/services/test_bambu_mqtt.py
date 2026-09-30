@@ -5960,7 +5960,7 @@ class TestPrintRunningObservedCallback:
 
         assert running_observed_calls == []
 
-    def test_does_not_fire_without_current_file(self, mqtt_client):
+    def test_observes_identity_even_without_current_file(self, mqtt_client):
         """RUNNING with no file is ill-formed (firmware glitch / transient).
         We need ``current_file`` to find the right archive, so skip the
         callback rather than fire it with a meaningless payload."""
@@ -5980,7 +5980,8 @@ class TestPrintRunningObservedCallback:
             }
         )
 
-        assert running_observed_calls == []
+        assert len(running_observed_calls) == 1
+        assert running_observed_calls[0]["submission_id"]
 
     def test_safe_when_callback_not_set(self, mqtt_client):
         """No callback configured → silently skip; no AttributeError on the
@@ -6030,6 +6031,7 @@ class TestPrintRunningObservedCallback:
             "remaining_time",
             "raw_data",
             "ams_mapping",
+            "submission_id",
         }
 
 
@@ -6079,11 +6081,13 @@ class TestTotalLayersPreservation:
         # different file going RUNNING.
         mqtt_client._previous_gcode_state = "RUNNING"
         mqtt_client._previous_gcode_file = "/data/Metadata/old_print.gcode"
+        mqtt_client._previous_job_id = "previous"
         mqtt_client._was_running = True
         mqtt_client._process_message(
             {
                 "print": {
                     "gcode_state": "RUNNING",
+                    "subtask_id": "new",
                     "gcode_file": "/data/Metadata/new_print.gcode",
                     "subtask_name": "new_print",
                 }

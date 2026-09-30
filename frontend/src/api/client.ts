@@ -2158,6 +2158,7 @@ export interface PrintQueueItem {
   use_ams: boolean;
   nozzle_offset_cali: CalibrationMode;
   status: 'pending' | 'preheating' | 'dispatching' | 'printing' | 'completed' | 'failed' | 'skipped' | 'cancelled';
+  dispatch_needs_resolution?: boolean;
   dispatched_at: string | null;
   started_at: string | null;
   completed_at: string | null;
@@ -5084,6 +5085,10 @@ export const api = {
     }),
   cancelQueueItem: (id: number) =>
     request<{ message: string }>(`/queue/${id}/cancel`, { method: 'POST' }),
+  resolveQueueDispatch: (id: number, outcome: 'printing' | 'failed') =>
+    request<{ message: string }>(`/queue/${id}/resolve-dispatch`, {
+      method: 'POST', body: JSON.stringify({ outcome }),
+    }),
   stopQueueItem: (id: number) =>
     request<{ message: string }>(`/queue/${id}/stop`, { method: 'POST' }),
   skipQueueHeatSoak: (id: number) =>

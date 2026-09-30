@@ -1078,6 +1078,11 @@ export default {
 
   // Queue page
   queue: {
+    resolveDispatch: {
+      prompt: 'The printer has not confirmed this job. Check the printer before choosing:',
+      printing: "It's printing",
+      failed: "It didn't start",
+    },
     title: 'Print Queue',
     subtitle: 'Schedule and manage your print jobs',
     filamentShort: {

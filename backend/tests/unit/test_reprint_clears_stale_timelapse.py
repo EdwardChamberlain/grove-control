@@ -165,9 +165,11 @@ async def test_reprint_clears_timelapse_path_and_unlinks_stale_file(tmp_path):
         mock_relay.on_print_start = AsyncMock()
         mock_pm.get_printer = MagicMock(return_value=MagicMock(name="Test", serial_number="TEST123"))
 
-        from backend.app.main import on_print_start
+        from backend.app.main import _archive_print_start as on_print_start
 
-        await on_print_start(1, {"filename": "MyModel.3mf", "subtask_name": "MyModel"})
+        await on_print_start(
+            1, {"filename": "MyModel.3mf", "subtask_name": "MyModel"}, queue_archive_id=mock_archive.id
+        )
 
     assert mock_archive.timelapse_path is None, (
         "expected-archive branch must clear timelapse_path on reprint so "
@@ -244,9 +246,11 @@ async def test_reprint_with_no_timelapse_path_is_noop(tmp_path):
         mock_relay.on_print_start = AsyncMock()
         mock_pm.get_printer = MagicMock(return_value=MagicMock(name="Test", serial_number="TEST123"))
 
-        from backend.app.main import on_print_start
+        from backend.app.main import _archive_print_start as on_print_start
 
-        await on_print_start(1, {"filename": "FreshFile.3mf", "subtask_name": "FreshFile"})
+        await on_print_start(
+            1, {"filename": "FreshFile.3mf", "subtask_name": "FreshFile"}, queue_archive_id=mock_archive.id
+        )
 
     assert mock_archive.timelapse_path is None
     assert mock_archive.status == "printing"
@@ -318,9 +322,9 @@ async def test_reprint_with_missing_stale_file_does_not_raise(tmp_path):
         mock_relay.on_print_start = AsyncMock()
         mock_pm.get_printer = MagicMock(return_value=MagicMock(name="Test", serial_number="TEST123"))
 
-        from backend.app.main import on_print_start
+        from backend.app.main import _archive_print_start as on_print_start
 
-        await on_print_start(1, {"filename": "Ghost.3mf", "subtask_name": "Ghost"})
+        await on_print_start(1, {"filename": "Ghost.3mf", "subtask_name": "Ghost"}, queue_archive_id=mock_archive.id)
 
     assert mock_archive.timelapse_path is None
     assert mock_archive.status == "printing"

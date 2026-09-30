@@ -41,7 +41,7 @@ class TestPrintStartLogic:
             mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
             mock_session_maker.return_value = mock_session
 
-            from backend.app.main import on_print_start
+            from backend.app.main import _archive_print_start as on_print_start
 
             await on_print_start(
                 1,
@@ -60,112 +60,80 @@ class TestPrintStartLogic:
 
 
 class TestPlateClearGate:
-    """The plate-clear gate (#961) blocks the queue from auto-dispatching the
-    next print until the user acknowledges the bed was cleared. The gate must
-    be raised on every terminal status that could have left material on the
-    bed — including aborted (printer self-abort or touchscreen stop) and
-    cancelled (user stopped via Grove Control queue UI). #1171: prior code only
-    raised the flag for completed/failed, so an aborted print auto-dispatched
-    the next queue item onto a fouled bed two seconds later."""
+    """All physically terminal outcomes gate dispatch of the next job."""
 
-    @staticmethod
-    def _setup_mocks(stack):
-        mock_session_maker = stack.enter_context(patch("backend.app.main.async_session"))
-        stack.enter_context(patch("backend.app.main.notification_service")).on_print_complete = AsyncMock()
-        stack.enter_context(patch("backend.app.main.smart_plug_manager")).on_print_complete = AsyncMock()
-        mock_ws = stack.enter_context(patch("backend.app.main.ws_manager"))
-        mock_ws.send_print_complete = AsyncMock()
-        mock_ws.broadcast = AsyncMock()
-        stack.enter_context(patch("backend.app.main.mqtt_relay")).on_print_complete = AsyncMock()
-        mock_pm = stack.enter_context(patch("backend.app.main.printer_manager"))
-        mock_pm.get_printer.return_value = None
-        # Real method under test — track each call so the test can assert on it.
-        mock_pm.set_awaiting_plate_clear = MagicMock()
+    @pytest.fixture
+    async def completion(self, test_engine, db_session, printer_factory):
+        from types import SimpleNamespace
 
-        mock_session = AsyncMock()
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
-        mock_session_maker.return_value = mock_session
-        return mock_pm
+        from sqlalchemy.ext.asyncio import async_sessionmaker
 
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        "status",
-        ["completed", "failed", "aborted", "cancelled"],
-        ids=["completed", "failed", "aborted-1171", "cancelled-1171"],
-    )
-    async def test_plate_clear_gate_raised_for_every_terminal_status(self, status):
-        """Regression for #1171. Every terminal status that can leave material
-        on the bed must raise the gate. Pre-fix the gate was raised only for
-        completed/failed, so aborted (printer touchscreen stop, self-abort) and
-        cancelled (Grove Control queue stop) auto-dispatched the next queue item
-        onto a fouled bed."""
-        from contextlib import ExitStack
+        from backend.app import main
+        from backend.app.models.print_queue import PrintQueueItem
 
-        tasks_before = set(asyncio.all_tasks())
+        printer = await printer_factory()
+        item = PrintQueueItem(printer_id=printer.id, status="printing", dispatch_subtask_id="123")
+        db_session.add(item)
+        await db_session.commit()
+        sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+        main._completed_job_events.clear()
+        manager = MagicMock()
+        manager.get_status.return_value = None
+        manager.get_printer.return_value = None
 
-        with ExitStack() as stack:
-            mock_pm = self._setup_mocks(stack)
+        def discard_background(coro, **kwargs):
+            coro.close()  # These tests verify the committed transition and plate gate.
 
-            from backend.app.main import on_print_complete
+        with (
+            patch.object(main, "async_session", sessions),
+            patch("backend.app.core.database.async_session", sessions),
+            patch.object(main, "printer_manager", manager),
+            patch.object(main, "ws_manager", AsyncMock()),
+            patch.object(main, "mqtt_relay", AsyncMock()),
+            patch.object(main, "spawn_background_task", discard_background),
+            patch("backend.app.services.usage_tracker.on_print_complete", AsyncMock(return_value=[])),
+            patch("backend.app.services.usage_tracker.discard_session", AsyncMock()),
+        ):
+            yield SimpleNamespace(printer=printer, item=item, manager=manager, complete=main.on_print_complete)
 
-            await on_print_complete(
-                1,
-                {
-                    "status": status,
-                    "filename": "/data/Metadata/test.gcode",
-                    "subtask_name": "Test",
-                    "timelapse_was_active": False,
-                },
-            )
+    @pytest.mark.parametrize("status", ["completed", "failed", "aborted", "cancelled"])
+    async def test_plate_clear_gate_raised_for_every_terminal_status(self, status, completion, db_session):
+        await completion.complete(completion.printer.id, {"subtask_id": "123", "status": status})
+        await db_session.refresh(completion.item)
+        assert completion.item.status == ("cancelled" if status == "aborted" else status)
+        completion.manager.set_awaiting_plate_clear.assert_any_call(completion.printer.id, True)
 
-            for task in asyncio.all_tasks() - tasks_before:
-                task.cancel()
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):
-                    pass
+    async def test_plate_clear_gate_not_raised_for_unknown_status(self, completion, db_session):
+        await completion.complete(completion.printer.id, {"subtask_id": "123", "status": "unknown_future_status"})
+        await db_session.refresh(completion.item)
+        assert completion.item.status == "printing"
+        assert all(not call.args[1] for call in completion.manager.set_awaiting_plate_clear.call_args_list)
 
-        mock_pm.set_awaiting_plate_clear.assert_any_call(1, True)
+    async def test_legacy_external_archive_is_adopted_by_id(self, completion, db_session):
+        from datetime import datetime, timezone
 
-    @pytest.mark.asyncio
-    async def test_plate_clear_gate_not_raised_for_unknown_status(self):
-        """Defence in depth: an unknown / not-terminal status string from a
-        future firmware revision must not silently raise the gate. The flag is
-        only meaningful when the print actually ended."""
-        from contextlib import ExitStack
+        from backend.app.models.archive import PrintArchive
+        from backend.app.models.print_queue import PrintQueueItem
 
-        tasks_before = set(asyncio.all_tasks())
-
-        with ExitStack() as stack:
-            mock_pm = self._setup_mocks(stack)
-
-            from backend.app.main import on_print_complete
-
-            await on_print_complete(
-                1,
-                {
-                    "status": "unknown_future_status",
-                    "filename": "/data/Metadata/test.gcode",
-                    "subtask_name": "Test",
-                    "timelapse_was_active": False,
-                },
-            )
-
-            for task in asyncio.all_tasks() - tasks_before:
-                task.cancel()
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):
-                    pass
-
-        # The mock records every call; assert no True-call landed.
-        true_calls = [c for c in mock_pm.set_awaiting_plate_clear.call_args_list if c.args[1] is True]
-        assert true_calls == [], (
-            "Gate must not be raised for an unrecognised terminal status; "
-            f"set_awaiting_plate_clear({1}, True) was called {len(true_calls)} time(s)."
+        await db_session.delete(completion.item)
+        archive = PrintArchive(
+            printer_id=completion.printer.id,
+            filename="same.3mf",
+            file_path="",
+            file_size=0,
+            status="printing",
+            subtask_id="legacy",
+            started_at=datetime.now(timezone.utc),
         )
+        db_session.add(archive)
+        await db_session.commit()
+        await completion.complete(completion.printer.id, {"subtask_id": "legacy", "status": "completed"})
+        await db_session.refresh(archive)
+        job = await db_session.get(PrintQueueItem, archive.dispatched_queue_item_id)
+        assert job.status == "completed"
+        assert job.archive_id == archive.id
+        assert job.dispatch_subtask_id == "legacy"
+        assert archive.status == "completed"
 
 
 class TestPrintCompleteLogic:

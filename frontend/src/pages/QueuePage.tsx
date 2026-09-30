@@ -362,6 +362,8 @@ function SortableQueueItem({
   onCancel,
   onRemove,
   onStop,
+  onResolveDispatch,
+  isResolvingDispatch = false,
   onSkipHeatSoak,
   isSkippingHeatSoak = false,
   onRequeue,
@@ -382,6 +384,8 @@ function SortableQueueItem({
   onCancel: () => void;
   onRemove: () => void;
   onStop: () => void;
+  onResolveDispatch?: (outcome: 'printing' | 'failed') => void;
+  isResolvingDispatch?: boolean;
   onSkipHeatSoak?: () => void;
   isSkippingHeatSoak?: boolean;
   onRequeue: () => void;
@@ -775,6 +779,20 @@ function SortableQueueItem({
             </p>
           )}
 
+          {item.dispatch_needs_resolution && onResolveDispatch && (
+            <div className="mt-2 text-sm text-amber-300">
+              <p>{t('queue.resolveDispatch.prompt')}</p>
+              <div className="flex gap-2 mt-2">
+                {(['printing', 'failed'] as const).map((outcome) => (
+                  <Button key={outcome} size="sm" variant="secondary"
+                    disabled={isResolvingDispatch || !canModify('queue', 'update', item.created_by_id)}
+                    onClick={(event) => { event.stopPropagation(); onResolveDispatch(outcome); }}>
+                    {t(`queue.resolveDispatch.${outcome}`)}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
           {/* Error message */}
           {item.error_message && (
             <p className="text-[10px] sm:text-xs text-red-400 mt-1.5 sm:mt-2 flex items-center gap-1">
@@ -1189,6 +1207,15 @@ export function QueuePage() {
       showToast(t('queue.toast.removed'));
     },
     onError: () => showToast(t('queue.toast.removeFailed'), 'error'),
+  });
+
+  const resolveDispatchMutation = useMutation({
+    mutationFn: ({ id, outcome }: { id: number; outcome: 'printing' | 'failed' }) => api.resolveQueueDispatch(id, outcome),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['queue'] });
+      queryClient.invalidateQueries({ queryKey: ['printers'] });
+    },
+    onError: (error: Error) => showToast(error.message, 'error'),
   });
 
   const stopMutation = useMutation({
@@ -2041,6 +2068,8 @@ export function QueuePage() {
                     onCancel={() => {}}
                     onRemove={() => {}}
                     onStop={() => setConfirmAction({ type: 'stop', item })}
+                    onResolveDispatch={(outcome) => resolveDispatchMutation.mutate({ id: item.id, outcome })}
+                    isResolvingDispatch={resolveDispatchMutation.isPending}
                     onSkipHeatSoak={() => skipHeatSoakMutation.mutate(item.id)}
                     isSkippingHeatSoak={skipHeatSoakMutation.isPending}
                     onRequeue={() => {}}

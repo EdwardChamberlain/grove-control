@@ -49,7 +49,7 @@ class TestCalibrationPrintFiltering:
 
             # Mock _send_print_start_notification
             with patch("backend.app.main._send_print_start_notification", new_callable=AsyncMock) as mock_notif_send:
-                from backend.app.main import on_print_start
+                from backend.app.main import _archive_print_start as on_print_start
 
                 await on_print_start(
                     1,
@@ -104,7 +104,7 @@ class TestCalibrationPrintFiltering:
                 )
                 mock_session_maker.return_value = mock_session
 
-                from backend.app.main import on_print_start
+                from backend.app.main import _archive_print_start as on_print_start
 
                 await on_print_start(1, {"filename": path, "subtask_name": "test"})
 
@@ -141,7 +141,7 @@ class TestCalibrationPrintFiltering:
             )
             mock_session_maker.return_value = mock_session
 
-            from backend.app.main import on_print_start
+            from backend.app.main import _archive_print_start as on_print_start
 
             await on_print_start(
                 1,

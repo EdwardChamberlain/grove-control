@@ -4,6 +4,13 @@
 
 ### Added
 
+- Queue jobs now match printer events by submission ID. External prints appear
+  as jobs, and startup checks include already-printing jobs.
+- Unconfirmed dispatches show **It's printing** and **It didn't start** actions
+  after the acknowledgement window. Interrupted heat soaks remain available
+  for Stop or Skip instead of being automatically returned to the queue.
+  See [stage 2 behavior and hardware validation](docs/queue-job-identity.md).
+
 - Every Queue dispatch, including a reprint, creates its own Archive attempt.
   It records the print outcome and stores the exact file uploaded to the
   printer, including any G-code injection used for that attempt.

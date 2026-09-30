@@ -44,6 +44,7 @@ def _archive(
     """Minimal PrintArchive stub — only the fields the decision function reads."""
     return SimpleNamespace(
         id=42,
+        dispatched_queue_item_id=None,
         subtask_id=subtask_id,
         filename=filename,
         print_name=print_name,
@@ -285,12 +286,12 @@ class TestReconcileStaleActivePrints:
         assert count == 0
 
     @pytest.mark.asyncio
-    async def test_stale_archive_synthesises_aborted_completion(self):
+    async def test_exact_terminal_identity_synthesises_completion(self):
         from backend.app.main import reconcile_stale_active_prints
 
         stale = _archive(subtask_id="OLD_ID", filename="ghost.3mf", print_name="ghost")
         with patch("backend.app.main.printer_manager") as mock_pm:
-            mock_pm.get_status.return_value = _state("IDLE", subtask_id="", subtask_name="")
+            mock_pm.get_status.return_value = _state("FINISH", subtask_id="OLD_ID", subtask_name="")
             with patch("backend.app.main.async_session") as mock_session:
                 session_ctx = AsyncMock()
                 session_ctx.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [stale])))
@@ -303,7 +304,7 @@ class TestReconcileStaleActivePrints:
         args, kwargs = mock_complete.call_args
         assert args[0] == 1
         payload = args[1]
-        assert payload["status"] == "aborted"
+        assert payload["status"] == "completed"
         assert payload["filename"] == "ghost.3mf"
         assert payload["_reconciled"] is True
 
@@ -347,7 +348,7 @@ class TestReconcileStaleActivePrints:
         mock_complete.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_on_print_complete_failure_does_not_block_rest(self):
+    async def test_reconciliation_ignores_unmatched_archives_and_handles_failure(self):
         """An exception during one archive's synthesis must not abort
         reconciliation for the other archives — and must not propagate to
         the caller (the connected-edge handler is a hot path)."""
@@ -360,7 +361,7 @@ class TestReconcileStaleActivePrints:
         a3 = _archive(subtask_id="C", filename="c.3mf")
         a3.id = 3
         with patch("backend.app.main.printer_manager") as mock_pm:
-            mock_pm.get_status.return_value = _state("IDLE")
+            mock_pm.get_status.return_value = _state("FINISH", subtask_id="B")
             with patch("backend.app.main.async_session") as mock_session:
                 session_ctx = AsyncMock()
                 session_ctx.execute = AsyncMock(
@@ -373,8 +374,8 @@ class TestReconcileStaleActivePrints:
                     count = await reconcile_stale_active_prints(printer_id=1)
         # Only the third archive is recorded as reconciled: the first raised
         # and the second explicitly reported that it was suppressed.
-        assert count == 1
-        assert mock_complete.await_count == 3
+        assert count == 0
+        assert mock_complete.await_count == 1
 
     @pytest.mark.asyncio
     async def test_reconciled_completion_is_ignored_while_printing(self):

@@ -1064,6 +1064,11 @@ export default {
 
   // Kuyruk sayfası
   queue: {
+    resolveDispatch: {
+      prompt: "Yazıcı bu işi onaylamadı. Seçmeden önce yazıcıyı kontrol edin:",
+      printing: "Yazdırıyor",
+      failed: "Yazdırma başlamadı",
+    },
     title: 'Baskı Kuyruğu',
     subtitle: 'Baskı işlerinizi zamanlayın ve yönetin',
     filamentShort: {

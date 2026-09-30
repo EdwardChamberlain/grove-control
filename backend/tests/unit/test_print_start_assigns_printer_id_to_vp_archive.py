@@ -115,7 +115,7 @@ async def test_expected_archive_path_assigns_printer_id_when_unset():
         mock_relay.on_print_start = AsyncMock()
         mock_pm.get_printer = MagicMock(return_value=MagicMock(name="Test", serial_number="TEST123"))
 
-        from backend.app.main import on_print_start
+        from backend.app.main import _archive_print_start as on_print_start
 
         await on_print_start(
             1,
@@ -123,6 +123,7 @@ async def test_expected_archive_path_assigns_printer_id_when_unset():
                 "filename": "bambu_lab_a1_tool_plate_3.gcode.3mf",
                 "subtask_name": "bambu_lab_a1_tool_plate_3",
             },
+            queue_archive_id=mock_archive.id,
         )
 
         assert mock_archive.printer_id == 1, (
@@ -202,9 +203,11 @@ async def test_expected_archive_path_preserves_existing_printer_id():
         mock_relay.on_print_start = AsyncMock()
         mock_pm.get_printer = MagicMock(return_value=MagicMock(name="Test", serial_number="TEST123"))
 
-        from backend.app.main import on_print_start
+        from backend.app.main import _archive_print_start as on_print_start
 
-        await on_print_start(7, {"filename": "MyModel.3mf", "subtask_name": "MyModel"})
+        await on_print_start(
+            7, {"filename": "MyModel.3mf", "subtask_name": "MyModel"}, queue_archive_id=mock_archive.id
+        )
 
         assert mock_archive.printer_id == 7
         assert mock_archive.status == "printing"
@@ -298,7 +301,7 @@ async def test_expected_archive_path_captures_timelapse_baseline():
         mock_relay.on_print_start = AsyncMock()
         mock_pm.get_printer = MagicMock(return_value=MagicMock(name="Test", serial_number="TEST123"))
 
-        from backend.app.main import on_print_start
+        from backend.app.main import _archive_print_start as on_print_start
 
         await on_print_start(
             1,
@@ -306,6 +309,7 @@ async def test_expected_archive_path_captures_timelapse_baseline():
                 "filename": "bambu_lab_a1_tool_plate_3.gcode.3mf",
                 "subtask_name": "bambu_lab_a1_tool_plate_3",
             },
+            queue_archive_id=mock_archive.id,
         )
 
         assert _timelapse_baselines.get(1) == {"earlier_print_a.mp4", "earlier_print_b.mp4"}, (

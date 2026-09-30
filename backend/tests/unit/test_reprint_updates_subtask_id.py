@@ -166,7 +166,7 @@ async def _drive(tmp_path, mock_archive, mqtt_subtask_id: str | None):
         # last_dispatch_subtask_id fallback shouldn't fire — MQTT carried one.
         mock_pm.get_client = MagicMock(return_value=MagicMock(last_dispatch_subtask_id=None))
 
-        from backend.app.main import on_print_start
+        from backend.app.main import _archive_print_start as on_print_start
 
         await on_print_start(
             1,
@@ -175,6 +175,7 @@ async def _drive(tmp_path, mock_archive, mqtt_subtask_id: str | None):
                 "subtask_name": mock_archive.print_name,
                 "raw_data": {"subtask_id": mqtt_subtask_id} if mqtt_subtask_id is not None else {},
             },
+            queue_archive_id=mock_archive.id,
         )
 
 

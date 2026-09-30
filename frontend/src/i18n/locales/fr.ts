@@ -1064,6 +1064,11 @@ export default {
 
   // Queue page
   queue: {
+    resolveDispatch: {
+      prompt: "L’imprimante n’a pas confirmé ce travail. Vérifiez l’imprimante avant de choisir :",
+      printing: "L’impression est en cours",
+      failed: "L’impression n’a pas démarré",
+    },
     filamentShort: {
       rowBadge: 'Filament insuffisant pour la bobine assignee',
       rowTooltip: "Le planificateur a signale cet element. Cliquez sur Lecture pour voir le deficit par emplacement et decider de lancer quand meme l'impression.",

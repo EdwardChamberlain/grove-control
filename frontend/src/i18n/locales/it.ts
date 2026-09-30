@@ -1064,6 +1064,11 @@ export default {
 
   // Queue page
   queue: {
+    resolveDispatch: {
+      prompt: "La stampante non ha confermato questo lavoro. Controlla la stampante prima di scegliere:",
+      printing: "Sta stampando",
+      failed: "La stampa non è iniziata",
+    },
     filamentShort: {
       rowBadge: 'Filamento insufficiente per la bobina assegnata',
       rowTooltip: 'Lo scheduler ha segnalato questo elemento. Premi Play per vedere il deficit per slot e decidere se stampare comunque.',

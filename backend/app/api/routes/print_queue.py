@@ -26,6 +26,7 @@ from backend.app.models.project import Project
 from backend.app.models.user import User
 from backend.app.schemas.library import FileUploadResponse
 from backend.app.schemas.print_queue import (
+    DispatchResolution,
     PrintQueueBulkUpdate,
     PrintQueueBulkUpdateResponse,
     PrintQueueItemCreate,
@@ -42,6 +43,7 @@ from backend.app.services.filament_requirements import (
     extract_filament_requirements,
     overrides_for_plate,
 )
+from backend.app.services.job_identity import needs_dispatch_resolution, telemetry_identity
 from backend.app.services.notification_service import notification_service
 from backend.app.services.queue_source_cleanup import (
     remove_queue_only_artifacts,
@@ -343,6 +345,7 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
         "nozzle_offset_cali": item.nozzle_offset_cali,
         "status": item.status,
         "dispatched_at": item.dispatched_at,
+        "dispatch_needs_resolution": needs_dispatch_resolution(item),
         "started_at": item.started_at,
         "completed_at": item.completed_at,
         "error_message": item.error_message,
@@ -1641,6 +1644,74 @@ async def cancel_queue_item(
 
     logger.info("Cancelled queue item %s", item_id)
     return {"message": "Queue item cancelled"}
+
+
+@router.post("/{item_id}/resolve-dispatch")
+async def resolve_queue_dispatch(
+    item_id: int,
+    data: DispatchResolution,
+    db: AsyncSession = Depends(get_db),
+    auth_result: tuple[User | None, bool] = Depends(
+        require_ownership_permission(Permission.QUEUE_UPDATE_ALL, Permission.QUEUE_UPDATE_OWN)
+    ),
+):
+    """Resolve an unconfirmed dispatch after checking the physical printer."""
+    from backend.app.services.archive import record_dispatch_outcome
+    from backend.app.services.print_scheduler import scheduler
+    from backend.app.services.printer_manager import printer_manager
+
+    user, can_modify_all = auth_result
+    item = await lock_queue_item(db, item_id)
+    if not item:
+        raise HTTPException(404, "Queue item not found")
+    if not can_modify_all and user is not None and item.created_by_id != user.id:
+        raise HTTPException(403, "You can only resolve your own queue items")
+    if not needs_dispatch_resolution(item):
+        raise HTTPException(409, "This job is no longer awaiting dispatch confirmation. Refresh and retry.")
+    state = printer_manager.get_status(item.printer_id)
+    if state and state.connected:
+        observed = telemetry_identity(state)
+        if (
+            observed
+            and observed != item.dispatch_subtask_id
+            and state.state in ("RUNNING", "PAUSE", "PREPARE", "SLICING")
+        ):
+            raise HTTPException(
+                409, "The printer reports a different job. Stop or inspect it before resolving this job."
+            )
+        if observed == item.dispatch_subtask_id:
+            from backend.app.services.print_scheduler import _queue_status_from_dispatch_telemetry
+
+            known = _queue_status_from_dispatch_telemetry(state, item.dispatch_subtask_id)
+            if known in ("completed", "failed") or (known == "printing" and data.outcome == "failed"):
+                raise HTTPException(409, "Printer telemetry has confirmed this job. Refresh and retry.")
+    now = datetime.now(timezone.utc)
+    values = {
+        "error_message": "Confirmed printing by user" if data.outcome == "printing" else "Printer didn't start the job"
+    }
+    values["started_at" if data.outcome == "printing" else "completed_at"] = now
+    await transition_queue_item(db, item, "dispatching", data.outcome, values=values)
+    await record_dispatch_outcome(
+        db,
+        status=data.outcome,
+        dispatched_queue_item_id=item.id,
+        archive_id=item.archive_id,
+        started_at=now if data.outcome == "printing" else None,
+        completed_at=now if data.outcome == "failed" else None,
+        failure_reason=values["error_message"] if data.outcome == "failed" else None,
+    )
+    if data.outcome == "failed":
+        printer = await db.get(Printer, item.printer_id)
+        if printer:
+            printer.awaiting_plate_clear = True
+            printer.awaiting_plate_clear_archive_id = item.archive_id
+    await db.commit()
+    if data.outcome == "printing":
+        await scheduler._publish_queue_job_started(item.id)
+    else:
+        printer_manager.set_awaiting_plate_clear(item.printer_id, True)
+        printer_manager.set_awaiting_plate_clear_archive_id(item.printer_id, item.archive_id)
+    return {"message": "Dispatch resolved"}
 
 
 @router.post("/{item_id}/stop")
