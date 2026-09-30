@@ -55,7 +55,7 @@ from backend.app.services.bambu_ftp import (
     get_storage_info_async,
     list_files_async,
 )
-from backend.app.services.job_identity import telemetry_identity
+from backend.app.services.job_identity import find_job, telemetry_identity
 from backend.app.services.printer_diagnostic import run_connection_diagnostic
 from backend.app.services.printer_manager import (
     drying_screen_only,
@@ -1113,6 +1113,18 @@ def clear_cover_cache(printer_id: int) -> None:
     _cover_404_cache.pop(printer_id, None)
 
 
+async def _queue_upload_filename(db: AsyncSession, printer_id: int, state) -> str | None:
+    """Resolve an attempt's SD path without treating its display name as identity."""
+    job = await find_job(db, printer_id, telemetry_identity(state), HOLDING_STATUSES)
+    if job is None or job.archive_id is None:
+        return None
+    archive = await db.get(PrintArchive, job.archive_id)
+    if archive is None or archive.dispatched_queue_item_id != job.id:
+        return None
+    filename = (archive.extra_data or {}).get("remote_filename")
+    return filename if isinstance(filename, str) else None
+
+
 @router.get("/{printer_id}/cover")
 async def get_printer_cover(
     printer_id: int,
@@ -1170,11 +1182,16 @@ async def get_printer_cover(
     if printer_id in _cover_404_cache and cache_key in _cover_404_cache[printer_id]:
         raise HTTPException(404, f"No cover available for '{subtask_name}' (cached)")
 
+    # Queue uploads use a durable attempt path; names remain a fallback for
+    # legacy/external prints. This also finds the upload after a restart.
+    remote_filename = await _queue_upload_filename(db, printer_id, state)
     # Build possible 3MF filenames from subtask_name
     # Bambu printers may store files as "name.gcode.3mf" (sliced via Bambu Studio)
     # or just "name.3mf" (uploaded directly)
     possible_filenames = []
-    if subtask_name.endswith(".3mf"):
+    if remote_filename:
+        possible_filenames.append(remote_filename)
+    elif subtask_name.endswith(".3mf"):
         possible_filenames.append(subtask_name)
     else:
         # Try both naming patterns
@@ -1182,7 +1199,7 @@ async def get_printer_cover(
         possible_filenames.append(f"{subtask_name}.3mf")
 
     # Also try with spaces converted to underscores (Bambu Studio may normalize filenames)
-    if " " in subtask_name:
+    if not remote_filename and " " in subtask_name:
         normalized = subtask_name.replace(" ", "_")
         if normalized.endswith(".3mf"):
             possible_filenames.append(normalized)
@@ -1191,16 +1208,17 @@ async def get_printer_cover(
             possible_filenames.append(f"{normalized}.3mf")
 
     # Build list of all remote paths to try
-    remote_paths = []
-    for filename in possible_filenames:
-        remote_paths.extend(
-            [
-                f"/{filename}",  # Root directory (most common)
-                f"/cache/{filename}",
-                f"/model/{filename}",
-                f"/data/{filename}",
-            ]
-        )
+    remote_paths = [f"/{remote_filename}"] if remote_filename else []
+    if not remote_filename:
+        for filename in possible_filenames:
+            remote_paths.extend(
+                [
+                    f"/{filename}",  # Root directory (most common)
+                    f"/cache/{filename}",
+                    f"/model/{filename}",
+                    f"/data/{filename}",
+                ]
+            )
 
     # Use first filename for temp path (will be reused)
     temp_filename = possible_filenames[0]
@@ -3581,20 +3599,23 @@ async def get_printable_objects(
     # Reload objects from 3MF if requested or no objects loaded
     if reload or not client.state.printable_objects:
         subtask_name = client.state.subtask_name
-        if subtask_name:
+        remote_filename = await _queue_upload_filename(db, printer_id, client.state)
+        if subtask_name or remote_filename:
             from backend.app.services.archive import extract_printable_objects_from_3mf
             from backend.app.services.bambu_ftp import download_file_try_paths_async
 
             # Build possible 3MF filenames (try both .gcode.3mf and .3mf)
             possible_filenames = []
-            if subtask_name.endswith(".3mf"):
+            if remote_filename:
+                possible_filenames.append(remote_filename)
+            elif subtask_name.endswith(".3mf"):
                 possible_filenames.append(subtask_name)
             else:
                 possible_filenames.append(f"{subtask_name}.gcode.3mf")
                 possible_filenames.append(f"{subtask_name}.3mf")
 
             # Also try with spaces converted to underscores (Bambu Studio may normalize filenames)
-            if " " in subtask_name:
+            if not remote_filename and " " in subtask_name:
                 normalized = subtask_name.replace(" ", "_")
                 if normalized.endswith(".3mf"):
                     possible_filenames.append(normalized)
@@ -3607,9 +3628,10 @@ async def get_printable_objects(
             temp_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Build list of all remote paths to try
-            remote_paths = []
-            for filename in possible_filenames:
-                remote_paths.extend([f"/{filename}", f"/cache/{filename}", f"/model/{filename}"])
+            remote_paths = [f"/{remote_filename}"] if remote_filename else []
+            if not remote_filename:
+                for filename in possible_filenames:
+                    remote_paths.extend([f"/{filename}", f"/cache/{filename}", f"/model/{filename}"])
 
             try:
                 downloaded = await download_file_try_paths_async(

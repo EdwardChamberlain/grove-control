@@ -64,6 +64,8 @@ Archive. Completion captures that filename before releasing the hold and deletes
 only that upload, including after restart. Printer display names and Files and
 Archive filenames retain the user's original name. Older/external prints keep
 their existing cleanup naming rules.
+Live covers and object reloads use the matching job's recorded upload path,
+so the original display name still works with cached files and after restart.
 
 ## Conditional writes and views
 
