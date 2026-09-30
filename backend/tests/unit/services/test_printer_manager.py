@@ -835,6 +835,7 @@ class TestPrinterStateToDict:
         state.current_print = "test.3mf"
         state.subtask_name = "Test Print"
         state.subtask_id = None
+        state.submission_id = None
         state.gcode_file = "/sdcard/test.gcode"
         state.progress = 50
         state.remaining_time = 3600
@@ -1259,6 +1260,11 @@ class TestPrinterStateToDict:
         mock_state.state = "FINISH"
         result = printer_state_to_dict(mock_state)
         assert result["current_print_identity"] is None
+
+    def test_local_print_identity_uses_observed_session_id(self, mock_state):
+        mock_state.subtask_id = "0"
+        mock_state.submission_id = "session-id"
+        assert printer_state_to_dict(mock_state)["current_print_identity"] == "session-id"
 
     def test_name_and_model_surfaced_when_registered(self, mock_state):
         """Registered PrinterInfo name + model arg should land in the WS payload.

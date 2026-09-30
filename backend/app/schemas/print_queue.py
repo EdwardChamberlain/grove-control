@@ -81,6 +81,10 @@ class QueueVariantCreate(BaseModel):
     filament_overrides: list[dict] | None = None
 
 
+class DispatchResolution(BaseModel):
+    outcome: Literal["printing", "failed"]
+
+
 class PrintQueueItemCreate(BaseModel):
     printer_id: int | None = None  # None = unassigned, user assigns later
     target_model: str | None = None  # Target printer model (mutually exclusive with printer_id)
@@ -231,6 +235,7 @@ class PrintQueueItemResponse(BaseModel):
     nozzle_offset_cali: TriState = "auto"
     status: Literal["pending", "preheating", "dispatching", "printing", "completed", "failed", "skipped", "cancelled"]
     preheat_started_at: UTCDatetime = None
+    dispatch_needs_resolution: bool = False
     dispatched_at: UTCDatetime
     started_at: UTCDatetime
     completed_at: UTCDatetime

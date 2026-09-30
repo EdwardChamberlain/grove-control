@@ -379,6 +379,8 @@ class PrinterState:
     heat_soak_disconnected_at: float = 0.0
     gcode_file: str | None = None
     subtask_id: str | None = None
+    submission_id: str | None = None  # Snapshot identity, including ID-less local prints
+    job_telemetry_ready: bool = False
     hms_errors: list = field(default_factory=list)  # List of HMSError
     kprofiles: list = field(default_factory=list)  # List of KProfile
     sdcard: bool = False  # SD card inserted
@@ -649,12 +651,10 @@ class BambuMQTTClient:
         self._finish_photo_captured: bool = False
         self._last_valid_progress: float = 0.0  # Last non-zero progress (firmware resets on cancel)
         self._last_valid_layer_num: int = 0  # Last non-zero layer (firmware resets on cancel)
-        # The subtask_id minted for the most recent start_print() command. The
-        # printer echoes it back in status, but often not within the first few
-        # seconds — so on_print_start uses this as the id source when the
-        # printer hasn't reported it yet, letting queue/scheduled archives
-        # persist a restart-stable id from the moment they dispatch (#1485).
+        # Diagnostic only; observed events never use the last sent command ID.
         self.last_dispatch_subtask_id: str | None = None
+        self._previous_job_id: str | None = None
+        self._local_submission_id: bool = False
         self._is_dual_nozzle: bool = False  # Set when device.extruder.info has >= 2 entries
         self._message_log: deque[MQTTLogEntry] = deque(maxlen=100)
         self._logging_enabled: bool = False
@@ -981,6 +981,13 @@ class BambuMQTTClient:
     def _on_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
             self.state.connected = True
+            self.state.job_telemetry_ready = False
+            self.state.subtask_id = None
+            self.state.submission_id = None
+            self._previous_job_id = None
+            self._local_submission_id = False
+            self._previous_gcode_state = None
+            self._was_running = False
             self.last_connect_error = None
             self.last_connect_error_name = None
             self._stale_reconnecting = False  # Clear stale-reconnect flag on successful connect
@@ -2558,6 +2565,17 @@ class BambuMQTTClient:
         # Update state fields
         if "gcode_state" in data:
             self.state.state = data["gcode_state"]
+            if self.state.state in ("PREPARE", "SLICING", "RUNNING", "PAUSE") and _previous_state not in (
+                "PREPARE",
+                "SLICING",
+                "RUNNING",
+                "PAUSE",
+            ):
+                self.state.subtask_id = None  # An older run's cached ID is not this run's identity.
+                self.state.gcode_file = None
+                self.state.current_print = None
+                self.state.subtask_name = None
+                self._previous_gcode_file = None
         if "gcode_file" in data:
             self.state.gcode_file = data["gcode_file"]
             self.state.current_print = data["gcode_file"]
@@ -3621,26 +3639,37 @@ class BambuMQTTClient:
                 f"file: {self.state.gcode_file}, subtask: {self.state.subtask_name}"
             )
 
-        # Detect print start (state changes TO RUNNING with a file)
+        if "gcode_state" in data:
+            self.state.job_telemetry_ready = True
+
+        # Detect print start (entry to an active state with a file)
         current_file = self.state.gcode_file or self.state.current_print
         is_new_print = (
-            self.state.state == "RUNNING"
+            self.state.state in ("PREPARE", "SLICING", "RUNNING", "PAUSE")
             and self._previous_gcode_state is not None  # #1304: skip on first push after Grove Control startup
-            and self._previous_gcode_state != "RUNNING"
+            and self._previous_gcode_state not in ("PREPARE", "SLICING", "RUNNING", "PAUSE")
             and current_file
             and not self._was_running  # Prevent duplicates when resuming from PAUSE
         )
-        # Also detect if file changed while running (new print started)
-        is_file_change = (
-            self.state.state == "RUNNING"
-            and current_file
-            and current_file != self._previous_gcode_file
-            and self._previous_gcode_file is not None
+        from backend.app.services.job_identity import normalize_id
+
+        reported_identity = normalize_id(self.state.subtask_id)
+        # An explicit missing ID during an active print may be a different
+        # local run whose intervening terminal push was missed. Start a fresh
+        # observation instead of letting its completion inherit the old ID.
+        # Omitted IDs in partial pushes retain the observed state above.
+        is_job_change = (
+            self.state.state in ("PREPARE", "SLICING", "RUNNING", "PAUSE")
+            and self._previous_job_id is not None
+            and (
+                (reported_identity is not None and reported_identity != self._previous_job_id)
+                or ("subtask_id" in data and reported_identity is None)
+            )
         )
 
-        # Track RUNNING state for more robust completion detection
+        # Track active states so even setup failures have a job to complete
         running_first_observed = False
-        if self.state.state == "RUNNING" and current_file:
+        if self.state.state in ("PREPARE", "SLICING", "RUNNING", "PAUSE"):
             if not self._was_running:
                 logger.debug("[%s] Now tracking RUNNING state for %s", self.serial_number, current_file)
                 # Check if timelapse was enabled in the same message (xcam parsed before this)
@@ -3658,7 +3687,7 @@ class BambuMQTTClient:
             self._was_running = True
             self._completion_triggered = False
 
-        if is_new_print or is_file_change:
+        if is_new_print or is_job_change:
             # Clear any old HMS errors when a new print starts
             self.state.hms_errors = []
             # Reset layer tracking for new print (needed for layer-based timelapse)
@@ -3697,15 +3726,41 @@ class BambuMQTTClient:
             else:
                 self._timelapse_during_print = False
 
-        if (is_new_print or is_file_change) and self.on_print_start:
+        # External touchscreen/SD prints can report 0. Give that observed run
+        # an identity without ever substituting a filename or last sent command.
+        from uuid import uuid4
+
+        previous_submission_id = None
+        if is_new_print or is_job_change or running_first_observed:
+            self.state.submission_id = reported_identity or uuid4().hex
+            self._local_submission_id = reported_identity is None
+        elif reported_identity:
+            if self._local_submission_id and self._was_running:
+                previous_submission_id = self.state.submission_id
+                self._local_submission_id = False
+            self.state.submission_id = reported_identity
+
+        if (
+            is_new_print
+            or is_job_change
+            or (
+                current_file
+                and self._previous_gcode_file is None
+                and not running_first_observed
+                and self.state.state in ("PREPARE", "SLICING", "RUNNING", "PAUSE")
+            )
+            or (previous_submission_id and self.state.state in ("PREPARE", "SLICING", "RUNNING", "PAUSE"))
+        ) and self.on_print_start:
             logger.info(
                 f"[{self.serial_number}] PRINT START detected - file: {current_file}, "
-                f"subtask: {self.state.subtask_name}, is_new: {is_new_print}, is_file_change: {is_file_change}"
+                f"subtask: {self.state.subtask_name}, is_new: {is_new_print}, is_job_change: {is_job_change}"
             )
             self.on_print_start(
                 {
                     "filename": current_file,
                     "subtask_name": self.state.subtask_name,
+                    "submission_id": self.state.submission_id,
+                    **({"previous_submission_id": previous_submission_id} if previous_submission_id else {}),
                     "remaining_time": self.state.remaining_time * 60
                     if self.state.remaining_time > 0
                     else None,  # Convert minutes to seconds
@@ -3727,6 +3782,8 @@ class BambuMQTTClient:
                 {
                     "filename": current_file,
                     "subtask_name": self.state.subtask_name,
+                    "submission_id": self.state.submission_id,
+                    **({"previous_submission_id": previous_submission_id} if previous_submission_id else {}),
                     "remaining_time": self.state.remaining_time * 60 if self.state.remaining_time > 0 else None,
                     "raw_data": data,
                     "ams_mapping": self._captured_ams_mapping,
@@ -3752,10 +3809,10 @@ class BambuMQTTClient:
                 or (self.state.state == "FAILED" and self._previous_gcode_state in ("PREPARE", "SLICING"))
             )
         )
-        # For IDLE, only trigger if we just came from RUNNING (explicit abort/cancel)
+        # IDLE after an observed active job is an explicit abort/cancel.
         if (
             self.state.state == "IDLE"
-            and self._previous_gcode_state == "RUNNING"
+            and self._previous_gcode_state in ("PREPARE", "SLICING", "RUNNING", "PAUSE")
             and not self._completion_triggered
             and self.on_print_complete
         ):
@@ -3841,6 +3898,8 @@ class BambuMQTTClient:
                     # live value explicitly so restart recovery can correlate
                     # this completion to the durable queue dispatch attempt.
                     "subtask_id": self.state.subtask_id,
+                    "submission_id": self.state.submission_id,
+                    **({"previous_submission_id": previous_submission_id} if previous_submission_id else {}),
                     "raw_data": data,
                     "timelapse_was_active": timelapse_was_active,
                     "hms_errors": hms_errors_data,
@@ -3852,6 +3911,7 @@ class BambuMQTTClient:
             )
             self._captured_ams_mapping = None
 
+        self._previous_job_id = reported_identity
         self._previous_gcode_state = self.state.state
         if current_file:
             self._previous_gcode_file = current_file

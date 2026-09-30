@@ -1064,6 +1064,11 @@ export default {
 
   // Queue page
   queue: {
+    resolveDispatch: {
+      prompt: "Der Drucker hat diesen Auftrag nicht bestätigt. Prüfen Sie den Drucker, bevor Sie wählen:",
+      printing: "Der Druck läuft",
+      failed: "Der Druck hat nicht begonnen",
+    },
     filamentShort: {
       rowBadge: 'Filament fuer die zugewiesene Spule reicht nicht',
       rowTooltip: 'Der Dispatcher hat diese Position markiert. Klicke auf Play, um den Pro-Slot-Fehlbestand zu sehen und zu entscheiden, ob trotzdem gedruckt werden soll.',

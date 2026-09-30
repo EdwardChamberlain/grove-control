@@ -249,6 +249,24 @@ describe('QueuePage', () => {
       expect(timelineItem).toHaveTextContent('Dispatching');
     });
 
+    it.each(['printing', 'failed'] as const)('resolves an unconfirmed dispatch as %s', async (outcome) => {
+      const user = userEvent.setup();
+      let submitted: unknown;
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json([{
+          ...mockQueueItems[1], id: 4, status: 'dispatching', dispatch_needs_resolution: true,
+        }])),
+        http.post('/api/v1/queue/4/resolve-dispatch', async ({ request }) => {
+          submitted = await request.json();
+          return HttpResponse.json({ message: 'Dispatch resolved' });
+        }),
+      );
+      render(<QueuePage />);
+      const label = outcome === 'printing' ? "It's printing" : "It didn't start";
+      await user.click(await screen.findByRole('button', { name: label }));
+      await waitFor(() => expect(submitted).toEqual({ outcome }));
+    });
+
     it('counts preheating items as printing and excludes them from queued work', async () => {
       server.use(
         http.get('/api/v1/queue/', () => HttpResponse.json([

@@ -137,6 +137,18 @@ The `library_archive_mode` setting has been removed. Queue-create requests and
 responses no longer have the `cleanup_library_after_dispatch` field; the
 server derives cleanup from whether the source is a hidden Queue upload.
 
+## Queue job identity (stage 2)
+
+No schema migration is required. Printer events now need a matching submission
+ID; legacy active jobs without one remain in place until resolved by the user.
+The Queue offers **It's printing** / **It didn't start** for unconfirmed
+dispatches after 270 seconds. Inspect the physical printer before choosing.
+Interrupted heat soaks remain reserved with Stop and Skip controls. Local prints
+that report no firmware ID cannot be reattached automatically after reconnect
+or restart. Use Stop to resolve an old active reservation when necessary.
+See [Queue job identity](docs/queue-job-identity.md) for details and the required
+hardware validation. Status names sent to integrations remain unchanged.
+
 ## Timezone
 
 `TZ` is the authoritative timezone for the container and for scheduled local

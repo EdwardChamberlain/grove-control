@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models.printer import Printer
 from backend.app.services.bambu_mqtt import BambuMQTTClient, MQTTLogEntry, PrinterState, get_stage_name
+from backend.app.services.job_identity import telemetry_identity
 
 logger = logging.getLogger(__name__)
 
@@ -1424,13 +1425,9 @@ def printer_state_to_dict(
         # current_archive_id is intentionally REST-only — it's stable for the life
         # of a print and needs a DB lookup the WebSocket path shouldn't pay for.
         "current_plate_id": resolve_plate_id(state),
-        # Bambu's subtask ID is the unique identity for an active print and lets
+        # The observed submission ID is the identity for an active print and lets
         # clients scope transient state across same-named back-to-back jobs (#43).
-        "current_print_identity": (
-            str(state.subtask_id).strip()
-            if state.state in ("RUNNING", "PAUSE") and state.subtask_id not in (None, "", 0, "0")
-            else None
-        ),
+        "current_print_identity": (telemetry_identity(state) if state.state in ("RUNNING", "PAUSE") else None),
         # Plate-clear gate (#939). Lives on the PrinterManager rather than PrinterState,
         # so surface it here — without this, WebSocket merges drop the flag and the
         # "Clear Plate" button only appears when the 30 s REST fallback poll runs.

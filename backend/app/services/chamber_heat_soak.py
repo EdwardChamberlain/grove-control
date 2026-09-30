@@ -229,6 +229,18 @@ class ChamberHeatSoak:
                 continue
             now = utcnow()
             elapsed = (now - item.preheat_checked_at).total_seconds() if item.preheat_checked_at else HEARTBEAT_TIMEOUT
+            if item.preheat_owner != self.owner:
+                # There is no submission ID before dispatch, so telemetry cannot
+                # prove this interrupted soak. Preserve the reservation until
+                # the user chooses Stop or Skip heat soak in the Queue.
+                if 0 <= elapsed < HEARTBEAT_TIMEOUT:
+                    await db.rollback()
+                    continue
+                item.error_message = "Heat soak interrupted; inspect the printer, then stop or skip heat soak"
+                _show_preheating(item.printer_id, True)
+                visible.add(item.printer_id)
+                await db.commit()
+                continue
             if elapsed < 0 or elapsed >= HEARTBEAT_TIMEOUT:
                 await abort_heat_soak(db, item, "Heat soak interrupted by restart or scheduler timeout; retry required")
                 continue
@@ -237,11 +249,6 @@ class ChamberHeatSoak:
                 continue
             visible.add(item.printer_id)
             _show_preheating(item.printer_id, True)
-            if item.preheat_owner != self.owner:
-                # A second live worker may own this reservation. The heartbeat
-                # timeout above is the restart/recovery boundary.
-                await db.rollback()
-                continue
             printer = await db.get(Printer, item.printer_id)
             state = printer_manager.get_status(item.printer_id)
             requested = item.preheat_requested_at

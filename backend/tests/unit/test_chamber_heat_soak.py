@@ -146,6 +146,10 @@ async def test_interruptions_release_item_for_manual_retry_and_shutdown(soak, in
     assert await soak.service.check(soak.db) == []
     await soak.db.refresh(soak.item)
     await soak.db.refresh(soak.printer)
+    if interruption == "restart":
+        assert soak.item.status == "preheating"
+        assert "inspect" in soak.item.error_message
+        return
     assert soak.item.status == "pending"
     assert soak.item.manual_start is True
     assert soak.item.preheat_owner is None
@@ -170,17 +174,17 @@ async def test_live_foreign_worker_never_claims_or_advances_reserved_item(soak):
         soak.client.set_bed_temperature.assert_called_once_with(60)
 
 
-async def test_restart_aborts_an_owned_preheat_and_requires_manual_retry(soak):
+async def test_restart_preserves_preheat_until_user_stops_or_skips(soak):
     assert await soak.service.stage(soak.db, soak.item)
     soak.item.preheat_checked_at = heat.utcnow() - timedelta(seconds=91)
     await soak.db.commit()
     restarted = heat.ChamberHeatSoak()
     assert await restarted.check(soak.db) == []
     await soak.db.refresh(soak.item)
+    assert soak.item.status == "preheating"
+    assert "inspect" in soak.item.error_message
+    await heat.skip_heat_soak(soak.db, soak.item)
     assert soak.item.status == "pending"
-    assert soak.item.manual_start is True
-    assert "restart" in (soak.item.error_message or "")
-    soak.client.set_bed_temperature.assert_called_with(0)
 
 
 async def test_failed_command_stops_every_supported_heater(soak):

@@ -1063,6 +1063,11 @@ export default {
 
   // Queue page
   queue: {
+    resolveDispatch: {
+      prompt: "プリンターがこのジョブを確認していません。選択する前にプリンターを確認してください：",
+      printing: "印刷中です",
+      failed: "印刷は開始されませんでした",
+    },
     filamentShort: {
       rowBadge: '割り当てられたスプールのフィラメントが不足しています',
       rowTooltip: 'スケジューラーがこのアイテムをフラグしました。再生ボタンをクリックしてスロットごとの不足量を確認し、それでも印刷するか判断してください。',

@@ -40,5 +40,6 @@ export function queueItemDisplayName(
     return first;
   }
 
-  return `File #${item.archive_id ?? item.library_file_id}`;
+  const sourceId = item.archive_id ?? item.library_file_id;
+  return sourceId == null ? 'External print' : `File #${sourceId}`;
 }

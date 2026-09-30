@@ -54,6 +54,7 @@ from backend.app.services.bambu_ftp import (
     get_storage_info_async,
     list_files_async,
 )
+from backend.app.services.job_identity import telemetry_identity
 from backend.app.services.printer_diagnostic import run_connection_diagnostic
 from backend.app.services.printer_manager import (
     drying_screen_only,
@@ -777,13 +778,11 @@ async def get_printer_status(
     current_plate_id: int | None = None
     if state.state in ("RUNNING", "PAUSE"):
         current_plate_id = resolve_plate_id(state)
-        if state.subtask_id:
-            normalized_subtask_id = str(state.subtask_id).strip()
-            if normalized_subtask_id not in ("", "0"):
-                current_print_identity = normalized_subtask_id
+        current_print_identity = telemetry_identity(state)
+        if current_print_identity:
             archive_row = await db.execute(
                 select(PrintArchive.id)
-                .where(PrintArchive.subtask_id == state.subtask_id)
+                .where(PrintArchive.subtask_id == current_print_identity)
                 .where(PrintArchive.printer_id == printer_id)
                 .order_by(PrintArchive.created_at.desc())
                 .limit(1)

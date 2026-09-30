@@ -1951,7 +1951,10 @@ class TestAbortedStatusNormalisation:
 
         from sqlalchemy.ext.asyncio import async_sessionmaker
 
-        from backend.app.main import on_print_complete
+        from backend.app.main import _completed_job_events, _user_stopped_printers, on_print_complete
+
+        _completed_job_events.clear()
+        _user_stopped_printers.clear()
         from backend.app.services.bambu_ftp import DeleteResult
 
         session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
@@ -1969,6 +1972,8 @@ class TestAbortedStatusNormalisation:
             patch(
                 "backend.app.services.bambu_ftp.delete_file_async", AsyncMock(return_value=DeleteResult.NOT_FOUND)
             ) as ftp,
+            patch("backend.app.services.camera.capture_camera_frame_bytes", AsyncMock(return_value=None)),
+            patch("backend.app.main._capture_finish_photo_from_timelapse", AsyncMock(return_value=False)),
             patch("backend.app.main.ws_manager", AsyncMock()),
             patch("backend.app.main.mqtt_relay", AsyncMock()) as relay,
             patch("backend.app.main.notification_service", AsyncMock()),
@@ -1992,10 +1997,16 @@ class TestAbortedStatusNormalisation:
         self, queue_item_factory, db_session, completion_environment
     ):
         """Verify the completion handler maps 'aborted' → 'cancelled' for queue items."""
-        item = await queue_item_factory(status="printing")
+        item = await queue_item_factory(status="printing", dispatch_subtask_id="123")
         await completion_environment.complete(
             item.printer_id,
-            {"status": "aborted", "filename": "test.gcode", "subtask_name": "Test", "timelapse_was_active": False},
+            {
+                "subtask_id": "123",
+                "status": "aborted",
+                "filename": "test.gcode",
+                "subtask_name": "Test",
+                "timelapse_was_active": False,
+            },
         )
         await db_session.refresh(item)
         assert item.status == "cancelled"
@@ -2020,7 +2031,7 @@ class TestAbortedStatusNormalisation:
         )
         await db_session.refresh(item)
         assert item.status == "dispatching"
-        completion_environment.ftp.assert_awaited()
+        completion_environment.ftp.assert_not_awaited()
         completion_environment.relay.on_queue_job_completed.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -2062,10 +2073,16 @@ class TestAbortedStatusNormalisation:
         self, queue_item_factory, db_session, completion_environment
     ):
         """Verify normal statuses like 'completed' are not affected by normalisation."""
-        item = await queue_item_factory(status="printing")
+        item = await queue_item_factory(status="printing", dispatch_subtask_id="123")
         await completion_environment.complete(
             item.printer_id,
-            {"status": "completed", "filename": "test.gcode", "subtask_name": "Test", "timelapse_was_active": False},
+            {
+                "subtask_id": "123",
+                "status": "completed",
+                "filename": "test.gcode",
+                "subtask_name": "Test",
+                "timelapse_was_active": False,
+            },
         )
         await db_session.refresh(item)
         assert item.status == "completed"

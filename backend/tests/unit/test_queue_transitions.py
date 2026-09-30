@@ -324,8 +324,8 @@ async def test_restart_recovery_skips_an_item_changed_mid_pass(sessions):
     raced = await make_item(sessions, "dispatching", printer_id=1, dispatch_subtask_id="111")
     other = await make_item(sessions, "dispatching", printer_id=2, dispatch_subtask_id="222")
     telemetry = {
-        1: SimpleNamespace(state="RUNNING", subtask_id="111"),
-        2: SimpleNamespace(state="RUNNING", subtask_id="222"),
+        1: SimpleNamespace(connected=True, state="RUNNING", subtask_id="111"),
+        2: SimpleNamespace(connected=True, state="RUNNING", subtask_id="222"),
     }
     scheduler = PrintScheduler()
     async with sessions() as db:

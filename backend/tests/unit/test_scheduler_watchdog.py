@@ -38,7 +38,7 @@ async def db_session():
 
 
 def _status(state: str, subtask_id: str | None = None, gcode_file: str | None = None):
-    return SimpleNamespace(state=state, subtask_id=subtask_id, gcode_file=gcode_file)
+    return SimpleNamespace(connected=True, state=state, subtask_id=subtask_id, gcode_file=gcode_file)
 
 
 class TestDurableDispatchingState:

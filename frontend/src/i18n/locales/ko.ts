@@ -1020,6 +1020,11 @@ export default {
     }
   },
   queue: {
+    resolveDispatch: {
+      prompt: "프린터가 이 작업을 확인하지 않았습니다. 선택하기 전에 프린터를 확인하세요:",
+      printing: "인쇄 중입니다",
+      failed: "인쇄가 시작되지 않았습니다",
+    },
     title: '인쇄 대기열',
     subtitle: '인쇄 작업을 예약하고 관리하세요',
     editQueueItem: '대기열 항목 편집',
