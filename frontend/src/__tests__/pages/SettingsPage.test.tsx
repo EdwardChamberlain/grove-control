@@ -109,6 +109,38 @@ describe('SettingsPage', () => {
       });
     });
 
+    it('shows the count-based archive preview when count retention is selected', async () => {
+      let previewKeepCount: string | null = null;
+      let purgeSettings = { enabled: true, days: 365, mode: 'age', max_count: 100, purge_stats: false };
+      server.use(
+        http.get('/api/v1/archives/purge/settings', () => HttpResponse.json(purgeSettings)),
+        http.put('/api/v1/archives/purge/settings', async ({ request }) => {
+          purgeSettings = (await request.json()) as typeof purgeSettings;
+          return HttpResponse.json(purgeSettings);
+        }),
+        http.get('/api/v1/archives/purge/preview', ({ request }) => {
+          previewKeepCount = new URL(request.url).searchParams.get('keep_count');
+          return HttpResponse.json({
+            count: 2,
+            total_bytes: 4096,
+            sample_filenames: ['old-print-a.3mf', 'old-print-b.3mf'],
+            mode: 'count',
+            older_than_days: null,
+            keep_count: 100,
+          });
+        }),
+      );
+
+      render(<SettingsPage />);
+
+      const policySelect = await screen.findByLabelText('Retention policy');
+      fireEvent.change(policySelect, { target: { value: 'count' } });
+
+      expect(await screen.findByText('2 archive(s) would be removed at the next run.')).toBeInTheDocument();
+      expect(screen.getByText('old-print-a.3mf')).toBeInTheDocument();
+      await waitFor(() => expect(previewKeepCount).toBe('100'));
+    });
+
     it('shows Administrators group without a duplicate Admin pill', async () => {
       const adminUser = {
         id: 1,
