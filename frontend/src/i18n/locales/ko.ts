@@ -5863,6 +5863,8 @@ export default {
     days: '일',
     maxCountLabel: '보관할 아카이브 파일의 최대 개수',
     countDescription: '기간과 관계없이 최신 아카이브를 보관합니다. 인쇄 중인 아카이브는 삭제하지 않습니다.',
+    countDraftHint: '적용을 선택하면 변경 사항이 반영됩니다.',
+    countValidationError: '1부터 100,000까지의 정수를 입력하세요.',
     countPreviewSummary: '다음 실행에서 아카이브 {{count}}개를 삭제합니다.',
     countPreviewNone: '현재 이 한도를 초과한 아카이브가 없습니다.',
     runNow: '지금 아카이브 삭제',

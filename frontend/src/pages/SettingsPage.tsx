@@ -644,23 +644,33 @@ export function SettingsPage() {
     queryFn: () => api.getArchivePurgeSettings(),
     enabled: canPurgeArchives,
   });
-  const { data: archiveCountPurgePreview, isFetching: isPreviewingArchiveCount } = useQuery({
-    queryKey: ['archive-count-purge-preview', archivePurgeSettings?.max_count],
-    queryFn: () => api.previewArchivePurge({ keepCount: archivePurgeSettings?.max_count ?? 100 }),
-    enabled: canPurgeArchives && archivePurgeSettings?.mode === 'count',
+  // A count edit must stay local until explicitly applied: the sweeper may
+  // run while the field is blank or contains an intermediate digit.
+  const [archivePurgeCountDraft, setArchivePurgeCountDraft] = useState<string | null>(null);
+  const archivePurgeCountInput = archivePurgeCountDraft ?? String(archivePurgeSettings?.max_count ?? 100);
+  const archivePurgeCount = Number(archivePurgeCountInput);
+  const isValidArchivePurgeCount = archivePurgeCountInput.trim() !== ''
+    && Number.isInteger(archivePurgeCount) && archivePurgeCount >= 1 && archivePurgeCount <= 100000;
+  const hasArchivePurgeCountChanges = archivePurgeCountDraft !== null
+    && archivePurgeCount !== archivePurgeSettings?.max_count;
+  const { data: archiveCountPurgePreview, isFetching: isPreviewingArchiveCount, isSuccess: hasArchiveCountPreview } = useQuery({
+    queryKey: ['archive-count-purge-preview', isValidArchivePurgeCount ? archivePurgeCount : null],
+    queryFn: () => api.previewArchivePurge({ keepCount: archivePurgeCount }),
+    enabled: canPurgeArchives && archivePurgeSettings?.mode === 'count' && isValidArchivePurgeCount,
   });
 
   const updateArchivePurgeSettingsMutation = useMutation({
     mutationFn: (body: ArchivePurgeSettings) => api.updateArchivePurgeSettings(body),
-    onSuccess: () => {
+    onSuccess: (saved) => {
+      queryClient.setQueryData(['archive-purge-settings'], saved);
       queryClient.invalidateQueries({ queryKey: ['archive-purge-settings'] });
       showToast(t('settings.toast.settingsSaved'), 'success');
     },
     onError: (e: Error) => showToast(e.message || t('archiveAutoPurge.saveFailed'), 'error'),
   });
 
-  const saveArchivePurgeSettings = (patch: Partial<ArchivePurgeSettings>) => {
-    if (!archivePurgeSettings) return;
+  const saveArchivePurgeSettings = (patch: Partial<ArchivePurgeSettings>, onSuccess?: () => void) => {
+    if (!archivePurgeSettings || updateArchivePurgeSettingsMutation.isPending) return;
     updateArchivePurgeSettingsMutation.mutate({
       enabled: archivePurgeSettings.enabled,
       days: archivePurgeSettings.days,
@@ -668,7 +678,7 @@ export function SettingsPage() {
       max_count: archivePurgeSettings.max_count,
       purge_stats: archivePurgeSettings.purge_stats,
       ...patch,
-    });
+    }, { onSuccess });
   };
 
   const { data: updateCheck, refetch: refetchUpdateCheck, isRefetching: isCheckingUpdate } = useQuery({
@@ -1854,6 +1864,7 @@ export function SettingsPage() {
                       <input
                         type="checkbox"
                         checked={archivePurgeSettings.enabled}
+                        disabled={updateArchivePurgeSettingsMutation.isPending}
                         onChange={(e) => saveArchivePurgeSettings({ enabled: e.target.checked })}
                         className="sr-only peer"
                       />
@@ -1868,6 +1879,7 @@ export function SettingsPage() {
                     <select
                       id="archive-auto-purge-mode"
                       value={archivePurgeSettings.mode}
+                      disabled={updateArchivePurgeSettingsMutation.isPending}
                       onChange={(e) => saveArchivePurgeSettings({ mode: e.target.value as 'age' | 'count' })}
                       className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none disabled:opacity-50"
                     >
@@ -1886,7 +1898,7 @@ export function SettingsPage() {
                           type="number"
                           min={7}
                           max={3650}
-                          disabled={!archivePurgeSettings.enabled}
+                          disabled={!archivePurgeSettings.enabled || updateArchivePurgeSettingsMutation.isPending}
                           value={archivePurgeSettings.days}
                           onChange={(e) =>
                             saveArchivePurgeSettings({
@@ -1911,46 +1923,73 @@ export function SettingsPage() {
                         type="number"
                         min={1}
                         max={100000}
-                        value={archivePurgeSettings.max_count}
-                        onChange={(e) =>
-                          saveArchivePurgeSettings({
-                            max_count: Math.max(1, Math.min(100000, parseInt(e.target.value || '0', 10) || 0)),
-                          })
-                        }
+                        step={1}
+                        value={archivePurgeCountInput}
+                        disabled={updateArchivePurgeSettingsMutation.isPending}
+                        aria-invalid={!isValidArchivePurgeCount}
+                        aria-describedby="archive-auto-purge-count-hint"
+                        onChange={(e) => setArchivePurgeCountDraft(e.target.value)}
                         className="w-28 px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none disabled:opacity-50"
                       />
+                      <p id="archive-auto-purge-count-hint" className={`text-xs mt-1 ${isValidArchivePurgeCount ? 'text-bambu-gray' : 'text-red-400'}`}>
+                        {t(isValidArchivePurgeCount ? 'archiveAutoPurge.countDraftHint' : 'archiveAutoPurge.countValidationError')}
+                      </p>
+                      <div className="flex gap-2 mt-2">
+                        <Button
+                          size="sm"
+                          disabled={!isValidArchivePurgeCount || !hasArchivePurgeCountChanges || updateArchivePurgeSettingsMutation.isPending || isPreviewingArchiveCount || !hasArchiveCountPreview}
+                          onClick={() => {
+                            if (!isValidArchivePurgeCount) return;
+                            saveArchivePurgeSettings({ max_count: archivePurgeCount }, () => setArchivePurgeCountDraft(null));
+                          }}
+                        >
+                          {t('common.apply')}
+                        </Button>
+                        {archivePurgeCountDraft !== null && (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={updateArchivePurgeSettingsMutation.isPending}
+                            onClick={() => setArchivePurgeCountDraft(null)}
+                          >
+                            {t('common.cancel')}
+                          </Button>
+                        )}
+                      </div>
                       <p className="text-xs text-bambu-gray mt-1">
                         {t('archiveAutoPurge.countDescription')}
                       </p>
-                      <div className="mt-2 rounded bg-bambu-dark/50 p-2 text-xs text-bambu-gray">
-                        {isPreviewingArchiveCount ? (
-                          t('archivePurge.previewLoading')
-                        ) : archiveCountPurgePreview ? (
-                          <>
-                            <p>
-                              {archiveCountPurgePreview.count === 0
-                                ? t('archiveAutoPurge.countPreviewNone')
-                                : t('archiveAutoPurge.countPreviewSummary', { count: archiveCountPurgePreview.count })}
-                            </p>
-                            {archiveCountPurgePreview.sample_filenames.length > 0 && (
-                              <ul className="mt-1 list-disc pl-4">
-                                {archiveCountPurgePreview.sample_filenames.map((filename, index) => (
-                                  <li key={`${index}-${filename}`} className="truncate">{filename}</li>
-                                ))}
-                              </ul>
-                            )}
-                          </>
-                        ) : (
-                          t('archivePurge.previewFailed')
-                        )}
-                      </div>
+                      {isValidArchivePurgeCount && (
+                        <div className="mt-2 rounded bg-bambu-dark/50 p-2 text-xs text-bambu-gray">
+                          {isPreviewingArchiveCount ? (
+                            t('archivePurge.previewLoading')
+                          ) : hasArchiveCountPreview && archiveCountPurgePreview ? (
+                            <>
+                              <p>
+                                {archiveCountPurgePreview.count === 0
+                                  ? t('archiveAutoPurge.countPreviewNone')
+                                  : t('archiveAutoPurge.countPreviewSummary', { count: archiveCountPurgePreview.count })}
+                              </p>
+                              {archiveCountPurgePreview.sample_filenames.length > 0 && (
+                                <ul className="mt-1 list-disc pl-4">
+                                  {archiveCountPurgePreview.sample_filenames.map((filename, index) => (
+                                    <li key={`${index}-${filename}`} className="truncate">{filename}</li>
+                                  ))}
+                                </ul>
+                              )}
+                            </>
+                          ) : (
+                            t('archivePurge.previewFailed')
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
 
                   <label className="flex items-start gap-2 cursor-pointer">
                     <input
                       type="checkbox"
-                      disabled={!archivePurgeSettings.enabled}
+                      disabled={!archivePurgeSettings.enabled || updateArchivePurgeSettingsMutation.isPending}
                       checked={archivePurgeSettings.purge_stats}
                       onChange={(e) => saveArchivePurgeSettings({ purge_stats: e.target.checked })}
                       className="mt-0.5 shrink-0 disabled:opacity-50"

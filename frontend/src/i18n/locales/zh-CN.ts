@@ -6366,6 +6366,8 @@ export default {
     days: '天',
     maxCountLabel: '最多保留的归档文件数',
     countDescription: '无论文件年龄如何，都保留最新的归档。正在打印的归档不会被删除。',
+    countDraftHint: '选择“应用”后更改才会生效。',
+    countValidationError: '请输入 1 到 100,000 之间的整数。',
     countPreviewSummary: '下次运行时将删除 {{count}} 个归档。',
     countPreviewNone: '当前归档数量未超过此上限。',
     purgeStatsLabel: '同时从统计中移除',

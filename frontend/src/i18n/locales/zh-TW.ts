@@ -6366,6 +6366,8 @@ export default {
     days: '天',
     maxCountLabel: '最多保留的歸檔檔案數',
     countDescription: '不論檔案年齡，保留最新的歸檔。列印中的歸檔不會被刪除。',
+    countDraftHint: '選擇「套用」後變更才會生效。',
+    countValidationError: '請輸入 1 到 100,000 之間的整數。',
     countPreviewSummary: '下次執行時會刪除 {{count}} 個歸檔。',
     countPreviewNone: '目前歸檔數量未超過此上限。',
     purgeStatsLabel: '同時從統計中移除',

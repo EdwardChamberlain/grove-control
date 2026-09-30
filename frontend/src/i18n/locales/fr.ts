@@ -6370,6 +6370,8 @@ export default {
     days: 'jours',
     maxCountLabel: 'Nombre maximal de fichiers d’archive à conserver',
     countDescription: 'Conserve les archives les plus récentes, quel que soit leur âge. Les impressions en cours ne sont jamais supprimées.',
+    countDraftHint: 'Les modifications prennent effet lorsque vous sélectionnez Appliquer.',
+    countValidationError: 'Saisissez un nombre entier compris entre 1 et 100 000.',
     countPreviewSummary: '{{count}} archive(s) seraient supprimées lors de la prochaine exécution.',
     countPreviewNone: 'Aucune archive ne dépasse actuellement cette limite.',
     purgeStatsLabel: 'Aussi retirer des statistiques',

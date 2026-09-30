@@ -6390,6 +6390,8 @@ export default {
     days: 'días',
     maxCountLabel: 'Número máximo de archivos de archivo que conservar',
     countDescription: 'Conserva los archivos más recientes, sin importar su antigüedad. Nunca elimina archivos de impresiones en curso.',
+    countDraftHint: 'Los cambios se aplican cuando seleccionas Aplicar.',
+    countValidationError: 'Introduce un número entero entre 1 y 100.000.',
     countPreviewSummary: 'En la próxima ejecución se eliminarían {{count}} archivos.',
     countPreviewNone: 'Ningún archivo supera actualmente este límite.',
     purgeStatsLabel: 'Eliminar también de las estadísticas',

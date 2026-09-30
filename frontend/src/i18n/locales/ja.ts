@@ -6381,6 +6381,8 @@ export default {
     days: '日',
     maxCountLabel: '保持するアーカイブファイルの最大数',
     countDescription: '経過日数に関係なく、新しいアーカイブを残します。印刷中のアーカイブは削除しません。',
+    countDraftHint: '「適用」を選択すると変更が反映されます。',
+    countValidationError: '1 から 100,000 までの整数を入力してください。',
     countPreviewSummary: '次回の実行で {{count}} 件のアーカイブを削除します。',
     countPreviewNone: '現在、この上限を超えるアーカイブはありません。',
     purgeStatsLabel: '統計からも削除',
