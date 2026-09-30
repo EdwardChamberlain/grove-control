@@ -90,6 +90,26 @@ async def test_cancel_chooses_destination_and_retains_active_holds(sessions, sta
             await db.rollback()
 
 
+async def test_stop_succeeds_when_auto_off_cannot_be_scheduled(sessions):
+    async with sessions() as db:
+        item = PrintQueueItem(printer_id=1, status="printing", auto_off_after=True)
+        db.add(item)
+        await db.commit()
+        failing_plug = AsyncMock(side_effect=RuntimeError("plug unreachable"))
+        with (
+            patch("backend.app.services.printer_manager.printer_manager.stop_print") as stop,
+            patch(
+                "backend.app.services.smart_plug_manager.smart_plug_manager.schedule_off_after_queue_job",
+                failing_plug,
+            ),
+        ):
+            await cancel_job(db, item)  # Does not raise after the committed stop.
+        failing_plug.assert_awaited_once()
+        stop.assert_called_once_with(1)
+        await db.refresh(item)
+        assert item.status == "cancelled"
+
+
 @pytest.mark.parametrize("status", ("queued", *ACTIVE_STATUSES))
 async def test_system_cannot_release_waiting_or_active_jobs(sessions, status):
     async with sessions() as db:
@@ -248,8 +268,48 @@ async def test_deleting_printer_ends_holding_job_and_leaves_waiting_job_to_retar
         await db.refresh(old)
         await db.refresh(waiting)
         assert old.status == ("successful" if status == "finished" else "unsuccessful")
-        assert old.error_message == "Printer deleted" and old.printer_id is None
+        # A finished print stays a success; only an unsuccessful end is explained.
+        assert old.error_message == (None if status == "finished" else "Printer deleted")
+        assert old.printer_id is None and old.completed_at is not None
         assert waiting.status == "queued" and waiting.printer_id is None
+
+
+@pytest.mark.parametrize("state", ["preheating", "soak-dispatching", "shutdown-pending"])
+@pytest.mark.parametrize("connected", [True, False])
+async def test_deleting_printer_waits_for_heat_soak_shutdown_while_reachable(sessions, state, connected):
+    from fastapi import HTTPException
+
+    async with sessions() as db:
+        printer = await db.get(Printer, 1)
+        if state == "shutdown-pending":
+            printer.heat_soak_shutdown_pending = True
+        else:
+            db.add(
+                PrintQueueItem(
+                    printer_id=1,
+                    status="preheating" if state == "preheating" else "dispatching",
+                    chamber_heat_soak=True,
+                )
+            )
+        await db.commit()
+        with (
+            patch("backend.app.api.routes.printers.printer_manager.is_connected", return_value=connected),
+            patch("backend.app.api.routes.printers.printer_manager.disconnect_printer") as disconnect,
+        ):
+            if connected:
+                # Heaters may be on and only this printer row can retry their
+                # shutdown until telemetry confirms it: stop and wait first.
+                with pytest.raises(HTTPException) as refused:
+                    await delete_printer(1, delete_archives=False, db=db, _=None)
+                assert refused.value.status_code == 409
+                disconnect.assert_not_called()
+            else:
+                # Grove cannot command an unreachable printer, so it is not held.
+                await delete_printer(1, delete_archives=False, db=db, _=None)
+                disconnect.assert_called_once_with(1)
+        await db.rollback()
+    async with sessions() as db:
+        assert (await db.get(Printer, 1) is not None) == connected
 
 
 async def test_migration_preserves_exact_hold_creates_missing_job_and_runs_once(sessions):
@@ -301,6 +361,20 @@ async def test_migration_preserves_exact_hold_creates_missing_job_and_runs_once(
         assert len(jobs) == 5
         assert (await db.get(PrintQueueItem, ids[0])).status == "unsuccessful"
         assert (await db.get(PrintQueueItem, synthetic.id)).status == "successful"
+
+
+async def test_fresh_and_upgraded_databases_share_one_holding_index_predicate(sessions):
+    from backend.app.models.print_queue import HOLDING_INDEX_NAME
+
+    index_sql = text("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = :name")
+    engine = sessions.kw["bind"]
+    async with engine.connect() as conn:
+        fresh = await conn.scalar(index_sql, {"name": HOLDING_INDEX_NAME})  # From the model (create_all).
+    async with engine.begin() as conn:
+        await _migrate_queue_lifecycle(conn)  # Drops and recreates it on upgrade.
+        upgraded = await conn.scalar(index_sql, {"name": HOLDING_INDEX_NAME})
+    assert all(f"'{status}'" in fresh for status in HOLDING_STATUSES)
+    assert fresh.split(" WHERE ", 1)[1] == upgraded.split(" WHERE ", 1)[1]
 
 
 async def test_migration_unbinds_waiting_any_machine_jobs_and_keeps_specific_requirements(sessions):

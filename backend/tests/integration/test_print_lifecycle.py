@@ -137,6 +137,30 @@ class TestPlateClearGate:
         assert main.mqtt_relay.on_print_complete.await_args.args[-1] == reported
         assert main.mqtt_relay.on_queue_job_completed.await_args.kwargs["status"] == job_status
 
+    async def test_locked_database_retries_the_whole_completion_transaction(self, completion, db_session):
+        from types import SimpleNamespace
+
+        from sqlalchemy.exc import OperationalError
+
+        from backend.app import main
+
+        completion.manager.get_printer.return_value = SimpleNamespace(name="P1", serial_number="SERIAL")
+        locked = OperationalError("UPDATE print_queue", {}, Exception("database is locked"))
+        bump = AsyncMock(side_effect=[locked, None])
+        with (
+            patch.object(main, "_bump_library_file_usage_if_completed", bump),
+            patch("backend.app.core.database.is_sqlite", return_value=True),
+            patch("backend.app.core.database.asyncio.sleep", AsyncMock()),
+        ):
+            await completion.complete(completion.printer.id, {"subtask_id": "123", "status": "completed"})
+
+        await db_session.refresh(completion.item)
+        # The first attempt rolled back; the second committed the outcome once
+        # and the completion effects still ran (#897).
+        assert completion.item.status == "finished"
+        assert bump.await_count == 2
+        main.mqtt_relay.on_queue_job_completed.assert_awaited_once()
+
     async def test_plate_clear_gate_not_raised_for_unknown_status(self, completion, db_session):
         await completion.complete(completion.printer.id, {"subtask_id": "123", "status": "unknown_future_status"})
         await db_session.refresh(completion.item)

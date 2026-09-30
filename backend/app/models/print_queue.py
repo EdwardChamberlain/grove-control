@@ -5,6 +5,16 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.core.database import Base
 
+# Job states that hold their printer (#194). Defined with the table because the
+# unique holding index below is built from them; queue_transitions re-exports.
+ACTIVE_STATUSES = ("preheating", "dispatching", "printing", "paused")
+AWAITING_PLATE_CLEAR_STATUSES = ("finished", "failed", "cancelled")
+HOLDING_STATUSES = ACTIVE_STATUSES + AWAITING_PLATE_CLEAR_STATUSES
+HOLDING_INDEX_NAME = "uq_print_queue_holding_printer"
+HOLDING_INDEX_WHERE = "printer_id IS NOT NULL AND status IN ({})".format(
+    ", ".join(f"'{status}'" for status in HOLDING_STATUSES)
+)
+
 
 class PrintQueueItem(Base):
     """Print queue item for scheduled/queued prints."""
@@ -12,15 +22,11 @@ class PrintQueueItem(Base):
     __tablename__ = "print_queue"
     __table_args__ = (
         Index(
-            "uq_print_queue_holding_printer",
+            HOLDING_INDEX_NAME,
             "printer_id",
             unique=True,
-            sqlite_where=text(
-                "printer_id IS NOT NULL AND status IN ('preheating', 'dispatching', 'printing', 'paused', 'finished', 'failed', 'cancelled')"
-            ),
-            postgresql_where=text(
-                "printer_id IS NOT NULL AND status IN ('preheating', 'dispatching', 'printing', 'paused', 'finished', 'failed', 'cancelled')"
-            ),
+            sqlite_where=text(HOLDING_INDEX_WHERE),
+            postgresql_where=text(HOLDING_INDEX_WHERE),
         ),
     )
     id: Mapped[int] = mapped_column(primary_key=True)

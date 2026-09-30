@@ -18,9 +18,13 @@ Resume after failure, and the Require previous success option have been removed.
 | `successful`, `unsuccessful` | No different destination |
 
 Printer deletion additionally ends an active job as `unsuccessful`. It resolves
-`finished` as `successful`, and `failed`/`cancelled` as `unsuccessful`, recording
-**Printer deleted**. Waiting jobs that required that printer remain `queued`,
-unassigned, so an operator can retarget them.
+`finished` as `successful`, and `failed`/`cancelled` as `unsuccessful`; only the
+unsuccessful ends record **Printer deleted**, and jobs that had already ended
+keep their completion time. Waiting jobs that required that printer remain
+`queued`, unassigned, so an operator can retarget them. While Grove can reach
+the printer, deletion is refused during a heat soak and until its heater
+shutdown is confirmed, because that retry loop needs the printer: stop the soak
+first. A disconnected printer can be deleted, since Grove cannot command it.
 
 ## Waiting jobs and printers
 

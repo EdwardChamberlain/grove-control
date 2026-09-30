@@ -431,16 +431,27 @@ async def delete_printer(
             )
         ).all()
     )
-    heating = printer.heat_soak_shutdown_pending or any(item.chamber_heat_soak for item in holding)
-    for item in holding:
-        await transition_queue_item(
-            db,
-            item,
-            item.status,
-            "successful" if item.status == "finished" else "unsuccessful",
-            action="printer_deleted",
-            values={"error_message": "Printer deleted", "completed_at": datetime.now(timezone.utc)},
+    # Heat-soak heaters are shut down by a loop that retries until telemetry
+    # confirms zero targets, and that loop needs this printer row. While Grove
+    # can reach the printer, stop the soak and let shutdown finish first. A
+    # disconnected printer cannot be commanded either way, so it is not held.
+    soaking = printer.heat_soak_shutdown_pending or any(
+        item.chamber_heat_soak
+        and (item.status == "preheating" or (item.status == "dispatching" and not item.dispatch_subtask_id))
+        for item in holding
+    )
+    if soaking and printer_manager.is_connected(printer_id):
+        raise HTTPException(
+            409, "Stop the heat soak and wait for heater shutdown to be confirmed before deleting this printer"
         )
+    for item in holding:
+        released = "successful" if item.status == "finished" else "unsuccessful"
+        # A finished print keeps its outcome; only an unsuccessful end is
+        # explained by the deletion. Jobs that already ended keep their time.
+        values = {"error_message": "Printer deleted"} if released == "unsuccessful" else {}
+        if item.completed_at is None:
+            values["completed_at"] = datetime.now(timezone.utc)
+        await transition_queue_item(db, item, item.status, released, action="printer_deleted", values=values)
     from sqlalchemy import update
 
     await db.execute(update(PrintQueueItem).where(PrintQueueItem.printer_id == printer_id).values(printer_id=None))
@@ -486,10 +497,6 @@ async def delete_printer(
     await db.delete(printer)
     await db.commit()
 
-    if heating:
-        from backend.app.services.chamber_heat_soak import _heaters_off
-
-        _heaters_off(printer)
     printer_manager.disconnect_printer(printer_id)
     return {"status": "deleted", "archives_deleted": delete_archives}
 

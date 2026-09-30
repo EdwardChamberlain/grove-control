@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import NamedTuple
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
@@ -75,7 +76,7 @@ from backend.app.api.routes import (
 from backend.app.api.routes.maintenance import _get_printer_maintenance_internal, ensure_default_types
 from backend.app.api.routes.support import init_debug_logging
 from backend.app.core.config import APP_VERSION, settings as app_settings
-from backend.app.core.database import async_session, engine, init_db
+from backend.app.core.database import async_session, engine, init_db, run_with_retry
 from backend.app.core.tasks import cancel_background_tasks, spawn_background_task
 from backend.app.core.websocket import ws_manager
 from backend.app.models.smart_plug import SmartPlug
@@ -4356,6 +4357,19 @@ async def on_print_complete(printer_id: int, data: dict):
         return await _complete_identified_print(printer_id, data)
 
 
+class _CompletionRecord(NamedTuple):
+    """What the completion transaction committed, for the effects that follow it."""
+
+    job_id: int
+    owner_id: int | None
+    queue_status: str
+    auto_off: bool
+    archive_id: int | None
+    reported_status: str
+    remote_filename: str | None
+    archive_filename: str | None
+
+
 async def _complete_identified_print(printer_id: int, data: dict):
     """Handle print completion - update the archive status."""
     import time
@@ -4387,13 +4401,9 @@ async def _complete_identified_print(printer_id: int, data: dict):
         and telemetry_identity(live) not in (None, identity)
     ):
         return False
-    queue_item_id = None
-    queue_item_owner_id = None
-    queue_status = None
-    queue_auto_off = False
-    remote_filename = None
-    archive_filename = None
-    async with async_session() as db:
+    reported_outcome = data.get("status", "completed")
+
+    async def _record_outcome(db) -> _CompletionRecord | None:
         await bind_observed_id(db, printer_id, identity, data.get("previous_submission_id"))
         statuses = ("dispatching", "printing", "paused", "cancelled")
         if data.get("_recovered_dispatch"):
@@ -4426,22 +4436,23 @@ async def _complete_identified_print(printer_id: int, data: dict):
                     archive.dispatched_queue_item_id = matched_job.id
                     await db.commit()
         if matched_job is None or _completed_job_events.get(printer_id) == matched_job.id:
-            return False
-        queue_status = data.get("status", "completed")
+            return None
+        queue_status = reported_outcome
         if (
             matched_job.status == "cancelled"
             or (printer_id in _user_stopped_printers and queue_status in ("failed", "aborted"))
             or queue_status == "aborted"
         ):
             queue_status = "cancelled"
-        if (matched_job.status == "cancelled" or printer_id in _user_stopped_printers) and data.get("status") in (
+        reported_status = reported_outcome
+        if (matched_job.status == "cancelled" or printer_id in _user_stopped_printers) and reported_outcome in (
             "failed",
             "aborted",
         ):
             # A stop from Grove is reported as "cancelled", now also after a
             # restart. Every other outcome, including a touchscreen "aborted",
             # keeps the printer's own name for notifications and integrations.
-            data = {**data, "status": "cancelled"}
+            reported_status = "cancelled"
         destination = "finished" if queue_status == "completed" else queue_status
         if matched_job.status == "dispatching" and destination == "finished":
             # Exact terminal identity also proves this dispatch was accepted.
@@ -4451,6 +4462,7 @@ async def _complete_identified_print(printer_id: int, data: dict):
             matched_job.completed_at = datetime.now(timezone.utc)
             if queue_status == "failed" and not matched_job.error_message:
                 matched_job.error_message = _format_hms_error_summary(data.get("hms_errors") or [])
+        remote_filename = archive_filename = None
         if matched_job.archive_id:
             from backend.app.services.archive import record_dispatch_outcome
 
@@ -4471,12 +4483,33 @@ async def _complete_identified_print(printer_id: int, data: dict):
                 remote_filename = (attempt_archive.extra_data or {}).get("remote_filename")
                 archive_filename = attempt_archive.filename
         await _bump_library_file_usage_if_completed(db, matched_job, queue_status)
-        queue_item_id = matched_job.id
-        queue_item_owner_id = matched_job.created_by_id
-        queue_auto_off = matched_job.auto_off_after
         await db.commit()
-        _completed_job_events[printer_id] = matched_job.id
-        matched_archive_id = matched_job.archive_id
+        return _CompletionRecord(
+            job_id=matched_job.id,
+            owner_id=matched_job.created_by_id,
+            queue_status=queue_status,
+            auto_off=bool(matched_job.auto_off_after),
+            archive_id=matched_job.archive_id,
+            reported_status=reported_status,
+            remote_filename=remote_filename,
+            archive_filename=archive_filename,
+        )
+
+    # The terminal transition, Archive outcome and printer hold commit together.
+    # A locked SQLite database retries the whole transaction in a fresh session,
+    # so a busy writer cannot leave the job printing with no effects run (#897).
+    record = await run_with_retry(_record_outcome, label="queue completion", session_factory=async_session)
+    if record is None:
+        return False
+    _completed_job_events[printer_id] = record.job_id
+    data = {**data, "status": record.reported_status}
+    queue_item_id = record.job_id
+    queue_item_owner_id = record.owner_id
+    queue_status = record.queue_status
+    queue_auto_off = record.auto_off
+    matched_archive_id = record.archive_id
+    remote_filename = record.remote_filename
+    archive_filename = record.archive_filename
 
     def log_timing(section: str):
         elapsed = time.time() - start_time
@@ -4859,7 +4892,7 @@ async def _complete_identified_print(printer_id: int, data: dict):
                         else None
                     )
                     try:
-                        queue_item = await db.get(PrintQueueItem, matched_job.id)
+                        queue_item = await db.get(PrintQueueItem, queue_item_id)
                         if queue_item:
                             if no_archive_data is None:
                                 no_archive_data = {}

@@ -17,10 +17,6 @@ async def cancel_job(db: AsyncSession, item: PrintQueueItem) -> None:
     from backend.app.services.archive import record_dispatch_outcome
     from backend.app.services.chamber_heat_soak import _heaters_off, _show_preheating, utcnow
     from backend.app.services.printer_manager import printer_manager
-    from backend.app.services.queue_source_cleanup import (
-        remove_queue_only_artifacts,
-        remove_queue_only_source_if_unused,
-    )
 
     queued = item.status == "queued"
     if not queued and item.status not in ACTIVE_STATUSES:
@@ -55,11 +51,9 @@ async def cancel_job(db: AsyncSession, item: PrintQueueItem) -> None:
             completed_at=item.completed_at,
             clear_failure_reason=True,
         )
-    cleanup_paths = []
-    if queued and item.cleanup_library_after_dispatch and item.library_file_id:
-        cleanup_paths = await remove_queue_only_source_if_unused(db, item.library_file_id)
+    # Ending a queued job releases its one-off source inside the transition;
+    # the files are removed once this commit succeeds.
     await db.commit()
-    remove_queue_only_artifacts(cleanup_paths)
 
     from backend.app.services.print_scheduler import scheduler
 
@@ -80,4 +74,9 @@ async def cancel_job(db: AsyncSession, item: PrintQueueItem) -> None:
         if item.auto_off_after:
             from backend.app.services.smart_plug_manager import smart_plug_manager
 
-            await smart_plug_manager.schedule_off_after_queue_job(printer_id, db)
+            # The cancellation is committed; a smart-plug failure must not
+            # report the Stop itself as failed.
+            try:
+                await smart_plug_manager.schedule_off_after_queue_job(printer_id, db)
+            except Exception:
+                logger.warning("Auto-off could not be scheduled for printer %s", printer_id, exc_info=True)

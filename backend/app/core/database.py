@@ -151,24 +151,26 @@ def get_pool_status() -> dict:
     }
 
 
-async def run_with_retry(fn, *, max_attempts: int = 3, label: str = ""):
+async def run_with_retry(fn, *, max_attempts: int = 3, label: str = "", session_factory=None):
     """Run an async DB operation with retry for SQLite 'database is locked' errors.
 
     ``fn`` is an async callable that receives an ``AsyncSession`` and performs
     the full query-mutate-commit cycle.  On each retry a fresh session is used
     so there are no stale-object / expired-attribute issues after rollback.
+    ``session_factory`` lets a caller keep using its own session factory.
 
     On PostgreSQL this calls ``fn`` once with no retry (Postgres uses row-level
     locking and doesn't suffer from single-writer contention).
     """
+    sessions = session_factory or async_session
     if not is_sqlite():
-        async with async_session() as db:
+        async with sessions() as db:
             return await fn(db)
 
     last_exc: OperationalError | None = None
     for attempt in range(1, max_attempts + 1):
         try:
-            async with async_session() as db:
+            async with sessions() as db:
                 return await fn(db)
         except OperationalError as exc:
             last_exc = exc
@@ -981,16 +983,15 @@ async def _migrate_widen_spoolman_slot_ams_id_range(conn) -> None:
 
 
 async def _ensure_holding_queue_index(conn) -> None:
+    """Create the one-holding-job-per-printer index from the model's predicate."""
     from sqlalchemy import text
 
-    from backend.app.services.queue_transitions import HOLDING_STATUSES
+    from backend.app.models.print_queue import HOLDING_INDEX_NAME, HOLDING_INDEX_WHERE
 
     await conn.execute(
         text(
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_print_queue_holding_printer ON print_queue (printer_id) "
-            "WHERE printer_id IS NOT NULL AND status IN ("
-            + ", ".join(f"'{status}'" for status in HOLDING_STATUSES)
-            + ")"
+            f"CREATE UNIQUE INDEX IF NOT EXISTS {HOLDING_INDEX_NAME} ON print_queue (printer_id) "
+            f"WHERE {HOLDING_INDEX_WHERE}"
         )
     )
 
@@ -1000,10 +1001,10 @@ async def _migrate_queue_lifecycle(conn) -> None:
     from sqlalchemy import select, text
 
     from backend.app.models.archive import PrintArchive
-    from backend.app.models.print_queue import PrintQueueItem
+    from backend.app.models.print_queue import ACTIVE_STATUSES, HOLDING_INDEX_NAME, PrintQueueItem
     from backend.app.models.printer import Printer
     from backend.app.models.settings import Settings
-    from backend.app.services.queue_transitions import ACTIVE_STATUSES, HOLDING_STATUSES, transition_queue_item
+    from backend.app.services.queue_transitions import transition_queue_item
 
     version_key = "queue_lifecycle_version"
     version = await conn.scalar(select(Settings.value).where(Settings.key == version_key))
@@ -1021,7 +1022,7 @@ async def _migrate_queue_lifecycle(conn) -> None:
     for name in (
         "uq_print_queue_active_printer",
         "uq_print_queue_active_printer_heat_soak",
-        "uq_print_queue_holding_printer",
+        HOLDING_INDEX_NAME,
     ):
         await conn.execute(text(f"DROP INDEX IF EXISTS {name}"))
 
@@ -1096,14 +1097,7 @@ async def _migrate_queue_lifecycle(conn) -> None:
     await conn.execute(
         Printer.__table__.update().values(awaiting_plate_clear=False, awaiting_plate_clear_archive_id=None)
     )
-    await conn.execute(
-        text(
-            "CREATE UNIQUE INDEX uq_print_queue_holding_printer ON print_queue (printer_id) "
-            "WHERE printer_id IS NOT NULL AND status IN ("
-            + ", ".join(f"'{status}'" for status in HOLDING_STATUSES)
-            + ")"
-        )
-    )
+    await _ensure_holding_queue_index(conn)
     if version is None:
         await conn.execute(Settings.__table__.insert().values(key=version_key, value="3"))
     else:

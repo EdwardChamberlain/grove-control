@@ -47,10 +47,6 @@ from backend.app.services.printer_manager import (
     supports_drying,
     supports_drying_while_printing,
 )
-from backend.app.services.queue_source_cleanup import (
-    remove_queue_only_artifacts,
-    remove_queue_only_source_if_unused,
-)
 from backend.app.services.queue_transitions import HOLDING_STATUSES, QueueTransitionConflict, transition_queue_item
 from backend.app.services.smart_plug_manager import smart_plug_manager
 from backend.app.utils.filename import derive_queue_remote_filename
@@ -210,7 +206,6 @@ async def _defer_incompatible_dispatch(
     heat_soak_complete: bool = False,
     remote_path: str | None = None,
     ftp_timeout: int | None = None,
-    transient_library_paths: list[Path] | None = None,
 ) -> bool:
     """Keep an incompatible job pending and clean up a file already uploaded."""
     reason = _incompatible_sliced_model_reason(sliced_for_model, printer)
@@ -242,28 +237,6 @@ async def _defer_incompatible_dispatch(
         await db.commit()
     else:
         await db.rollback()
-
-    # For ordinary dispatches, the LibraryFile deletion is still in this
-    # transaction and was rolled back when another action took ownership. A
-    # heat-soak handoff commits before FTP, so its transient row may already be
-    # gone even if cancellation wins while the upload is in progress.
-    if transient_library_paths and (owns_handoff or heat_soak_complete):
-        for path in transient_library_paths:
-            try:
-                if path.exists():
-                    path.unlink()
-            except OSError as cleanup_error:
-                logger.warning(
-                    "TRANSIENT_LIBRARY_FILE_ORPHAN %s",
-                    json.dumps(
-                        {
-                            "queue_item_id": item.id,
-                            "path": str(path),
-                            "error": str(cleanup_error),
-                        },
-                        sort_keys=True,
-                    ),
-                )
 
     if remote_path:
         try:
@@ -3777,7 +3750,6 @@ class PrintScheduler:
         library_file = None
         file_path = None
         filename = None
-        cleanup_disk_paths: list[Path] = []
 
         if item.archive_id:
             # Print from archive
@@ -4054,7 +4026,6 @@ class PrintScheduler:
             heat_soak_complete=heat_soak_complete,
             remote_path=remote_path,
             ftp_timeout=ftp_timeout,
-            transient_library_paths=cleanup_disk_paths,
         ):
             if injected_path and injected_path.exists():
                 injected_path.unlink(missing_ok=True)
@@ -4239,22 +4210,9 @@ class PrintScheduler:
                 extra_data["source_archive_id"] = source_archive_id
             archive.extra_data = extra_data
 
-            if (
-                library_file
-                and item.cleanup_library_after_dispatch
-                and library_file.queue_only
-                and not library_file.is_external
-            ):
-                cleanup_disk_paths.extend(
-                    await remove_queue_only_source_if_unused(
-                        db,
-                        library_file.id,
-                    )
-                )
-
             # Queue cards and cover downloads now use the immutable attempt
-            # copy. The library copy is removed only after this transaction
-            # commits for one-off direct-to-queue uploads.
+            # copy. A one-off direct-to-queue source stays until the job is
+            # final, for Retry; the transition to a final state removes it.
             file_path = settings.base_dir / archive.file_path
             filename = archive.filename
             # Copying the Archive may take minutes. Only now start the
@@ -4320,7 +4278,6 @@ class PrintScheduler:
             plate_id=item.plate_id,
         )
 
-        remove_queue_only_artifacts(cleanup_disk_paths)
         for cleanup_path in [*([injected_path] if injected_path else [])]:
             try:
                 cleanup_path.unlink(missing_ok=True)

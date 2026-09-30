@@ -16,13 +16,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.sql.elements import ColumnElement
 
+from backend.app.models.print_queue import ACTIVE_STATUSES, AWAITING_PLATE_CLEAR_STATUSES, HOLDING_STATUSES
+
 if TYPE_CHECKING:
     from backend.app.models.print_queue import PrintQueueItem
 
 
-ACTIVE_STATUSES = ("preheating", "dispatching", "printing", "paused")
-AWAITING_PLATE_CLEAR_STATUSES = ("finished", "failed", "cancelled")
-HOLDING_STATUSES = ACTIVE_STATUSES + AWAITING_PLATE_CLEAR_STATUSES
 FINAL_STATUSES = ("successful", "unsuccessful")
 ALLOWED_TRANSITIONS = {
     "queued": frozenset({"preheating", "dispatching", "unsuccessful"}),
