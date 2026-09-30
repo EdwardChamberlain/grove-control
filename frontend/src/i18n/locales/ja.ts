@@ -1192,8 +1192,7 @@ export default {
     },
     // Badges
     badges: {
-      staged: 'ステージ済み',
-      requiresPrevious: '前の成功が必要',
+      manualStart: '手動開始',
       autoPowerOff: '自動電源オフ',
       gcodeInjection: 'G-code',
     },

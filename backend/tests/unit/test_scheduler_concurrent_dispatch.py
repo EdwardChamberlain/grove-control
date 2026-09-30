@@ -25,7 +25,7 @@ async def test_different_printers_dispatch_concurrently():
     release = asyncio.Event()
     peak = 0
 
-    async def dispatch(item_id: int, _selected_printer_id: int | None = None) -> None:
+    async def dispatch(item_id: int, _selected_printer_id: int | None = None, **_kwargs) -> None:
         nonlocal peak
         entered.append(item_id)
         peak = max(peak, len(entered))
@@ -55,7 +55,7 @@ async def test_pool_cap_refills_after_a_slot_is_freed():
     release = asyncio.Event()
     started: list[int] = []
 
-    async def dispatch(item_id: int, _selected_printer_id: int | None = None) -> None:
+    async def dispatch(item_id: int, _selected_printer_id: int | None = None, **_kwargs) -> None:
         started.append(item_id)
         await release.wait()
 
@@ -86,7 +86,7 @@ async def test_cancellation_releases_pool_slot():
     scheduler = PrintScheduler()
     release = asyncio.Event()
 
-    async def dispatch(_item_id: int, _selected_printer_id: int | None = None) -> None:
+    async def dispatch(_item_id: int, _selected_printer_id: int | None = None, **_kwargs) -> None:
         await release.wait()
 
     with patch(
@@ -111,7 +111,7 @@ async def test_same_printer_is_reserved_once_even_if_selection_repeats():
     scheduler = PrintScheduler()
     release = asyncio.Event()
 
-    async def dispatch(_item_id: int, _selected_printer_id: int | None = None) -> None:
+    async def dispatch(_item_id: int, _selected_printer_id: int | None = None, **_kwargs) -> None:
         await release.wait()
 
     with patch(

@@ -207,4 +207,5 @@ async def test_model_selected_route_applies_drying_gate_after_assignment_before_
 
     prepare.assert_awaited_once_with(db, item, 2)
     start_print.assert_not_awaited()
-    assert item.printer_id == 2
+    # Deferred for drying, the "Any machine" job stays unbound in the pool.
+    assert item.printer_id is None

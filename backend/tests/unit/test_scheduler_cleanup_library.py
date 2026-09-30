@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import backend.app.models  # noqa: F401 - populate Base.metadata
@@ -122,6 +123,9 @@ async def _dispatch_library_item(
     printer_statuses=None,
     before_reservation=None,
     during_archive=None,
+    binding=None,
+    connected=True,
+    assigned_notification=None,
 ):
     scheduler = PrintScheduler()
 
@@ -181,7 +185,7 @@ async def _dispatch_library_item(
     patches = [
         patch.object(scheduler_module.settings, "base_dir", ctx.base_dir),
         patch("backend.app.services.archive.ArchiveService.archive_print", new=archive_print),
-        patch("backend.app.services.print_scheduler.printer_manager.is_connected", MagicMock(return_value=True)),
+        patch("backend.app.services.print_scheduler.printer_manager.is_connected", MagicMock(return_value=connected)),
         patch(
             "backend.app.services.print_scheduler.printer_manager.get_status",
             status_mock,
@@ -201,6 +205,10 @@ async def _dispatch_library_item(
         patch("backend.app.services.print_scheduler.cache_3mf_download", MagicMock()),
         patch("backend.app.services.notification_service.notification_service.on_queue_job_started", AsyncMock()),
         patch("backend.app.services.notification_service.notification_service.on_queue_job_failed", AsyncMock()),
+        patch(
+            "backend.app.services.notification_service.notification_service.on_queue_job_assigned",
+            assigned_notification or AsyncMock(),
+        ),
         patch("backend.app.services.mqtt_relay.mqtt_relay.on_queue_job_started", AsyncMock()),
         patch.object(scheduler, "_propagate_owner_to_printer_manager", AsyncMock()),
         patch.object(scheduler, "_power_off_if_needed", AsyncMock()),
@@ -208,11 +216,17 @@ async def _dispatch_library_item(
     ]
     if unlink_side_effect:
         patches.append(patch.object(type(ctx.source_path), "unlink", unlink_side_effect))
+    if binding is not None:
+        patches.append(patch.object(scheduler_module, "async_session", ctx.session_maker))
 
     with ExitStack() as stack:
         for patcher in patches:
             stack.enter_context(patcher)
 
+        if binding is not None:
+            # The real worker path: claim, then bind only at the hold.
+            await scheduler._dispatch_one(ctx.queue_item_id, binding.printer_id, binding=binding)
+            return
         async with ctx.session_maker() as db:
             item = await db.get(PrintQueueItem, ctx.queue_item_id)
             if before_reservation:
@@ -734,3 +748,95 @@ async def test_reservation_rejects_a_retargeted_job_or_replaced_claim_before_ftp
         assert item.dispatching_at is not None
     ctx.upload.assert_not_awaited()
     ctx.start_print.assert_not_called()
+
+
+async def _make_any_machine_job(ctx):
+    """Turn the case's job into an "Any machine" job, as the Queue creates it."""
+    async with ctx.session_maker() as db:
+        item = await db.get(PrintQueueItem, ctx.queue_item_id)
+        item.printer_id = None
+        item.target_model = "X1C"
+        item.ams_mapping = None
+        await db.commit()
+
+
+async def _row(ctx):
+    async with ctx.session_maker() as db:
+        return await db.get(PrintQueueItem, ctx.queue_item_id)
+
+
+@pytest.mark.asyncio
+async def test_any_machine_job_gets_its_printer_only_from_the_hold_transition(queue_factory):
+    from backend.app.services.print_scheduler import _PoolBinding
+
+    ctx = await queue_factory(cleanup=False)
+    await _make_any_machine_job(ctx)
+    held_during_upload = []
+
+    async def upload(*_args, **_kwargs):
+        row = await _row(ctx)
+        held_during_upload.append((row.status, row.printer_id, row.ams_mapping))
+        return True
+
+    ctx.upload.side_effect = upload
+    assigned = AsyncMock()
+    await _dispatch_library_item(ctx, binding=_PoolBinding(ctx.printer_id, "[4]"), assigned_notification=assigned)
+
+    # The printer and its tray mapping were written with the move out of the
+    # queue, before the upload, and nowhere earlier.
+    assert held_during_upload == [("dispatching", ctx.printer_id, "[4]")]
+    row = await _row(ctx)
+    assert (row.status, row.printer_id, row.target_model) == ("dispatching", ctx.printer_id, "X1C")
+    assert row.dispatching_at is None
+    assigned.assert_awaited_once()
+    assert assigned.await_args.kwargs["printer_id"] == ctx.printer_id
+
+
+@pytest.mark.parametrize("pool", [True, False], ids=["any-machine", "specific-machine"])
+@pytest.mark.asyncio
+async def test_disconnected_printer_leaves_the_job_queued_and_unheld(queue_factory, pool):
+    from backend.app.services.print_scheduler import _PoolBinding
+
+    ctx = await queue_factory(cleanup=False)
+    if pool:
+        await _make_any_machine_job(ctx)
+    binding = _PoolBinding(ctx.printer_id, None) if pool else None
+
+    await _dispatch_library_item(ctx, binding=binding, connected=False)
+
+    row = await _row(ctx)
+    assert row.status == "queued"
+    assert row.printer_id == (None if pool else ctx.printer_id), "a waiting job is never bound to a printer"
+    assert row.waiting_reason == "Printer not connected"
+    assert row.manual_start is False, "a transient printer problem retries on its own"
+    ctx.upload.assert_not_awaited()
+    async with ctx.session_maker() as db:
+        # Nothing holds the printer, so the next compatible job can use it.
+        held = await db.scalar(
+            select(PrintQueueItem.id).where(
+                PrintQueueItem.printer_id == ctx.printer_id, PrintQueueItem.status != "queued"
+            )
+        )
+    assert held is None
+
+
+@pytest.mark.parametrize("pool", [True, False], ids=["any-machine", "specific-machine"])
+@pytest.mark.asyncio
+async def test_missing_source_parks_the_job_in_the_queue(queue_factory, pool):
+    from backend.app.services.print_scheduler import _PoolBinding
+
+    ctx = await queue_factory(cleanup=False)
+    if pool:
+        await _make_any_machine_job(ctx)
+    ctx.source_path.unlink()
+
+    await _dispatch_library_item(ctx, binding=_PoolBinding(ctx.printer_id, None) if pool else None)
+
+    row = await _row(ctx)
+    assert row.status == "queued"
+    assert row.printer_id == (None if pool else ctx.printer_id)
+    assert row.waiting_reason == "Source file not found on disk"
+    # Parked for a manual start, so it neither fails onto a printer nor
+    # blocks the jobs behind it by being retried every tick.
+    assert row.manual_start is True
+    ctx.upload.assert_not_awaited()

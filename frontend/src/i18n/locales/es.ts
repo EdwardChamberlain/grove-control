@@ -1193,8 +1193,7 @@ export default {
     },
     // Badges
     badges: {
-      staged: 'Preparado',
-      requiresPrevious: 'Requiere éxito previo',
+      manualStart: 'Inicio manual',
       autoPowerOff: 'Apagado automático',
       gcodeInjection: 'G-code',
     },

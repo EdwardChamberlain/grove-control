@@ -9,6 +9,14 @@
   printer hold; failed attempts hold even with confirmation disabled.
   Queue History, Resume after failure, and Require previous success are removed.
   See [the lifecycle and upgrade guide](docs/queue-status-transitions.md).
+- Waiting jobs keep the **Queued** status and show **Scheduled**, **Manual
+  start**, and **Waiting** badges for why they have not started.
+- "Any machine" jobs stay unassigned while they wait. A printer is chosen and
+  written to the job only when it leaves the queue, so a dispatch that backs
+  out no longer pins the job to one printer. A job's printer is now only a
+  "Specific machine" requirement. A disconnected printer leaves the job
+  waiting; a missing source file parks it for a manual start instead of
+  failing it onto a printer.
 
 - Queue jobs now match printer events by submission ID. External prints appear
   as jobs, and startup checks include already-printing jobs.
@@ -71,7 +79,13 @@
   reservation across every active and awaiting-plate-clear state. Existing
   plate holds remain actionable; unidentifiable legacy holds become external
   jobs. Back up the database before upgrading. Queued jobs targeting a deleted
-  printer remain available to retarget.
+  printer remain available to retarget. Waiting "Any machine" jobs that an
+  older scheduler had assigned to a printer are returned to the pool.
+- Integrations keep their existing names. Print completion notifications,
+  webhooks, the MQTT relay and Home Assistant report the printer's outcome
+  (`completed`, `failed`, `aborted`, or `cancelled` for a stop from Grove), and
+  the webhook Queue status reports waiting jobs as `pending`. See the name
+  table in [the lifecycle guide](docs/queue-status-transitions.md).
 
 - The nullable Archive-to-queue link and unique index are added automatically
   at startup. Existing Archive rows keep a NULL link; no released database has

@@ -1193,8 +1193,7 @@ export default {
     },
     // Rozetler
     badges: {
-      staged: 'Hazırlandı',
-      requiresPrevious: 'Önceki başarı gerekli',
+      manualStart: 'Manuel başlatma',
       autoPowerOff: 'Otomatik kapanma',
       gcodeInjection: 'G-kod',
     },

@@ -292,7 +292,9 @@ class TestModelBased:
 
         launched.assert_called_once()
         assert launched.call_args[0][0] == [item_id]
-        assert (await _get_item(queue_db, item_id)).printer_id == 2
+        # The printer travels with the worker; the waiting job stays unbound.
+        assert launched.call_args[0][3][item_id].printer_id == 2
+        assert (await _get_item(queue_db, item_id)).printer_id is None
 
     @pytest.mark.asyncio
     async def test_every_printer_held_leaves_the_job_waiting(self, queue_db):

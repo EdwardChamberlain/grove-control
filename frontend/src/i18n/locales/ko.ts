@@ -1132,8 +1132,7 @@ export default {
       descendingNewest: '내림차순 (최신 것 먼저)'
     },
     badges: {
-      staged: '준비됨',
-      requiresPrevious: '이전 성공 필요',
+      manualStart: '수동 시작',
       autoPowerOff: '자동 전원 끄기',
       gcodeInjection: 'G코드'
     },

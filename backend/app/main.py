@@ -4434,7 +4434,14 @@ async def _complete_identified_print(printer_id: int, data: dict):
             or queue_status == "aborted"
         ):
             queue_status = "cancelled"
-        data = {**data, "status": queue_status}
+        if (matched_job.status == "cancelled" or printer_id in _user_stopped_printers) and data.get("status") in (
+            "failed",
+            "aborted",
+        ):
+            # A stop from Grove is reported as "cancelled", now also after a
+            # restart. Every other outcome, including a touchscreen "aborted",
+            # keeps the printer's own name for notifications and integrations.
+            data = {**data, "status": "cancelled"}
         destination = "finished" if queue_status == "completed" else queue_status
         if matched_job.status == "dispatching" and destination == "finished":
             # Exact terminal identity also proves this dispatch was accepted.

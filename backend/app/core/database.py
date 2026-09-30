@@ -1075,6 +1075,11 @@ async def _migrate_queue_lifecycle(conn) -> None:
             values = {"waiting_reason": None}
             if new == "queued":
                 values.update(error_message=None, completed_at=None, dispatching_at=None)
+                if row["target_model"]:
+                    # Older schedulers wrote their pick onto waiting "Any
+                    # machine" jobs. A queued printer_id is now only a
+                    # "Specific machine" requirement.
+                    values["printer_id"] = None
             elif old in ACTIVE_STATUSES and not held:
                 values["error_message"] = "Duplicate legacy printer reservation released during upgrade"
             await transition_queue_item(conn, row["id"], old, new, migration=True, values=values)

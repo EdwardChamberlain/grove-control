@@ -106,6 +106,37 @@ class TestPlateClearGate:
         )
         completion.manager.set_awaiting_plate_clear.assert_any_call(completion.printer.id, True)
 
+    @pytest.mark.parametrize(
+        ("printer_outcome", "stopped_in_grove", "job_status", "reported"),
+        [
+            ("aborted", False, "cancelled", "aborted"),
+            ("failed", False, "failed", "failed"),
+            ("aborted", True, "cancelled", "cancelled"),
+            ("failed", True, "cancelled", "cancelled"),
+        ],
+    )
+    async def test_integrations_keep_the_printers_outcome_name(
+        self, printer_outcome, stopped_in_grove, job_status, reported, completion, db_session
+    ):
+        from types import SimpleNamespace
+
+        from backend.app import main
+        from backend.app.services.queue_transitions import transition_queue_item
+
+        completion.manager.get_printer.return_value = SimpleNamespace(name="P1", serial_number="SERIAL")
+        if stopped_in_grove:
+            # cancel_job commits `cancelled` before the printer reports the stop,
+            # so this also holds after a restart loses the in-memory stop flag.
+            await transition_queue_item(db_session, completion.item, "printing", "cancelled")
+            await db_session.commit()
+        await completion.complete(completion.printer.id, {"subtask_id": "123", "status": printer_outcome})
+        await db_session.refresh(completion.item)
+        assert completion.item.status == job_status
+        # The relay and notifications describe the physical outcome; a
+        # touchscreen abort is not renamed to a Grove cancellation.
+        assert main.mqtt_relay.on_print_complete.await_args.args[-1] == reported
+        assert main.mqtt_relay.on_queue_job_completed.await_args.kwargs["status"] == job_status
+
     async def test_plate_clear_gate_not_raised_for_unknown_status(self, completion, db_session):
         await completion.complete(completion.printer.id, {"subtask_id": "123", "status": "unknown_future_status"})
         await db_session.refresh(completion.item)

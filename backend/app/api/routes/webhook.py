@@ -358,7 +358,8 @@ async def webhook_get_queue_status(
                         "id": item.id,
                         "archive_id": item.archive_id,
                         "position": item.position,
-                        "status": item.status,
+                        # Integrations keep the pre-#194 name for waiting jobs.
+                        "status": "pending" if item.status == "queued" else item.status,
                     }
                     for item in items
                 ],

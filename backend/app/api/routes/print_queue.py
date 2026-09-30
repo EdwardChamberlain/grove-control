@@ -1656,7 +1656,10 @@ async def retry_queue_item(
             values["library_file_id"] = None
             values["cleanup_library_after_dispatch"] = False
         if old.target_model:
+            # An "Any machine" retry returns to the pool. The printer and the
+            # tray mapping bound for it at dispatch are chosen again.
             values["printer_id"] = None
+            values["ams_mapping"] = None
 
     if values["target_model"]:
         models = {candidate.target_model for candidate in candidates} or {values["target_model"]}

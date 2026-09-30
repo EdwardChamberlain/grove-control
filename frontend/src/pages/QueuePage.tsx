@@ -57,7 +57,7 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { api, ApiError } from '../api/client';
-import { type TimeFormat, formatETA, formatDuration, formatRelativeTime, parseUTCDate } from '../utils/date';
+import { type TimeFormat, formatDate, formatETA, formatDuration, formatRelativeTime, parseUTCDate } from '../utils/date';
 import { getBedTypeInfo } from '../utils/bedType';
 import type { PrintQueueItem, PrintQueueBulkUpdate, Permission, CalibrationMode } from '../api/client';
 import { Card } from '../components/Card';
@@ -82,7 +82,7 @@ function formatHeatSoakCountdown(totalSeconds: number): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
-function StatusBadge({ status, printerState, t }: { status: PrintQueueItem['status']; scheduledTime?: string | null; waitingReason?: string | null; printerState?: string | null; t: (key: string) => string }) {
+function StatusBadge({ status, printerState, t }: { status: PrintQueueItem['status']; printerState?: string | null; t: (key: string) => string }) {
   // Special case: printing but printer is paused
   if (status === 'printing' && printerState === 'PAUSE') {
     return (
@@ -426,6 +426,8 @@ function SortableQueueItem({
   const isPrinting = item.status === 'printing' || item.status === 'paused' || item.status === 'preheating';
   const isDispatching = item.status === 'dispatching';
   const isPending = item.status === 'queued';
+  const isScheduled = isPending && !!item.scheduled_time
+    && (parseUTCDate(item.scheduled_time)?.getTime() ?? 0) > Date.now();
   const isAwaiting = ['finished', 'failed', 'cancelled'].includes(item.status);
 
   const isMobileSelectable = isPending && onToggleSelect;
@@ -653,12 +655,35 @@ function SortableQueueItem({
             )}
           </div>
 
-          {/* Options badges */}
+          {/* Options badges. A waiting job's status is always Queued; these
+              say why it has not started yet, derived from its own fields. */}
           <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
-            {item.manual_start && (
-              <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 bg-purple-500/10 text-purple-400 rounded-full border border-purple-500/20 flex items-center gap-1">
+            {isScheduled && item.scheduled_time && (
+              <span
+                data-testid={`queue-badge-scheduled-${item.id}`}
+                className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 bg-yellow-500/10 text-yellow-300 rounded-full border border-yellow-500/20 flex items-center gap-1"
+              >
+                <Calendar className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                {t('queue.status.scheduled')} · {formatDate(item.scheduled_time)}
+              </span>
+            )}
+            {isPending && item.manual_start && (
+              <span
+                data-testid={`queue-badge-manual-start-${item.id}`}
+                className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 bg-purple-500/10 text-purple-400 rounded-full border border-purple-500/20 flex items-center gap-1"
+              >
                 <Hand className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
-                {t('queue.badges.staged')}
+                {t('queue.badges.manualStart')}
+              </span>
+            )}
+            {isPending && item.waiting_reason && (
+              <span
+                data-testid={`queue-badge-waiting-${item.id}`}
+                title={item.waiting_reason}
+                className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 bg-purple-400/10 text-purple-300 rounded-md border border-purple-400/20 flex items-start gap-1 max-w-full"
+              >
+                <Clock className="w-2.5 h-2.5 sm:w-3 sm:h-3 mt-0.5 shrink-0" />
+                <span className="break-words">{t('queue.status.waiting')} · {item.waiting_reason}</span>
               </span>
             )}
 
@@ -732,14 +757,6 @@ function SortableQueueItem({
             </div>
           )}
 
-          {/* Waiting reason for model-based assignments */}
-          {item.waiting_reason && item.status === 'queued' && (
-            <p className="text-[10px] sm:text-xs text-purple-400 mt-1.5 sm:mt-2 flex items-start gap-1">
-              <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0" />
-              <span>{item.waiting_reason}</span>
-            </p>
-          )}
-
           {/* Filament-short flag from the dispatch pre-flight (#1496). */}
           {item.filament_short && item.status === 'queued' && (
             <p
@@ -776,7 +793,7 @@ function SortableQueueItem({
 
         {/* Status badge + Actions */}
         <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2 sm:gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-          <StatusBadge status={item.status} scheduledTime={item.scheduled_time} waitingReason={item.waiting_reason} printerState={printerState} t={t} />
+          <StatusBadge status={item.status} printerState={printerState} t={t} />
 
           <div className="flex items-center gap-0.5 sm:gap-1">
             {item.status === 'preheating' && onSkipHeatSoak && (

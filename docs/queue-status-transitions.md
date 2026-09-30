@@ -19,16 +19,40 @@ Resume after failure, and the Require previous success option have been removed.
 
 Printer deletion additionally ends an active job as `unsuccessful`. It resolves
 `finished` as `successful`, and `failed`/`cancelled` as `unsuccessful`, recording
-**Printer deleted**. Waiting jobs remain `queued` with their printer assignment
-removed so an operator can retarget them.
+**Printer deleted**. Waiting jobs that required that printer remain `queued`,
+unassigned, so an operator can retarget them.
 
-A targeted `queued` job has no printer reservation. Leaving the queue reserves
-the printer until the job reaches a final state. A unique partial index covers
-`preheating`, `dispatching`, `printing`, `paused`, `finished`, `failed`, and
-`cancelled`. Dispatch checks both the database hold and connected, idle
-telemetry. Model, nozzle, material, and drying eligibility are checked before
-starting an attempt; an interruption after reservation fails the attempt and
-keeps its hold. The lifecycle never moves a job backward into `queued`.
+## Waiting jobs and printers
+
+`queued` jobs are a pool. On a `queued` job, `printer_id` means only one thing:
+a **Specific machine** requirement, which the job must run on. A blank
+`printer_id` is normal: an **Any machine** job carries its model (and any
+cross-model alternatives) instead, and has no printer while it waits.
+
+The scheduler picks a free, compatible printer for an Any machine job and hands
+that choice, with the tray mapping computed for it, to the dispatch worker in
+memory. The worker writes both in the same conditional update that moves the
+job to `preheating` or `dispatching`, which requires the row to still be
+unassigned. If the attempt backs out before that update, nothing was written,
+and the next pass may choose any compatible printer. Retry of an Any machine
+job returns it to the pool the same way, with its printer and tray mapping
+chosen again.
+
+Leaving the queue reserves the printer until the job reaches a final state. A
+unique partial index covers `preheating`, `dispatching`, `printing`, `paused`,
+`finished`, `failed`, and `cancelled`. Dispatch checks both the database hold
+and connected, idle telemetry. Model, nozzle, material, and drying eligibility
+are checked before starting an attempt. A problem found before the hold never
+fails the job, because it was not sent anywhere: a missing or disconnected
+printer leaves it waiting, and a missing source file parks it with **Manual
+start** and a reason so it does not block the jobs behind it. An interruption
+after reservation fails the attempt and keeps its hold. The lifecycle never
+moves a job backward into `queued`.
+
+A waiting job's status is always **Queued**. The Queue explains why it has not
+started with badges derived from the job itself: **Scheduled** (a future start
+time), **Manual start**, and **Waiting** (the scheduler's display-only reason,
+such as a busy printer or missing material).
 
 Turning **Require plate clear** off automatically applies the same Clear Plate
 transition when a job first enters `finished`. Failed and cancelled attempts
@@ -129,10 +153,29 @@ only ensure the holding index exists. Back up the database before upgrading.
   creating the unique holding index; the strongest existing active attempt is
   retained, and other attempts become `unsuccessful` with an upgrade reason.
 
-Queue REST payloads expose the new names. Print completion notifications,
-webhooks, MQTT relay, and Home Assistant retain their existing physical outcome
-names. The webhook Queue aggregate keeps its `pending` count key as a
-compatibility alias for `queued`; its item payloads use the new job names.
+## Names for integrations
+
+Queue REST payloads and the Queue UI expose the job names below. Integrations
+keep their existing names: print completion notifications, webhooks, the MQTT
+relay and Home Assistant describe what physically happened when a print ended,
+which is the moment a job enters `finished`, `failed` or `cancelled`. Plate
+clearing (`successful`, `unsuccessful`) publishes no integration event.
+
+| Job state (Queue) | Old queue name | Meaning | Integrations receive |
+| --- | --- | --- | --- |
+| `queued` | `pending`, `skipped` | Waiting for a free, compatible printer | `pending` (webhook Queue status) |
+| `preheating` | `preheating` | Heat soak running; printer held | `preheating` |
+| `dispatching` | `dispatching` | Sending the job; waiting for the printer to accept it | `dispatching` |
+| `printing` | `printing` | Printing | `printing` |
+| `paused` | (none) | Paused on the printer (stage 4) | Not yet emitted |
+| `finished` | `completed` | Printed; plate not yet cleared; printer held | Print event `completed` |
+| `failed` | `failed` | Error after leaving the queue; plate not yet cleared | Print event `failed` |
+| `cancelled` | `cancelled`, `aborted` | Stopped after leaving the queue; plate not yet cleared | Print event `cancelled` for a stop from Grove; `aborted` for a stop on the printer |
+| `successful` | `completed` | Finished, and the plate was cleared | No event |
+| `unsuccessful` | `failed`, `cancelled`, `skipped` | Failed or cancelled, and the plate was cleared; or cancelled while waiting | No event |
+
+The MQTT relay's queue job events keep their names: `job_completed` for
+`completed`, and `job_failed` with status `failed` or `cancelled`.
 
 ## Scope and verification
 

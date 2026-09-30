@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.app.services.print_scheduler import PrintScheduler
+from backend.app.services.print_scheduler import PrintScheduler, _PoolBinding
 
 
 def _queue_item(*, force_color_match: bool = True):
@@ -193,8 +193,11 @@ async def test_model_unforced_job_recomputes_cross_material_mapping(mock_pm, sch
         ],
     )
     compute.assert_awaited_once_with(db, 3, item)
-    assert item.ams_mapping == "[0]"
-    start_print.assert_awaited_once_with(db, item)
+    # The recomputed mapping travels with the selected printer to the worker;
+    # the waiting "Any machine" job itself stays unbound.
+    assert item.ams_mapping == "[2]"
+    assert item.printer_id is None
+    start_print.assert_awaited_once_with(db, item, binding=_PoolBinding(3, "[0]"))
 
 
 @pytest.mark.asyncio
@@ -327,7 +330,7 @@ async def test_assigned_job_recomputes_mapping_and_starts_on_exact_colour(mock_p
         session_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
         await scheduler.check_queue()
 
-    start_print.assert_awaited_once_with(db, item)
+    start_print.assert_awaited_once_with(db, item, binding=None)
     assert item.ams_mapping == "[2]"
 
 
@@ -360,7 +363,7 @@ async def test_assigned_job_allows_different_colour_when_force_is_disabled(mock_
         await scheduler.check_queue()
 
     missing_colors.assert_not_called()
-    start_print.assert_awaited_once_with(db, item)
+    start_print.assert_awaited_once_with(db, item, binding=None)
 
 
 @pytest.mark.asyncio

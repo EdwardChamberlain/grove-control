@@ -1213,8 +1213,7 @@ export default {
     },
     // Badges
     badges: {
-      staged: 'Staged',
-      requiresPrevious: 'Requires previous success',
+      manualStart: 'Manual start',
       autoPowerOff: 'Auto power off',
       gcodeInjection: 'G-code',
     },

@@ -205,9 +205,11 @@ async def test_retry_is_a_new_job_at_top_and_keeps_original_hold_and_settings(se
         assert old.status == "failed"
         assert new.printer_id is None and new.target_model == "H2D"
         assert new.library_file_id == library.id and new.archive_id is None
+        # The tray mapping bound to the old printer at dispatch is chosen again
+        # with the printer, like any other "Any machine" job.
         assert (new.plate_id, new.ams_mapping, new.nozzle_mapping, new.chamber_heat_soak) == (
             2,
-            "[1, 2]",
+            None,
             "[3, 4]",
             True,
         )
@@ -299,6 +301,25 @@ async def test_migration_preserves_exact_hold_creates_missing_job_and_runs_once(
         assert len(jobs) == 5
         assert (await db.get(PrintQueueItem, ids[0])).status == "unsuccessful"
         assert (await db.get(PrintQueueItem, synthetic.id)).status == "successful"
+
+
+async def test_migration_unbinds_waiting_any_machine_jobs_and_keeps_specific_requirements(sessions):
+    engine = sessions.kw["bind"]
+    async with engine.begin() as conn:
+        await conn.execute(text("DROP INDEX uq_print_queue_holding_printer"))
+    async with sessions() as db:
+        # Older schedulers wrote their pick onto a waiting "Any machine" job.
+        stale_pick = PrintQueueItem(printer_id=1, target_model="X1C", status="pending")
+        specific = PrintQueueItem(printer_id=1, status="pending")
+        db.add_all([stale_pick, specific])
+        await db.commit()
+        ids = stale_pick.id, specific.id
+    async with engine.begin() as conn:
+        await _migrate_queue_lifecycle(conn)
+    async with sessions() as db:
+        stale_pick, specific = [await db.get(PrintQueueItem, i) for i in ids]
+        assert (stale_pick.status, stale_pick.printer_id, stale_pick.target_model) == ("queued", None, "X1C")
+        assert (specific.status, specific.printer_id) == ("queued", 1)
 
 
 async def test_heat_soak_does_not_restore_a_stale_printer_assignment(sessions):

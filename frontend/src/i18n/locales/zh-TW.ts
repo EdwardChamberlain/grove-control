@@ -1193,8 +1193,7 @@ export default {
     },
     // Badges
     badges: {
-      staged: '已暫存',
-      requiresPrevious: '需要前一個成功',
+      manualStart: '手動開始',
       autoPowerOff: '自動關機',
       gcodeInjection: 'G-code',
     },

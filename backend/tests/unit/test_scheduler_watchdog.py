@@ -452,7 +452,7 @@ class TestDispatchConfirmationScheduling:
 
         dispatched: list[int] = []
 
-        async def start_print(db, item):
+        async def start_print(db, item, **_kwargs):
             dispatched.append(item.printer_id)
             if item.printer_id == 42:
                 scheduler._schedule_dispatch_confirmation(

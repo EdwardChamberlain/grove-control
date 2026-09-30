@@ -359,13 +359,53 @@ describe('QueuePage', () => {
       });
     });
 
-    it('keeps future jobs in the queued state', async () => {
+    it('keeps future jobs in the queued state with a Scheduled badge', async () => {
       server.use(http.get('/api/v1/queue/', () => HttpResponse.json([
         { ...mockQueueItems[0], scheduled_time: '2099-01-01T09:30:00Z' },
       ])));
       render(<QueuePage />);
       expect(await screen.findByText('Test Print 1')).toBeInTheDocument();
       expect(screen.getAllByText('Queued').length).toBeGreaterThan(0);
+      expect(screen.getByTestId(`queue-badge-scheduled-${mockQueueItems[0].id}`))
+        .toHaveTextContent('Scheduled · Jan 1, 2099');
+    });
+
+    it('does not badge a queued job whose scheduled time has passed', async () => {
+      server.use(http.get('/api/v1/queue/', () => HttpResponse.json([
+        { ...mockQueueItems[0], scheduled_time: '2000-01-01T09:30:00Z' },
+      ])));
+      render(<QueuePage />);
+      expect(await screen.findByText('Test Print 1')).toBeInTheDocument();
+      expect(screen.queryByTestId(`queue-badge-scheduled-${mockQueueItems[0].id}`)).not.toBeInTheDocument();
+    });
+
+    it('shows the waiting reason as a badge on a queued job', async () => {
+      server.use(http.get('/api/v1/queue/', () => HttpResponse.json([
+        { ...mockQueueItems[0], waiting_reason: 'No matching material. Waiting on PETG' },
+      ])));
+      render(<QueuePage />);
+      const badge = await screen.findByTestId(`queue-badge-waiting-${mockQueueItems[0].id}`);
+      expect(badge).toHaveTextContent('Waiting · No matching material. Waiting on PETG');
+      expect(badge).toHaveAttribute('title', 'No matching material. Waiting on PETG');
+      expect(screen.getAllByText('Queued').length).toBeGreaterThan(0);
+    });
+
+    it('does not show queue badges once a job has left the queue', async () => {
+      server.use(http.get('/api/v1/queue/', () => HttpResponse.json([
+        {
+          ...mockQueueItems[0],
+          status: 'printing',
+          manual_start: true,
+          scheduled_time: '2099-01-01T09:30:00Z',
+          waiting_reason: 'Stale reason',
+        },
+      ])));
+      render(<QueuePage />);
+      expect(await screen.findByText('Test Print 1')).toBeInTheDocument();
+      const id = mockQueueItems[0].id;
+      expect(screen.queryByTestId(`queue-badge-scheduled-${id}`)).not.toBeInTheDocument();
+      expect(screen.queryByTestId(`queue-badge-manual-start-${id}`)).not.toBeInTheDocument();
+      expect(screen.queryByTestId(`queue-badge-waiting-${id}`)).not.toBeInTheDocument();
     });
 
     it('shows printer names', async () => {
@@ -525,7 +565,7 @@ describe('QueuePage', () => {
   });
 
   describe('staged items', () => {
-    it('shows staged badge for manual_start items', async () => {
+    it('shows the Manual start badge for manual_start items', async () => {
       server.use(
         http.get('/api/v1/queue/', () => {
           return HttpResponse.json([
@@ -540,7 +580,7 @@ describe('QueuePage', () => {
       render(<QueuePage />);
 
       await waitFor(() => {
-        expect(screen.getByText('Staged')).toBeInTheDocument();
+        expect(screen.getByTestId(`queue-badge-manual-start-${mockQueueItems[0].id}`)).toHaveTextContent('Manual start');
       });
     });
 

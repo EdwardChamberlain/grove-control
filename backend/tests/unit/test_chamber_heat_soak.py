@@ -90,6 +90,46 @@ async def test_supported_controls_and_durable_reservation(soak, model, chamber, 
     await soak.db.rollback()
 
 
+async def test_any_machine_job_is_bound_to_its_printer_only_by_the_soak_hold(soak):
+    from backend.app.services.print_scheduler import _bind_in_memory
+
+    # An "Any machine" job waits unassigned; the worker carries its choice.
+    await soak.db.execute(
+        PrintQueueItem.__table__.update().where(PrintQueueItem.id == 1).values(printer_id=None, target_model="H2D")
+    )
+    await soak.db.commit()
+    await soak.db.refresh(soak.item)
+    _bind_in_memory(soak.item, 1, "[3]")
+
+    assert await soak.service.stage(soak.db, soak.item, bind_values={"printer_id": 1, "ams_mapping": "[3]"})
+
+    row = (await soak.db.execute(select(PrintQueueItem.__table__).where(PrintQueueItem.id == 1))).mappings().one()
+    assert (row["status"], row["printer_id"], row["ams_mapping"]) == ("preheating", 1, "[3]")
+
+
+async def test_any_machine_soak_refuses_a_job_that_gained_a_printer_requirement(soak):
+    from backend.app.services.print_scheduler import _bind_in_memory
+
+    await soak.db.execute(
+        PrintQueueItem.__table__.update().where(PrintQueueItem.id == 1).values(printer_id=None, target_model="H2D")
+    )
+    await soak.db.commit()
+    await soak.db.refresh(soak.item)
+    _bind_in_memory(soak.item, 1, None)
+    # Retargeted to a specific printer after the scheduler picked printer 1.
+    soak.db.add(Printer(id=2, name="Other", serial_number="TEST2", ip_address="127.0.0.2", access_code="12345678"))
+    await soak.db.execute(
+        PrintQueueItem.__table__.update().where(PrintQueueItem.id == 1).values(printer_id=2, target_model=None)
+    )
+    await soak.db.commit()
+
+    assert not await soak.service.stage(soak.db, soak.item, bind_values={"printer_id": 1, "ams_mapping": None})
+
+    row = (await soak.db.execute(select(PrintQueueItem.__table__).where(PrintQueueItem.id == 1))).mappings().one()
+    assert (row["status"], row["printer_id"]) == ("queued", 2)
+    soak.client.set_bed_temperature.assert_not_called()
+
+
 async def test_full_timer_starts_when_heating_commands_are_sent(soak):
     assert await soak.service.stage(soak.db, soak.item)
     await soak.db.refresh(soak.item)

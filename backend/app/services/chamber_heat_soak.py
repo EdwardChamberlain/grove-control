@@ -7,7 +7,9 @@ abort an expired attempt, never resume its timer or dispatch its job.
 
 import logging
 import time
+from collections.abc import Mapping
 from datetime import datetime, timezone
+from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import and_, or_, select, update
@@ -133,14 +135,22 @@ class ChamberHeatSoak:
         self.owner = str(uuid4())
         self._visible_printers: set[int] = set()
 
-    async def stage(self, db: AsyncSession, item: PrintQueueItem) -> bool:
+    async def stage(
+        self, db: AsyncSession, item: PrintQueueItem, *, bind_values: Mapping[str, Any] | None = None
+    ) -> bool:
+        """Hold the printer and start heating.
+
+        ``bind_values`` assigns an "Any machine" job to the printer the worker
+        selected (``item.printer_id`` in memory); the row itself must still be
+        unassigned. Otherwise the row must still require that printer.
+        """
         item_id, printer_id, claim = item.id, item.printer_id, item.dispatching_at
+        required_printer_id = None if bind_values is not None else printer_id
         item = await lock_queue_item(db, item_id)
-        if not item or item.status != "queued" or item.printer_id != printer_id:
+        if not item or item.status != "queued" or item.printer_id != required_printer_id:
             await db.rollback()
             return False
-        # Preserve the selected printer for model-based queue items, but claim
-        # only a still-pending row. Concurrent workers cannot reassign a winner.
+        # Claim only a still-queued row. Concurrent workers cannot reassign a winner.
         now = utcnow()
         try:
             await transition_queue_item(
@@ -148,8 +158,14 @@ class ChamberHeatSoak:
                 item,
                 "queued",
                 "preheating",
-                conditions=(PrintQueueItem.dispatching_at == claim,),
+                conditions=(
+                    PrintQueueItem.dispatching_at == claim,
+                    PrintQueueItem.printer_id.is_(None)
+                    if required_printer_id is None
+                    else PrintQueueItem.printer_id == required_printer_id,
+                ),
                 values={
+                    **(bind_values or {}),
                     "printer_id": printer_id,
                     "preheat_owner": self.owner,
                     "preheat_requested_at": now,

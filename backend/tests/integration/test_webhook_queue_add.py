@@ -137,4 +137,5 @@ async def test_webhook_queue_status_includes_dispatching(async_client: AsyncClie
     assert queue["pending"] == 1
     assert queue["dispatching"] == 1
     assert queue["printing"] == 0
-    assert [item["status"] for item in queue["items"]] == ["queued", "dispatching"]
+    # Integrations keep the pre-#194 name for waiting jobs.
+    assert [item["status"] for item in queue["items"]] == ["pending", "dispatching"]
