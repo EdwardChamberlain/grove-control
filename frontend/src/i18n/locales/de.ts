@@ -1064,6 +1064,7 @@ export default {
 
   // Queue page
   queue: {
+    awaitingPlateClear: 'Warten auf Freigabe der Druckplatte',
     resolveDispatch: {
       prompt: "Der Drucker hat diesen Auftrag nicht bestätigt. Prüfen Sie den Drucker, bevor Sie wählen:",
       printing: "Der Druck läuft",
@@ -1149,6 +1150,10 @@ export default {
     },
     // Status
     status: {
+      queued: 'In Warteschlange',
+      finished: 'Fertig',
+      successful: 'Erfolgreich',
+      unsuccessful: 'Nicht erfolgreich',
       pending: 'Ausstehend',
       scheduled: 'Geplant',
       waiting: 'Wartend',
@@ -1209,6 +1214,8 @@ export default {
     },
     // Actions
     actions: {
+      clearPlate: 'Druckplatte freigeben',
+      retry: 'Erneut versuchen',
       startPrint: 'Druck starten',
       stopPrint: 'Druck stoppen',
       requeue: 'Erneut einreihen',

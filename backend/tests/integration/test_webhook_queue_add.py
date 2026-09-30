@@ -121,9 +121,8 @@ async def test_webhook_queue_status_includes_dispatching(async_client: AsyncClie
     api_key, printer, _archive = webhook_queue_setup
     db_session.add_all(
         [
-            PrintQueueItem(printer_id=printer.id, position=1, status="pending"),
+            PrintQueueItem(printer_id=printer.id, position=1, status="queued"),
             PrintQueueItem(printer_id=printer.id, position=2, status="dispatching"),
-            PrintQueueItem(printer_id=printer.id, position=3, status="printing"),
         ]
     )
     await db_session.commit()
@@ -137,5 +136,5 @@ async def test_webhook_queue_status_includes_dispatching(async_client: AsyncClie
     queue = response.json()[0]
     assert queue["pending"] == 1
     assert queue["dispatching"] == 1
-    assert queue["printing"] == 1
-    assert [item["status"] for item in queue["items"]] == ["pending", "dispatching", "printing"]
+    assert queue["printing"] == 0
+    assert [item["status"] for item in queue["items"]] == ["queued", "dispatching"]

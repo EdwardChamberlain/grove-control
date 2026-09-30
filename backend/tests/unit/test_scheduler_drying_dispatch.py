@@ -15,6 +15,7 @@ def _status(*ams_units: dict) -> SimpleNamespace:
 def _item(*, wait: bool = False, printer_id: int | None = 1, target_model: str | None = None):
     return SimpleNamespace(
         id=10,
+        status="queued",
         printer_id=printer_id,
         target_model=target_model,
         target_location=None,
@@ -29,7 +30,6 @@ def _item(*, wait: bool = False, printer_id: int | None = 1, target_model: str |
         required_filament_types=None,
         filament_overrides=None,
         ams_mapping="[0]",
-        require_previous_success=False,
         waiting_reason=None,
         wait_for_drying_complete=wait,
     )

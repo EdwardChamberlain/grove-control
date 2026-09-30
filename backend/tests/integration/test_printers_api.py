@@ -406,7 +406,7 @@ class TestPrintersAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    @pytest.mark.parametrize("queue_status", ["pending", "preheating", "dispatching", "printing"])
+    @pytest.mark.parametrize("queue_status", ["queued", "preheating", "dispatching", "printing", "paused"])
     async def test_get_printer_status_reports_queue_work_for_active_queue_states(
         self, async_client: AsyncClient, printer_factory, db_session, queue_status
     ):
@@ -443,7 +443,7 @@ class TestPrintersAPI:
                 target_model="X1C",
                 target_location="Workshop",
                 position=1,
-                status="pending",
+                status="queued",
             )
         )
         await db_session.commit()
@@ -506,7 +506,9 @@ class TestPrintersAPI:
             filename="completed-widget.3mf",
             thumbnail_path="completed-widget.png",
         )
-        printer.awaiting_plate_clear_archive_id = target.id
+        from backend.app.models.print_queue import PrintQueueItem
+
+        db_session.add(PrintQueueItem(printer_id=printer.id, archive_id=target.id, status="finished"))
         await db_session.commit()
 
         state = PrinterState()
@@ -557,7 +559,7 @@ class TestPrintersAPI:
                 printer_id=printer.id,
                 archive_id=target.id,
                 position=1,
-                status="completed",
+                status="finished",
                 completed_at=datetime.now(timezone.utc),
                 created_by_id=queue_owner.id,
             )

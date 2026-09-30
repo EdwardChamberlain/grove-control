@@ -2,6 +2,7 @@ import asyncio
 import logging
 import re
 import zipfile
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
@@ -65,6 +66,13 @@ from backend.app.services.printer_manager import (
     supports_chamber_temp,
     supports_drying,
     supports_drying_while_printing,
+)
+from backend.app.services.queue_transitions import (
+    ACTIVE_STATUSES,
+    AWAITING_PLATE_CLEAR_STATUSES,
+    HOLDING_STATUSES,
+    clear_job_plate,
+    transition_queue_item,
 )
 from backend.app.services.slot_nozzle import resolve_slot_nozzle
 from backend.app.utils.http import build_content_disposition
@@ -413,25 +421,35 @@ async def delete_printer(
     if not printer:
         raise HTTPException(404, "Printer not found")
 
-    active_preheat = await db.scalar(
-        select(PrintQueueItem.id)
-        .where(
-            PrintQueueItem.printer_id == printer_id,
-            or_(
-                PrintQueueItem.status == "preheating",
-                and_(
-                    PrintQueueItem.status == "dispatching",
-                    PrintQueueItem.chamber_heat_soak.is_(True),
-                    PrintQueueItem.dispatch_subtask_id.is_(None),
-                ),
-            ),
-        )
-        .limit(1)
+    holding = list(
+        (
+            await db.scalars(
+                select(PrintQueueItem)
+                .where(PrintQueueItem.printer_id == printer_id, PrintQueueItem.status.in_(HOLDING_STATUSES))
+                .with_for_update()
+            )
+        ).all()
     )
-    if active_preheat or printer.heat_soak_shutdown_pending:
-        raise HTTPException(409, "Stop chamber heat soak and wait for heater shutdown before deleting this printer")
+    heating = printer.heat_soak_shutdown_pending or any(item.chamber_heat_soak for item in holding)
+    for item in holding:
+        await transition_queue_item(
+            db,
+            item,
+            item.status,
+            "successful" if item.status == "finished" else "unsuccessful",
+            action="printer_deleted",
+            values={"error_message": "Printer deleted", "completed_at": datetime.now(timezone.utc)},
+        )
+    from sqlalchemy import update
 
-    printer_manager.disconnect_printer(printer_id)
+    await db.execute(update(PrintQueueItem).where(PrintQueueItem.printer_id == printer_id).values(printer_id=None))
+    if delete_archives:
+        # Preserve jobs when the Archive FK would otherwise cascade-delete them.
+        await db.execute(
+            update(PrintQueueItem)
+            .where(PrintQueueItem.archive_id.in_(select(PrintArchive.id).where(PrintArchive.printer_id == printer_id)))
+            .values(archive_id=None)
+        )
 
     if delete_archives:
         # Delete all archives for this printer
@@ -467,6 +485,11 @@ async def delete_printer(
     await db.delete(printer)
     await db.commit()
 
+    if heating:
+        from backend.app.services.chamber_heat_soak import _heaters_off
+
+        _heaters_off(printer)
+    printer_manager.disconnect_printer(printer_id)
     return {"status": "deleted", "archives_deleted": delete_archives}
 
 
@@ -483,8 +506,15 @@ async def get_printer_status(
         raise HTTPException(404, "Printer not found")
 
     state = printer_manager.get_status(printer_id)
+    awaiting_job = await db.scalar(
+        select(PrintQueueItem).where(
+            PrintQueueItem.printer_id == printer_id, PrintQueueItem.status.in_(AWAITING_PLATE_CLEAR_STATUSES)
+        )
+    )
+    awaiting = awaiting_job is not None
+
     queue_work_filter = [
-        PrintQueueItem.status.in_(["pending", "preheating", "dispatching", "printing"]),
+        PrintQueueItem.status.in_(["queued", *ACTIVE_STATUSES]),
     ]
     if printer.model:
         queue_work_filter.append(
@@ -515,6 +545,7 @@ async def get_printer_status(
             id=printer_id,
             name=printer.name,
             connected=False,
+            awaiting_plate_clear=awaiting,
             has_queued_work=has_queued_work,
         )
 
@@ -797,7 +828,7 @@ async def get_printer_status(
         select(User.username)
         .join(PrintQueueItem, PrintQueueItem.created_by_id == User.id)
         .where(PrintQueueItem.printer_id == printer_id)
-        .where(PrintQueueItem.status.in_(["preheating", "dispatching", "printing"]))
+        .where(PrintQueueItem.status.in_(ACTIVE_STATUSES))
         .order_by(PrintQueueItem.position, PrintQueueItem.id)
         .limit(1)
     )
@@ -816,8 +847,8 @@ async def get_printer_status(
     # to the current user's ownership permissions, while printer viewers still
     # need the card to describe the physical plate that must be cleared (#43).
     awaiting_plate_clear_print: PlateClearPrintSummary | None = None
-    if printer_manager.is_awaiting_plate_clear(printer_id):
-        awaiting_archive_id = printer_manager.get_awaiting_plate_clear_archive_id(printer_id)
+    if awaiting:
+        awaiting_archive_id = awaiting_job.archive_id
         archive = None
         if awaiting_archive_id is not None:
             archive_result = await db.execute(
@@ -841,7 +872,7 @@ async def get_printer_status(
                 .join(PrintQueueItem, PrintQueueItem.created_by_id == User.id)
                 .where(PrintQueueItem.archive_id == archive.id)
                 .where(PrintQueueItem.printer_id == printer_id)
-                .where(PrintQueueItem.status.in_(("completed", "failed", "cancelled", "aborted")))
+                .where(PrintQueueItem.status.in_(AWAITING_PLATE_CLEAR_STATUSES))
                 .order_by(PrintQueueItem.completed_at.desc().nullslast(), PrintQueueItem.id.desc())
                 .limit(1)
             )
@@ -909,7 +940,7 @@ async def get_printer_status(
         firmware_version=state.firmware_version,
         developer_mode=state.developer_mode if state else None,
         ams_filament_backup=state.ams_filament_backup if state else None,
-        awaiting_plate_clear=printer_manager.is_awaiting_plate_clear(printer_id),
+        awaiting_plate_clear=awaiting,
         awaiting_plate_clear_print=awaiting_plate_clear_print,
         supports_drying=supports_drying(printer.model, state.firmware_version),
         supports_drying_while_printing=supports_drying_while_printing(printer.model, state.firmware_version),
@@ -2989,6 +3020,21 @@ async def stop_print(
     if not printer:
         raise HTTPException(404, "Printer not found")
 
+    item = await db.scalar(
+        select(PrintQueueItem)
+        .where(PrintQueueItem.printer_id == printer_id, PrintQueueItem.status.in_(ACTIVE_STATUSES))
+        .with_for_update()
+    )
+    if item is not None:
+        from backend.app.services.chamber_heat_soak import lock_queue_item
+        from backend.app.services.queue_actions import cancel_job
+
+        item = await lock_queue_item(db, item.id)
+        if item is None or item.status not in ACTIVE_STATUSES:
+            raise HTTPException(409, "The job changed; refresh before stopping it")
+        await cancel_job(db, item)
+        return {"success": True, "message": "Job stopped; clear the plate before the next print"}
+
     client = printer_manager.get_client(printer_id)
     if not client:
         raise HTTPException(400, "Printer not connected")
@@ -3019,7 +3065,7 @@ async def clear_plate(
 ):
     """Acknowledge that the build plate has been cleared after a finished/failed print.
 
-    Sets a plate-cleared flag so the scheduler can start the next queued print.
+    Finalizes the holding job so the scheduler can start the next queued print.
     No MQTT command is sent to the printer — the scheduler's start_print command
     will override the FINISH/FAILED state when it sends the next job.
     """
@@ -3028,21 +3074,18 @@ async def clear_plate(
     if not printer:
         raise HTTPException(404, "Printer not found")
 
-    if not printer_manager.is_connected(printer_id):
-        raise HTTPException(400, "Printer not connected")
+    from backend.app.services.chamber_heat_soak import lock_queue_item
 
-    # Accept the acknowledgment whenever the printer is awaiting it — not only when the
-    # reported state is FINISH/FAILED. After a power cycle the printer boots into IDLE
-    # but the awaiting flag persists, and the user still needs a way to ack it (#961).
-    state = printer_manager.get_status(printer_id)
-    awaiting = printer_manager.is_awaiting_plate_clear(printer_id)
-    if not awaiting and (not state or state.state not in ("FINISH", "FAILED")):
-        raise HTTPException(
-            400,
-            f"Printer is not awaiting plate-clear acknowledgment (state={state.state if state else 'unknown'})",
+    item = await db.scalar(
+        select(PrintQueueItem).where(
+            PrintQueueItem.printer_id == printer_id, PrintQueueItem.status.in_(AWAITING_PLATE_CLEAR_STATUSES)
         )
-
-    printer_manager.set_awaiting_plate_clear(printer_id, False)
+    )
+    if item is None:
+        raise HTTPException(409, "No job is awaiting plate clear")
+    item = await lock_queue_item(db, item.id)
+    await clear_job_plate(db, item)
+    await db.commit()
 
     return {"success": True, "message": "Plate cleared, next print will start shortly"}
 

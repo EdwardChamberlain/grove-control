@@ -45,7 +45,7 @@ async def soak(tmp_path, monkeypatch):
         printer = Printer(
             id=1, name="Test", serial_number="TEST", ip_address="127.0.0.1", access_code="12345678", model="H2D"
         )
-        item = PrintQueueItem(id=1, printer_id=1, chamber_heat_soak=True, heat_soak_minutes=1, status="pending")
+        item = PrintQueueItem(id=1, printer_id=1, chamber_heat_soak=True, heat_soak_minutes=1, status="queued")
         db.add_all([printer, item])
         await db.commit()
         yield SimpleNamespace(
@@ -150,7 +150,7 @@ async def test_interruptions_release_item_for_manual_retry_and_shutdown(soak, in
         assert soak.item.status == "preheating"
         assert "inspect" in soak.item.error_message
         return
-    assert soak.item.status == "pending"
+    assert soak.item.status == "failed"
     assert soak.item.manual_start is True
     assert soak.item.preheat_owner is None
     assert soak.item.preheat_started_at is None
@@ -184,14 +184,14 @@ async def test_restart_preserves_preheat_until_user_stops_or_skips(soak):
     assert soak.item.status == "preheating"
     assert "inspect" in soak.item.error_message
     await heat.skip_heat_soak(soak.db, soak.item)
-    assert soak.item.status == "pending"
+    assert soak.item.status == "dispatching"
 
 
 async def test_failed_command_stops_every_supported_heater(soak):
     soak.client.set_chamber_temperature.return_value = False
     assert not await soak.service.stage(soak.db, soak.item)
     await soak.db.refresh(soak.item)
-    assert soak.item.status == "pending"
+    assert soak.item.status == "failed"
     soak.client.set_bed_temperature.assert_called_with(0)
     soak.client.set_chamber_temperature.assert_called_with(0)
     soak.client.set_airduct_mode.assert_called_with("cooling")
@@ -218,7 +218,14 @@ async def test_delete_offline_preserves_cleanup_and_prevents_new_soak_until_off_
     await soak.service.cleanup(soak.db)
     await soak.db.refresh(soak.printer)
     assert not soak.printer.heat_soak_shutdown_pending
-    assert await soak.service.stage(soak.db, new_item)
+    from backend.app.services.queue_transitions import clear_job_plate
+
+    await clear_job_plate(soak.db, new_item)
+    await soak.db.commit()
+    retry = PrintQueueItem(id=3, printer_id=1, chamber_heat_soak=True)
+    soak.db.add(retry)
+    await soak.db.commit()
+    assert await soak.service.stage(soak.db, retry)
 
 
 async def test_deleting_preheating_library_file_aborts_reservation_and_heaters(soak):
@@ -307,7 +314,7 @@ def test_telemetry_decodes_nested_firmware_targets_and_ignores_local_ui_values()
 
 async def test_index_upgrade_includes_preheating_when_old_index_exists(soak):
     async with soak.engine.begin() as conn:
-        await conn.execute(text("DROP INDEX uq_print_queue_active_printer_heat_soak"))
+        await conn.execute(text("DROP INDEX uq_print_queue_holding_printer"))
         await conn.execute(
             text(
                 "CREATE UNIQUE INDEX uq_print_queue_active_printer ON print_queue(printer_id) "

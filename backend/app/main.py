@@ -4352,6 +4352,8 @@ async def _complete_identified_print(printer_id: int, data: dict):
     """Handle print completion - update the archive status."""
     import time
 
+    from backend.app.models.print_queue import PrintQueueItem
+
     logger = logging.getLogger(__name__)
     start_time = time.time()
 
@@ -4377,11 +4379,15 @@ async def _complete_identified_print(printer_id: int, data: dict):
         and telemetry_identity(live) not in (None, identity)
     ):
         return False
+    queue_item_id = None
+    queue_item_owner_id = None
+    queue_status = None
+    queue_auto_off = False
     async with async_session() as db:
         await bind_observed_id(db, printer_id, identity, data.get("previous_submission_id"))
-        statuses = ("dispatching", "printing", "cancelled")
+        statuses = ("dispatching", "printing", "paused", "cancelled")
         if data.get("_recovered_dispatch"):
-            statuses += ("completed", "failed")
+            statuses += ("finished", "failed", "successful")
         matched_job = await find_job(db, printer_id, identity, statuses)
         if matched_job is None and identity:
             # An external print archived by an older version may finish while
@@ -4411,6 +4417,41 @@ async def _complete_identified_print(printer_id: int, data: dict):
                     await db.commit()
         if matched_job is None or _completed_job_events.get(printer_id) == matched_job.id:
             return False
+        queue_status = data.get("status", "completed")
+        if (
+            matched_job.status == "cancelled"
+            or (printer_id in _user_stopped_printers and queue_status in ("failed", "aborted"))
+            or queue_status == "aborted"
+        ):
+            queue_status = "cancelled"
+        data = {**data, "status": queue_status}
+        destination = "finished" if queue_status == "completed" else queue_status
+        if matched_job.status == "dispatching" and destination == "finished":
+            # Exact terminal identity also proves this dispatch was accepted.
+            await transition_queue_item(db, matched_job, "dispatching", "printing")
+        if matched_job.status not in ("successful", "unsuccessful"):
+            await transition_queue_item(db, matched_job, matched_job.status, destination)
+            matched_job.completed_at = datetime.now(timezone.utc)
+            if queue_status == "failed" and not matched_job.error_message:
+                matched_job.error_message = _format_hms_error_summary(data.get("hms_errors") or [])
+        if matched_job.archive_id:
+            from backend.app.services.archive import record_dispatch_outcome
+
+            await record_dispatch_outcome(
+                db,
+                status="aborted" if queue_status == "cancelled" else queue_status,
+                dispatched_queue_item_id=matched_job.id,
+                archive_id=matched_job.archive_id,
+                completed_at=matched_job.completed_at,
+                failure_reason=(matched_job.error_message or "Print failed")[:100]
+                if queue_status == "failed"
+                else None,
+                preserve_failure_reason=True,
+            )
+        await _bump_library_file_usage_if_completed(db, matched_job, queue_status)
+        queue_item_id = matched_job.id
+        queue_item_owner_id = matched_job.created_by_id
+        queue_auto_off = matched_job.auto_off_after
         await db.commit()
         _completed_job_events[printer_id] = matched_job.id
         matched_archive_id = matched_job.archive_id
@@ -4457,19 +4498,6 @@ async def _complete_identified_print(printer_id: int, data: dict):
         data = {**data, "status": "cancelled"}
     _user_stopped_printers.discard(printer_id)
 
-    # Raise the plate-clear gate for queued dispatch (#961). Any terminal status
-    # may have left material on the bed: a user can cancel ten hours into a
-    # twelve-hour print, a printer can self-abort mid-job after a clog, and a
-    # touchscreen-stop reports `aborted` rather than `cancelled` because
-    # `_user_stopped_printers` is only populated when the user stops via the
-    # Grove Control queue UI. Earlier code raised the flag only for completed/failed,
-    # which auto-dispatched the next queued print onto a fouled bed two seconds
-    # after a touchscreen-abort (#1171). Persisted to DB so the gate survives
-    # Auto Off power cycles and Grove Control restarts.
-    _final_status = data.get("status", "completed")
-    if _final_status in ("completed", "failed", "aborted", "cancelled"):
-        printer_manager.set_awaiting_plate_clear(printer_id, True)
-
     # MQTT relay - publish print complete
     try:
         printer_info = printer_manager.get_printer(printer_id)
@@ -4490,18 +4518,11 @@ async def _complete_identified_print(printer_id: int, data: dict):
 
     logger.info("Print complete - filename: %s, subtask: %s, status: %s", filename, subtask_name, data.get("status"))
 
-    event_subtask_id = identity
     archive_id = matched_archive_id
     # Names remain useful for display and cleanup, never attribution.
     for key, value in list(_active_prints.items()):
         if value == archive_id:
             _active_prints.pop(key, None)
-
-    # Keep the plate-clear gate tied to this exact archive. This is intentionally
-    # updated after matching because the initial gate is raised before the longer
-    # completion/cleanup work begins.
-    if _final_status in ("completed", "failed", "aborted", "cancelled"):
-        printer_manager.set_awaiting_plate_clear_archive_id(printer_id, archive_id)
 
     # Cleanup: delete uploaded file from printer SD card to prevent phantom prints (Issue #374, #1542)
     # The print scheduler uploads files to the SD card root (/). Some printers (e.g. P1S, A1)
@@ -4606,73 +4627,8 @@ async def _complete_identified_print(printer_id: int, data: dict):
 
     log_timing("SD card cleanup")
 
-    # Update queue item status early — must run before the archive_id early-return
-    # so queue items don't get stuck in "printing" when archive lookup fails.
-    # Uses run_with_retry to handle SQLite "database is locked" errors (#897).
-    queue_item_id = None
-    queue_item_owner_id = None
-    queue_status = None
-    queue_auto_off = False
+    # The physical outcome and printer hold committed before completion effects.
     try:
-        from backend.app.core.database import run_with_retry
-        from backend.app.models.print_queue import PrintQueueItem
-
-        async def _update_queue_status(db):
-            nonlocal queue_item_id, queue_item_owner_id, queue_status, queue_auto_off
-            recovered_dispatch = bool(data.get("_recovered_dispatch"))
-            queue_statuses = ["dispatching", "printing"]
-            if recovered_dispatch and event_subtask_id:
-                # Scheduler recovery has already committed this exact terminal
-                # state so a process stop cannot requeue it. Include it once to
-                # run the normal completion side effects; ordinary terminal
-                # MQTT callbacks never take this path.
-                queue_statuses.extend(["completed", "failed"])
-            item = await find_job(db, printer_id, event_subtask_id, queue_statuses)
-            if item:
-                queue_status = data.get("status", "completed")
-                # MQTT sends "aborted" for cancelled prints; normalise to
-                # "cancelled" so it matches the queue schema Literal.
-                if queue_status == "aborted":
-                    queue_status = "cancelled"
-                await transition_queue_item(db, item, item.status, queue_status)
-                item.completed_at = datetime.now(timezone.utc)
-                if queue_status == "failed" and not item.error_message:
-                    item.error_message = _format_hms_error_summary(data.get("hms_errors") or [])
-
-                # The linked Archive is the dispatch attempt, not necessarily
-                # the source Archive used to queue a reprint. Its durable queue
-                # item foreign key makes terminalization exact and atomic with
-                # the queue row even if the later archive callback fails.
-                if queue_status in ("completed", "failed", "cancelled") and item.archive_id:
-                    from backend.app.services.archive import record_dispatch_outcome
-
-                    await record_dispatch_outcome(
-                        db,
-                        status="aborted" if queue_status == "cancelled" else queue_status,
-                        dispatched_queue_item_id=item.id,
-                        archive_id=item.archive_id,
-                        completed_at=item.completed_at,
-                        failure_reason=(item.error_message or "Print failed")[:100]
-                        if queue_status == "failed"
-                        else None,
-                        preserve_failure_reason=True,
-                    )
-
-                # Bump usage counters on the source library file so admins can
-                # sort by "last printed" and (eventually) auto-purge stale
-                # files — #1008.
-                await _bump_library_file_usage_if_completed(db, item, queue_status)
-
-                await db.commit()
-                if item.status in ("completed", "failed", "cancelled"):
-                    unregister_expected_print(printer_id)
-                queue_item_id = item.id
-                queue_item_owner_id = item.created_by_id
-                queue_auto_off = item.auto_off_after
-                logger.info("Updated queue item %s status to %s", item.id, queue_status)
-
-        await run_with_retry(_update_queue_status, label="queue status update")
-
         # Post-commit side effects (notifications, MQTT relay, auto-off) use
         # their own sessions and have their own error handling — no retry needed.
         if queue_item_id is not None:
@@ -4695,7 +4651,7 @@ async def _complete_identified_print(printer_id: int, data: dict):
 
                 async with async_session() as db:
                     count_result = await db.execute(
-                        select(sa_func.count(PrintQueueItem.id)).where(PrintQueueItem.status == "pending")
+                        select(sa_func.count(PrintQueueItem.id)).where(PrintQueueItem.status == "queued")
                     )
                     pending_count = count_result.scalar() or 0
 
@@ -4703,7 +4659,9 @@ async def _complete_identified_print(printer_id: int, data: dict):
                         today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
                         completed_result = await db.execute(
                             select(sa_func.count(PrintQueueItem.id)).where(
-                                PrintQueueItem.status.in_(["completed", "failed", "skipped"]),
+                                PrintQueueItem.status.in_(
+                                    ["finished", "successful", "failed", "cancelled", "unsuccessful"]
+                                ),
                                 PrintQueueItem.completed_at >= today_start,
                             )
                         )
@@ -6502,20 +6460,6 @@ async def lifespan(app: FastAPI):
 
     # Fix queue items stuck with invalid "aborted" status (should be "cancelled").
     # This can happen when a print was cancelled mid-print on versions before this fix.
-    try:
-        async with async_session() as db:
-            from backend.app.models.print_queue import PrintQueueItem
-
-            result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.status == "aborted"))
-            aborted_items = result.scalars().all()
-            if aborted_items:
-                for item in aborted_items:
-                    await transition_queue_item(db, item, item.status, "cancelled")
-                await db.commit()
-                logging.info("Fixed %d queue item(s) with invalid 'aborted' status → 'cancelled'", len(aborted_items))
-    except Exception as e:
-        logging.warning("Failed to fix aborted queue items: %s", e)
-
     # Restore debug logging state from previous session
     await init_debug_logging()
 

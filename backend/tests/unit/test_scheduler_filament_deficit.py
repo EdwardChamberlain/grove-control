@@ -32,7 +32,7 @@ def queue_item(db_session, printer_factory):
         printer = await printer_factory()
         defaults = {
             "printer_id": printer.id,
-            "status": "pending",
+            "status": "queued",
             "manual_start": False,
             "filament_short": False,
         }

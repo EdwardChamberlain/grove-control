@@ -1064,6 +1064,7 @@ export default {
 
   // Queue page
   queue: {
+    awaitingPlateClear: 'Aguardando limpeza da mesa',
     resolveDispatch: {
       prompt: "A impressora não confirmou este trabalho. Verifique a impressora antes de escolher:",
       printing: "Está imprimindo",
@@ -1149,6 +1150,10 @@ export default {
     },
     // Status
     status: {
+      queued: 'Na fila',
+      finished: 'Concluído',
+      successful: 'Bem-sucedido',
+      unsuccessful: 'Sem sucesso',
       pending: 'Pendente',
       scheduled: 'Agendado',
       waiting: 'Aguardando',
@@ -1209,6 +1214,8 @@ export default {
     },
     // Actions
     actions: {
+      clearPlate: 'Limpar mesa',
+      retry: 'Tentar novamente',
       startPrint: 'Iniciar Impressão',
       stopPrint: 'Parar Impressão',
       requeue: 'Reenfileirar',

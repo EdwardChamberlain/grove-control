@@ -112,7 +112,7 @@ class TestPrintQueueAPI:
                 kwargs["archive_id"] = archive.id
 
             defaults = {
-                "status": "pending",
+                "status": "queued",
                 "position": counter,
             }
             defaults.update(kwargs)
@@ -149,7 +149,7 @@ class TestPrintQueueAPI:
         result = response.json()
         assert result["printer_id"] == printer.id
         assert result["archive_id"] == archive.id
-        assert result["status"] == "pending"
+        assert result["status"] == "queued"
         assert result["manual_start"] is False
         assert result["wait_for_drying_complete"] is False
 
@@ -379,7 +379,7 @@ class TestPrintQueueAPI:
         result = response.json()
         assert result["printer_id"] == printer.id
         assert result["archive_id"] == archive.id
-        assert result["status"] == "pending"
+        assert result["status"] == "queued"
         assert result["manual_start"] is True
 
     @pytest.mark.asyncio
@@ -792,19 +792,22 @@ class TestPrintQueueAPI:
             preheat_started_at=datetime.now(timezone.utc),
         )
 
-        response = await async_client.post(f"/api/v1/queue/{item.id}/skip-heat-soak")
+        from unittest.mock import patch
+
+        with patch("backend.app.core.tasks.spawn_background_task", side_effect=lambda coro, **kwargs: coro.close()):
+            response = await async_client.post(f"/api/v1/queue/{item.id}/skip-heat-soak")
 
         assert response.status_code == 200, response.text
         assert response.json()["message"] == "Heat soak skipped"
         await db_session.refresh(item)
-        assert item.status == "pending"
+        assert item.status == "dispatching"
         assert item.chamber_heat_soak is False
         assert item.manual_start is False
-        assert item.preheat_owner is None
+        assert item.preheat_owner is not None
         assert item.preheat_started_at is None
 
     @pytest.mark.parametrize("action", ["cancel", "stop", "edit", "delete"])
-    async def test_preheating_api_interruptions_release_reservation(
+    async def test_preheating_actions_preserve_the_printer_hold(
         self, async_client, queue_item_factory, db_session, action
     ):
         from backend.app.models.printer import Printer
@@ -818,15 +821,18 @@ class TestPrintQueueAPI:
             response = await async_client.delete(url)
         else:
             response = await async_client.post(f"{url}/{action}")
-        assert response.status_code == 200, response.text
-        if action != "delete":
-            await db_session.refresh(item)
-            assert item.status == ("pending" if action == "edit" else "cancelled")
-            assert item.preheat_owner is None
-            assert item.manual_start
+        await db_session.refresh(item)
         printer = await db_session.get(Printer, printer_id, populate_existing=True)
-        assert printer.heat_soak_shutdown_pending
-        assert printer.heat_soak_shutdown_at
+        if action in ("edit", "delete"):
+            assert response.status_code == (400 if action == "edit" else 409), response.text
+            assert item.status == "preheating"
+            assert item.preheat_owner == "test-worker"
+        else:
+            assert response.status_code == 200, response.text
+            assert item.status == "cancelled"
+            assert item.preheat_owner is None
+            assert printer.heat_soak_shutdown_pending
+            assert printer.heat_soak_shutdown_at
 
 
 class TestQueueStartEndpoint:
@@ -909,7 +915,7 @@ class TestQueueStartEndpoint:
                 kwargs["archive_id"] = archive.id
 
             defaults = {
-                "status": "pending",
+                "status": "queued",
                 "position": counter,
             }
             defaults.update(kwargs)
@@ -933,7 +939,7 @@ class TestQueueStartEndpoint:
         assert response.status_code == 200
         result = response.json()
         assert result["manual_start"] is False
-        assert result["status"] == "pending"
+        assert result["status"] == "queued"
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -962,7 +968,7 @@ class TestQueueStartEndpoint:
 
         response = await async_client.post(f"/api/v1/queue/{item.id}/start")
         assert response.status_code == 400
-        assert "pending" in response.json()["detail"].lower()
+        assert "queued" in response.json()["detail"].lower()
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -1015,7 +1021,7 @@ class TestQueueStartEndpoint:
 
         # Item still pending, manual_start unchanged.
         await db_session.refresh(item)
-        assert item.status == "pending"
+        assert item.status == "queued"
         assert item.manual_start is True
 
     @pytest.mark.asyncio
@@ -1176,7 +1182,7 @@ class TestQueueCancelEndpoint:
                 kwargs["archive_id"] = archive.id
 
             defaults = {
-                "status": "pending",
+                "status": "queued",
                 "position": 1,
             }
             defaults.update(kwargs)
@@ -1191,22 +1197,29 @@ class TestQueueCancelEndpoint:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_cancel_pending_queue_item(self, async_client: AsyncClient, queue_item_factory, db_session):
+    async def test_cancel_queued_queue_item(self, async_client: AsyncClient, queue_item_factory, db_session):
         """Verify cancelling a pending queue item."""
-        item = await queue_item_factory(status="pending")
+        item = await queue_item_factory(status="queued")
 
         response = await async_client.post(f"/api/v1/queue/{item.id}/cancel")
         assert response.status_code == 200
-        assert response.json()["message"] == "Queue item cancelled"
+        assert response.json()["message"] == "Job cancelled"
+
+        await db_session.refresh(item)
+        assert item.status == "unsuccessful"
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_cancel_non_pending_queue_item(self, async_client: AsyncClient, queue_item_factory, db_session):
-        """Verify 400 error when trying to cancel a non-pending queue item."""
+    async def test_cancel_printing_queue_item_holds_printer(
+        self, async_client: AsyncClient, queue_item_factory, db_session
+    ):
+        """A user cancellation ends the attempt without releasing the plate."""
         item = await queue_item_factory(status="printing")
 
         response = await async_client.post(f"/api/v1/queue/{item.id}/cancel")
-        assert response.status_code == 400
+        assert response.status_code == 200
+        await db_session.refresh(item)
+        assert item.status == "cancelled"
 
 
 class TestQueueLibraryFileSupport:
@@ -1287,7 +1300,7 @@ class TestQueueLibraryFileSupport:
         assert result["printer_id"] == printer.id
         assert result["library_file_id"] == lib_file.id
         assert result["archive_id"] is None
-        assert result["status"] == "pending"
+        assert result["status"] == "queued"
         assert result["library_file_name"] == "Library Print 1"
         assert result["print_time_seconds"] == 3600
 
@@ -1351,7 +1364,7 @@ class TestQueueLibraryFileSupport:
         item = PrintQueueItem(
             printer_id=printer.id,
             library_file_id=lib_file.id,
-            status="pending",
+            status="queued",
             position=1,
         )
         db_session.add(item)
@@ -1385,7 +1398,7 @@ class TestQueueLibraryFileSupport:
         item = PrintQueueItem(
             printer_id=printer.id,
             library_file_id=lib_file.id,
-            status="pending",
+            status="queued",
             position=1,
         )
         db_session.add(item)
@@ -1479,7 +1492,7 @@ class TestBulkUpdateEndpoint:
                 kwargs["archive_id"] = archive.id
 
             defaults = {
-                "status": "pending",
+                "status": "queued",
                 "position": 1,
                 "bed_levelling": "on",
                 "flow_cali": "off",
@@ -1546,7 +1559,7 @@ class TestBulkUpdateEndpoint:
     @pytest.mark.integration
     async def test_bulk_update_skips_non_pending(self, async_client: AsyncClient, queue_item_factory, db_session):
         """Verify bulk update skips non-pending items."""
-        pending_item = await queue_item_factory(status="pending", bed_levelling="on")
+        pending_item = await queue_item_factory(status="queued", bed_levelling="on")
         printing_item = await queue_item_factory(status="printing", bed_levelling="on")
         completed_item = await queue_item_factory(status="completed", bed_levelling="on")
 
@@ -1712,7 +1725,7 @@ class TestTargetLocationFeature:
                 kwargs["archive_id"] = archive.id
 
             defaults = {
-                "status": "pending",
+                "status": "queued",
                 "position": counter,
             }
             defaults.update(kwargs)
@@ -1929,7 +1942,7 @@ class TestAbortedStatusNormalisation:
                 kwargs["archive_id"] = archive.id
 
             defaults = {
-                "status": "pending",
+                "status": "queued",
                 "position": counter,
             }
             defaults.update(kwargs)
@@ -2036,23 +2049,19 @@ class TestAbortedStatusNormalisation:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_startup_fixup_converts_aborted_to_cancelled(self, queue_item_factory, db_session):
-        """Verify the startup fixup converts existing 'aborted' rows to 'cancelled'."""
+    async def test_versioned_upgrade_finalizes_historical_aborted_attempt(self, queue_item_factory, db_session):
+        """The real, versioned migration finalizes historical attempts once."""
         from sqlalchemy import select
 
         from backend.app.models.print_queue import PrintQueueItem
 
         # Create items with various statuses including 'aborted'
         item_aborted = await queue_item_factory(status="aborted")
-        item_pending = await queue_item_factory(status="pending")
+        item_pending = await queue_item_factory(status="queued")
 
-        # Run the fixup query (same logic as lifespan)
-        result = await db_session.execute(select(PrintQueueItem).where(PrintQueueItem.status == "aborted"))
-        aborted_items = result.scalars().all()
-        from backend.app.services.queue_transitions import transition_queue_item
+        from backend.app.core.database import _migrate_queue_lifecycle
 
-        for i in aborted_items:
-            await transition_queue_item(db_session, i, "aborted", "cancelled")
+        await _migrate_queue_lifecycle(await db_session.connection())
         await db_session.commit()
 
         # Verify: no more 'aborted' items
@@ -2061,11 +2070,11 @@ class TestAbortedStatusNormalisation:
 
         # The previously aborted item should now be 'cancelled'
         await db_session.refresh(item_aborted)
-        assert item_aborted.status == "cancelled"
+        assert item_aborted.status == "unsuccessful"
 
         # The pending item should be unchanged
         await db_session.refresh(item_pending)
-        assert item_pending.status == "pending"
+        assert item_pending.status == "queued"
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -2085,7 +2094,7 @@ class TestAbortedStatusNormalisation:
             },
         )
         await db_session.refresh(item)
-        assert item.status == "completed"
+        assert item.status == "finished"
         completion_environment.ftp.assert_awaited()
         assert completion_environment.relay.on_queue_job_completed.await_args.kwargs["status"] == "completed"
 
@@ -2292,7 +2301,7 @@ class TestAbortedStatusNormalisation:
         for item in queue_items:
             assert item["printer_id"] == printer.id
             assert item["archive_id"] == archive.id
-            assert item["status"] == "pending"
+            assert item["status"] == "queued"
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -2563,7 +2572,7 @@ class TestAbortedStatusNormalisation:
 
         printer = await printer_factory()
         archive = await archive_factory(thumbnail_path="archives/test/test/thumbnail.png")
-        pending = await queue_item_factory(printer_id=printer.id, archive_id=archive.id, status="pending")
+        pending = await queue_item_factory(printer_id=printer.id, archive_id=archive.id, status="queued")
         completed = await queue_item_factory(printer_id=printer.id, archive_id=archive.id, status="completed")
 
         service = ArchiveService(db_session)
@@ -2624,7 +2633,7 @@ class TestAbortedStatusNormalisation:
             print_name="Live Archive",
             thumbnail_path="archives/test/live/thumbnail.png",
         )
-        item = await queue_item_factory(printer_id=printer.id, archive_id=archive.id, status="pending")
+        item = await queue_item_factory(printer_id=printer.id, archive_id=archive.id, status="queued")
 
         resp = await async_client.get("/api/v1/queue/")
         assert resp.status_code == 200
@@ -2633,250 +2642,6 @@ class TestAbortedStatusNormalisation:
         assert row["archive_deleted"] is False
         assert row["archive_name"] == "Live Archive"
         assert row["archive_thumbnail"] == "archives/test/live/thumbnail.png"
-
-
-class TestResumeQueueAfterFailure:
-    """Integration tests for POST /api/v1/queue/printer/{id}/resume (#1818)."""
-
-    @pytest.fixture
-    async def printer_factory(self, db_session):
-        _counter = [0]
-
-        async def _create_printer(**kwargs):
-            from backend.app.models.printer import Printer
-
-            _counter[0] += 1
-            counter = _counter[0]
-            defaults = {
-                "name": f"Resume Printer {counter}",
-                "ip_address": f"192.168.42.{100 + counter}",
-                "serial_number": f"RESUMESERIAL{counter:04d}",
-                "access_code": "12345678",
-                "model": "P1S",
-            }
-            defaults.update(kwargs)
-            printer = Printer(**defaults)
-            db_session.add(printer)
-            await db_session.commit()
-            await db_session.refresh(printer)
-            return printer
-
-        return _create_printer
-
-    @pytest.fixture
-    async def archive_factory(self, db_session):
-        _counter = [0]
-
-        async def _create_archive(**kwargs):
-            from backend.app.models.archive import PrintArchive
-
-            _counter[0] += 1
-            counter = _counter[0]
-            defaults = {
-                "filename": f"resume_print_{counter}.3mf",
-                "print_name": f"Resume Print {counter}",
-                "file_path": f"/tmp/resume_print_{counter}.3mf",  # nosec B108
-                "file_size": 1024,
-                "content_hash": f"resumehash{counter:08d}",
-                "status": "completed",
-            }
-            defaults.update(kwargs)
-            archive = PrintArchive(**defaults)
-            db_session.add(archive)
-            await db_session.commit()
-            await db_session.refresh(archive)
-            return archive
-
-        return _create_archive
-
-    async def _add_item(self, db_session, printer, archive_factory, **kwargs):
-        from backend.app.models.print_queue import PrintQueueItem
-
-        archive = await archive_factory()
-        defaults = {
-            "printer_id": printer.id,
-            "archive_id": archive.id,
-            "status": "pending",
-            "require_previous_success": True,
-        }
-        defaults.update(kwargs)
-        item = PrintQueueItem(**defaults)
-        db_session.add(item)
-        await db_session.commit()
-        await db_session.refresh(item)
-        return item
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_resume_unknown_printer_returns_404(self, async_client: AsyncClient):
-        resp = await async_client.post("/api/v1/queue/printer/999999/resume")
-        assert resp.status_code == 404
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_resume_no_op_on_clean_queue(self, async_client: AsyncClient, printer_factory):
-        """Calling resume on a printer with no failures and no skipped items
-        returns zero counts — endpoint is idempotent and safe to spam."""
-        printer = await printer_factory()
-        resp = await async_client.post(f"/api/v1/queue/printer/{printer.id}/resume")
-        assert resp.status_code == 200
-        assert resp.json() == {"acknowledged": 0, "restored": 0}
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_resume_acknowledges_failed_and_restores_skipped(
-        self, async_client: AsyncClient, printer_factory, archive_factory, db_session
-    ):
-        """Reporter's scenario: failed predecessor + N skipped downstream items.
-        Resume sets gate_acknowledged on the failure and flips skipped → pending."""
-        from sqlalchemy import select
-
-        from backend.app.models.print_queue import PrintQueueItem
-
-        printer = await printer_factory()
-        failed = await self._add_item(db_session, printer, archive_factory, status="failed")
-        skipped_1 = await self._add_item(
-            db_session,
-            printer,
-            archive_factory,
-            status="skipped",
-            error_message="Previous print failed or was aborted",
-        )
-        skipped_2 = await self._add_item(
-            db_session,
-            printer,
-            archive_factory,
-            status="skipped",
-            error_message="Previous print failed or was aborted",
-        )
-
-        resp = await async_client.post(f"/api/v1/queue/printer/{printer.id}/resume")
-        assert resp.status_code == 200
-        assert resp.json() == {"acknowledged": 1, "restored": 2}
-
-        failed_id = failed.id
-        skipped_ids = [skipped_1.id, skipped_2.id]
-        db_session.expire_all()
-
-        result = await db_session.execute(select(PrintQueueItem).where(PrintQueueItem.id == failed_id))
-        assert result.scalar_one().gate_acknowledged is True
-
-        for sid in skipped_ids:
-            result = await db_session.execute(select(PrintQueueItem).where(PrintQueueItem.id == sid))
-            row = result.scalar_one()
-            assert row.status == "pending"
-            assert row.error_message is None
-            assert row.completed_at is None
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_resume_preserves_skipped_items_with_other_reasons(
-        self, async_client: AsyncClient, printer_factory, archive_factory, db_session
-    ):
-        """Skipped items whose error_message is something OTHER than the
-        gate string (e.g. filament-deficit promotion, future skip reasons)
-        must not be touched — they encode different user intent."""
-        from sqlalchemy import select
-
-        from backend.app.models.print_queue import PrintQueueItem
-
-        printer = await printer_factory()
-        gate_skip = await self._add_item(
-            db_session,
-            printer,
-            archive_factory,
-            status="skipped",
-            error_message="Previous print failed or was aborted",
-        )
-        other_skip = await self._add_item(
-            db_session,
-            printer,
-            archive_factory,
-            status="skipped",
-            error_message="User skipped via UI",
-        )
-
-        gate_id = gate_skip.id
-        other_id = other_skip.id
-        resp = await async_client.post(f"/api/v1/queue/printer/{printer.id}/resume")
-        assert resp.json() == {"acknowledged": 0, "restored": 1}
-
-        db_session.expire_all()
-        result = await db_session.execute(select(PrintQueueItem).where(PrintQueueItem.id == gate_id))
-        assert result.scalar_one().status == "pending"
-        result = await db_session.execute(select(PrintQueueItem).where(PrintQueueItem.id == other_id))
-        assert result.scalar_one().status == "skipped"
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_resume_scoped_to_printer(
-        self, async_client: AsyncClient, printer_factory, archive_factory, db_session
-    ):
-        """A resume on printer A must not clear printer B's gate — farms run
-        each printer's queue independently."""
-        from sqlalchemy import select
-
-        from backend.app.models.print_queue import PrintQueueItem
-
-        p1 = await printer_factory()
-        p2 = await printer_factory()
-        failed_p1 = await self._add_item(db_session, p1, archive_factory, status="failed")
-        failed_p2 = await self._add_item(db_session, p2, archive_factory, status="failed")
-
-        failed_p1_id = failed_p1.id
-        failed_p2_id = failed_p2.id
-        resp = await async_client.post(f"/api/v1/queue/printer/{p1.id}/resume")
-        assert resp.json() == {"acknowledged": 1, "restored": 0}
-
-        db_session.expire_all()
-        result = await db_session.execute(select(PrintQueueItem).where(PrintQueueItem.id == failed_p1_id))
-        assert result.scalar_one().gate_acknowledged is True
-        result = await db_session.execute(select(PrintQueueItem).where(PrintQueueItem.id == failed_p2_id))
-        assert result.scalar_one().gate_acknowledged is False
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_resume_handles_aborted_status(
-        self, async_client: AsyncClient, printer_factory, archive_factory, db_session
-    ):
-        """Aborted prints (printer-detected mid-print failure) gate the same
-        way failed prints do and must also be acknowledgeable."""
-        from sqlalchemy import select
-
-        from backend.app.models.print_queue import PrintQueueItem
-
-        printer = await printer_factory()
-        aborted = await self._add_item(db_session, printer, archive_factory, status="aborted")
-        aborted_id = aborted.id
-        resp = await async_client.post(f"/api/v1/queue/printer/{printer.id}/resume")
-        assert resp.json() == {"acknowledged": 1, "restored": 0}
-
-        db_session.expire_all()
-        result = await db_session.execute(select(PrintQueueItem).where(PrintQueueItem.id == aborted_id))
-        assert result.scalar_one().gate_acknowledged is True
-
-    @pytest.mark.asyncio
-    @pytest.mark.integration
-    async def test_resume_idempotent_second_call_is_no_op(
-        self, async_client: AsyncClient, printer_factory, archive_factory, db_session
-    ):
-        """Calling resume twice on the same printer doesn't re-acknowledge
-        the same failure — the second call sees acknowledged=0, restored=0."""
-        printer = await printer_factory()
-        await self._add_item(db_session, printer, archive_factory, status="failed")
-        await self._add_item(
-            db_session,
-            printer,
-            archive_factory,
-            status="skipped",
-            error_message="Previous print failed or was aborted",
-        )
-
-        first = await async_client.post(f"/api/v1/queue/printer/{printer.id}/resume")
-        assert first.json() == {"acknowledged": 1, "restored": 1}
-
-        second = await async_client.post(f"/api/v1/queue/printer/{printer.id}/resume")
-        assert second.json() == {"acknowledged": 0, "restored": 0}
 
 
 class TestReorderEndpoint:
@@ -2945,8 +2710,8 @@ class TestReorderEndpoint:
         printer = await printer_factory()
         a1 = await archive_factory()
         a2 = await archive_factory()
-        item1 = PrintQueueItem(printer_id=printer.id, archive_id=a1.id, status="pending", position=1)
-        item2 = PrintQueueItem(printer_id=printer.id, archive_id=a2.id, status="pending", position=2)
+        item1 = PrintQueueItem(printer_id=printer.id, archive_id=a1.id, status="queued", position=1)
+        item2 = PrintQueueItem(printer_id=printer.id, archive_id=a2.id, status="queued", position=2)
         db_session.add_all([item1, item2])
         await db_session.commit()
         await db_session.refresh(item1)
@@ -2978,8 +2743,8 @@ class TestReorderEndpoint:
         printer = await printer_factory()
         a1 = await archive_factory()
         a2 = await archive_factory()
-        item1 = PrintQueueItem(printer_id=printer.id, archive_id=a1.id, status="pending", position=1)
-        item2 = PrintQueueItem(printer_id=printer.id, archive_id=a2.id, status="pending", position=2)
+        item1 = PrintQueueItem(printer_id=printer.id, archive_id=a1.id, status="queued", position=1)
+        item2 = PrintQueueItem(printer_id=printer.id, archive_id=a2.id, status="queued", position=2)
         db_session.add_all([item1, item2])
         await db_session.commit()
         await db_session.refresh(item1)

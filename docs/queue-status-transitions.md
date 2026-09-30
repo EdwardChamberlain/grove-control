@@ -1,72 +1,123 @@
-# Queue status transitions (issue #194, stage 1)
+# Queue job lifecycle (issue #194, stage 3)
 
-Stage 1 centralizes writes to the existing queue status column. It does not
-introduce the later lifecycle names, change plate-clear behavior, remove the
-previous-success gate, or change retry, Archive, notification or heater policy.
-There is no schema change or new data migration. Existing startup repairs keep
-their current selection rules and use the same status writer.
+The Queue shows waiting jobs, active jobs, jobs awaiting plate clear, and a
+Timeline. Completed job history lives in Archives. Queue History, Clear History,
+Resume after failure, and the Require previous success option have been removed.
 
-## Current transitions
+## States and actions
 
 | From | Allowed destinations |
 | --- | --- |
-| `pending` | `preheating`, `dispatching`, `failed`, `skipped`, `cancelled` |
-| `preheating` | `pending`, `dispatching`, `failed`, `cancelled` |
-| `dispatching` | `pending`, `printing`, `completed`, `failed`, `cancelled` |
-| `printing` | `completed`, `failed`, `cancelled` |
-| `skipped` | `pending`, `cancelled` |
-| `failed` | `pending` (existing heat-soak dispatch cleanup) |
-| `completed`, `cancelled` | No different destination |
-| `aborted` (legacy rows only) | `cancelled` (startup repair) |
+| `queued` | `preheating`, `dispatching`, `unsuccessful` (user cancellation) |
+| `preheating` | `dispatching`, `failed`, `cancelled` |
+| `dispatching` | `printing`, `failed`, `cancelled` |
+| `printing` | `paused`, `finished`, `failed`, `cancelled` |
+| `paused` | `printing`, `finished`, `failed`, `cancelled` |
+| `finished` | `successful` (Clear Plate) |
+| `failed`, `cancelled` | `unsuccessful` (Clear Plate) |
+| `successful`, `unsuccessful` | No different destination |
 
-Reapplying the same known status is a guarded write: heat-soak handoff and
-cleanup, and recovered completion callbacks already need this behavior. It
-still requires the database status to match. These are today's edges, not the
-future state table in #194. For example, a preflight failure can still fail a
-pending job and a heat-soak interruption still returns it to manual-start pending.
+Printer deletion additionally ends an active job as `unsuccessful`. It resolves
+`finished` as `successful`, and `failed`/`cancelled` as `unsuccessful`, recording
+**Printer deleted**. Waiting jobs remain `queued` with their printer assignment
+removed so an operator can retarget them.
 
-## Writing a transition
+A targeted `queued` job has no printer reservation. Leaving the queue reserves
+the printer until the job reaches a final state. A unique partial index covers
+`preheating`, `dispatching`, `printing`, `paused`, `finished`, `failed`, and
+`cancelled`. Dispatch checks both the database hold and connected, idle
+telemetry. Model, nozzle, material, and drying eligibility are checked before
+starting an attempt; an interruption after reservation fails the attempt and
+keeps its hold. The lifecycle never moves a job backward into `queued`.
 
-Use `backend.app.services.queue_transitions.transition_queue_item` with the
-observed expected status and desired destination. Its conditional SQL update
-matches both ID and expected status. Dispatch also supplies its existing claim
-timestamp condition. Metadata that must change in that statement goes in
-`values`; the writer synchronizes the ORM object without marking status dirty
-and producing an unconditional second update during flush.
+Turning **Require plate clear** off automatically applies the same Clear Plate
+transition when a job first enters `finished`. Failed and cancelled attempts
+always require an explicit Clear Plate, including failures during upload or
+heat soak. This prevents the next job from draining through a failed printer.
 
-The caller owns the transaction. Commit before running the existing post-commit
-effects. On `QueueTransitionConflict` nothing was written: do not continue the
-losing operation. A single-item operation rolls back, and HTTP callers receive
-409 with a refresh/retry message. Work that handles several items in one
-transaction skips the changed item and continues with the rest. The scheduler
-pass does this for restart recovery and the previous-success skip, and
-"Resume after failure" restores every item that is still skipped and reports
-that count. A heat-soak dispatch that loses the race still turns its heaters
-off.
+**Cancel** on a waiting job makes it `unsuccessful`. **Cancel** and **Stop Print**
+on active jobs both use `cancel_job`: commit `cancelled`, then stop the device
+and shut down heat soak if needed. A failed stop command or disconnected
+printer leaves an actionable hold. Editing or deleting a holding job is refused.
+**Skip heat soak** proceeds into `dispatching` while keeping the same hold.
 
-An invalid edge raises `InvalidQueueTransition` before any update. Reasons
-remain ordinary metadata; the writer never parses them to decide whether an
-edge is allowed.
+**Clear Plate** is available from the job and the printer, including while the
+printer is offline. Inspect and physically clear the plate before using it.
 
-New queue rows still start with their normal `pending` initial value. Creation
-is not a transition. Existing rows, including those repaired at startup, must
-use the writer. The model rejects direct status assignments on persisted or
-detached rows, even if the transition module has not been imported. Architecture
-tests check SQLAlchemy bulk status updates and raw SQL status repairs outside
-the writer, and require the table to cover every API status.
+**Retry** on a failed or cancelled attempt creates a separate, unlinked
+`queued` job at the top of the same printer/model queue, carrying the print
+settings. It uses the original Files source if it is still available, otherwise
+the Archive copy. Retry does not clear the original attempt's hold. Clear Plate
+is required before its replacement can dispatch. Queue-only sources remain
+available while a nonfinal job needs them and are removed after finalization
+and commit; other queued copies keep a shared source alive.
 
-The heat-soak row-lock helper updates only the row ID to itself;
-it does not write status. Archive and scheduled-drying statuses belong to their
-own models and are outside this queue refactor.
+## Conditional writes and views
 
-Repeated scheduler failure paths share a helper that writes the reason and
-completion time atomically with the status, then commits before side effects.
-Paths that also update an Archive keep their joint transaction.
+`transition_queue_item` remains the sole status writer. It conditionally matches
+ID, expected status, and any supplied dispatch claim. Metadata changes in the
+same update; the ORM object is synchronized without a second status write.
+Same-state writes still check the persisted status. Reasons are metadata and
+never determine which transitions are allowed.
 
-The database-backed tests exercise allowed workflows, invalid edges, stale
-sessions, deletion, replaced claims, rollback, ORM flush behavior, dirty metadata
-on conflict, drying reservation release after cancellation, a Stop racing
-dispatch confirmation, and a cancellation racing restart recovery, a heat-soak
-dispatch and "Resume after failure". Completion callback tests use real
-database matching and transitions, independent sessions, mocked printer FTP,
-and scoped background-task cleanup. No existing tests were removed.
+The caller owns the transaction. A losing compare-and-set raises
+`QueueTransitionConflict`; no losing operation may publish effects. Invalid
+edges raise `InvalidQueueTransition` before writing. User cancellation,
+Clear Plate, and printer deletion have explicit action guards.
+
+Printer plate-clear flags and Archive IDs are projections of the holding job.
+They are rehydrated from jobs at startup and published to the manager only after
+commit. Rollback discards pending view and artifact updates. The old Printer
+flag columns remain solely for upgrade compatibility and are not runtime
+reservation authorities.
+
+## One-time upgrade
+
+Startup performs the migration after legacy table rebuilds and schema repair,
+in the same transaction, and records `queue_lifecycle_version=3`. Later startups
+only ensure the holding index exists. Back up the database before upgrading.
+
+- `pending` and `skipped` become `queued`; stale skip reasons are cleared.
+- Active jobs retain their state and the existing startup identity checks.
+- Historical `completed` becomes `successful`; historical failure/cancellation
+  becomes `unsuccessful`.
+- The job identified by an old plate-clear flag's exact Archive/dispatch link
+  remains `finished`, `failed`, or `cancelled`. No filename or recency matching
+  is used to identify that held terminal job.
+- An unidentified old plate flag becomes a synthetic external `finished` job,
+  so it stays visible and can be cleared instead of silently blocking scheduling.
+- Conflicting legacy active reservations are repaired conservatively before
+  creating the unique holding index; the strongest existing active attempt is
+  retained, and other attempts become `unsuccessful` with an upgrade reason.
+
+Queue REST payloads expose the new names. Print completion notifications,
+webhooks, MQTT relay, and Home Assistant retain their existing physical outcome
+names. The webhook Queue aggregate keeps its `pending` count key as a
+compatibility alias for `queued`; its item payloads use the new job names.
+
+## Scope and verification
+
+Stage 2's strict printer/job identity matching remains in place. PAUSE telemetry
+still uses the existing active print behavior: emitting durable `paused`
+transitions is stage 4. Moving Archive creation to entry into `dispatching` and
+consolidating all lifecycle effects are stage 5; this stage keeps the current
+Archive creation timing.
+
+Real database tests cover the transition table, stale sessions, rollback,
+claim replacement, cancellation/confirmation/recovery races, all holding states,
+auto Clear Plate, offline Clear Plate, Retry, printer deletion, migration, and
+Queue-only source retention. The full backend and frontend suites remain part
+of validation.
+
+Tests for the removed previous-success skip, cancellation cascade, independent
+Printer flag persistence, and Resume after failure were replaced by
+`test_queue_lifecycle.py`, `TestAwaitingPlateClearProjection`, and the updated
+Queue API/source tests. The replacements check durable holds and explicit
+release, rather than mocking the transition writer or identity resolver.
+
+SQLite is exercised locally. PostgreSQL upgrade/concurrency and physical printer
+qualification still require validation. On hardware, verify successful
+completion with confirmation on/off, failed uploads, heat-soak interruption,
+Stop while offline, Retry followed by Clear Plate, restart/reconnect, and two
+printers working independently. The original stage 2 identity qualification
+checklist remains in [queue-job-identity.md](queue-job-identity.md).

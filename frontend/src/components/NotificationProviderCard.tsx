@@ -557,16 +557,6 @@ export function NotificationProviderCard({ provider, onEdit }: NotificationProvi
                   />
                 </div>
 
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-white">{t('notifications.jobSkipped')}</p>
-                    <p className="text-xs text-bambu-gray">{t('notifications.jobSkippedDescription')}</p>
-                  </div>
-                  <Toggle
-                    checked={provider.on_queue_job_skipped ?? true}
-                    onChange={(checked) => updateMutation.mutate({ on_queue_job_skipped: checked })}
-                  />
-                </div>
 
                 <div className="flex items-center justify-between">
                   <div>

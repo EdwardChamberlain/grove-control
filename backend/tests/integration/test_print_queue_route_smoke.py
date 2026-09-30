@@ -21,7 +21,7 @@ async def queue_item_factory(db_session, printer_factory, archive_factory):
         defaults = {
             "printer_id": printer.id,
             "archive_id": archive.id,
-            "status": "pending",
+            "status": "queued",
             "position": counter,
         }
         defaults.update(kwargs)

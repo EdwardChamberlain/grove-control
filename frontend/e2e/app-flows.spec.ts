@@ -68,7 +68,7 @@ async function mockApi(page: Page, calls: ApiCall[], options: {
     is_active: options.maintenanceMode ? false : printer.is_active,
   };
   const queueItems: Array<Record<string, unknown>> = [
-    { id: 1, archive_id: 1, archive_name: 'Benchy', printer_id: 1, printer_name: printer.name, status: options.preheating ? 'preheating' : 'pending', position: 1 },
+    { id: 1, archive_id: 1, archive_name: 'Benchy', printer_id: 1, printer_name: printer.name, status: options.preheating ? 'preheating' : 'queued', position: 1 },
   ];
 
   await page.route('**/*', async (route) => {
@@ -187,16 +187,16 @@ async function mockApi(page: Page, calls: ApiCall[], options: {
         archive_name: 'Benchy',
         printer_id: queueBody.printer_id ?? 1,
         printer_name: printer.name,
-        status: 'pending',
+        status: 'queued',
         position: queueItems.length + 1,
         ...queueBody,
       };
       queueItems.push(queuedItem);
       await route.fulfill({ json: queuedItem });
     } else if (pathname === '/api/v1/queue/1' && method === 'PATCH') {
-      await route.fulfill({ json: { id: 1, archive_id: 1, printer_id: 1, status: 'pending', position: 1, ...(body as object) } });
+      await route.fulfill({ json: { id: 1, archive_id: 1, printer_id: 1, status: 'queued', position: 1, ...(body as object) } });
     } else if (pathname === '/api/v1/queue/1/cancel' && method === 'POST') {
-      await route.fulfill({ json: { message: 'Queue item cancelled' } });
+      await route.fulfill({ json: { message: 'Job cancelled' } });
     } else if (pathname === '/api/v1/queue/') {
       await route.fulfill({ json: queueItems });
     } else if (pathname === '/api/v1/archives/') {
@@ -273,7 +273,7 @@ test('print modal exposes queue-first controls', async ({ page }) => {
   expect(queueCall?.body).not.toHaveProperty('scheduled_time');
 });
 
-test('postponed print submits its UTC start time and is shown as scheduled in the queue', async ({ page }) => {
+test('postponed print submits its UTC start time and remains queued until then', async ({ page }) => {
   const calls: ApiCall[] = [];
   await mockApi(page, calls);
 
@@ -291,7 +291,8 @@ test('postponed print submits its UTC start time and is shown as scheduled in th
   expect(queueCall?.body).toMatchObject({ scheduled_time: '2099-12-31T09:30:00.000Z' });
 
   await page.goto('/queue');
-  await expect(page.getByText(/Scheduled · Dec 31, 2099, 09:30 AM/)).toBeVisible();
+  await expect(page.getByText("Queued", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText(/Dec 31, 2099, 09:30 AM/)).toBeVisible();
 });
 
 test('invalid postponed dates cannot create a queue item', async ({ page }) => {

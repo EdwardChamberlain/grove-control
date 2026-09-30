@@ -31,7 +31,6 @@ class QueueAddRequest(BaseModel):
     printer_id: int
     project_id: int | None = None
     scheduled_time: str | None = None  # ISO format datetime
-    require_previous_success: bool = False
     auto_off_after: bool = False
     filament_overrides: list[dict] | None = None
     force_color_match: bool = True
@@ -99,7 +98,7 @@ async def webhook_add_to_queue(
         select(PrintQueueItem.position)
         .where(
             PrintQueueItem.printer_id == data.printer_id,
-            PrintQueueItem.status == "pending",
+            PrintQueueItem.status == "queued",
         )
         .order_by(PrintQueueItem.position.desc())
         .limit(1)
@@ -138,7 +137,6 @@ async def webhook_add_to_queue(
         project_id=data.project_id,
         position=next_position,
         scheduled_time=scheduled_time,
-        require_previous_success=data.require_previous_success,
         auto_off_after=data.auto_off_after,
         filament_overrides=json.dumps(overrides) if overrides else None,
         force_color_match=data.force_color_match,
@@ -190,7 +188,7 @@ async def webhook_start_print(
         select(PrintQueueItem)
         .where(
             PrintQueueItem.printer_id == printer_id,
-            PrintQueueItem.status == "pending",
+            PrintQueueItem.status == "queued",
         )
         .order_by(PrintQueueItem.position)
         .limit(1)
@@ -337,13 +335,13 @@ async def webhook_get_queue_status(
             select(PrintQueueItem)
             .where(
                 PrintQueueItem.printer_id == printer.id,
-                PrintQueueItem.status.in_(["pending", "preheating", "dispatching", "printing"]),
+                PrintQueueItem.status.in_(["queued", "preheating", "dispatching", "printing"]),
             )
             .order_by(PrintQueueItem.position)
         )
         items = result.scalars().all()
 
-        pending_count = sum(1 for i in items if i.status == "pending")
+        pending_count = sum(1 for i in items if i.status == "queued")
         dispatching_count = sum(1 for i in items if i.status == "dispatching")
         printing_count = sum(1 for i in items if i.status == "printing")
 

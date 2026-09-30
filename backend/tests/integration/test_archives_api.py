@@ -337,14 +337,14 @@ class TestArchivesAPI:
         # dispatch looks at the wire (#1733).
         db_session.add_all(
             [
-                PrintQueueItem(printer_id=printer.id, archive_id=archive.id, status="pending", position=1),
-                PrintQueueItem(printer_id=printer.id, archive_id=archive.id, status="pending", position=2),
+                PrintQueueItem(printer_id=printer.id, archive_id=archive.id, status="queued", position=1),
+                PrintQueueItem(printer_id=printer.id, archive_id=archive.id, status="queued", position=2),
                 PrintQueueItem(printer_id=printer.id, archive_id=archive.id, status="dispatching", position=3),
             ]
         )
         # An unrelated archive's queue rows must not bleed into the count.
         other = await archive_factory(printer.id)
-        db_session.add(PrintQueueItem(printer_id=printer.id, archive_id=other.id, status="pending", position=4))
+        db_session.add(PrintQueueItem(printer_id=printer.id, archive_id=other.id, status="queued", position=4))
         await db_session.commit()
 
         resp = await async_client.get(f"/api/v1/archives/{archive.id}/delete-impact")

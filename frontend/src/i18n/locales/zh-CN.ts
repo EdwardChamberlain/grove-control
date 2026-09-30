@@ -1064,6 +1064,7 @@ export default {
 
   // Queue page
   queue: {
+    awaitingPlateClear: '等待清理打印板',
     resolveDispatch: {
       prompt: "打印机尚未确认此任务。选择前请检查打印机：",
       printing: "正在打印",
@@ -1149,6 +1150,10 @@ export default {
     },
     // Status
     status: {
+      queued: '排队中',
+      finished: '已完成',
+      successful: '成功',
+      unsuccessful: '未成功',
       pending: '等待中',
       scheduled: '已排期',
       waiting: '等待中',
@@ -1209,6 +1214,8 @@ export default {
     },
     // Actions
     actions: {
+      clearPlate: '清理打印板',
+      retry: '重试',
       startPrint: '开始打印',
       stopPrint: '停止打印',
       requeue: '重新排队',

@@ -1020,6 +1020,7 @@ export default {
     }
   },
   queue: {
+    awaitingPlateClear: '플레이트 정리 대기',
     resolveDispatch: {
       prompt: "프린터가 이 작업을 확인하지 않았습니다. 선택하기 전에 프린터를 확인하세요:",
       printing: "인쇄 중입니다",
@@ -1092,6 +1093,10 @@ export default {
       history: '기록'
     },
     status: {
+      queued: '대기 중',
+      finished: '완료',
+      successful: '성공',
+      unsuccessful: '실패',
       pending: '대기 중',
       scheduled: '예약됨',
       waiting: '기다리는 중',
@@ -1145,6 +1150,8 @@ export default {
       inHours: '{{count}}시간 후'
     },
     actions: {
+      clearPlate: '플레이트 정리',
+      retry: '재시도',
       startPrint: '인쇄 시작',
       stopPrint: '인쇄 정지',
       requeue: '재대기',

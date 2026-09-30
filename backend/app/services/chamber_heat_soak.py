@@ -83,15 +83,13 @@ def _heaters_off(printer: Printer) -> None:
             logger.exception("Heat-soak heater shutdown failed for printer %s", printer.id)
 
 
-async def abort_heat_soak(db: AsyncSession, item: PrintQueueItem, reason: str, *, status: str = "pending") -> None:
+async def abort_heat_soak(db: AsyncSession, item: PrintQueueItem, reason: str, *, status: str = "failed") -> None:
     """Caller holds the queue write lock. Persist cleanup even if the item is deleted."""
     await transition_queue_item(db, item, item.status, status)
     printer = await db.get(Printer, item.printer_id)
     if printer:
         printer.heat_soak_shutdown_pending = True
         printer.heat_soak_shutdown_at = utcnow()
-        _heaters_off(printer)
-    _show_preheating(item.printer_id, False)
     item.error_message = reason
     item.completed_at = utcnow()
     item.preheat_owner = None
@@ -100,26 +98,34 @@ async def abort_heat_soak(db: AsyncSession, item: PrintQueueItem, reason: str, *
     # An explicit retry must repeat the complete soak.
     item.manual_start = True
     await db.commit()
+    if printer:
+        _heaters_off(printer)
+    _show_preheating(item.printer_id, False)
 
 
 async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> None:
-    """Release an active soak and let the queue dispatch the item normally.
+    """Continue an active soak into dispatch while retaining its printer hold.
 
     Skipping is different from stopping: keep the printer's current heater
-    targets so the print can start immediately, but remove the preheating
-    reservation and disable the soak for this queue item.
+    targets so the print can start immediately, and disable the soak for
+    this queue item.
     """
-    _show_preheating(item.printer_id, False)
-    await transition_queue_item(db, item, item.status, "pending")
+    await transition_queue_item(db, item, item.status, "dispatching")
     item.chamber_heat_soak = False
     item.manual_start = False
     item.error_message = None
     item.completed_at = None
-    item.preheat_owner = None
+    from backend.app.services.print_scheduler import scheduler
+
+    item.preheat_owner = scheduler._heat_soak.owner
     item.preheat_requested_at = None
     item.preheat_checked_at = None
     item.preheat_started_at = None
     await db.commit()
+    _show_preheating(item.printer_id, False)
+    from backend.app.core.tasks import spawn_background_task
+
+    spawn_background_task(scheduler._dispatch_after_heat_soak(item.id), name=f"skip-heat-soak-dispatch-{item.id}")
 
 
 class ChamberHeatSoak:
@@ -128,9 +134,9 @@ class ChamberHeatSoak:
         self._visible_printers: set[int] = set()
 
     async def stage(self, db: AsyncSession, item: PrintQueueItem) -> bool:
-        item_id, printer_id = item.id, item.printer_id
+        item_id, printer_id, claim = item.id, item.printer_id, item.dispatching_at
         item = await lock_queue_item(db, item_id)
-        if not item or item.status != "pending":
+        if not item or item.status != "queued" or item.printer_id != printer_id:
             await db.rollback()
             return False
         # Preserve the selected printer for model-based queue items, but claim
@@ -140,8 +146,9 @@ class ChamberHeatSoak:
             await transition_queue_item(
                 db,
                 item,
-                "pending",
+                "queued",
                 "preheating",
+                conditions=(PrintQueueItem.dispatching_at == claim,),
                 values={
                     "printer_id": printer_id,
                     "preheat_owner": self.owner,
@@ -297,7 +304,7 @@ class ChamberHeatSoak:
             if not printer.heat_soak_shutdown_pending:
                 await db.rollback()
                 continue
-            _heaters_off(printer)
+                _heaters_off(printer)
             client = printer_manager.get_client(printer.id)
             if client:
                 client.request_status_update()

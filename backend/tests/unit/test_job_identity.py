@@ -107,10 +107,8 @@ async def test_stop_unmatched_run_keeps_plate_gate_before_release_and_after_rest
             commit = db.commit
 
             async def commit_with_plate_gate():
-                # The scheduler's in-memory gate must close before the commit
-                # makes the released reservation visible to another session.
-                assert manager.is_awaiting_plate_clear(1)
-                assert manager.get_awaiting_plate_clear_archive_id(1) == archive_id
+                # Cancellation keeps a database hold; cache effects wait for commit.
+                assert (await db.get(PrintQueueItem, item_id)).status == "cancelled"
                 await commit()
 
             with patch.object(db, "commit", commit_with_plate_gate):
@@ -123,10 +121,9 @@ async def test_stop_unmatched_run_keeps_plate_gate_before_release_and_after_rest
         assert await main.on_print_complete(1, {"submission_id": "new-session", "status": "aborted"}) is False
         async with sessions() as db:
             item = await db.get(PrintQueueItem, item_id)
-            printer = await db.get(Printer, 1)
             assert item.status == "cancelled"
-            assert printer.awaiting_plate_clear
-            assert printer.awaiting_plate_clear_archive_id == archive_id
+            assert manager.is_awaiting_plate_clear(1)
+            assert manager.get_awaiting_plate_clear_archive_id(1) == archive_id
             if archive_id:
                 assert (await db.get(PrintArchive, archive_id)).status == "aborted"
 
@@ -238,7 +235,10 @@ async def test_external_start_is_one_job_and_cannot_take_a_dispatch(sessions):
         assert first.status == "printing"
         assert first.created_by_id is None
         assert await observe_print(db, 1, "different") == (None, False)
-        await transition_queue_item(db, first, "printing", "completed")
+        await transition_queue_item(db, first, "printing", "finished")
+        from backend.app.services.queue_transitions import clear_job_plate
+
+        await clear_job_plate(db, first)
         await db.commit()
         following, confirmed = await observe_print(db, 1, "next")
         await db.commit()
@@ -262,7 +262,7 @@ async def test_start_requires_exact_dispatch_id_and_uses_transition(sessions):
 @pytest.mark.parametrize(
     "state, identity, connected, expected",
     [
-        ("FINISH", "123", True, "completed"),
+        ("FINISH", "123", True, "finished"),
         ("FAILED", "123", True, "failed"),
         ("FINISH", "other", True, "printing"),
         ("FINISH", None, True, "printing"),
@@ -289,7 +289,7 @@ async def test_startup_checks_already_printing_jobs_by_id(sessions, state, ident
             await scheduler._recover_stale_dispatches(db)
         async with sessions() as db:
             assert (await db.get(PrintQueueItem, item_id)).status == expected
-    assert bool(spawned) == (expected in ("completed", "failed"))
+    assert bool(spawned) == (expected in ("finished", "failed"))
 
 
 @pytest.mark.parametrize("outcome", ["printing", "failed"])
@@ -306,7 +306,7 @@ async def test_user_resolution_commits_and_keeps_failed_plate_gate(sessions, out
         async with sessions() as db:
             item = await db.get(PrintQueueItem, item_id)
             assert item.status == outcome
-            assert (await db.get(Printer, 1)).awaiting_plate_clear == (outcome == "failed")
+            manager.set_awaiting_plate_clear.assert_called_with(1, outcome == "failed")
             with pytest.raises(HTTPException) as conflict:
                 await resolve_queue_dispatch(item_id, DispatchResolution(outcome=outcome), db, (None, True))
             assert conflict.value.status_code == 409

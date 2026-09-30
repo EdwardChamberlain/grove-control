@@ -34,7 +34,6 @@ const createMockQueueItem = (overrides: Partial<PrintQueueItem> = {}): PrintQueu
   archive_id: 1,
   position: 1,
   scheduled_time: null,
-  require_previous_success: false,
   wait_for_drying_complete: false,
   auto_off_after: false,
   gcode_injection: false,
@@ -48,7 +47,7 @@ const createMockQueueItem = (overrides: Partial<PrintQueueItem> = {}): PrintQueu
   layer_inspect: false,
   timelapse: false,
   use_ams: true,
-  status: 'pending',
+  status: 'queued',
   started_at: null,
   completed_at: null,
   error_message: null,
@@ -80,10 +79,10 @@ describe('PrintModal', () => {
         return HttpResponse.json({ connected: true, state: 'IDLE', ams: [], vt_tray: [] });
       }),
       http.post('/api/v1/queue/', () => {
-        return HttpResponse.json({ id: 1, status: 'pending' });
+        return HttpResponse.json({ id: 1, status: 'queued' });
       }),
       http.patch('/api/v1/queue/:id', () => {
-        return HttpResponse.json({ id: 1, status: 'pending' });
+        return HttpResponse.json({ id: 1, status: 'queued' });
       })
     );
   });
@@ -166,7 +165,7 @@ describe('PrintModal', () => {
         ])),
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'pending' });
+          return HttpResponse.json({ id: 1, status: 'queued' });
         }),
       );
 
@@ -202,7 +201,7 @@ describe('PrintModal', () => {
         ])),
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'pending' });
+          return HttpResponse.json({ id: 1, status: 'queued' });
         }),
       );
 
@@ -244,7 +243,7 @@ describe('PrintModal', () => {
         ])),
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'pending' });
+          return HttpResponse.json({ id: 1, status: 'queued' });
         }),
       );
 
@@ -275,7 +274,7 @@ describe('PrintModal', () => {
         ])),
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'pending' });
+          return HttpResponse.json({ id: 1, status: 'queued' });
         }),
       );
 
@@ -302,7 +301,7 @@ describe('PrintModal', () => {
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'pending' });
+          return HttpResponse.json({ id: 1, status: 'queued' });
         }),
       );
 
@@ -328,7 +327,7 @@ describe('PrintModal', () => {
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'pending' });
+          return HttpResponse.json({ id: 1, status: 'queued' });
         }),
       );
 
@@ -355,7 +354,7 @@ describe('PrintModal', () => {
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'pending' });
+          return HttpResponse.json({ id: 1, status: 'queued' });
         }),
       );
 
@@ -538,7 +537,7 @@ describe('PrintModal', () => {
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'pending' });
+          return HttpResponse.json({ id: 1, status: 'queued' });
         }),
       );
       const user = userEvent.setup();
@@ -573,7 +572,7 @@ describe('PrintModal', () => {
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'pending' });
+          return HttpResponse.json({ id: 1, status: 'queued' });
         }),
       );
       const user = userEvent.setup();
@@ -601,7 +600,7 @@ describe('PrintModal', () => {
         ])),
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'pending' });
+          return HttpResponse.json({ id: 1, status: 'queued' });
         }),
       );
       const user = userEvent.setup();
@@ -633,7 +632,7 @@ describe('PrintModal', () => {
         ])),
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'pending' });
+          return HttpResponse.json({ id: 1, status: 'queued' });
         }),
       );
       const user = userEvent.setup();
@@ -670,7 +669,7 @@ describe('PrintModal', () => {
         ),
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = (await request.json()) as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'pending' });
+          return HttpResponse.json({ id: 1, status: 'queued' });
         }),
       );
       const user = userEvent.setup();
@@ -728,7 +727,7 @@ describe('PrintModal', () => {
         ),
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'pending' });
+          return HttpResponse.json({ id: 1, status: 'queued' });
         }),
       );
       const user = userEvent.setup();
@@ -768,7 +767,7 @@ describe('PrintModal', () => {
         ),
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = (await request.json()) as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'pending' });
+          return HttpResponse.json({ id: 1, status: 'queued' });
         }),
       );
       const user = userEvent.setup();
@@ -825,7 +824,7 @@ describe('PrintModal', () => {
         ),
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = (await request.json()) as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'pending' });
+          return HttpResponse.json({ id: 1, status: 'queued' });
         }),
       );
       const user = userEvent.setup();
@@ -892,7 +891,7 @@ describe('PrintModal', () => {
         ),
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = (await request.json()) as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'pending' });
+          return HttpResponse.json({ id: 1, status: 'queued' });
         }),
       );
       const user = userEvent.setup();
@@ -1007,7 +1006,7 @@ describe('PrintModal', () => {
       let body: Record<string, unknown> | undefined;
       server.use(http.post('/api/v1/queue/', async ({ request }) => {
         body = await request.json() as Record<string, unknown>;
-        return HttpResponse.json({ id: 1, status: 'pending' });
+        return HttpResponse.json({ id: 1, status: 'queued' });
       }));
       const user = userEvent.setup();
       render(<PrintModal mode="create" archiveId={1} initialSelectedPrinterIds={[1]} onClose={mockOnClose} />);
@@ -1070,7 +1069,7 @@ describe('PrintModal', () => {
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = (await request.json()) as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'pending' });
+          return HttpResponse.json({ id: 1, status: 'queued' });
         }),
       );
       const user = userEvent.setup();
@@ -1335,7 +1334,7 @@ describe('PrintModal', () => {
       server.use(
         http.patch('/api/v1/queue/:id', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'pending' });
+          return HttpResponse.json({ id: 1, status: 'queued' });
         }),
       );
       const user = userEvent.setup();
@@ -1358,7 +1357,7 @@ describe('PrintModal', () => {
       server.use(
         http.patch('/api/v1/queue/:id', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'pending' });
+          return HttpResponse.json({ id: 1, status: 'queued' });
         }),
       );
       const user = userEvent.setup();
@@ -1377,7 +1376,7 @@ describe('PrintModal', () => {
       server.use(
         http.patch('/api/v1/queue/:id', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'pending' });
+          return HttpResponse.json({ id: 1, status: 'queued' });
         }),
       );
       const user = userEvent.setup();
@@ -1507,7 +1506,7 @@ describe('PrintModal', () => {
         server.use(
           http.patch('/api/v1/queue/:id', async ({ request }) => {
             captured.body = (await request.json()) as Record<string, unknown>;
-            return HttpResponse.json({ id: 1, status: 'pending' });
+            return HttpResponse.json({ id: 1, status: 'queued' });
           }),
         );
         return captured;
@@ -1643,7 +1642,7 @@ describe('PrintModal', () => {
         server.use(
           http.post('/api/v1/queue/', () => {
             created += 1;
-            return HttpResponse.json({ id: 2, status: 'pending' });
+            return HttpResponse.json({ id: 2, status: 'queued' });
           }),
         );
         const user = userEvent.setup();
@@ -1821,7 +1820,7 @@ describe('PrintModal', () => {
         }),
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBodies.push((await request.json()) as Record<string, unknown>);
-          return HttpResponse.json({ id: capturedBodies.length, status: 'pending' });
+          return HttpResponse.json({ id: capturedBodies.length, status: 'queued' });
         }),
       );
       const user = userEvent.setup();
@@ -2287,7 +2286,7 @@ describe('PrintModal', () => {
         http.post('/api/v1/queue/', async ({ request }) => {
           const body = await request.json();
           queueRequests.push(body);
-          return HttpResponse.json({ id: queueRequests.length, status: 'pending' });
+          return HttpResponse.json({ id: queueRequests.length, status: 'queued' });
         }),
       );
 
@@ -2333,7 +2332,7 @@ describe('PrintModal', () => {
         http.post('/api/v1/queue/', async ({ request }) => {
           const body = await request.json();
           queueRequests.push(body);
-          return HttpResponse.json({ id: queueRequests.length, status: 'pending' });
+          return HttpResponse.json({ id: queueRequests.length, status: 'queued' });
         }),
       );
 
@@ -2474,7 +2473,7 @@ describe('PrintModal', () => {
         withSnippets(),
         http.post('/api/v1/queue/', async ({ request }) => {
           queueCalls.push((await request.json()) as Record<string, unknown>);
-          return HttpResponse.json({ id: queueCalls.length, status: 'pending' });
+          return HttpResponse.json({ id: queueCalls.length, status: 'queued' });
         }),
       );
 
@@ -2513,7 +2512,7 @@ describe('PrintModal', () => {
         withSnippets(),
         http.post('/api/v1/queue/', async ({ request }) => {
           queueCalls.push((await request.json()) as Record<string, unknown>);
-          return HttpResponse.json({ id: queueCalls.length, status: 'pending' });
+          return HttpResponse.json({ id: queueCalls.length, status: 'queued' });
         }),
       );
 
@@ -2578,7 +2577,7 @@ describe('PrintModal', () => {
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'pending' });
+          return HttpResponse.json({ id: 1, status: 'queued' });
         })
       );
       const user = userEvent.setup();
@@ -2614,7 +2613,7 @@ describe('PrintModal', () => {
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'pending' });
+          return HttpResponse.json({ id: 1, status: 'queued' });
         })
       );
       const user = userEvent.setup();
@@ -2649,7 +2648,7 @@ describe('PrintModal', () => {
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'pending' });
+          return HttpResponse.json({ id: 1, status: 'queued' });
         })
       );
       const user = userEvent.setup();
@@ -2687,7 +2686,7 @@ describe('PrintModal', () => {
       server.use(
         http.post('/api/v1/queue/', async ({ request }) => {
           capturedBody = await request.json() as Record<string, unknown>;
-          return HttpResponse.json({ id: 1, status: 'pending' });
+          return HttpResponse.json({ id: 1, status: 'queued' });
         })
       );
       const user = userEvent.setup();
@@ -2757,7 +2756,7 @@ describe('PrintModal — per-plate quantity (#342)', () => {
         HttpResponse.json({ filaments: [{ slot_id: 1, type: 'PLA', color: '#FF0000', tray_info_idx: '', used_grams: 50 }] }),
       ),
       http.get('/api/v1/printers/available-filaments', () => HttpResponse.json([])),
-      http.post('/api/v1/queue/', () => HttpResponse.json({ id: 1, status: 'pending' })),
+      http.post('/api/v1/queue/', () => HttpResponse.json({ id: 1, status: 'queued' })),
     );
   });
 
@@ -2808,7 +2807,7 @@ describe('PrintModal — per-plate quantity (#342)', () => {
     server.use(
       http.post('/api/v1/queue/', async ({ request }) => {
         queued.push((await request.json()) as Queued);
-        return HttpResponse.json({ id: queued.length, status: 'pending' });
+        return HttpResponse.json({ id: queued.length, status: 'queued' });
       }),
     );
 
@@ -2845,7 +2844,7 @@ describe('PrintModal — per-plate quantity (#342)', () => {
     server.use(
       http.post('/api/v1/queue/', async ({ request }) => {
         queued.push((await request.json()) as Queued);
-        return HttpResponse.json({ id: queued.length, status: 'pending' });
+        return HttpResponse.json({ id: queued.length, status: 'queued' });
       }),
     );
 

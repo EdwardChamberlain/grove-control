@@ -98,7 +98,6 @@ class PrintQueueItemCreate(BaseModel):
     archive_id: int | None = None
     library_file_id: int | None = None
     scheduled_time: datetime | None = None  # None = ASAP (next when idle)
-    require_previous_success: bool = False
     auto_off_after: bool = False  # Power off printer after print completes
     manual_start: bool = False  # Requires manual trigger to start (staged)
     chamber_heat_soak: bool = False
@@ -159,7 +158,6 @@ class PrintQueueItemUpdate(BaseModel):
     force_color_match: bool | None = None
     position: int | None = None
     scheduled_time: datetime | None = None
-    require_previous_success: bool | None = None
     auto_off_after: bool | None = None
     manual_start: bool | None = None
     # "Print Anyway" acknowledged from the edit dialog's filament warning
@@ -208,7 +206,6 @@ class PrintQueueItemResponse(BaseModel):
     library_file_id: int | None  # For queue items from library files
     position: int
     scheduled_time: UTCDatetime
-    require_previous_success: bool
     auto_off_after: bool
     manual_start: bool
     chamber_heat_soak: bool = False
@@ -233,7 +230,18 @@ class PrintQueueItemResponse(BaseModel):
     timelapse: bool = False
     use_ams: bool = True
     nozzle_offset_cali: TriState = "auto"
-    status: Literal["pending", "preheating", "dispatching", "printing", "completed", "failed", "skipped", "cancelled"]
+    status: Literal[
+        "queued",
+        "preheating",
+        "dispatching",
+        "printing",
+        "paused",
+        "finished",
+        "failed",
+        "cancelled",
+        "successful",
+        "unsuccessful",
+    ]
     preheat_started_at: UTCDatetime = None
     dispatch_needs_resolution: bool = False
     dispatched_at: UTCDatetime
@@ -332,7 +340,6 @@ class PrintQueueBulkUpdate(BaseModel):
     # Fields to update (all optional - only set fields are applied)
     printer_id: int | None = None
     scheduled_time: datetime | None = None
-    require_previous_success: bool | None = None
     auto_off_after: bool | None = None
     manual_start: bool | None = None
     chamber_heat_soak: bool = False

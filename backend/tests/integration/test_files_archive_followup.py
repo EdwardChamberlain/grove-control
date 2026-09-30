@@ -70,7 +70,7 @@ class TestPendingUploadSaveToFiles:
         _configure_storage(monkeypatch, tmp_path)
         upload_id = await _add_pending_upload(
             db_session,
-            tmp_path / "pending" / "single.3mf",
+            tmp_path / "queued" / "single.3mf",
             filename="single.3mf",
         )
 
@@ -111,12 +111,12 @@ class TestPendingUploadSaveToFiles:
         _configure_storage(monkeypatch, tmp_path)
         await _add_pending_upload(
             db_session,
-            tmp_path / "pending" / "plain.3mf",
+            tmp_path / "queued" / "plain.3mf",
             filename="plain.3mf",
         )
         await _add_pending_upload(
             db_session,
-            tmp_path / "pending" / "tagged.3mf",
+            tmp_path / "queued" / "tagged.3mf",
             filename="tagged.3mf",
             tags="Queue, Review",
         )
@@ -244,11 +244,11 @@ class TestQueueUploadSourceLifecycle:
 
         assert requeued.status_code == 200, requeued.text
         assert requeued.json()["library_file_id"] == library_file_id
-        assert requeued.json()["status"] == "pending"
+        assert requeued.json()["status"] == "queued"
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_skipped_queue_item_keeps_sealed_source_until_resume(
+    async def test_failed_job_keeps_sealed_source_through_retry_and_clear(
         self,
         async_client: AsyncClient,
         db_session: AsyncSession,
@@ -269,11 +269,11 @@ class TestQueueUploadSourceLifecycle:
         source_path = Path(settings.base_dir) / source.file_path
 
         printer = await printer_factory()
-        skipped_item = PrintQueueItem(
+        failed_item = PrintQueueItem(
             printer_id=printer.id,
             library_file_id=library_file_id,
             position=1,
-            status="skipped",
+            status="failed",
             error_message="Previous print failed or was aborted",
             cleanup_library_after_dispatch=True,
         )
@@ -281,11 +281,11 @@ class TestQueueUploadSourceLifecycle:
             printer_id=printer.id,
             library_file_id=library_file_id,
             position=2,
-            status="skipped",
+            status="queued",
             error_message="Previous print failed or was aborted",
             cleanup_library_after_dispatch=True,
         )
-        db_session.add_all([skipped_item, deleted_item])
+        db_session.add_all([failed_item, deleted_item])
         await db_session.commit()
 
         deleted = await async_client.delete(f"/api/v1/queue/{deleted_item.id}")
@@ -294,12 +294,17 @@ class TestQueueUploadSourceLifecycle:
         assert await db_session.scalar(select(func.count(LibraryFile.id)).where(LibraryFile.id == library_file_id)) == 1
         assert source_path.is_file()
 
-        resumed = await async_client.post(f"/api/v1/queue/printer/{printer.id}/resume")
+        resumed = await async_client.post(f"/api/v1/queue/{failed_item.id}/retry")
 
         assert resumed.status_code == 200, resumed.text
-        await db_session.refresh(skipped_item)
-        assert skipped_item.status == "pending"
-        assert skipped_item.library_file_id == library_file_id
+        await db_session.refresh(failed_item)
+        assert failed_item.status == "failed"
+        assert resumed.json()["status"] == "queued"
+        cleared = await async_client.post(f"/api/v1/queue/{failed_item.id}/clear-plate")
+        assert cleared.status_code == 200
+        await db_session.refresh(failed_item)
+        assert failed_item.status == "unsuccessful"
+        assert failed_item.library_file_id == library_file_id
         assert source_path.is_file()
 
     @pytest.mark.asyncio
@@ -332,7 +337,7 @@ class TestQueueUploadSourceLifecycle:
                 printer_id=printer.id,
                 library_file_id=library_file_id,
                 position=1,
-                status="pending",
+                status="queued",
                 cleanup_library_after_dispatch=True,
             )
             db_session.add(pending_item)
@@ -423,7 +428,7 @@ class TestQueueUploadSourceLifecycle:
             printer_id=printer.id,
             library_file_id=library_file_id,
             position=2,
-            status="pending",
+            status="queued",
             cleanup_library_after_dispatch=True,
         )
         db_session.add(later_item)
@@ -492,6 +497,10 @@ class TestDispatchArchiveLifecycle:
         item = await db_session.get(PrintQueueItem, item_id)
         archive = await db_session.get(PrintArchive, archive_id)
         assert item is not None and archive is not None
+        held = await async_client.delete(f"/api/v1/queue/{item_id}")
+        assert held.status_code == 409
+        cleared = await async_client.post(f"/api/v1/queue/{item_id}/clear-plate")
+        assert cleared.status_code == 200
         response = await async_client.delete(f"/api/v1/queue/{item_id}")
         assert response.status_code == 200, response.text
         await db_session.refresh(archive)

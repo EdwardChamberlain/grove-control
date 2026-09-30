@@ -1064,6 +1064,7 @@ export default {
 
   // Queue page
   queue: {
+    awaitingPlateClear: '等待清理列印板',
     resolveDispatch: {
       prompt: "印表機尚未確認此工作。選擇前請檢查印表機：",
       printing: "正在列印",
@@ -1149,6 +1150,10 @@ export default {
     },
     // Status
     status: {
+      queued: '排隊中',
+      finished: '已完成',
+      successful: '成功',
+      unsuccessful: '未成功',
       pending: '等待中',
       scheduled: '已排程',
       waiting: '等待中',
@@ -1209,6 +1214,8 @@ export default {
     },
     // Actions
     actions: {
+      clearPlate: '清理列印板',
+      retry: '重試',
       startPrint: '開始列印',
       stopPrint: '停止列印',
       requeue: '重新佇列',

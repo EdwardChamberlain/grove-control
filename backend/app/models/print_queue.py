@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, event, func, inspect
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, event, func, inspect, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.core.database import Base
@@ -10,6 +10,19 @@ class PrintQueueItem(Base):
     """Print queue item for scheduled/queued prints."""
 
     __tablename__ = "print_queue"
+    __table_args__ = (
+        Index(
+            "uq_print_queue_holding_printer",
+            "printer_id",
+            unique=True,
+            sqlite_where=text(
+                "printer_id IS NOT NULL AND status IN ('preheating', 'dispatching', 'printing', 'paused', 'finished', 'failed', 'cancelled')"
+            ),
+            postgresql_where=text(
+                "printer_id IS NOT NULL AND status IN ('preheating', 'dispatching', 'printing', 'paused', 'finished', 'failed', 'cancelled')"
+            ),
+        ),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
 
     # Links
@@ -49,9 +62,6 @@ class PrintQueueItem(Base):
     preheat_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     preheat_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     preheat_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-
-    # Conditions
-    require_previous_success: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Power management
     auto_off_after: Mapped[bool] = mapped_column(Boolean, default=False)  # Power off printer after print
@@ -106,24 +116,15 @@ class PrintQueueItem(Base):
     # Nozzle offset calibration — dual-nozzle printers only, MQTT-gated (#1682)
     nozzle_offset_cali: Mapped[str] = mapped_column(String(8), default="auto")
 
-    # Status: pending, preheating, dispatching, printing, completed, failed, skipped, cancelled
+    # queued, active, awaiting plate clear, or final; see queue_transitions.
     # Persisted status changes go through services.queue_transitions.transition_queue_item.
-    status: Mapped[str] = mapped_column(String(20), default="pending")
+    status: Mapped[str] = mapped_column(String(20), default="queued")
 
     # Durable dispatch claim. A queue worker stamps this before slow source
     # preparation or FTP I/O so pending rows cannot be reassigned or selected
     # by another worker. The claim is cleared when the worker exits; startup
     # reconciliation clears claims left by a process restart.
     dispatching_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-
-    # Cleared by the per-printer "Resume after failure" action (#1818) so the
-    # scheduler's `_check_previous_success` lookback skips this row. Without
-    # this, a single `failed` or `aborted` print poisoned every later
-    # `require_previous_success` item on the same printer forever — the
-    # lookback excluded `skipped` but had no way to dismiss the originating
-    # failure. The flag is per-item, not per-printer, so a fresh failure
-    # after a resume re-gates downstream items independently.
-    gate_acknowledged: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Set by the dispatch scheduler when the assigned spool can't satisfy
     # this print's per-slot filament weight (#1496). Display-only flag — the

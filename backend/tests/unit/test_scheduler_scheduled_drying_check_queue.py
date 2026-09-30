@@ -33,6 +33,8 @@ def _utcnow_naive() -> datetime:
 
 def _state(dry_time=0):
     state = MagicMock()
+    state.state = "IDLE"
+    state.connected = True
     state.firmware_version = "01.09.00.00"
     state.raw_data = {"ams": [{"id": 0, "dry_time": dry_time, "dry_sf_reason": []}]}
     return state
@@ -78,7 +80,7 @@ async def _add_print_item(ctx, *, sliced_for_model="P2S"):
         await db.flush()
         db.add(
             PrintQueueItem(
-                status="pending",
+                status="queued",
                 position=1,
                 printer_id=1,
                 library_file_id=lib.id,

@@ -1078,6 +1078,7 @@ export default {
 
   // Queue page
   queue: {
+    awaitingPlateClear: 'Awaiting plate clear',
     resolveDispatch: {
       prompt: 'The printer has not confirmed this job. Check the printer before choosing:',
       printing: "It's printing",
@@ -1169,6 +1170,10 @@ export default {
     },
     // Status
     status: {
+      queued: 'Queued',
+      finished: 'Finished',
+      successful: 'Successful',
+      unsuccessful: 'Unsuccessful',
       pending: 'Pending',
       scheduled: 'Scheduled',
       waiting: 'Waiting',
@@ -1229,6 +1234,8 @@ export default {
     },
     // Actions
     actions: {
+      clearPlate: 'Clear plate',
+      retry: 'Retry',
       startPrint: 'Start Print',
       stopPrint: 'Stop Print',
       requeue: 'Re-queue',

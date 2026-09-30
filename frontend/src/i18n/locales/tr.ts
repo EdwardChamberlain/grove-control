@@ -1064,6 +1064,7 @@ export default {
 
   // Kuyruk sayfası
   queue: {
+    awaitingPlateClear: 'Tabla temizliği bekleniyor',
     resolveDispatch: {
       prompt: "Yazıcı bu işi onaylamadı. Seçmeden önce yazıcıyı kontrol edin:",
       printing: "Yazdırıyor",
@@ -1149,6 +1150,10 @@ export default {
     },
     // Durum
     status: {
+      queued: 'Kuyrukta',
+      finished: 'Bitti',
+      successful: 'Başarılı',
+      unsuccessful: 'Başarısız',
       pending: 'Beklemede',
       scheduled: 'Planlandı',
       waiting: 'Bekliyor',
@@ -1209,6 +1214,8 @@ export default {
     },
     // İşlemler
     actions: {
+      clearPlate: 'Tablayı temizle',
+      retry: 'Yeniden dene',
       startPrint: 'Baskıyı Başlat',
       stopPrint: 'Baskıyı Durdur',
       requeue: 'Yeniden Kuyrukla',

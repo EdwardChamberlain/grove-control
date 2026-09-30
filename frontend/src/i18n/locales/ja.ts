@@ -1063,6 +1063,7 @@ export default {
 
   // Queue page
   queue: {
+    awaitingPlateClear: 'プレートの清掃待ち',
     resolveDispatch: {
       prompt: "プリンターがこのジョブを確認していません。選択する前にプリンターを確認してください：",
       printing: "印刷中です",
@@ -1148,6 +1149,10 @@ export default {
     },
     // Status
     status: {
+      queued: '待機中',
+      finished: '完了',
+      successful: '成功',
+      unsuccessful: '未成功',
       pending: '待機中',
       scheduled: '予定済み',
       waiting: '待機中',
@@ -1208,6 +1213,8 @@ export default {
     },
     // Actions
     actions: {
+      clearPlate: 'プレートを清掃',
+      retry: '再試行',
       startPrint: '印刷を開始',
       stopPrint: '印刷を停止',
       requeue: '再キュー',

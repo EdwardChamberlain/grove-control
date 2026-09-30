@@ -29,7 +29,7 @@ async def sessions(tmp_path):
     await engine.dispose()
 
 
-async def make_item(sessions, status="pending", **kwargs):
+async def make_item(sessions, status="queued", **kwargs):
     async with sessions() as db:
         item = PrintQueueItem(status=status, **kwargs)
         db.add(item)
@@ -40,17 +40,11 @@ async def make_item(sessions, status="pending", **kwargs):
 @pytest.mark.parametrize(
     "path",
     [
-        ("pending", "dispatching", "printing", "completed"),
-        ("pending", "preheating", "dispatching", "dispatching", "printing", "failed"),
-        ("pending", "skipped", "pending", "cancelled"),
-        ("pending", "preheating", "pending", "preheating", "cancelled", "cancelled"),
-        ("pending", "dispatching", "pending", "failed"),
-        ("pending", "preheating", "dispatching", "failed", "pending"),
-        ("dispatching", "completed", "completed"),
-        ("dispatching", "failed"),
-        ("printing", "cancelled"),
-        ("skipped", "cancelled"),
-        ("aborted", "cancelled"),
+        ("queued", "dispatching", "printing", "finished", "successful"),
+        ("queued", "preheating", "dispatching", "printing", "paused", "printing", "failed", "unsuccessful"),
+        ("queued", "unsuccessful"),
+        ("queued", "preheating", "cancelled", "unsuccessful"),
+        ("dispatching", "failed", "unsuccessful"),
     ],
 )
 async def test_existing_workflows_keep_their_status_paths(sessions, path):
@@ -58,7 +52,17 @@ async def test_existing_workflows_keep_their_status_paths(sessions, path):
     async with sessions() as db:
         item = await db.get(PrintQueueItem, item_id)
         for before, after in zip(path, path[1:], strict=False):
-            await transition_queue_item(db, item, before, after)
+            await transition_queue_item(
+                db,
+                item,
+                before,
+                after,
+                action="cancel"
+                if before == "queued" and after == "unsuccessful"
+                else "clear_plate"
+                if before in ("finished", "failed", "cancelled")
+                else None,
+            )
             await db.commit()
             assert item.status == after
             await db.refresh(item)
@@ -68,11 +72,11 @@ async def test_existing_workflows_keep_their_status_paths(sessions, path):
 @pytest.mark.parametrize(
     ("before", "after"),
     [
-        ("completed", "pending"),
+        ("completed", "queued"),
         ("cancelled", "printing"),
-        ("pending", "printing"),
-        ("printing", "pending"),
-        ("pending", "queued"),
+        ("queued", "printing"),
+        ("printing", "queued"),
+        ("queued", "printing"),
         ("unknown", "unknown"),
     ],
 )
@@ -81,7 +85,17 @@ async def test_invalid_edges_leave_database_unchanged(sessions, before, after):
     async with sessions() as db:
         item = await db.get(PrintQueueItem, item_id)
         with pytest.raises(InvalidQueueTransition):
-            await transition_queue_item(db, item, before, after)
+            await transition_queue_item(
+                db,
+                item,
+                before,
+                after,
+                action="cancel"
+                if before == "queued" and after == "unsuccessful"
+                else "clear_plate"
+                if before in ("finished", "failed", "cancelled")
+                else None,
+            )
         await db.commit()
         await db.refresh(item)
         assert item.status == before
@@ -93,14 +107,16 @@ async def test_cancellation_wins_against_stale_dispatch_and_its_metadata(session
         stale = await worker.get(PrintQueueItem, item_id)
         await worker.commit()  # Retain the stale ORM snapshot, release the read transaction.
         current = await user.get(PrintQueueItem, item_id)
-        await transition_queue_item(user, current, "pending", "cancelled", values={"error_message": "Cancelled"})
+        await transition_queue_item(
+            user, current, "queued", "unsuccessful", action="cancel", values={"error_message": "Cancelled"}
+        )
         await user.commit()
         with pytest.raises(QueueTransitionConflict):
-            await transition_queue_item(worker, stale, "pending", "dispatching", values={"dispatch_subtask_id": "123"})
+            await transition_queue_item(worker, stale, "queued", "dispatching", values={"dispatch_subtask_id": "123"})
         await worker.rollback()
     async with sessions() as db:
         item = await db.get(PrintQueueItem, item_id)
-        assert (item.status, item.error_message, item.dispatch_subtask_id) == ("cancelled", "Cancelled", None)
+        assert (item.status, item.error_message, item.dispatch_subtask_id) == ("unsuccessful", "Cancelled", None)
 
 
 async def test_deleted_item_cannot_be_transitioned(sessions):
@@ -110,7 +126,7 @@ async def test_deleted_item_cannot_be_transitioned(sessions):
         await db.delete(item)
         await db.commit()
         with pytest.raises(QueueTransitionConflict):
-            await transition_queue_item(db, item, "pending", "failed")
+            await transition_queue_item(db, item, "queued", "dispatching")
 
 
 async def test_replaced_dispatch_claim_is_rejected_even_while_pending(sessions):
@@ -122,14 +138,14 @@ async def test_replaced_dispatch_claim_is_rejected_even_while_pending(sessions):
             await transition_queue_item(
                 db,
                 item,
-                "pending",
+                "queued",
                 "dispatching",
                 conditions=(PrintQueueItem.dispatching_at == now - timedelta(seconds=1),),
                 values={"dispatch_subtask_id": "123"},
             )
         await db.rollback()
         await db.refresh(item)
-        assert item.status == "pending"
+        assert item.status == "queued"
         assert item.dispatch_subtask_id is None
 
 
@@ -137,13 +153,13 @@ async def test_status_and_metadata_share_callers_transaction(sessions):
     item_id = await make_item(sessions)
     async with sessions() as db:
         item = await db.get(PrintQueueItem, item_id)
-        await transition_queue_item(db, item, "pending", "failed", values={"error_message": "Upload failed"})
+        await transition_queue_item(db, item, "queued", "dispatching", values={"error_message": "Upload failed"})
         item.completed_at = datetime.now()
         await db.flush()
         # Writer must not have committed independently.
         await db.rollback()
         await db.refresh(item)
-        assert (item.status, item.error_message, item.completed_at) == ("pending", None, None)
+        assert (item.status, item.error_message, item.completed_at) == ("queued", None, None)
 
 
 async def test_flush_does_not_emit_an_unconditional_status_write(sessions):
@@ -159,7 +175,7 @@ async def test_flush_does_not_emit_an_unconditional_status_write(sessions):
 
         event.listen(engine, "before_cursor_execute", capture)
         try:
-            await transition_queue_item(db, item, "pending", "failed")
+            await transition_queue_item(db, item, "queued", "dispatching")
             item.error_message = "Upload failed"
             await db.commit()
         finally:
@@ -180,7 +196,7 @@ async def test_direct_status_write_is_rejected_without_calling_helper(sessions, 
         with pytest.raises(InvalidQueueTransition, match="only be changed"):
             item.status = "printing"
         await db.rollback()
-        assert await db.scalar(select(PrintQueueItem.status).where(PrintQueueItem.id == item_id)) == "pending"
+        assert await db.scalar(select(PrintQueueItem.status).where(PrintQueueItem.id == item_id)) == "queued"
 
 
 async def test_late_scheduler_failure_cannot_overwrite_cancel_or_power_off(sessions):
@@ -196,7 +212,7 @@ async def test_late_scheduler_failure_cannot_overwrite_cancel_or_power_off(sessi
         stale = await worker.get(PrintQueueItem, item_id)
         await worker.commit()
         current = await user.get(PrintQueueItem, item_id)
-        await transition_queue_item(user, current, "pending", "cancelled")
+        await transition_queue_item(user, current, "queued", "unsuccessful", action="cancel")
         await user.commit()
         with (
             patch("backend.app.services.print_scheduler.printer_manager.is_connected", return_value=False),
@@ -207,7 +223,7 @@ async def test_late_scheduler_failure_cannot_overwrite_cancel_or_power_off(sessi
         await worker.rollback()
     power_off.assert_not_awaited()
     async with sessions() as db:
-        assert await db.scalar(select(PrintQueueItem.status).where(PrintQueueItem.id == item_id)) == "cancelled"
+        assert await db.scalar(select(PrintQueueItem.status).where(PrintQueueItem.id == item_id)) == "unsuccessful"
 
 
 async def test_stop_winning_confirmation_race_does_not_publish_job_started(sessions):
@@ -254,7 +270,9 @@ async def test_conflict_does_not_autoflush_dirty_metadata(sessions):
         stale = await worker.get(PrintQueueItem, item_id)
         await worker.commit()
         current = await user.get(PrintQueueItem, item_id)
-        await transition_queue_item(user, current, "pending", "cancelled", values={"error_message": "Stopped by user"})
+        await transition_queue_item(
+            user, current, "queued", "unsuccessful", action="cancel", values={"error_message": "Stopped by user"}
+        )
         await user.commit()
         stale.error_message = "Stale upload failure"
 
@@ -266,7 +284,7 @@ async def test_conflict_does_not_autoflush_dirty_metadata(sessions):
         event.listen(engine, "before_cursor_execute", capture)
         try:
             with pytest.raises(QueueTransitionConflict):
-                await transition_queue_item(worker, stale, "pending", "failed")
+                await transition_queue_item(worker, stale, "queued", "dispatching")
         finally:
             event.remove(engine, "before_cursor_execute", capture)
             await worker.rollback()
@@ -276,7 +294,7 @@ async def test_conflict_does_not_autoflush_dirty_metadata(sessions):
         assert "print_queue.status =" in statements[0].split(" WHERE ")[1]
     async with sessions() as db:
         item = await db.get(PrintQueueItem, item_id)
-        assert (item.status, item.error_message) == ("cancelled", "Stopped by user")
+        assert (item.status, item.error_message) == ("unsuccessful", "Stopped by user")
 
 
 async def test_drying_reservation_release_cannot_overwrite_cancellation(sessions):
@@ -379,26 +397,3 @@ async def test_heat_soak_dispatch_that_loses_a_race_still_turns_heaters_off(sess
         printer = await db.get(Printer, printer_id)
         assert (item.status, item.manual_start, item.preheat_owner) == ("cancelled", True, None)
         assert printer.heat_soak_shutdown_pending
-
-
-async def test_resume_restores_every_item_that_is_still_skipped(sessions):
-    from backend.app.api.routes.print_queue import resume_queue_after_failure
-
-    async with sessions() as db:
-        printer = Printer(name="Printer", ip_address="127.0.0.1", serial_number="RESUME", access_code="code")
-        db.add(printer)
-        await db.commit()
-        printer_id = printer.id
-    gate = {"printer_id": printer_id, "error_message": "Previous print failed or was aborted"}
-    raced = await make_item(sessions, "skipped", **gate)
-    other = await make_item(sessions, "skipped", **gate)
-
-    async with sessions() as db:
-        with _cancel_after_first_select(sessions, db, raced, marker="print_queue.error_message ="):
-            response = await resume_queue_after_failure(printer_id, db=db, _=None)
-
-    assert response == {"acknowledged": 0, "restored": 1}
-    async with sessions() as db:
-        items = {item.id: item for item in (await db.scalars(select(PrintQueueItem))).all()}
-    assert items[raced].status == "cancelled"
-    assert (items[other].status, items[other].error_message) == ("pending", None)

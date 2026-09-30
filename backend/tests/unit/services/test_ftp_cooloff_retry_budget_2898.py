@@ -311,7 +311,7 @@ async def dispatch_case(tmp_path):
         )
         db.add(archive)
         await db.flush()
-        item = PrintQueueItem(printer_id=printer.id, archive_id=archive.id, status="pending")
+        item = PrintQueueItem(printer_id=printer.id, archive_id=archive.id, status="queued")
         db.add(item)
         await db.commit()
         item_id = item.id
@@ -344,7 +344,11 @@ async def _failed_dispatch_message(dispatch_case, *, handshake_fails: bool) -> s
         patches = [
             patch.object(scheduler_module.settings, "base_dir", dispatch_case.base_dir),
             patch("backend.app.services.print_scheduler.printer_manager.is_connected", MagicMock(return_value=True)),
-            patch("backend.app.services.print_scheduler.printer_manager.get_status", MagicMock(return_value=None)),
+            patch(
+                "backend.app.services.print_scheduler.printer_manager.get_status",
+                MagicMock(return_value=SimpleNamespace(state="IDLE", connected=True, raw_data={})),
+            ),
+            patch("backend.app.services.print_scheduler.printer_manager.is_awaiting_plate_clear", return_value=False),
             patch(
                 "backend.app.services.print_scheduler.get_ftp_retry_settings",
                 AsyncMock(return_value=(False, 0, 0, 1.0)),

@@ -28,7 +28,7 @@ async def db_session():
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
 
     async with session_maker() as db:
-        db.add(PrintQueueItem(id=1, printer_id=42, archive_id=99, status="pending"))
+        db.add(PrintQueueItem(id=1, printer_id=42, archive_id=99, status="queued"))
         await db.commit()
 
     try:
@@ -331,7 +331,7 @@ class TestDurableDispatchingState:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("printer_state", "expected_status"),
-        [("FINISH", "completed"), ("FAILED", "failed")],
+        [("FINISH", "finished"), ("FAILED", "failed")],
     )
     async def test_restart_recovery_completes_matching_terminal_dispatch_instead_of_requeueing(
         self, db_session, printer_state, expected_status
@@ -373,7 +373,7 @@ class TestDurableDispatchingState:
             complete.assert_awaited_once_with(
                 42,
                 {
-                    "status": expected_status,
+                    "status": "completed" if expected_status == "finished" else expected_status,
                     "filename": "completed-while-down.3mf",
                     "subtask_name": "",
                     "subtask_id": "12345",
@@ -429,7 +429,6 @@ class TestDispatchConfirmationScheduling:
             scheduled_time=None,
             manual_start=False,
             force_color_match=None,
-            require_previous_success=False,
             ams_mapping="[]",
             filament_overrides=None,
             waiting_reason=None,

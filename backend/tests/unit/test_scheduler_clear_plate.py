@@ -66,177 +66,70 @@ class TestPrinterManagerPlateCleared:
         assert manager.get_awaiting_plate_clear_archive_id(1) is None
 
 
-class TestAwaitingPlateClearPersistence:
-    """Verify the awaiting-plate-clear flag round-trips through the DB (#961)."""
+class TestAwaitingPlateClearProjection:
+    """Restart reads durable jobs; view setters cannot create database holds."""
 
-    @pytest.mark.asyncio
-    async def test_load_rehydrates_in_memory_set_from_db(self):
-        """Printers flagged in DB must re-appear in the in-memory set on startup."""
-        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+    @pytest.fixture
+    async def projection_db(self):
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-        # Ensure all models are imported so Base.metadata includes them
         import backend.app.models  # noqa: F401
         from backend.app.core.database import Base
         from backend.app.models.printer import Printer
 
-        engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-        # Seed: two printers, one flagged awaiting, one not
-        async with session_maker() as db:
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessions() as db:
             db.add_all(
                 [
-                    Printer(
-                        id=1,
-                        name="P1",
-                        serial_number="S1",
-                        ip_address="1.1.1.1",
-                        access_code="x",
-                        awaiting_plate_clear=True,
-                        awaiting_plate_clear_archive_id=17,
-                    ),
+                    Printer(id=1, name="P1", serial_number="S1", ip_address="1.1.1.1", access_code="x"),
                     Printer(
                         id=2,
                         name="P2",
                         serial_number="S2",
                         ip_address="2.2.2.2",
                         access_code="y",
-                        awaiting_plate_clear=False,
+                        awaiting_plate_clear=True,
                     ),
                 ]
             )
             await db.commit()
+        yield sessions
+        await engine.dispose()
 
-        # Point the manager's session factory at our in-memory DB and load
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status", ["finished", "failed", "cancelled"])
+    async def test_restart_projects_exact_holding_job(self, projection_db, status):
+        from backend.app.models.archive import PrintArchive
+        from backend.app.models.print_queue import PrintQueueItem
+
+        async with projection_db() as db:
+            archive = PrintArchive(printer_id=1, filename="job.3mf", file_path="job.3mf", file_size=1)
+            db.add(archive)
+            await db.flush()
+            archive_id = archive.id
+            db.add(PrintQueueItem(printer_id=1, archive_id=archive_id, status=status))
+            await db.commit()
         manager = PrinterManager()
-        with patch("backend.app.core.database.async_session", session_maker):
+        with patch("backend.app.core.database.async_session", projection_db):
             await manager.load_awaiting_plate_clear_from_db()
-
-        assert manager.is_awaiting_plate_clear(1) is True
-        assert manager.is_awaiting_plate_clear(2) is False
-        assert manager.get_awaiting_plate_clear_archive_id(1) == 17
-        assert manager.get_awaiting_plate_clear_archive_id(2) is None
-        await engine.dispose()
+        assert manager.is_awaiting_plate_clear(1)
+        assert manager.get_awaiting_plate_clear_archive_id(1) == archive_id
+        assert not manager.is_awaiting_plate_clear(2)  # Legacy flag alone has no authority.
 
     @pytest.mark.asyncio
-    async def test_persist_writes_flag_to_db(self):
-        """set_awaiting_plate_clear + _persist writes the flag to the DB row."""
-        from sqlalchemy import select
-        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-        import backend.app.models  # noqa: F401
-        from backend.app.core.database import Base
+    async def test_view_setters_do_not_persist_independent_flags(self, projection_db):
         from backend.app.models.printer import Printer
-
-        engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-        async with session_maker() as db:
-            db.add(
-                Printer(
-                    id=1,
-                    name="P1",
-                    serial_number="S1",
-                    ip_address="1.1.1.1",
-                    access_code="x",
-                    awaiting_plate_clear=False,
-                    awaiting_plate_clear_archive_id=99,
-                )
-            )
-            await db.commit()
 
         manager = PrinterManager()
         manager.set_awaiting_plate_clear(1, True)
-        with patch("backend.app.core.database.async_session", session_maker):
-            await manager._persist_awaiting_plate_clear(1, True)
-
-        async with session_maker() as db:
-            row = (await db.execute(select(Printer).where(Printer.id == 1))).scalar_one()
-            assert row.awaiting_plate_clear is True
-            assert row.awaiting_plate_clear_archive_id is None
-
-        manager.set_awaiting_plate_clear(1, False)
-        with patch("backend.app.core.database.async_session", session_maker):
-            await manager._persist_awaiting_plate_clear(1, False)
-
-        async with session_maker() as db:
-            row = (await db.execute(select(Printer).where(Printer.id == 1))).scalar_one()
-            assert row.awaiting_plate_clear is False
-
-        await engine.dispose()
-
-    @pytest.mark.asyncio
-    async def test_persist_missing_printer_does_not_raise(self):
-        """Persisting for a non-existent printer should be a silent no-op."""
-        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-        import backend.app.models  # noqa: F401
-        from backend.app.core.database import Base
-
-        engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-        manager = PrinterManager()
-        manager.set_awaiting_plate_clear(999, True)
-        with patch("backend.app.core.database.async_session", session_maker):
-            # Should not raise even though printer 999 does not exist
-            await manager._persist_awaiting_plate_clear(999, True)
-
-        await engine.dispose()
-
-    @pytest.mark.asyncio
-    async def test_persist_archive_id_writes_to_db(self):
-        """The exact archive identity must survive a backend restart."""
-        from sqlalchemy import select
-        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-        import backend.app.models  # noqa: F401
-        from backend.app.core.database import Base
-        from backend.app.models.printer import Printer
-
-        engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-        async with session_maker() as db:
-            db.add(
-                Printer(
-                    id=1,
-                    name="P1",
-                    serial_number="S1",
-                    ip_address="1.1.1.1",
-                    access_code="x",
-                    awaiting_plate_clear=True,
-                )
-            )
-            await db.commit()
-
-        manager = PrinterManager()
-        manager.set_awaiting_plate_clear(1, True)
-        manager.set_awaiting_plate_clear_archive_id(1, 17)
-        with patch("backend.app.core.database.async_session", session_maker):
-            await manager._persist_awaiting_plate_clear_archive_id(1, 17)
-
-        async with session_maker() as db:
-            row = (await db.execute(select(Printer).where(Printer.id == 1))).scalar_one()
-            assert row.awaiting_plate_clear_archive_id == 17
-
-        manager.set_awaiting_plate_clear_archive_id(1, None)
-        with patch("backend.app.core.database.async_session", session_maker):
-            await manager._persist_awaiting_plate_clear_archive_id(1, None)
-
-        async with session_maker() as db:
-            row = (await db.execute(select(Printer).where(Printer.id == 1))).scalar_one()
-            assert row.awaiting_plate_clear_archive_id is None
-
-        await engine.dispose()
+        manager.set_awaiting_plate_clear_archive_id(1, 99)
+        async with projection_db() as db:
+            printer = await db.get(Printer, 1)
+            assert not printer.awaiting_plate_clear
+            assert printer.awaiting_plate_clear_archive_id is None
 
 
 class TestSchedulerIdleCheckWithPlateCleared:

@@ -12,9 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services.queue_transitions import transition_queue_item
-
-ACTIVE_STATUSES = ("preheating", "dispatching", "printing")
+from backend.app.services.queue_transitions import ACTIVE_STATUSES, HOLDING_STATUSES, transition_queue_item
 
 
 def normalize_id(value) -> str | None:
@@ -130,7 +128,7 @@ async def observe_print(db: AsyncSession, printer_id: int, identity: str | None)
         select(PrintQueueItem.id)
         .where(
             PrintQueueItem.printer_id == printer_id,
-            PrintQueueItem.status.in_(ACTIVE_STATUSES),
+            PrintQueueItem.status.in_(HOLDING_STATUSES),
         )
         .limit(1)
     )
@@ -141,7 +139,7 @@ async def observe_print(db: AsyncSession, printer_id: int, identity: str | None)
         .where(
             PrintQueueItem.printer_id == printer_id,
             PrintQueueItem.dispatch_subtask_id == identity,
-            PrintQueueItem.status.in_(("completed", "failed", "cancelled")),
+            PrintQueueItem.status.in_(("finished", "failed", "cancelled", "successful", "unsuccessful")),
         )
         .limit(1)
     )

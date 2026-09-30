@@ -300,6 +300,7 @@ async def init_db():
         # table-rebuild migration has completed. This is a narrow, idempotent
         # safety net for interrupted upgrades and restored databases.
         await ensure_queue_insert_schema(conn)
+        await _migrate_queue_lifecycle(conn)
 
     # Re-encrypt any legacy plaintext OIDC client_secret / TOTP secret rows
     # that exist from before the encryption key was configured.
@@ -622,7 +623,6 @@ _QUEUE_INSERT_COLUMN_DEFINITIONS: dict[str, tuple[str, str]] = {
     "preheat_checked_at": ("DATETIME", "TIMESTAMP"),
     "preheat_started_at": ("DATETIME", "TIMESTAMP"),
     "wait_for_drying_complete": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
-    "require_previous_success": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
     "auto_off_after": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
     "ams_mapping": ("TEXT", "TEXT"),
     "filament_overrides": ("TEXT", "TEXT"),
@@ -645,9 +645,8 @@ _QUEUE_INSERT_COLUMN_DEFINITIONS: dict[str, tuple[str, str]] = {
     "use_ams": ("BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT true"),
     "nozzle_offset_cali": ("VARCHAR(8) DEFAULT 'auto'", "VARCHAR(8) DEFAULT 'auto'"),
     # Lifecycle / audit fields
-    "status": ("VARCHAR(20) DEFAULT 'pending'", "VARCHAR(20) DEFAULT 'pending'"),
+    "status": ("VARCHAR(20) DEFAULT 'queued'", "VARCHAR(20) DEFAULT 'queued'"),
     "dispatching_at": ("DATETIME", "TIMESTAMP"),
-    "gate_acknowledged": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
     "dispatched_at": ("DATETIME", "TIMESTAMP"),
     "dispatch_subtask_id": ("VARCHAR(32)", "VARCHAR(32)"),
     "started_at": ("DATETIME", "TIMESTAMP"),
@@ -981,64 +980,134 @@ async def _migrate_widen_spoolman_slot_ams_id_range(conn) -> None:
         raise
 
 
-async def _ensure_active_queue_printer_reservation(conn) -> None:
-    """Repair old duplicate active rows, then enforce one active row per printer.
-
-    This must run after the queue table exists but before the partial unique
-    index is created. Older releases could leave multiple optimistic
-    ``printing`` rows for a printer; failing startup on those databases would
-    turn a safety migration into an outage. Keep the most credible active row
-    (confirmed printing before dispatching, then the newest timestamp) and
-    fail the rest closed so they require an intentional retry instead of
-    risking a second physical print.
-    """
+async def _ensure_holding_queue_index(conn) -> None:
     from sqlalchemy import text
 
-    recovery_message = (
-        "Recovered duplicate active queue reservation during startup; manual retry required to avoid a duplicate print."
+    from backend.app.services.queue_transitions import HOLDING_STATUSES
+
+    await conn.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_print_queue_holding_printer ON print_queue (printer_id) "
+            "WHERE printer_id IS NOT NULL AND status IN ("
+            + ", ".join(f"'{status}'" for status in HOLDING_STATUSES)
+            + ")"
+        )
     )
-    from sqlalchemy import func
 
-    from backend.app.services.queue_transitions import transition_queue_item
 
-    async with conn.begin_nested():
-        result = await conn.execute(
-            text(
-                "WITH ranked_active_queue AS ("
-                " SELECT id, status, ROW_NUMBER() OVER ("
-                "   PARTITION BY printer_id"
-                "   ORDER BY CASE status WHEN 'printing' THEN 0 WHEN 'dispatching' THEN 1 ELSE 2 END,"
-                "            COALESCE(started_at, dispatched_at, created_at) DESC, id DESC"
-                " ) AS reservation_rank"
-                " FROM print_queue"
-                " WHERE printer_id IS NOT NULL AND status IN ('preheating', 'dispatching', 'printing')"
-                ") SELECT id, status FROM ranked_active_queue WHERE reservation_rank > 1"
+async def _migrate_queue_lifecycle(conn) -> None:
+    """Upgrade legacy jobs once, retaining an actionable job for every plate hold."""
+    from sqlalchemy import select, text
+
+    from backend.app.models.archive import PrintArchive
+    from backend.app.models.print_queue import PrintQueueItem
+    from backend.app.models.printer import Printer
+    from backend.app.models.settings import Settings
+    from backend.app.services.queue_transitions import ACTIVE_STATUSES, HOLDING_STATUSES, transition_queue_item
+
+    version_key = "queue_lifecycle_version"
+    version = await conn.scalar(select(Settings.value).where(Settings.key == version_key))
+    if version == "3":
+        await _ensure_holding_queue_index(conn)
+        return
+    # Serialize concurrent upgraders, and recheck after obtaining the write lock.
+    if conn.dialect.name == "postgresql":
+        await conn.execute(text("LOCK TABLE print_queue IN SHARE ROW EXCLUSIVE MODE"))
+    await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value=Settings.value))
+    version = await conn.scalar(select(Settings.value).where(Settings.key == version_key))
+    if version == "3":
+        await _ensure_holding_queue_index(conn)
+        return
+    for name in (
+        "uq_print_queue_active_printer",
+        "uq_print_queue_active_printer_heat_soak",
+        "uq_print_queue_holding_printer",
+    ):
+        await conn.execute(text(f"DROP INDEX IF EXISTS {name}"))
+
+    jobs = (await conn.execute(select(PrintQueueItem.__table__).order_by(PrintQueueItem.id))).mappings().all()
+    printers = (
+        await conn.execute(select(Printer.id, Printer.awaiting_plate_clear, Printer.awaiting_plate_clear_archive_id))
+    ).all()
+    archive_jobs = dict((await conn.execute(select(PrintArchive.id, PrintArchive.dispatched_queue_item_id))).all())
+    holders = {}
+    for row in jobs:
+        if row["printer_id"] is not None and row["status"] in ACTIVE_STATUSES:
+            old = holders.get(row["printer_id"])
+            rank = (row["status"] in ("printing", "paused"), row["status"] == "dispatching", row["id"])
+            if old is None or rank > old[0]:
+                holders[row["printer_id"]] = (rank, row["id"])
+    selected = {pid: entry[1] for pid, entry in holders.items()}
+    synthetic = []
+    for printer_id, awaiting, archive_id in printers:
+        if not awaiting or printer_id in selected:
+            continue
+        candidates = [
+            row
+            for row in jobs
+            if row["printer_id"] == printer_id
+            and row["status"] in ("completed", "failed", "cancelled", "aborted")
+            and archive_id is not None
+            and row["archive_id"] == archive_id
+        ]
+        linked_id = archive_jobs.get(archive_id)
+        if linked_id is not None:
+            candidates = [row for row in candidates if row["id"] == linked_id]
+        if len(candidates) == 1:
+            selected[printer_id] = candidates[0]["id"]
+        else:
+            synthetic.append((printer_id, archive_id))
+
+    for row in jobs:
+        old = row["status"]
+        held = selected.get(row["printer_id"]) == row["id"]
+        if old in ("pending", "skipped"):
+            new = "queued"
+        elif old == "completed":
+            new = "finished" if held else "successful"
+        elif old in ("failed", "cancelled", "aborted"):
+            new = ("cancelled" if old == "aborted" else old) if held else "unsuccessful"
+        elif old in ACTIVE_STATUSES and not held:
+            new = "unsuccessful"
+        else:
+            continue
+        if new != old:
+            values = {"waiting_reason": None}
+            if new == "queued":
+                values.update(error_message=None, completed_at=None, dispatching_at=None)
+            elif old in ACTIVE_STATUSES and not held:
+                values["error_message"] = "Duplicate legacy printer reservation released during upgrade"
+            await transition_queue_item(conn, row["id"], old, new, migration=True, values=values)
+    for printer_id, archive_id in synthetic:
+        await conn.execute(
+            PrintQueueItem.__table__.insert().values(
+                printer_id=printer_id,
+                archive_id=archive_id if archive_id in archive_jobs else None,
+                status="finished",
+                error_message="Legacy plate hold; inspect and clear the plate",
             )
         )
-        duplicates = result.all()
-        for row in duplicates:
-            await transition_queue_item(
-                conn,
-                row.id,
-                row.status,
-                "failed",
-                values={
-                    "dispatched_at": None,
-                    "started_at": None,
-                    "completed_at": func.current_timestamp(),
-                    "error_message": recovery_message,
-                },
-            )
-    if duplicates:
-        logger.warning("Recovered %d duplicate active print_queue reservation(s)", len(duplicates))
-
-    # A new name upgrades the old predicate without dropping the existing guard.
-    await _safe_execute(
-        conn,
-        "CREATE UNIQUE INDEX IF NOT EXISTS uq_print_queue_active_printer_heat_soak "
-        "ON print_queue (printer_id) "
-        "WHERE printer_id IS NOT NULL AND status IN ('preheating', 'dispatching', 'printing')",
+    # The old flags remain as unused upgrade columns. Runtime views use jobs.
+    await conn.execute(
+        Printer.__table__.update().values(awaiting_plate_clear=False, awaiting_plate_clear_archive_id=None)
     )
+    await conn.execute(
+        text(
+            "CREATE UNIQUE INDEX uq_print_queue_holding_printer ON print_queue (printer_id) "
+            "WHERE printer_id IS NOT NULL AND status IN ("
+            + ", ".join(f"'{status}'" for status in HOLDING_STATUSES)
+            + ")"
+        )
+    )
+    if version is None:
+        await conn.execute(Settings.__table__.insert().values(key=version_key, value="3"))
+    else:
+        await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value="3"))
+
+
+async def _ensure_active_queue_printer_reservation(conn) -> None:
+    # Compatibility for callers of the old migration helper.
+    await _migrate_queue_lifecycle(conn)
 
 
 async def run_migrations(conn):
@@ -1352,8 +1421,6 @@ async def run_migrations(conn):
 
     timestamp_type = "DATETIME" if is_sqlite() else "TIMESTAMP"
     await _safe_execute(conn, f"ALTER TABLE printers ADD COLUMN heat_soak_shutdown_at {timestamp_type}")
-
-    await _ensure_active_queue_printer_reservation(conn)
 
     # Migration: Add wiki_url column to maintenance_types for documentation links
     await _safe_execute(conn, "ALTER TABLE maintenance_types ADD COLUMN wiki_url VARCHAR(500)")
@@ -2486,55 +2553,6 @@ async def run_migrations(conn):
             "  ))"
         )
     )
-
-    # Migration: Recover queue items that got stuck in `skipped` because of
-    # the cancellation-cascade bug (#1667). Pre-fix, the scheduler's
-    # `_check_previous_success` lookback excluded `cancelled` but included
-    # `skipped`, so a single user-cancelled print poisoned every downstream
-    # item with `require_previous_success=True` indefinitely. The reporter saw
-    # 18 items blocked over 3 days from one cancellation.
-    #
-    # Conservative reversal: ONLY reset rows whose immediate predecessor on
-    # the same printer (by completed_at desc, excluding the skipped-bug
-    # cascade) was `cancelled`. Skipped items whose true predecessor was a
-    # real `failed` or `aborted` print stay skipped — those were legitimate.
-    # Genuine failure-skips share the same status + error_message + completed_at
-    # fingerprint as bug-skips, so the predecessor check is what distinguishes
-    # them. Idempotent (post-reset rows no longer match the WHERE clause).
-    #
-    # Correlated subquery is portable across SQLite and Postgres. The
-    # `error_message` literal matches the exact string the buggy scheduler
-    # wrote — narrowing further on intent.
-    stuck_skipped_result = await conn.execute(
-        text(
-            "SELECT pq.id, pq.printer_id "
-            "FROM print_queue pq "
-            "WHERE pq.status = 'skipped' "
-            "  AND pq.error_message = 'Previous print failed or was aborted' "
-            "  AND pq.completed_at IS NOT NULL "
-            "  AND ("
-            "    SELECT prev.status FROM print_queue prev "
-            "    WHERE prev.printer_id = pq.printer_id "
-            "      AND prev.id != pq.id "
-            "      AND prev.status IN ('completed', 'failed', 'cancelled', 'aborted') "
-            "      AND prev.completed_at IS NOT NULL "
-            "      AND prev.completed_at < pq.completed_at "
-            "    ORDER BY prev.completed_at DESC LIMIT 1"
-            "  ) = 'cancelled'"
-        )
-    )
-    stuck_ids = [row.id for row in stuck_skipped_result.fetchall()]
-    if stuck_ids:
-        logger.info(
-            "Queue cancellation-cascade migration (#1667): resetting %d skipped item(s) to pending",
-            len(stuck_ids),
-        )
-        from backend.app.services.queue_transitions import transition_queue_item
-
-        for item_id in stuck_ids:
-            await transition_queue_item(
-                conn, item_id, "skipped", "pending", values={"error_message": None, "completed_at": None}
-            )
 
     # Migration: Unify `LibraryFile.file_type` across ingest paths (#1600).
     # Pre-#1600, only the external-folder scan path stored `gcode.3mf` for

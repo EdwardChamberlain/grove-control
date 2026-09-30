@@ -4,6 +4,12 @@
 
 ### Added
 
+- The live Queue now keeps finished, failed, and cancelled attempts visible
+  until Clear Plate. Retry creates a new job without releasing the original
+  printer hold; failed attempts hold even with confirmation disabled.
+  Queue History, Resume after failure, and Require previous success are removed.
+  See [the lifecycle and upgrade guide](docs/queue-status-transitions.md).
+
 - Queue jobs now match printer events by submission ID. External prints appear
   as jobs, and startup checks include already-printing jobs.
 - Unconfirmed dispatches show **It's printing** and **It didn't start** actions
@@ -17,7 +23,7 @@
 - Archive artifacts and pending virtual-printer uploads can be saved to Files.
   Slicing an Archive artifact also saves the result in Files.
 - Direct Queue uploads use hidden, temporary sources. They do not appear in
-  Files and are retained while queued, skipped, or retryable work needs them.
+  Files and are retained while queued, active, or awaiting plate clear work needs them.
   Abandoned uploads are closed after 24 hours.
 - Dispatch Archives link to their exact queue items through a nullable, unique
   database foreign key. Deleting a queue item clears the link and keeps the
@@ -53,7 +59,11 @@
 
 ### Upgrade notes
 
-- Queue transition centralization requires no schema migration or manual action.
+- Stage 3 migrates Queue statuses once at startup and adds a unique printer
+  reservation across every active and awaiting-plate-clear state. Existing
+  plate holds remain actionable; unidentifiable legacy holds become external
+  jobs. Back up the database before upgrading. Queued jobs targeting a deleted
+  printer remain available to retarget.
 
 - The nullable Archive-to-queue link and unique index are added automatically
   at startup. Existing Archive rows keep a NULL link; no released database has

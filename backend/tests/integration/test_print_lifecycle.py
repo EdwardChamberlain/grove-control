@@ -88,6 +88,7 @@ class TestPlateClearGate:
             patch.object(main, "async_session", sessions),
             patch("backend.app.core.database.async_session", sessions),
             patch.object(main, "printer_manager", manager),
+            patch("backend.app.services.printer_manager.printer_manager", manager),
             patch.object(main, "ws_manager", AsyncMock()),
             patch.object(main, "mqtt_relay", AsyncMock()),
             patch.object(main, "spawn_background_task", discard_background),
@@ -100,7 +101,9 @@ class TestPlateClearGate:
     async def test_plate_clear_gate_raised_for_every_terminal_status(self, status, completion, db_session):
         await completion.complete(completion.printer.id, {"subtask_id": "123", "status": status})
         await db_session.refresh(completion.item)
-        assert completion.item.status == ("cancelled" if status == "aborted" else status)
+        assert completion.item.status == (
+            "cancelled" if status == "aborted" else "finished" if status == "completed" else status
+        )
         completion.manager.set_awaiting_plate_clear.assert_any_call(completion.printer.id, True)
 
     async def test_plate_clear_gate_not_raised_for_unknown_status(self, completion, db_session):
@@ -130,7 +133,7 @@ class TestPlateClearGate:
         await completion.complete(completion.printer.id, {"subtask_id": "legacy", "status": "completed"})
         await db_session.refresh(archive)
         job = await db_session.get(PrintQueueItem, archive.dispatched_queue_item_id)
-        assert job.status == "completed"
+        assert job.status == "finished"
         assert job.archive_id == archive.id
         assert job.dispatch_subtask_id == "legacy"
         assert archive.status == "completed"

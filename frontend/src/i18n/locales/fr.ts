@@ -1064,6 +1064,7 @@ export default {
 
   // Queue page
   queue: {
+    awaitingPlateClear: 'En attente du nettoyage du plateau',
     resolveDispatch: {
       prompt: "L’imprimante n’a pas confirmé ce travail. Vérifiez l’imprimante avant de choisir :",
       printing: "L’impression est en cours",
@@ -1149,6 +1150,10 @@ export default {
     },
     // Status
     status: {
+      queued: 'En attente',
+      finished: 'Terminé',
+      successful: 'Réussi',
+      unsuccessful: 'Non réussi',
       pending: 'En attente',
       scheduled: 'Planifiée',
       waiting: 'En attente',
@@ -1209,6 +1214,8 @@ export default {
     },
     // Actions
     actions: {
+      clearPlate: 'Nettoyer le plateau',
+      retry: 'Réessayer',
       startPrint: 'Démarrer',
       stopPrint: 'Arrêter',
       requeue: 'Remettre en file',

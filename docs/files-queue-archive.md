@@ -13,7 +13,7 @@ prints. Automatic Files purging excludes temporary Queue-only uploads.
 
 An upload made directly into the Queue is stored as a hidden Queue-only source.
 It is available to queue items during setup and remains available while an
-active, skipped, or retryable failed item still needs its bytes. Once intake is
+queued, active, or awaiting-plate-clear job still needs its bytes. Once intake is
 closed and no queue item needs the source, Grove Control removes it. A startup
 sweep closes abandoned uploads after 24 hours; items already using the source
 keep it safe.
@@ -35,3 +35,6 @@ unchanged.
 
 Use **Save to Files** on an Archive or a virtual-printer upload when the file
 should become a persistent, operator-managed library file.
+
+For Cancel, Stop, Clear Plate, Retry, and the one-time upgrade, see the
+[Queue job lifecycle](queue-status-transitions.md).

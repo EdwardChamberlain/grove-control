@@ -1320,7 +1320,7 @@ async def _track_from_3mf(
                 queue_result = await db.execute(
                     select(PrintQueueItem)
                     .where(PrintQueueItem.archive_id == archive_id)
-                    .where(PrintQueueItem.status.in_(["printing", "completed", "failed"]))
+                    .where(PrintQueueItem.status.in_(["printing", "paused", "finished", "successful", "failed"]))
                 )
                 _queue_item_lookup.append(queue_result.scalars().first())
         return _queue_item_lookup[0]

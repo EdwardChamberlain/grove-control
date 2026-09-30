@@ -121,7 +121,7 @@ class TestSchedulingFromSetAwaitingPlateClear:
             manager.set_awaiting_plate_clear(7, True)
 
         # Two coroutines: persist + broadcast. Order doesn't matter.
-        assert scheduled.call_count == 2
+        assert scheduled.call_count == 1
 
     def test_does_not_schedule_when_no_loop_attached(self, manager):
         """Sync unit-test path (no loop attached): nothing must be
@@ -161,7 +161,7 @@ class TestSchedulingFromSetAwaitingPlateClear:
             manager.set_awaiting_plate_clear(7, False)
 
         # Each flip = persist + broadcast = 2 calls.
-        assert scheduled.call_count == 2
+        assert scheduled.call_count == 1
 
 
 class TestBroadcastStatusChange:
@@ -270,9 +270,6 @@ class TestEndToEndUnderRunningLoop:
                 "backend.app.core.websocket.ws_manager.send_printer_status",
                 new_callable=AsyncMock,
             ) as send_status,
-            # Persistence path opens a DB session; stub it out so this
-            # stays a pure unit test.
-            patch.object(manager, "_persist_awaiting_plate_clear", new_callable=AsyncMock),
         ):
             manager.set_awaiting_plate_clear(7, False)
             # Yield repeatedly so run_coroutine_threadsafe has a chance

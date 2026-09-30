@@ -77,7 +77,7 @@ async def _add_item(ctx, *, printer_id=None, target_model=None):
         db.add(lib)
         await db.flush()
         item = PrintQueueItem(
-            status="pending",
+            status="queued",
             position=1,
             printer_id=printer_id,
             target_model=target_model,
@@ -144,7 +144,7 @@ class TestFixedPrinter:
 
         launched.assert_not_called()
         item = await _get_item(queue_db, item_id)
-        assert item.status == "pending"
+        assert item.status == "queued"
         assert item.waiting_reason == "Waiting on Enclosure Door"
 
     @pytest.mark.asyncio
@@ -156,7 +156,7 @@ class TestFixedPrinter:
         await _run(queue_db, PrintScheduler(), {1: "Enclosure Door"}, MagicMock())
 
         item = await _get_item(queue_db, item_id)
-        assert item.status == "pending"
+        assert item.status == "queued"
         assert item.error_message is None
         assert item.completed_at is None
 
@@ -309,5 +309,5 @@ class TestModelBased:
 
         launched.assert_not_called()
         item = await _get_item(queue_db, item_id)
-        assert item.status == "pending"
+        assert item.status == "queued"
         assert item.printer_id is None

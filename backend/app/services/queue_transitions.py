@@ -1,8 +1,7 @@
-"""The single writer for existing queue-item statuses (issue #194, stage 1).
+"""The single conditional writer for the print job lifecycle (#194).
 
-This deliberately describes today's lifecycle, including returns to pending.
-Callers still own transactions, metadata and side effects. A successful call is
-not a commit; callers must commit before publishing their existing effects.
+Callers own the transaction. Printer views are updated only after commit;
+the holding index, rather than the view, is the reservation authority.
 """
 
 from __future__ import annotations
@@ -11,7 +10,9 @@ from collections.abc import Mapping, Sequence
 from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any
 
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
+from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -19,20 +20,57 @@ if TYPE_CHECKING:
     from backend.app.models.print_queue import PrintQueueItem
 
 
+ACTIVE_STATUSES = ("preheating", "dispatching", "printing", "paused")
+AWAITING_PLATE_CLEAR_STATUSES = ("finished", "failed", "cancelled")
+HOLDING_STATUSES = ACTIVE_STATUSES + AWAITING_PLATE_CLEAR_STATUSES
+FINAL_STATUSES = ("successful", "unsuccessful")
 ALLOWED_TRANSITIONS = {
-    "pending": frozenset({"preheating", "dispatching", "failed", "skipped", "cancelled"}),
-    "preheating": frozenset({"pending", "dispatching", "failed", "cancelled"}),
-    "dispatching": frozenset({"pending", "printing", "completed", "failed", "cancelled"}),
-    "printing": frozenset({"completed", "failed", "cancelled"}),
-    "skipped": frozenset({"pending", "cancelled"}),
-    # The heat-soak dispatch finally block currently restores failed attempts
-    # to pending/manual-start after shutting down their heaters.
-    "failed": frozenset({"pending"}),
-    "completed": frozenset(),
-    "cancelled": frozenset(),
-    # Legacy startup repair only; no current flow creates this status.
-    "aborted": frozenset({"cancelled"}),
+    "queued": frozenset({"preheating", "dispatching", "unsuccessful"}),
+    "preheating": frozenset({"dispatching", "failed", "cancelled", "unsuccessful"}),
+    "dispatching": frozenset({"printing", "failed", "cancelled", "unsuccessful"}),
+    "printing": frozenset({"paused", "finished", "failed", "cancelled", "unsuccessful"}),
+    "paused": frozenset({"printing", "finished", "failed", "cancelled", "unsuccessful"}),
+    "finished": frozenset({"successful"}),
+    "failed": frozenset({"unsuccessful"}),
+    "cancelled": frozenset({"unsuccessful"}),
+    "successful": frozenset(),
+    "unsuccessful": frozenset(),
 }
+
+# Only the versioned upgrade on an AsyncConnection may use these edges.
+LEGACY_TRANSITIONS = {
+    "pending": {"queued"},
+    "skipped": {"queued"},
+    "completed": {"successful", "finished"},
+    "failed": {"unsuccessful"},
+    "cancelled": {"unsuccessful"},
+    "aborted": {"cancelled", "unsuccessful"},
+    **{state: {"unsuccessful"} for state in ACTIVE_STATUSES},
+}
+
+
+@event.listens_for(Session, "after_commit")
+def _publish_printer_views(session: Session) -> None:
+    paths = session.info.pop("queue_source_artifacts", [])
+    if paths:
+        from backend.app.services.queue_source_cleanup import remove_queue_only_artifacts
+
+        remove_queue_only_artifacts(paths)
+    updates = session.info.pop("queue_printer_views", {})
+    if not updates:
+        return
+    from backend.app.services.printer_manager import printer_manager
+
+    for printer_id, (status, archive_id) in updates.items():
+        awaiting = status in AWAITING_PLATE_CLEAR_STATUSES
+        printer_manager.set_awaiting_plate_clear(printer_id, awaiting)
+        printer_manager.set_awaiting_plate_clear_archive_id(printer_id, archive_id if awaiting else None)
+
+
+@event.listens_for(Session, "after_rollback")
+def _discard_printer_views(session: Session) -> None:
+    session.info.pop("queue_printer_views", None)
+    session.info.pop("queue_source_artifacts", None)
 
 
 class InvalidQueueTransition(ValueError):
@@ -51,6 +89,8 @@ async def transition_queue_item(
     *,
     values: Mapping[str, Any] | None = None,
     conditions: Sequence[ColumnElement[bool]] = (),
+    action: str | None = None,
+    migration: bool = False,
 ) -> None:
     """Conditionally change a persisted item, or raise without writing it.
 
@@ -69,10 +109,19 @@ async def transition_queue_item(
     """
     from backend.app.models.print_queue import PrintQueueItem
 
-    if expected_status not in ALLOWED_TRANSITIONS or (
-        status != expected_status and status not in ALLOWED_TRANSITIONS[expected_status]
+    upgrading = migration and isinstance(db, AsyncConnection) and status in LEGACY_TRANSITIONS.get(expected_status, ())
+    if not upgrading and (
+        expected_status not in ALLOWED_TRANSITIONS
+        or (status != expected_status and status not in ALLOWED_TRANSITIONS[expected_status])
     ):
         raise InvalidQueueTransition(f"Invalid queue transition: {expected_status} -> {status}")
+    if not upgrading and status != expected_status:
+        if expected_status == "queued" and status == "unsuccessful" and action != "cancel":
+            raise InvalidQueueTransition("Only a user cancellation may end a queued job")
+        if expected_status in ACTIVE_STATUSES and status == "unsuccessful" and action != "printer_deleted":
+            raise InvalidQueueTransition("Only printer deletion may release an active job")
+        if expected_status in AWAITING_PLATE_CLEAR_STATUSES and action not in ("clear_plate", "printer_deleted"):
+            raise InvalidQueueTransition("A holding job must be released through Clear Plate or printer deletion")
     metadata = dict(values or {})
     if "status" in metadata or "id" in metadata:
         raise ValueError("Transition metadata cannot override status or id")
@@ -95,3 +144,32 @@ async def transition_queue_item(
         set_committed_value(item, "status", status)
         for key, value in metadata.items():
             set_committed_value(item, key, value)
+    if isinstance(db, AsyncSession):
+        if status in FINAL_STATUSES and expected_status != status:
+            from backend.app.services.queue_source_cleanup import remove_queue_only_source_if_unused
+
+            source_id = await db.scalar(select(table.c.library_file_id).where(table.c.id == item_id))
+            if source_id is not None:
+                paths = await remove_queue_only_source_if_unused(db, source_id)
+                db.sync_session.info.setdefault("queue_source_artifacts", []).extend(paths)
+        row = (await db.execute(select(table.c.printer_id, table.c.archive_id).where(table.c.id == item_id))).one()
+        if row.printer_id is not None and (expected_status in HOLDING_STATUSES or status in HOLDING_STATUSES):
+            db.sync_session.info.setdefault("queue_printer_views", {})[row.printer_id] = (status, row.archive_id)
+        if status == "finished" and expected_status != "finished":
+            from backend.app.models.settings import Settings
+
+            confirmation = await db.scalar(select(Settings.value).where(Settings.key == "require_plate_clear"))
+            if confirmation is not None and confirmation.lower() in ("false", "0"):
+                await clear_job_plate(db, item)
+
+
+async def clear_job_plate(db: AsyncSession, item: PrintQueueItem | int) -> None:
+    from backend.app.models.print_queue import PrintQueueItem as QueueItemModel
+
+    if isinstance(item, int):
+        item = await db.get(QueueItemModel, item)
+    if item is None or item.status not in AWAITING_PLATE_CLEAR_STATUSES:
+        raise InvalidQueueTransition("This job is not awaiting plate clear")
+    await transition_queue_item(
+        db, item, item.status, "successful" if item.status == "finished" else "unsuccessful", action="clear_plate"
+    )

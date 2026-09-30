@@ -1064,6 +1064,7 @@ export default {
 
   // Queue page
   queue: {
+    awaitingPlateClear: 'In attesa della pulizia del piatto',
     resolveDispatch: {
       prompt: "La stampante non ha confermato questo lavoro. Controlla la stampante prima di scegliere:",
       printing: "Sta stampando",
@@ -1149,6 +1150,10 @@ export default {
     },
     // Status
     status: {
+      queued: 'In coda',
+      finished: 'Terminato',
+      successful: 'Riuscito',
+      unsuccessful: 'Non riuscito',
       pending: 'In attesa',
       scheduled: 'Pianificata',
       waiting: 'In attesa',
@@ -1209,6 +1214,8 @@ export default {
     },
     // Actions
     actions: {
+      clearPlate: 'Pulisci piatto',
+      retry: 'Riprova',
       startPrint: 'Avvia Stampa',
       stopPrint: 'Ferma Stampa',
       requeue: 'Rimetti in coda',
