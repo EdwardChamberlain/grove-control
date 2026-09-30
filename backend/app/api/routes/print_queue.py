@@ -1798,6 +1798,17 @@ async def stop_queue_item(
         completed_at=item.completed_at,
         clear_failure_reason=True,
     )
+    # A stopped dispatch may already have put material on the plate. Save the
+    # gate in the cancellation transaction: reconnect/ID-less telemetry may
+    # never produce a completion callback that can identify this job.
+    printer = await db.get(Printer, printer_id)
+    if printer:
+        printer.awaiting_plate_clear = True
+        printer.awaiting_plate_clear_archive_id = item.archive_id
+    # Close the scheduler's in-memory gate before commit releases the active
+    # reservation. The DB gate above also protects recovery after a restart.
+    printer_manager.set_awaiting_plate_clear(printer_id, True)
+    printer_manager.set_awaiting_plate_clear_archive_id(printer_id, item.archive_id)
     await db.commit()
 
     from backend.app.main import unregister_expected_print

@@ -10,13 +10,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import backend.app.models  # noqa: F401
-from backend.app.api.routes.print_queue import resolve_queue_dispatch
+from backend.app.api.routes.print_queue import resolve_queue_dispatch, stop_queue_item
 from backend.app.core.database import Base, _ensure_active_queue_printer_reservation
+from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.schemas.print_queue import DispatchResolution
 from backend.app.services.job_identity import bind_observed_id, event_identity, find_job, observe_print
 from backend.app.services.print_scheduler import PrintScheduler
+from backend.app.services.printer_manager import PrinterManager
 from backend.app.services.queue_transitions import transition_queue_item
 
 
@@ -26,6 +28,7 @@ async def sessions(tmp_path):
 
     main._completed_job_events.clear()
     main._observed_job_starts.clear()
+    main._user_stopped_printers.clear()
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'jobs.db'}")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -35,6 +38,7 @@ async def sessions(tmp_path):
         db.add(Printer(id=1, name="Printer", serial_number="TEST", ip_address="127.0.0.1", access_code="12345678"))
         await db.commit()
     yield maker
+    main._user_stopped_printers.clear()
     await engine.dispose()
 
 
@@ -50,6 +54,170 @@ async def add_job(sessions, status="dispatching", **kwargs):
         db.add(item)
         await db.commit()
         return item.id
+
+
+async def add_linked_job(sessions, identity, status="printing", with_archive=True):
+    async with sessions() as db:
+        item = PrintQueueItem(printer_id=1, status=status, dispatch_subtask_id=identity)
+        db.add(item)
+        await db.flush()
+        if with_archive:
+            archive = PrintArchive(
+                printer_id=1,
+                dispatched_queue_item_id=item.id,
+                filename="same.3mf",
+                file_path="",
+                file_size=0,
+                status="printing",
+                subtask_id=identity,
+            )
+            db.add(archive)
+            await db.flush()
+            item.archive_id = archive.id
+        await db.commit()
+        return item.id, item.archive_id
+
+
+@pytest.mark.parametrize("status", ["dispatching", "printing"])
+@pytest.mark.parametrize("stop_outcome", ["sent", "offline", "error"])
+@pytest.mark.parametrize("with_archive", [True, False])
+async def test_stop_unmatched_run_keeps_plate_gate_before_release_and_after_restart(
+    sessions, status, stop_outcome, with_archive
+):
+    import backend.app.main as main
+
+    item_id, archive_id = await add_linked_job(sessions, "old-session", status, with_archive)
+    manager = PrinterManager()
+    live = SimpleNamespace(state="RUNNING", connected=True, submission_id="new-session", subtask_id="0")
+    with (
+        patch.object(main, "async_session", sessions),
+        patch.object(main, "printer_manager", manager),
+        patch("backend.app.services.printer_manager.printer_manager", manager),
+        patch("backend.app.services.print_scheduler.printer_manager", manager),
+        patch.object(manager, "get_status", return_value=live),
+        patch.object(manager, "is_connected", return_value=True),
+        patch.object(
+            manager,
+            "stop_print",
+            return_value=stop_outcome == "sent",
+            side_effect=RuntimeError("disconnected") if stop_outcome == "error" else None,
+        ),
+    ):
+        async with sessions() as db:
+            commit = db.commit
+
+            async def commit_with_plate_gate():
+                # The scheduler's in-memory gate must close before the commit
+                # makes the released reservation visible to another session.
+                assert manager.is_awaiting_plate_clear(1)
+                assert manager.get_awaiting_plate_clear_archive_id(1) == archive_id
+                await commit()
+
+            with patch.object(db, "commit", commit_with_plate_gate):
+                await stop_queue_item(item_id, db, (None, True))
+
+        live.state = "IDLE"
+        assert not PrintScheduler()._is_printer_idle(1, require_plate_clear=True)
+        # The reconnect identity cannot match the old job. Its rejected
+        # completion must not be needed to protect the physical plate.
+        assert await main.on_print_complete(1, {"submission_id": "new-session", "status": "aborted"}) is False
+        async with sessions() as db:
+            item = await db.get(PrintQueueItem, item_id)
+            printer = await db.get(Printer, 1)
+            assert item.status == "cancelled"
+            assert printer.awaiting_plate_clear
+            assert printer.awaiting_plate_clear_archive_id == archive_id
+            if archive_id:
+                assert (await db.get(PrintArchive, archive_id)).status == "aborted"
+
+        restarted = PrinterManager()
+        with patch("backend.app.core.database.async_session", sessions):
+            await restarted.load_awaiting_plate_clear_from_db()
+        assert restarted.is_awaiting_plate_clear(1)
+        assert restarted.get_awaiting_plate_clear_archive_id(1) == archive_id
+
+
+@pytest.mark.parametrize("active_state", ["PREPARE", "SLICING", "RUNNING", "PAUSE", None])
+@pytest.mark.parametrize("missing_id", ["0", 0, "", None])
+def test_mqtt_explicit_id_loss_starts_a_separate_observation(active_state, missing_id):
+    from backend.app.services.bambu_mqtt import BambuMQTTClient
+
+    client = BambuMQTTClient(ip_address="127.0.0.1", serial_number="TEST", access_code="12345678")
+    starts, finishes = [], []
+    client.on_print_running_observed = starts.append
+    client.on_print_start = starts.append
+    client.on_print_complete = finishes.append
+    client._process_message({"print": {"gcode_state": "RUNNING", "subtask_id": "123", "gcode_file": "same.3mf"}})
+    # The inactive/terminal push between two prints can be missed. Reusing
+    # the filename must not make this unidentifiable run inherit the old ID.
+    update = {"subtask_id": missing_id}
+    if active_state:
+        update["gcode_state"] = active_state
+    client._process_message({"print": update})
+    assert len(starts) == 2
+    identity = starts[1]["submission_id"]
+    assert identity and identity != "123"
+    assert "previous_submission_id" not in starts[1]
+    client._process_message({"print": {"gcode_state": "RUNNING", "subtask_id": "0"}})
+    assert len(starts) == 2
+    client._process_message({"print": {"gcode_state": "FINISH", "subtask_id": "0"}})
+    assert finishes[0]["submission_id"] == identity
+
+
+@pytest.mark.parametrize("terminal_state", ["FINISH", "FAILED", "IDLE"])
+def test_mqtt_omitted_active_id_and_terminal_zero_preserve_the_observed_run(terminal_state):
+    from backend.app.services.bambu_mqtt import BambuMQTTClient
+
+    client = BambuMQTTClient(ip_address="127.0.0.1", serial_number="TEST", access_code="12345678")
+    starts, finishes = [], []
+    client.on_print_running_observed = starts.append
+    client.on_print_start = starts.append
+    client.on_print_complete = finishes.append
+    client._process_message({"print": {"gcode_state": "RUNNING", "subtask_id": "123", "gcode_file": "same.3mf"}})
+    client._process_message({"print": {"gcode_state": "PAUSE"}})
+    client._process_message({"print": {"gcode_state": "RUNNING"}})
+    client._process_message({"print": {"gcode_state": terminal_state, "subtask_id": "0"}})
+    assert len(starts) == 1
+    assert finishes[0]["submission_id"] == "123"
+
+
+async def test_mqtt_id_loss_cannot_complete_or_recover_the_previous_job(sessions):
+    import backend.app.main as main
+    from backend.app.services.bambu_mqtt import BambuMQTTClient
+
+    item_id, archive_id = await add_linked_job(sessions, "123")
+    client = BambuMQTTClient(ip_address="127.0.0.1", serial_number="TEST", access_code="12345678")
+    client.state.connected = True
+    starts, finishes = [], []
+    client.on_print_running_observed = starts.append
+    client.on_print_start = starts.append
+    client.on_print_complete = finishes.append
+    with (
+        patch.object(main, "async_session", sessions),
+        patch.object(main, "_archive_print_start", AsyncMock()),
+        patch.object(main, "printer_manager", MagicMock()) as manager,
+        patch("backend.app.services.print_scheduler.printer_manager", manager),
+        patch.object(main, "ws_manager", AsyncMock()) as websocket,
+    ):
+        manager.get_status.return_value = client.state
+        client._process_message({"print": {"gcode_state": "RUNNING", "subtask_id": "123", "gcode_file": "same.3mf"}})
+        await main.on_print_start(1, starts[-1])
+        client._process_message({"print": {"gcode_state": "RUNNING", "subtask_id": "0", "gcode_file": "other.3mf"}})
+        await main.on_print_start(1, starts[-1])
+        client._process_message({"print": {"gcode_state": "FINISH", "subtask_id": "0"}})
+        assert await main.on_print_complete(1, finishes[-1]) is False
+        async with sessions() as db:
+            await PrintScheduler()._recover_stale_dispatches(db)
+        manager.set_awaiting_plate_clear.assert_not_called()
+        websocket.send_print_complete.assert_not_awaited()
+    async with sessions() as db:
+        item = await db.get(PrintQueueItem, item_id)
+        archive = await db.get(PrintArchive, archive_id)
+        assert item.status == "printing"
+        assert item.dispatch_subtask_id == "123"
+        assert archive.status == "printing"
+        assert archive.subtask_id == "123"
+        assert len((await db.scalars(select(PrintQueueItem))).all()) == 1
 
 
 @pytest.mark.parametrize("value", [None, "", "0", 0])

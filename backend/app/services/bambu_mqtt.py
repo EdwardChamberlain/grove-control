@@ -3654,11 +3654,17 @@ class BambuMQTTClient:
         from backend.app.services.job_identity import normalize_id
 
         reported_identity = normalize_id(self.state.subtask_id)
+        # An explicit missing ID during an active print may be a different
+        # local run whose intervening terminal push was missed. Start a fresh
+        # observation instead of letting its completion inherit the old ID.
+        # Omitted IDs in partial pushes retain the observed state above.
         is_job_change = (
-            self.state.state in ("RUNNING", "PAUSE")
-            and reported_identity is not None
+            self.state.state in ("PREPARE", "SLICING", "RUNNING", "PAUSE")
             and self._previous_job_id is not None
-            and reported_identity != self._previous_job_id
+            and (
+                (reported_identity is not None and reported_identity != self._previous_job_id)
+                or ("subtask_id" in data and reported_identity is None)
+            )
         )
 
         # Track active states so even setup failures have a job to complete

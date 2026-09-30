@@ -26,6 +26,18 @@ instead of adopting a different print or matching by name. Inspect the printer
 and use **Stop Print** to resolve such a reservation. No second active job is
 created while another job reserves that printer.
 
+An explicit zero, empty or null ID reported while a known-ID print is active also
+starts a fresh observation: Grove cannot prove that an intervening finish/start
+was not missed. The old reservation remains held instead of attributing the
+unidentified run's completion to it. An omitted ID in a partial update, or a
+zero ID only in the terminal update of a continuous observed run, retains that
+run's identity.
+
+**Stop Print** saves the existing plate-clear gate together with cancellation,
+even if the printer is offline or its completion cannot identify the old job.
+Inspect and clear the physical plate, then use **Clear Plate** before the next
+queued job can dispatch.
+
 If the firmware ID arrives after a partial start update, its callback carries
 the exact prior session ID. The same job and linked Archive are bound to the
 reported ID without repeating start effects. Archiving waits for file metadata
