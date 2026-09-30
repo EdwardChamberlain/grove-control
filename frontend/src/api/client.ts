@@ -4259,18 +4259,25 @@ export const api = {
     request<void>(`/archives/${id}${purgeStats ? '?purge_stats=true' : ''}`, { method: 'DELETE' }),
 
   // ========== Archive auto-purge (#1008 follow-up) ==========
-  previewArchivePurge: (olderThanDays: number, purgeStats: boolean = false) =>
-    request<ArchivePurgePreview>(
-      `/archives/purge/preview?older_than_days=${olderThanDays}&purge_stats=${purgeStats}`,
-    ),
+  previewArchivePurge: (options: { olderThanDays?: number; keepCount?: number; purgeStats?: boolean }) => {
+    const params = new URLSearchParams();
+    if (options.olderThanDays !== undefined) params.set('older_than_days', String(options.olderThanDays));
+    if (options.keepCount !== undefined) params.set('keep_count', String(options.keepCount));
+    if (options.purgeStats !== undefined) params.set('purge_stats', String(options.purgeStats));
+    return request<ArchivePurgePreview>(`/archives/purge/preview?${params.toString()}`);
+  },
   // #1390: purgeStats=false (default) soft-deletes each old archive — Quick Stats
   // preserved, files removed from disk, row hidden via deleted_at. true matches
   // the single-archive delete's `?purge_stats=true` semantics (hard-deletes the
   // linked PrintLogEntry rows so the contribution drops from /stats too).
-  executeArchivePurge: (olderThanDays: number, purgeStats: boolean = false) =>
+  executeArchivePurge: (options: { olderThanDays?: number; keepCount?: number; purgeStats?: boolean }) =>
     request<{ deleted: number; purge_stats: boolean }>('/archives/purge', {
       method: 'POST',
-      body: JSON.stringify({ older_than_days: olderThanDays, purge_stats: purgeStats }),
+      body: JSON.stringify({
+        ...(options.olderThanDays !== undefined ? { older_than_days: options.olderThanDays } : {}),
+        ...(options.keepCount !== undefined ? { keep_count: options.keepCount } : {}),
+        purge_stats: options.purgeStats ?? false,
+      }),
     }),
   getArchivePurgeSettings: () =>
     request<ArchivePurgeSettings>('/archives/purge/settings'),
@@ -7027,12 +7034,16 @@ export interface ArchivePurgePreview {
   count: number;
   total_bytes: number;
   sample_filenames: string[];
-  older_than_days: number;
+  mode: 'age' | 'count';
+  older_than_days: number | null;
+  keep_count: number | null;
 }
 
 export interface ArchivePurgeSettings {
   enabled: boolean;
   days: number;
+  mode: 'age' | 'count';
+  max_count: number;
   // #1390: when true, bulk-deletes the linked PrintLogEntry rows so the
   // contribution drops from Quick Stats too. Default false — soft-delete,
   // Quick Stats preserved.

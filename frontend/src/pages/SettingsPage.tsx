@@ -9,7 +9,7 @@ import { getCurrencySymbol, SUPPORTED_CURRENCIES } from '../utils/currency';
 import { checkPasswordComplexity } from '../utils/password';
 import { PRESET_CATEGORIES, parsePresetTriple } from '../utils/temperatureFanPresets';
 import { CALIBRATION_MODES, CALIBRATION_MODE_ACTIVE, CALIBRATION_MODE_INACTIVE } from '../utils/calibrationMode';
-import type { APIKey, AppSettings, AppSettingsUpdate, PrinterHASensor, LocationHASensor, StorageLocation, SmartPlug, SmartPlugStatus, NotificationProvider, NotificationTemplate, UpdateStatus, GitHubBackupStatus, CloudAuthStatus, UserCreate, UserUpdate, UserResponse, StorageUsageResponse, CalibrationMode } from '../api/client';
+import type { APIKey, AppSettings, AppSettingsUpdate, PrinterHASensor, LocationHASensor, StorageLocation, SmartPlug, SmartPlugStatus, NotificationProvider, NotificationTemplate, UpdateStatus, GitHubBackupStatus, CloudAuthStatus, UserCreate, UserUpdate, UserResponse, StorageUsageResponse, CalibrationMode, ArchivePurgeSettings } from '../api/client';
 import { Card, CardContent, CardDensityProvider, CardHeader } from '../components/Card';
 import { SlicerBundlesPanel } from '../components/SlicerBundlesPanel';
 import { CameraTokensSection } from './CameraTokensPage';
@@ -644,10 +644,14 @@ export function SettingsPage() {
     queryFn: () => api.getArchivePurgeSettings(),
     enabled: canPurgeArchives,
   });
+  const { data: archiveCountPurgePreview, isFetching: isPreviewingArchiveCount } = useQuery({
+    queryKey: ['archive-count-purge-preview', archivePurgeSettings?.max_count],
+    queryFn: () => api.previewArchivePurge({ keepCount: archivePurgeSettings?.max_count ?? 100 }),
+    enabled: canPurgeArchives && archivePurgeSettings?.mode === 'count',
+  });
 
   const updateArchivePurgeSettingsMutation = useMutation({
-    mutationFn: (body: { enabled: boolean; days: number; purge_stats: boolean }) =>
-      api.updateArchivePurgeSettings(body),
+    mutationFn: (body: ArchivePurgeSettings) => api.updateArchivePurgeSettings(body),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['archive-purge-settings'] });
       showToast(t('settings.toast.settingsSaved'), 'success');
@@ -655,13 +659,13 @@ export function SettingsPage() {
     onError: (e: Error) => showToast(e.message || t('archiveAutoPurge.saveFailed'), 'error'),
   });
 
-  const saveArchivePurgeSettings = (
-    patch: Partial<{ enabled: boolean; days: number; purge_stats: boolean }>,
-  ) => {
+  const saveArchivePurgeSettings = (patch: Partial<ArchivePurgeSettings>) => {
     if (!archivePurgeSettings) return;
     updateArchivePurgeSettingsMutation.mutate({
       enabled: archivePurgeSettings.enabled,
       days: archivePurgeSettings.days,
+      mode: archivePurgeSettings.mode,
+      max_count: archivePurgeSettings.max_count,
       purge_stats: archivePurgeSettings.purge_stats,
       ...patch,
     });
@@ -1838,8 +1842,7 @@ export function SettingsPage() {
               )}
 
               {/* Archive auto-purge (#1008 follow-up). Admin-only — gated on
-                  archives:delete_all. Hard-deletes archives older than the
-                  configured age threshold once per 24h. */}
+                  archives:purge. Runs at most once per day using the selected policy. */}
               {canPurgeArchives && archivePurgeSettings && (
                 <div className="border-t border-bambu-dark-tertiary pt-3 mt-3 space-y-3">
                   <div className="flex items-center justify-between">
@@ -1859,29 +1862,90 @@ export function SettingsPage() {
                   </div>
 
                   <div>
-                    <label className="block text-sm text-bambu-gray mb-1">
-                      {t('archiveAutoPurge.ageLabel')}
+                    <label htmlFor="archive-auto-purge-mode" className="block text-sm text-bambu-gray mb-1">
+                      {t('archiveAutoPurge.modeLabel')}
                     </label>
-                    <div className="flex items-center gap-2">
+                    <select
+                      id="archive-auto-purge-mode"
+                      value={archivePurgeSettings.mode}
+                      onChange={(e) => saveArchivePurgeSettings({ mode: e.target.value as 'age' | 'count' })}
+                      className="w-full px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none disabled:opacity-50"
+                    >
+                      <option value="age">{t('archiveAutoPurge.ageMode')}</option>
+                      <option value="count">{t('archiveAutoPurge.countMode')}</option>
+                    </select>
+                  </div>
+
+                  {archivePurgeSettings.mode === 'age' ? (
+                    <div>
+                      <label className="block text-sm text-bambu-gray mb-1">
+                        {t('archiveAutoPurge.ageLabel')}
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min={7}
+                          max={3650}
+                          disabled={!archivePurgeSettings.enabled}
+                          value={archivePurgeSettings.days}
+                          onChange={(e) =>
+                            saveArchivePurgeSettings({
+                              days: Math.max(7, Math.min(3650, parseInt(e.target.value || '0', 10) || 0)),
+                            })
+                          }
+                          className="w-24 px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none disabled:opacity-50"
+                        />
+                        <span className="text-bambu-gray">{t('archiveAutoPurge.days')}</span>
+                      </div>
+                      <p className="text-xs text-bambu-gray mt-1">
+                        {t('archiveAutoPurge.ageDescription')}
+                      </p>
+                    </div>
+                  ) : (
+                    <div>
+                      <label htmlFor="archive-auto-purge-max-count" className="block text-sm text-bambu-gray mb-1">
+                        {t('archiveAutoPurge.maxCountLabel')}
+                      </label>
                       <input
+                        id="archive-auto-purge-max-count"
                         type="number"
-                        min={7}
-                        max={3650}
-                        disabled={!archivePurgeSettings.enabled}
-                        value={archivePurgeSettings.days}
+                        min={1}
+                        max={100000}
+                        value={archivePurgeSettings.max_count}
                         onChange={(e) =>
                           saveArchivePurgeSettings({
-                            days: Math.max(7, Math.min(3650, parseInt(e.target.value || '0', 10) || 0)),
+                            max_count: Math.max(1, Math.min(100000, parseInt(e.target.value || '0', 10) || 0)),
                           })
                         }
-                        className="w-24 px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none disabled:opacity-50"
+                        className="w-28 px-3 py-2 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none disabled:opacity-50"
                       />
-                      <span className="text-bambu-gray">{t('archiveAutoPurge.days')}</span>
+                      <p className="text-xs text-bambu-gray mt-1">
+                        {t('archiveAutoPurge.countDescription')}
+                      </p>
+                      <div className="mt-2 rounded bg-bambu-dark/50 p-2 text-xs text-bambu-gray">
+                        {isPreviewingArchiveCount ? (
+                          t('archivePurge.previewLoading')
+                        ) : archiveCountPurgePreview ? (
+                          <>
+                            <p>
+                              {archiveCountPurgePreview.count === 0
+                                ? t('archiveAutoPurge.countPreviewNone')
+                                : t('archiveAutoPurge.countPreviewSummary', { count: archiveCountPurgePreview.count })}
+                            </p>
+                            {archiveCountPurgePreview.sample_filenames.length > 0 && (
+                              <ul className="mt-1 list-disc pl-4">
+                                {archiveCountPurgePreview.sample_filenames.map((filename, index) => (
+                                  <li key={`${index}-${filename}`} className="truncate">{filename}</li>
+                                ))}
+                              </ul>
+                            )}
+                          </>
+                        ) : (
+                          t('archivePurge.previewFailed')
+                        )}
+                      </div>
                     </div>
-                    <p className="text-xs text-bambu-gray mt-1">
-                      {t('archiveAutoPurge.ageDescription')}
-                    </p>
-                  </div>
+                  )}
 
                   <label className="flex items-start gap-2 cursor-pointer">
                     <input

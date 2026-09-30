@@ -486,7 +486,7 @@ export const handlers = [
 
   // Status / object endpoints → minimal disabled-state responses
   http.get('/api/v1/archives/purge/settings', () =>
-    HttpResponse.json({ enabled: false, retention_days: 0 })
+    HttpResponse.json({ enabled: false, days: 365, mode: 'age', max_count: 100, purge_stats: false })
   ),
   http.get('/api/v1/auth/2fa/status', () =>
     HttpResponse.json({ totp_enabled: false, email_otp_enabled: false, backup_codes_remaining: 0 })
