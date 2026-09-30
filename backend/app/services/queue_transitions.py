@@ -120,8 +120,14 @@ async def transition_queue_item(
             raise InvalidQueueTransition("Only a user cancellation may end a queued job")
         if expected_status in ACTIVE_STATUSES and status == "unsuccessful" and action != "printer_deleted":
             raise InvalidQueueTransition("Only printer deletion may release an active job")
-        if expected_status in AWAITING_PLATE_CLEAR_STATUSES and action not in ("clear_plate", "printer_deleted"):
-            raise InvalidQueueTransition("A holding job must be released through Clear Plate or printer deletion")
+        if expected_status in AWAITING_PLATE_CLEAR_STATUSES and action not in (
+            "clear_plate",
+            "printer_deleted",
+            "hold_transferred",
+        ):
+            raise InvalidQueueTransition(
+                "A holding job requires Clear Plate, printer deletion, or an observed hold transfer"
+            )
     metadata = dict(values or {})
     if "status" in metadata or "id" in metadata:
         raise ValueError("Transition metadata cannot override status or id")
@@ -160,16 +166,28 @@ async def transition_queue_item(
 
             confirmation = await db.scalar(select(Settings.value).where(Settings.key == "require_plate_clear"))
             if confirmation is not None and confirmation.lower() in ("false", "0"):
-                await clear_job_plate(db, item)
+                await clear_job_plate(db, item, automatic=True)
 
 
-async def clear_job_plate(db: AsyncSession, item: PrintQueueItem | int) -> None:
+async def clear_job_plate(db: AsyncSession, item: PrintQueueItem | int, *, automatic: bool = False) -> None:
     from backend.app.models.print_queue import PrintQueueItem as QueueItemModel
 
     if isinstance(item, int):
         item = await db.get(QueueItemModel, item)
     if item is None or item.status not in AWAITING_PLATE_CLEAR_STATUSES:
         raise InvalidQueueTransition("This job is not awaiting plate clear")
+    from backend.app.services.printer_manager import printer_manager
+
+    live = printer_manager.get_status(item.printer_id) if item.printer_id is not None else None
+    if (
+        live
+        and live.connected
+        and getattr(live, "job_telemetry_ready", True)
+        and live.state in ("PREPARE", "SLICING", "RUNNING", "PAUSE")
+    ):
+        if automatic:
+            return  # Keep the physical outcome and hold if another print is already active.
+        raise InvalidQueueTransition("The printer is still active. Stop or finish its print before clearing the plate")
     await transition_queue_item(
         db, item, item.status, "successful" if item.status == "finished" else "unsuccessful", action="clear_plate"
     )

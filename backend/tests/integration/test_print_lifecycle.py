@@ -112,6 +112,35 @@ class TestPlateClearGate:
         assert completion.item.status == "printing"
         assert all(not call.args[1] for call in completion.manager.set_awaiting_plate_clear.call_args_list)
 
+    async def test_touchscreen_print_on_a_held_printer_completes_as_its_own_job(self, completion, db_session):
+        from backend.app import main
+        from backend.app.api.routes.print_queue import clear_queue_plate
+        from backend.app.services.bambu_mqtt import BambuMQTTClient
+        from backend.app.services.job_identity import find_job
+        from backend.app.services.queue_transitions import transition_queue_item
+
+        await transition_queue_item(db_session, completion.item, "printing", "failed")
+        await db_session.commit()
+        client = BambuMQTTClient(ip_address="127.0.0.1", serial_number="TEST", access_code="12345678")
+        client.state.connected = True
+        starts, finishes = [], []
+        client.on_print_start = starts.append
+        client.on_print_running_observed = starts.append
+        client.on_print_complete = finishes.append
+        completion.manager.get_status.return_value = client.state
+        with patch.object(main, "_archive_print_start", AsyncMock()):
+            client._process_message({"print": {"gcode_state": "RUNNING", "subtask_id": "0", "gcode_file": "sd.3mf"}})
+            await main.on_print_start(completion.printer.id, starts[-1])
+        identity = starts[-1]["submission_id"]
+        job = await find_job(db_session, completion.printer.id, identity)
+        assert job is not None and job.id != completion.item.id and job.status == "printing"
+        client._process_message({"print": {"gcode_state": "FINISH", "subtask_id": "0"}})
+        await completion.complete(completion.printer.id, finishes[-1])
+        await db_session.refresh(job)
+        assert job.status == "finished"
+        await clear_queue_plate(job.id, db_session, None)
+        assert job.status == "successful"
+
     async def test_legacy_external_archive_is_adopted_by_id(self, completion, db_session):
         from datetime import datetime, timezone
 

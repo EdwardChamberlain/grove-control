@@ -586,6 +586,8 @@ class PrintScheduler:
         promoted_ids: list[int] = []
         terminal_dispatches: list[tuple[int, int, dict]] = []
         for item in dispatches:
+            if item.status == "dispatching" and item.dispatching_at is not None:
+                continue  # A live preparation worker still owns this attempt.
             if item.status == "dispatching" and self._recovery_started_at and item.dispatched_at:
                 sent = item.dispatched_at.replace(tzinfo=timezone.utc)
                 if sent >= self._recovery_started_at and (now - sent).total_seconds() < 270:
@@ -3567,6 +3569,7 @@ class PrintScheduler:
                 return
             # Consume the handoff exactly once before yielding to file preparation.
             item.preheat_owner = None
+            item.dispatching_at = datetime.now(timezone.utc)
             await db.commit()
             try:
                 await self._start_print(db, item, heat_soak_complete=True)
@@ -3589,6 +3592,7 @@ class PrintScheduler:
                         item.error_message or "Heat-soak dispatch interrupted; retry required",
                         status=item.status if item.status in ("cancelled", "failed") else "failed",
                     )
+                await self._clear_dispatch_claim(db, item_id)
 
     async def _start_print(self, db: AsyncSession, item: PrintQueueItem, *, heat_soak_complete: bool = False):
         """Upload file and start print for a queue item.
@@ -3972,11 +3976,10 @@ class PrintScheduler:
         from secrets import randbelow
 
         dispatch_subtask_id = str(randbelow(2_147_483_646) + 1)
-        now_utc = datetime.now(timezone.utc)
         claim_timestamp = item.dispatching_at
         dispatch_item_id, dispatch_printer_id = item.id, item.printer_id
         conditions = (PrintQueueItem.printer_id == dispatch_printer_id,)
-        if not heat_soak_complete and claim_timestamp is not None:
+        if claim_timestamp is not None:
             conditions += (PrintQueueItem.dispatching_at == claim_timestamp,)
         try:
             await transition_queue_item(
@@ -3986,7 +3989,7 @@ class PrintScheduler:
                 "dispatching",
                 conditions=conditions,
                 values={
-                    "dispatched_at": now_utc,
+                    "dispatched_at": None,
                     "dispatch_subtask_id": dispatch_subtask_id,
                     "started_at": None,
                     "error_message": None,
@@ -4102,7 +4105,6 @@ class PrintScheduler:
                 raise RuntimeError("ArchiveService did not create an attempt record")
 
             archive = attempt_archive
-            item.archive_id = archive.id
             extra_data = dict(archive.extra_data or {})
             extra_data["remote_filename"] = remote_filename
             if source_archive_id is not None:
@@ -4127,6 +4129,17 @@ class PrintScheduler:
             # commits for one-off direct-to-queue uploads.
             file_path = settings.base_dir / archive.file_path
             filename = archive.filename
+            # Copying the Archive may take minutes. Only now start the
+            # acknowledgement timeout, and recheck cancellation/claim fencing
+            # before committing the exact attempt link and sending MQTT.
+            await transition_queue_item(
+                db,
+                item,
+                "dispatching",
+                "dispatching",
+                conditions=conditions,
+                values={"archive_id": archive.id, "dispatched_at": datetime.now(timezone.utc)},
+            )
             await db.commit()
         except Exception:
             await db.rollback()
@@ -4157,7 +4170,7 @@ class PrintScheduler:
             if injected_path and injected_path.exists():
                 injected_path.unlink(missing_ok=True)
             item = await db.get(PrintQueueItem, queue_item_id)
-            if item:
+            if item and item.status == "dispatching" and item.dispatch_subtask_id == dispatch_subtask_id:
                 await self._fail_queue_item(
                     db,
                     item,

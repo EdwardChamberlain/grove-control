@@ -246,6 +246,19 @@ describe('QueuePage', () => {
       expect(timelineItem).toHaveTextContent('Dispatching');
     });
 
+    it('keeps a normal upload active without offering dispatch resolution', async () => {
+      server.use(http.get('/api/v1/queue/', () => HttpResponse.json([{
+        ...mockQueueItems[1], id: 4, status: 'dispatching', dispatch_needs_resolution: false,
+        dispatched_at: null, started_at: null,
+      }])));
+      render(<QueuePage />);
+      await screen.findByText('Dispatching');
+      expect(screen.getByText('Active jobs')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: "It's printing" })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: "It didn't start" })).not.toBeInTheDocument();
+      expect(screen.getByTitle('Stop Print')).toBeInTheDocument();
+    });
+
     it.each(['printing', 'failed'] as const)('resolves an unconfirmed dispatch as %s', async (outcome) => {
       const user = userEvent.setup();
       let submitted: unknown;

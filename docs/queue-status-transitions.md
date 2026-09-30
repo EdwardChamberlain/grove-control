@@ -43,6 +43,25 @@ printer leaves an actionable hold. Editing or deleting a holding job is refused.
 
 **Clear Plate** is available from the job and the printer, including while the
 printer is offline. Inspect and physically clear the plate before using it.
+Both actions refuse to clear a job while fresh telemetry reports an active
+print. Automatic clearing also retains the finished job's hold in that case.
+
+A touchscreen/SD print can start while an earlier job still awaits Clear Plate.
+When fresh telemetry identifies that new run, its external `printing` job takes
+over the reservation in the same transaction. The previous `finished`, `failed`,
+or `cancelled` job becomes final with an explicit hold-transfer reason; its
+Archive outcome is unchanged. This is an exception to finalization by Clear
+Plate: it transfers the hold without declaring the physical plate empty. There
+is still exactly one holding job, and the old Clear Plate button cannot release
+the new print. Different active reservations, disconnected telemetry, delayed
+starts, and previously ended identities cannot establish a transfer. The new
+job follows the normal completion and plate-clear rules, including after restart.
+
+The unconfirmed-dispatch prompt requires an attempt ID, a send timestamp, and
+an expired acknowledgement window after preparation has finished. Upload and
+Archive-copy workers remain `dispatching` with Stop available. The send timer
+starts after the Archive copy, and both REST serialization and resolution reject
+attempts still owned by a preparation worker.
 
 **Retry** on a failed or cancelled attempt creates a separate, unlinked
 `queued` job at the top of the same printer/model queue, carrying the print
@@ -51,13 +70,17 @@ per-file settings, resetting candidate attempt counts. If none survive, Retry
 uses the selected Files source or the Archive copy. Inserting this replacement
 at the top requires `queue:insert_top`, as well as queue creation and ownership
 update permissions. Retry does not clear the original attempt's hold. Clear Plate
-is required before its replacement can dispatch. Queue-only sources remain
+is required before its replacement can use the same printer; model-based retries
+can use a different free, compatible printer. Queue-only sources remain
 available while a nonfinal job needs them and are removed after finalization
 and commit; other queued copies keep a shared source alive.
 
 Archive deletion and automatic purge refuse to remove a source backing any
 holding job. Purge previews exclude these Archives, and deletion rechecks the
 hold in the same transaction as removal of the job and statistics.
+Deleting a user together with their items similarly refuses any affected hold,
+including another user's job backed by that user's Files or Archive. Deleting
+only the account leaves its jobs ownerless, with Clear Plate still available.
 
 Each Queue dispatch uploads to a unique SD filename recorded in its attempt
 Archive. Completion captures that filename before releasing the hold and deletes
@@ -78,7 +101,8 @@ never determine which transitions are allowed.
 The caller owns the transaction. A losing compare-and-set raises
 `QueueTransitionConflict`; no losing operation may publish effects. Invalid
 edges raise `InvalidQueueTransition` before writing. User cancellation,
-Clear Plate, and printer deletion have explicit action guards.
+Clear Plate, printer deletion, and an observed external hold transfer have
+explicit action guards.
 
 Printer plate-clear flags and Archive IDs are projections of the holding job.
 They are rehydrated from jobs at startup and published to the manager only after
@@ -121,7 +145,9 @@ Archive creation timing.
 Real database tests cover the transition table, stale sessions, rollback,
 claim replacement, cancellation/confirmation/recovery races, all holding states,
 auto Clear Plate, offline Clear Plate, Retry, printer deletion, migration, and
-Queue-only source retention. The full backend and frontend suites remain part
+Queue-only source retention. Upload confirmation, user deletion with FK cascades,
+touchscreen hold transfer, stale starts, and active-printer Clear Plate guards
+also use real database tests. The full backend and frontend suites remain part
 of validation.
 
 Tests for the removed previous-success skip, cancellation cascade, independent
@@ -134,5 +160,7 @@ SQLite is exercised locally. PostgreSQL upgrade/concurrency and physical printer
 qualification still require validation. On hardware, verify successful
 completion with confirmation on/off, failed uploads, heat-soak interruption,
 Stop while offline, Retry followed by Clear Plate, restart/reconnect, and two
-printers working independently. The original stage 2 identity qualification
+printers working independently. Also start a touchscreen/SD print while an old
+job awaits Clear Plate, confirm that its hold transfers, and try the old Clear
+Plate action while the new print is running. The original stage 2 identity qualification
 checklist remains in [queue-job-identity.md](queue-job-identity.md).

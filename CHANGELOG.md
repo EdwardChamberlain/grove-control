@@ -54,6 +54,10 @@
 
 ### Fixed
 
+- Normal Queue uploads no longer offer unconfirmed-dispatch actions before
+  a command is sent. Archive and user-item deletion cannot bypass Clear Plate.
+  Touchscreen prints on an uncleared printer take over its durable hold, and
+  Clear Plate refuses to release a printer while a print is active.
 - Interrupted heat soaks retry heater shutdown after reconnect until fresh
   telemetry confirms zero heater targets.
 - Files bulk-queue submissions use the new `queued` lifecycle. Virtual-printer

@@ -2526,7 +2526,15 @@ async def _observe_print_start(printer_id: int, data: dict):
         return
     async with async_session() as db:
         await bind_observed_id(db, printer_id, identity, data.get("previous_submission_id"))
-        item, was_dispatching = await observe_print(db, printer_id, identity)
+        live = printer_manager.get_status(printer_id)
+        active_states = ("PREPARE", "SLICING", "RUNNING", "PAUSE")
+        # A delayed start cannot replace a plate hold. For a very short print,
+        # telemetry may already be terminal while this active snapshot waits
+        # behind another callback; its exact live identity still proves the run.
+        observed_active = (data.get("raw_data") or {}).get("gcode_state") in active_states
+        item, was_dispatching = await observe_print(
+            db, printer_id, identity, observed_state=live, active_snapshot=observed_active
+        )
         if item is None:
             return  # Missing identity or another job still owns this printer.
         item_id = item.id

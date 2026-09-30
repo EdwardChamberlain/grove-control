@@ -1,6 +1,7 @@
 """Stage 3's physical holds, user actions and one-time upgrade on real SQLite."""
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -141,6 +142,42 @@ async def test_clear_plate_works_offline_and_final_jobs_leave_the_live_queue(ses
         assert item.status == "unsuccessful"
         response = await list_queue(db=db, auth_result=(None, True), printer_id=None, status=None, target_model=None)
         assert response == []
+
+
+@pytest.mark.parametrize("route", ("queue", "printer"))
+@pytest.mark.parametrize("active", ("PREPARE", "SLICING", "RUNNING", "PAUSE"))
+async def test_clear_plate_cannot_release_an_older_hold_while_another_print_is_active(sessions, route, active):
+    from fastapi import HTTPException
+
+    live = SimpleNamespace(connected=True, job_telemetry_ready=True, state=active, submission_id="new-print")
+    async with sessions() as db:
+        old = PrintQueueItem(printer_id=1, status="finished", dispatch_subtask_id="old")
+        db.add(old)
+        await db.commit()
+        with (
+            patch("backend.app.services.printer_manager.printer_manager.get_status", return_value=live),
+            pytest.raises(HTTPException) as conflict,
+        ):
+            if route == "queue":
+                await clear_queue_plate(old.id, db=db, _=None)
+            else:
+                await clear_plate(1, db=db, _=None)
+        assert conflict.value.status_code == 409
+        await db.rollback()
+        await db.refresh(old)
+        assert old.status == "finished"
+
+
+async def test_auto_clear_keeps_the_outcome_and_hold_if_another_print_is_already_active(sessions):
+    live = SimpleNamespace(connected=True, job_telemetry_ready=True, state="RUNNING", submission_id="new-print")
+    async with sessions() as db:
+        old = PrintQueueItem(printer_id=1, status="printing", dispatch_subtask_id="old")
+        db.add_all([old, Settings(key="require_plate_clear", value="false")])
+        await db.commit()
+        with patch("backend.app.services.printer_manager.printer_manager.get_status", return_value=live):
+            await transition_queue_item(db, old, "printing", "finished")
+            await db.commit()
+        assert old.status == "finished"
 
 
 async def test_retry_is_a_new_job_at_top_and_keeps_original_hold_and_settings(sessions, tmp_path):

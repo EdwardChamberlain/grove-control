@@ -10,16 +10,22 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import backend.app.models  # noqa: F401
-from backend.app.api.routes.print_queue import resolve_queue_dispatch, stop_queue_item
+from backend.app.api.routes.print_queue import clear_queue_plate, resolve_queue_dispatch, stop_queue_item
 from backend.app.core.database import Base, _ensure_active_queue_printer_reservation
 from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.schemas.print_queue import DispatchResolution
-from backend.app.services.job_identity import bind_observed_id, event_identity, find_job, observe_print
+from backend.app.services.job_identity import (
+    bind_observed_id,
+    event_identity,
+    find_job,
+    needs_dispatch_resolution,
+    observe_print,
+)
 from backend.app.services.print_scheduler import PrintScheduler
 from backend.app.services.printer_manager import PrinterManager
-from backend.app.services.queue_transitions import transition_queue_item
+from backend.app.services.queue_transitions import HOLDING_STATUSES, transition_queue_item
 
 
 @pytest.fixture
@@ -313,6 +319,40 @@ async def test_user_resolution_commits_and_keeps_failed_plate_gate(sessions, out
         assert publish.await_count == (outcome == "printing")
 
 
+@pytest.mark.parametrize("outcome", ["printing", "failed"])
+@pytest.mark.parametrize("preparing", ["upload", "archive"])
+async def test_preparing_dispatch_cannot_be_resolved_as_a_sent_command(sessions, outcome, preparing):
+    from backend.app.api.routes.print_queue import get_queue_item
+
+    async with sessions() as db:
+        item = PrintQueueItem(
+            printer_id=1,
+            status="dispatching",
+            dispatching_at=datetime.now(timezone.utc) - timedelta(minutes=10),
+            dispatched_at=datetime.now(timezone.utc) - timedelta(minutes=10) if preparing == "archive" else None,
+            dispatch_subtask_id="123" if preparing == "archive" else None,
+        )
+        db.add(item)
+        await db.commit()
+        assert not (await get_queue_item(item.id, db, (None, True))).dispatch_needs_resolution
+        with pytest.raises(HTTPException) as conflict:
+            await resolve_queue_dispatch(item.id, DispatchResolution(outcome=outcome), db, (None, True))
+        assert conflict.value.status_code == 409
+        await db.rollback()
+        await db.refresh(item)
+        assert item.status == "dispatching" and item.started_at is None
+
+
+@pytest.mark.parametrize("seconds, expected", [(0, False), (269, False), (271, True)])
+def test_dispatch_confirmation_prompt_requires_a_finished_send_attempt(seconds, expected):
+    item = PrintQueueItem(
+        status="dispatching",
+        dispatch_subtask_id="123",
+        dispatched_at=datetime.now(timezone.utc) - timedelta(seconds=seconds),
+    )
+    assert needs_dispatch_resolution(item) is expected
+
+
 async def test_resolution_rejects_other_owner_and_conflicting_live_job(sessions):
     item_id = await add_job(sessions)
     async with sessions() as db:
@@ -368,6 +408,118 @@ async def test_external_observation_survives_callbacks_and_restart(sessions):
         items = list((await db.scalars(select(PrintQueueItem))).all())
         assert len(items) == 1
         assert items[0].dispatch_subtask_id == "external"
+
+
+@pytest.mark.parametrize("previous_status", ["finished", "failed", "cancelled"])
+async def test_touchscreen_print_takes_over_the_hold_without_releasing_the_printer(sessions, previous_status):
+    import backend.app.main as main
+
+    old_id, archive_id = await add_linked_job(sessions, "previous", previous_status)
+    previous_outcome = {"finished": "completed", "failed": "failed", "cancelled": "aborted"}[previous_status]
+    async with sessions() as db:
+        (await db.get(PrintArchive, archive_id)).status = previous_outcome
+        await db.commit()
+    manager = PrinterManager()
+    live = SimpleNamespace(
+        connected=True, job_telemetry_ready=True, state="RUNNING", submission_id="touchscreen", subtask_id="0"
+    )
+    with (
+        patch.object(main, "async_session", sessions),
+        patch.object(main, "printer_manager", manager),
+        patch("backend.app.services.printer_manager.printer_manager", manager),
+        patch.object(manager, "get_status", return_value=live),
+        patch.object(main, "_archive_print_start", AsyncMock()) as archive_print,
+    ):
+        await main.on_print_start(1, {"submission_id": "touchscreen", "filename": "same.3mf"})
+        await main.on_print_start(1, {"submission_id": "touchscreen", "filename": "same.3mf"})
+        archive_print.assert_awaited_once()
+        async with sessions() as db:
+            new = await find_job(db, 1, "touchscreen")
+            assert new is not None and new.id != old_id and new.status == "printing"
+            held = list(await db.scalars(select(PrintQueueItem).where(PrintQueueItem.status.in_(HOLDING_STATUSES))))
+            assert [item.id for item in held] == [new.id]
+            assert (await db.get(PrintArchive, archive_id)).status == previous_outcome
+            with pytest.raises(HTTPException) as conflict:
+                await clear_queue_plate(old_id, db, None)
+            assert conflict.value.status_code == 409
+            await db.rollback()
+        main._observed_job_starts.clear()  # Simulate restart while the touchscreen print is running.
+        await main.on_print_start(1, {"submission_id": "touchscreen", "filename": "same.3mf"})
+        async with sessions() as db:
+            new = await find_job(db, 1, "touchscreen")
+            live.state = "FINISH"
+            await transition_queue_item(db, new, "printing", "finished")
+            await db.commit()
+            assert manager.is_awaiting_plate_clear(1)
+            await clear_queue_plate(new.id, db, None)
+            assert new.status == "successful"
+            assert not list(await db.scalars(select(PrintQueueItem).where(PrintQueueItem.status.in_(HOLDING_STATUSES))))
+
+
+@pytest.mark.parametrize(
+    "connected, ready, identity", [(False, True, "new"), (True, False, "new"), (True, True, "later")]
+)
+async def test_delayed_or_disconnected_start_cannot_replace_a_plate_hold(sessions, connected, ready, identity):
+    import backend.app.main as main
+
+    old_id = await add_job(sessions, "finished")
+    state = SimpleNamespace(connected=connected, job_telemetry_ready=ready, state="RUNNING", submission_id=identity)
+    with (
+        patch.object(main, "async_session", sessions),
+        patch.object(main.printer_manager, "get_status", return_value=state),
+        patch.object(main, "_archive_print_start", AsyncMock()) as archive,
+    ):
+        await main.on_print_start(1, {"submission_id": "new", "filename": "same.3mf"})
+        archive.assert_not_awaited()
+    async with sessions() as db:
+        assert (await db.get(PrintQueueItem, old_id)).status == "finished"
+        assert len(list(await db.scalars(select(PrintQueueItem)))) == 1
+
+
+async def test_rolling_back_external_hold_transfer_restores_the_previous_job(sessions):
+    old_id = await add_job(sessions, "failed")
+    manager = PrinterManager()
+    with patch("backend.app.services.printer_manager.printer_manager", manager):
+        with patch("backend.app.core.database.async_session", sessions):
+            await manager.load_awaiting_plate_clear_from_db()
+        assert manager.is_awaiting_plate_clear(1)
+        async with sessions() as db:
+            live = SimpleNamespace(connected=True, job_telemetry_ready=True, state="RUNNING", submission_id="new")
+            new, _ = await observe_print(db, 1, "new", observed_state=live)
+            assert new is not None
+            assert manager.is_awaiting_plate_clear(1)
+            await db.rollback()
+        assert manager.is_awaiting_plate_clear(1)
+        async with sessions() as db:
+            assert (await db.get(PrintQueueItem, old_id)).status == "failed"
+            assert len(list(await db.scalars(select(PrintQueueItem)))) == 1
+
+
+@pytest.mark.parametrize("terminal", ["FINISH", "FAILED", "IDLE"])
+async def test_short_external_start_still_transfers_the_hold_before_its_terminal_callback(sessions, terminal):
+    import backend.app.main as main
+
+    await add_job(sessions, "failed")
+    live = SimpleNamespace(connected=True, job_telemetry_ready=True, state=terminal, submission_id="short-print")
+    with (
+        patch.object(main, "async_session", sessions),
+        patch.object(main.printer_manager, "get_status", return_value=live),
+        patch.object(main, "_archive_print_start", AsyncMock()),
+    ):
+        await main.on_print_start(1, {"submission_id": "short-print", "raw_data": {"gcode_state": "RUNNING"}})
+    async with sessions() as db:
+        assert (await find_job(db, 1, "short-print")).status == "printing"
+
+
+async def test_old_duplicate_identity_cannot_take_the_hold_from_another_ended_job(sessions):
+    async with sessions() as db:
+        db.add(PrintQueueItem(printer_id=1, status="successful", dispatch_subtask_id="old"))
+        current = PrintQueueItem(printer_id=1, status="failed", dispatch_subtask_id="current")
+        db.add(current)
+        await db.commit()
+        live = SimpleNamespace(connected=True, job_telemetry_ready=True, state="RUNNING", submission_id="old")
+        assert await observe_print(db, 1, "old", observed_state=live) == (None, False)
+        assert current.status == "failed"
 
 
 @pytest.mark.parametrize("live_state", ["RUNNING", "FINISH", "FAILED"])

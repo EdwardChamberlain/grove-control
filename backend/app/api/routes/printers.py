@@ -71,6 +71,7 @@ from backend.app.services.queue_transitions import (
     ACTIVE_STATUSES,
     AWAITING_PLATE_CLEAR_STATUSES,
     HOLDING_STATUSES,
+    InvalidQueueTransition,
     clear_job_plate,
     transition_queue_item,
 )
@@ -3102,7 +3103,10 @@ async def clear_plate(
     if item is None:
         raise HTTPException(409, "No job is awaiting plate clear")
     item = await lock_queue_item(db, item.id)
-    await clear_job_plate(db, item)
+    try:
+        await clear_job_plate(db, item)
+    except InvalidQueueTransition as exc:
+        raise HTTPException(409, str(exc)) from exc
     await db.commit()
 
     return {"success": True, "message": "Plate cleared, next print will start shortly"}

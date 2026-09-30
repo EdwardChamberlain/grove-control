@@ -12,7 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services.queue_transitions import ACTIVE_STATUSES, HOLDING_STATUSES, transition_queue_item
+from backend.app.services.queue_transitions import (
+    ACTIVE_STATUSES,
+    AWAITING_PLATE_CLEAR_STATUSES,
+    HOLDING_STATUSES,
+    transition_queue_item,
+)
 
 
 def normalize_id(value) -> str | None:
@@ -34,10 +39,18 @@ def telemetry_identity(state) -> str | None:
 
 
 def needs_dispatch_resolution(item: PrintQueueItem) -> bool:
-    if item.status != "dispatching" or (item.chamber_heat_soak and not item.dispatch_subtask_id):
+    # The reservation covers preparation too. A live upload/Archive worker
+    # has not yet handed the attempt to confirmation; it cannot be resolved
+    # as printing (or failed) while that worker may still send the command.
+    if (
+        item.status != "dispatching"
+        or item.dispatching_at is not None
+        or not normalize_id(item.dispatch_subtask_id)
+        or item.dispatched_at is None
+    ):
         return False
     sent = item.dispatched_at
-    return sent is None or (datetime.now(timezone.utc) - sent.replace(tzinfo=timezone.utc)).total_seconds() >= 270
+    return (datetime.now(timezone.utc) - sent.replace(tzinfo=timezone.utc)).total_seconds() >= 270
 
 
 async def find_job(db: AsyncSession, printer_id: int, identity: str | None, statuses=ACTIVE_STATUSES):
@@ -97,12 +110,17 @@ async def bind_observed_id(db: AsyncSession, printer_id: int, identity: str | No
         )
 
 
-async def observe_print(db: AsyncSession, printer_id: int, identity: str | None) -> tuple[PrintQueueItem | None, bool]:
+async def observe_print(
+    db: AsyncSession, printer_id: int, identity: str | None, *, observed_state=None, active_snapshot: bool = False
+) -> tuple[PrintQueueItem | None, bool]:
     """Attach an observed active print, or create its external job atomically.
 
     The printer row serializes duplicate callbacks on SQLite and PostgreSQL.
     The existing unique active-printer index also fences scheduler dispatch.
-    Never displace a different or unidentifiable active reservation.
+    Never displace a different or unidentifiable active reservation. Fresh
+    telemetry can establish a new external run on a plate still held by an
+    ended job. In that case, transfer the hold in this transaction; the
+    printer never becomes free, and the previous physical outcome is retained.
     """
     if not identity:
         return None, False
@@ -124,16 +142,6 @@ async def observe_print(db: AsyncSession, printer_id: int, identity: str | None)
                 },
             )
         return item, confirmed
-    held = await db.scalar(
-        select(PrintQueueItem.id)
-        .where(
-            PrintQueueItem.printer_id == printer_id,
-            PrintQueueItem.status.in_(HOLDING_STATUSES),
-        )
-        .limit(1)
-    )
-    if held is not None:
-        return None, False
     ended = await db.scalar(
         select(PrintQueueItem.id)
         .where(
@@ -145,6 +153,36 @@ async def observe_print(db: AsyncSession, printer_id: int, identity: str | None)
     )
     if ended is not None:
         return None, False  # A duplicate/delayed start cannot revive a finished job.
+    held = await db.scalar(
+        select(PrintQueueItem)
+        .where(PrintQueueItem.printer_id == printer_id, PrintQueueItem.status.in_(HOLDING_STATUSES))
+        .execution_options(populate_existing=True)
+    )
+    if held is not None:
+        active_states = ("PREPARE", "SLICING", "RUNNING", "PAUSE")
+        # Check the live, mutable state after acquiring the printer/row locks.
+        # A start that waited behind another callback may now be stale.
+        replace_awaiting = (
+            observed_state is not None
+            and observed_state.connected
+            and getattr(observed_state, "job_telemetry_ready", True)
+            and telemetry_identity(observed_state) == identity
+            and (
+                observed_state.state in active_states
+                or (active_snapshot and observed_state.state in ("FINISH", "FAILED", "IDLE"))
+            )
+        )
+        if not replace_awaiting or held.status not in AWAITING_PLATE_CLEAR_STATUSES:
+            return None, False
+        reason = f"Printer hold transferred to externally started print {identity}"
+        await transition_queue_item(
+            db,
+            held,
+            held.status,
+            "successful" if held.status == "finished" else "unsuccessful",
+            action="hold_transferred",
+            values={"error_message": f"{held.error_message}; {reason}" if held.error_message else reason},
+        )
     item = PrintQueueItem(
         printer_id=printer_id, status="printing", dispatch_subtask_id=identity, started_at=datetime.now(timezone.utc)
     )

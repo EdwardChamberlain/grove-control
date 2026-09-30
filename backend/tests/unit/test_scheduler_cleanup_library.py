@@ -121,6 +121,7 @@ async def _dispatch_library_item(
     printer_status=None,
     printer_statuses=None,
     before_reservation=None,
+    during_archive=None,
 ):
     scheduler = PrintScheduler()
 
@@ -145,6 +146,8 @@ async def _dispatch_library_item(
         ctx.archive_path = ctx.base_dir / archive_rel_path
         ctx.archive_path.parent.mkdir(parents=True, exist_ok=True)
         ctx.archive_path.write_bytes(Path(source_file).read_bytes())
+        if during_archive:
+            await during_archive()
 
         archive = PrintArchive(
             printer_id=printer_id,
@@ -237,6 +240,75 @@ async def _queue_snapshot(ctx):
         library_file = await db.get(LibraryFile, ctx.library_file_id)
         archive = await db.get(PrintArchive, item.archive_id) if item.archive_id else None
         return item, library_file, archive
+
+
+async def test_live_upload_is_not_a_dispatch_confirmation_prompt(queue_factory):
+    from datetime import datetime, timezone
+
+    from fastapi import HTTPException
+
+    from backend.app.api.routes.print_queue import get_queue_item, resolve_queue_dispatch
+    from backend.app.schemas.print_queue import DispatchResolution
+
+    ctx = await queue_factory(cleanup=False)
+
+    async def claim(db, item):
+        item.dispatching_at = datetime.now(timezone.utc)
+        await db.commit()
+
+    async def uploading(*_args, **_kwargs):
+        ctx.start_print.assert_not_called()
+        async with ctx.session_maker() as db:
+            response = await get_queue_item(ctx.queue_item_id, db, (None, True))
+            assert response.status == "dispatching" and not response.dispatch_needs_resolution
+            with pytest.raises(HTTPException) as conflict:
+                await resolve_queue_dispatch(
+                    ctx.queue_item_id, DispatchResolution(outcome="printing"), db, (None, True)
+                )
+            assert conflict.value.status_code == 409
+            await db.rollback()
+            await PrintScheduler()._recover_stale_dispatches(db)
+            assert (await db.get(PrintQueueItem, ctx.queue_item_id)).error_message is None
+        return True
+
+    ctx.upload.side_effect = uploading
+    await _dispatch_library_item(ctx, before_reservation=claim)
+    ctx.start_print.assert_called_once()
+    item, _, _ = await _queue_snapshot(ctx)
+    assert item.status == "dispatching" and item.started_at is None
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+async def test_archive_preparation_is_unsent_and_cancellation_still_fences_mqtt(queue_factory, cancelled):
+    from datetime import datetime, timezone
+
+    from backend.app.services.job_identity import needs_dispatch_resolution
+    from backend.app.services.queue_transitions import transition_queue_item
+
+    ctx = await queue_factory(cleanup=False)
+    preparation_finished = None
+
+    async def copying():
+        nonlocal preparation_finished
+        async with ctx.session_maker() as db:
+            item = await db.get(PrintQueueItem, ctx.queue_item_id)
+            assert item.status == "dispatching" and item.dispatch_subtask_id
+            assert item.dispatched_at is None and not needs_dispatch_resolution(item)
+            if cancelled:
+                await transition_queue_item(db, item, "dispatching", "cancelled", action="cancel")
+                await db.commit()
+        preparation_finished = datetime.now(timezone.utc)
+
+    await _dispatch_library_item(ctx, during_archive=copying)
+    item, _, archive = await _queue_snapshot(ctx)
+    if cancelled:
+        ctx.start_print.assert_not_called()
+        assert item.status == "cancelled" and item.dispatched_at is None and archive is None
+        assert not ctx.archive_path.exists()
+    else:
+        ctx.start_print.assert_called_once()
+        assert item.dispatched_at.replace(tzinfo=timezone.utc) >= preparation_finished
+        assert not needs_dispatch_resolution(item)
 
 
 @pytest.mark.parametrize("recorded_path, subtask_name", [(True, "same"), (True, ""), (False, "same")])
