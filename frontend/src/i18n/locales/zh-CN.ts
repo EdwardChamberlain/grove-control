@@ -974,7 +974,7 @@ export default {
       deleteButton: '删除',
       deletePurgeStats: '同时从快速统计中删除此打印（耗材、时间、成本、能耗）',
       deleteQueueItemsWarning: '与此归档关联的 {{count}} 个队列项也将被移除。',
-      deleteBlockedByPrinting: '无法删除 — {{count}} 个队列项正在发送或打印。请先停止活动作业再重试。',
+      deleteBlockedByPrinting: '无法删除 — {{count}} 个作业仍占用打印机。请先停止活动作业并清理其打印板。',
       removeSource3mf: '移除源 3MF',
       removeSource3mfConfirm: '确定要从"{{name}}"中移除源 3MF 文件吗？这将删除原始切片项目文件。',
       removeButton: '移除',

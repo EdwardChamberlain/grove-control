@@ -4118,6 +4118,7 @@ class BambuMQTTClient:
         nozzle_offset_cali: str = "auto",
         nozzle_mapping: str | None = None,
         submission_id: str | None = None,
+        display_name: str | None = None,
     ):
         """Start a print job on the printer.
 
@@ -4147,6 +4148,8 @@ class BambuMQTTClient:
             submission_id: Optional scheduler-persisted numeric identity for
                 this exact project_file attempt. When omitted, one is minted
                 locally for direct-print callers.
+            display_name: Original filename to show on the printer when the
+                uploaded file uses an attempt-specific SD path.
         """
         if self._client and self.state.connected:
             # Bambu print command format — matches Bambu Studio's format.
@@ -4306,7 +4309,7 @@ class BambuMQTTClient:
                     # (H2D/H2D Pro/H2C/X2D); single-nozzle prints resolve to 0 so
                     # firmware never runs a calibration the head doesn't support.
                     "nozzle_offset_cali": nozzle_cali_int if is_dual_nozzle else 0,
-                    "subtask_name": filename.replace(".3mf", "").replace(".gcode", ""),
+                    "subtask_name": (display_name or filename).replace(".3mf", "").replace(".gcode", ""),
                     "profile_id": "0",
                     "project_id": submission_id,
                     "subtask_id": submission_id,

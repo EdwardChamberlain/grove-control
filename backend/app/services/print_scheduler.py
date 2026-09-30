@@ -52,7 +52,7 @@ from backend.app.services.queue_source_cleanup import (
 )
 from backend.app.services.queue_transitions import HOLDING_STATUSES, QueueTransitionConflict, transition_queue_item
 from backend.app.services.smart_plug_manager import smart_plug_manager
-from backend.app.utils.filename import derive_remote_filename
+from backend.app.utils.filename import derive_queue_remote_filename
 from backend.app.utils.local_time import utcnow_naive
 from backend.app.utils.printer_models import is_gcode_compatible, normalize_printer_model
 from backend.app.utils.safe_path import assert_under, safe_join_under
@@ -3802,7 +3802,7 @@ class PrintScheduler:
 
         # Upload to root directory (not /cache/) - the start_print command references
         # files by name only (ftp://{filename}), so they must be in the root
-        remote_filename = derive_remote_filename(filename)
+        remote_filename = derive_queue_remote_filename(filename)
         remote_path = f"/{remote_filename}"
 
         # Get FTP retry settings
@@ -4103,10 +4103,11 @@ class PrintScheduler:
 
             archive = attempt_archive
             item.archive_id = archive.id
+            extra_data = dict(archive.extra_data or {})
+            extra_data["remote_filename"] = remote_filename
             if source_archive_id is not None:
-                extra_data = dict(archive.extra_data or {})
                 extra_data["source_archive_id"] = source_archive_id
-                archive.extra_data = extra_data
+            archive.extra_data = extra_data
 
             if (
                 library_file
@@ -4210,6 +4211,7 @@ class PrintScheduler:
                 nozzle_offset_cali=item.nozzle_offset_cali,
                 nozzle_mapping=item.nozzle_mapping,
                 submission_id=dispatch_subtask_id,
+                display_name=filename,
             )
         except Exception:
             # A transport exception does not prove whether the printer

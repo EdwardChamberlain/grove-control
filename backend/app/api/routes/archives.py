@@ -1504,7 +1504,7 @@ async def get_archive_delete_impact(
     """Pre-flight for the delete-confirm modal (#1734).
 
     Returns the number of related queue items the user is about to remove
-    AND whether any are dispatching or printing. Active work blocks deletion
+    AND how many hold a printer, including jobs awaiting Clear Plate. Holds block deletion
     with a 409 — surfaced to the modal so it can disable the
     confirm button instead of failing on submit). Cheap, single endpoint —
     not folded into the archive GET response so the much larger list
@@ -2008,11 +2008,9 @@ async def delete_archive(
 ):
     """Delete an archive (soft by default; ``?purge_stats=true`` to hard-delete).
 
-    Both delete paths now cascade to related ``print_queue`` rows (#1734) —
-    hard delete via the ``ON DELETE CASCADE`` FK, soft delete via the
-    ``_delete_related_queue_items`` helper. A 409 guard blocks the delete
-    when any related queue item is currently mid-print so the dispatcher
-    doesn't lose its metadata trail under the running print.
+    Both paths remove related Queue rows. The service rejects deletion while
+    any job holds a printer, including jobs awaiting Clear Plate, so Archive
+    deletion cannot release a physical hold or remove an active source.
     """
     user, can_modify_all = auth_result
 
@@ -2027,40 +2025,21 @@ async def delete_archive(
         if archive.created_by_id != user.id:
             raise HTTPException(403, "You can only delete your own archives")
 
-    # #1734: block delete when any related queue item is dispatching or printing.
-    # Both soft and hard delete are gated — an in-flight print needs its
-    # backing archive to stay around for the metadata trail (filament,
-    # plate, ams_mapping). The user can stop the print first, then retry.
-    from backend.app.services.archive import _count_related_queue_items
-
-    _related_total, related_active = await _count_related_queue_items(db, archive_id)
-    if related_active > 0:
-        raise HTTPException(
-            409,
-            f"Cannot delete archive — {related_active} related queue item(s) are "
-            f"being dispatched or printed. Stop the active job first, then retry.",
-        )
+    from backend.app.services.archive import ArchiveDeletionConflict
 
     service = ArchiveService(db)
-    if purge_stats:
-        # Hard-delete the linked PrintLogEntry rows first so their filament /
-        # cost / count contributions disappear from /archives/stats. The FK is
-        # ON DELETE SET NULL, so without this delete the runs would survive
-        # the archive row and keep showing up in totals (#1343 / #1378).
-        from sqlalchemy import delete as sa_delete
-
-        from backend.app.models.print_log import PrintLogEntry
-
-        await db.execute(sa_delete(PrintLogEntry).where(PrintLogEntry.archive_id == archive_id))
-        await db.commit()
-
-        if not await service.delete_archive(archive_id):
-            raise HTTPException(404, "Archive not found")
-        return {"status": "deleted", "purged_from_stats": True}
-
-    if not await service.soft_delete_archive(archive_id):
+    try:
+        deleted = (
+            await service.delete_archive(archive_id, purge_stats=True)
+            if purge_stats
+            else await service.soft_delete_archive(archive_id)
+        )
+    except ArchiveDeletionConflict as exc:
+        await db.rollback()
+        raise HTTPException(409, str(exc)) from exc
+    if not deleted:
         raise HTTPException(404, "Archive not found")
-    return {"status": "deleted", "purged_from_stats": False}
+    return {"status": "deleted", "purged_from_stats": purge_stats}
 
 
 @router.get("/{archive_id}/download")

@@ -1308,7 +1308,7 @@ function ArchiveCard({
           }}
         >
           {/* #1734: warn the user when related queue items will also be removed,
-              and block the action entirely if any are currently printing. */}
+              and block the action entirely if any still hold a printer. */}
           {(deleteImpactQuery.data?.related_queue_items ?? 0) > 0 && (
             <div
               className={

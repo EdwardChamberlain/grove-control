@@ -974,7 +974,7 @@ export default {
       deleteButton: 'Löschen',
       deletePurgeStats: 'Diesen Druck auch aus den Quick Stats entfernen (Filament, Zeit, Kosten, Energie)',
       deleteQueueItemsWarning: '{{count}} mit diesem Archiv verknüpfte Warteschlangeneinträge werden ebenfalls entfernt.',
-      deleteBlockedByPrinting: 'Löschen nicht möglich — {{count}} Warteschlangeneinträge werden gerade gesendet oder gedruckt. Aktiven Auftrag zuerst stoppen und erneut versuchen.',
+      deleteBlockedByPrinting: 'Löschen nicht möglich — {{count}} Aufträge belegen noch einen Drucker. Aktive Aufträge zuerst stoppen und die Druckplatten freigeben.',
       removeSource3mf: 'Quell-3MF entfernen',
       removeSource3mfConfirm: 'Möchten Sie die Quell-3MF-Datei wirklich von "{{name}}" entfernen? Die ursprüngliche Slicer-Projektdatei wird gelöscht.',
       removeButton: 'Entfernen',

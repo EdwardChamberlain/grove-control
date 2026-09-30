@@ -14,7 +14,7 @@ from backend.app.api.routes.printers import clear_plate, delete_printer, get_pri
 from backend.app.core.database import Base, _migrate_queue_lifecycle
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
-from backend.app.models.print_queue import PrintQueueItem
+from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
 from backend.app.models.printer import Printer
 from backend.app.models.settings import Settings
 from backend.app.services.printer_manager import PrinterManager
@@ -185,10 +185,15 @@ async def test_retry_uses_archive_copy_when_source_has_gone(sessions, tmp_path):
         db.add(archive)
         await db.flush()
         old = PrintQueueItem(printer_id=1, archive_id=archive.id, status="failed")
+        missing = LibraryFile(filename="gone.3mf", file_path=str(tmp_path / "gone.3mf"), file_size=4, file_type="3mf")
+        db.add(missing)
+        await db.flush()
+        old.variants = [PrintQueueVariant(library_file_id=missing.id, target_model="H2S", position=0)]
         db.add(old)
         await db.commit()
         result = await retry_queue_item(old.id, db=db, auth_result=(None, True), _=None)
         assert result.archive_id == archive.id and result.library_file_id is None
+        assert result.variants == []
         assert old.status == "failed"
 
 

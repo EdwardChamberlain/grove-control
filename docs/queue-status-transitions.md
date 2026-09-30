@@ -46,11 +46,24 @@ printer is offline. Inspect and physically clear the plate before using it.
 
 **Retry** on a failed or cancelled attempt creates a separate, unlinked
 `queued` job at the top of the same printer/model queue, carrying the print
-settings. It uses the original Files source if it is still available, otherwise
-the Archive copy. Retry does not clear the original attempt's hold. Clear Plate
+settings. Cross-model retries copy the available candidate slices and their
+per-file settings, resetting candidate attempt counts. If none survive, Retry
+uses the selected Files source or the Archive copy. Inserting this replacement
+at the top requires `queue:insert_top`, as well as queue creation and ownership
+update permissions. Retry does not clear the original attempt's hold. Clear Plate
 is required before its replacement can dispatch. Queue-only sources remain
 available while a nonfinal job needs them and are removed after finalization
 and commit; other queued copies keep a shared source alive.
+
+Archive deletion and automatic purge refuse to remove a source backing any
+holding job. Purge previews exclude these Archives, and deletion rechecks the
+hold in the same transaction as removal of the job and statistics.
+
+Each Queue dispatch uploads to a unique SD filename recorded in its attempt
+Archive. Completion captures that filename before releasing the hold and deletes
+only that upload, including after restart. Printer display names and Files and
+Archive filenames retain the user's original name. Older/external prints keep
+their existing cleanup naming rules.
 
 ## Conditional writes and views
 

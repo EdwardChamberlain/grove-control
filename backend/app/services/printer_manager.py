@@ -724,6 +724,7 @@ class PrinterManager:
         nozzle_offset_cali: str = "auto",
         nozzle_mapping: str | None = None,
         submission_id: str | None = None,
+        display_name: str | None = None,
     ) -> bool:
         """Start a print on a connected printer.
 
@@ -755,6 +756,7 @@ class PrinterManager:
                 nozzle_offset_cali=nozzle_offset_cali,
                 nozzle_mapping=nozzle_mapping,
                 submission_id=submission_id,
+                **({"display_name": display_name} if display_name is not None else {}),
             )
         return False
 

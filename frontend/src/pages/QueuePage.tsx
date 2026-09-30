@@ -849,7 +849,7 @@ function SortableQueueItem({
                 </Button>
                 {item.status !== 'finished' && (
                   <Button size="sm" variant="ghost" onClick={onRequeue}
-                    disabled={!hasPermission('queue:create') || !canModify('queue', 'update', item.created_by_id)}>
+                    disabled={!hasPermission('queue:create') || !hasPermission('queue:insert_top') || !canModify('queue', 'update', item.created_by_id)}>
                     <RefreshCw className="w-4 h-4" />{t('queue.actions.retry')}
                   </Button>
                 )}

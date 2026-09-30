@@ -1,5 +1,6 @@
+import asyncio
 import zipfile
-from contextlib import ExitStack
+from contextlib import ExitStack, suppress
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -14,6 +15,7 @@ from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
+from backend.app.models.settings import Settings
 from backend.app.services.print_scheduler import PrintScheduler
 
 
@@ -235,6 +237,113 @@ async def _queue_snapshot(ctx):
         library_file = await db.get(LibraryFile, ctx.library_file_id)
         archive = await db.get(PrintArchive, item.archive_id) if item.archive_id else None
         return item, library_file, archive
+
+
+@pytest.mark.parametrize("recorded_path, subtask_name", [(True, "same"), (True, ""), (False, "same")])
+async def test_old_completion_cannot_delete_a_later_upload(queue_factory, recorded_path, subtask_name):
+    """Overlap real completion and dispatch; only the completed upload may go."""
+    import backend.app.main as main
+    from backend.app.services.archive import ArchiveService
+    from backend.app.services.bambu_ftp import DeleteResult
+
+    ctx = await queue_factory(cleanup=False)
+    old_remote = "/same__grove_previous.3mf" if recorded_path else "/same.3mf"
+    old_file = ctx.base_dir / "archives/previous/same.gcode.3mf"
+    old_file.parent.mkdir(parents=True)
+    old_file.write_bytes(b"old attempt")
+    async with ctx.session_maker() as db:
+        library = await db.get(LibraryFile, ctx.library_file_id)
+        library.filename = "same.gcode.3mf"
+        archive = PrintArchive(
+            printer_id=ctx.printer_id,
+            filename=library.filename,
+            file_path=str(old_file),
+            file_size=old_file.stat().st_size,
+            status="printing",
+            extra_data={"remote_filename": old_remote[1:]} if recorded_path else None,
+        )
+        db.add(archive)
+        await db.flush()
+        old = PrintQueueItem(
+            printer_id=ctx.printer_id,
+            archive_id=archive.id,
+            status="printing",
+            dispatch_subtask_id="123",
+        )
+        db.add_all([old, Settings(key="require_plate_clear", value="false")])
+        await db.flush()
+        archive.dispatched_queue_item_id = old.id
+        await db.commit()
+        old_id, archive_id = old.id, archive.id
+
+    remote_files = {old_remote: b"old attempt"}
+    if recorded_path:
+        remote_files["/same.3mf"] = b"unrelated display-name file"
+    entered, release = asyncio.Event(), asyncio.Event()
+    deleted_paths = []
+
+    async def delete_old(_ip, _code, path, **_kwargs):
+        deleted_paths.append(path)
+        if path == old_remote:
+            entered.set()
+            await release.wait()
+        return DeleteResult.DELETED if remote_files.pop(path, None) is not None else DeleteResult.NOT_FOUND
+
+    async def upload_new(_ip, _code, file_path, remote_path, **_kwargs):
+        remote_files[remote_path] = Path(file_path).read_bytes()
+        return True
+
+    ctx.upload.side_effect = upload_new
+    state = SimpleNamespace(state="FINISH", connected=True, submission_id="123", subtask_id="123", raw_data={})
+    with (
+        patch.object(main, "async_session", ctx.session_maker),
+        patch.object(main, "_completed_job_events", {}),
+        patch.object(main.printer_manager, "get_status", return_value=state),
+        patch.object(main.printer_manager, "is_connected", return_value=True),
+        patch.object(scheduler_module.settings, "base_dir", ctx.base_dir),
+        patch.object(scheduler_module.settings, "archive_dir", ctx.base_dir / "archives"),
+        patch("backend.app.services.bambu_ftp.delete_file_async", new=delete_old),
+        # End the callback after SD cleanup, before unrelated completion effects.
+        patch("backend.app.services.usage_tracker.on_print_complete", AsyncMock(side_effect=asyncio.CancelledError)),
+    ):
+        completion = asyncio.create_task(
+            main._complete_identified_print(
+                ctx.printer_id,
+                {
+                    "status": "completed",
+                    "filename": "same.gcode.3mf",
+                    "subtask_name": subtask_name,
+                    "submission_id": "123",
+                },
+            )
+        )
+        try:
+            await asyncio.wait_for(entered.wait(), 5)
+            async with ctx.session_maker() as db:
+                assert (await db.get(PrintQueueItem, old_id)).status == "successful"
+                # Automatic Clear Plate permits Archive purge before FTP ends.
+                assert await ArchiveService(db).delete_archive(archive_id)
+            await _dispatch_library_item(ctx)
+            ctx.start_print.assert_called_once()
+            remote_path = ctx.upload.call_args.args[3]
+            assert remote_path != old_remote
+            assert ctx.start_print.call_args.args[1] == remote_path[1:]
+            assert ctx.start_print.call_args.kwargs["display_name"] == "same.gcode.3mf"
+            _, _, new_archive = await _queue_snapshot(ctx)
+            assert new_archive.filename == "same.gcode.3mf"
+            assert new_archive.extra_data["remote_filename"] == remote_path[1:]
+            release.set()
+            with suppress(asyncio.CancelledError):
+                await asyncio.wait_for(completion, 5)
+            assert remote_path in remote_files
+            assert old_remote not in remote_files
+            if recorded_path:
+                assert deleted_paths == [old_remote]
+                assert remote_files["/same.3mf"] == b"unrelated display-name file"
+        finally:
+            completion.cancel()
+            with suppress(asyncio.CancelledError):
+                await completion
 
 
 @pytest.mark.asyncio

@@ -9,6 +9,8 @@ and dispatch boundaries so the failure surfaces with a clear message
 instead of an obscure FTP error after the user has already hit Print.
 """
 
+from uuid import uuid4
+
 INVALID_FILENAME_CHARS = '<>:"/\\|?*'
 
 # FAT/exFAT cap on a single path component; UTF-8 byte length, not codepoints,
@@ -65,12 +67,10 @@ def derive_remote_filename(filename: str) -> str:
     replaced with underscores because the firmware parses
     ``ftp://{filename}`` as a URL.
 
-    Canonical for both the dispatch uploader and the post-print SD
-    cleanup — when the two drift apart the cleanup misses, and a
-    library row whose stored filename ended up with a doubled
-    ``.gcode.3mf`` (#1542) leaves the real file on the SD card. On A1
-    firmware that lingering file becomes a ghost print on the next
-    power-on (same family as the P1S behaviour in #374).
+    Normalizes the upload basename and supports cleanup of older attempts.
+    Stripping doubled ``.gcode.3mf`` suffixes also prevents legacy cleanup
+    misses (#1542), which can leave ghost prints on the SD card (#374).
+    New Queue uploads add a unique suffix and clean their recorded path.
 
     Raises ``TypeError`` on non-string input rather than entering the
     strip loop, because a duck-typed object that returns truthy
@@ -88,3 +88,13 @@ def derive_remote_filename(filename: str) -> str:
         else:
             break
     return f"{stem}.3mf".replace(" ", "_")
+
+
+def derive_queue_remote_filename(filename: str) -> str:
+    """Give each upload its own SD path so an older cleanup cannot delete it."""
+    stem = derive_remote_filename(filename)[:-4]
+    validate_print_filename(filename)
+    suffix = f"__grove_{uuid4().hex}.3mf"
+    budget = MAX_FILENAME_BYTES - len(suffix.encode("utf-8"))
+    stem = stem.encode("utf-8")[:budget].decode("utf-8", errors="ignore")
+    return f"{stem}{suffix}"

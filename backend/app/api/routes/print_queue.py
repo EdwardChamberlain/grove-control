@@ -1576,9 +1576,11 @@ async def retry_queue_item(
     ),
     _: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_CREATE),
 ):
-    from sqlalchemy import func
+    from sqlalchemy import text
 
     user, can_modify_all = auth_result
+    if user is not None and not user.has_permission(Permission.QUEUE_INSERT_TOP.value):
+        raise HTTPException(403, "Retry requires permission to insert at the top of the queue")
     old = await lock_queue_item(db, item_id)
     if old is None:
         raise HTTPException(404, "Queue item not found")
@@ -1609,35 +1611,77 @@ async def retry_queue_item(
         for column in PrintQueueItem.__table__.columns
         if column.name not in excluded
     }
-    source = None
-    if old.library_file_id is not None:
-        library = await db.get(LibraryFile, old.library_file_id)
-        if library and library.deleted_at is None:
-            path = Path(library.file_path)
-            path = path if path.is_absolute() else safe_join_under(settings.base_dir, library.file_path, http=False)
-            if path.is_file():
-                source = path
-                values["archive_id"] = None
-    if source is None and old.archive_id is not None:
-        archive = await db.get(PrintArchive, old.archive_id)
-        if archive and archive.deleted_at is None:
-            path = Path(archive.file_path)
-            path = path if path.is_absolute() else safe_join_under(settings.base_dir, archive.file_path, http=False)
-            if path.is_file():
-                source = path
-                values["library_file_id"] = None
-                values["cleanup_library_after_dispatch"] = False
-    if source is None:
-        raise HTTPException(409, "The print source is no longer available")
-    if old.target_model:
-        values["printer_id"] = None
-    scope = (
-        ((PrintQueueItem.printer_id.is_(None)) & (PrintQueueItem.target_model == old.target_model))
-        if old.target_model
-        else PrintQueueItem.printer_id == old.printer_id
+
+    def source_available(source: LibraryFile | PrintArchive | None) -> bool:
+        if source is None or source.deleted_at is not None:
+            return False
+        path = Path(source.file_path)
+        path = path if path.is_absolute() else safe_join_under(settings.base_dir, source.file_path, http=False)
+        return path.is_file()
+
+    candidates = list(
+        (
+            await db.scalars(
+                select(PrintQueueVariant)
+                .where(PrintQueueVariant.queue_item_id == old.id)
+                .options(selectinload(PrintQueueVariant.library_file))
+                .order_by(PrintQueueVariant.position)
+            )
+        ).all()
     )
+    candidates = [candidate for candidate in candidates if source_available(candidate.library_file)]
+    if candidates:
+        # Retry the user's original choices, rather than only the winning
+        # slice folded onto the old job at dispatch. Keep per-file snapshots
+        # intact; a new job starts with fresh candidate attempt counts.
+        values.update(
+            library_file_id=None,
+            archive_id=None,
+            printer_id=None,
+            target_model=candidates[0].target_model,
+            cleanup_library_after_dispatch=False,
+        )
+        for field in ("plate_id", "ams_mapping", "nozzle_mapping", "filament_overrides", "required_filament_types"):
+            values[field] = getattr(candidates[0], field)
+        estimates = [candidate.print_time_seconds for candidate in candidates if candidate.print_time_seconds]
+        values["print_time_seconds"] = min(estimates) if estimates else None
+    else:
+        library = await db.get(LibraryFile, old.library_file_id) if old.library_file_id is not None else None
+        if source_available(library):
+            values["archive_id"] = None
+        else:
+            archive = await db.get(PrintArchive, old.archive_id) if old.archive_id is not None else None
+            if not source_available(archive):
+                raise HTTPException(409, "The print source is no longer available")
+            values["library_file_id"] = None
+            values["cleanup_library_after_dispatch"] = False
+        if old.target_model:
+            values["printer_id"] = None
+
+    if values["target_model"]:
+        models = {candidate.target_model for candidate in candidates} or {values["target_model"]}
+        scope = PrintQueueItem.printer_id.is_(None) & (
+            PrintQueueItem.target_model.in_(models)
+            | PrintQueueItem.variants.any(PrintQueueVariant.target_model.in_(models))
+        )
+    else:
+        scope = PrintQueueItem.printer_id == values["printer_id"]
+    # Use the same insertion lock as ordinary queue creation, including an
+    # empty scope where there are no existing rows to lock on PostgreSQL.
+    if db.get_bind().dialect.name == "postgresql":
+        await db.execute(text("SELECT pg_advisory_xact_lock(1625, :k)"), {"k": values["printer_id"] or 0})
     first = await db.scalar(select(func.min(PrintQueueItem.position)).where(scope, PrintQueueItem.status == "queued"))
     new = PrintQueueItem(**values, status="queued", position=(first or 0) - 1)
+    for candidate in candidates:
+        new.variants.append(
+            PrintQueueVariant(
+                **{
+                    column.name: getattr(candidate, column.name)
+                    for column in PrintQueueVariant.__table__.columns
+                    if column.name not in {"id", "queue_item_id", "created_at", "attempt_count"}
+                }
+            )
+        )
     db.add(new)
     await db.commit()
     return await get_queue_item(new.id, db, (user, can_modify_all))

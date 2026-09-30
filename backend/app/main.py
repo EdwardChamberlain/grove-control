@@ -4383,6 +4383,8 @@ async def _complete_identified_print(printer_id: int, data: dict):
     queue_item_owner_id = None
     queue_status = None
     queue_auto_off = False
+    remote_filename = None
+    archive_filename = None
     async with async_session() as db:
         await bind_observed_id(db, printer_id, identity, data.get("previous_submission_id"))
         statuses = ("dispatching", "printing", "paused", "cancelled")
@@ -4437,7 +4439,7 @@ async def _complete_identified_print(printer_id: int, data: dict):
         if matched_job.archive_id:
             from backend.app.services.archive import record_dispatch_outcome
 
-            await record_dispatch_outcome(
+            attempt_archive = await record_dispatch_outcome(
                 db,
                 status="aborted" if queue_status == "cancelled" else queue_status,
                 dispatched_queue_item_id=matched_job.id,
@@ -4448,6 +4450,11 @@ async def _complete_identified_print(printer_id: int, data: dict):
                 else None,
                 preserve_failure_reason=True,
             )
+            if attempt_archive:
+                # Capture cleanup identity before automatic Clear Plate can
+                # release the hold and make this Archive eligible for deletion.
+                remote_filename = (attempt_archive.extra_data or {}).get("remote_filename")
+                archive_filename = attempt_archive.filename
         await _bump_library_file_usage_if_completed(db, matched_job, queue_status)
         queue_item_id = matched_job.id
         queue_item_owner_id = matched_job.created_by_id
@@ -4529,36 +4536,30 @@ async def _complete_identified_print(printer_id: int, data: dict):
     # auto-start files found in root on power cycle, causing ghost prints.
     # Must run before the archive_id early-return so it executes even when archiving is disabled.
     try:
-        if subtask_name:
-            archive_filename: str | None = None
+        if remote_filename or subtask_name:
             async with async_session() as db:
-                from backend.app.models.archive import PrintArchive
                 from backend.app.models.printer import Printer
 
                 result = await db.execute(select(Printer).where(Printer.id == printer_id))
                 printer = result.scalar_one_or_none()
-                if archive_id:
-                    archive_row = await db.execute(select(PrintArchive.filename).where(PrintArchive.id == archive_id))
-                    archive_filename = archive_row.scalar_one_or_none()
 
             if printer:
                 from backend.app.services.bambu_ftp import DeleteResult, delete_file_async
                 from backend.app.utils.filename import derive_remote_filename
 
-                # Primary candidate: the exact path the dispatcher uploaded to
-                # (derived from archive.filename via the same rule as upload).
-                # Without it, a library row that ended up with a doubled
-                # .gcode.3mf (#1542) leaves the real file behind because the
-                # subtask_name + ext fallbacks below don't match what's on the
-                # SD card. Fallbacks remain for archive-less prints (subtask
-                # never resolved to an archive) and for older naming variants.
+                # Modern Queue attempts clean only their recorded upload.
+                # Display names may be reused while this callback awaits FTP.
+                # Legacy/external prints retain the old naming fallbacks.
                 candidate_paths: list[str] = []
-                if archive_filename:
-                    candidate_paths.append(f"/{derive_remote_filename(archive_filename)}")
-                for ext in (".3mf", ".gcode"):
-                    fallback = f"/{subtask_name}{ext}"
-                    if fallback not in candidate_paths:
-                        candidate_paths.append(fallback)
+                if remote_filename:
+                    candidate_paths.append(f"/{remote_filename}")
+                else:
+                    if archive_filename:
+                        candidate_paths.append(f"/{derive_remote_filename(archive_filename)}")
+                    for ext in (".3mf", ".gcode"):
+                        fallback = f"/{subtask_name}{ext}"
+                        if fallback not in candidate_paths:
+                            candidate_paths.append(fallback)
 
                 # Three outcomes track across all candidates so the final log
                 # line reflects what actually happened. The A1 in #1721 always
