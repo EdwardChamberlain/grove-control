@@ -228,6 +228,48 @@ async def test_delete_offline_preserves_cleanup_and_prevents_new_soak_until_off_
     assert await soak.service.stage(soak.db, retry)
 
 
+@pytest.mark.parametrize("model,chamber,airduct", [("H2D", True, True), ("X1C", False, False), ("P2S", False, True)])
+async def test_shutdown_retries_after_reconnect_until_fresh_zero_targets(soak, model, chamber, airduct):
+    soak.printer.model = model
+    await soak.db.commit()
+    assert await soak.service.stage(soak.db, soak.item)
+    confirm(soak)
+
+    soak.manager.is_connected.return_value = False
+    item = await heat.lock_queue_item(soak.db, soak.item.id)
+    await heat.abort_heat_soak(soak.db, item, "Stopped while offline", status="cancelled")
+    soak.client.reset_mock()
+    await soak.service.cleanup(soak.db)
+    soak.client.set_bed_temperature.assert_not_called()
+    soak.client.set_chamber_temperature.assert_not_called()
+    soak.client.set_airduct_mode.assert_not_called()
+    assert soak.printer.heat_soak_shutdown_pending
+
+    soak.manager.is_connected.return_value = True
+    confirm(soak)
+    for _ in range(2):
+        soak.client.reset_mock()
+        await soak.service.cleanup(soak.db)
+        soak.client.set_bed_temperature.assert_called_once_with(0)
+        assert soak.client.set_chamber_temperature.called == chamber
+        if chamber:
+            soak.client.set_chamber_temperature.assert_called_once_with(0)
+        assert soak.client.set_airduct_mode.called == airduct
+        if airduct:
+            soak.client.set_airduct_mode.assert_called_once_with("cooling")
+        assert soak.printer.heat_soak_shutdown_pending
+        assert item.status == "cancelled"
+
+    confirm(soak, target=0)
+    await soak.service.cleanup(soak.db)
+    assert not soak.printer.heat_soak_shutdown_pending
+    soak.client.reset_mock()
+    await soak.service.cleanup(soak.db)
+    soak.client.set_bed_temperature.assert_not_called()
+    soak.client.set_chamber_temperature.assert_not_called()
+    soak.client.set_airduct_mode.assert_not_called()
+
+
 async def test_deleting_preheating_library_file_aborts_reservation_and_heaters(soak):
     """Deleting a source file must not leave its preheating reservation alive."""
     source = LibraryFile(

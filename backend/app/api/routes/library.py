@@ -2687,7 +2687,7 @@ async def add_files_to_queue(
                 printer_id=None,  # Unassigned
                 library_file_id=file_id,
                 position=max_position,
-                status="pending",
+                status="queued",
                 filament_overrides=json.dumps(overrides) if overrides else None,
                 force_color_match=request.force_color_match,
             )

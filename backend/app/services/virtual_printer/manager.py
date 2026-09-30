@@ -620,7 +620,7 @@ class VirtualPrinterInstance:
                     file_path=str(file_path),
                     file_size=file_path.stat().st_size,
                     source_ip=source_ip,
-                    status="queued",
+                    status="pending",
                     uploaded_at=datetime.now(timezone.utc),
                     metadata_print_name=metadata_print_name,
                 )

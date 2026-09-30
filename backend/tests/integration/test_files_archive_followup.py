@@ -9,7 +9,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from backend.app.core.config import settings
@@ -56,6 +56,58 @@ async def _add_pending_upload(db: AsyncSession, path: Path, *, filename: str, ta
 
 
 class TestPendingUploadSaveToFiles:
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    @pytest.mark.parametrize("save_all", [False, True])
+    async def test_virtual_printer_review_upload_is_visible_and_can_be_saved(
+        self, async_client: AsyncClient, db_session: AsyncSession, test_engine, monkeypatch, tmp_path: Path, save_all
+    ):
+        from backend.app.services.virtual_printer.manager import VirtualPrinterInstance
+
+        base_dir, _ = _configure_storage(monkeypatch, tmp_path)
+        instance = VirtualPrinterInstance(
+            vp_id=1,
+            name="Review printer",
+            mode="review",
+            model="BL-P001",
+            access_code="12345678",
+            serial_suffix="391800001",
+            base_dir=base_dir,
+            session_factory=async_sessionmaker(test_engine, expire_on_commit=False),
+        )
+        payload = _three_mf_bytes()
+        source = instance.upload_dir / "review.gcode.3mf"
+        source.write_bytes(payload)
+        await instance.on_file_received(source, "192.168.1.50")
+
+        uploads = await async_client.get("/api/v1/pending-uploads/")
+        assert uploads.status_code == 200, uploads.text
+        assert len(uploads.json()) == 1
+        upload = uploads.json()[0]
+        assert upload["filename"] == source.name
+        assert upload["status"] == "pending"
+        count = await async_client.get("/api/v1/pending-uploads/count")
+        assert count.status_code == 200
+        assert count.json() == {"count": 1}
+        assert await db_session.scalar(select(func.count(PrintQueueItem.id))) == 0
+
+        endpoint = (
+            "/api/v1/pending-uploads/save-to-files-all"
+            if save_all
+            else f"/api/v1/pending-uploads/{upload['id']}/save-to-files"
+        )
+        saved = await async_client.post(endpoint)
+        assert saved.status_code == 200, saved.text
+        assert await db_session.scalar(select(func.count(LibraryFile.id))) == 1
+        library = await db_session.scalar(select(LibraryFile))
+        assert not library.queue_only
+        assert (base_dir / library.file_path).read_bytes() == payload
+        assert not source.exists()
+        pending = await db_session.get(PendingUpload, upload["id"], populate_existing=True)
+        assert pending.status == "saved_to_files"
+        assert (await async_client.get("/api/v1/pending-uploads/")).json() == []
+        assert (await async_client.get("/api/v1/pending-uploads/count")).json() == {"count": 0}
+
     @pytest.mark.asyncio
     @pytest.mark.integration
     @pytest.mark.parametrize("tags", [None, "Prototype, PLA"])

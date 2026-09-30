@@ -304,7 +304,7 @@ class ChamberHeatSoak:
             if not printer.heat_soak_shutdown_pending:
                 await db.rollback()
                 continue
-                _heaters_off(printer)
+            _heaters_off(printer)
             client = printer_manager.get_client(printer.id)
             if client:
                 client.request_status_update()

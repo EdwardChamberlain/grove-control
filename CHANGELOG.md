@@ -54,6 +54,10 @@
 
 ### Fixed
 
+- Interrupted heat soaks retry heater shutdown after reconnect until fresh
+  telemetry confirms zero heater targets.
+- Files bulk-queue submissions use the new `queued` lifecycle. Virtual-printer
+  review uploads remain available for Save to Files.
 - Queue-only uploads are excluded from automatic Files purging and serialize
   cleanup against queue submissions.
 
