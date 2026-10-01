@@ -918,11 +918,10 @@ describe('PrintersPage', () => {
           ...mockPrinterStatus,
           state: 'RUNNING',
           current_print: 'test-print.3mf',
+          current_queue_owner: 'Avery',
         })),
-        http.get('/api/v1/queue/', ({ request }) => {
-          const status = new URL(request.url).searchParams.get('status');
-          return HttpResponse.json(status === 'printing' ? [{ created_by_username: 'Avery' }] : []);
-        }),
+        http.get('/api/v1/printers/:id/current-print-user', () => HttpResponse.json({})),
+        http.get('/api/v1/queue/', () => HttpResponse.json([])),
       );
 
       render(<PrintersPage />);
@@ -933,6 +932,53 @@ describe('PrintersPage', () => {
       expect(owner).toHaveTextContent('Avery');
       expect(owner.compareDocumentPosition(jobName) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
+
+    it.each(['cockpit', 'detail cards'])(
+      'shows the persisted owner of a paused print in %s after a restart',
+      async (view) => {
+        server.use(
+          http.get('/api/v1/printers/:id/status', ({ params }) => HttpResponse.json(
+            Number(params.id) === 1 ? {
+              ...mockPrinterStatus,
+              state: 'PAUSE',
+              current_print: 'test-print.3mf',
+              current_queue_owner: 'Avery',
+              submission_id: '123',
+            } : mockPrinterStatus,
+          )),
+          http.get('/api/v1/printers/:id/current-print-user', () => HttpResponse.json({})),
+          http.get('/api/v1/queue/', () => HttpResponse.json([])),
+        );
+
+        render(<PrintersPage />);
+        fireEvent.click(await screen.findByRole('button', {
+          name: view === 'cockpit' ? 'X1 Carbon' : 'Detail cards',
+        }));
+
+        expect(await screen.findByTitle('Started by Avery')).toBeInTheDocument();
+      },
+    );
+
+    it.each(['RUNNING', 'PAUSE'])(
+      'keeps the reprint owner fallback while the printer is %s',
+      async (state) => {
+        server.use(
+          http.get('/api/v1/printers/:id/status', () => HttpResponse.json({
+            ...mockPrinterStatus,
+            state,
+            current_print: 'reprint.3mf',
+            current_queue_owner: null,
+          })),
+          http.get('/api/v1/printers/:id/current-print-user', () => HttpResponse.json({ username: 'Morgan' })),
+          http.get('/api/v1/queue/', () => HttpResponse.json([])),
+        );
+
+        render(<PrintersPage />);
+        fireEvent.click(await screen.findByRole('button', { name: 'X1 Carbon' }));
+
+        expect(await screen.findByTestId('cockpit-print-owner')).toHaveTextContent('Morgan');
+      },
+    );
 
     it('shows the heat-soak status as the active cockpit job', async () => {
       server.use(

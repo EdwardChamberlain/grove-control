@@ -1385,19 +1385,16 @@ function useCurrentPrintOwner(
   printerId: number,
   isPrintingOrPaused: boolean,
   printIdentity: string | null,
+  queueOwner: string | null | undefined,
 ) {
-  const { data: printingQueueItems } = useQuery({
-    queryKey: ['queue', printerId, 'printing', printIdentity],
-    queryFn: () => api.getQueue(printerId, 'printing'),
-    enabled: isPrintingOrPaused && printIdentity !== null,
-  });
   const { data: reprintUser } = useQuery({
     queryKey: ['currentPrintUser', printerId, printIdentity],
     queryFn: () => api.getCurrentPrintUser(printerId),
     enabled: isPrintingOrPaused && printIdentity !== null,
   });
 
-  return printingQueueItems?.[0]?.created_by_username || reprintUser?.username;
+  // Printer status resolves the durable active job owner, including paused jobs.
+  return queueOwner || reprintUser?.username;
 }
 
 function SinglePrinterCockpit({
@@ -1857,7 +1854,7 @@ function SinglePrinterCockpit({
   const activePrintName = status?.current_print && isPrintingOrPaused
     ? formatPrintName(status.subtask_name || status.current_print || null, status.gcode_file, t)
     : null;
-  const currentPrintUser = useCurrentPrintOwner(printer.id, isPrintingOrPaused, activePrintIdentity);
+  const currentPrintUser = useCurrentPrintOwner(printer.id, isPrintingOrPaused, activePrintIdentity, status?.current_queue_owner);
   const printEntries = useMemo(() => printLog?.items ?? [], [printLog?.items]);
   const printerStats = useMemo(() => {
     const completed = printEntries.filter(entry => entry.status === 'completed').length;
@@ -3399,7 +3396,7 @@ function PrinterCard({
     status?.awaiting_plate_clear_print,
   ]);
   const activePrintIdentity = getActivePrintIdentity(status);
-  const currentPrintUser = useCurrentPrintOwner(printer.id, isPrintingOrPaused, activePrintIdentity);
+  const currentPrintUser = useCurrentPrintOwner(printer.id, isPrintingOrPaused, activePrintIdentity, status?.current_queue_owner);
   const activePrintName = status?.current_print && isPrintingOrPaused
     ? formatPrintName(status.subtask_name || status.current_print || null, status.gcode_file, t, activePlateLabel)
     : null;

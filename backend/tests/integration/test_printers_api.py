@@ -455,8 +455,9 @@ class TestPrintersAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    @pytest.mark.parametrize(("queue_status", "printer_state"), [("printing", "RUNNING"), ("paused", "PAUSE")])
     async def test_get_printer_status_includes_active_queue_owner(
-        self, async_client: AsyncClient, printer_factory, db_session
+        self, async_client: AsyncClient, printer_factory, db_session, queue_status: str, printer_state: str
     ):
         """The status projection includes the active queue owner's username."""
         from backend.app.models.print_queue import PrintQueueItem
@@ -471,7 +472,7 @@ class TestPrintersAPI:
             PrintQueueItem(
                 printer_id=printer.id,
                 position=1,
-                status="printing",
+                status=queue_status,
                 created_by_id=owner.id,
             )
         )
@@ -479,7 +480,7 @@ class TestPrintersAPI:
 
         state = PrinterState()
         state.connected = True
-        state.state = "RUNNING"
+        state.state = printer_state
         with patch("backend.app.api.routes.printers.printer_manager") as mock_pm:
             mock_pm.get_status.return_value = state
             mock_pm.is_awaiting_plate_clear.return_value = False
