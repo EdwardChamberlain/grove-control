@@ -416,7 +416,7 @@ async def release_queue_references(db: AsyncSession, file_ids: list[int]) -> int
             .where(PrintQueueItem.archive_id.is_(None))
             .where(
                 or_(
-                    PrintQueueItem.status.in_(("pending", "skipped", "preheating")),
+                    PrintQueueItem.status.in_(("queued", "preheating")),
                     and_(
                         PrintQueueItem.status == "dispatching",
                         PrintQueueItem.chamber_heat_soak.is_(True),
@@ -453,8 +453,8 @@ async def release_queue_references(db: AsyncSession, file_ids: list[int]) -> int
                 status="cancelled",
             )
             cancelled += 1
-        elif item.status in ("pending", "skipped"):
-            await transition_queue_item(db, item, item.status, "cancelled")
+        elif item.status == "queued":
+            await transition_queue_item(db, item, item.status, "unsuccessful", action="cancel")
             item.completed_at = now
             item.error_message = reason_by_file.get(item.library_file_id, "The library file was deleted")
             cancelled += 1

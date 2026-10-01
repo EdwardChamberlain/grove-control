@@ -223,7 +223,7 @@ function KioskQueueStatusPill({
   status: PrinterStatus | undefined;
   t: Translate;
 }) {
-  const scheduled = item.status === 'pending' && item.scheduled_time && (parseUTCDate(item.scheduled_time)?.getTime() ?? 0) > Date.now();
+  const scheduled = item.status === 'queued' && item.scheduled_time && (parseUTCDate(item.scheduled_time)?.getTime() ?? 0) > Date.now();
   const className = 'flex max-w-[48%] shrink-0 items-center gap-1 self-center truncate rounded-full border px-2 py-1 text-right text-xs';
 
   if (scheduled) {
@@ -235,7 +235,7 @@ function KioskQueueStatusPill({
     );
   }
 
-  if (item.status === 'pending' && item.waiting_reason) {
+  if (item.status === 'queued' && item.waiting_reason) {
     return (
       <p data-testid={`kiosk-queue-status-${item.id}`} className={`${className} border-purple-400/30 bg-purple-400/10 text-purple-400`} title={item.waiting_reason}>
         <AlertCircle className="h-3 w-3 shrink-0" />
@@ -274,7 +274,7 @@ function KioskQueueStatusPill({
   return (
     <p data-testid={`kiosk-queue-status-${item.id}`} className={`${className} border-status-warning/20 bg-status-warning/10 text-status-warning`}>
       <Clock className="h-3 w-3 shrink-0" />
-      <span className="truncate">{t('queue.status.pending')}</span>
+      <span className="truncate">{t('queue.status.queued')}</span>
     </p>
   );
 }
@@ -368,7 +368,7 @@ export function KioskPage() {
     () => queue.filter((item) => item.status === 'preheating' || item.status === 'dispatching' || item.status === 'printing'),
     [queue],
   );
-  const pendingItems = useMemo(() => queue.filter((item) => item.status === 'pending').sort((a, b) => a.position - b.position), [queue]);
+  const pendingItems = useMemo(() => queue.filter((item) => item.status === 'queued').sort((a, b) => a.position - b.position), [queue]);
   const printingItemsByPrinter = useMemo(() => new Map(printingItems.filter((item) => item.printer_id != null).map((item) => [item.printer_id!, item])), [printingItems]);
 
   const owners = useMemo(() => new Map(printers.map((printer, index) => {

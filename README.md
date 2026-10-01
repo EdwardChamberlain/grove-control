@@ -45,7 +45,9 @@ Grove Control brings together printer monitoring, scheduling, automation, and pr
 For upgrade and release guidance, see [UPDATING.md](UPDATING.md),
 [CHANGELOG.md](CHANGELOG.md), and the [Docker install guide](install/README.md).
 For how Files, Queue uploads, and print Archives fit together, see
-[Files, Queue, and Archives](docs/files-queue-archive.md).
+[Files, Queue, and Archives](docs/files-queue-archive.md). See the
+[Queue job lifecycle](docs/queue-status-transitions.md) for Clear Plate, Retry,
+and upgrade behavior.
 
 ---
 

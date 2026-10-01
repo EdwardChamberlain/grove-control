@@ -18,8 +18,8 @@ interface PrinterQueueWidgetProps {
 export function PrinterQueueWidget({ printerId, printerModel, loadedFilamentTypes, loadedFilaments, variant = 'card' }: PrinterQueueWidgetProps) {
   const { t } = useTranslation();
   const { data: queue } = useQuery({
-    queryKey: ['queue', printerId, 'pending', printerModel],
-    queryFn: () => api.getQueue(printerId, 'pending', printerModel || undefined),
+    queryKey: ['queue', printerId, 'queued', printerModel],
+    queryFn: () => api.getQueue(printerId, 'queued', printerModel || undefined),
     refetchInterval: 30000,
   });
 

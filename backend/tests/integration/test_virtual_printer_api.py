@@ -201,7 +201,7 @@ class TestPendingUploadsAPI:
                 file_path=f"/tmp/{filename}",
                 file_size=1024,
                 source_ip="192.168.1.100",
-                status="pending",
+                status="queued",
             )
             db_session.add(upload)
             await db_session.commit()

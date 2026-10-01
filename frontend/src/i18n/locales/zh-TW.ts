@@ -974,7 +974,7 @@ export default {
       deleteButton: '刪除',
       deletePurgeStats: '同時從快速統計中刪除此列印（耗材、時間、成本、能耗）',
       deleteQueueItemsWarning: '與此封存連結的 {{count}} 個佇列項目也將被移除。',
-      deleteBlockedByPrinting: '無法刪除 — {{count}} 個佇列項目正在傳送或列印。請先停止進行中的工作再重試。',
+      deleteBlockedByPrinting: '無法刪除 — {{count}} 個工作仍佔用印表機。請先停止進行中的工作並清理其列印板。',
       removeSource3mf: '移除源 3MF',
       removeSource3mfConfirm: '確定要從"{{name}}"中移除源 3MF 檔案嗎？這將刪除原始切片專案檔案。',
       removeButton: '移除',
@@ -1064,6 +1064,7 @@ export default {
 
   // Queue page
   queue: {
+    awaitingPlateClear: '等待清理列印板',
     resolveDispatch: {
       prompt: "印表機尚未確認此工作。選擇前請檢查印表機：",
       printing: "正在列印",
@@ -1149,6 +1150,10 @@ export default {
     },
     // Status
     status: {
+      queued: '排隊中',
+      finished: '已完成',
+      successful: '成功',
+      unsuccessful: '未成功',
       pending: '等待中',
       scheduled: '已排程',
       waiting: '等待中',
@@ -1188,8 +1193,7 @@ export default {
     },
     // Badges
     badges: {
-      staged: '已暫存',
-      requiresPrevious: '需要前一個成功',
+      manualStart: '手動開始',
       autoPowerOff: '自動關機',
       gcodeInjection: 'G-code',
     },
@@ -1209,6 +1213,8 @@ export default {
     },
     // Actions
     actions: {
+      clearPlate: '清理列印板',
+      retry: '重試',
       startPrint: '開始列印',
       stopPrint: '停止列印',
       requeue: '重新佇列',

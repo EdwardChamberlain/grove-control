@@ -36,7 +36,7 @@ from backend.app.schemas.print_queue import (
     QueueVariantCreate,
     QueueVariantSummary,
 )
-from backend.app.services.chamber_heat_soak import abort_heat_soak, lock_queue_item, skip_heat_soak
+from backend.app.services.chamber_heat_soak import lock_queue_item, skip_heat_soak
 from backend.app.services.filament_deficit import compute_deficit_for_queue_item
 from backend.app.services.filament_requirements import (
     build_queue_filament_overrides,
@@ -49,8 +49,15 @@ from backend.app.services.queue_source_cleanup import (
     remove_queue_only_artifacts,
     remove_queue_only_source_if_unused,
 )
-from backend.app.services.queue_transitions import QueueTransitionConflict, transition_queue_item
+from backend.app.services.queue_transitions import (
+    FINAL_STATUSES,
+    HOLDING_STATUSES,
+    InvalidQueueTransition,
+    clear_job_plate,
+    transition_queue_item,
+)
 from backend.app.utils.printer_models import is_gcode_compatible
+from backend.app.utils.safe_path import safe_join_under
 from backend.app.utils.threemf_tools import (
     extract_bed_type_from_3mf,
     extract_filament_usage_from_3mf,
@@ -324,7 +331,6 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
         "library_file_id": item.library_file_id,
         "position": item.position,
         "scheduled_time": item.scheduled_time,
-        "require_previous_success": item.require_previous_success,
         "auto_off_after": item.auto_off_after,
         "manual_start": item.manual_start,
         "wait_for_drying_complete": bool(item.wait_for_drying_complete),
@@ -504,6 +510,8 @@ async def list_queue(
         query = query.where(func.lower(PrintQueueItem.target_model) == target_model.lower())
     if status:
         query = query.where(PrintQueueItem.status == status)
+    else:
+        query = query.where(PrintQueueItem.status.not_in(FINAL_STATUSES))
 
     result = await db.execute(query)
     items = result.scalars().all()
@@ -880,13 +888,13 @@ async def add_to_queue(
     if data.printer_id is not None:
         queue_scope = (
             PrintQueueItem.printer_id == data.printer_id,
-            PrintQueueItem.status == "pending",
+            PrintQueueItem.status == "queued",
         )
     else:
         # For unassigned/model-based items, scope across all unassigned.
         queue_scope = (
             PrintQueueItem.printer_id.is_(None),
-            PrintQueueItem.status == "pending",
+            PrintQueueItem.status == "queued",
         )
 
     # Serialize concurrent queue inserts to the same scope (#1625-followup).
@@ -970,7 +978,6 @@ async def add_to_queue(
             archive_id=data.archive_id,
             library_file_id=data.library_file_id,
             scheduled_time=data.scheduled_time,
-            require_previous_success=data.require_previous_success,
             auto_off_after=data.auto_off_after,
             manual_start=data.manual_start,
             wait_for_drying_complete=data.wait_for_drying_complete,
@@ -994,7 +1001,7 @@ async def add_to_queue(
             cleanup_library_after_dispatch=bool(library_file and library_file.queue_only),
             project_id=data.project_id,
             position=start_position + i,
-            status="pending",
+            status="queued",
             created_by_id=actor.id if actor else None,
             print_time_seconds=cached_print_time,
         )
@@ -1125,7 +1132,7 @@ async def bulk_update_queue_items(
 
     for item in items:
         item = await lock_queue_item(db, item.id)
-        if not item or item.status != "pending" or item.dispatching_at is not None:
+        if not item or item.status != "queued" or item.dispatching_at is not None:
             skipped_count += 1
             continue
 
@@ -1219,10 +1226,10 @@ async def update_queue_item(
         if item.created_by_id != user.id:
             raise HTTPException(403, "You can only update your own queue items")
 
-    if item.status not in ("pending", "preheating"):
+    if item.status != "queued":
         raise HTTPException(400, "Can only update pending items")
 
-    if item.status == "pending" and item.dispatching_at is not None:
+    if item.status == "queued" and item.dispatching_at is not None:
         raise HTTPException(409, "Item is being dispatched — cancel it first to make changes")
 
     update_data = data.model_dump(exclude_unset=True)
@@ -1360,17 +1367,12 @@ async def update_queue_item(
 
     # Validation above contains awaits, so a scheduler worker may have claimed
     # this row after the initial guard. Re-check immediately before mutating it.
-    if item.status == "pending":
+    if item.status == "queued":
         claimed = (
             await db.execute(select(PrintQueueItem.dispatching_at).where(PrintQueueItem.id == item_id))
         ).scalar_one_or_none()
         if claimed is not None:
             raise HTTPException(409, "Item is being dispatched — cancel it first to make changes")
-
-    if item.status == "preheating":
-        await abort_heat_soak(db, item, "Heat soak stopped for editing", status="pending")
-        item = await lock_queue_item(db, item_id)
-        update_data["manual_start"] = True
 
     for field, value in update_data.items():
         setattr(item, field, value)
@@ -1419,12 +1421,10 @@ async def delete_queue_item(
         if item.created_by_id != user.id:
             raise HTTPException(403, "You can only delete your own queue items")
 
-    if item.status in ("dispatching", "printing"):
-        raise HTTPException(400, "Cannot delete an item that is being dispatched or is currently printing")
-
-    if item.status == "preheating":
-        await abort_heat_soak(db, item, "Heat soak deleted", status="cancelled")
-        item = await lock_queue_item(db, item_id)
+    if item.status in HOLDING_STATUSES:
+        raise HTTPException(409, "Stop the job and clear its plate before removing it")
+    if item.status == "queued":
+        await transition_queue_item(db, item, "queued", "unsuccessful", action="cancel")
     library_file_id = item.library_file_id if item.cleanup_library_after_dispatch else None
     from backend.app.services.archive import detach_dispatch_archive_links
 
@@ -1473,7 +1473,7 @@ async def reorder_queue(
         requested_items = [items_by_id.get(item_id) for item_id in item_ids]
         if any(item is None for item in requested_items):
             raise HTTPException(404, "Queue item not found")
-        if any(item.status != "pending" for item in requested_items if item is not None):
+        if any(item.status != "queued" for item in requested_items if item is not None):
             raise HTTPException(400, "Only pending queue items can be reordered")
         if any(item.created_by_id != user.id for item in requested_items if item is not None):
             raise HTTPException(403, "You can only reorder your own queue items")
@@ -1495,7 +1495,7 @@ async def reorder_queue(
             raise HTTPException(400, "Queue items must belong to the same printer")
         pending_query = (
             select(PrintQueueItem)
-            .where(PrintQueueItem.status == "pending")
+            .where(PrintQueueItem.status == "queued")
             .where(
                 PrintQueueItem.printer_id.is_(None)
                 if queue_printer_id is None
@@ -1513,7 +1513,7 @@ async def reorder_queue(
     updated_count = 0
     for reorder_item in data.items:
         item = items_by_id.get(reorder_item.id)
-        if item and item.status == "pending":
+        if item and item.status == "queued":
             item.position = reorder_item.position
             updated_count += 1
 
@@ -1522,128 +1522,172 @@ async def reorder_queue(
     return {"message": f"Reordered {len(data.items)} items"}
 
 
-@router.post("/printer/{printer_id}/resume")
-async def resume_queue_after_failure(
-    printer_id: int,
-    db: AsyncSession = Depends(get_db),
-    _: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_UPDATE_ALL),
-):
-    """Clear the previous-success gate for a printer and restore skipped items.
-
-    Single atomic op (#1818):
-
-    * Sets ``gate_acknowledged=True`` on every ``failed`` / ``aborted`` queue
-      item for this printer that's still in the scheduler's lookback window,
-      so the next ``_check_previous_success`` call ignores them.
-    * Restores ``skipped`` items whose ``error_message`` matches the
-      scheduler's exact "Previous print failed or was aborted" gate string
-      back to ``pending`` (clears ``error_message`` + ``completed_at``). An
-      item another request changed first is left alone and not counted.
-
-    Returns counts so the UI can render a precise toast. No-op endpoint
-    (zero counts) when called against a printer with no gate to clear.
-    """
-    result = await db.execute(select(Printer).where(Printer.id == printer_id))
-    printer = result.scalar_one_or_none()
-    if not printer:
-        raise HTTPException(404, "Printer not found")
-
-    ack_result = await db.execute(
-        select(PrintQueueItem)
-        .where(PrintQueueItem.printer_id == printer_id)
-        .where(PrintQueueItem.status.in_(["failed", "aborted"]))
-        .where(PrintQueueItem.gate_acknowledged == False)  # noqa: E712
-    )
-    to_ack = ack_result.scalars().all()
-    for failed_item in to_ack:
-        failed_item.gate_acknowledged = True
-
-    restore_result = await db.execute(
-        select(PrintQueueItem)
-        .where(PrintQueueItem.printer_id == printer_id)
-        .where(PrintQueueItem.status == "skipped")
-        .where(PrintQueueItem.error_message == "Previous print failed or was aborted")
-    )
-    restored = 0
-    for skipped_item in restore_result.scalars().all():
-        try:
-            await transition_queue_item(
-                db,
-                skipped_item,
-                "skipped",
-                "pending",
-                values={"error_message": None, "completed_at": None},
-            )
-        except QueueTransitionConflict:
-            # Cancelled or restored concurrently; restore the others.
-            continue
-        restored += 1
-
-    await db.commit()
-
-    logger.info(
-        "Resume after failure on printer %s: acknowledged %d failure(s), restored %d skipped item(s)",
-        printer_id,
-        len(to_ack),
-        restored,
-    )
-    return {"acknowledged": len(to_ack), "restored": restored}
-
-
 @router.post("/{item_id}/cancel")
+@router.post("/{item_id}/stop")
 async def cancel_queue_item(
     item_id: int,
     db: AsyncSession = Depends(get_db),
     auth_result: tuple[User | None, bool] = Depends(
-        require_ownership_permission(
-            Permission.QUEUE_UPDATE_ALL,
-            Permission.QUEUE_UPDATE_OWN,
-        )
+        require_ownership_permission(Permission.QUEUE_UPDATE_ALL, Permission.QUEUE_UPDATE_OWN)
     ),
 ):
-    """Cancel a pending queue item."""
+    from backend.app.services.queue_actions import cancel_job
+
     user, can_modify_all = auth_result
-
     item = await lock_queue_item(db, item_id)
-    if not item:
+    if item is None:
         raise HTTPException(404, "Queue item not found")
+    if user is not None and not can_modify_all and item.created_by_id != user.id:
+        raise HTTPException(403, "You can only cancel your own queue items")
+    try:
+        await cancel_job(db, item)
+    except InvalidQueueTransition as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"message": "Job cancelled"}
 
-    # Ownership check
-    if not can_modify_all:
-        if item.created_by_id != user.id:
-            raise HTTPException(403, "You can only cancel your own queue items")
 
-    if item.status == "preheating":
-        await abort_heat_soak(db, item, "Heat soak cancelled by user", status="cancelled")
-        item = await lock_queue_item(db, item_id)
-        if item is not None and item.cleanup_library_after_dispatch and item.library_file_id is not None:
-            cleanup_paths = await _cleanup_transient_library_source(
-                db,
-                item.library_file_id,
-                exclude_item_id=item_id,
-            )
-            await db.commit()
-            remove_queue_only_artifacts(cleanup_paths)
-        return {"message": "Heat soak cancelled"}
+# Keep the established import name and /stop URL for existing clients.
+stop_queue_item = cancel_queue_item
 
-    if item.status not in ("pending",):
-        raise HTTPException(400, f"Cannot cancel item with status '{item.status}'")
 
-    library_file_id = item.library_file_id if item.cleanup_library_after_dispatch else None
-    await transition_queue_item(db, item, item.status, "cancelled")
-    item.completed_at = datetime.now(timezone.utc)
-    cleanup_paths = []
-    if library_file_id is not None:
-        cleanup_paths = await _cleanup_transient_library_source(db, library_file_id, exclude_item_id=item_id)
+@router.post("/{item_id}/clear-plate")
+async def clear_queue_plate(
+    item_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.PRINTERS_CLEAR_PLATE),
+):
+    item = await lock_queue_item(db, item_id)
+    if item is None:
+        raise HTTPException(404, "Queue item not found")
+    try:
+        await clear_job_plate(db, item)
+    except InvalidQueueTransition as exc:
+        raise HTTPException(409, str(exc)) from exc
     await db.commit()
-    remove_queue_only_artifacts(cleanup_paths)
+    return {"message": "Plate cleared"}
 
-    from backend.app.services.print_scheduler import scheduler
 
-    scheduler.cancel_inflight(item_id)
+@router.post("/{item_id}/retry", response_model=PrintQueueItemResponse)
+async def retry_queue_item(
+    item_id: int,
+    db: AsyncSession = Depends(get_db),
+    auth_result: tuple[User | None, bool] = Depends(
+        require_ownership_permission(Permission.QUEUE_UPDATE_ALL, Permission.QUEUE_UPDATE_OWN)
+    ),
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_CREATE),
+):
+    from sqlalchemy import text
 
-    logger.info("Cancelled queue item %s", item_id)
-    return {"message": "Queue item cancelled"}
+    user, can_modify_all = auth_result
+    if user is not None and not user.has_permission(Permission.QUEUE_INSERT_TOP.value):
+        raise HTTPException(403, "Retry requires permission to insert at the top of the queue")
+    old = await lock_queue_item(db, item_id)
+    if old is None:
+        raise HTTPException(404, "Queue item not found")
+    if user is not None and not can_modify_all and old.created_by_id != user.id:
+        raise HTTPException(403, "You can only retry your own queue items")
+    if old.status not in ("failed", "cancelled"):
+        raise HTTPException(409, "Only failed or cancelled jobs awaiting plate clear can be retried")
+    excluded = {
+        "id",
+        "status",
+        "created_at",
+        "position",
+        "started_at",
+        "completed_at",
+        "dispatched_at",
+        "dispatch_subtask_id",
+        "dispatching_at",
+        "error_message",
+        "waiting_reason",
+        "been_jumped",
+        "preheat_owner",
+        "preheat_requested_at",
+        "preheat_checked_at",
+        "preheat_started_at",
+    }
+    values = {
+        column.name: getattr(old, column.name)
+        for column in PrintQueueItem.__table__.columns
+        if column.name not in excluded
+    }
+
+    def source_available(source: LibraryFile | PrintArchive | None) -> bool:
+        if source is None or source.deleted_at is not None:
+            return False
+        path = Path(source.file_path)
+        path = path if path.is_absolute() else safe_join_under(settings.base_dir, source.file_path, http=False)
+        return path.is_file()
+
+    candidates = list(
+        (
+            await db.scalars(
+                select(PrintQueueVariant)
+                .where(PrintQueueVariant.queue_item_id == old.id)
+                .options(selectinload(PrintQueueVariant.library_file))
+                .order_by(PrintQueueVariant.position)
+            )
+        ).all()
+    )
+    candidates = [candidate for candidate in candidates if source_available(candidate.library_file)]
+    if candidates:
+        # Retry the user's original choices, rather than only the winning
+        # slice folded onto the old job at dispatch. Keep per-file snapshots
+        # intact; a new job starts with fresh candidate attempt counts.
+        values.update(
+            library_file_id=None,
+            archive_id=None,
+            printer_id=None,
+            target_model=candidates[0].target_model,
+            cleanup_library_after_dispatch=False,
+        )
+        for field in ("plate_id", "ams_mapping", "nozzle_mapping", "filament_overrides", "required_filament_types"):
+            values[field] = getattr(candidates[0], field)
+        estimates = [candidate.print_time_seconds for candidate in candidates if candidate.print_time_seconds]
+        values["print_time_seconds"] = min(estimates) if estimates else None
+    else:
+        library = await db.get(LibraryFile, old.library_file_id) if old.library_file_id is not None else None
+        if source_available(library):
+            values["archive_id"] = None
+        else:
+            archive = await db.get(PrintArchive, old.archive_id) if old.archive_id is not None else None
+            if not source_available(archive):
+                raise HTTPException(409, "The print source is no longer available")
+            values["library_file_id"] = None
+            values["cleanup_library_after_dispatch"] = False
+        if old.target_model:
+            # An "Any machine" retry returns to the pool. The printer and the
+            # tray mapping bound for it at dispatch are chosen again.
+            values["printer_id"] = None
+            values["ams_mapping"] = None
+
+    if values["target_model"]:
+        models = {candidate.target_model for candidate in candidates} or {values["target_model"]}
+        scope = PrintQueueItem.printer_id.is_(None) & (
+            PrintQueueItem.target_model.in_(models)
+            | PrintQueueItem.variants.any(PrintQueueVariant.target_model.in_(models))
+        )
+    else:
+        scope = PrintQueueItem.printer_id == values["printer_id"]
+    # Use the same insertion lock as ordinary queue creation, including an
+    # empty scope where there are no existing rows to lock on PostgreSQL.
+    if db.get_bind().dialect.name == "postgresql":
+        await db.execute(text("SELECT pg_advisory_xact_lock(1625, :k)"), {"k": values["printer_id"] or 0})
+    first = await db.scalar(select(func.min(PrintQueueItem.position)).where(scope, PrintQueueItem.status == "queued"))
+    new = PrintQueueItem(**values, status="queued", position=(first or 0) - 1)
+    for candidate in candidates:
+        new.variants.append(
+            PrintQueueVariant(
+                **{
+                    column.name: getattr(candidate, column.name)
+                    for column in PrintQueueVariant.__table__.columns
+                    if column.name not in {"id", "queue_item_id", "created_at", "attempt_count"}
+                }
+            )
+        )
+    db.add(new)
+    await db.commit()
+    return await get_queue_item(new.id, db, (user, can_modify_all))
 
 
 @router.post("/{item_id}/resolve-dispatch")
@@ -1700,142 +1744,10 @@ async def resolve_queue_dispatch(
         completed_at=now if data.outcome == "failed" else None,
         failure_reason=values["error_message"] if data.outcome == "failed" else None,
     )
-    if data.outcome == "failed":
-        printer = await db.get(Printer, item.printer_id)
-        if printer:
-            printer.awaiting_plate_clear = True
-            printer.awaiting_plate_clear_archive_id = item.archive_id
     await db.commit()
     if data.outcome == "printing":
         await scheduler._publish_queue_job_started(item.id)
-    else:
-        printer_manager.set_awaiting_plate_clear(item.printer_id, True)
-        printer_manager.set_awaiting_plate_clear_archive_id(item.printer_id, item.archive_id)
     return {"message": "Dispatch resolved"}
-
-
-@router.post("/{item_id}/stop")
-async def stop_queue_item(
-    item_id: int,
-    db: AsyncSession = Depends(get_db),
-    auth_result: tuple[User | None, bool] = Depends(
-        require_ownership_permission(
-            Permission.QUEUE_UPDATE_ALL,
-            Permission.QUEUE_UPDATE_OWN,
-        )
-    ),
-):
-    """Stop an actively dispatching or printing queue item.
-
-    Ownership-scoped (#1625-followup): callers with QUEUE_UPDATE_OWN can stop
-    their own items; callers with QUEUE_UPDATE_ALL can stop any item. Mirrors
-    the /cancel shape. Pre-fix this required QUEUE_UPDATE_ALL — Operators
-    holding only _OWN saw the Stop button in the queue UI but got 403 on click.
-    """
-
-    from backend.app.services.printer_manager import printer_manager
-
-    user, can_modify_all = auth_result
-
-    item = await lock_queue_item(db, item_id)
-    if not item:
-        raise HTTPException(404, "Queue item not found")
-
-    # Ownership check — mirrors /cancel. Ownerless items (created_by_id IS NULL)
-    # require _ALL: stop is destructive and an _OWN holder can't claim "they
-    # own it" the way /start does (#1670).
-    if not can_modify_all and user is not None:
-        if item.created_by_id is None or item.created_by_id != user.id:
-            raise HTTPException(403, "You can only stop your own queue items")
-
-    if item.status == "preheating" or (
-        item.status == "dispatching" and item.chamber_heat_soak and not item.dispatch_subtask_id
-    ):
-        await abort_heat_soak(db, item, "Heat soak stopped by user", status="cancelled")
-        return {"message": "Heat soak stopped"}
-
-    if item.status not in ("dispatching", "printing"):
-        raise HTTPException(
-            400,
-            f"Can only stop items that are dispatching or printing, current status: '{item.status}'",
-        )
-
-    # Capture values we need for background task
-    printer_id = item.printer_id
-    auto_off_after = item.auto_off_after
-
-    # Try to send stop command to printer
-    stop_sent = False
-    try:
-        stop_sent = printer_manager.stop_print(printer_id)
-        if not stop_sent:
-            logger.warning("stop_print returned False for printer %s - printer may not be connected", printer_id)
-    except Exception as e:
-        logger.error("Error sending stop command for queue item %s: %s", item_id, e)
-
-    # Mark this printer as user-stopped BEFORE the first await so that if the
-    # MQTT on_print_complete callback fires during the db.commit() yield the flag
-    # is already set and the "failed" status will be correctly overridden to
-    # "cancelled" (preventing a spurious "print failed" notification).
-    try:
-        from backend.app.main import mark_printer_stopped_by_user
-
-        mark_printer_stopped_by_user(printer_id)
-    except Exception as _mark_err:
-        logger.warning("Failed to mark printer %s as user-stopped: %s", printer_id, _mark_err)
-
-    # Update queue item status regardless - if printer is off, print is already stopped
-    await transition_queue_item(db, item, item.status, "cancelled")
-    item.completed_at = datetime.now(timezone.utc)
-    item.error_message = "Stopped by user" if stop_sent else "Stopped by user (printer was offline)"
-    from backend.app.services.archive import record_dispatch_outcome
-
-    await record_dispatch_outcome(
-        db,
-        status="aborted",
-        dispatched_queue_item_id=item.id,
-        archive_id=item.archive_id,
-        completed_at=item.completed_at,
-        clear_failure_reason=True,
-    )
-    # A stopped dispatch may already have put material on the plate. Save the
-    # gate in the cancellation transaction: reconnect/ID-less telemetry may
-    # never produce a completion callback that can identify this job.
-    printer = await db.get(Printer, printer_id)
-    if printer:
-        printer.awaiting_plate_clear = True
-        printer.awaiting_plate_clear_archive_id = item.archive_id
-    # Close the scheduler's in-memory gate before commit releases the active
-    # reservation. The DB gate above also protects recovery after a restart.
-    printer_manager.set_awaiting_plate_clear(printer_id, True)
-    printer_manager.set_awaiting_plate_clear_archive_id(printer_id, item.archive_id)
-    await db.commit()
-
-    from backend.app.main import unregister_expected_print
-
-    unregister_expected_print(printer_id)
-
-    if item.chamber_heat_soak:
-        item = await lock_queue_item(db, item_id)
-        await abort_heat_soak(db, item, item.error_message, status="cancelled")
-
-    logger.info("Stopped printing queue item %s (stop command sent: %s)", item_id, stop_sent)
-
-    # Schedule power-off if the queue item opted in. Delegates to the smart-plug
-    # manager so the off honours each plug's configured strategy (time delay or
-    # temperature threshold), is cancelled if the printer starts printing again,
-    # and never cuts power on a loaded print (#1890). Previously an inline block
-    # hardcoded a 50°C / 600s cooldown wait and powered off on the timeout
-    # regardless of print state.
-    if auto_off_after:
-        from backend.app.services.smart_plug_manager import smart_plug_manager
-
-        try:
-            await smart_plug_manager.schedule_off_after_queue_job(printer_id, db)
-        except Exception as e:
-            logger.warning("Auto-off: Failed to schedule power-off for printer %s: %s", printer_id, e)
-
-    return {"message": "Print stopped" if stop_sent else "Queue item cancelled (printer was offline)"}
 
 
 @router.post("/{item_id}/skip-heat-soak")
@@ -1919,8 +1831,8 @@ async def start_queue_item(
         if item.created_by_id is not None and item.created_by_id != user.id:
             raise HTTPException(403, "You can only start your own queue items")
 
-    if item.status != "pending":
-        raise HTTPException(400, f"Can only start pending items, current status: '{item.status}'")
+    if item.status != "queued":
+        raise HTTPException(400, f"Can only start queued items, current status: '{item.status}'")
 
     # Live deficit check — re-evaluated against current spool state, so a
     # spool swap between scheduler flagging and the user clicking ▶ clears

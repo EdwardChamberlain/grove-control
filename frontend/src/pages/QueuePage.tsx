@@ -22,7 +22,6 @@ import { CSS } from '@dnd-kit/utilities';
 import { queueItemDisplayName } from '../utils/queueItemName';
 import {
   Clock,
-  Trash2,
   Play,
   X,
   CheckCircle,
@@ -53,10 +52,9 @@ import {
   Code,
   Snail,
   Package,
-  PlayCircle,
-  ChevronDown,
-  ChevronUp,
   Plus,
+  ChevronUp,
+  ChevronDown,
 } from 'lucide-react';
 import { api, ApiError } from '../api/client';
 import { type TimeFormat, formatDate, formatETA, formatDuration, formatRelativeTime, parseUTCDate } from '../utils/date';
@@ -70,7 +68,6 @@ import { DirectPrintUploadModal } from '../components/DirectPrintUploadModal';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { QueueStatsBar } from '../components/QueueStatsBar';
-import { CompactHistoryRow } from '../components/CompactHistoryRow';
 import { QueueTimelineView } from '../components/QueueTimelineView';
 import { ToolbarDropdown, ReactSelect } from '../components/ToolbarControls';
 
@@ -85,28 +82,7 @@ function formatHeatSoakCountdown(totalSeconds: number): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
-function StatusBadge({ status, scheduledTime, waitingReason, printerState, t }: { status: PrintQueueItem['status']; scheduledTime?: string | null; waitingReason?: string | null; printerState?: string | null; t: (key: string) => string }) {
-  // A future pending job has its own explicit status. The relative timestamp
-  // in the row is useful context, but the pill makes the scheduler state clear.
-  if (status === 'pending' && scheduledTime && (parseUTCDate(scheduledTime)?.getTime() ?? 0) > Date.now()) {
-    return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border text-yellow-300 bg-yellow-500/10 border-yellow-500/20">
-        <Calendar className="w-3.5 h-3.5" />
-        {t('queue.status.scheduled')} · {formatDate(scheduledTime)}
-      </span>
-    );
-  }
-
-  // Special case: pending with waiting_reason shows as "Waiting"
-  if (status === 'pending' && waitingReason) {
-    return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border text-purple-400 bg-purple-400/10 border-purple-400/20">
-        <Clock className="w-3.5 h-3.5" />
-        {t('queue.status.waiting')}
-      </span>
-    );
-  }
-
+function StatusBadge({ status, printerState, t }: { status: PrintQueueItem['status']; printerState?: string | null; t: (key: string) => string }) {
   // Special case: printing but printer is paused
   if (status === 'printing' && printerState === 'PAUSE') {
     return (
@@ -118,13 +94,15 @@ function StatusBadge({ status, scheduledTime, waitingReason, printerState, t }: 
   }
 
   const config = {
-    pending: { icon: Clock, color: 'text-status-warning bg-status-warning/10 border-status-warning/20', label: t('queue.status.pending') },
+    queued: { icon: Clock, color: 'text-status-warning bg-status-warning/10 border-status-warning/20', label: t('queue.status.queued') },
     preheating: { icon: Timer, color: 'text-amber-300 bg-amber-500/10 border-amber-500/20', label: t('heatSoak.status') },
     dispatching: { icon: Timer, color: 'text-purple-300 bg-purple-500/10 border-purple-500/20', label: t('queue.status.dispatching') },
     printing: { icon: Play, color: 'text-blue-400 bg-blue-400/10 border-blue-400/20', label: t('queue.status.printing') },
-    completed: { icon: CheckCircle, color: 'text-status-ok bg-status-ok/10 border-status-ok/20', label: t('queue.status.completed') },
+    finished: { icon: CheckCircle, color: 'text-status-ok bg-status-ok/10 border-status-ok/20', label: t('queue.status.finished') },
     failed: { icon: XCircle, color: 'text-status-error bg-status-error/10 border-status-error/20', label: t('queue.status.failed') },
-    skipped: { icon: SkipForward, color: 'text-orange-400 bg-orange-400/10 border-orange-400/20', label: t('queue.status.skipped') },
+    paused: { icon: Pause, color: 'text-yellow-400', label: t('queue.status.paused') },
+    successful: { icon: CheckCircle, color: 'text-status-ok', label: t('queue.status.successful') },
+    unsuccessful: { icon: XCircle, color: 'text-status-error', label: t('queue.status.unsuccessful') },
     cancelled: { icon: X, color: 'text-gray-400 bg-gray-400/10 border-gray-400/20', label: t('queue.status.cancelled') },
   };
 
@@ -159,7 +137,6 @@ function BulkEditModal({
   const [printerId, setPrinterId] = useState<number | null | 'unchanged'>('unchanged');
   const [manualStart, setManualStart] = useState<boolean | 'unchanged'>('unchanged');
   const [autoOffAfter, setAutoOffAfter] = useState<boolean | 'unchanged'>('unchanged');
-  const [requirePreviousSuccess, setRequirePreviousSuccess] = useState<boolean | 'unchanged'>('unchanged');
   const [bedLevelling, setBedLevelling] = useState<CalibrationMode | 'unchanged'>('unchanged');
   const [flowCali, setFlowCali] = useState<CalibrationMode | 'unchanged'>('unchanged');
   const [vibrationCali, setVibrationCali] = useState<boolean | 'unchanged'>('unchanged');
@@ -178,7 +155,6 @@ function BulkEditModal({
     if (printerId !== 'unchanged') data.printer_id = printerId;
     if (manualStart !== 'unchanged') data.manual_start = manualStart;
     if (autoOffAfter !== 'unchanged') data.auto_off_after = autoOffAfter;
-    if (requirePreviousSuccess !== 'unchanged') data.require_previous_success = requirePreviousSuccess;
     if (bedLevelling !== 'unchanged') data.bed_levelling = bedLevelling;
     if (flowCali !== 'unchanged') data.flow_cali = flowCali;
     if (vibrationCali !== 'unchanged') data.vibration_cali = vibrationCali;
@@ -190,7 +166,7 @@ function BulkEditModal({
   };
 
   const hasChanges = printerId !== 'unchanged' || manualStart !== 'unchanged' || autoOffAfter !== 'unchanged' ||
-    requirePreviousSuccess !== 'unchanged' || bedLevelling !== 'unchanged' || flowCali !== 'unchanged' ||
+    bedLevelling !== 'unchanged' || flowCali !== 'unchanged' ||
     vibrationCali !== 'unchanged' || layerInspect !== 'unchanged' || timelapse !== 'unchanged' || useAms !== 'unchanged' ||
     nozzleOffsetCali !== 'unchanged';
 
@@ -238,7 +214,6 @@ function BulkEditModal({
             <div className="space-y-2">
               <TriStateToggle label={t('queue.bulkEdit.staged')} value={manualStart} onChange={setManualStart} t={t} />
               <TriStateToggle label={t('queue.bulkEdit.autoPowerOff')} value={autoOffAfter} onChange={setAutoOffAfter} disabled={!canControlPrinter} t={t} />
-              <TriStateToggle label={t('queue.bulkEdit.requirePrevious')} value={requirePreviousSuccess} onChange={setRequirePreviousSuccess} t={t} />
             </div>
           </div>
 
@@ -360,13 +335,13 @@ function SortableQueueItem({
   position,
   onEdit,
   onCancel,
-  onRemove,
   onStop,
   onResolveDispatch,
   isResolvingDispatch = false,
   onSkipHeatSoak,
   isSkippingHeatSoak = false,
   onRequeue,
+  onClearPlate,
   onStart,
   timeFormat = 'system',
   isSelected = false,
@@ -389,6 +364,7 @@ function SortableQueueItem({
   onSkipHeatSoak?: () => void;
   isSkippingHeatSoak?: boolean;
   onRequeue: () => void;
+  onClearPlate?: () => void;
   onStart: () => void;
   timeFormat?: TimeFormat;
   isSelected?: boolean;
@@ -440,17 +416,19 @@ function SortableQueueItem({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: item.id, disabled: item.status !== 'pending' || !canReorder });
+  } = useSortable({ id: item.id, disabled: item.status !== 'queued' || !canReorder });
 
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
   };
 
-  const isPrinting = item.status === 'printing' || item.status === 'preheating';
+  const isPrinting = item.status === 'printing' || item.status === 'paused' || item.status === 'preheating';
   const isDispatching = item.status === 'dispatching';
-  const isPending = item.status === 'pending';
-  const isHistory = ['completed', 'failed', 'skipped', 'cancelled'].includes(item.status);
+  const isPending = item.status === 'queued';
+  const isScheduled = isPending && !!item.scheduled_time
+    && (parseUTCDate(item.scheduled_time)?.getTime() ?? 0) > Date.now();
+  const isAwaiting = ['finished', 'failed', 'cancelled'].includes(item.status);
 
   const isMobileSelectable = isPending && onToggleSelect;
 
@@ -477,7 +455,7 @@ function SortableQueueItem({
           isPrinting ? 'border-l-blue-500' :
           isDispatching ? 'border-l-purple-500' :
           isPending ? 'border-l-yellow-500' :
-          item.status === 'completed' ? 'border-l-emerald-500' :
+          item.status === 'finished' ? 'border-l-emerald-500' :
           item.status === 'failed' ? 'border-l-red-500' :
           'border-l-gray-500'
         }
@@ -665,7 +643,8 @@ function SortableQueueItem({
                 {item.created_by_username}
               </span>
             )}
-            {isPending && !item.manual_start && (
+            {/* A future start time is shown once, by the Scheduled badge. */}
+            {isPending && !item.manual_start && !isScheduled && (
               <span className="flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5" />
                 {item.scheduled_time
@@ -677,19 +656,38 @@ function SortableQueueItem({
             )}
           </div>
 
-          {/* Options badges */}
+          {/* Options badges. A waiting job's status is always Queued; these
+              say why it has not started yet, derived from its own fields. */}
           <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-1.5 sm:mt-2">
-            {item.manual_start && (
-              <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 bg-purple-500/10 text-purple-400 rounded-full border border-purple-500/20 flex items-center gap-1">
+            {isScheduled && item.scheduled_time && (
+              <span
+                data-testid={`queue-badge-scheduled-${item.id}`}
+                className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 bg-yellow-500/10 text-yellow-300 rounded-full border border-yellow-500/20 flex items-center gap-1"
+              >
+                <Calendar className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                {t('queue.status.scheduled')} · {formatDate(item.scheduled_time)}
+              </span>
+            )}
+            {isPending && item.manual_start && (
+              <span
+                data-testid={`queue-badge-manual-start-${item.id}`}
+                className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 bg-purple-500/10 text-purple-400 rounded-full border border-purple-500/20 flex items-center gap-1"
+              >
                 <Hand className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
-                {t('queue.badges.staged')}
+                {t('queue.badges.manualStart')}
               </span>
             )}
-            {item.require_previous_success && (
-              <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 bg-orange-500/10 text-orange-400 rounded-full border border-orange-500/20">
-                {t('queue.badges.requiresPrevious')}
+            {isPending && item.waiting_reason && (
+              <span
+                data-testid={`queue-badge-waiting-${item.id}`}
+                title={item.waiting_reason}
+                className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 bg-purple-400/10 text-purple-300 rounded-md border border-purple-400/20 flex items-start gap-1 max-w-full"
+              >
+                <Clock className="w-2.5 h-2.5 sm:w-3 sm:h-3 mt-0.5 shrink-0" />
+                <span className="break-words">{t('queue.status.waiting')} · {item.waiting_reason}</span>
               </span>
             )}
+
             {item.auto_off_after && (
               <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 bg-blue-500/10 text-blue-400 rounded-full border border-blue-500/20 flex items-center gap-1">
                 <Power className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
@@ -760,16 +758,8 @@ function SortableQueueItem({
             </div>
           )}
 
-          {/* Waiting reason for model-based assignments */}
-          {item.waiting_reason && item.status === 'pending' && (
-            <p className="text-[10px] sm:text-xs text-purple-400 mt-1.5 sm:mt-2 flex items-start gap-1">
-              <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0" />
-              <span>{item.waiting_reason}</span>
-            </p>
-          )}
-
           {/* Filament-short flag from the dispatch pre-flight (#1496). */}
-          {item.filament_short && item.status === 'pending' && (
+          {item.filament_short && item.status === 'queued' && (
             <p
               className="text-[10px] sm:text-xs text-yellow-400 mt-1.5 sm:mt-2 flex items-start gap-1"
               title={t('queue.filamentShort.rowTooltip')}
@@ -804,7 +794,7 @@ function SortableQueueItem({
 
         {/* Status badge + Actions */}
         <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2 sm:gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-          <StatusBadge status={item.status} scheduledTime={item.scheduled_time} waitingReason={item.waiting_reason} printerState={printerState} t={t} />
+          <StatusBadge status={item.status} printerState={printerState} t={t} />
 
           <div className="flex items-center gap-0.5 sm:gap-1">
             {item.status === 'preheating' && onSkipHeatSoak && (
@@ -861,36 +851,26 @@ function SortableQueueItem({
                   variant="ghost"
                   size="sm"
                   onClick={onCancel}
-                  disabled={!canModify('queue', 'delete', item.created_by_id)}
-                  title={!canModify('queue', 'delete', item.created_by_id) ? t('queue.permissions.noCancel') : t('common.cancel')}
+                  disabled={!canModify('queue', 'update', item.created_by_id)}
+                  title={!canModify('queue', 'update', item.created_by_id) ? t('queue.permissions.noCancel') : t('common.cancel')}
                   className="text-red-400 hover:text-red-300 hover:bg-red-500/10 p-1.5 sm:p-2"
                 >
                   <X className="w-4 h-4" />
                 </Button>
               </>
             )}
-            {isHistory && (
+            {isAwaiting && (
               <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={onRequeue}
-                  disabled={!hasPermission('queue:create')}
-                  title={!hasPermission('queue:create') ? t('queue.permissions.noRequeue') : t('queue.actions.requeue')}
-                  className="text-bambu-green hover:text-bambu-green/80 hover:bg-bambu-green/10 p-1.5 sm:p-2"
-                >
-                  <RefreshCw className="w-4 h-4" />
+                <Button size="sm" variant="secondary" onClick={onClearPlate}
+                  disabled={!hasPermission('printers:clear_plate')}>
+                  <CheckCircle className="w-4 h-4" />{t('queue.actions.clearPlate')}
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={onRemove}
-                  disabled={!canModify('queue', 'delete', item.created_by_id)}
-                  title={!canModify('queue', 'delete', item.created_by_id) ? t('queue.permissions.noRemove') : t('common.remove')}
-                  className="p-1.5 sm:p-2"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </Button>
+                {item.status !== 'finished' && (
+                  <Button size="sm" variant="ghost" onClick={onRequeue}
+                    disabled={!hasPermission('queue:create') || !hasPermission('queue:insert_top') || !canModify('queue', 'update', item.created_by_id)}>
+                    <RefreshCw className="w-4 h-4" />{t('queue.actions.retry')}
+                  </Button>
+                )}
               </>
             )}
           </div>
@@ -953,131 +933,15 @@ function QueueRowRender({
     />
   );
 }
-type HistoryRow = { kind: 'item'; item: PrintQueueItem };
-
-interface HistorySectionProps {
-  items: PrintQueueItem[];
-  visibleCount: number;
-  onShowMore: () => void;
-  collapsed: boolean;
-  sortBy: 'date' | 'name' | 'printer';
-  sortAsc: boolean;
-  onSortByChange: (v: 'date' | 'name' | 'printer') => void;
-  onSortAscToggle: () => void;
-  onRemove: (item: PrintQueueItem) => void;
-  onRequeue: (item: PrintQueueItem) => void;
-  timeFormat: TimeFormat;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  hasPermission: (p: any) => boolean;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  canModify: (resource: any, action: any, createdById?: number | null) => boolean;
-  t: (key: string, options?: Record<string, unknown>) => string;
-}
-
-function HistorySection({
-  items,
-  visibleCount,
-  onShowMore,
-  sortBy,
-  sortAsc,
-  onSortByChange,
-  onSortAscToggle,
-  onRemove,
-  onRequeue,
-  timeFormat,
-  hasPermission,
-  canModify,
-  t,
-}: HistorySectionProps) {
-  if (items.length === 0) {
-    return (
-      <Card className="p-12 text-center border-dashed">
-        <ListOrdered className="w-16 h-16 text-bambu-gray mx-auto mb-4 opacity-50" />
-        <h3 className="text-xl font-medium text-white mb-2">{t('queue.history.emptyTitle')}</h3>
-        <p className="text-bambu-gray max-w-md mx-auto">{t('queue.history.emptyDescription')}</p>
-      </Card>
-    );
-  }
-
-  // History is also a flat list: legacy batch metadata must not hide or merge
-  // the independent rows that users can remove or requeue.
-  const rows: HistoryRow[] = items.slice(0, visibleCount).map((item) => ({ kind: 'item', item }));
-
-  return (
-    <div>
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-3 sm:mb-4">
-        <h2 className="text-base sm:text-lg font-semibold text-white flex items-center gap-2">
-          {t('queue.sections.history')}
-          <span className="text-xs sm:text-sm font-normal text-bambu-gray">
-            ({t('queue.itemCount', { count: items.length })})
-          </span>
-        </h2>
-        <div className="flex items-center gap-2">
-          <ToolbarDropdown
-            value={sortBy}
-            onChange={(value) => onSortByChange(value as 'date' | 'name' | 'printer')}
-            minWidthClass="min-w-32"
-            options={[
-              { value: 'date', label: t('queue.sort.byDate') },
-              { value: 'name', label: t('queue.sort.byName') },
-              { value: 'printer', label: t('queue.sort.byPrinter') },
-            ]}
-          />
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onSortAscToggle}
-            title={sortAsc ? t('queue.sort.ascendingOldest') : t('queue.sort.descendingNewest')}
-            className="px-2"
-          >
-            {sortAsc ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />}
-          </Button>
-        </div>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
-        {rows.map((row) => {
-          if (row.kind === 'item') {
-            return (
-              <CompactHistoryRow
-                key={row.item.id}
-                item={row.item}
-                onRemove={() => onRemove(row.item)}
-                onRequeue={() => onRequeue(row.item)}
-                timeFormat={timeFormat}
-                hasPermission={hasPermission}
-                canModify={canModify}
-                t={t}
-              />
-            );
-          }
-        })}
-      </div>
-      {visibleCount < items.length && (
-        <div className="mt-4 flex flex-col items-center gap-2">
-          <Button variant="secondary" size="sm" onClick={onShowMore}>
-            {t('queue.history.showMore')}
-          </Button>
-          <span className="text-xs text-bambu-gray">
-            {t('queue.history.showingCount', { shown: Math.min(visibleCount, items.length), total: items.length })}
-          </span>
-        </div>
-      )}
-    </div>
-  );
-}
-
 export function QueuePage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const { hasPermission, hasAnyPermission, canModify } = useAuth();
-  const HISTORY_PAGE_SIZE = 50;
   const [filterPrinter, setFilterPrinter] = useState<number | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [filterLocation, setFilterLocation] = useState<string>('');
-  const [showClearHistoryConfirm, setShowClearHistoryConfirm] = useState(false);
   const [editItem, setEditItem] = useState<PrintQueueItem | null>(null);
-  const [requeueItem, setRequeueItem] = useState<PrintQueueItem | null>(null);
   const [showQueueUpload, setShowQueueUpload] = useState(false);
   const [uploadedQueueFile, setUploadedQueueFile] = useState<{ id: number; filename: string } | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
@@ -1086,22 +950,6 @@ export function QueuePage() {
   } | null>(null);
   const [selectedItems, setSelectedItems] = useState<number[]>([]);
   const [showBulkEditModal, setShowBulkEditModal] = useState(false);
-  // #1818: per-printer Resume-after-failure confirm modal. Tracks which
-  // printer's gate the user is about to clear; null when no modal is open.
-  const [resumeConfirm, setResumeConfirm] = useState<{
-    printerId: number;
-    printerName: string;
-    skippedCount: number;
-  } | null>(null);
-  const [historySortBy, setHistorySortBy] = useState<'date' | 'name' | 'printer'>(() => {
-    const saved = localStorage.getItem('queue.historySortBy');
-    return (saved as 'date' | 'name' | 'printer') || 'date';
-  });
-  const [historySortAsc, setHistorySortAsc] = useState(() => {
-    const saved = localStorage.getItem('queue.historySortAsc');
-    return saved !== null ? saved === 'true' : false;
-  });
-  const [historyVisibleCount, setHistoryVisibleCount] = useState(HISTORY_PAGE_SIZE);
   const [pendingSortBy, setPendingSortBy] = useState<'position' | 'name' | 'printer' | 'time'>(() => {
     const saved = localStorage.getItem('queue.pendingSortBy');
     return (saved as 'position' | 'name' | 'printer' | 'time') || 'position';
@@ -1110,19 +958,10 @@ export function QueuePage() {
     const saved = localStorage.getItem('queue.pendingSortAsc');
     return saved !== null ? saved === 'true' : true;
   });
-  // historyCollapsed legacy state retained only for localStorage migration; the
-  // History tab renders unconditionally so this no longer drives the UI.
-  // Tabbed page structure: Active queue stays as the main view; History
-  // and Timeline split off. Persists per-user via localStorage.
-  const [activeTab, setActiveTab] = useState<'queue' | 'history' | 'timeline'>(() => {
-    const search = new URLSearchParams(window.location.search);
-    const url = search.get('tab');
-    if (url === 'history' || url === 'timeline' || url === 'queue') {
-      return url;
-    }
+  const [activeTab, setActiveTab] = useState<'queue' | 'timeline'>(() => {
+    const url = new URLSearchParams(window.location.search).get('tab');
     const saved = localStorage.getItem('queue.activeTab');
-    if (saved === 'history' || saved === 'timeline') return saved;
-    return 'queue';
+    return url === 'timeline' || (!url && saved === 'timeline') ? 'timeline' : 'queue';
   });
   // Active-tab layout toggle. "position" = today's flat list; "printer"
   // groups items under per-printer section headers with aggregate stats.
@@ -1131,19 +970,6 @@ export function QueuePage() {
     return saved === 'printer' ? 'printer' : 'position';
   });
   const [activeDragId, setActiveDragId] = useState<number | null>(null);
-
-  // Persist sort settings to localStorage
-  useEffect(() => {
-    localStorage.setItem('queue.historySortBy', historySortBy);
-  }, [historySortBy]);
-
-  useEffect(() => {
-    localStorage.setItem('queue.historySortAsc', String(historySortAsc));
-  }, [historySortAsc]);
-
-  useEffect(() => {
-    setHistoryVisibleCount(HISTORY_PAGE_SIZE);
-  }, [historySortBy, historySortAsc, filterLocation]);
 
   useEffect(() => {
     localStorage.setItem('queue.pendingSortBy', pendingSortBy);
@@ -1281,23 +1107,6 @@ export function QueuePage() {
     onError: () => showToast(t('queue.toast.reorderFailed'), 'error'),
   });
 
-  const clearHistoryMutation = useMutation({
-    mutationFn: async () => {
-      const historyItems = queue?.filter(i =>
-        ['completed', 'failed', 'skipped', 'cancelled'].includes(i.status)
-      ) || [];
-      for (const item of historyItems) {
-        await api.removeFromQueue(item.id);
-      }
-      return historyItems.length;
-    },
-    onSuccess: (count) => {
-      queryClient.invalidateQueries({ queryKey: ['queue'] });
-      showToast(t('queue.toast.historyCleared', { count }));
-    },
-    onError: () => showToast(t('queue.toast.clearHistoryFailed'), 'error'),
-  });
-
   const bulkUpdateMutation = useMutation({
     mutationFn: (data: PrintQueueBulkUpdate) => api.bulkUpdateQueue(data),
     onSuccess: (result) => {
@@ -1324,20 +1133,7 @@ export function QueuePage() {
     onError: () => showToast(t('queue.toast.bulkCancelFailed'), 'error'),
   });
 
-  const resumeAfterFailureMutation = useMutation({
-    mutationFn: (printerId: number) => api.resumeQueueAfterFailure(printerId),
-    onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ['queue'] });
-      setResumeConfirm(null);
-      showToast(
-        t('queue.toast.resumedAfterFailure', {
-          restored: result.restored,
-          acknowledged: result.acknowledged,
-        }),
-      );
-    },
-    onError: () => showToast(t('queue.toast.resumeAfterFailureFailed'), 'error'),
-  });
+
 
   const handleToggleSelect = (id: number) => {
     setSelectedItems(prev =>
@@ -1372,7 +1168,7 @@ export function QueuePage() {
   }, [filterLocation, printers]);
 
   const pendingItems = useMemo(() => {
-    let items = queue?.filter(i => i.status === 'pending') || [];
+    let items = queue?.filter(i => i.status === 'queued') || [];
 
     // Apply location filter
     if (filterLocation) {
@@ -1491,26 +1287,24 @@ export function QueuePage() {
     return map;
   }, [activePrinterIds, printerStatusQueries]);
 
-  const historyItems = useMemo(() => {
-    let items = queue?.filter(i => ['completed', 'failed', 'skipped', 'cancelled'].includes(i.status)) || [];
-    if (filterLocation) {
-      items = items.filter(matchesLocationFilter);
-    }
-    return [...items].sort((a, b) => {
-      let cmp: number;
-      if (historySortBy === 'name') {
-        const aName = a.archive_name || a.library_file_name || '';
-        const bName = b.archive_name || b.library_file_name || '';
-        cmp = aName.localeCompare(bName);
-      } else if (historySortBy === 'printer') {
-        cmp = (a.printer_name || '').localeCompare(b.printer_name || '');
-      } else {
-        // Default: by date - most recent first (desc) is the natural order
-        cmp = (parseUTCDate(b.completed_at || b.created_at)?.getTime() ?? 0) - (parseUTCDate(a.completed_at || a.created_at)?.getTime() ?? 0);
-      }
-      return historySortAsc ? -cmp : cmp;
-    });
-  }, [queue, historySortBy, historySortAsc, matchesLocationFilter, filterLocation]);
+  const awaitingItems = useMemo(() => (queue || []).filter(item =>
+    ['finished', 'failed', 'cancelled'].includes(item.status) && matchesLocationFilter(item)
+  ), [queue, matchesLocationFilter]);
+  const refreshLifecycle = () => {
+    queryClient.invalidateQueries({ queryKey: ['queue'] });
+    queryClient.invalidateQueries({ queryKey: ['printerStatus'] });
+  };
+  const clearPlateMutation = useMutation({
+    mutationFn: (id: number) => api.clearQueuePlate(id),
+    onSuccess: refreshLifecycle,
+    onError: (error: Error) => showToast(error.message, 'error'),
+  });
+  const retryMutation = useMutation({
+    mutationFn: (id: number) => api.retryQueueItem(id),
+    onSuccess: refreshLifecycle,
+    onError: (error: Error) => showToast(error.message, 'error'),
+  });
+
 
   // Calculate total queue time
   const totalQueueTime = useMemo(() => {
@@ -1591,7 +1385,7 @@ export function QueuePage() {
 
   const rowCanMove = (row: QueueRow | undefined): row is QueueRow =>
     !!row &&
-    row.item.status === 'pending' &&
+    row.item.status === 'queued' &&
     canModify('queue', 'update', row.item.created_by_id);
 
   const rowsSharePrinter = (left: QueueRow, right: QueueRow): boolean =>
@@ -1745,42 +1539,6 @@ export function QueuePage() {
     });
   }, [groupedRows, t]);
 
-  // #1818: printers whose queue is gated by a prior failure that's poisoning
-  // downstream `require_previous_success` items. We surface a per-printer
-  // Resume banner above the active queue so the user can clear the gate +
-  // restore the skipped jobs in one click, without re-queuing each one.
-  // Detection key: skipped + the scheduler's exact gate string. Other skip
-  // reasons (filament deficit, etc.) get their own UX and stay untouched.
-  const gateBlockedPrinters = useMemo<
-    Array<{ printerId: number; printerName: string; skippedCount: number }>
-  >(() => {
-    const counts = new Map<number, { name: string; count: number }>();
-    queue?.forEach((item) => {
-      if (
-        item.status === 'skipped' &&
-        item.error_message === 'Previous print failed or was aborted' &&
-        item.printer_id
-      ) {
-        const existing = counts.get(item.printer_id);
-        if (existing) {
-          existing.count += 1;
-        } else {
-          counts.set(item.printer_id, {
-            name: item.printer_name || `Printer #${item.printer_id}`,
-            count: 1,
-          });
-        }
-      }
-    });
-    return Array.from(counts.entries())
-      .map(([printerId, { name, count }]) => ({
-        printerId,
-        printerName: name,
-        skippedCount: count,
-      }))
-      .sort((a, b) => a.printerName.localeCompare(b.printerName));
-  }, [queue]);
-
   const aggregateForRows = (rows: QueueRow[]) => {
     let count = 0;
     let time = 0;
@@ -1804,12 +1562,11 @@ export function QueuePage() {
         <p className="text-bambu-gray mt-1">{t('queue.subtitle')}</p>
       </div>
 
-      {/* Tab strip — Active queue is the main view; History and Timeline
+      {/* Tab strip — Active queue is the main view; Timeline
           live in their own tabs so the queue page stays focused. */}
       <div className="flex gap-1 border-b border-bambu-dark-tertiary mb-6 overflow-x-auto">
         {([
-          { id: 'queue' as const, label: t('queue.tabs.queue'), icon: Clock, count: pendingItems.length + activeItems.length },
-          { id: 'history' as const, label: t('queue.tabs.history'), icon: ListOrdered, count: historyItems.length },
+          { id: 'queue' as const, label: t('queue.tabs.queue'), icon: Clock, count: pendingItems.length + activeItems.length + awaitingItems.length },
           { id: 'timeline' as const, label: t('queue.tabs.timeline'), icon: GanttChart, count: null as number | null },
         ]).map(({ id, label, icon: Icon, count }) => (
           <button
@@ -1840,7 +1597,7 @@ export function QueuePage() {
         queuedCount={pendingItems.length + dispatchingItems.length}
         totalTime={totalQueueTime}
         totalWeight={totalWeight}
-        historyCount={historyItems.length}
+        awaitingCount={awaitingItems.length}
         t={t}
         action={(
           <Button
@@ -1861,43 +1618,6 @@ export function QueuePage() {
           </Button>
         )}
       />
-
-      {/* #1818: Resume-after-failure banner. One row per printer whose queue
-          is gated by a prior failed/aborted print. Visible regardless of
-          tab/layout so the user can clear the gate without hunting for
-          skipped items. Hidden entirely when no gates are active. */}
-      {activeTab === 'queue' && gateBlockedPrinters.length > 0 && hasPermission('queue:update_all' as Permission) && (
-        <div className="mb-4 space-y-2">
-          {gateBlockedPrinters.map(({ printerId, printerName, skippedCount }) => (
-            <div
-              key={printerId}
-              className="flex items-center gap-3 px-4 py-3 bg-orange-500/10 border border-orange-500/30 rounded-lg"
-            >
-              <AlertCircle className="w-5 h-5 text-orange-400 flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <div className="text-sm text-orange-200">
-                  {t('queue.resumeAfterFailure.banner', {
-                    printer: printerName,
-                    count: skippedCount,
-                  })}
-                </div>
-                <div className="text-xs text-orange-200/70 mt-0.5">
-                  {t('queue.resumeAfterFailure.bannerHint')}
-                </div>
-              </div>
-              <button
-                onClick={() =>
-                  setResumeConfirm({ printerId, printerName, skippedCount })
-                }
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-500/20 hover:bg-orange-500/30 text-orange-100 text-sm rounded-md border border-orange-500/40 transition-colors flex-shrink-0"
-              >
-                <PlayCircle className="w-4 h-4" />
-                {t('queue.resumeAfterFailure.button')}
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
 
       {/* Filters — about the print queue items (printer / status / location). */}
       <div className="flex flex-wrap items-center gap-2 sm:gap-4 mb-6">
@@ -1922,13 +1642,12 @@ export function QueuePage() {
           minWidthClass="min-w-32"
           options={[
             { value: '', label: t('queue.filter.allStatus') },
-            { value: 'pending', label: t('queue.status.pending') },
+            { value: 'queued', label: t('queue.status.queued') },
             { value: 'preheating', label: t('heatSoak.status') },
             { value: 'dispatching', label: t('queue.status.dispatching') },
             { value: 'printing', label: t('queue.status.printing') },
-            { value: 'completed', label: t('queue.status.completed') },
+            { value: 'finished', label: t('queue.status.finished') },
             { value: 'failed', label: t('queue.status.failed') },
-            { value: 'skipped', label: t('queue.status.skipped') },
             { value: 'cancelled', label: t('queue.status.cancelled') },
           ]}
         />
@@ -1947,23 +1666,10 @@ export function QueuePage() {
 
         <div className="hidden sm:block flex-1" />
 
-        {activeTab === 'history' && historyItems.length > 0 && (
-          <Button
-            className="w-full sm:w-auto"
-            variant="secondary"
-            size="sm"
-            onClick={() => setShowClearHistoryConfirm(true)}
-            disabled={!hasPermission('queue:delete_all')}
-            title={!hasPermission('queue:delete_all') ? t('queue.permissions.noClearHistory') : undefined}
-          >
-            <Trash2 className="w-4 h-4" />
-            {t('queue.clearHistory')}
-          </Button>
-        )}
       </div>
 
       {/* Queue-tab controls: layout toggle (Position / Printer) + SJF.
-          Hidden on History/Timeline tabs since they don't apply. */}
+          Hidden on the Timeline tab since they don't apply. */}
       {activeTab === 'queue' && (
         <div className="flex flex-wrap items-center gap-3 mb-6">
           <div className="inline-flex h-8 items-center bg-bambu-dark border border-bambu-dark-tertiary rounded-lg p-0.5">
@@ -2023,9 +1729,7 @@ export function QueuePage() {
           printers={printers || []}
           printerStatuses={printerStatusMap}
           onItemClick={(item) => {
-            if (['completed', 'failed', 'skipped', 'cancelled'].includes(item.status)) {
-              setRequeueItem(item);
-            } else if (item.status === 'pending') {
+            if (item.status === 'queued') {
               setEditItem(item);
             } else if (item.status === 'preheating' || item.status === 'dispatching' || item.status === 'printing') {
               setConfirmAction({ type: 'stop', item });
@@ -2033,25 +1737,21 @@ export function QueuePage() {
           }}
           t={t}
         />
-      ) : activeTab === 'history' ? (
-        <HistorySection
-          items={historyItems}
-          visibleCount={historyVisibleCount}
-          onShowMore={() => setHistoryVisibleCount((count) => Math.min(count + HISTORY_PAGE_SIZE, historyItems.length))}
-          collapsed={false}
-          sortBy={historySortBy}
-          sortAsc={historySortAsc}
-          onSortByChange={setHistorySortBy}
-          onSortAscToggle={() => setHistorySortAsc(!historySortAsc)}
-          onRemove={(item) => setConfirmAction({ type: 'remove', item })}
-          onRequeue={setRequeueItem}
-          timeFormat={timeFormat}
-          hasPermission={hasPermission}
-          canModify={canModify}
-          t={t}
-        />
       ) : (
         <div className="space-y-6 sm:space-y-8">
+          {awaitingItems.length > 0 && (
+            <section aria-label={t('queue.awaitingPlateClear')}>
+              <h2 className="text-lg font-semibold text-white mb-3">{t('queue.awaitingPlateClear')}</h2>
+              <div className="space-y-2">
+                {awaitingItems.map(item => (
+                  <SortableQueueItem key={item.id} item={item} onEdit={() => {}} onCancel={() => {}}
+                    onRemove={() => {}} onStop={() => {}} onStart={() => {}}
+                    onRequeue={() => retryMutation.mutate(item.id)} onClearPlate={() => clearPlateMutation.mutate(item.id)}
+                    timeFormat={timeFormat} hasPermission={hasPermission} canModify={canModify} t={t} />
+                ))}
+              </div>
+            </section>
+          )}
           {/* Active Prints */}
           {activeItems.length > 0 && (
             <div>
@@ -2297,17 +1997,6 @@ export function QueuePage() {
         />
       )}
 
-      {/* Re-queue Modal */}
-      {requeueItem && (
-        <PrintModal
-          mode="create"
-          archiveId={requeueItem.archive_id ?? undefined}
-          libraryFileId={requeueItem.library_file_id ?? undefined}
-          archiveName={queueItemDisplayName(requeueItem, (n) => t('common.plusNMore', { count: n }))}
-          onClose={() => setRequeueItem(null)}
-        />
-      )}
-
       {/* Confirm Action Modal */}
       {filamentShortConfirm && (
         <ConfirmModal
@@ -2367,36 +2056,6 @@ export function QueuePage() {
             setConfirmAction(null);
           }}
           onCancel={() => setConfirmAction(null)}
-        />
-      )}
-
-      {/* #1818: Resume-after-failure confirm */}
-      {resumeConfirm && (
-        <ConfirmModal
-          title={t('queue.resumeAfterFailure.confirmTitle')}
-          message={t('queue.resumeAfterFailure.confirmMessage', {
-            printer: resumeConfirm.printerName,
-            count: resumeConfirm.skippedCount,
-          })}
-          confirmText={t('queue.resumeAfterFailure.button')}
-          variant="warning"
-          onConfirm={() => resumeAfterFailureMutation.mutate(resumeConfirm.printerId)}
-          onCancel={() => setResumeConfirm(null)}
-        />
-      )}
-
-      {/* Clear History Confirm Modal */}
-      {showClearHistoryConfirm && (
-        <ConfirmModal
-          title={t('queue.confirm.clearHistoryTitle')}
-          message={t('queue.confirm.clearHistoryMessage', { count: historyItems.length })}
-          confirmText={t('queue.clearHistory')}
-          variant="danger"
-          onConfirm={() => {
-            clearHistoryMutation.mutate();
-            setShowClearHistoryConfirm(false);
-          }}
-          onCancel={() => setShowClearHistoryConfirm(false)}
         />
       )}
 

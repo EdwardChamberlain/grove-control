@@ -27,7 +27,7 @@ const queue = [
     archive_name: `Queued job ${index + 1}`,
     printer_name: null,
     position: index + 1,
-    status: 'pending',
+    status: 'queued',
     created_by_username: `Operator ${index + 1}`,
     print_time_seconds: 3_600,
     scheduled_time: index === 0 ? '2099-01-01T09:30:00Z' : null,

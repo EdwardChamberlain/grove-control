@@ -18,9 +18,8 @@ const mockQueueItems = [
     printer_id: 1,
     archive_id: 1,
     position: 1,
-    status: 'pending',
+    status: 'queued',
     scheduled_time: null,
-    require_previous_success: false,
     auto_off_after: false,
     manual_start: false,
     ams_mapping: null,
@@ -47,7 +46,6 @@ const mockQueueItems = [
     position: 2,
     status: 'printing',
     scheduled_time: null,
-    require_previous_success: false,
     auto_off_after: true,
     manual_start: false,
     ams_mapping: null,
@@ -72,9 +70,8 @@ const mockQueueItems = [
     printer_id: 1,
     archive_id: 3,
     position: 3,
-    status: 'completed',
+    status: 'finished',
     scheduled_time: null,
-    require_previous_success: false,
     auto_off_after: false,
     manual_start: false,
     ams_mapping: null,
@@ -182,7 +179,7 @@ describe('QueuePage', () => {
       render(<QueuePage />);
 
       const addJobButton = await screen.findByRole('button', { name: 'Add Job' });
-      const summaryRow = screen.getByTestId('queue-stat-history').parentElement;
+      const summaryRow = screen.getByTestId('queue-stat-awaiting').parentElement;
       expect(summaryRow).toContainElement(addJobButton);
 
       await user.click(addJobButton);
@@ -247,6 +244,19 @@ describe('QueuePage', () => {
       const timelineItem = await screen.findByTestId('queue-timeline-item-4');
       expect(timelineItem).toHaveAttribute('data-status', 'dispatching');
       expect(timelineItem).toHaveTextContent('Dispatching');
+    });
+
+    it('keeps a normal upload active without offering dispatch resolution', async () => {
+      server.use(http.get('/api/v1/queue/', () => HttpResponse.json([{
+        ...mockQueueItems[1], id: 4, status: 'dispatching', dispatch_needs_resolution: false,
+        dispatched_at: null, started_at: null,
+      }])));
+      render(<QueuePage />);
+      await screen.findByText('Dispatching');
+      expect(screen.getByText('Active jobs')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: "It's printing" })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: "It didn't start" })).not.toBeInTheDocument();
+      expect(screen.getByTitle('Stop Print')).toBeInTheDocument();
     });
 
     it.each(['printing', 'failed'] as const)('resolves an unconfirmed dispatch as %s', async (outcome) => {
@@ -321,41 +331,23 @@ describe('QueuePage', () => {
       });
     });
 
-    it('shows completed items in history', async () => {
-      const user = userEvent.setup();
+    it('shows finished jobs with Clear Plate in the live queue', async () => {
       render(<QueuePage />);
-
-      // The History tab now owns the completed/cancelled/failed list.
-      await user.click(await screen.findByRole('button', { name: /^History/ }));
-
-      await waitFor(() => {
-        expect(screen.getByText('Completed Print')).toBeInTheDocument();
-      });
+      expect(await screen.findByText('Completed Print')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Awaiting plate clear' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Clear plate' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^History/ })).not.toBeInTheDocument();
     });
 
-    it('reveals history beyond the first page on demand', async () => {
-      const user = userEvent.setup();
-      const historyItems = Array.from({ length: 51 }, (_, index) => ({
-        ...mockQueueItems[2],
-        id: 100 + index,
-        archive_name: `History Print ${index + 1}`,
+    it('keeps every awaiting job visible and clearable', async () => {
+      const items = Array.from({ length: 51 }, (_, index) => ({
+        ...mockQueueItems[2], id: 100 + index, printer_id: 100 + index,
+        archive_name: `Awaiting Print ${index + 1}`,
       }));
-      server.use(
-        http.get('/api/v1/queue/', () => HttpResponse.json(historyItems)),
-      );
-
+      server.use(http.get('/api/v1/queue/', () => HttpResponse.json(items)));
       render(<QueuePage />);
-      await user.click(await screen.findByRole('button', { name: /^History/ }));
-
-      await waitFor(() => {
-        expect(screen.getByText('History Print 1')).toBeInTheDocument();
-        expect(screen.getByText('Showing 50 of 51')).toBeInTheDocument();
-      });
-      expect(screen.queryByText('History Print 51')).not.toBeInTheDocument();
-
-      await user.click(screen.getByRole('button', { name: 'Show more' }));
-      expect(await screen.findByText('History Print 51')).toBeInTheDocument();
-      expect(screen.queryByText('Showing 50 of 51')).not.toBeInTheDocument();
+      expect(await screen.findByText('Awaiting Print 51')).toBeInTheDocument();
+      expect(screen.getAllByRole('button', { name: 'Clear plate' })).toHaveLength(51);
     });
 
     it('shows status badges', async () => {
@@ -367,18 +359,55 @@ describe('QueuePage', () => {
       });
     });
 
-    it('shows future jobs as scheduled, including their scheduled time', async () => {
-      server.use(
-        http.get('/api/v1/queue/', () => HttpResponse.json([
-          { ...mockQueueItems[0], scheduled_time: '2099-01-01T09:30:00Z' },
-        ])),
-      );
-
+    it('keeps future jobs in the queued state with a Scheduled badge', async () => {
+      server.use(http.get('/api/v1/queue/', () => HttpResponse.json([
+        { ...mockQueueItems[0], scheduled_time: '2099-01-01T09:30:00Z' },
+      ])));
       render(<QueuePage />);
+      expect(await screen.findByText('Test Print 1')).toBeInTheDocument();
+      expect(screen.getAllByText('Queued').length).toBeGreaterThan(0);
+      expect(screen.getByTestId(`queue-badge-scheduled-${mockQueueItems[0].id}`))
+        .toHaveTextContent('Scheduled · Jan 1, 2099');
+      // The badge carries the start time; the row does not repeat it.
+      expect(screen.getAllByText(/Jan 1, 2099/)).toHaveLength(1);
+    });
 
-      await waitFor(() => {
-        expect(screen.getByText(/^Scheduled · Jan 1, 2099/)).toBeInTheDocument();
-      });
+    it('does not badge a queued job whose scheduled time has passed', async () => {
+      server.use(http.get('/api/v1/queue/', () => HttpResponse.json([
+        { ...mockQueueItems[0], scheduled_time: '2000-01-01T09:30:00Z' },
+      ])));
+      render(<QueuePage />);
+      expect(await screen.findByText('Test Print 1')).toBeInTheDocument();
+      expect(screen.queryByTestId(`queue-badge-scheduled-${mockQueueItems[0].id}`)).not.toBeInTheDocument();
+    });
+
+    it('shows the waiting reason as a badge on a queued job', async () => {
+      server.use(http.get('/api/v1/queue/', () => HttpResponse.json([
+        { ...mockQueueItems[0], waiting_reason: 'No matching material. Waiting on PETG' },
+      ])));
+      render(<QueuePage />);
+      const badge = await screen.findByTestId(`queue-badge-waiting-${mockQueueItems[0].id}`);
+      expect(badge).toHaveTextContent('Waiting · No matching material. Waiting on PETG');
+      expect(badge).toHaveAttribute('title', 'No matching material. Waiting on PETG');
+      expect(screen.getAllByText('Queued').length).toBeGreaterThan(0);
+    });
+
+    it('does not show queue badges once a job has left the queue', async () => {
+      server.use(http.get('/api/v1/queue/', () => HttpResponse.json([
+        {
+          ...mockQueueItems[0],
+          status: 'printing',
+          manual_start: true,
+          scheduled_time: '2099-01-01T09:30:00Z',
+          waiting_reason: 'Stale reason',
+        },
+      ])));
+      render(<QueuePage />);
+      expect(await screen.findByText('Test Print 1')).toBeInTheDocument();
+      const id = mockQueueItems[0].id;
+      expect(screen.queryByTestId(`queue-badge-scheduled-${id}`)).not.toBeInTheDocument();
+      expect(screen.queryByTestId(`queue-badge-manual-start-${id}`)).not.toBeInTheDocument();
+      expect(screen.queryByTestId(`queue-badge-waiting-${id}`)).not.toBeInTheDocument();
     });
 
     it('shows printer names', async () => {
@@ -452,9 +481,9 @@ describe('QueuePage', () => {
 
       await user.click(screen.getByRole('button', { name: 'All Status' }));
 
-      expect(screen.getByRole('button', { name: 'Pending' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Queued' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Printing' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Completed' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Finished' })).toBeInTheDocument();
     });
   });
 
@@ -493,55 +522,52 @@ describe('QueuePage', () => {
       expect(stopButtons.length).toBeGreaterThan(0);
     });
 
-    it('shows re-queue button for history items', async () => {
+    it('retries a failed job and leaves its hold visible', async () => {
       const user = userEvent.setup();
+      let retried = false;
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json([{ ...mockQueueItems[2], status: 'failed' }])),
+        http.post('/api/v1/queue/3/retry', () => {
+          retried = true;
+          return HttpResponse.json({ ...mockQueueItems[2], id: 4, status: 'queued' });
+        }),
+      );
       render(<QueuePage />);
-
-      await user.click(await screen.findByRole('button', { name: /^History/ }));
-
-      await waitFor(() => {
-        expect(screen.getByText('Completed Print')).toBeInTheDocument();
-      });
-
-      const requeueButtons = screen.getAllByTitle('Re-queue');
-      expect(requeueButtons.length).toBeGreaterThan(0);
+      await user.click(await screen.findByRole('button', { name: 'Retry' }));
+      await waitFor(() => expect(retried).toBe(true));
+      expect(screen.getByText('Completed Print')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Clear plate' })).toBeInTheDocument();
     });
   });
 
-  describe('clear history', () => {
-    it('shows clear history button when history exists', async () => {
+  describe('plate clearing', () => {
+    it('removes a cleared job from the live queue', async () => {
       const user = userEvent.setup();
+      let cleared = false;
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json(cleared ? [] : [mockQueueItems[2]])),
+        http.post('/api/v1/queue/3/clear-plate', () => {
+          cleared = true;
+          return HttpResponse.json({ message: 'Plate cleared' });
+        }),
+      );
       render(<QueuePage />);
-
-      // Clear History only renders inside the History tab now.
-      await user.click(await screen.findByRole('button', { name: /^History/ }));
-
-      await waitFor(() => {
-        expect(screen.getByText('Clear History')).toBeInTheDocument();
-      });
+      await user.click(await screen.findByRole('button', { name: 'Clear plate' }));
+      await waitFor(() => expect(screen.queryByText('Completed Print')).not.toBeInTheDocument());
+      expect(cleared).toBe(true);
     });
 
-    it('opens confirm modal when clicking clear history', async () => {
-      const user = userEvent.setup();
+    it('opens the live queue when the saved tab was History', async () => {
+      vi.mocked(localStorage.getItem).mockImplementation(key => key === 'queue.activeTab' ? 'history' : null);
       render(<QueuePage />);
-
-      await user.click(await screen.findByRole('button', { name: /^History/ }));
-
-      await waitFor(() => {
-        expect(screen.getByText('Clear History')).toBeInTheDocument();
-      });
-
-      const clearButton = screen.getByRole('button', { name: /clear history/i });
-      await user.click(clearButton);
-
-      await waitFor(() => {
-        expect(screen.getByText(/Are you sure you want to remove all/i)).toBeInTheDocument();
-      });
+      expect(await screen.findByText('Test Print 1')).toBeInTheDocument();
+      expect(screen.queryByText('Clear History')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^History/ })).not.toBeInTheDocument();
     });
   });
 
   describe('staged items', () => {
-    it('shows staged badge for manual_start items', async () => {
+    it('shows the Manual start badge for manual_start items', async () => {
       server.use(
         http.get('/api/v1/queue/', () => {
           return HttpResponse.json([
@@ -556,7 +582,7 @@ describe('QueuePage', () => {
       render(<QueuePage />);
 
       await waitFor(() => {
-        expect(screen.getByText('Staged')).toBeInTheDocument();
+        expect(screen.getByTestId(`queue-badge-manual-start-${mockQueueItems[0].id}`)).toHaveTextContent('Manual start');
       });
     });
 

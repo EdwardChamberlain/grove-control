@@ -974,7 +974,7 @@ export default {
       deleteButton: 'Supprimer',
       deletePurgeStats: 'Retirer également cette impression des Quick Stats (filament, temps, coût, énergie)',
       deleteQueueItemsWarning: '{{count}} élément(s) de file d\'attente lié(s) à cette archive seront également supprimé(s).',
-      deleteBlockedByPrinting: 'Suppression impossible — {{count}} élément(s) de file d\'attente en cours d\'envoi ou d\'impression. Arrêtez d\'abord la tâche active, puis réessayez.',
+      deleteBlockedByPrinting: 'Suppression impossible — {{count}} tâche(s) réservent encore une imprimante. Arrêtez les tâches actives et libérez leurs plateaux d\'abord.',
       removeSource3mf: 'Retirer Source 3MF',
       removeSource3mfConfirm: 'Retirer le fichier 3MF de "{{name}}" ?',
       removeButton: 'Retirer',
@@ -1064,6 +1064,7 @@ export default {
 
   // Queue page
   queue: {
+    awaitingPlateClear: 'En attente du nettoyage du plateau',
     resolveDispatch: {
       prompt: "L’imprimante n’a pas confirmé ce travail. Vérifiez l’imprimante avant de choisir :",
       printing: "L’impression est en cours",
@@ -1149,6 +1150,10 @@ export default {
     },
     // Status
     status: {
+      queued: 'En attente',
+      finished: 'Terminé',
+      successful: 'Réussi',
+      unsuccessful: 'Non réussi',
       pending: 'En attente',
       scheduled: 'Planifiée',
       waiting: 'En attente',
@@ -1188,8 +1193,7 @@ export default {
     },
     // Badges
     badges: {
-      staged: 'Préparé',
-      requiresPrevious: 'Nécessite succès précédent',
+      manualStart: 'Démarrage manuel',
       autoPowerOff: 'Extinction auto',
       gcodeInjection: 'G-code',
     },
@@ -1209,6 +1213,8 @@ export default {
     },
     // Actions
     actions: {
+      clearPlate: 'Nettoyer le plateau',
+      retry: 'Réessayer',
       startPrint: 'Démarrer',
       stopPrint: 'Arrêter',
       requeue: 'Remettre en file',

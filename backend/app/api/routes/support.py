@@ -465,12 +465,12 @@ async def _collect_queue_info(db: AsyncSession) -> dict:
 
     info: dict = {}
     info["pending_total"] = (
-        await db.execute(select(func.count(PrintQueueItem.id)).where(PrintQueueItem.status == "pending"))
+        await db.execute(select(func.count(PrintQueueItem.id)).where(PrintQueueItem.status == "queued"))
     ).scalar() or 0
     info["manual_start_pending"] = (
         await db.execute(
             select(func.count(PrintQueueItem.id)).where(
-                PrintQueueItem.status == "pending",
+                PrintQueueItem.status == "queued",
                 PrintQueueItem.manual_start.is_(True),
             )
         )
@@ -480,7 +480,7 @@ async def _collect_queue_info(db: AsyncSession) -> dict:
     oldest_row = (
         await db.execute(
             select(PrintQueueItem.created_at)
-            .where(PrintQueueItem.status == "pending")
+            .where(PrintQueueItem.status == "queued")
             .order_by(PrintQueueItem.created_at)
             .limit(1)
         )

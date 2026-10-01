@@ -988,7 +988,7 @@ export default {
       deleteButton: 'Delete',
       deletePurgeStats: 'Also remove this print from Quick Stats (filament, time, cost, energy)',
       deleteQueueItemsWarning: '{{count}} queue item(s) linked to this archive will also be removed.',
-      deleteBlockedByPrinting: 'Cannot delete — {{count}} queue item(s) are being dispatched or printed. Stop the active job first, then retry.',
+      deleteBlockedByPrinting: 'Cannot delete — {{count}} job(s) still hold a printer. Stop active jobs and clear their plates first.',
       removeSource3mf: 'Remove Source 3MF',
       removeSource3mfConfirm: 'Are you sure you want to remove the source 3MF file from "{{name}}"? This will delete the original slicer project file.',
       removeButton: 'Remove',
@@ -1078,6 +1078,7 @@ export default {
 
   // Queue page
   queue: {
+    awaitingPlateClear: 'Awaiting plate clear',
     resolveDispatch: {
       prompt: 'The printer has not confirmed this job. Check the printer before choosing:',
       printing: "It's printing",
@@ -1169,6 +1170,10 @@ export default {
     },
     // Status
     status: {
+      queued: 'Queued',
+      finished: 'Finished',
+      successful: 'Successful',
+      unsuccessful: 'Unsuccessful',
       pending: 'Pending',
       scheduled: 'Scheduled',
       waiting: 'Waiting',
@@ -1208,8 +1213,7 @@ export default {
     },
     // Badges
     badges: {
-      staged: 'Staged',
-      requiresPrevious: 'Requires previous success',
+      manualStart: 'Manual start',
       autoPowerOff: 'Auto power off',
       gcodeInjection: 'G-code',
     },
@@ -1229,6 +1233,8 @@ export default {
     },
     // Actions
     actions: {
+      clearPlate: 'Clear plate',
+      retry: 'Retry',
       startPrint: 'Start Print',
       stopPrint: 'Stop Print',
       requeue: 'Re-queue',

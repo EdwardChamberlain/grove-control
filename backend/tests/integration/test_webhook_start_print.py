@@ -52,7 +52,7 @@ async def printer_with_queue(db_session):
     item = PrintQueueItem(
         printer_id=printer.id,
         position=1,
-        status="pending",
+        status="queued",
         manual_start=True,
         timelapse=True,
         bed_levelling="on",

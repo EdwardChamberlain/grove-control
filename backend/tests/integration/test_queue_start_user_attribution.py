@@ -90,7 +90,7 @@ async def queue_item(db_session):
     item = PrintQueueItem(
         printer_id=printer.id,
         archive_id=archive.id,
-        status="pending",
+        status="queued",
         position=1,
         manual_start=True,
         created_by_id=None,  # unattributed — VP-queue shape

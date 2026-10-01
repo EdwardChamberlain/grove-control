@@ -19,9 +19,9 @@ import { Button } from './Button';
 import { queueItemDisplayName } from '../utils/queueItemName';
 
 const STATUS_CONFIG = {
-  completed: { icon: CheckCircle, color: 'text-emerald-400', border: 'border-l-emerald-500' },
+  successful: { icon: CheckCircle, color: 'text-emerald-400', border: 'border-l-emerald-500' },
   failed: { icon: XCircle, color: 'text-red-400', border: 'border-l-red-500' },
-  skipped: { icon: SkipForward, color: 'text-orange-400', border: 'border-l-gray-500' },
+  unsuccessful: { icon: SkipForward, color: 'text-orange-400', border: 'border-l-gray-500' },
   cancelled: { icon: Ban, color: 'text-gray-400', border: 'border-l-gray-500' },
 } as const;
 
@@ -69,7 +69,7 @@ export function CompactHistoryRow({
   // Failed and skipped prints carry the diagnostic in error_message; surface
   // it inline so the user doesn't have to reopen the row to see why.
   const showErrorMessage = !!item.error_message
-    && (item.status === 'failed' || item.status === 'skipped');
+    && (item.status === 'failed' || item.status === 'unsuccessful');
 
   return (
     <div className={`px-3 py-2 bg-bambu-dark-secondary rounded-lg border border-bambu-dark-tertiary border-l-[3px] ${config.border}`}>

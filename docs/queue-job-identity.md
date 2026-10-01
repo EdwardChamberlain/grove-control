@@ -1,8 +1,8 @@
 # Queue job identity (issue #194, stage 2)
 
-Stage 2 keeps the current status names and Queue History tab. The new states,
-plate-clear transitions, paused state and Archive transaction redesign belong
-to later stages of #194.
+Stage 2 introduced durable identity matching. Stage 3 builds on it with the
+[new job lifecycle and live Queue](queue-status-transitions.md). The identity
+rules and device qualification checklist below still apply.
 
 ## Matching and external prints
 
@@ -53,8 +53,8 @@ Files storage is unchanged.
 The scheduler checks both `dispatching` and `printing` rows against connected
 telemetry. Cached state from before a reconnect is not evidence. A matching
 active ID confirms dispatch; a matching FINISH or FAILED records the physical
-outcome and runs normal completion handling. The existing plate gate is saved
-with a recovered terminal transition, before its active reservation is released.
+outcome and runs normal completion handling. The recovered terminal job retains the printer reservation until Clear Plate
+(or automatic Clear Plate for successful completion with confirmation off).
 Missing IDs, mismatches, disconnected printers and ambiguous IDLE reports leave
 the job in its current state.
 

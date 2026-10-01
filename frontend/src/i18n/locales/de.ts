@@ -974,7 +974,7 @@ export default {
       deleteButton: 'Löschen',
       deletePurgeStats: 'Diesen Druck auch aus den Quick Stats entfernen (Filament, Zeit, Kosten, Energie)',
       deleteQueueItemsWarning: '{{count}} mit diesem Archiv verknüpfte Warteschlangeneinträge werden ebenfalls entfernt.',
-      deleteBlockedByPrinting: 'Löschen nicht möglich — {{count}} Warteschlangeneinträge werden gerade gesendet oder gedruckt. Aktiven Auftrag zuerst stoppen und erneut versuchen.',
+      deleteBlockedByPrinting: 'Löschen nicht möglich — {{count}} Aufträge belegen noch einen Drucker. Aktive Aufträge zuerst stoppen und die Druckplatten freigeben.',
       removeSource3mf: 'Quell-3MF entfernen',
       removeSource3mfConfirm: 'Möchten Sie die Quell-3MF-Datei wirklich von "{{name}}" entfernen? Die ursprüngliche Slicer-Projektdatei wird gelöscht.',
       removeButton: 'Entfernen',
@@ -1064,6 +1064,7 @@ export default {
 
   // Queue page
   queue: {
+    awaitingPlateClear: 'Warten auf Freigabe der Druckplatte',
     resolveDispatch: {
       prompt: "Der Drucker hat diesen Auftrag nicht bestätigt. Prüfen Sie den Drucker, bevor Sie wählen:",
       printing: "Der Druck läuft",
@@ -1149,6 +1150,10 @@ export default {
     },
     // Status
     status: {
+      queued: 'In Warteschlange',
+      finished: 'Fertig',
+      successful: 'Erfolgreich',
+      unsuccessful: 'Nicht erfolgreich',
       pending: 'Ausstehend',
       scheduled: 'Geplant',
       waiting: 'Wartend',
@@ -1188,8 +1193,7 @@ export default {
     },
     // Badges
     badges: {
-      staged: 'Bereitgestellt',
-      requiresPrevious: 'Erfordert vorherigen Erfolg',
+      manualStart: 'Manueller Start',
       autoPowerOff: 'Automatisch ausschalten',
       gcodeInjection: 'G-Code',
     },
@@ -1209,6 +1213,8 @@ export default {
     },
     // Actions
     actions: {
+      clearPlate: 'Druckplatte freigeben',
+      retry: 'Erneut versuchen',
       startPrint: 'Druck starten',
       stopPrint: 'Druck stoppen',
       requeue: 'Erneut einreihen',

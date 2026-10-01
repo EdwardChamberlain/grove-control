@@ -858,7 +858,7 @@ function PrinterListRow({
   const isMaintenanceMode = printer.is_active === false;
   const isPrintingOrPaused = !isMaintenanceMode && (status?.state === 'RUNNING' || status?.state === 'PAUSE');
   const progress = Math.max(0, Math.min(100, status?.progress ?? 0));
-  const needsPlateClear = !!requirePlateClear && !isMaintenanceMode && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
+  const needsPlateClear = !isMaintenanceMode && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
   const showClearPlateButton = status?.connected === true && needsPlateClear;
   const clearPlateMutation = useMutation({
     mutationFn: () => api.clearPlate(printer.id),
@@ -1069,7 +1069,6 @@ function SinglePrinterSwitcherItem({
   isSelected,
   maintenanceInfo,
   smartPlugPoweredOff = false,
-  requirePlateClear,
   checkPrinterFirmware = true,
   onSelect,
 }: {
@@ -1098,7 +1097,7 @@ function SinglePrinterSwitcherItem({
 
   const knownHmsErrors = status?.hms_errors ? filterKnownHMSErrors(status.hms_errors) : [];
   const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
-  const needsPlateClear = !!requirePlateClear && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
+  const needsPlateClear = status?.awaiting_plate_clear === true && !isPrintingOrPaused;
   const hasDoorSensor = ['X1C', 'X1', 'X1E', 'X2D', 'P2S', 'H2D', 'H2D Pro', 'H2C', 'H2S'].includes(printer.model ?? '');
   const printerHealth = getPrinterHealthMeta({
     connected: status?.connected,
@@ -1831,7 +1830,7 @@ function SinglePrinterCockpit({
   const printActionLabel = hasQueuedWork ? t('printers.queueJob', 'Queue Job') : t('common.print');
   const isPaused = status?.state === 'PAUSE';
   const progress = Math.max(0, Math.min(100, status?.progress ?? 0));
-  const needsPlateClear = !!requirePlateClear && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
+  const needsPlateClear = status?.awaiting_plate_clear === true && !isPrintingOrPaused;
   const showClearPlateButton = !!status?.connected && needsPlateClear && !isPrintingOrPaused;
   const hasDoorSensor = ['X1C', 'X1', 'X1E', 'X2D', 'P2S', 'H2D', 'H2D Pro', 'H2C', 'H2S'].includes(printer.model ?? '');
   const printerHealth = getPrinterHealthMeta({
@@ -1953,7 +1952,7 @@ function SinglePrinterCockpit({
     : cockpitStatusErrorClass;
   const isMaintenanceMode = printer.is_active === false;
   const cockpitPlateStatus = (() => {
-    if (!requirePlateClear || !status?.connected || !needsPlateClear) return null;
+    if (!needsPlateClear) return null;
     return {
       label: t('printers.plateStatus.notCleared'),
       className: cockpitStatusWarningClass,
@@ -3384,7 +3383,7 @@ function PrinterCard({
   const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
   const hasQueuedWork = isPrintingOrPaused || !!status?.has_queued_work;
   const printActionLabel = hasQueuedWork ? t('printers.queueJob', 'Queue Job') : t('common.print');
-  const needsPlateClear = requirePlateClear && status?.awaiting_plate_clear === true && !isPrintingOrPaused;
+  const needsPlateClear = status?.awaiting_plate_clear === true && !isPrintingOrPaused;
   const showClearPlateButton = status?.connected && needsPlateClear && !isPrintingOrPaused;
   // A live WebSocket status update carries the plate-clear flag, but the exact
   // archive summary is resolved by the REST status endpoint. Fetch it promptly
@@ -3438,7 +3437,7 @@ function PrinterCard({
     [plateClearPrint?.archive_id, plateClearPrint?.thumbnail_path],
   );
   const plateStatus = (() => {
-    if (!requirePlateClear || !status?.connected) return null;
+    if (!status || (!requirePlateClear && !status.awaiting_plate_clear)) return null;
     if (isPrintingOrPaused) {
       return {
         label: t('printers.plateStatus.inUse'),

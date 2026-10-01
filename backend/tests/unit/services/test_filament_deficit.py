@@ -109,7 +109,7 @@ async def _queue_item(
         archive_id=archive.id if archive else None,
         ams_mapping=json.dumps(ams_mapping) if ams_mapping is not None else None,
         plate_id=plate_id,
-        status="pending",
+        status="queued",
         manual_start=True,
     )
     db_session.add(item)

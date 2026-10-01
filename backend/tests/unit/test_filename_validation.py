@@ -5,6 +5,7 @@ import pytest
 from backend.app.utils.filename import (
     INVALID_FILENAME_CHARS,
     InvalidFilenameError,
+    derive_queue_remote_filename,
     derive_remote_filename,
     validate_print_filename,
 )
@@ -118,3 +119,20 @@ class TestDeriveRemoteFilename:
             derive_remote_filename(None)  # type: ignore[arg-type]
         with pytest.raises(TypeError, match="requires str"):
             derive_remote_filename(123)  # type: ignore[arg-type]
+
+
+class TestQueueRemoteFilename:
+    def test_same_source_never_reuses_an_upload_path(self):
+        first = derive_queue_remote_filename("Cube (1).gcode.3mf.gcode.3mf")
+        second = derive_queue_remote_filename("Cube (1).gcode.3mf.gcode.3mf")
+        assert first != second
+        assert first.startswith("Cube_(1)__grove_")
+        assert first.endswith(".3mf")
+        validate_print_filename(first)
+
+    @pytest.mark.parametrize("stem", ["a" * 251, "界" * 83, "ä" * 125])
+    def test_attempt_suffix_fits_without_splitting_unicode(self, stem):
+        filename = derive_queue_remote_filename(f"{stem}.3mf")
+        validate_print_filename(filename)
+        assert len(filename.encode("utf-8")) <= 255
+        assert "\ufffd" not in filename

@@ -297,11 +297,11 @@ class PrinterManager:
         # Track who started the current print (Issue #206)
         self._current_print_user: dict[int, dict] = {}  # {printer_id: {"user_id": int, "username": str}}
         # Track printers awaiting plate-clear acknowledgment after a finished/failed print.
-        # Persisted to DB (printers.awaiting_plate_clear) so the gate survives restarts/power
-        # cycles — see issue #961. Loaded into this set at startup via load_awaiting_plate_clear_from_db().
+        # Read-only view of holding jobs, rehydrated at startup and refreshed
+        # after lifecycle commits. The queue index is the reservation authority.
         self._awaiting_plate_clear: set[int] = set()
         # Exact archive associated with each awaiting plate-clear gate (#43).
-        # This is persisted on Printer so the completion card survives restarts.
+        # Rehydrated from the exact holding job after restart.
         self._awaiting_plate_clear_archive_id: dict[int, int] = {}
 
     def get_printer(self, printer_id: int) -> PrinterInfo | None:
@@ -331,11 +331,10 @@ class PrinterManager:
         return self._awaiting_plate_clear_archive_id.get(printer_id)
 
     def set_awaiting_plate_clear(self, printer_id: int, awaiting: bool):
-        """Set/clear the awaiting-plate-clear gate and persist it to DB.
+        """Publish the committed job's read-only plate-clear view.
 
-        Persisted so the gate survives Grove Control/printer restarts (#961): after Auto Off
-        cycles the printer, the printer boots into IDLE with no memory of the previous
-        finish, and without persistence the queue would bypass the confirmation prompt.
+        The job persists the hold across restarts, even when the printer
+        boots into IDLE after Auto Off. This setter only updates the view.
 
         Also broadcasts an updated ``printer_status`` over the WebSocket (#1128).
         ``awaiting_plate_clear`` is a Grove Control-side flag — toggling it does not
@@ -360,7 +359,6 @@ class PrinterManager:
         # Only create the coroutine when there is a loop to run it on — otherwise Python
         # emits "coroutine was never awaited" warnings (e.g. in sync unit tests).
         if self._loop and self._loop.is_running():
-            self._schedule_async(self._persist_awaiting_plate_clear(printer_id, awaiting))
             self._schedule_async(self._broadcast_status_change(printer_id))
 
     def set_awaiting_plate_clear_archive_id(self, printer_id: int, archive_id: int | None) -> None:
@@ -372,7 +370,6 @@ class PrinterManager:
         else:
             self._awaiting_plate_clear_archive_id[printer_id] = archive_id
         if self._loop and self._loop.is_running():
-            self._schedule_async(self._persist_awaiting_plate_clear_archive_id(printer_id, archive_id))
             self._schedule_async(self._broadcast_status_change(printer_id))
 
     async def _broadcast_status_change(self, printer_id: int) -> None:
@@ -416,58 +413,19 @@ class PrinterManager:
                 e,
             )
 
-    async def _persist_awaiting_plate_clear(self, printer_id: int, awaiting: bool):
-        from backend.app.core.database import run_with_retry
-
-        async def _do(db):
-            # A queued write can be overtaken by a later in-memory transition.
-            # Persist only if this task still represents the current gate state.
-            if self.is_awaiting_plate_clear(printer_id) is not awaiting:
-                return
-            printer = await db.get(Printer, printer_id)
-            if printer is not None:
-                printer.awaiting_plate_clear = awaiting
-                printer.awaiting_plate_clear_archive_id = (
-                    self._awaiting_plate_clear_archive_id.get(printer_id) if awaiting else None
-                )
-                await db.commit()
-
-        try:
-            await run_with_retry(_do, label=f"persist awaiting_plate_clear printer={printer_id}")
-        except Exception as e:
-            logger.warning("Failed to persist awaiting_plate_clear for printer %d: %s", printer_id, e)
-
-    async def _persist_awaiting_plate_clear_archive_id(self, printer_id: int, archive_id: int | None):
-        from backend.app.core.database import run_with_retry
-
-        async def _do(db):
-            # Do not let a late archive write revive details after the gate was
-            # cleared or overwrite a newer print's archive identity.
-            if (
-                not self.is_awaiting_plate_clear(printer_id)
-                or self._awaiting_plate_clear_archive_id.get(printer_id) != archive_id
-            ):
-                return
-            printer = await db.get(Printer, printer_id)
-            if printer is not None:
-                printer.awaiting_plate_clear = True
-                printer.awaiting_plate_clear_archive_id = archive_id
-                await db.commit()
-
-        try:
-            await run_with_retry(_do, label=f"persist awaiting_plate_clear archive printer={printer_id}")
-        except Exception as e:
-            logger.warning("Failed to persist awaiting_plate_clear archive for printer %d: %s", printer_id, e)
-
     async def load_awaiting_plate_clear_from_db(self):
-        """Rehydrate the awaiting-plate-clear set from the printers table on startup."""
+        """Rehydrate the read-only plate-clear view from holding jobs."""
         from backend.app.core.database import async_session
 
         try:
             async with async_session() as db:
+                from backend.app.models.print_queue import PrintQueueItem
+                from backend.app.services.queue_transitions import AWAITING_PLATE_CLEAR_STATUSES
+
                 result = await db.execute(
-                    select(Printer.id, Printer.awaiting_plate_clear_archive_id).where(
-                        Printer.awaiting_plate_clear.is_(True)
+                    select(PrintQueueItem.printer_id, PrintQueueItem.archive_id).where(
+                        PrintQueueItem.status.in_(AWAITING_PLATE_CLEAR_STATUSES),
+                        PrintQueueItem.printer_id.is_not(None),
                     )
                 )
                 rows = result.all()
@@ -766,6 +724,7 @@ class PrinterManager:
         nozzle_offset_cali: str = "auto",
         nozzle_mapping: str | None = None,
         submission_id: str | None = None,
+        display_name: str | None = None,
     ) -> bool:
         """Start a print on a connected printer.
 
@@ -797,6 +756,7 @@ class PrinterManager:
                 nozzle_offset_cali=nozzle_offset_cali,
                 nozzle_mapping=nozzle_mapping,
                 submission_id=submission_id,
+                **({"display_name": display_name} if display_name is not None else {}),
             )
         return False
 

@@ -27,8 +27,7 @@ const MAX_SNAPSHOT_SEC = 60;
 
 export function CameraWall({
   printers,
-  requirePlateClear,
-  maxLive,
+    maxLive,
   snapshotIntervalSec,
   onTileClick,
   onOpenFullscreen,
@@ -222,8 +221,7 @@ export function CameraWall({
           const etaLabel = isPrintingOrPaused && status?.remaining_time != null && status.remaining_time > 0
             ? `${formatDuration(status.remaining_time * 60)} - ${formatETA(status.remaining_time, timeFormat, t)}`
             : null;
-          const needsPlateClear = requirePlateClear && status?.connected === true
-            && status.awaiting_plate_clear === true && !isPrintingOrPaused;
+          const needsPlateClear = status?.awaiting_plate_clear === true && !isPrintingOrPaused;
           return (
             <div
               key={p.id}

@@ -204,7 +204,7 @@ async def archive_case(tmp_path):
             item = PrintQueueItem(
                 printer_id=printer.id,
                 archive_id=archive.id,
-                status="pending",
+                status="queued",
                 bed_levelling="on",
                 flow_cali="off",
                 vibration_cali=True,
@@ -234,6 +234,9 @@ async def archive_case(tmp_path):
 async def _run_start_print(ctx, *, installed_nozzles, nozzle_rack=None):
     scheduler = PrintScheduler()
     status = SimpleNamespace(
+        state="IDLE",
+        connected=True,
+        raw_data={},
         nozzles=[SimpleNamespace(nozzle_diameter=d) for d in installed_nozzles],
         nozzle_rack=nozzle_rack or [],
     )
@@ -245,6 +248,7 @@ async def _run_start_print(ctx, *, installed_nozzles, nozzle_rack=None):
         patch.object(scheduler_module.settings, "base_dir", ctx.base_dir),
         patch("backend.app.services.print_scheduler.printer_manager.is_connected", MagicMock(return_value=True)),
         patch("backend.app.services.print_scheduler.printer_manager.get_status", MagicMock(return_value=status)),
+        patch("backend.app.services.print_scheduler.printer_manager.is_awaiting_plate_clear", return_value=False),
         patch("backend.app.services.print_scheduler.printer_manager.start_print", ctx.start_print),
         patch("backend.app.services.print_scheduler.printer_manager.set_awaiting_plate_clear", MagicMock()),
         patch("backend.app.services.print_scheduler.upload_file_async", ctx.upload),
@@ -277,8 +281,8 @@ async def test_start_print_blocks_on_nozzle_mismatch_before_upload(archive_case)
 
     async with ctx.session_maker() as db:
         item = await db.get(PrintQueueItem, ctx.queue_item_id)
-    assert item.status == "failed"
-    assert "0.6mm" in item.error_message and "0.4mm" in item.error_message
+    assert item.status == "queued"
+    assert "0.6mm" in item.waiting_reason and "0.4mm" in item.waiting_reason
     ctx.upload.assert_not_called()
     ctx.start_print.assert_not_called()
 
@@ -286,7 +290,7 @@ async def test_start_print_blocks_on_nozzle_mismatch_before_upload(archive_case)
 @pytest.mark.asyncio
 async def test_start_print_proceeds_when_nozzle_matches(archive_case):
     """0.6 slice on a 0.6 printer: the guard is a no-op and dispatch proceeds
-    (item leaves 'pending', start_print is reached)."""
+    (item leaves 'queued', start_print is reached)."""
     ctx = await archive_case(sliced_nozzle=0.6)
     await _run_start_print(ctx, installed_nozzles=["0.6"])
 

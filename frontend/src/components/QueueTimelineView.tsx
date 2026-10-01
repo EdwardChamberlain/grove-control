@@ -128,7 +128,7 @@ export function QueueTimelineView({
         const lk = laneKeyOf(item);
         lanesWithActive.add(lk);
         chainEndByLane.set(lk, Math.max(chainEndByLane.get(lk) ?? nowMs, endTime.getTime()));
-      } else if (item.status === 'pending') {
+      } else if (item.status === 'queued') {
         // Skip un-committed pending shapes — staged items and waiting items
         // won't auto-dispatch, so a bar would lie.
         if (item.manual_start) continue;

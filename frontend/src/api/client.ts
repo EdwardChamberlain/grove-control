@@ -2128,7 +2128,6 @@ export interface PrintQueueItem {
   library_file_id: number | null;
   position: number;
   scheduled_time: string | null;
-  require_previous_success: boolean;
   wait_for_drying_complete: boolean;
   chamber_heat_soak?: boolean;
   heat_soak_temperature?: number;
@@ -2157,7 +2156,7 @@ export interface PrintQueueItem {
   timelapse: boolean;
   use_ams: boolean;
   nozzle_offset_cali: CalibrationMode;
-  status: 'pending' | 'preheating' | 'dispatching' | 'printing' | 'completed' | 'failed' | 'skipped' | 'cancelled';
+  status: 'queued' | 'preheating' | 'dispatching' | 'printing' | 'paused' | 'finished' | 'failed' | 'cancelled' | 'successful' | 'unsuccessful';
   dispatch_needs_resolution?: boolean;
   dispatched_at: string | null;
   started_at: string | null;
@@ -2196,7 +2195,6 @@ export interface PrintQueueItemCreate {
   archive_id?: number | null;
   library_file_id?: number | null;
   scheduled_time?: string | null;
-  require_previous_success?: boolean;
   wait_for_drying_complete?: boolean;
   chamber_heat_soak?: boolean;
   heat_soak_temperature?: number;
@@ -2250,7 +2248,6 @@ export interface PrintQueueItemUpdate {
   force_color_match?: boolean;
   position?: number;
   scheduled_time?: string | null;
-  require_previous_success?: boolean;
   wait_for_drying_complete?: boolean;
   chamber_heat_soak?: boolean;
   heat_soak_temperature?: number;
@@ -2276,7 +2273,6 @@ export interface PrintQueueBulkUpdate {
   item_ids: number[];
   printer_id?: number | null;
   scheduled_time?: string | null;
-  require_previous_success?: boolean;
   wait_for_drying_complete?: boolean;
   chamber_heat_soak?: boolean;
   heat_soak_temperature?: number;
@@ -5103,17 +5099,8 @@ export const api = {
     const qs = opts?.skipFilamentCheck ? '?skip_filament_check=true' : '';
     return request<PrintQueueItem>(`/queue/${id}/start${qs}`, { method: 'POST' });
   },
-  /**
-   * Clear the `require_previous_success` gate for a printer after the user
-   * resolves the failure. Acknowledges any failed/aborted predecessors and
-   * restores skipped items whose error_message matches the gate string
-   * back to pending. Returns counts so the UI can render a precise toast.
-   */
-  resumeQueueAfterFailure: (printerId: number) =>
-    request<{ acknowledged: number; restored: number }>(
-      `/queue/printer/${printerId}/resume`,
-      { method: 'POST' },
-    ),
+  clearQueuePlate: (id: number) => request<{ message: string }>(`/queue/${id}/clear-plate`, { method: 'POST' }),
+  retryQueueItem: (id: number) => request<PrintQueueItem>(`/queue/${id}/retry`, { method: 'POST' }),
   bulkUpdateQueue: (data: PrintQueueBulkUpdate) =>
     request<PrintQueueBulkUpdateResponse>('/queue/bulk', {
       method: 'PATCH',

@@ -81,7 +81,7 @@ class TestSJFScheduling:
                 kwargs["archive_id"] = archive.id
 
             defaults = {
-                "status": "pending",
+                "status": "queued",
                 "position": 0,
             }
             defaults.update(kwargs)
@@ -137,7 +137,7 @@ class TestSJFScheduling:
         # SJF query: been_jumped DESC, print_time_seconds ASC NULLS LAST, position
         result = await db_session.execute(
             select(PrintQueueItem)
-            .where(PrintQueueItem.status == "pending")
+            .where(PrintQueueItem.status == "queued")
             .where(PrintQueueItem.printer_id == printer.id)
             .order_by(
                 PrintQueueItem.been_jumped.desc(),
@@ -163,7 +163,7 @@ class TestSJFScheduling:
 
         result = await db_session.execute(
             select(PrintQueueItem)
-            .where(PrintQueueItem.status == "pending")
+            .where(PrintQueueItem.status == "queued")
             .where(PrintQueueItem.printer_id == printer.id)
             .order_by(
                 PrintQueueItem.been_jumped.desc(),
@@ -191,7 +191,7 @@ class TestSJFScheduling:
 
         result = await db_session.execute(
             select(PrintQueueItem)
-            .where(PrintQueueItem.status == "pending")
+            .where(PrintQueueItem.status == "queued")
             .where(PrintQueueItem.printer_id == printer.id)
             .order_by(
                 PrintQueueItem.been_jumped.desc(),
@@ -216,7 +216,7 @@ class TestSJFScheduling:
         # Default FIFO query (no SJF)
         result = await db_session.execute(
             select(PrintQueueItem)
-            .where(PrintQueueItem.status == "pending")
+            .where(PrintQueueItem.status == "queued")
             .where(PrintQueueItem.printer_id == printer.id)
             .order_by(PrintQueueItem.position)
         )
@@ -236,7 +236,7 @@ class TestSJFScheduling:
 
         result = await db_session.execute(
             select(PrintQueueItem)
-            .where(PrintQueueItem.status == "pending")
+            .where(PrintQueueItem.status == "queued")
             .where(PrintQueueItem.printer_id == printer.id)
             .order_by(
                 PrintQueueItem.been_jumped.desc(),
@@ -267,7 +267,7 @@ class TestSJFScheduling:
         for other in items:
             if (
                 other.id != winning_item.id
-                and other.status == "pending"
+                and other.status == "queued"
                 and other.printer_id == winning_item.printer_id
                 and not other.been_jumped
                 and other.position < winning_item.position
@@ -297,7 +297,7 @@ class TestSJFScheduling:
         # SJF order: jumped items first, then by duration
         result = await db_session.execute(
             select(PrintQueueItem)
-            .where(PrintQueueItem.status == "pending")
+            .where(PrintQueueItem.status == "queued")
             .where(PrintQueueItem.printer_id == printer.id)
             .order_by(
                 PrintQueueItem.been_jumped.desc(),

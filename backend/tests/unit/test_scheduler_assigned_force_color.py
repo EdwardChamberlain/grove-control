@@ -113,6 +113,14 @@ def test_malformed_persisted_slot_flag_inherits_safe_queue_default(scheduler, in
     ]
 
 
+def _assert_sent_with(start_print, db, item, *, printer_id, ams_mapping, unassigned):
+    """The worker received the scheduler's decision for this job."""
+    start_print.assert_awaited_once()
+    assert start_print.await_args.args == (db, item)
+    binding = start_print.await_args.kwargs["binding"]
+    assert (binding.printer_id, binding.ams_mapping, binding.unassigned) == (printer_id, ams_mapping, unassigned)
+
+
 @pytest.mark.asyncio
 @patch("backend.app.services.print_scheduler.printer_manager")
 async def test_model_unforced_job_accepts_same_material_without_exact_colour(mock_pm, scheduler):
@@ -193,8 +201,11 @@ async def test_model_unforced_job_recomputes_cross_material_mapping(mock_pm, sch
         ],
     )
     compute.assert_awaited_once_with(db, 3, item)
-    assert item.ams_mapping == "[0]"
-    start_print.assert_awaited_once_with(db, item)
+    # The recomputed mapping travels with the selected printer to the worker;
+    # the waiting "Any machine" job itself stays unbound.
+    assert item.ams_mapping == "[2]"
+    assert item.printer_id is None
+    _assert_sent_with(start_print, db, item, printer_id=3, ams_mapping="[0]", unassigned=True)
 
 
 @pytest.mark.asyncio
@@ -327,8 +338,10 @@ async def test_assigned_job_recomputes_mapping_and_starts_on_exact_colour(mock_p
         session_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
         await scheduler.check_queue()
 
-    start_print.assert_awaited_once_with(db, item)
-    assert item.ams_mapping == "[2]"
+    # The exact-colour mapping travels with the dispatch and is written with
+    # the hold; the waiting job's own mapping is never overwritten.
+    _assert_sent_with(start_print, db, item, printer_id=3, ams_mapping="[2]", unassigned=False)
+    assert item.ams_mapping == "[0]"
 
 
 @pytest.mark.asyncio
@@ -360,7 +373,7 @@ async def test_assigned_job_allows_different_colour_when_force_is_disabled(mock_
         await scheduler.check_queue()
 
     missing_colors.assert_not_called()
-    start_print.assert_awaited_once_with(db, item)
+    _assert_sent_with(start_print, db, item, printer_id=3, ams_mapping="[0]", unassigned=False)
 
 
 @pytest.mark.asyncio

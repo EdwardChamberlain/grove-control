@@ -15,7 +15,16 @@ from backend.app.utils.safe_path import safe_join_under
 
 logger = logging.getLogger(__name__)
 
-_SOURCE_NEEDED_STATUSES = ("pending", "preheating", "dispatching", "printing", "skipped")
+_SOURCE_NEEDED_STATUSES = (
+    "queued",
+    "preheating",
+    "dispatching",
+    "printing",
+    "paused",
+    "finished",
+    "failed",
+    "cancelled",
+)
 _UNSEALED_SOURCE_MAX_AGE = timedelta(hours=24)
 _SOURCE_SWEEP_INTERVAL_SECONDS = 60 * 60
 _queue_source_cleanup_task: asyncio.Task | None = None
@@ -27,9 +36,9 @@ async def remove_queue_only_source_if_unused(
     *,
     exclude_item_id: int | None = None,
 ) -> list[Path]:
-    """Delete a Queue-only source after all queued jobs have copied it to Archive.
+    """Delete a sealed Queue-only source after all references become final.
 
-    Failed jobs without an Archive link keep their source available for retry.
+    Every nonfinal job keeps its source available for retry.
     Historical queue rows are detached before deleting the library row so the
     FK's cascade cannot erase queue history.
     """

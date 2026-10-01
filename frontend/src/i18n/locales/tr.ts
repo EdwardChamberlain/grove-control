@@ -974,7 +974,7 @@ export default {
       deleteButton: 'Sil',
       deletePurgeStats: 'Ayrıca bu baskıyı Hızlı İstatistiklerden de kaldır (filament, süre, maliyet, enerji)',
       deleteQueueItemsWarning: 'Bu arşive bağlı {{count}} kuyruk öğesi de kaldırılacak.',
-      deleteBlockedByPrinting: 'Silinemiyor — {{count}} kuyruk öğesi gönderiliyor veya yazdırılıyor. Önce etkin işi durdurun, ardından tekrar deneyin.',
+      deleteBlockedByPrinting: 'Silinemiyor — {{count}} iş hâlâ bir yazıcıyı ayırıyor. Önce etkin işleri durdurun ve tablalarını boşaltın.',
       removeSource3mf: 'Kaynak 3MF Kaldır',
       removeSource3mfConfirm: '"{{name}}" dosyasından kaynak 3MF dosyasını kaldırmak istediğinizden emin misiniz? Bu, orijinal dilimleyici proje dosyasını silecek.',
       removeButton: 'Kaldır',
@@ -1064,6 +1064,7 @@ export default {
 
   // Kuyruk sayfası
   queue: {
+    awaitingPlateClear: 'Tabla temizliği bekleniyor',
     resolveDispatch: {
       prompt: "Yazıcı bu işi onaylamadı. Seçmeden önce yazıcıyı kontrol edin:",
       printing: "Yazdırıyor",
@@ -1149,6 +1150,10 @@ export default {
     },
     // Durum
     status: {
+      queued: 'Kuyrukta',
+      finished: 'Bitti',
+      successful: 'Başarılı',
+      unsuccessful: 'Başarısız',
       pending: 'Beklemede',
       scheduled: 'Planlandı',
       waiting: 'Bekliyor',
@@ -1188,8 +1193,7 @@ export default {
     },
     // Rozetler
     badges: {
-      staged: 'Hazırlandı',
-      requiresPrevious: 'Önceki başarı gerekli',
+      manualStart: 'Manuel başlatma',
       autoPowerOff: 'Otomatik kapanma',
       gcodeInjection: 'G-kod',
     },
@@ -1209,6 +1213,8 @@ export default {
     },
     // İşlemler
     actions: {
+      clearPlate: 'Tablayı temizle',
+      retry: 'Yeniden dene',
       startPrint: 'Baskıyı Başlat',
       stopPrint: 'Baskıyı Durdur',
       requeue: 'Yeniden Kuyrukla',

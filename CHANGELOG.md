@@ -4,6 +4,20 @@
 
 ### Added
 
+- The live Queue now keeps finished, failed, and cancelled attempts visible
+  until Clear Plate. Retry creates a new job without releasing the original
+  printer hold; failed attempts hold even with confirmation disabled.
+  Queue History, Resume after failure, and Require previous success are removed.
+  See [the lifecycle and upgrade guide](docs/queue-status-transitions.md).
+- Waiting jobs keep the **Queued** status and show **Scheduled**, **Manual
+  start**, and **Waiting** badges for why they have not started.
+- "Any machine" jobs stay unassigned while they wait. A printer is chosen and
+  written to the job only when it leaves the queue, so a dispatch that backs
+  out no longer pins the job to one printer. A job's printer is now only a
+  "Specific machine" requirement. A disconnected printer leaves the job
+  waiting; a missing source file parks it for a manual start instead of
+  failing it onto a printer.
+
 - Queue jobs now match printer events by submission ID. External prints appear
   as jobs, and startup checks include already-printing jobs.
 - Unconfirmed dispatches show **It's printing** and **It didn't start** actions
@@ -17,7 +31,7 @@
 - Archive artifacts and pending virtual-printer uploads can be saved to Files.
   Slicing an Archive artifact also saves the result in Files.
 - Direct Queue uploads use hidden, temporary sources. They do not appear in
-  Files and are retained while queued, skipped, or retryable work needs them.
+  Files and are retained while queued, active, or awaiting plate clear work needs them.
   Abandoned uploads are closed after 24 hours.
 - Dispatch Archives link to their exact queue items through a nullable, unique
   database foreign key. Deleting a queue item clears the link and keeps the
@@ -48,12 +62,30 @@
 
 ### Fixed
 
+- Normal Queue uploads no longer offer unconfirmed-dispatch actions before
+  a command is sent. Archive and user-item deletion cannot bypass Clear Plate.
+  Touchscreen prints on an uncleared printer take over its durable hold, and
+  Clear Plate refuses to release a printer while a print is active.
+- Interrupted heat soaks retry heater shutdown after reconnect until fresh
+  telemetry confirms zero heater targets.
+- Files bulk-queue submissions use the new `queued` lifecycle. Virtual-printer
+  review uploads remain available for Save to Files.
 - Queue-only uploads are excluded from automatic Files purging and serialize
   cleanup against queue submissions.
 
 ### Upgrade notes
 
-- Queue transition centralization requires no schema migration or manual action.
+- Stage 3 migrates Queue statuses once at startup and adds a unique printer
+  reservation across every active and awaiting-plate-clear state. Existing
+  plate holds remain actionable; unidentifiable legacy holds become external
+  jobs. Back up the database before upgrading. Queued jobs targeting a deleted
+  printer remain available to retarget. Waiting "Any machine" jobs that an
+  older scheduler had assigned to a printer are returned to the pool.
+- Integrations keep their existing names. Print completion notifications,
+  webhooks, the MQTT relay and Home Assistant report the printer's outcome
+  (`completed`, `failed`, `aborted`, or `cancelled` for a stop from Grove), and
+  the webhook Queue status reports waiting jobs as `pending`. See the name
+  table in [the lifecycle guide](docs/queue-status-transitions.md).
 
 - The nullable Archive-to-queue link and unique index are added automatically
   at startup. Existing Archive rows keep a NULL link; no released database has

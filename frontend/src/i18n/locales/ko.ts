@@ -924,7 +924,7 @@ export default {
       deleteCount: '{{count}}개 삭제',
       deletePurgeStats: '빠른 통계에서도 이 인쇄 항목 제거 (필라멘트, 시간, 비용, 에너지)',
       deleteQueueItemsWarning: '이 아카이브와 연결된 {{count}}개의 대기열 항목도 함께 제거됩니다.',
-      deleteBlockedByPrinting: '삭제할 수 없습니다 — {{count}}개의 대기열 항목이 전송 중이거나 인쇄 중입니다. 활성 작업을 먼저 중지한 다음 다시 시도하십시오.'
+      deleteBlockedByPrinting: '삭제할 수 없습니다 — {{count}}개의 작업이 아직 프린터를 점유하고 있습니다. 먼저 활성 작업을 중지하고 플레이트를 비우십시오.'
     },
     page: {
       title: '아카이브',
@@ -1020,6 +1020,7 @@ export default {
     }
   },
   queue: {
+    awaitingPlateClear: '플레이트 정리 대기',
     resolveDispatch: {
       prompt: "프린터가 이 작업을 확인하지 않았습니다. 선택하기 전에 프린터를 확인하세요:",
       printing: "인쇄 중입니다",
@@ -1092,6 +1093,10 @@ export default {
       history: '기록'
     },
     status: {
+      queued: '대기 중',
+      finished: '완료',
+      successful: '성공',
+      unsuccessful: '실패',
       pending: '대기 중',
       scheduled: '예약됨',
       waiting: '기다리는 중',
@@ -1127,8 +1132,7 @@ export default {
       descendingNewest: '내림차순 (최신 것 먼저)'
     },
     badges: {
-      staged: '준비됨',
-      requiresPrevious: '이전 성공 필요',
+      manualStart: '수동 시작',
       autoPowerOff: '자동 전원 끄기',
       gcodeInjection: 'G코드'
     },
@@ -1145,6 +1149,8 @@ export default {
       inHours: '{{count}}시간 후'
     },
     actions: {
+      clearPlate: '플레이트 정리',
+      retry: '재시도',
       startPrint: '인쇄 시작',
       stopPrint: '인쇄 정지',
       requeue: '재대기',

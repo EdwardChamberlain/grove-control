@@ -974,7 +974,7 @@ export default {
       deleteButton: '删除',
       deletePurgeStats: '同时从快速统计中删除此打印（耗材、时间、成本、能耗）',
       deleteQueueItemsWarning: '与此归档关联的 {{count}} 个队列项也将被移除。',
-      deleteBlockedByPrinting: '无法删除 — {{count}} 个队列项正在发送或打印。请先停止活动作业再重试。',
+      deleteBlockedByPrinting: '无法删除 — {{count}} 个作业仍占用打印机。请先停止活动作业并清理其打印板。',
       removeSource3mf: '移除源 3MF',
       removeSource3mfConfirm: '确定要从"{{name}}"中移除源 3MF 文件吗？这将删除原始切片项目文件。',
       removeButton: '移除',
@@ -1064,6 +1064,7 @@ export default {
 
   // Queue page
   queue: {
+    awaitingPlateClear: '等待清理打印板',
     resolveDispatch: {
       prompt: "打印机尚未确认此任务。选择前请检查打印机：",
       printing: "正在打印",
@@ -1149,6 +1150,10 @@ export default {
     },
     // Status
     status: {
+      queued: '排队中',
+      finished: '已完成',
+      successful: '成功',
+      unsuccessful: '未成功',
       pending: '等待中',
       scheduled: '已排期',
       waiting: '等待中',
@@ -1188,8 +1193,7 @@ export default {
     },
     // Badges
     badges: {
-      staged: '已暂存',
-      requiresPrevious: '需要前一个成功',
+      manualStart: '手动开始',
       autoPowerOff: '自动关机',
       gcodeInjection: 'G-code',
     },
@@ -1209,6 +1213,8 @@ export default {
     },
     // Actions
     actions: {
+      clearPlate: '清理打印板',
+      retry: '重试',
       startPrint: '开始打印',
       stopPrint: '停止打印',
       requeue: '重新排队',

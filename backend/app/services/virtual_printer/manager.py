@@ -478,7 +478,7 @@ class VirtualPrinterInstance:
                 result = await db.execute(
                     select(PrintQueueItem.id).where(
                         PrintQueueItem.id.in_(queue_item_ids),
-                        PrintQueueItem.status == "pending",
+                        PrintQueueItem.status == "queued",
                     )
                 )
                 eligible_ids = [row[0] for row in result.all()]
@@ -821,7 +821,7 @@ class VirtualPrinterInstance:
                     from sqlalchemy import func, select as _sql_select
 
                     queue_scope = _sql_select(func.max(PrintQueueItem.position)).where(
-                        PrintQueueItem.status == "pending"
+                        PrintQueueItem.status == "queued"
                     )
                     if self.target_printer_id is not None:
                         queue_scope = queue_scope.where(PrintQueueItem.printer_id == self.target_printer_id)
@@ -867,7 +867,7 @@ class VirtualPrinterInstance:
                             library_file_id=uploaded_file.id,
                             plate_id=plate_id,
                             position=max_pos + offset,
-                            status="pending",
+                            status="queued",
                             manual_start=not self.auto_dispatch,
                             required_filament_types=required_filament_types_json,
                             filament_overrides=filament_overrides_json,

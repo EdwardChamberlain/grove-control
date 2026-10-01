@@ -296,21 +296,34 @@ class TestArchivesAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    @pytest.mark.parametrize("status", ["dispatching", "printing"])
+    @pytest.mark.parametrize(
+        "status", ["preheating", "dispatching", "printing", "paused", "finished", "failed", "cancelled"]
+    )
     async def test_delete_archive_blocked_when_related_queue_item_active(
-        self, async_client: AsyncClient, archive_factory, printer_factory, db_session, status
+        self, async_client: AsyncClient, archive_factory, printer_factory, db_session, status, tmp_path, monkeypatch
     ):
-        """#1734: archive delete must 409 when a related queue item is active —
-        deleting the archive would strip the dispatcher's metadata trail
-        (filament / plate / ams_mapping) out from under the in-flight job.
-        Both soft and hard delete are gated by the same precondition.
-        """
+        """Deletion must preserve active sources, physical holds, files and logs."""
+        from sqlalchemy import select
+
+        from backend.app.core.config import settings
+        from backend.app.models.archive import PrintArchive
+        from backend.app.models.print_log import PrintLogEntry
         from backend.app.models.print_queue import PrintQueueItem
 
+        monkeypatch.setattr(settings, "base_dir", tmp_path)
+        monkeypatch.setattr(settings, "archive_dir", tmp_path / "archives")
+        source = tmp_path / "archives/test/test_print.gcode.3mf"
+        source.parent.mkdir(parents=True)
+        source.write_bytes(b"attempt copy")
         printer = await printer_factory()
         archive = await archive_factory(printer.id)
-        db_session.add(PrintQueueItem(printer_id=printer.id, archive_id=archive.id, status=status, position=1))
+        item = PrintQueueItem(printer_id=printer.id, archive_id=archive.id, status=status, position=1)
+        db_session.add(item)
         await db_session.commit()
+        item_id, archive_id = item.id, archive.id
+
+        impact = await async_client.get(f"/api/v1/archives/{archive_id}/delete-impact")
+        assert impact.json()["currently_printing"] == 1
 
         soft = await async_client.delete(f"/api/v1/archives/{archive.id}")
         assert soft.status_code == 409
@@ -318,6 +331,11 @@ class TestArchivesAPI:
 
         hard = await async_client.delete(f"/api/v1/archives/{archive.id}?purge_stats=true")
         assert hard.status_code == 409
+        db_session.expire_all()
+        assert (await db_session.get(PrintQueueItem, item_id)).status == status
+        assert (await db_session.get(PrintArchive, archive_id)).deleted_at is None
+        assert await db_session.scalar(select(PrintLogEntry.id).where(PrintLogEntry.archive_id == archive_id))
+        assert source.read_bytes() == b"attempt copy"
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -337,14 +355,14 @@ class TestArchivesAPI:
         # dispatch looks at the wire (#1733).
         db_session.add_all(
             [
-                PrintQueueItem(printer_id=printer.id, archive_id=archive.id, status="pending", position=1),
-                PrintQueueItem(printer_id=printer.id, archive_id=archive.id, status="pending", position=2),
+                PrintQueueItem(printer_id=printer.id, archive_id=archive.id, status="queued", position=1),
+                PrintQueueItem(printer_id=printer.id, archive_id=archive.id, status="queued", position=2),
                 PrintQueueItem(printer_id=printer.id, archive_id=archive.id, status="dispatching", position=3),
             ]
         )
         # An unrelated archive's queue rows must not bleed into the count.
         other = await archive_factory(printer.id)
-        db_session.add(PrintQueueItem(printer_id=printer.id, archive_id=other.id, status="pending", position=4))
+        db_session.add(PrintQueueItem(printer_id=printer.id, archive_id=other.id, status="queued", position=4))
         await db_session.commit()
 
         resp = await async_client.get(f"/api/v1/archives/{archive.id}/delete-impact")

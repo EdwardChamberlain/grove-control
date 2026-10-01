@@ -83,7 +83,6 @@ export interface ScheduleOptions {
   postponePrint: boolean;
   scheduledTime: string;
   requireManualStart: boolean;
-  requirePreviousSuccess: boolean;
   waitForDryingComplete: boolean;
   chamberHeatSoak: boolean;
   heatSoakTemperature: number;
@@ -100,7 +99,6 @@ export const DEFAULT_SCHEDULE_OPTIONS: ScheduleOptions = {
   postponePrint: false,
   scheduledTime: '',
   requireManualStart: false,
-  requirePreviousSuccess: false,
   waitForDryingComplete: false,
   chamberHeatSoak: false,
   heatSoakTemperature: 60,

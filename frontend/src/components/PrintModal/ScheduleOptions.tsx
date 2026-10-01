@@ -43,7 +43,6 @@ export function ScheduleOptionsPanel({
   const controls: Array<{ key: ToggleKey; label: string; disabled?: boolean }> = [
     ...(canInsertAtTop ? [{ key: 'insertAtTop' as const, label: t('printModal.insertAtTop', 'Insert at top of queue') }] : []),
     { key: 'requireManualStart', label: t('printModal.requireManualStart') },
-    { key: 'requirePreviousSuccess', label: t('printModal.requirePreviousSuccess') },
     { key: 'chamberHeatSoak', label: t('heatSoak.option') },
     { key: 'waitForDryingComplete', label: t('printModal.waitForDryingComplete') },
     ...(showAutoOff ? [{ key: 'autoOffAfter' as const, label: t('printModal.autoOffAfter'), disabled: !canControlPrinter }] : []),

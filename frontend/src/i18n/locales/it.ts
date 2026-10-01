@@ -974,7 +974,7 @@ export default {
       deleteButton: 'Elimina',
       deletePurgeStats: 'Rimuovi anche questa stampa dalle Quick Stats (filamento, tempo, costo, energia)',
       deleteQueueItemsWarning: '{{count}} elemento/i in coda collegato/i a questo archivio verrà/verranno rimosso/i.',
-      deleteBlockedByPrinting: 'Impossibile eliminare — {{count}} elemento/i in coda sono in fase di invio o stampa. Interrompi il lavoro attivo, poi riprova.',
+      deleteBlockedByPrinting: 'Impossibile eliminare — {{count}} lavori occupano ancora una stampante. Interrompi i lavori attivi e libera i loro piatti prima di procedere.',
       removeSource3mf: 'Rimuovi Sorgente 3MF',
       removeSource3mfConfirm: 'Sei sicuro di rimuovere il file sorgente 3MF da "{{name}}"? Questo eliminerà il progetto slicer originale.',
       removeButton: 'Rimuovi',
@@ -1064,6 +1064,7 @@ export default {
 
   // Queue page
   queue: {
+    awaitingPlateClear: 'In attesa della pulizia del piatto',
     resolveDispatch: {
       prompt: "La stampante non ha confermato questo lavoro. Controlla la stampante prima di scegliere:",
       printing: "Sta stampando",
@@ -1149,6 +1150,10 @@ export default {
     },
     // Status
     status: {
+      queued: 'In coda',
+      finished: 'Terminato',
+      successful: 'Riuscito',
+      unsuccessful: 'Non riuscito',
       pending: 'In attesa',
       scheduled: 'Pianificata',
       waiting: 'In attesa',
@@ -1188,8 +1193,7 @@ export default {
     },
     // Badges
     badges: {
-      staged: 'In staging',
-      requiresPrevious: 'Richiede successo precedente',
+      manualStart: 'Avvio manuale',
       autoPowerOff: 'Spegnimento automatico',
       gcodeInjection: 'G-code',
     },
@@ -1209,6 +1213,8 @@ export default {
     },
     // Actions
     actions: {
+      clearPlate: 'Pulisci piatto',
+      retry: 'Riprova',
       startPrint: 'Avvia Stampa',
       stopPrint: 'Ferma Stampa',
       requeue: 'Rimetti in coda',

@@ -973,7 +973,7 @@ export default {
       deleteButton: '削除',
       deletePurgeStats: 'このプリントをQuick Statsからも削除（フィラメント、時間、コスト、電力）',
       deleteQueueItemsWarning: 'このアーカイブにリンクされた {{count}} 件のキュー項目も削除されます。',
-      deleteBlockedByPrinting: '削除できません — {{count}} 件のキュー項目が送信中または印刷中です。先に実行中のジョブを停止してから再試行してください。',
+      deleteBlockedByPrinting: '削除できません — {{count}} 件のジョブがまだプリンターを占有しています。先に実行中のジョブを停止し、プレートをクリアしてください。',
       removeSource3mf: 'ソース3MFを削除',
       removeSource3mfConfirm: '"{{name}}"からソース3MFファイルを削除してもよろしいですか？元のスライサープロジェクトファイルが削除されます。',
       removeButton: '削除',
@@ -1063,6 +1063,7 @@ export default {
 
   // Queue page
   queue: {
+    awaitingPlateClear: 'プレートの清掃待ち',
     resolveDispatch: {
       prompt: "プリンターがこのジョブを確認していません。選択する前にプリンターを確認してください：",
       printing: "印刷中です",
@@ -1148,6 +1149,10 @@ export default {
     },
     // Status
     status: {
+      queued: '待機中',
+      finished: '完了',
+      successful: '成功',
+      unsuccessful: '未成功',
       pending: '待機中',
       scheduled: '予定済み',
       waiting: '待機中',
@@ -1187,8 +1192,7 @@ export default {
     },
     // Badges
     badges: {
-      staged: 'ステージ済み',
-      requiresPrevious: '前の成功が必要',
+      manualStart: '手動開始',
       autoPowerOff: '自動電源オフ',
       gcodeInjection: 'G-code',
     },
@@ -1208,6 +1212,8 @@ export default {
     },
     // Actions
     actions: {
+      clearPlate: 'プレートを清掃',
+      retry: '再試行',
       startPrint: '印刷を開始',
       stopPrint: '印刷を停止',
       requeue: '再キュー',

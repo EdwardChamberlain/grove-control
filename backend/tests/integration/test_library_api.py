@@ -773,6 +773,44 @@ class TestLibraryAddToQueueAPI:
             {"slot_id": 1, "type": "PETG", "color": "#0000FF", "force_color_match": False}
         ]
 
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_bulk_queued_files_are_visible_and_cancellable(
+        self, async_client: AsyncClient, db_session, library_file_factory, tmp_path
+    ):
+        from backend.app.models.print_queue import PrintQueueItem
+
+        files = []
+        sources = []
+        for index in range(2):
+            source = tmp_path / f"bulk-lifecycle-{index}.gcode.3mf"
+            with zipfile.ZipFile(source, "w") as zf:
+                zf.writestr("Metadata/plate_1.gcode", "; bulk queue test\n")
+            sources.append(source)
+            files.append(await library_file_factory(filename=source.name, file_path=str(source)))
+
+        added = await async_client.post(
+            "/api/v1/library/files/add-to-queue", json={"file_ids": [file.id for file in files]}
+        )
+        assert added.status_code == 200, added.text
+        assert added.json()["errors"] == []
+        item_ids = [item["queue_item_id"] for item in added.json()["added"]]
+        assert len(item_ids) == 2
+
+        live = await async_client.get("/api/v1/queue/")
+        assert live.status_code == 200, live.text
+        assert {item["id"] for item in live.json()} == set(item_ids)
+        assert all(item["status"] == "queued" for item in live.json())
+
+        cancelled = await async_client.post(f"/api/v1/queue/{item_ids[0]}/cancel")
+        assert cancelled.status_code == 200, cancelled.text
+        item = await db_session.get(PrintQueueItem, item_ids[0], populate_existing=True)
+        assert item.status == "unsuccessful"
+        remaining = await async_client.get("/api/v1/queue/")
+        assert remaining.status_code == 200, remaining.text
+        assert [item["id"] for item in remaining.json()] == [item_ids[1]]
+        assert all(source.is_file() for source in sources)
+
 
 class TestLibraryZipExtractAPI:
     """Integration tests for ZIP extraction endpoint."""

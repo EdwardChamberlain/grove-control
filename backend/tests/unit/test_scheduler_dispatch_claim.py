@@ -25,7 +25,7 @@ async def session_maker():
         await engine.dispose()
 
 
-async def _queue_item(maker, *, status="pending", claimed=False):
+async def _queue_item(maker, *, status="queued", claimed=False):
     async with maker() as db:
         item = PrintQueueItem(status=status, dispatching_at=None)
         db.add(item)
@@ -87,7 +87,7 @@ async def test_dispatch_claim_rejects_reassigned_printer(session_maker):
     scheduler._start_print.assert_not_awaited()
     async with session_maker() as db:
         item = await db.get(PrintQueueItem, item_id)
-        assert item.status == "pending"
+        assert item.status == "queued"
         assert item.printer_id == 202
         assert item.dispatching_at is None
 

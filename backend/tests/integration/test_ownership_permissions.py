@@ -520,7 +520,7 @@ class TestQueueOwnershipPermissions(TestOwnershipPermissionsSetup):
             defaults = {
                 "printer_id": printer.id,
                 "archive_id": archive.id,
-                "status": "pending",
+                "status": "queued",
                 "position": 0,
             }
             defaults.update(kwargs)
@@ -1103,7 +1103,7 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
         )
         db_session.add(nested_file)
         await db_session.flush()
-        queue_item = PrintQueueItem(library_file_id=nested_file.id, status="pending", position=1)
+        queue_item = PrintQueueItem(library_file_id=nested_file.id, status="queued", position=1)
         db_session.add(queue_item)
         await db_session.commit()
         await db_session.refresh(queue_item)
@@ -1116,7 +1116,7 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
 
         assert response.status_code == 200
         await db_session.refresh(queue_item)
-        assert queue_item.status == "cancelled"
+        assert queue_item.status == "unsuccessful"
         assert queue_item.library_file_id is None
 
     @pytest.mark.asyncio
@@ -1481,14 +1481,14 @@ class TestReadIDORClosure(TestOwnershipPermissionsSetup):
         own_item = PrintQueueItem(
             archive_id=archive.id,
             printer_id=printer.id,
-            status="pending",
+            status="queued",
             position=1,
             created_by_id=auth_setup["operator_user"]["id"],
         )
         admin_item = PrintQueueItem(
             archive_id=archive.id,
             printer_id=printer.id,
-            status="pending",
+            status="queued",
             position=2,
             created_by_id=auth_setup["admin_user"]["id"],
         )
@@ -1519,7 +1519,7 @@ class TestReadIDORClosure(TestOwnershipPermissionsSetup):
         admin_item = PrintQueueItem(
             archive_id=archive.id,
             printer_id=printer.id,
-            status="pending",
+            status="queued",
             position=1,
             created_by_id=auth_setup["admin_user"]["id"],
         )
@@ -1957,7 +1957,7 @@ class TestProjectOwnershipBoundaries(TestOwnershipPermissionsSetup):
             archive_id=owned_archive.id,
             project_id=project.id,
             created_by_id=auth_setup["operator_user"]["id"],
-            status="pending",
+            status="queued",
             position=1,
         )
         other_item = PrintQueueItem(
@@ -1965,7 +1965,7 @@ class TestProjectOwnershipBoundaries(TestOwnershipPermissionsSetup):
             archive_id=other_archive.id,
             project_id=project.id,
             created_by_id=auth_setup["operator2_user"]["id"],
-            status="pending",
+            status="queued",
             position=2,
         )
         db_session.add_all([owned_item, other_item])

@@ -62,7 +62,7 @@ class TestProjectsAPI:
         project = await project_factory(name="Dispatching queue counts")
         db_session.add_all(
             [
-                PrintQueueItem(project_id=project.id, position=1, status="pending"),
+                PrintQueueItem(project_id=project.id, position=1, status="queued"),
                 PrintQueueItem(project_id=project.id, position=2, status="dispatching"),
                 PrintQueueItem(project_id=project.id, position=3, status="printing"),
                 PrintQueueItem(project_id=project.id, position=4, status="completed"),

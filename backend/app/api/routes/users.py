@@ -4,7 +4,7 @@ from typing import Annotated
 import jwt as _jwt
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.security import HTTPAuthorizationCredentials
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -349,8 +349,8 @@ async def delete_user(
     """Delete a user.
 
     If delete_items=True, all archives, queue items, and library files created by
-    this user will also be deleted. Otherwise, these items will become "ownerless"
-    (created_by_id set to NULL by the foreign key constraint).
+    this user will also be deleted, unless a related job holds a printer.
+    Otherwise, these items will become "ownerless" (created_by_id set to NULL).
     """
     result = await db.execute(select(User).where(User.id == user_id).options(selectinload(User.groups)))
     user = result.scalar_one_or_none()
@@ -379,7 +379,39 @@ async def delete_user(
         )
 
     if delete_items:
-        # Delete all items created by this user
+        from backend.app.services.queue_transitions import HOLDING_STATUSES
+
+        archives = select(PrintArchive.id).where(PrintArchive.created_by_id == user_id)
+        files = select(LibraryFile.id).where(LibraryFile.created_by_id == user_id)
+        affected_jobs = or_(
+            PrintQueueItem.created_by_id == user_id,
+            PrintQueueItem.archive_id.in_(archives),
+            PrintQueueItem.library_file_id.in_(files),
+            PrintQueueItem.id.in_(
+                select(PrintArchive.dispatched_queue_item_id).where(PrintArchive.created_by_id == user_id)
+            ),
+        )
+        # Fence status changes before checking, then lock source rows so a
+        # concurrent FK attachment cannot introduce a new holding reference.
+        # Re-read after those locks: deleting a source can cascade into a
+        # different user's job too. SQLite uses the same transaction boundary.
+        with db.no_autoflush:
+            await db.execute(update(PrintQueueItem).where(affected_jobs).values(id=PrintQueueItem.id))
+            await db.execute(
+                update(PrintArchive).where(PrintArchive.created_by_id == user_id).values(id=PrintArchive.id)
+            )
+            await db.execute(update(LibraryFile).where(LibraryFile.created_by_id == user_id).values(id=LibraryFile.id))
+            await db.execute(update(PrintQueueItem).where(affected_jobs).values(id=PrintQueueItem.id))
+            held = await db.scalar(
+                select(PrintQueueItem.id).where(affected_jobs, PrintQueueItem.status.in_(HOLDING_STATUSES)).limit(1)
+            )
+        if held is not None:
+            await db.rollback()
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Cannot delete this user's items while a related job holds a printer. "
+                "Stop active jobs and clear their plates, or delete the account while keeping its items.",
+            )
         await db.execute(delete(PrintArchive).where(PrintArchive.created_by_id == user_id))
         queue_item_ids = list(
             (await db.scalars(select(PrintQueueItem.id).where(PrintQueueItem.created_by_id == user_id))).all()
@@ -392,8 +424,6 @@ async def delete_user(
     else:
         # Explicitly set created_by_id to NULL for all items (ensures consistent behavior
         # across different database backends, including SQLite without foreign key support).
-        from sqlalchemy import update
-
         await db.execute(update(PrintArchive).where(PrintArchive.created_by_id == user_id).values(created_by_id=None))
         await db.execute(
             update(PrintQueueItem).where(PrintQueueItem.created_by_id == user_id).values(created_by_id=None)

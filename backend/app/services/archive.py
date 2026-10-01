@@ -23,6 +23,37 @@ from backend.app.utils.safe_path import PathTraversalError, safe_join_under
 logger = logging.getLogger(__name__)
 
 
+class ArchiveDeletionConflict(RuntimeError):
+    """An Archive still backs a job that holds a printer."""
+
+
+async def _guard_archive_deletion(db: AsyncSession, archive_id: int) -> bool:
+    from backend.app.models.print_queue import PrintQueueItem
+    from backend.app.services.queue_transitions import HOLDING_STATUSES
+
+    queue = PrintQueueItem.__table__
+    archive = PrintArchive.__table__
+    # Match the outcome writer's lock order: job first, then Archive. The
+    # Archive PK lock also fences new FK references on PostgreSQL. Re-lock
+    # references admitted while waiting for that lock before checking holds.
+    with db.no_autoflush:
+        lock_jobs = queue.update().where(queue.c.archive_id == archive_id).values(id=queue.c.id)
+        await db.execute(lock_jobs)
+        locked = await db.execute(archive.update().where(archive.c.id == archive_id).values(id=archive.c.id))
+        if locked.rowcount != 1:
+            return False
+        await db.execute(lock_jobs)
+        holding = await db.scalar(
+            select(queue.c.id).where(queue.c.archive_id == archive_id, queue.c.status.in_(HOLDING_STATUSES)).limit(1)
+        )
+    if holding is not None:
+        raise ArchiveDeletionConflict(
+            "Cannot delete archive while a related job is dispatching, printing, or awaiting plate clear. "
+            "Stop active jobs and clear their plates first."
+        )
+    return True
+
+
 async def record_dispatch_outcome(
     db: AsyncSession,
     *,
@@ -1018,27 +1049,10 @@ async def _null_print_log_thumbnail_paths(db: AsyncSession, archive_id: int) -> 
 
 
 async def _delete_related_queue_items(db: AsyncSession, archive_id: int) -> int:
-    """Delete every queue item pointing at *archive_id* (#1734).
+    """Delete references after the service has locked and ruled out holds.
 
-    Called from ``soft_delete_archive``. Hard-delete is covered by the
-    ``ON DELETE CASCADE`` on ``print_queue.archive_id`` — same end state
-    via the FK. Pre-#1734 this helper merely flipped pending rows to
-    ``status='cancelled'`` while leaving every other status alone and
-    leaving the rows in the DB, which surprised users who expected the
-    queue lines to disappear when their backing archive went away. Worse,
-    a Send-All archive backed N queue items (one per plate, #1733) — soft-
-    deleting that archive left N "cancelled" rows behind, none of which
-    could ever dispatch.
-
-    Now we delete unconditionally regardless of status. ``printing`` rows
-    are blocked one layer up at the route (``delete_archive`` returns 409
-    when a related row is mid-print) so we never delete an actively-
-    running queue row out from under the dispatcher. Completed / failed
-    / cancelled rows go too — they're queue history, not print history.
-    PrintLogEntry rows are the authoritative print history and are
-    untouched (FK ``ON DELETE SET NULL``).
-
-    Returns the number of rows removed so the caller can report it.
+    Both deletion modes use this explicitly, including legacy SQLite
+    connections that do not enforce the Archive FK's cascade.
     """
     from sqlalchemy import delete as sa_delete
 
@@ -1053,15 +1067,11 @@ async def _delete_related_queue_items(db: AsyncSession, archive_id: int) -> int:
 
 
 async def _count_related_queue_items(db: AsyncSession, archive_id: int) -> tuple[int, int]:
-    """Return ``(total, active)`` queue items linked to *archive_id*.
-
-    Used by the archive GET response so the frontend delete-confirm modal
-    can surface how much the deletion will wipe out, and by the delete route
-    so it can 409 while a related row is dispatching or printing (#1734).
-    """
+    """Return ``(total, holding)`` jobs for deletion pre-flight."""
     from sqlalchemy import func as sa_func, select as sa_select
 
     from backend.app.models.print_queue import PrintQueueItem
+    from backend.app.services.queue_transitions import HOLDING_STATUSES
 
     total = (
         await db.execute(
@@ -1074,7 +1084,7 @@ async def _count_related_queue_items(db: AsyncSession, archive_id: int) -> tuple
             .select_from(PrintQueueItem)
             .where(
                 PrintQueueItem.archive_id == archive_id,
-                PrintQueueItem.status.in_(["preheating", "dispatching", "printing"]),
+                PrintQueueItem.status.in_(HOLDING_STATUSES),
             )
         )
     ).scalar_one()
@@ -1519,9 +1529,12 @@ class ArchiveService:
         checkbox in the delete dialog — that path calls ``delete_archive``
         instead and removes the row entirely.
         """
+        if not await _guard_archive_deletion(self.db, archive_id):
+            return False
         archive = await self.get_archive(archive_id)
         if not archive:
             return False
+        await self.db.refresh(archive)
         if archive.deleted_at is not None:
             # Already soft-deleted; nothing to do. The files were purged on
             # the first soft-delete pass so there is nothing left on disk.
@@ -1574,52 +1587,22 @@ class ArchiveService:
             return None
         return archive_dir
 
-    async def delete_archive(self, archive_id: int) -> bool:
+    async def delete_archive(self, archive_id: int, *, purge_stats: bool = False) -> bool:
         """Delete an archive and its files."""
+        if not await _guard_archive_deletion(self.db, archive_id):
+            return False
         archive = await self.get_archive(archive_id)
         if not archive:
             return False
+        await self.db.refresh(archive)
+        dir_to_delete = self._resolve_archive_dir_for_delete(archive)
 
-        # Resolve the directory to delete BEFORE committing the DB change
-        dir_to_delete: Path | None = None
+        if purge_stats:
+            from sqlalchemy import delete
 
-        if archive.file_path and archive.file_path.strip():
-            file_path = settings.base_dir / archive.file_path
-            if file_path.exists():
-                archive_dir = file_path.parent
+            from backend.app.models.print_log import PrintLogEntry
 
-                # Safety check 1: archive_dir must be inside archive_dir
-                try:
-                    archive_dir.resolve().relative_to(settings.archive_dir.resolve())
-                except ValueError:
-                    logger.error(
-                        f"SECURITY: Refusing to delete archive {archive_id} - "
-                        f"path {archive_dir} is outside archive directory {settings.archive_dir}"
-                    )
-                    await self.db.delete(archive)
-                    await self.db.commit()
-                    return True
-
-                # Safety check 2: archive_dir must be at least 1 level deep inside archive_dir
-                try:
-                    relative_path = archive_dir.resolve().relative_to(settings.archive_dir.resolve())
-                    if len(relative_path.parts) < 1:
-                        logger.error(
-                            f"SECURITY: Refusing to delete archive {archive_id} - "
-                            f"path {archive_dir} is not deep enough inside archive directory"
-                        )
-                        await self.db.delete(archive)
-                        await self.db.commit()
-                        return True
-                except ValueError:
-                    pass  # Already handled above
-
-                dir_to_delete = archive_dir
-        else:
-            logger.error(
-                f"SECURITY: Refusing to delete files for archive {archive_id} - "
-                f"file_path is empty or invalid: '{archive.file_path}'"
-            )
+            await self.db.execute(delete(PrintLogEntry).where(PrintLogEntry.archive_id == archive_id))
 
         # NULL stale thumbnail_path on linked PrintLogEntries before the FK
         # SET-NULL cascade fires. The on-disk file is about to be removed by
@@ -1627,6 +1610,7 @@ class ArchiveService:
         # gets SET NULL by the FK) would otherwise point at a missing file
         # and produce 404 storms in the print-log view (#1348-followup).
         await _null_print_log_thumbnail_paths(self.db, archive_id)
+        await _delete_related_queue_items(self.db, archive_id)
 
         # Delete database record FIRST — if the commit fails (e.g. database locked
         # during concurrent bulk deletes), the files stay on disk and nothing is lost.

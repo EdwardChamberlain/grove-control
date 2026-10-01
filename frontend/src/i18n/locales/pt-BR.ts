@@ -974,7 +974,7 @@ export default {
       deleteButton: 'Excluir',
       deletePurgeStats: 'Remover também esta impressão das Quick Stats (filamento, tempo, custo, energia)',
       deleteQueueItemsWarning: '{{count}} item(ns) de fila vinculado(s) a este arquivo também serão removidos.',
-      deleteBlockedByPrinting: 'Não é possível excluir — {{count}} item(ns) de fila estão sendo enviados ou impressos. Pare o trabalho ativo primeiro e tente novamente.',
+      deleteBlockedByPrinting: 'Não é possível excluir — {{count}} trabalho(s) ainda reservam uma impressora. Pare os trabalhos ativos e libere suas placas primeiro.',
       removeSource3mf: 'Remover Source 3MF',
       removeSource3mfConfirm: 'Tem certeza de que deseja remover o arquivo source 3MF de "{{name}}"? Isso excluirá o arquivo original do projeto do fatiador.',
       removeButton: 'Remover',
@@ -1064,6 +1064,7 @@ export default {
 
   // Queue page
   queue: {
+    awaitingPlateClear: 'Aguardando limpeza da mesa',
     resolveDispatch: {
       prompt: "A impressora não confirmou este trabalho. Verifique a impressora antes de escolher:",
       printing: "Está imprimindo",
@@ -1149,6 +1150,10 @@ export default {
     },
     // Status
     status: {
+      queued: 'Na fila',
+      finished: 'Concluído',
+      successful: 'Bem-sucedido',
+      unsuccessful: 'Sem sucesso',
       pending: 'Pendente',
       scheduled: 'Agendado',
       waiting: 'Aguardando',
@@ -1188,8 +1193,7 @@ export default {
     },
     // Badges
     badges: {
-      staged: 'Preparado (início manual)',
-      requiresPrevious: 'Requer sucesso anterior',
+      manualStart: 'Início manual',
       autoPowerOff: 'Desligamento automático',
       gcodeInjection: 'G-code',
     },
@@ -1209,6 +1213,8 @@ export default {
     },
     // Actions
     actions: {
+      clearPlate: 'Limpar mesa',
+      retry: 'Tentar novamente',
       startPrint: 'Iniciar Impressão',
       stopPrint: 'Parar Impressão',
       requeue: 'Reenfileirar',
