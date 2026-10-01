@@ -10,6 +10,16 @@ from httpx import AsyncClient
 class TestMetricsAPI:
     """Integration tests for /api/v1/metrics endpoint."""
 
+    async def test_queue_printing_gauge_includes_paused_jobs(self, async_client: AsyncClient, db_session):
+        from backend.app.models.print_queue import PrintQueueItem
+
+        await async_client.put("/api/v1/settings/", json={"prometheus_enabled": True, "prometheus_token": ""})
+        db_session.add_all([PrintQueueItem(status="printing"), PrintQueueItem(status="paused")])
+        await db_session.commit()
+        response = await async_client.get("/api/v1/metrics")
+        assert response.status_code == 200
+        assert "bambuddy_queue_printing 2\n" in response.text
+
     # ========================================================================
     # Metrics endpoint access control
     # ========================================================================

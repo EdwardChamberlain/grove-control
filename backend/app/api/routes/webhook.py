@@ -335,7 +335,7 @@ async def webhook_get_queue_status(
             select(PrintQueueItem)
             .where(
                 PrintQueueItem.printer_id == printer.id,
-                PrintQueueItem.status.in_(["queued", "preheating", "dispatching", "printing"]),
+                PrintQueueItem.status.in_(["queued", "preheating", "dispatching", "printing", "paused"]),
             )
             .order_by(PrintQueueItem.position)
         )
@@ -343,7 +343,7 @@ async def webhook_get_queue_status(
 
         pending_count = sum(1 for i in items if i.status == "queued")
         dispatching_count = sum(1 for i in items if i.status == "dispatching")
-        printing_count = sum(1 for i in items if i.status == "printing")
+        printing_count = sum(1 for i in items if i.status in ("printing", "paused"))
 
         response.append(
             QueueStatusResponse(
@@ -358,8 +358,8 @@ async def webhook_get_queue_status(
                         "id": item.id,
                         "archive_id": item.archive_id,
                         "position": item.position,
-                        # Integrations keep the pre-#194 name for waiting jobs.
-                        "status": "pending" if item.status == "queued" else item.status,
+                        # Preserve the existing integration names for waiting/paused work.
+                        "status": {"queued": "pending", "paused": "printing"}.get(item.status, item.status),
                     }
                     for item in items
                 ],

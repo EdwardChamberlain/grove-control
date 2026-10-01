@@ -246,6 +246,31 @@ describe('QueuePage', () => {
       expect(timelineItem).toHaveTextContent('Dispatching');
     });
 
+    it('keeps a paused job visible and stoppable in Active jobs and Timeline', async () => {
+      const user = userEvent.setup();
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json([{
+          ...mockQueueItems[1], id: 4, status: 'paused', archive_name: 'Paused print',
+        }])),
+        // Disconnected telemetry must not erase the persisted paused badge.
+        http.get('/api/v1/printers/1/status', () => HttpResponse.json({ connected: false, state: 'UNKNOWN' })),
+      );
+      render(<QueuePage />);
+      await screen.findByText('Paused print');
+      expect(screen.getByText('Paused')).toBeInTheDocument();
+      expect(screen.getByText('Active jobs')).toBeInTheDocument();
+      expect(screen.getByTitle('Stop Print')).toBeInTheDocument();
+      expect(screen.getByTestId('queue-stat-printing')).toHaveTextContent(/1\s*Printing/);
+      expect(screen.queryByTitle('Cancel')).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: /Timeline/ }));
+      const timelineItem = await screen.findByTestId('queue-timeline-item-4');
+      expect(timelineItem).toHaveAttribute('data-status', 'paused');
+      expect(timelineItem).toHaveTextContent('Paused');
+      await user.click(timelineItem);
+      expect(await screen.findByRole('button', { name: 'Stop Print' })).toBeInTheDocument();
+    });
+
     it('keeps a normal upload active without offering dispatch resolution', async () => {
       server.use(http.get('/api/v1/queue/', () => HttpResponse.json([{
         ...mockQueueItems[1], id: 4, status: 'dispatching', dispatch_needs_resolution: false,

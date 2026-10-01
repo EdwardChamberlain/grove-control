@@ -149,6 +149,20 @@ or restart. Use Stop to resolve an old active reservation when necessary.
 See [Queue job identity](docs/queue-job-identity.md) for details and the required
 hardware validation. Status names sent to integrations remain unchanged.
 
+## Queue pause and resume (stage 4)
+
+No additional migration is needed after stage 3: `paused` is already included
+in its versioned lifecycle and printer holding index. The next fresh, matching
+PAUSE observation changes an active job to Paused; matching RUNNING telemetry
+returns it to Printing. Existing ambiguous or offline jobs stay where they are,
+with Stop available. Inspect the printer before resolving them.
+
+Queue REST clients now receive `paused`. The webhook Queue view continues to
+report `printing` for paused jobs and includes them in its printing count;
+the existing Prometheus queue printing gauge does the same. Pause/resume does
+not create another Archive or change its physical outcome. See the
+[lifecycle guide and stage 4 hardware checklist](docs/queue-status-transitions.md).
+
 ## Timezone
 
 `TZ` is the authoritative timezone for the container and for scheduled local

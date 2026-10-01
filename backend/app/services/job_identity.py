@@ -71,6 +71,37 @@ async def find_job(db: AsyncSession, printer_id: int, identity: str | None, stat
     return rows[0] if len(rows) == 1 else None
 
 
+async def sync_print_state(db: AsyncSession, item: PrintQueueItem, state) -> bool:
+    """Apply a fresh, matching PAUSE/RUNNING observation without releasing the hold.
+
+    Preparation and uncertain/offline telemetry do not resume a paused job.
+    Callers own the transaction; duplicate observations do not write anything.
+    """
+    if (
+        item.status not in ("printing", "paused")
+        or state is None
+        or not state.connected
+        or not getattr(state, "job_telemetry_ready", True)
+        or not normalize_id(item.dispatch_subtask_id)
+        or telemetry_identity(state) != item.dispatch_subtask_id
+    ):
+        return False
+    destination = {"PAUSE": "paused", "RUNNING": "printing"}.get(state.state)
+    if destination is None or destination == item.status:
+        return False
+    await transition_queue_item(
+        db,
+        item,
+        item.status,
+        destination,
+        conditions=(
+            PrintQueueItem.printer_id == item.printer_id,
+            PrintQueueItem.dispatch_subtask_id == item.dispatch_subtask_id,
+        ),
+    )
+    return True
+
+
 async def bind_observed_id(db: AsyncSession, printer_id: int, identity: str | None, previous: str | None):
     """Bind a session-local job to the firmware ID observed later in that run."""
     if not identity or not previous or identity == previous:
@@ -85,14 +116,14 @@ async def bind_observed_id(db: AsyncSession, printer_id: int, identity: str | No
         is not None
     ):
         return
-    item = await find_job(db, printer_id, previous, ("printing",))
+    item = await find_job(db, printer_id, previous, ("printing", "paused"))
     if item is None:
         return
     await transition_queue_item(
         db,
         item,
-        "printing",
-        "printing",
+        item.status,
+        item.status,
         values={"dispatch_subtask_id": identity},
         conditions=(PrintQueueItem.dispatch_subtask_id == previous,),
     )
@@ -141,6 +172,7 @@ async def observe_print(
                     "error_message": None,
                 },
             )
+        await sync_print_state(db, item, observed_state)
         return item, confirmed
     ended = await db.scalar(
         select(PrintQueueItem.id)
@@ -188,4 +220,5 @@ async def observe_print(
     )
     db.add(item)
     await db.flush()
+    await sync_print_state(db, item, observed_state)
     return item, False

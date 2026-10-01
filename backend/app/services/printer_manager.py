@@ -285,6 +285,7 @@ class PrinterManager:
         self._on_print_start: Callable[[int, dict], None] | None = None
         self._on_print_complete: Callable[[int, dict], None] | None = None
         self._on_print_running_observed: Callable[[int, dict], None] | None = None
+        self._on_print_state_change: Callable[[int, dict], None] | None = None
         self._on_finish_photo_moment: Callable[[int, dict], None] | None = None
         self._on_status_change: Callable[[int, PrinterState], None] | None = None
         self._on_ams_change: Callable[[int, list], None] | None = None
@@ -458,6 +459,10 @@ class PrinterManager:
         hook to recover."""
         self._on_print_running_observed = callback
 
+    def set_print_state_change_callback(self, callback: Callable[[int, dict], None]):
+        """Set the callback for identified pause/resume telemetry, including reconnect."""
+        self._on_print_state_change = callback
+
     def set_finish_photo_moment_callback(self, callback: Callable[[int, dict], None]):
         """Set callback for the #1721 finish-photo moment.
 
@@ -537,8 +542,29 @@ class PrinterManager:
             self.disconnect_printer(printer.id)
 
         printer_id = printer.id
+        last_print_state = None
 
         def on_state_change(state: PrinterState):
+            nonlocal last_print_state
+            from backend.app.services.job_identity import telemetry_identity
+
+            observation = (
+                (telemetry_identity(state), state.state) if state.connected and state.job_telemetry_ready else None
+            )
+            if observation != last_print_state:
+                last_print_state = observation
+                if (
+                    observation
+                    and observation[0]
+                    and state.state in ("PAUSE", "RUNNING")
+                    and self._on_print_state_change
+                ):
+                    # Snapshot the event: PrinterState is mutated by later MQTT pushes.
+                    self._schedule_async(
+                        self._on_print_state_change(
+                            printer_id, {"submission_id": observation[0], "state": observation[1]}
+                        )
+                    )
             if self._on_status_change:
                 self._schedule_async(self._on_status_change(printer_id, state))
 

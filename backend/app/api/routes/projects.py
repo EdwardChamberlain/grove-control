@@ -143,7 +143,7 @@ async def compute_project_stats(
     in_progress_result = await db.execute(
         select(func.count(PrintQueueItem.id)).where(
             PrintQueueItem.project_id == project_id,
-            PrintQueueItem.status.in_(["preheating", "dispatching", "printing"]),
+            PrintQueueItem.status.in_(["preheating", "dispatching", "printing", "paused"]),
             *_owner_filter(PrintQueueItem.created_by_id, owner_id),
         )
     )
@@ -250,7 +250,7 @@ async def list_projects(
         queue_count_result = await db.execute(
             select(func.count(PrintQueueItem.id)).where(
                 PrintQueueItem.project_id == project.id,
-                PrintQueueItem.status.in_(["queued", "preheating", "dispatching", "printing"]),
+                PrintQueueItem.status.in_(["queued", "preheating", "dispatching", "printing", "paused"]),
                 *_owner_filter(PrintQueueItem.created_by_id, api_key_owner.id if api_key_owner else None),
             )
         )
@@ -1623,7 +1623,7 @@ async def get_project_timeline(
             if item.archive
             else (item.library_file.filename if item.library_file else f"Queue item {item.id}")
         )
-        if item.status == "printing":
+        if item.status in ("printing", "paused"):
             events.append(
                 TimelineEvent(
                     event_type="print_started",

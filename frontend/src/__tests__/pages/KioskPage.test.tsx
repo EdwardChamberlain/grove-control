@@ -159,6 +159,23 @@ describe('KioskPage', () => {
     });
   });
 
+  it('keeps a durable paused job and its owner visible with offline telemetry', async () => {
+    vi.spyOn(api, 'getQueue').mockResolvedValue([{
+      id: 10, printer_id: 1, archive_id: 1, library_file_id: null,
+      archive_name: 'Paused widget batch', printer_name: 'Atlas', position: 1,
+      status: 'paused', created_by_username: 'Morgan',
+    }] as never);
+    vi.spyOn(api, 'getPrinterStatus').mockResolvedValue({
+      ...statusFor('1'), connected: false, state: 'UNKNOWN',
+    } as never);
+    render(<KioskPage />);
+    await screen.findByText('Paused widget batch');
+    const activeSection = screen.getByTestId('kiosk-printing-section');
+    expect(within(activeSection).getByText('Paused')).toBeInTheDocument();
+    expect(within(activeSection).getByText('Morgan')).toBeInTheDocument();
+    expect(within(activeSection).getByText('(1)')).toBeInTheDocument();
+  });
+
   it('shows maintenance mode instead of offline for an inactive printer', async () => {
     const maintenancePrinter = { id: 1, name: 'Atlas', model: 'X1 Carbon', is_active: false };
     vi.mocked(api.getPrinters).mockResolvedValue([maintenancePrinter, printers[1]] as never);

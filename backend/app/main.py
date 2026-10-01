@@ -100,6 +100,7 @@ from backend.app.services.job_identity import (
     event_identity,
     find_job,
     observe_print,
+    sync_print_state,
     telemetry_identity,
 )
 from backend.app.services.library_trash import library_trash_service
@@ -2513,6 +2514,31 @@ def _load_objects_from_archive(archive, printer_id: int, logger) -> None:
 _job_event_locks: dict[int, asyncio.Lock] = {}
 _observed_job_starts: dict[int, int] = {}
 _completed_job_events: dict[int, int] = {}
+
+
+async def on_print_state_change(printer_id: int, data: dict):
+    """Persist pause/resume without replaying print-start or completion effects."""
+    identity = event_identity(data)
+    if not identity:
+        return
+    async with _job_event_locks.setdefault(printer_id, asyncio.Lock()):
+
+        async def _apply(db):
+            item = await find_job(db, printer_id, identity, ("printing", "paused"))
+            if item is None:
+                return
+            live = printer_manager.get_status(printer_id)
+            if live is None or live.state != data.get("state"):
+                return  # A later push superseded this snapshot while the callback waited.
+            try:
+                changed = await sync_print_state(db, item, live)
+            except QueueTransitionConflict:
+                await db.rollback()
+                return  # Stop, completion or another observation already won.
+            if changed:
+                await db.commit()
+
+        await run_with_retry(_apply, label="queue pause/resume", session_factory=async_session)
 
 
 async def on_print_start(printer_id: int, data: dict):
@@ -6519,6 +6545,7 @@ async def lifespan(app: FastAPI):
     printer_manager.set_print_start_callback(on_print_start)
     printer_manager.set_print_complete_callback(on_print_complete)
     printer_manager.set_print_running_observed_callback(on_print_running_observed)
+    printer_manager.set_print_state_change_callback(on_print_state_change)
     printer_manager.set_finish_photo_moment_callback(on_finish_photo_moment)
     printer_manager.set_ams_change_callback(on_ams_change)
     printer_manager.set_fts_inlet_change_callback(on_fts_inlet_change)
