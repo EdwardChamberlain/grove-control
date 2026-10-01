@@ -2552,16 +2552,22 @@ async def _observe_print_start(printer_id: int, data: dict):
     if not identity:
         return
     async with async_session() as db:
-        await bind_observed_id(db, printer_id, identity, data.get("previous_submission_id"))
-        live = printer_manager.get_status(printer_id)
-        active_states = ("PREPARE", "SLICING", "RUNNING", "PAUSE")
-        # A delayed start cannot replace a plate hold. For a very short print,
-        # telemetry may already be terminal while this active snapshot waits
-        # behind another callback; its exact live identity still proves the run.
-        observed_active = (data.get("raw_data") or {}).get("gcode_state") in active_states
-        item, was_dispatching = await observe_print(
-            db, printer_id, identity, observed_state=live, active_snapshot=observed_active
-        )
+        try:
+            await bind_observed_id(db, printer_id, identity, data.get("previous_submission_id"))
+            live = printer_manager.get_status(printer_id)
+            active_states = ("PREPARE", "SLICING", "RUNNING", "PAUSE")
+            # A delayed start cannot replace a plate hold. For a very short print,
+            # telemetry may already be terminal while this active snapshot waits
+            # behind another callback; its exact live identity still proves the run.
+            observed_active = (data.get("raw_data") or {}).get("gcode_state") in active_states
+            item, was_dispatching = await observe_print(
+                db, printer_id, identity, observed_state=live, active_snapshot=observed_active
+            )
+        except QueueTransitionConflict:
+            # Stop/completion can win after the matching read. Discard the
+            # entire observation before publishing or running archive effects.
+            await db.rollback()
+            return
         if item is None:
             return  # Missing identity or another job still owns this printer.
         item_id = item.id

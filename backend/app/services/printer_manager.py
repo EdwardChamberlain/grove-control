@@ -546,7 +546,6 @@ class PrinterManager:
 
         def on_state_change(state: PrinterState):
             nonlocal last_print_state
-            from backend.app.services.job_identity import telemetry_identity
 
             observation = (
                 (telemetry_identity(state), state.state) if state.connected and state.job_telemetry_ready else None

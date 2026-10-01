@@ -203,6 +203,72 @@ async def test_cancel_winning_a_pause_observation_cannot_be_overwritten(sessions
 
 
 @pytest.mark.parametrize(
+    ("initial", "state"),
+    [("dispatching", "RUNNING"), ("printing", "PAUSE"), ("paused", "RUNNING")],
+)
+async def test_print_start_skips_a_stop_that_wins_after_the_job_is_read(sessions, initial, state):
+    import backend.app.main as main
+
+    item_id, archive_id = await add_job(sessions, initial)
+    async with sessions() as stale:
+        item = await stale.get(PrintQueueItem, item_id)
+        started_at = item.started_at
+        async with sessions() as cancel:
+            current = await cancel.get(PrintQueueItem, item_id)
+            await transition_queue_item(cancel, current, initial, "cancelled")
+            await cancel.commit()
+        # SQLite serializes writers at the printer lock. Supply the pre-Stop
+        # snapshot to exercise the stale-read conflict possible on PostgreSQL.
+        with (
+            patch.object(main, "async_session", return_value=stale),
+            patch.object(main.printer_manager, "get_status", return_value=telemetry(state)),
+            patch("backend.app.services.job_identity.find_job", AsyncMock(return_value=item)),
+            patch.object(main, "_archive_print_start", AsyncMock()) as archive_start,
+            patch.object(main.print_scheduler, "_publish_queue_job_started", AsyncMock()) as publish,
+        ):
+            await main.on_print_start(1, {"submission_id": "123", "filename": "same.3mf"})
+            archive_start.assert_not_awaited()
+            publish.assert_not_awaited()
+            assert 1 not in main._observed_job_starts
+    async with sessions() as db:
+        item = await db.get(PrintQueueItem, item_id)
+        assert item.status == "cancelled"
+        assert item.started_at == started_at
+        assert item.archive_id == archive_id
+        assert len((await db.scalars(select(PrintQueueItem))).all()) == 1
+
+
+async def test_external_print_start_conflict_rolls_back_the_job_and_hold_transfer(sessions):
+    import backend.app.main as main
+
+    item_id, archive_id = await add_job(sessions, "finished", "previous")
+
+    async def conflicting_pause(db, item, state):
+        assert item.dispatch_subtask_id == state.submission_id == "external"
+        assert (await db.get(PrintQueueItem, item_id)).status == "successful"
+        raise QueueTransitionConflict("A competing transition won")
+
+    with (
+        patch.object(main, "async_session", sessions),
+        patch.object(main.printer_manager, "get_status", return_value=telemetry(identity="external")),
+        patch("backend.app.services.job_identity.sync_print_state", side_effect=conflicting_pause) as sync,
+        patch.object(main, "_archive_print_start", AsyncMock()) as archive_start,
+        patch.object(main.print_scheduler, "_publish_queue_job_started", AsyncMock()) as publish,
+    ):
+        await main.on_print_start(1, {"submission_id": "external", "filename": "same.3mf"})
+        sync.assert_awaited_once()
+        archive_start.assert_not_awaited()
+        publish.assert_not_awaited()
+        assert 1 not in main._observed_job_starts
+    async with sessions() as db:
+        items = (await db.scalars(select(PrintQueueItem))).all()
+        assert len(items) == 1
+        assert items[0].id == item_id and items[0].status == "finished"
+        assert items[0].archive_id == archive_id
+        assert (await db.get(PrintArchive, archive_id)).subtask_id == "previous"
+
+
+@pytest.mark.parametrize(
     ("observed", "live", "identity"),
     [
         ("PAUSE", "RUNNING", "123"),
