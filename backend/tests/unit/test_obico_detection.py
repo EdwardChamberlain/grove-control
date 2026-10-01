@@ -295,8 +295,6 @@ class TestCaptureFrameSharesBroadcasterUpstream:
     @pytest.mark.asyncio
     async def test_returns_buffered_frame_when_stream_active(self):
         printer = MagicMock(
-            external_camera_enabled=False,
-            external_camera_url=None,
             ip_address="192.168.1.10",
             access_code="12345678",
             model="N6",
@@ -332,8 +330,6 @@ class TestCaptureFrameSharesBroadcasterUpstream:
     async def test_skips_poll_when_stream_active_but_buffer_empty(self):
         """#1348: viewer attached + buffer empty must NOT open a competing socket."""
         printer = MagicMock(
-            external_camera_enabled=False,
-            external_camera_url=None,
             ip_address="192.168.1.10",
             access_code="12345678",
             model="X1C",
@@ -368,8 +364,6 @@ class TestCaptureFrameSharesBroadcasterUpstream:
     @pytest.mark.asyncio
     async def test_falls_back_to_fresh_capture_when_no_stream(self):
         printer = MagicMock(
-            external_camera_enabled=False,
-            external_camera_url=None,
             ip_address="192.168.1.10",
             access_code="12345678",
             model="N6",

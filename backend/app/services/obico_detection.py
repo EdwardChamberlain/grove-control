@@ -215,36 +215,12 @@ class ObicoDetectionService:
         """Capture one JPEG frame from the printer camera. Returns None on failure."""
         # Late import to avoid cycles at module load time
         from backend.app.services.camera import capture_camera_frame_bytes
-        from backend.app.services.external_camera import capture_frame as capture_external_frame
 
         async with async_session() as db:
             printer = await db.get(Printer, printer_id)
         if printer is None:
             self._last_error = f"Printer {printer_id} not found"
             return None
-
-        if printer.external_camera_enabled and printer.external_camera_url:
-            # Same rule as the built-in branch below, which this used to skip:
-            # an external camera is single-reader too, so polling while a viewer
-            # is attached just fails (#2707).
-            from backend.app.api.routes.camera import live_frame_for_capture
-
-            defer, buffered = live_frame_for_capture(printer_id)
-            if defer:
-                if buffered:
-                    return buffered
-                logger.info(
-                    "Obico: viewer attached for printer %s but buffer empty; "
-                    "skipping this poll to avoid competing camera handle (#2707)",
-                    printer_id,
-                )
-                return None
-            return await capture_external_frame(
-                printer.external_camera_url,
-                printer.external_camera_type,
-                timeout=SNAPSHOT_CAPTURE_TIMEOUT,
-                snapshot_url=printer.external_camera_snapshot_url,
-            )
 
         # Reuse the fan-out broadcaster's buffered frame when a viewer is
         # already watching — avoids opening a second concurrent RTSP socket

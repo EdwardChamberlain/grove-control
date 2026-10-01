@@ -1,11 +1,13 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.app.utils.printer_models import supports_nozzle_flow_type
 
 
 class PrinterBase(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(..., min_length=1, max_length=100)
     serial_number: str = Field(..., min_length=1, max_length=50)
 
@@ -34,10 +36,6 @@ class PrinterBase(BaseModel):
     model: str | None = None
     location: str | None = None  # Group/location name
     auto_archive: bool = True
-    external_camera_url: str | None = None
-    external_camera_type: str | None = None  # "mjpeg", "rtsp", "snapshot", "usb"
-    external_camera_enabled: bool = False
-    external_camera_snapshot_url: str | None = None  # Optional single-frame override; #1177
     camera_rotation: int = 0  # 0, 90, 180, 270 degrees
 
 
@@ -46,6 +44,7 @@ class PrinterCreate(PrinterBase):
     # PrinterResponse. Direct exposure on PRINTERS_READ would let a Viewer
     # connect to the printer's MQTT and bypass Grove Control's RBAC.
     access_code: str = Field(..., min_length=1, max_length=20)
+    is_active: bool = True
 
 
 class PlateDetectionROI(BaseModel):
@@ -58,6 +57,8 @@ class PlateDetectionROI(BaseModel):
 
 
 class PrinterUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str | None = None
     ip_address: str | None = Field(
         default=None,
@@ -70,10 +71,6 @@ class PrinterUpdate(BaseModel):
     is_active: bool | None = None
     auto_archive: bool | None = None
     print_hours_offset: float | None = None
-    external_camera_url: str | None = None
-    external_camera_type: str | None = None
-    external_camera_enabled: bool | None = None
-    external_camera_snapshot_url: str | None = None  # #1177
     camera_rotation: int | None = None  # 0, 90, 180, 270 degrees
     plate_detection_enabled: bool | None = None
     plate_detection_roi: PlateDetectionROI | None = None
@@ -89,10 +86,6 @@ class PrinterResponse(PrinterBase):
     # printer_models.supports_nozzle_flow_type.
     supports_nozzle_flow_type: bool = True
     print_hours_offset: float = 0.0
-    external_camera_url: str | None = None
-    external_camera_type: str | None = None
-    external_camera_enabled: bool = False
-    external_camera_snapshot_url: str | None = None  # #1177
     camera_rotation: int = 0  # 0, 90, 180, 270 degrees
     plate_detection_enabled: bool = False
     plate_detection_roi: PlateDetectionROI | None = None
@@ -113,10 +106,6 @@ class PrinterResponse(PrinterBase):
             "model": printer.model,
             "location": printer.location,
             "auto_archive": printer.auto_archive,
-            "external_camera_url": printer.external_camera_url,
-            "external_camera_type": printer.external_camera_type,
-            "external_camera_enabled": printer.external_camera_enabled,
-            "external_camera_snapshot_url": printer.external_camera_snapshot_url,
             "camera_rotation": printer.camera_rotation,
             "is_active": printer.is_active,
             "nozzle_count": printer.nozzle_count,

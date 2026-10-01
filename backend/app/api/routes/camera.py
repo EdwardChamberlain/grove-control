@@ -71,11 +71,6 @@ _last_frame_times: dict[int, float] = {}
 # Track stream start times for each printer
 _stream_start_times: dict[int, float] = {}
 
-# Track active external camera viewer counts by printer ID. External MJPEG and
-# HTTP-snapshot streams may have no ffmpeg process in ``_active_streams``, so
-# this registry is the single source of truth for their camera ownership.
-_active_external_streams: dict[int, int] = {}
-
 # Track ALL spawned ffmpeg PIDs (persists even if _active_streams entries are removed)
 # Maps PID -> spawn timestamp — used by cleanup to find truly orphaned OS processes
 _spawned_ffmpeg_pids: dict[int, float] = {}
@@ -120,9 +115,9 @@ def get_buffered_frame(printer_id: int) -> bytes | None:
 def live_frame_for_capture(printer_id: int) -> tuple[bool, bytes | None]:
     """Return whether a live viewer owns the camera and its reusable frame.
 
-    External cameras, like built-in printer cameras, commonly allow only one
-    reader. A one-shot capture must therefore reuse a buffered live frame or
-    skip the attempt while a stream is active instead of competing with it.
+    Native printer cameras commonly allow only one reader. A one-shot capture
+    must therefore reuse a buffered live frame or skip the attempt while a
+    stream is active instead of competing with it.
     """
     if not is_stream_active(printer_id):
         return False, None
@@ -143,10 +138,8 @@ def is_stream_active(printer_id: int) -> bool:
     returns None (the stream may be running but the first frame hasn't landed
     in the buffer yet, or the upstream is mid-reconnect).
     """
-    return (
-        _active_external_streams.get(printer_id, 0) > 0
-        or any(k.startswith(f"{printer_id}-") for k in _active_streams)
-        or any(k.startswith(f"{printer_id}-") for k in _active_chamber_streams)
+    return any(k.startswith(f"{printer_id}-") for k in _active_streams) or any(
+        k.startswith(f"{printer_id}-") for k in _active_chamber_streams
     )
 
 
@@ -280,9 +273,8 @@ def _new_fanout_stream_id(printer_id: int) -> str:
 
     A plain ``f"{printer_id}-fanout"`` meant every successive stream for a
     printer shared one key, so a departing generator's cleanup removed the entry
-    its successor had just registered. The external-camera path already carries a
-    per-instance suffix for exactly this reason (#2675); this gives the fan-out
-    path the same property.
+    its successor had just registered. Every stream carries a per-instance
+    suffix for exactly this reason (#2675).
 
     The ``f"{printer_id}-"`` prefix is load-bearing — ``is_stream_active``,
     ``stop_camera_stream`` and ``/camera/status`` all find a printer's streams by
@@ -837,8 +829,7 @@ async def camera_stream(
 
     Requires a stream token query param (?token=xxx) when auth is enabled.
 
-    Uses external camera if configured, otherwise uses built-in camera:
-    - External: MJPEG, RTSP, or HTTP snapshot
+    Uses the native camera built into the printer:
     - A1/P1: Chamber image protocol (port 6000)
     - X1/H2/P2: RTSP via ffmpeg (port 322)
 
@@ -847,95 +838,6 @@ async def camera_stream(
         fps: Target frames per second (default: 10, max: 30)
     """
     printer = await get_printer_or_404(printer_id, db)
-
-    # Check for external camera first
-    if printer.external_camera_enabled and printer.external_camera_url:
-        from backend.app.services.external_camera import generate_mjpeg_stream
-
-        # Limit external camera FPS to reduce browser load
-        fps = min(max(fps, 1), 15)
-        logger.info(
-            "Using external camera (%s) for printer %s at %s fps", printer.external_camera_type, printer_id, fps
-        )
-
-        # Register the stream into the SAME registries the RTSP/chamber paths use
-        # (#2675) so `/camera/stop` and cleanup_orphaned_streams can find and kill
-        # a leaked ffmpeg holding a USB device open. Before this, external streams
-        # only tracked _active_external_streams and were structurally invisible to
-        # both the stop endpoint and the janitor. The stream_id keeps the
-        # `{printer_id}-` prefix both scanners key on, plus a unique suffix so two
-        # concurrent viewers of one printer don't clobber each other's entry.
-        stream_id = f"{printer_id}-ext-{uuid.uuid4().hex[:8]}"
-        stop_event = asyncio.Event()
-        _disconnect_events[stream_id] = stop_event
-        # Track stream start
-        _stream_start_times[printer_id] = time.time()
-        _active_external_streams[printer_id] = _active_external_streams.get(printer_id, 0) + 1
-
-        # Mutable holder so the wrapper's finally can unregister whatever process
-        # is currently registered (the RTSP path may respawn across reconnects).
-        current_proc: dict[str, asyncio.subprocess.Process] = {}
-
-        def _register_external_process(proc: asyncio.subprocess.Process) -> None:
-            prev = current_proc.get("proc")
-            if prev is not None and prev.pid != proc.pid:
-                _spawned_ffmpeg_pids.pop(prev.pid, None)
-            current_proc["proc"] = proc
-            _active_streams[stream_id] = proc
-            _spawned_ffmpeg_pids[proc.pid] = time.time()
-            _stream_last_frame_times[stream_id] = time.time()
-
-        async def external_stream_wrapper():
-            """Wrap external stream to track start/stop and update frame times."""
-
-            def publish_external_frame(frame: bytes) -> None:
-                # Store the raw JPEG, not the multipart wrapper, so one-shot
-                # consumers can reuse it directly.
-                _last_frames[printer_id] = frame
-
-            try:
-                async for frame in generate_mjpeg_stream(
-                    printer.external_camera_url,
-                    printer.external_camera_type,
-                    fps,
-                    on_frame=publish_external_frame,
-                    on_process=_register_external_process,
-                    stop_event=stop_event,
-                ):
-                    # generate_mjpeg_stream already handles rate limiting;
-                    # track frame times (per-printer + per-stream) for stall detection
-                    now = time.time()
-                    _last_frame_times[printer_id] = now
-                    _stream_last_frame_times[stream_id] = now
-                    yield frame
-            finally:
-                # Best-effort unregister. If an abrupt disconnect skips this
-                # finally, the registry entries persist — which is exactly what
-                # lets the stop endpoint / janitor reap the leaked process.
-                stop_event.set()
-                proc = current_proc.get("proc")
-                if proc is not None:
-                    _spawned_ffmpeg_pids.pop(proc.pid, None)
-                _active_streams.pop(stream_id, None)
-                _disconnect_events.pop(stream_id, None)
-                _stream_last_frame_times.pop(stream_id, None)
-                viewer_count = _active_external_streams.get(printer_id, 0) - 1
-                if viewer_count > 0:
-                    _active_external_streams[printer_id] = viewer_count
-                else:
-                    _active_external_streams.pop(printer_id, None)
-                _release_printer_frame_state(printer_id)
-                logger.info("External camera stream ended for printer %s", printer_id)
-
-        return StreamingResponse(
-            external_stream_wrapper(),
-            media_type="multipart/x-mixed-replace; boundary=frame",
-            headers={
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-                "Pragma": "no-cache",
-                "Expires": "0",
-            },
-        )
 
     # Validate FPS - A1/P1 models max out at ~5 FPS
     if is_chamber_image_model(printer.model):
@@ -1139,34 +1041,6 @@ async def camera_snapshot(
     async with async_session() as db:
         printer = await get_printer_or_404(printer_id, db)
 
-    # Check for external camera first
-    if printer.external_camera_enabled and printer.external_camera_url:
-        from backend.app.services.external_camera import capture_frame
-
-        defer, buffered = live_frame_for_capture(printer_id)
-        if defer:
-            frame_data = buffered
-        else:
-            frame_data = await capture_frame(
-                printer.external_camera_url,
-                printer.external_camera_type,
-                timeout=15,
-                snapshot_url=printer.external_camera_snapshot_url,
-            )
-        if not frame_data:
-            raise HTTPException(
-                status_code=503,
-                detail="Failed to capture frame from external camera.",
-            )
-        return Response(
-            content=frame_data,
-            media_type="image/jpeg",
-            headers={
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-                "Content-Disposition": f'inline; filename="snapshot_{printer_id}.jpg"',
-            },
-        )
-
     # Reuse the fan-out broadcaster's buffered frame when a viewer is already
     # watching — avoids opening a second concurrent RTSP socket on printers
     # that allow only one camera connection (e.g. X2D firmware 01.01.00.00;
@@ -1292,10 +1166,6 @@ async def camera_status(
     # Check if there's an active stream for this printer
     has_active_stream = False
 
-    # Check external camera streams
-    if _active_external_streams.get(printer_id, 0) > 0:
-        has_active_stream = True
-
     # Check ffmpeg/RTSP streams
     if not has_active_stream:
         for stream_id in _active_streams:
@@ -1342,32 +1212,6 @@ async def camera_status(
     }
 
 
-@router.post("/{printer_id}/camera/external/test")
-async def test_external_camera(
-    printer_id: int,
-    url: str,
-    camera_type: str,
-    db: AsyncSession = Depends(get_db),
-    _: User | None = RequirePermissionIfAuthEnabled(Permission.CAMERA_VIEW),
-):
-    """Test external camera connection.
-
-    Args:
-        printer_id: Printer ID (for authorization)
-        url: Camera URL or USB device path to test
-        camera_type: Camera type ("mjpeg", "rtsp", "snapshot", "usb")
-
-    Returns:
-        Dict with {success: bool, error?: str, resolution?: str}
-    """
-    # Verify printer exists (for authorization)
-    await get_printer_or_404(printer_id, db)
-
-    from backend.app.services.external_camera import test_connection
-
-    return await test_connection(url, camera_type)
-
-
 @router.get("/{printer_id}/camera/check-plate")
 async def check_plate_empty(
     printer_id: int,
@@ -1387,11 +1231,8 @@ async def check_plate_empty(
     Args:
         printer_id: Printer ID
         plate_type: Type of build plate (e.g., "High Temp Plate") for calibration lookup
-        use_external: If True, prefer external camera over built-in. When omitted
-            (None), defaults to the printer's external_camera_enabled setting —
-            mirroring the runtime auto-check at print start (main.py). Without
-            this default the UI's manual check would always use the built-in
-            camera, mismatching the reference saved during calibration (#1359).
+        use_external: Retained only to return a clear migration error to old
+            clients that still request an external source.
         include_debug_image: If True, return URL to annotated debug image
 
     Returns:
@@ -1412,9 +1253,10 @@ async def check_plate_empty(
     # Check printer exists first (before OpenCV check)
     printer = await get_printer_or_404(printer_id, db)
 
-    if use_external is None:
-        use_external = bool(
-            printer.external_camera_enabled and printer.external_camera_url and printer.external_camera_type
+    if use_external:
+        raise HTTPException(
+            status_code=410,
+            detail="External cameras are no longer supported; use the printer's native Bambu camera.",
         )
 
     if not is_plate_detection_available():
@@ -1455,11 +1297,7 @@ async def check_plate_empty(
         model=printer.model,
         plate_type=plate_type,
         include_debug_image=include_debug_image,
-        external_camera_url=printer.external_camera_url if printer.external_camera_enabled else None,
-        external_camera_type=printer.external_camera_type if printer.external_camera_enabled else None,
-        use_external=use_external,
         roi=roi,
-        external_camera_snapshot_url=printer.external_camera_snapshot_url if printer.external_camera_enabled else None,
     )
 
     # Get reference count for the response
@@ -1508,10 +1346,8 @@ async def calibrate_plate_detection(
     Args:
         printer_id: Printer ID
         label: Optional label for this reference (e.g., "High Temp Plate", "Wham Bam")
-        use_external: If True, prefer external camera over built-in. When omitted
-            (None), defaults to the printer's external_camera_enabled setting so
-            calibration captures from the same source the runtime auto-check
-            uses at print start (#1359).
+        use_external: Retained only to return a clear migration error to old
+            clients that still request an external source.
 
     Returns:
         Dict with:
@@ -1528,9 +1364,10 @@ async def calibrate_plate_detection(
     # Check printer exists first (before OpenCV check)
     printer = await get_printer_or_404(printer_id, db)
 
-    if use_external is None:
-        use_external = bool(
-            printer.external_camera_enabled and printer.external_camera_url and printer.external_camera_type
+    if use_external:
+        raise HTTPException(
+            status_code=410,
+            detail="External cameras are no longer supported; use the printer's native Bambu camera.",
         )
 
     if not is_plate_detection_available():
@@ -1549,10 +1386,6 @@ async def calibrate_plate_detection(
         access_code=printer.access_code,
         model=printer.model,
         label=label,
-        external_camera_url=printer.external_camera_url if printer.external_camera_enabled else None,
-        external_camera_type=printer.external_camera_type if printer.external_camera_enabled else None,
-        use_external=use_external,
-        external_camera_snapshot_url=printer.external_camera_snapshot_url if printer.external_camera_enabled else None,
     )
 
     if light_warning and success:
@@ -1764,19 +1597,13 @@ async def delete_reference(
 def _scan_bambu_ffmpeg_pids() -> list[int]:
     """Scan /proc for ffmpeg processes that are ours.
 
-    Two shapes are matched, both unambiguously Bambuddy's:
-    - Bambu RTSP: no other software connects to ``rtsp(s)://bblp:``.
-    - External USB: the stream command carries a private Bambuddy marker. A
-      generic ``-f v4l2`` match is unsafe because other ffmpeg workloads can
-      legitimately use V4L2.
+    Bambu RTSP is unambiguous because no other Grove Control workload connects
+    to ``rtsp(s)://bblp:``. Do not match generic ffmpeg or V4L2 processes: other
+    workloads may legitimately own them.
 
     This catches orphans that survive app restarts and are not in any tracking dict.
     """
     import os
-
-    from backend.app.services.external_camera import BAMBUDDY_USB_STREAM_MARKER
-
-    external_usb_marker = BAMBUDDY_USB_STREAM_MARKER.encode()
 
     pids = []
     try:
@@ -1788,10 +1615,7 @@ def _scan_bambu_ffmpeg_pids() -> list[int]:
                     cmdline = f.read()
                 if b"ffmpeg" not in cmdline:
                     continue
-                # Match built-in Bambu RTSP or the explicit marker added to
-                # Bambuddy's external USB stream command. Never match V4L2 by
-                # itself: that could SIGKILL an unrelated ffmpeg workload.
-                if b"rtsp://bblp:" in cmdline or b"rtsps://bblp:" in cmdline or external_usb_marker in cmdline:
+                if b"rtsp://bblp:" in cmdline or b"rtsps://bblp:" in cmdline:
                     pids.append(int(entry))
             except (OSError, PermissionError, ValueError):
                 continue
@@ -1805,7 +1629,7 @@ async def cleanup_orphaned_streams():
 
     Called periodically from the background task loop in main.py.
 
-    Three-layer cleanup:
+    Two-layer cleanup:
     1. /proc scan — finds ALL Bambu ffmpeg processes on the system, even those
        from previous app sessions. This is the nuclear safety net.
     2. _spawned_ffmpeg_pids — tracks PIDs spawned this session, catches orphans

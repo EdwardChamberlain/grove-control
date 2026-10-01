@@ -114,8 +114,6 @@ def _make_printer():
     mock_printer = MagicMock()
     mock_printer.id = 1
     mock_printer.auto_archive = True
-    mock_printer.external_camera_enabled = False
-    mock_printer.external_camera_url = None
     mock_printer.name = "TestP1S"
     return mock_printer
 

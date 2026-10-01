@@ -585,10 +585,6 @@ async def capture_camera_image(
     ip_address: str,
     access_code: str,
     model: str,
-    external_camera_url: str | None = None,
-    external_camera_type: str | None = None,
-    use_external: bool = False,
-    external_camera_snapshot_url: str | None = None,
 ) -> tuple[bytes | None, str]:
     """Capture an image from the printer camera.
 
@@ -601,72 +597,42 @@ async def capture_camera_image(
     image_data: bytes | None = None
     camera_source = "unknown"
 
-    # Try external camera first if requested and available
-    if use_external and external_camera_url and external_camera_type:
-        try:
-            from backend.app.api.routes.camera import live_frame_for_capture
-            from backend.app.services.external_camera import capture_frame
+    # First, check if there's an active stream with a buffered frame. This
+    # avoids opening a second connection while a viewer is attached.
+    try:
+        from backend.app.api.routes.camera import get_buffered_frame
 
-            # What this function's docstring already promised, but only the
-            # built-in fallback below delivered: an external camera is
-            # single-reader too, so capturing while a viewer watches fails
-            # (#2707).
-            defer, buffered = live_frame_for_capture(printer_id)
-            if defer:
-                if buffered:
-                    image_data = buffered
-                    camera_source = "external (buffered)"
-                    logger.debug("Using buffered external frame for printer %s", printer_id)
-            else:
-                image_data = await capture_frame(
-                    external_camera_url,
-                    external_camera_type,
-                    snapshot_url=external_camera_snapshot_url,
-                )
-                if image_data:
-                    camera_source = "external"
-                    logger.debug("Captured frame from external camera for printer %s", printer_id)
-        except Exception as e:
-            logger.warning("Failed to capture from external camera: %s", e)
+        buffered = get_buffered_frame(printer_id)
+        if buffered:
+            image_data = buffered
+            camera_source = "native (buffered)"
+            logger.debug("Using buffered native frame for printer %s", printer_id)
+    except Exception as e:
+        logger.debug("Could not get buffered frame: %s", e)
 
-    # Fall back to built-in camera
+    # If no buffered frame, try to capture a new native frame.
     if image_data is None:
-        # First, check if there's an active stream with a buffered frame
-        # This avoids blocking when camera viewer is open
+        import tempfile
+
+        from backend.app.services.camera import capture_camera_frame
+
+        fd, tmp_name = tempfile.mkstemp(suffix=".jpg")
+        os.close(fd)
+        tmp_path = Path(tmp_name)
+        tmp_path.chmod(0o600)
+
         try:
-            from backend.app.api.routes.camera import get_buffered_frame
-
-            buffered = get_buffered_frame(printer_id)
-            if buffered:
-                image_data = buffered
-                camera_source = "built-in (buffered)"
-                logger.debug("Using buffered frame from active stream for printer %s", printer_id)
-        except Exception as e:
-            logger.debug("Could not get buffered frame: %s", e)
-
-        # If no buffered frame, try to capture a new one
-        if image_data is None:
-            import tempfile
-
-            from backend.app.services.camera import capture_camera_frame
-
-            fd, tmp_name = tempfile.mkstemp(suffix=".jpg")
-            os.close(fd)
-            tmp_path = Path(tmp_name)
-            tmp_path.chmod(0o600)
-
+            success = await capture_camera_frame(ip_address, access_code, model, tmp_path, timeout=10)
+            if success:
+                with open(tmp_path, "rb") as f:
+                    image_data = f.read()
+                camera_source = "native"
+                logger.debug("Captured frame from native camera for printer %s", printer_id)
+        finally:
             try:
-                success = await capture_camera_frame(ip_address, access_code, model, tmp_path, timeout=10)
-                if success:
-                    with open(tmp_path, "rb") as f:
-                        image_data = f.read()
-                    camera_source = "built-in"
-                    logger.debug("Captured frame from built-in camera for printer %s", printer_id)
-            finally:
-                try:
-                    tmp_path.unlink()
-                except OSError:
-                    pass  # Best-effort cleanup of temporary camera capture file
+                tmp_path.unlink()
+            except OSError:
+                pass  # Best-effort cleanup of temporary camera capture file
 
     return image_data, camera_source
 
@@ -678,11 +644,7 @@ async def check_plate_empty(
     model: str,
     plate_type: str | None = None,
     include_debug_image: bool = False,
-    external_camera_url: str | None = None,
-    external_camera_type: str | None = None,
-    use_external: bool = False,
     roi: tuple[float, float, float, float] | None = None,
-    external_camera_snapshot_url: str | None = None,
 ) -> PlateDetectionResult:
     """Check if the build plate is empty for a printer.
 
@@ -693,9 +655,6 @@ async def check_plate_empty(
         model: Printer model string
         plate_type: Type of build plate for calibration lookup
         include_debug_image: If True, include annotated image in result
-        external_camera_url: URL of external camera (if configured)
-        external_camera_type: Type of external camera (mjpeg, rtsp, snapshot)
-        use_external: If True, prefer external camera over built-in
         roi: Region of interest as (x%, y%, w%, h%) - percentages of image size
 
     Returns:
@@ -714,10 +673,6 @@ async def check_plate_empty(
         ip_address,
         access_code,
         model,
-        external_camera_url,
-        external_camera_type,
-        use_external,
-        external_camera_snapshot_url=external_camera_snapshot_url,
     )
 
     if image_data is None:
@@ -744,10 +699,6 @@ async def calibrate_plate(
     access_code: str,
     model: str,
     label: str | None = None,
-    external_camera_url: str | None = None,
-    external_camera_type: str | None = None,
-    use_external: bool = False,
-    external_camera_snapshot_url: str | None = None,
 ) -> tuple[bool, str, int]:
     """Calibrate plate detection by capturing a reference image of the empty plate.
 
@@ -757,10 +708,6 @@ async def calibrate_plate(
         access_code: Printer access code
         model: Printer model string
         label: Optional label for this reference (e.g., "High Temp Plate")
-        external_camera_url: URL of external camera (if configured)
-        external_camera_type: Type of external camera (mjpeg, rtsp, snapshot)
-        use_external: If True, prefer external camera over built-in
-
     Returns:
         Tuple of (success, message, index)
     """
@@ -772,10 +719,6 @@ async def calibrate_plate(
         ip_address,
         access_code,
         model,
-        external_camera_url,
-        external_camera_type,
-        use_external,
-        external_camera_snapshot_url=external_camera_snapshot_url,
     )
 
     if image_data is None:

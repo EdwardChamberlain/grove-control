@@ -728,13 +728,6 @@ GUARDED_BODY_URLS = {
     ("SmartPlugUpdate", "rest_status_url"),
     ("SmartPlugUpdate", "rest_power_url"),
     ("SmartPlugUpdate", "rest_energy_url"),
-    # External camera handlers use the scheme-aware LAN policy. HTTP camera
-    # requests use the pinned aiohttp resolver; RTSP/RTSPS requests use a
-    # validated numeric target (or the pinned TLS proxy).
-    ("PrinterCreate", "external_camera_url"),
-    ("PrinterCreate", "external_camera_snapshot_url"),
-    ("PrinterUpdate", "external_camera_url"),
-    ("PrinterUpdate", "external_camera_snapshot_url"),
 }
 
 # Not a destination Bambuddy requests — no guard applies.

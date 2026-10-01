@@ -53,8 +53,6 @@ async def test_expected_archive_path_assigns_printer_id_when_unset():
     mock_printer = MagicMock()
     mock_printer.id = 1
     mock_printer.auto_archive = True
-    mock_printer.external_camera_enabled = False
-    mock_printer.external_camera_url = None
     mock_printer.name = "TestP1S"
 
     # VP-queue archive: printer_id is None — this is the bug surface.
@@ -142,8 +140,6 @@ async def test_expected_archive_path_preserves_existing_printer_id():
     mock_printer = MagicMock()
     mock_printer.id = 7
     mock_printer.auto_archive = True
-    mock_printer.external_camera_enabled = False
-    mock_printer.external_camera_url = None
     mock_printer.name = "TestP1S"
 
     mock_archive = MagicMock()
@@ -229,8 +225,6 @@ async def test_expected_archive_path_captures_timelapse_baseline():
     mock_printer = MagicMock()
     mock_printer.id = 1
     mock_printer.auto_archive = True
-    mock_printer.external_camera_enabled = False
-    mock_printer.external_camera_url = None
     mock_printer.name = "TestP1S"
 
     mock_archive = MagicMock()
