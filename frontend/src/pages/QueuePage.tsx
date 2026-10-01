@@ -927,7 +927,7 @@ export function QueuePage() {
   const { showToast } = useToast();
   const { hasPermission, hasAnyPermission, canModify } = useAuth();
   const [filterPrinter, setFilterPrinter] = useState<number | null>(null);
-  const [filterStatus, setFilterStatus] = useState<string>('');
+  const [filterStatus, setFilterStatus] = useState<PrintQueueItem['status'] | ''>('');
   const [filterLocation, setFilterLocation] = useState<string>('');
   const [editItem, setEditItem] = useState<PrintQueueItem | null>(null);
   const [showQueueUpload, setShowQueueUpload] = useState(false);
@@ -1612,7 +1612,7 @@ export function QueuePage() {
           ]}
         />
 
-        <ToolbarDropdown
+        <ToolbarDropdown<PrintQueueItem['status'] | ''>
           value={filterStatus}
           onChange={setFilterStatus}
           minWidthClass="min-w-32"

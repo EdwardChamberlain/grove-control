@@ -204,15 +204,15 @@ export function Layout() {
     refetchOnWindowFocus: true,
   });
 
-  // Fetch pending queue items count for badge
+  // Fetch queued jobs for the sidebar badge
   const { data: queueItems } = useQuery({
-    queryKey: ['queue', 'pending'],
-    queryFn: () => api.getQueue(undefined, 'pending'),
+    queryKey: ['queue', 'queued'],
+    queryFn: () => api.getQueue(undefined, 'queued'),
     staleTime: 5 * 1000, // 5 seconds
     refetchInterval: 5 * 1000, // Refresh every 5 seconds
     refetchOnWindowFocus: true,
   });
-  const pendingQueueCount = queueItems?.length ?? 0;
+  const queuedJobCount = queueItems?.length ?? 0;
 
   // Fetch pending uploads count for archive badge (virtual printer review items)
   const { data: pendingUploadsData } = useQuery({
@@ -610,9 +610,9 @@ export function Layout() {
                 if (!navItem) return null;
 
                 const { to, icon: Icon, labelKey } = navItem;
-                const showQueueBadge = id === 'queue' && pendingQueueCount > 0;
+                const showQueueBadge = id === 'queue' && queuedJobCount > 0;
                 const showArchiveBadge = id === 'archives' && pendingUploadsCount > 0;
-                const badgeCount = showQueueBadge ? pendingQueueCount : showArchiveBadge ? pendingUploadsCount : 0;
+                const badgeCount = showQueueBadge ? queuedJobCount : showArchiveBadge ? pendingUploadsCount : 0;
                 const showBadge = showQueueBadge || showArchiveBadge;
                 const showClearPlateDot = id === 'printers' && needsClearPlate;
 

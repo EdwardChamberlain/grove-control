@@ -5054,7 +5054,7 @@ export const api = {
     }),
 
   // Print Queue
-  getQueue: (printerId?: number, status?: string, targetModel?: string) => {
+  getQueue: (printerId?: number, status?: PrintQueueItem['status'], targetModel?: string) => {
     const params = new URLSearchParams();
     if (printerId) params.set('printer_id', String(printerId));
     if (status) params.set('status', status);

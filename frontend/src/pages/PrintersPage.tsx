@@ -3358,8 +3358,8 @@ function PrinterCard({
 
   // Fetch queue count for this printer
   const { data: queueItems } = useQuery({
-    queryKey: ['queue', printer.id, 'pending', printer.model],
-    queryFn: () => api.getQueue(printer.id, 'pending', printer.model || undefined),
+    queryKey: ['queue', printer.id, 'queued', printer.model],
+    queryFn: () => api.getQueue(printer.id, 'queued', printer.model || undefined),
     refetchInterval: 30000,
   });
   // Filter queue items by filament compatibility (same logic as PrinterQueueWidget)

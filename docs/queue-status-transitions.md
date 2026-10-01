@@ -30,6 +30,10 @@ view maps it to `printing`, and its printing count and the existing Prometheus
 queue printing gauge include paused work, preserving integration behavior.
 Project counts and filament tracking also retain paused work.
 
+The sidebar Queue badge and printer queue counts request `queued` waiting
+jobs. Frontend queue filters accept only the lifecycle's status values, so
+legacy filter names fail TypeScript checks.
+
 Stage 4 needs no schema change or new migration: stage 3 already added `paused`
 to the state table and unique holding index. On upgrade, the next matching
 telemetry observation updates an existing active job. Back up the database as

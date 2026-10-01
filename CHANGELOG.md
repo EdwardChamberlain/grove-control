@@ -67,6 +67,8 @@
 
 ### Fixed
 
+- The sidebar Queue badge, printer-card queue count, and printer health menu
+  now include waiting jobs from the `queued` lifecycle.
 - Normal Queue uploads no longer offer unconfirmed-dispatch actions before
   a command is sent. Archive and user-item deletion cannot bypass Clear Plate.
   Touchscreen prints on an uncleared printer take over its durable hold, and

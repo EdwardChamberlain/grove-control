@@ -560,6 +560,38 @@ describe('PrintersPage', () => {
       expect(screen.queryByText('Plate Clear')).not.toBeInTheDocument();
     });
 
+    it.each(['detail cards', 'list'])(
+      'shows the queued job count in %s',
+      async (view) => {
+        const jobs = [
+          { id: 1, printer_id: 1, archive_id: 1, position: 1, status: 'queued', archive_name: 'First queued print' },
+          { id: 2, printer_id: 1, archive_id: 2, position: 2, status: 'queued', archive_name: 'Second queued print' },
+          { id: 3, printer_id: 1, archive_id: 3, position: 3, status: 'paused', archive_name: 'Active print' },
+        ];
+        server.use(
+          http.get('/api/v1/printers/', () => HttpResponse.json([mockPrinters[0]])),
+          http.get('/api/v1/queue/', ({ request }) => {
+            const url = new URL(request.url);
+            return HttpResponse.json(jobs.filter(job =>
+              String(job.printer_id) === url.searchParams.get('printer_id')
+              && job.status === url.searchParams.get('status'),
+            ));
+          }),
+        );
+        if (view === 'list') localStorage.setItem('printerViewMode', 'list');
+
+        render(<PrintersPage />);
+
+        if (view === 'detail cards') {
+          fireEvent.click(await screen.findByRole('button', { name: 'Detail cards' }));
+        } else {
+          await screen.findByText('X1 Carbon');
+        }
+        fireEvent.click((await screen.findAllByLabelText(/Machine health:/))[0]);
+        expect(await within(screen.getByTestId('printer-health-queue')).findByText(/^2 prints? in queue$/)).toBeInTheDocument();
+      },
+    );
+
     it('opens status details from the list health indicator without opening the expanded card', async () => {
       localStorage.setItem('printerViewMode', 'list');
       render(<PrintersPage />);
