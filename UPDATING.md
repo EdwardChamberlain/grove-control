@@ -203,9 +203,10 @@ start, including reprints of trashed Archives. Preparation also rejects sources
 deleted during heat soaking. If a source disappears between the eligibility
 read and preparation, a queued job still parks without taking the printer;
 an existing heat soak shuts down and retains its Failed hold.
-All three dispatch paths share preparation-error
-reporting, so the job and Skip response retain the cause, such as a deleted
-source or a full disk. A Skip copy failure
+All three dispatch paths share user-safe preparation-error reporting. A deleted
+source and insufficient disk space have specific messages; other copy failures
+use a generic message. Full exceptions, including server paths, stay in the log.
+A Skip copy failure
 commits Failed with its printer hold and Auto Off, then returns HTTP 409 with
 the job's error instead of reporting success. The Queue shows that error and
 refreshes the failed job. Pool copy failures send a failure notification;
@@ -215,6 +216,8 @@ the request; it neither copies again nor launches another dispatch worker.
 Skip checks fresh ready/idle telemetry before copying and at handoff. If the
 printer becomes busy, disconnected or unready, it returns HTTP 409 and keeps
 the soak alive; any prepared attempt is discarded and no worker starts.
+The response describes current readiness or a changed soak, rather than an
+older job error. Only a copy-failure response uses the newly committed job error.
 Repeated completion callbacks still repair proven restored legacy Archive links
 without rewriting the job's recorded physical outcome.
 Reconnect reconciliation reaches this repair for already-ended and final jobs,

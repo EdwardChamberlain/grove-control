@@ -36,7 +36,12 @@ from backend.app.schemas.print_queue import (
     QueueVariantCreate,
     QueueVariantSummary,
 )
-from backend.app.services.chamber_heat_soak import heat_soak_dispatch_started, lock_queue_item, skip_heat_soak
+from backend.app.services.chamber_heat_soak import (
+    SkipHeatSoakResult,
+    heat_soak_dispatch_started,
+    lock_queue_item,
+    skip_heat_soak,
+)
 from backend.app.services.filament_deficit import compute_deficit_for_queue_item
 from backend.app.services.filament_requirements import (
     build_queue_filament_overrides,
@@ -1771,14 +1776,19 @@ async def skip_queue_item_heat_soak(
             return {"message": "Heat soak skipped"}
         raise HTTPException(400, f"Can only skip heat soak for preheating items, current status: '{item.status}'")
 
-    if not await skip_heat_soak(db, item):
+    result = await skip_heat_soak(db, item)
+    if result == SkipHeatSoakResult.COPY_FAILED:
         current = await db.get(PrintQueueItem, item_id, populate_existing=True)
         raise HTTPException(
             409,
-            (current.error_message or "Printer is not ready or the heat soak changed; refresh and retry")
+            (current.error_message or "Failed to create Archive record for dispatch")
             if current
             else "Queue item no longer exists",
         )
+    if result == SkipHeatSoakResult.PRINTER_NOT_READY:
+        raise HTTPException(409, "Printer is not ready to start; wait for it to report idle, then retry")
+    if result != SkipHeatSoakResult.SKIPPED:
+        raise HTTPException(409, "Heat soak changed during preparation; refresh and retry")
     logger.info("Skipped heat soak for queue item %s", item_id)
     return {"message": "Heat soak skipped"}
 

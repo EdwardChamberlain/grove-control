@@ -23,7 +23,8 @@
   return the job's error and refresh the Queue; pool copy failures send a
   failure notification instead of an assignment notification.
   Trashed Archive reprints stay parked before taking a printer. All dispatch
-  paths share copy-error reporting and retain the actual cause. The writer
+  paths report safe copy errors, including disk-space causes; server paths and
+  raw exception details stay in the log. The writer
   requires a prepared attempt on entry to Dispatching; copy failures take an
   explicit Failed hold directly. Skip succeeds when the same attempt has
   already progressed, without launching another worker. Repeated completion
@@ -34,6 +35,10 @@
   replaying completion effects, including after Clear Plate or a cached completion.
   Automatic heat-soak handoffs retain their heartbeat when readiness changes
   after a slow copy, so preparation does not cause a scheduler-timeout failure.
+  Skip refusals show the current readiness or soak-change reason instead of
+  an older job error. Copy failures show the newly committed failure message.
+  Duplicate completions of modern jobs avoid a write transaction; proven
+  restored legacy links still receive their repair.
 
 - Queue jobs now persist **Paused** from matching printer telemetry, including
   startup and reconnect, and return to Printing on resume. Paused jobs retain

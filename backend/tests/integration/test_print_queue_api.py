@@ -829,6 +829,63 @@ class TestPrintQueueAPI:
         assert item.preheat_owner is not None
         assert item.preheat_started_at is None
 
+    @pytest.mark.parametrize("outcome", ["not_ready", "copy_failed", "soak_changed"])
+    async def test_skip_heat_soak_reports_the_current_refusal(
+        self, async_client, queue_item_factory, db_session, monkeypatch, outcome
+    ):
+        import errno
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from backend.app.services import print_scheduler as scheduling
+        from backend.app.services.archive import ArchiveService
+        from backend.app.services.chamber_heat_soak import lock_queue_item
+        from backend.app.services.printer_manager import printer_manager
+        from backend.app.services.queue_transitions import transition_queue_item
+
+        stale = "Heat soak interrupted; inspect the printer, then stop or skip heat soak"
+        item = await queue_item_factory(
+            status="preheating", chamber_heat_soak=True, preheat_owner="test-worker", error_message=stale
+        )
+        live = SimpleNamespace(state="IDLE", connected=True, job_telemetry_ready=outcome != "not_ready")
+        monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
+        monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
+        monkeypatch.setattr(printer_manager, "get_client", lambda _id: None)
+        monkeypatch.setattr(scheduling.scheduler, "_power_off_if_needed", AsyncMock())
+
+        async def copy_fails(_service, **_kwargs):
+            await copy()
+            if outcome == "soak_changed":
+                changed = await lock_queue_item(db_session, item.id)
+                await transition_queue_item(
+                    db_session, changed, "preheating", "preheating", values={"preheat_owner": "another-worker"}
+                )
+                await db_session.commit()
+            raise OSError(errno.ENOSPC, "No space left on device", "/abs/path/x.3mf")
+
+        copy = AsyncMock()
+        monkeypatch.setattr(ArchiveService, "archive_print", copy_fails)
+        response = await async_client.post(f"/api/v1/queue/{item.id}/skip-heat-soak")
+        assert response.status_code == 409, response.text
+        await db_session.refresh(item)
+        detail = response.json()["detail"]
+        assert "/abs/path" not in detail
+        if outcome == "not_ready":
+            assert detail == "Printer is not ready to start; wait for it to report idle, then retry"
+            assert item.status == "preheating" and item.error_message == stale
+            copy.assert_not_awaited()
+        elif outcome == "copy_failed":
+            assert (
+                detail == "Failed to create Archive record for dispatch: Not enough disk space to copy the print file"
+            )
+            assert item.status == "failed" and detail == item.error_message
+            copy.assert_awaited_once()
+        else:
+            assert detail == "Heat soak changed during preparation; refresh and retry"
+            assert item.status == "preheating" and item.error_message == stale
+            assert item.preheat_owner == "another-worker"
+            copy.assert_awaited_once()
+
     @pytest.mark.parametrize("action", ["cancel", "stop", "edit", "delete"])
     async def test_preheating_actions_preserve_the_printer_hold(
         self, async_client, queue_item_factory, db_session, action

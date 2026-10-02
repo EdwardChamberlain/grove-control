@@ -9,6 +9,7 @@ import logging
 import time
 from collections.abc import Mapping
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Any
 from uuid import uuid4
 
@@ -145,7 +146,14 @@ async def heat_soak_dispatch_started(db: AsyncSession, item: PrintQueueItem) -> 
     ) is not None
 
 
-async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> bool:
+class SkipHeatSoakResult(str, Enum):
+    SKIPPED = "skipped"
+    PRINTER_NOT_READY = "printer_not_ready"
+    SOAK_CHANGED = "soak_changed"
+    COPY_FAILED = "copy_failed"
+
+
+async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> SkipHeatSoakResult:
     """Prepare outside the control lock, then conditionally hand off the soak."""
     item_id, owner, printer_id = item.id, item.preheat_owner, item.printer_id
     item.preheat_checked_at = utcnow()
@@ -153,23 +161,28 @@ async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> bool:
     if not _dispatch_ready(printer_id):
         item = await lock_queue_item(db, item_id)
         started = bool(item and item.printer_id == printer_id and await heat_soak_dispatch_started(db, item))
+        same_soak = bool(
+            item and item.status == "preheating" and item.preheat_owner == owner and item.printer_id == printer_id
+        )
         await db.rollback()
-        return started
+        if started:
+            return SkipHeatSoakResult.SKIPPED
+        return SkipHeatSoakResult.PRINTER_NOT_READY if same_soak else SkipHeatSoakResult.SOAK_CHANGED
     preparation = await prepare_dispatch_attempt(db, item, {})
     item = await lock_queue_item(db, item_id)
     if not item or item.status != "preheating" or item.preheat_owner != owner or item.printer_id != printer_id:
         discard_prepared_archive(db, preparation.archive)
         started = bool(item and item.printer_id == printer_id and await heat_soak_dispatch_started(db, item))
         await db.rollback()
-        return started
+        return SkipHeatSoakResult.SKIPPED if started else SkipHeatSoakResult.SOAK_CHANGED
     if not _dispatch_ready(printer_id):
         discard_prepared_archive(db, preparation.archive)
         item.preheat_checked_at = utcnow()
         await db.commit()
-        return False
+        return SkipHeatSoakResult.PRINTER_NOT_READY
     if preparation.error_message:
         await abort_heat_soak(db, item, preparation.error_message, schedule_auto_off=True)
-        return False
+        return SkipHeatSoakResult.COPY_FAILED
     from backend.app.services.print_scheduler import scheduler
 
     try:
@@ -200,13 +213,13 @@ async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> bool:
         if item and item.status == "preheating" and item.preheat_owner == owner and item.printer_id == printer_id:
             item.preheat_checked_at = utcnow()
             await db.commit()
-            return False
+            return SkipHeatSoakResult.SOAK_CHANGED
         started = bool(item and item.printer_id == printer_id and await heat_soak_dispatch_started(db, item))
         await db.rollback()
-        return started
+        return SkipHeatSoakResult.SKIPPED if started else SkipHeatSoakResult.SOAK_CHANGED
     _show_preheating(printer_id, False)
     spawn_background_task(scheduler._dispatch_after_heat_soak(item_id), name=f"skip-heat-soak-dispatch-{item_id}")
-    return True
+    return SkipHeatSoakResult.SKIPPED
 
 
 class ChamberHeatSoak:

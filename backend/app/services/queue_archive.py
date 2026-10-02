@@ -1,5 +1,6 @@
 """Prepare the immutable artifact committed with entry into dispatching."""
 
+import errno
 import json
 import logging
 import shutil
@@ -27,6 +28,10 @@ class DispatchSourceUnavailable(RuntimeError):
     """The dispatch source row is missing or soft-deleted."""
 
 
+class DispatchPreparationError(RuntimeError):
+    """A preparation failure with a message safe to show to users."""
+
+
 @dataclass(frozen=True)
 class DispatchArchivePreparation:
     archive: PrintArchive | None
@@ -46,10 +51,20 @@ async def prepare_dispatch_attempt(db: AsyncSession, item: PrintQueueItem, value
         raise
     except Exception as error:
         logger.exception("Queue item %s: failed to prepare dispatch Archive", item.id)
-        cause = str(error).strip() or type(error).__name__
+        message = "Failed to create Archive record for dispatch"
+        # Keep server paths and parser details in the log, not notifications.
+        if isinstance(error, (DispatchSourceUnavailable, DispatchPreparationError)):
+            message += f": {error}"
+        elif isinstance(error, OSError):
+            cause = (
+                "Not enough disk space to copy the print file"
+                if error.errno == errno.ENOSPC
+                else "Could not copy the print file"
+            )
+            message += f": {cause}"
         return DispatchArchivePreparation(
             None,
-            f"Failed to create Archive record for dispatch: {cause}",
+            message,
             source_unavailable=isinstance(error, DispatchSourceUnavailable),
         )
 
@@ -88,7 +103,7 @@ async def prepare_dispatch_archive(db: AsyncSession, item: PrintQueueItem, value
         printer_id = values.get("printer_id", item.printer_id)
         printer = await db.get(Printer, printer_id)
         if printer is None:
-            raise RuntimeError("Dispatch printer no longer exists")
+            raise DispatchPreparationError("Dispatch printer no longer exists")
         source_path = Path(source.file_path)
         source_path = (
             source_path
@@ -128,7 +143,7 @@ async def prepare_dispatch_archive(db: AsyncSession, item: PrintQueueItem, value
                 created_dirs=created_dirs,
             )
             if archive is None:
-                raise RuntimeError("ArchiveService did not create an attempt record")
+                raise DispatchPreparationError("ArchiveService did not create an attempt record")
             archive.extra_data = {
                 **(archive.extra_data or {}),
                 "remote_filename": remote_filename,

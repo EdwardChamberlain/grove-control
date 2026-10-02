@@ -1,5 +1,6 @@
 """Dispatch contracts retained after moving preparation out of the writer."""
 
+import errno
 from datetime import timedelta
 from unittest.mock import AsyncMock
 
@@ -110,7 +111,8 @@ async def test_source_removed_after_eligibility_read_stays_parked(handoff, monke
         await handoff.scheduler._start_print(db, job, binding=binding)
         await db.refresh(job)
         assert job.status == "queued" and job.printer_id is None and job.manual_start
-        assert "Dispatch source" in job.waiting_reason
+        cause = "Dispatch source was deleted" if remove == "trash" else "Dispatch source no longer exists"
+        assert job.waiting_reason == f"Failed to create Archive record for dispatch: {cause}"
         assert job.physical_outcome is None
         assert await db.scalar(select(PrintQueueItem.id).where(PrintQueueItem.status.in_(HOLDING_STATUSES))) is None
         assert await db.scalar(select(PrintArchive.id).where(PrintArchive.dispatched_queue_item_id == job.id)) is None
@@ -120,11 +122,28 @@ async def test_source_removed_after_eligibility_read_stays_parked(handoff, monke
 
 
 @pytest.mark.parametrize("path", ["ordinary", "tick", "skip"])
-async def test_preparation_failure_preserves_the_cause_in_job_and_response(handoff, monkeypatch, path):
-    copy = AsyncMock(side_effect=OSError("Disk full"))
+@pytest.mark.parametrize(
+    "error,message",
+    [
+        (
+            OSError(errno.ENOSPC, "No space left on device", "/abs/path/x.3mf"),
+            "Failed to create Archive record for dispatch: Not enough disk space to copy the print file",
+        ),
+        (
+            OSError(errno.EACCES, "Permission denied", "/abs/path/x.3mf"),
+            "Failed to create Archive record for dispatch: Could not copy the print file",
+        ),
+        (RuntimeError("Cannot parse /abs/path/x.3mf"), "Failed to create Archive record for dispatch"),
+    ],
+)
+async def test_preparation_failure_reports_safe_cause_in_job_and_response(
+    handoff, monkeypatch, caplog, path, error, message
+):
+    copy = AsyncMock(side_effect=error)
     monkeypatch.setattr(ArchiveService, "archive_print", copy)
     monkeypatch.setattr(handoff.scheduler, "_power_off_if_needed", AsyncMock())
-    monkeypatch.setattr(scheduling.notification_service, "on_queue_job_failed", AsyncMock())
+    notified = AsyncMock()
+    monkeypatch.setattr(scheduling.notification_service, "on_queue_job_failed", notified)
     # Skip imports the process-wide scheduler for the configured Auto Off.
     monkeypatch.setattr(scheduling.scheduler, "_power_off_if_needed", AsyncMock())
     async with handoff.sessions() as db:
@@ -143,12 +162,19 @@ async def test_preparation_failure_preserves_the_cause_in_job_and_response(hando
             with pytest.raises(HTTPException) as failure:
                 await skip_queue_item_heat_soak(handoff.job_id, db=db, auth_result=(None, True))
             assert failure.value.status_code == 409
-            assert "Disk full" in failure.value.detail
+            assert failure.value.detail == message and "/abs/path" not in failure.value.detail
         job = await db.get(PrintQueueItem, handoff.job_id, populate_existing=True)
-        assert job.status == "failed" and "Disk full" in job.error_message
-        assert "Disk full" in job.physical_failure_reason
+        assert job.status == "failed" and job.error_message == message
+        assert job.physical_failure_reason == message[:100]
+        assert "/abs/path" not in job.error_message
+        if path == "ordinary":
+            notified.assert_awaited_once()
+            assert notified.call_args.kwargs["reason"] == message
+            assert "/abs/path" not in notified.call_args.kwargs["reason"]
         assert await db.scalar(select(PrintArchive.id)) is None
         copy.assert_awaited_once()
+    assert "/abs/path" in caplog.text  # Detailed diagnostics stay in the log.
+    assert handoff.source_path.exists()
 
 
 @pytest.mark.parametrize("status,outcome", [("finished", "completed"), ("failed", "failed"), ("cancelled", "aborted")])
@@ -347,7 +373,12 @@ async def test_skip_preserves_soak_when_telemetry_cannot_dispatch(handoff, monke
     async with handoff.sessions() as db:
         with pytest.raises(HTTPException) as failure:
             await skip_queue_item_heat_soak(handoff.job_id, db=db, auth_result=(None, True))
-        assert failure.value.status_code == 409 and "not ready" in failure.value.detail
+        expected = (
+            "Heat soak changed during preparation; refresh and retry"
+            if phase == "at_cas"
+            else "Printer is not ready to start; wait for it to report idle, then retry"
+        )
+        assert failure.value.status_code == 409 and failure.value.detail == expected
     async with handoff.sessions() as db:
         job = await db.get(PrintQueueItem, handoff.job_id)
         assert job.status == "preheating" and job.chamber_heat_soak

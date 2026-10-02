@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 from backend.app.core.database import _migrate_queue_archive_outcomes, _migrate_queue_lifecycle
 from backend.app.models.archive import PrintArchive
@@ -15,6 +15,7 @@ from backend.app.models.printer import Printer
 from backend.app.services.archive import ArchiveService
 from backend.app.services.job_identity import bind_observed_id
 from backend.app.services.queue_actions import cancel_job
+from backend.app.services.queue_archive import prepare_dispatch_archive
 from backend.app.services.queue_transitions import QueueTransitionConflict, clear_job_plate, transition_queue_item
 from backend.tests.unit.test_queue_archive_alignment import alignment  # noqa: F401
 
@@ -371,3 +372,79 @@ async def test_reconnect_terminal_legacy_repair_rejects_ambiguous_identity(legac
         job = await db.get(PrintQueueItem, legacy.job_id)
         assert archive.dispatched_queue_item_id is None and archive.status == "printing"
         assert job.status == "failed" and job.physical_completed_at == completed
+
+
+@pytest.mark.parametrize("cached", [False, True])
+@pytest.mark.parametrize("status", ["finished", "failed", "successful", "unsuccessful"])
+async def test_duplicate_modern_completion_needs_no_write_transaction(alignment, monkeypatch, cached, status):
+    import backend.app.main as main
+    from backend.app.services.printer_manager import printer_manager
+
+    async with alignment.sessions() as db:
+        job = await db.get(PrintQueueItem, alignment.job_id)
+        attempt = await prepare_dispatch_archive(db, job, {})
+        await transition_queue_item(db, job, "queued", "dispatching", attempt=attempt)
+        await transition_queue_item(db, job, "dispatching", "printing", values={"dispatch_subtask_id": "123"})
+        awaiting = "finished" if status in ("finished", "successful") else "failed"
+        await transition_queue_item(db, job, "printing", awaiting, values={"error_message": "Original reason"})
+        if status in ("successful", "unsuccessful"):
+            await clear_job_plate(db, job)
+        await db.commit()
+        await db.refresh(job)
+        await db.refresh(attempt)
+        before_job = (
+            job.status,
+            job.archive_id,
+            job.error_message,
+            job.physical_outcome,
+            job.physical_completed_at,
+            job.physical_failure_reason,
+        )
+        before_archive = (
+            attempt.status,
+            attempt.dispatched_queue_item_id,
+            attempt.started_at,
+            attempt.completed_at,
+            attempt.failure_reason,
+        )
+
+    monkeypatch.setattr(main, "async_session", alignment.sessions)
+    monkeypatch.setattr(main, "_completed_job_events", {1: alignment.job_id} if cached else {})
+    monkeypatch.setattr(main, "_user_stopped_printers", set())
+    monkeypatch.setattr(printer_manager, "get_status", lambda _id: None)
+    notified, published, usage = AsyncMock(), AsyncMock(), AsyncMock()
+    monkeypatch.setattr(main.notification_service, "on_queue_completed", notified)
+    monkeypatch.setattr(main.ws_manager, "send_print_complete", published)
+    monkeypatch.setattr(main, "_bump_library_file_usage_if_completed", usage)
+    statements = []
+
+    def capture(_conn, _cursor, statement, _parameters, _context, _executemany):
+        statements.append(statement)
+
+    engine = alignment.sessions.kw["bind"].sync_engine
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        assert await main.on_print_complete(1, {"submission_id": "123", "status": "completed"}) is False
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+    assert not [sql for sql in statements if sql.lstrip().upper().startswith("UPDATE")]
+    async with alignment.sessions() as db:
+        job = await db.get(PrintQueueItem, alignment.job_id)
+        attempt = await db.get(PrintArchive, job.archive_id)
+        assert (
+            job.status,
+            job.archive_id,
+            job.error_message,
+            job.physical_outcome,
+            job.physical_completed_at,
+            job.physical_failure_reason,
+        ) == before_job
+        assert (
+            attempt.status,
+            attempt.dispatched_queue_item_id,
+            attempt.started_at,
+            attempt.completed_at,
+            attempt.failure_reason,
+        ) == before_archive
+    for effect in (notified, published, usage):
+        effect.assert_not_awaited()

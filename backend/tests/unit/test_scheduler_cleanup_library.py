@@ -482,7 +482,7 @@ async def test_archive_creation_failure_skips_cleanup_and_dispatch(queue_factory
 
     item, library_file, archive = await _queue_snapshot(ctx)
     assert item.status == "failed"
-    assert item.error_message == "Failed to create Archive record for dispatch: archive copy failed"
+    assert item.error_message == "Failed to create Archive record for dispatch"
     assert item.archive_id is None
     assert archive is None
     assert library_file is not None

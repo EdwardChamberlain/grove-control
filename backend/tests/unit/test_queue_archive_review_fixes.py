@@ -226,7 +226,7 @@ async def test_final_guard_keeps_heat_soak_alive_after_slow_preparation(handoff,
     async with handoff.sessions() as db:
         if skip:
             job = await heat.lock_queue_item(db, handoff.job_id)
-            assert await heat.skip_heat_soak(db, job) is False
+            assert await heat.skip_heat_soak(db, job) == heat.SkipHeatSoakResult.SOAK_CHANGED
         else:
             assert await handoff.service.check(db) == []
     for _ in range(heat.HEARTBEAT_TIMEOUT // 10 + 4):
