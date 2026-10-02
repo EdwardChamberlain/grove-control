@@ -4118,6 +4118,24 @@ class PrintScheduler:
         conditions = (PrintQueueItem.printer_id == dispatch_printer_id,)
         if claim_timestamp is not None:
             conditions += (PrintQueueItem.dispatching_at == claim_timestamp,)
+        # Either conditional update can lose after upload. Capture connection
+        # values before rollback expires ORM state; retain the committed Archive.
+        printer_ip, printer_code, printer_model = printer.ip_address, printer.access_code, printer.model
+
+        async def cleanup_losing_upload():
+            await db.rollback()
+            logger.info("Queue item %s lost its dispatch claim; cleaning up uploaded file", dispatch_item_id)
+            try:
+                await delete_file_async(
+                    printer_ip,
+                    printer_code,
+                    remote_path,
+                    socket_timeout=ftp_timeout,
+                    printer_model=printer_model,
+                )
+            except Exception as cleanup_err:
+                logger.debug("Queue item %s: cancelled-dispatch cleanup failed: %s", dispatch_item_id, cleanup_err)
+
         try:
             await transition_queue_item(
                 db,
@@ -4143,21 +4161,7 @@ class PrintScheduler:
             )
             return
         except QueueTransitionConflict:
-            # Cancellation, deletion or a replaced claim won during the upload.
-            # Capture connection values before rollback expires ORM attributes.
-            printer_ip, printer_code, printer_model = printer.ip_address, printer.access_code, printer.model
-            await db.rollback()
-            logger.info("Queue item %s lost its dispatch claim; cleaning up uploaded file", dispatch_item_id)
-            try:
-                await delete_file_async(
-                    printer_ip,
-                    printer_code,
-                    remote_path,
-                    socket_timeout=ftp_timeout,
-                    printer_model=printer_model,
-                )
-            except Exception as cleanup_err:
-                logger.debug("Queue item %s: cancelled-dispatch cleanup failed: %s", dispatch_item_id, cleanup_err)
+            await cleanup_losing_upload()
             return
 
         logger.info("Queue item %s: Status set to 'dispatching'; performing final pre-send checks", item.id)
@@ -4204,15 +4208,19 @@ class PrintScheduler:
                 return
 
         # Start the acknowledgement window only once upload is complete.
-        await transition_queue_item(
-            db,
-            item,
-            "dispatching",
-            "dispatching",
-            conditions=conditions,
-            values={"dispatched_at": datetime.now(timezone.utc)},
-        )
-        await db.commit()
+        try:
+            await transition_queue_item(
+                db,
+                item,
+                "dispatching",
+                "dispatching",
+                conditions=conditions,
+                values={"dispatched_at": datetime.now(timezone.utc)},
+            )
+            await db.commit()
+        except QueueTransitionConflict:
+            await cleanup_losing_upload()
+            return
 
         from backend.app.main import register_expected_print
 

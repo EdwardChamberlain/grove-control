@@ -218,6 +218,10 @@ printer becomes busy, disconnected or unready, it returns HTTP 409 and keeps
 the soak alive; any prepared attempt is discarded and no worker starts.
 The response describes current readiness or a changed soak, rather than an
 older job error. Only a copy-failure response uses the newly committed job error.
+A readiness rejection at the final handoff also reports that the printer is
+not ready. The same soak keeps its heartbeat and remains available to retry.
+When cancellation wins a dispatch update after upload, staged printer-file
+cleanup is attempted without removing the committed cancelled Archive or hold.
 Repeated completion callbacks still repair proven restored legacy Archive links
 without rewriting the job's recorded physical outcome.
 Reconnect reconciliation reaches this repair for already-ended and final jobs,

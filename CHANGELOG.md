@@ -39,6 +39,9 @@
   an older job error. Copy failures show the newly committed failure message.
   Duplicate completions of modern jobs avoid a write transaction; proven
   restored legacy links still receive their repair.
+  A dispatch update that loses to Stop attempts to remove its staged printer
+  file while retaining the cancelled Archive and printer hold. Skip also reports
+  printer readiness when telemetry drops at the final handoff.
 
 - Queue jobs now persist **Paused** from matching printer telemetry, including
   startup and reconnect, and return to Printing on resume. Paused jobs retain

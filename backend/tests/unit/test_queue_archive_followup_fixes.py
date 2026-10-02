@@ -373,11 +373,7 @@ async def test_skip_preserves_soak_when_telemetry_cannot_dispatch(handoff, monke
     async with handoff.sessions() as db:
         with pytest.raises(HTTPException) as failure:
             await skip_queue_item_heat_soak(handoff.job_id, db=db, auth_result=(None, True))
-        expected = (
-            "Heat soak changed during preparation; refresh and retry"
-            if phase == "at_cas"
-            else "Printer is not ready to start; wait for it to report idle, then retry"
-        )
+        expected = "Printer is not ready to start; wait for it to report idle, then retry"
         assert failure.value.status_code == 409 and failure.value.detail == expected
     async with handoff.sessions() as db:
         job = await db.get(PrintQueueItem, handoff.job_id)

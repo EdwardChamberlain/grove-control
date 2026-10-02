@@ -213,7 +213,8 @@ async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> SkipHeatSoak
         if item and item.status == "preheating" and item.preheat_owner == owner and item.printer_id == printer_id:
             item.preheat_checked_at = utcnow()
             await db.commit()
-            return SkipHeatSoakResult.SOAK_CHANGED
+            # The handoff conditions still match, so the live readiness guard refused.
+            return SkipHeatSoakResult.PRINTER_NOT_READY
         started = bool(item and item.printer_id == printer_id and await heat_soak_dispatch_started(db, item))
         await db.rollback()
         return SkipHeatSoakResult.SKIPPED if started else SkipHeatSoakResult.SOAK_CHANGED
