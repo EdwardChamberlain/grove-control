@@ -227,10 +227,29 @@ The MQTT relay's queue job events keep their names: `job_completed` for
 
 ## Scope and verification
 
-Stage 2's strict printer/job identity matching remains in place. Stage 4 adds
-durable `paused` transitions without changing Archive outcomes. Moving Archive
-creation to entry into `dispatching` and consolidating all lifecycle effects
-remain stage 5; Archive creation timing is unchanged here.
+Stage 2's strict printer/job identity matching and stage 4's durable `paused`
+transitions remain in place. Stage 5 aligns Archive and hidden-source lifecycle
+work with the conditional transition writer:
+
+- Entering `dispatching` prepares an immutable copy (with current injection),
+  then commits its exact Archive link and the printer hold together. FTP reads
+  that copy. A losing cancellation/claim or rollback removes the uncommitted
+  copy; preparation never locks a waiting job before the conditional update.
+  Recheck idle telemetry after copying, before taking the hold, so a new
+  external print cannot be displaced while its callback is still pending.
+- Successful upload is no longer required for an Archive entry. Upload,
+  drying-policy and command failures update the attempt to `failed` and retain
+  the printer hold. A copy failure holds the job as `failed` without sending.
+- Entry into `finished`, `failed`, or `cancelled` records the Archive outcome
+  (`completed`, `failed`, or `aborted`) in the same transaction. Exact job and
+  Archive columns must both match. Pause/resume, duplicate terminal observations,
+  Clear Plate and printer deletion do not rewrite the physical outcome.
+- Hidden sources are retained by every nonfinal reference, including variants.
+  Finalization detaches final references and removes sources; artifact deletion
+  waits for commit. Files storage and external sources are preserved.
+
+There is no new schema migration. Older in-flight attempts without an Archive
+remain held for user inspection rather than publishing a command without one.
 
 Real database tests cover the transition table, stale sessions, rollback,
 claim replacement, cancellation/confirmation/recovery races, all holding states,
@@ -264,3 +283,22 @@ pauses, touchscreen/SD starts first observed in PAUSE, restart/reconnect while
 paused, Stop while paused, and completion/failure directly from PAUSE. Confirm
 the same job/Archive IDs and printer hold throughout, with no repeated start
 notification. Physical printer and PostgreSQL qualification remain outstanding.
+
+For stage 5, additionally verify an upload failure produces one failed Archive
+and retains the printer hold; Cancel during copying leaves no Archive or MQTT
+command; Cancel during upload preserves an aborted Archive; completed/skipped
+heat soaks create their Archive only at dispatch; and a reprint uploads exactly
+its new copy with current snippets once. Restart during upload and dispatch
+confirmation, complete external and paused jobs, and compare Archive outcome
+and timestamps before and after Clear Plate. Retain a shared hidden upload
+until every direct and variant reference is final, and confirm saved Files
+copies remain. PostgreSQL must additionally exercise competing dispatch/Stop,
+rollback and shared-source finalization with real concurrent connections.
+
+`test_queue_archive_alignment.py` covers real-database dispatch/Archive commit,
+rollback (including session close), cancellation during copying, duplicate
+handoffs, outcomes and auto/manual Clear Plate, exact reprint links, copy
+failure, and variant-source retention. No existing tests were removed in
+stage 5. Earlier late-Archive and original-source upload expectations in
+`test_scheduler_cleanup_library.py` are replaced by early failed-attempt and
+immutable-copy checks; the same cancellation and MQTT fencing cases remain.

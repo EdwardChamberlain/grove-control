@@ -14,12 +14,20 @@ from backend.app.services.queue_transitions import transition_queue_item
 
 
 @pytest.fixture
-async def db_session():
+async def db_session(tmp_path, monkeypatch):
     """In-memory SQLite with one queue item assigned to printer 42."""
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     import backend.app.models  # noqa: F401 - populate Base.metadata
+    from backend.app.core.config import settings
     from backend.app.core.database import Base, _ensure_active_queue_printer_reservation
+    from backend.app.models.archive import PrintArchive
+    from backend.app.models.printer import Printer
+
+    monkeypatch.setattr(settings, "base_dir", tmp_path)
+    monkeypatch.setattr(settings, "archive_dir", tmp_path / "archives")
+    source = tmp_path / "source.3mf"
+    source.write_bytes(b"dispatch source")
 
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
     async with engine.begin() as conn:
@@ -28,6 +36,8 @@ async def db_session():
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
 
     async with session_maker() as db:
+        db.add(Printer(id=42, name="Test", serial_number="TEST", ip_address="127.0.0.1", access_code="code"))
+        db.add(PrintArchive(id=99, filename="source.3mf", file_path=str(source), file_size=15, status="completed"))
         db.add(PrintQueueItem(id=1, printer_id=42, archive_id=99, status="queued"))
         await db.commit()
 

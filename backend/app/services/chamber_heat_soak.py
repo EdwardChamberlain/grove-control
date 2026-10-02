@@ -87,7 +87,9 @@ def _heaters_off(printer: Printer) -> None:
 
 async def abort_heat_soak(db: AsyncSession, item: PrintQueueItem, reason: str, *, status: str = "failed") -> None:
     """Caller holds the queue write lock. Persist cleanup even if the item is deleted."""
-    await transition_queue_item(db, item, item.status, status)
+    await transition_queue_item(
+        db, item, item.status, status, values={"error_message": reason, "completed_at": utcnow()}
+    )
     printer = await db.get(Printer, item.printer_id)
     if printer:
         printer.heat_soak_shutdown_pending = True
@@ -113,6 +115,9 @@ async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> None:
     this queue item.
     """
     await transition_queue_item(db, item, item.status, "dispatching")
+    if item.status == "failed":
+        await abort_heat_soak(db, item, item.error_message)
+        return
     item.chamber_heat_soak = False
     item.manual_start = False
     item.error_message = None
@@ -301,8 +306,20 @@ class ChamberHeatSoak:
                 continue
             if (now - item.preheat_started_at).total_seconds() >= item.heat_soak_minutes * 60:
                 _show_preheating(item.printer_id, False)
-                await transition_queue_item(db, item, item.status, "dispatching")
-                item.dispatched_at = now
+                await transition_queue_item(
+                    db,
+                    item,
+                    item.status,
+                    "dispatching",
+                    dispatch_guard=lambda item=item, state=state: (
+                        printer_manager.is_connected(item.printer_id) and state.state in ("IDLE", "FINISH", "FAILED")
+                    ),
+                )
+                if item.status == "failed":
+                    await abort_heat_soak(db, item, item.error_message)
+                    continue
+                # No acknowledgement timeout until the upload and send boundary.
+                item.dispatched_at = None
                 ready.append(item.id)
             client = printer_manager.get_client(item.printer_id)
             if client:

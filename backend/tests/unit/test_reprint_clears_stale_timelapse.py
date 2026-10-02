@@ -113,6 +113,7 @@ async def test_reprint_clears_timelapse_path_and_unlinks_stale_file(tmp_path):
     assert stale_file.exists()
 
     mock_archive = MagicMock()
+    mock_archive.dispatched_queue_item_id = None
     mock_archive.id = 42
     mock_archive.filename = "MyModel.3mf"
     mock_archive.subtask_id = None
@@ -194,6 +195,7 @@ async def test_reprint_with_no_timelapse_path_is_noop(tmp_path):
     mock_printer.name = "TestP2S"
 
     mock_archive = MagicMock()
+    mock_archive.dispatched_queue_item_id = None
     mock_archive.id = 99
     mock_archive.filename = "FreshFile.3mf"
     mock_archive.subtask_id = None
@@ -269,6 +271,7 @@ async def test_reprint_with_missing_stale_file_does_not_raise(tmp_path):
     mock_printer.name = "TestP2S"
 
     mock_archive = MagicMock()
+    mock_archive.dispatched_queue_item_id = None
     mock_archive.id = 7
     mock_archive.filename = "Ghost.3mf"
     mock_archive.subtask_id = None

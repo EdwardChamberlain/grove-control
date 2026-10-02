@@ -439,13 +439,30 @@ async def test_no_upload_or_print_until_soak_then_normal_correlated_dispatch(soa
     scheduler._propagate_owner_to_printer_manager = AsyncMock()
     scheduler._schedule_dispatch_confirmation = MagicMock()
     upload = AsyncMock(return_value=True)
-    archiving = AsyncMock(return_value=archive)
+
+    async def copy_attempt(_self, **kwargs):
+        attempt = PrintArchive(
+            filename="test.3mf",
+            file_path=str(source),
+            file_size=10,
+            status="dispatching",
+            dispatched_queue_item_id=kwargs["dispatched_queue_item_id"],
+        )
+        _self.db.add(attempt)
+        return attempt
+
+    archiving = AsyncMock(side_effect=lambda **kwargs: None)
+
+    async def archive_print(service, **kwargs):
+        await archiving(**kwargs)
+        return await copy_attempt(service, **kwargs)
+
     monkeypatch.setattr(scheduling, "printer_manager", soak.manager)
     monkeypatch.setattr(scheduling, "upload_file_async", upload)
     monkeypatch.setattr(scheduling, "delete_file_async", AsyncMock())
     monkeypatch.setattr(scheduling, "get_ftp_retry_settings", AsyncMock(return_value=(False, 0, 0, 1)))
     monkeypatch.setattr(scheduling, "cache_3mf_download", MagicMock())
-    monkeypatch.setattr(ArchiveService, "archive_print", archiving)
+    monkeypatch.setattr(ArchiveService, "archive_print", archive_print)
     monkeypatch.setattr(scheduling, "async_session", lambda: AsyncSession(soak.engine, expire_on_commit=False))
     soak.manager.start_print.return_value = True
 

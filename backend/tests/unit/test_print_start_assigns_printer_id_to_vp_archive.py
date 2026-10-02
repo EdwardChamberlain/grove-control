@@ -59,6 +59,7 @@ async def test_expected_archive_path_assigns_printer_id_when_unset():
 
     # VP-queue archive: printer_id is None — this is the bug surface.
     mock_archive = MagicMock()
+    mock_archive.dispatched_queue_item_id = None
     mock_archive.id = 42
     mock_archive.filename = "bambu_lab_a1_tool_plate_3.gcode.3mf"
     mock_archive.subtask_id = None
@@ -147,6 +148,7 @@ async def test_expected_archive_path_preserves_existing_printer_id():
     mock_printer.name = "TestP1S"
 
     mock_archive = MagicMock()
+    mock_archive.dispatched_queue_item_id = None
     mock_archive.id = 99
     mock_archive.filename = "MyModel.3mf"
     mock_archive.subtask_id = None
@@ -234,6 +236,7 @@ async def test_expected_archive_path_captures_timelapse_baseline():
     mock_printer.name = "TestP1S"
 
     mock_archive = MagicMock()
+    mock_archive.dispatched_queue_item_id = None
     mock_archive.id = 42
     mock_archive.filename = "bambu_lab_a1_tool_plate_3.gcode.3mf"
     mock_archive.subtask_id = None

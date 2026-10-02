@@ -783,7 +783,7 @@ class TestPrintQueueAPI:
     @pytest.mark.asyncio
     @pytest.mark.integration
     async def test_skip_heat_soak_returns_item_to_dispatchable_state(
-        self, async_client, queue_item_factory, db_session
+        self, async_client, queue_item_factory, db_session, tmp_path, monkeypatch
     ):
         item = await queue_item_factory(
             status="preheating",
@@ -791,6 +791,15 @@ class TestPrintQueueAPI:
             preheat_owner="test-worker",
             preheat_started_at=datetime.now(timezone.utc),
         )
+        from backend.app.core.config import settings
+        from backend.app.models.archive import PrintArchive
+
+        monkeypatch.setattr(settings, "archive_dir", tmp_path / "archives")
+        source = tmp_path / "source.3mf"
+        source.write_bytes(b"heat-soak source")
+        source_archive = await db_session.get(PrintArchive, item.archive_id)
+        source_archive.file_path = str(source)
+        await db_session.commit()
 
         from unittest.mock import patch
 

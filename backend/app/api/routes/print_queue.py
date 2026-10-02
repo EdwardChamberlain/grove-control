@@ -1700,7 +1700,6 @@ async def resolve_queue_dispatch(
     ),
 ):
     """Resolve an unconfirmed dispatch after checking the physical printer."""
-    from backend.app.services.archive import record_dispatch_outcome
     from backend.app.services.print_scheduler import scheduler
     from backend.app.services.printer_manager import printer_manager
 
@@ -1735,15 +1734,6 @@ async def resolve_queue_dispatch(
     }
     values["started_at" if data.outcome == "printing" else "completed_at"] = now
     await transition_queue_item(db, item, "dispatching", data.outcome, values=values)
-    await record_dispatch_outcome(
-        db,
-        status=data.outcome,
-        dispatched_queue_item_id=item.id,
-        archive_id=item.archive_id,
-        started_at=now if data.outcome == "printing" else None,
-        completed_at=now if data.outcome == "failed" else None,
-        failure_reason=values["error_message"] if data.outcome == "failed" else None,
-    )
     await db.commit()
     if data.outcome == "printing":
         await scheduler._publish_queue_job_started(item.id)

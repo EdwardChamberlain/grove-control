@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import backend.app.models  # noqa: F401 - populate Base.metadata
+import backend.app.models.print_log  # noqa: F401
 import backend.app.services.print_scheduler as scheduler_module
 from backend.app.core.database import Base
 from backend.app.models.archive import PrintArchive
@@ -142,13 +143,15 @@ async def _dispatch_library_item(
         dispatched_queue_item_id=None,
         prefer_filename_for_name=False,
         commit=True,
+        flush=True,
     ):
         if archive_failure:
             raise RuntimeError("archive copy failed")
 
-        archive_rel_path = Path("archives") / f"archive-{ctx.queue_item_id}.3mf"
+        archive_rel_path = Path("archives") / f"attempt-{ctx.queue_item_id}" / "copy.3mf"
         ctx.archive_path = ctx.base_dir / archive_rel_path
         ctx.archive_path.parent.mkdir(parents=True, exist_ok=True)
+        self.db.sync_session.info.setdefault("queue_archive_artifacts", []).append(ctx.archive_path.parent)
         ctx.archive_path.write_bytes(Path(source_file).read_bytes())
         if during_archive:
             await during_archive()
@@ -168,7 +171,8 @@ async def _dispatch_library_item(
             dispatched_queue_item_id=dispatched_queue_item_id,
         )
         self.db.add(archive)
-        await self.db.flush()
+        if flush:
+            await self.db.flush()
         return archive
 
     states = printer_statuses if printer_statuses is not None else [printer_status]
@@ -178,7 +182,7 @@ async def _dispatch_library_item(
             state.connected = True
     printer_status = printer_status or SimpleNamespace(state="IDLE", connected=True, raw_data={})
     status_mock = (
-        MagicMock(side_effect=printer_statuses)
+        MagicMock(side_effect=[printer_statuses[0], *printer_statuses])
         if printer_statuses is not None
         else MagicMock(return_value=printer_status)
     )
@@ -306,18 +310,24 @@ async def test_archive_preparation_is_unsent_and_cancellation_still_fences_mqtt(
         nonlocal preparation_finished
         async with ctx.session_maker() as db:
             item = await db.get(PrintQueueItem, ctx.queue_item_id)
-            assert item.status == "dispatching" and item.dispatch_subtask_id
+            assert item.status == "queued" and item.dispatch_subtask_id is None
             assert item.dispatched_at is None and not needs_dispatch_resolution(item)
             if cancelled:
-                await transition_queue_item(db, item, "dispatching", "cancelled", action="cancel")
+                await transition_queue_item(db, item, "queued", "unsuccessful", action="cancel")
                 await db.commit()
         preparation_finished = datetime.now(timezone.utc)
 
-    await _dispatch_library_item(ctx, during_archive=copying)
+    if cancelled:
+        from backend.app.services.queue_transitions import QueueTransitionConflict
+
+        with pytest.raises(QueueTransitionConflict):
+            await _dispatch_library_item(ctx, during_archive=copying)
+    else:
+        await _dispatch_library_item(ctx, during_archive=copying)
     item, _, archive = await _queue_snapshot(ctx)
     if cancelled:
         ctx.start_print.assert_not_called()
-        assert item.status == "cancelled" and item.dispatched_at is None and archive is None
+        assert item.status == "unsuccessful" and item.dispatched_at is None and archive is None
         assert not ctx.archive_path.exists()
     else:
         ctx.start_print.assert_called_once()
@@ -475,7 +485,7 @@ async def test_archive_creation_failure_skips_cleanup_and_dispatch(queue_factory
     assert library_file is not None
     assert ctx.source_path.exists()
     assert ctx.thumbnail_path.exists()
-    ctx.upload.assert_awaited_once()
+    ctx.upload.assert_not_awaited()
     ctx.start_print.assert_not_called()
 
 
@@ -506,7 +516,7 @@ async def test_archive_copy_survives_library_cleanup(queue_factory):
     assert ctx.archive_path.exists()
     assert ctx.archive_path.read_bytes() == b"library source"
     uploaded_path = ctx.upload.await_args.args[2]
-    assert uploaded_path == ctx.source_path
+    assert uploaded_path == ctx.archive_path
 
 
 @pytest.mark.parametrize("source_kind", ["archive", "files"])
@@ -578,7 +588,7 @@ async def test_final_dispatch_boundary_stops_new_drying_and_does_not_send_print(
     assert item.status == "failed"
     assert item.waiting_reason == "Stopping AMS drying before dispatch"
     assert library_file is not None
-    assert archive is None
+    assert archive.status == "failed"
     ctx.stop_drying.assert_called_once_with(ctx.printer_id, 0, 0, 0, mode=0)
     ctx.start_print.assert_not_called()
 
@@ -595,7 +605,7 @@ async def test_final_dispatch_boundary_can_wait_for_natural_drying_completion(qu
     assert item.status == "failed"
     assert item.waiting_reason == "Waiting for AMS drying to complete"
     assert library_file is not None
-    assert archive is None
+    assert archive.status == "failed"
     ctx.stop_drying.assert_not_called()
     ctx.start_print.assert_not_called()
 
@@ -642,11 +652,11 @@ async def test_command_boundary_retains_reservation_if_drying_starts_after_final
     assert item.dispatch_subtask_id is None
     assert item.waiting_reason == waiting_reason
     assert item.library_file_id == ctx.library_file_id
-    assert item.archive_id is None
+    assert item.archive_id == archive.id
     assert library_file is not None
-    assert archive is None
+    assert archive.status == "failed"
     assert ctx.source_path.exists()
-    assert ctx.archive_path is None
+    assert ctx.archive_path.exists()
     register_expected.assert_not_called()
     unregister_expected.assert_not_called()
     clear_current_print_user.assert_not_called()
@@ -920,3 +930,22 @@ async def test_unedited_job_with_a_start_time_is_dispatched_with_its_decision(qu
     row = await _row(ctx)
     assert (row.status, row.printer_id, row.ams_mapping) == ("dispatching", ctx.printer_id, "[4]")
     ctx.upload.assert_awaited_once()
+
+
+async def test_printer_becoming_busy_during_archive_copy_is_rechecked_before_hold_and_ftp(queue_factory):
+    from backend.app.services.queue_transitions import QueueTransitionConflict
+
+    ctx = await queue_factory(cleanup=False)
+    state = SimpleNamespace(state="IDLE", connected=True, raw_data={})
+
+    async def external_start():
+        # Fresh telemetry can precede the external-job callback's database hold.
+        state.state = "RUNNING"
+
+    with pytest.raises(QueueTransitionConflict):
+        await _dispatch_library_item(ctx, printer_status=state, during_archive=external_start)
+    job, _, attempt = await _queue_snapshot(ctx)
+    assert job.status == "queued" and attempt is None
+    assert not ctx.archive_path.exists()
+    ctx.upload.assert_not_awaited()
+    ctx.start_print.assert_not_called()

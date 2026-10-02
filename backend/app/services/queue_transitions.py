@@ -6,11 +6,15 @@ the holding index, rather than the view, is the reservation authority.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import logging
+import shutil
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import nullcontext
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import event, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
@@ -23,6 +27,7 @@ if TYPE_CHECKING:
 
 
 FINAL_STATUSES = ("successful", "unsuccessful")
+logger = logging.getLogger(__name__)
 ALLOWED_TRANSITIONS = {
     "queued": frozenset({"preheating", "dispatching", "unsuccessful"}),
     "preheating": frozenset({"dispatching", "failed", "cancelled", "unsuccessful"}),
@@ -50,6 +55,7 @@ LEGACY_TRANSITIONS = {
 
 @event.listens_for(Session, "after_commit")
 def _publish_printer_views(session: Session) -> None:
+    session.info.pop("queue_archive_artifacts", None)
     paths = session.info.pop("queue_source_artifacts", [])
     if paths:
         from backend.app.services.queue_source_cleanup import remove_queue_only_artifacts
@@ -68,8 +74,18 @@ def _publish_printer_views(session: Session) -> None:
 
 @event.listens_for(Session, "after_rollback")
 def _discard_printer_views(session: Session) -> None:
+    for directory in session.info.pop("queue_archive_artifacts", []):
+        shutil.rmtree(directory, ignore_errors=True)
     session.info.pop("queue_printer_views", None)
     session.info.pop("queue_source_artifacts", None)
+
+
+@event.listens_for(Session, "after_transaction_end")
+def _discard_closed_transaction(session: Session, transaction) -> None:
+    # Session.close() rolls back without the explicit after_rollback event.
+    # Committed transactions already removed their pending data above.
+    if transaction.parent is None:
+        _discard_printer_views(session)
 
 
 class InvalidQueueTransition(ValueError):
@@ -90,6 +106,8 @@ async def transition_queue_item(
     conditions: Sequence[ColumnElement[bool]] = (),
     action: str | None = None,
     migration: bool = False,
+    archive_failure_reason: str | None = None,
+    dispatch_guard: Callable[[], bool] | None = None,
 ) -> None:
     """Conditionally change a persisted item, or raise without writing it.
 
@@ -133,9 +151,43 @@ async def transition_queue_item(
     item_id = item if isinstance(item, int) else item.id
 
     table = PrintQueueItem.__table__
+    archive = None
+    archive_error = False
+    artifact_offset = (
+        len(db.sync_session.info.get("queue_archive_artifacts", [])) if isinstance(db, AsyncSession) else 0
+    )
+    if isinstance(db, AsyncSession) and expected_status != status:
+        if status in AWAITING_PLATE_CLEAR_STATUSES:
+            metadata.setdefault("completed_at", datetime.now(timezone.utc))
+        if status == "dispatching":
+            from backend.app.services.queue_archive import prepare_dispatch_archive
+
+            dispatch_item = await db.get(PrintQueueItem, item_id) if isinstance(item, int) else item
+            if dispatch_item is not None:
+                try:
+                    with db.no_autoflush:
+                        archive = await prepare_dispatch_archive(db, dispatch_item, metadata)
+                except SQLAlchemyError:
+                    raise
+                except Exception:
+                    logger.exception("Queue item %s: failed to prepare dispatch Archive", item_id)
+                    archive_error = True
+                    artifacts = db.sync_session.info.get("queue_archive_artifacts", [])
+                    for directory in artifacts[artifact_offset:]:
+                        shutil.rmtree(directory, ignore_errors=True)
+                    del artifacts[artifact_offset:]
     # SQLAlchemy 2.1 autoflushes Core statements regardless of their statement
     # execution options. Suppress it at the session boundary so a losing CAS
     # cannot flush stale metadata first. Startup repairs use AsyncConnection.
+    if dispatch_guard is not None and not dispatch_guard():
+        if isinstance(db, AsyncSession):
+            if archive is not None:
+                db.expunge(archive)
+            artifacts = db.sync_session.info.get("queue_archive_artifacts", [])
+            for directory in artifacts[artifact_offset:]:
+                shutil.rmtree(directory, ignore_errors=True)
+            del artifacts[artifact_offset:]
+        raise QueueTransitionConflict("Printer is no longer available after Archive preparation")
     with db.no_autoflush if isinstance(db, AsyncSession) else nullcontext():
         result = await db.execute(
             table.update()
@@ -144,17 +196,85 @@ async def transition_queue_item(
             .execution_options(autoflush=False)
         )
     if result.rowcount != 1:
+        if isinstance(db, AsyncSession):
+            if archive is not None:
+                db.expunge(archive)
+            artifacts = db.sync_session.info.get("queue_archive_artifacts", [])
+            for directory in artifacts[artifact_offset:]:
+                shutil.rmtree(directory, ignore_errors=True)
+            del artifacts[artifact_offset:]
         raise QueueTransitionConflict(f"Queue item {item_id} no longer matches expected status {expected_status}")
     if not isinstance(item, int):
         set_committed_value(item, "status", status)
         for key, value in metadata.items():
             set_committed_value(item, key, value)
     if isinstance(db, AsyncSession):
+        if archive is not None:
+            await db.flush()
+            await db.execute(table.update().where(table.c.id == item_id).values(archive_id=archive.id))
+            if not isinstance(item, int):
+                set_committed_value(item, "archive_id", archive.id)
+                # Existing loaded source relationships must follow the attempt.
+                set_committed_value(item, "archive", archive)
+        if archive_error:
+            await transition_queue_item(
+                db,
+                item,
+                "dispatching",
+                "failed",
+                values={"error_message": "Failed to create Archive record for dispatch"},
+            )
+            return
+        from backend.app.models.archive import PrintArchive
+
+        # Only the exact attempt, never the Archive used as a reprint source.
+        row = (await db.execute(select(table).where(table.c.id == item_id))).one()
+        attempt = (
+            await db.scalar(
+                select(PrintArchive).where(
+                    PrintArchive.id == row.archive_id, PrintArchive.dispatched_queue_item_id == item_id
+                )
+            )
+            if row.archive_id is not None
+            else None
+        )
+        if attempt is not None:
+            attaching = "archive_id" in metadata
+            if status == "dispatching" and "dispatch_subtask_id" in metadata:
+                attempt.subtask_id = metadata["dispatch_subtask_id"]
+            if (expected_status == "dispatching" and status == "printing") or (
+                attaching and status in ("printing", "paused")
+            ):
+                attempt.status = "printing"
+                attempt.started_at = row.started_at or datetime.now(timezone.utc)
+            if (status in AWAITING_PLATE_CLEAR_STATUSES and (expected_status != status or attaching)) or (
+                attaching and status == "successful"
+            ):
+                attempt.status = {
+                    "finished": "completed",
+                    "successful": "completed",
+                    "failed": "failed",
+                    "cancelled": "aborted",
+                }[status]
+                attempt.completed_at = row.completed_at
+                attempt.failure_reason = (
+                    (archive_failure_reason or (row.error_message or "Print failed")[:100])
+                    if status == "failed"
+                    else "User cancelled"
+                    if status == "cancelled"
+                    else None
+                )
         if status in FINAL_STATUSES and expected_status != status:
+            from backend.app.models.print_queue import PrintQueueVariant
             from backend.app.services.queue_source_cleanup import remove_queue_only_source_if_unused
 
-            source_id = await db.scalar(select(table.c.library_file_id).where(table.c.id == item_id))
-            if source_id is not None:
+            source_ids = set(
+                await db.scalars(
+                    select(PrintQueueVariant.library_file_id).where(PrintQueueVariant.queue_item_id == item_id)
+                )
+            )
+            source_ids.add(row.library_file_id)
+            for source_id in sorted(source_ids - {None}):
                 paths = await remove_queue_only_source_if_unused(db, source_id)
                 db.sync_session.info.setdefault("queue_source_artifacts", []).extend(paths)
         row = (await db.execute(select(table.c.printer_id, table.c.archive_id).where(table.c.id == item_id))).one()

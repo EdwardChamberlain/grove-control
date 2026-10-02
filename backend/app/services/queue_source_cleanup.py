@@ -10,21 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.config import settings
 from backend.app.models.library import LibraryFile
-from backend.app.models.print_queue import PrintQueueItem
+from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
+from backend.app.services.queue_transitions import FINAL_STATUSES
 from backend.app.utils.safe_path import safe_join_under
 
 logger = logging.getLogger(__name__)
 
-_SOURCE_NEEDED_STATUSES = (
-    "queued",
-    "preheating",
-    "dispatching",
-    "printing",
-    "paused",
-    "finished",
-    "failed",
-    "cancelled",
-)
 _UNSEALED_SOURCE_MAX_AGE = timedelta(hours=24)
 _SOURCE_SWEEP_INTERVAL_SECONDS = 60 * 60
 _queue_source_cleanup_task: asyncio.Task | None = None
@@ -58,11 +49,11 @@ async def remove_queue_only_source_if_unused(
         return []
 
     source_filters = [
-        PrintQueueItem.library_file_id == library_file_id,
         or_(
-            PrintQueueItem.status.in_(_SOURCE_NEEDED_STATUSES),
-            (PrintQueueItem.status == "failed") & PrintQueueItem.archive_id.is_(None),
+            PrintQueueItem.library_file_id == library_file_id,
+            PrintQueueItem.variants.any(PrintQueueVariant.library_file_id == library_file_id),
         ),
+        PrintQueueItem.status.not_in(FINAL_STATUSES),
     ]
     if exclude_item_id is not None:
         source_filters.append(PrintQueueItem.id != exclude_item_id)

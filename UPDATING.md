@@ -163,6 +163,26 @@ the existing Prometheus queue printing gauge does the same. Pause/resume does
 not create another Archive or change its physical outcome. See the
 [lifecycle guide and stage 4 hardware checklist](docs/queue-status-transitions.md).
 
+## Queue Archive alignment (stage 5)
+
+No additional schema migration is required. New attempts create their exact
+Archive copy atomically with entry into Dispatching, before uploading to the
+printer. An upload or command failure therefore appears in Archive while its
+job holds the printer on the Queue. Jobs cancelled while waiting, or stopped
+or failed during preheating, still create no Archive entry.
+
+Archive outcomes commit when jobs enter Finished, Failed, or Cancelled.
+Clear Plate changes only the job. Existing Archive outcome names remain
+`completed`, `failed`, and `aborted`, including for paused and external jobs.
+Hidden Queue uploads remain available while any nonfinal job references them,
+including a queued file variant; deletion happens after the last job finalizes
+and its transaction commits. Files copies remain independent.
+
+Existing active attempts retain their Archive and use the normal identity
+checks. An older in-flight upload with no attempt Archive remains held for
+inspection and Retry rather than sending without an Archive. Review the
+[stage 5 qualification checklist](docs/queue-status-transitions.md).
+
 ## Timezone
 
 `TZ` is the authoritative timezone for the container and for scheduled local

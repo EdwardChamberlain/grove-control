@@ -4,6 +4,12 @@
 
 ### Added
 
+- Queue attempts now enter Archive when they enter Dispatching, before upload.
+  The immutable copy includes the G-code sent for that attempt. Upload and
+  command failures record their physical outcome in the same transaction as
+  the Queue state; Clear Plate preserves that outcome. Hidden uploads remain
+  available until every referencing job, including file variants, is final.
+
 - Queue jobs now persist **Paused** from matching printer telemetry, including
   startup and reconnect, and return to Printing on resume. Paused jobs retain
   their printer hold, appear in Active jobs and Timeline, and keep Stop Print
