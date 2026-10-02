@@ -66,7 +66,8 @@ async def test_trashed_reprint_stays_parked_without_a_printer_hold(handoff, monk
 
 @pytest.mark.parametrize("path", ["ordinary", "tick", "skip"])
 async def test_preparation_failure_preserves_the_cause_in_job_and_response(handoff, monkeypatch, path):
-    monkeypatch.setattr(ArchiveService, "archive_print", AsyncMock(side_effect=OSError("Disk full")))
+    copy = AsyncMock(side_effect=OSError("Disk full"))
+    monkeypatch.setattr(ArchiveService, "archive_print", copy)
     monkeypatch.setattr(handoff.scheduler, "_power_off_if_needed", AsyncMock())
     monkeypatch.setattr(scheduling.notification_service, "on_queue_job_failed", AsyncMock())
     # Skip imports the process-wide scheduler for the configured Auto Off.
@@ -92,6 +93,7 @@ async def test_preparation_failure_preserves_the_cause_in_job_and_response(hando
         assert job.status == "failed" and "Disk full" in job.error_message
         assert "Disk full" in job.physical_failure_reason
         assert await db.scalar(select(PrintArchive.id)) is None
+        copy.assert_awaited_once()
 
 
 @pytest.mark.parametrize("status,outcome", [("finished", "completed"), ("failed", "failed"), ("cancelled", "aborted")])

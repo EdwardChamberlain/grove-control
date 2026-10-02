@@ -36,6 +36,7 @@ async def handoff(alignment, monkeypatch):
     }
     monkeypatch.setattr(printer_manager, "get_status", states.get)
     monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
+    monkeypatch.setattr(printer_manager, "is_awaiting_plate_clear", lambda _id: False)
     monkeypatch.setattr(printer_manager, "get_client", lambda _id: None)
     monkeypatch.setattr(printer_manager, "_broadcast_status_change", AsyncMock())
     monkeypatch.setattr(service, "cleanup", AsyncMock())
