@@ -323,9 +323,12 @@ class ChamberHeatSoak:
                         item,
                         item.status,
                         "dispatching",
-                        dispatch_guard=lambda item=item, state=state: (
-                            printer_manager.is_connected(item.printer_id)
-                            and state.state in ("IDLE", "FINISH", "FAILED")
+                        dispatch_guard=lambda item=item: (
+                            (live := printer_manager.get_status(item.printer_id)) is not None
+                            and printer_manager.is_connected(item.printer_id)
+                            and live.connected
+                            and getattr(live, "job_telemetry_ready", True)
+                            and live.state in ("IDLE", "FINISH", "FAILED")
                         ),
                     )
                 except QueueTransitionConflict:

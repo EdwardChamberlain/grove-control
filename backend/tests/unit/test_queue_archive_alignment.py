@@ -321,6 +321,147 @@ async def test_committed_heat_soak_handoff_is_dispatched_when_later_copy_loses_i
         assert f"heat-soak-dispatch-{first.id}" in dispatched, (first.status, first.dispatch_subtask_id, dispatched)
 
 
+@pytest.mark.parametrize("current", ["busy", "reconnected_busy", "reconnected_idle", "missing", "unready", "offline"])
+async def test_heat_soak_dispatch_uses_current_telemetry_after_archive_copy(alignment, monkeypatch, current):
+    import backend.app.main as main
+    from backend.app.services import chamber_heat_soak as heat, print_scheduler as sched
+
+    scheduler = sched.PrintScheduler()
+    service = scheduler._heat_soak
+    states = {
+        1: SimpleNamespace(
+            state="IDLE", connected=True, job_telemetry_ready=True, heat_soak_disconnected_at=0, raw_data={}
+        )
+    }
+    manager = MagicMock()
+    manager.get_status.side_effect = states.get
+    manager.is_connected.side_effect = lambda printer_id: bool(states[printer_id] and states[printer_id].connected)
+    manager.get_client.return_value = None
+    manager.start_print.return_value = True
+    manager._broadcast_status_change = AsyncMock()
+    monkeypatch.setattr(heat, "printer_manager", manager)
+    monkeypatch.setattr(sched, "printer_manager", manager)
+    monkeypatch.setattr(service, "cleanup", AsyncMock())
+    upload = AsyncMock(return_value=True)
+    monkeypatch.setattr(sched, "upload_file_async", upload)
+    monkeypatch.setattr(sched, "delete_file_async", AsyncMock(return_value=True))
+    monkeypatch.setattr(sched, "get_ftp_retry_settings", AsyncMock(return_value=(False, 0, 0, 1)))
+    monkeypatch.setattr(sched, "cache_3mf_download", MagicMock())
+    monkeypatch.setattr(scheduler, "_schedule_dispatch_confirmation", MagicMock())
+    monkeypatch.setattr(scheduler, "_propagate_owner_to_printer_manager", AsyncMock())
+    monkeypatch.setattr(main, "register_expected_print", MagicMock())
+    monkeypatch.setattr(sched, "async_session", alignment.sessions)
+    original = ArchiveService.archive_print
+
+    async def telemetry_changes_during_copy(self, **kwargs):
+        attempt = await original(self, **kwargs)
+        if current == "busy":
+            states[1].state = "RUNNING"
+        else:
+            # Reconnecting replaces the client's state; the old object can
+            # still say IDLE after fresh telemetry proves another print is active.
+            states[1].connected = False
+            states[1] = (
+                None
+                if current == "missing"
+                else SimpleNamespace(
+                    state="RUNNING" if current == "reconnected_busy" else "IDLE",
+                    connected=current != "offline",
+                    job_telemetry_ready=current != "unready",
+                    heat_soak_disconnected_at=0,
+                    raw_data={},
+                )
+            )
+        return attempt
+
+    monkeypatch.setattr(ArchiveService, "archive_print", telemetry_changes_during_copy)
+    async with alignment.sessions() as db:
+        job = await db.get(PrintQueueItem, alignment.job_id)
+        now = heat.utcnow()
+        await transition_queue_item(
+            db,
+            job,
+            "queued",
+            "preheating",
+            values={
+                "chamber_heat_soak": True,
+                "heat_soak_minutes": 1,
+                "preheat_owner": service.owner,
+                "preheat_requested_at": now - timedelta(minutes=2),
+                "preheat_started_at": now - timedelta(minutes=2),
+                "preheat_checked_at": now,
+            },
+        )
+        await db.commit()
+        ready = await service.check(db)
+        for item_id in ready:
+            await scheduler._dispatch_after_heat_soak(item_id)
+        await db.refresh(job)
+        if current == "reconnected_idle":
+            assert ready == [job.id] and job.status == "dispatching"
+            attempt = await db.get(PrintArchive, job.archive_id)
+            assert attempt.dispatched_queue_item_id == job.id
+            upload.assert_awaited_once()
+            manager.start_print.assert_called_once()
+        else:
+            assert ready == [] and job.status == "preheating"
+            assert job.archive_id is None and await db.scalar(select(PrintArchive.id)) is None
+            assert list(settings.archive_dir.rglob("*.3mf")) == []
+            upload.assert_not_awaited()
+            manager.start_print.assert_not_called()
+
+
+@pytest.mark.parametrize("outcome", ["failed", "cancelled"])
+@pytest.mark.parametrize("source_kind", ["file", "archive", "variants"])
+async def test_retry_does_not_inherit_physical_outcome_even_when_cancelled_while_queued(
+    alignment, outcome, source_kind
+):
+    from backend.app.api.routes.print_queue import retry_queue_item
+
+    async with alignment.sessions() as db:
+        old = await db.get(PrintQueueItem, alignment.job_id)
+        if source_kind == "variants":
+            db.add(PrintQueueVariant(queue_item_id=old.id, library_file_id=alignment.source_id, target_model="X1C"))
+            await db.commit()
+        await transition_queue_item(db, old, "queued", "dispatching")
+        await transition_queue_item(
+            db,
+            old,
+            "dispatching",
+            outcome,
+            values={
+                "error_message": "Original outcome",
+                "completed_at": datetime.now(timezone.utc).replace(tzinfo=None),
+            },
+        )
+        await db.commit()
+        original_facts = (old.physical_outcome, old.physical_completed_at, old.physical_failure_reason)
+        assert all(original_facts)
+        original_archive = await db.get(PrintArchive, old.archive_id)
+        archive_facts = (original_archive.status, original_archive.completed_at, original_archive.failure_reason)
+        if source_kind == "archive":
+            alignment.source_path.unlink()
+        result = await retry_queue_item(old.id, db=db, auth_result=(None, True), _=None)
+        new = await db.get(PrintQueueItem, result.id)
+        old_id, new_id, archive_id = old.id, new.id, old.archive_id
+        assert new.id != old.id and new.status == "queued" and old.status == outcome
+        assert (new.physical_outcome, new.physical_completed_at, new.physical_failure_reason) == (None, None, None)
+        await cancel_job(db, new)
+    async with alignment.sessions() as observer:
+        new = await observer.get(PrintQueueItem, new_id)
+        old = await observer.get(PrintQueueItem, old_id)
+        original_archive = await observer.get(PrintArchive, archive_id)
+        assert new.status == "unsuccessful" and old.status == outcome
+        assert (new.physical_outcome, new.physical_completed_at, new.physical_failure_reason) == (None, None, None)
+        assert (old.physical_outcome, old.physical_completed_at, old.physical_failure_reason) == original_facts
+        assert original_archive.dispatched_queue_item_id == old.id
+        assert (
+            original_archive.status,
+            original_archive.completed_at,
+            original_archive.failure_reason,
+        ) == archive_facts
+
+
 @pytest.mark.parametrize("clear_plate", [False, True])
 @pytest.mark.parametrize("outcome, archived", [("failed", "failed"), ("cancelled", "aborted")])
 async def test_late_external_archive_preserves_failure_after_user_clears_plate(

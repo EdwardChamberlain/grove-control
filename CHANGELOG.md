@@ -11,6 +11,8 @@
   Archives downloaded later. Copy failures honor configured Auto Off, and a
   heat-soak handoff race does not strand other printers. Hidden uploads remain
   available until every referencing job, including file variants, is final.
+  Heat-soak handoffs check fresh telemetry after reconnecting during copying,
+  and Retry starts with no physical outcome from the previous job.
 
 - Queue jobs now persist **Paused** from matching printer telemetry, including
   startup and reconnect, and return to Printing on resume. Paused jobs retain

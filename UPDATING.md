@@ -183,6 +183,9 @@ Clear Plate changes only the job. Existing Archive outcome names remain
 An external Archive download that finishes after Clear Plate uses the retained
 physical outcome, timestamp and failure reason. Copy failures also honor the
 job's Auto Off setting, including completed and skipped heat-soak handoffs.
+Heat-soak handoffs check current telemetry after copying, including when a
+reconnection replaces the client. Retry starts with empty physical-outcome
+fields; cancelling the retry while queued does not inherit the old result.
 Hidden Queue uploads remain available while any nonfinal job references them,
 including a queued file variant; deletion happens after the last job finalizes
 and its transaction commits. Files copies remain independent.

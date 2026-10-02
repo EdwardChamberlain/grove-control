@@ -239,6 +239,8 @@ work with the conditional transition writer:
   external print cannot be displaced while its callback is still pending.
   A heat-soak handoff conflict rolls back only that item; earlier committed
   handoffs still start their dispatch workers.
+  The guard reads current telemetry even if reconnection replaced the client
+  during copying; missing, disconnected or unready telemetry cannot dispatch.
 - Successful upload is no longer required for an Archive entry. Upload,
   drying-policy and command failures update the attempt to `failed` and retain
   the printer hold. A copy failure holds the job as `failed` without sending
@@ -250,6 +252,8 @@ work with the conditional transition writer:
   The job retains the outcome, timestamp and failure reason separately from
   its released state, so a delayed external Archive can attach after Clear
   Plate or restart. Association briefly locks the job against Stop/Clear Plate.
+  Retry starts with no physical outcome, completion timestamp or failure reason
+  from the previous job, including when the retry is cancelled while queued.
 - Hidden sources are retained by every nonfinal reference, including variants.
   Finalization detaches final references and removes sources; artifact deletion
   waits for commit. Files storage and external sources are preserved.
@@ -307,6 +311,10 @@ Also finish a slow external Archive download after failure/Stop and Clear
 Plate, advance multiple heat soaks while one printer becomes busy during
 copying, and confirm Auto Off after a copy failure on ordinary and heat-soak
 jobs. Verify the one-time outcome backfill on a pre-stage-5 PostgreSQL database.
+Reconnect during a heat-soak Archive copy and verify fresh busy or unready
+telemetry prevents upload and dispatch; a fresh idle report permits the
+handoff. Retry failed and cancelled jobs from Files, Archive and variants,
+then cancel the queued retry and confirm the original outcome is unchanged.
 
 `test_queue_archive_alignment.py` covers real-database dispatch/Archive commit,
 rollback (including session close), cancellation during copying, duplicate

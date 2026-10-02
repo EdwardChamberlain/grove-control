@@ -30,7 +30,8 @@ async def soak(tmp_path, monkeypatch):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await _ensure_active_queue_printer_reservation(conn)
-    state = PrinterState(connected=True, state="IDLE")
+    # This connected client has already reported its idle job state.
+    state = PrinterState(connected=True, state="IDLE", job_telemetry_ready=True)
     client = MagicMock()
     client.set_bed_temperature.return_value = True
     client.set_chamber_temperature.return_value = True
