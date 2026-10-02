@@ -191,7 +191,7 @@ async def test_same_status_completion_repairs_only_proven_legacy_attempt(legacy,
         assert (job.physical_outcome, job.physical_completed_at, job.physical_failure_reason) == snapshot
 
 
-@pytest.mark.parametrize("phase", ["before_request", "during_copy"])
+@pytest.mark.parametrize("phase", ["before_request", "before_readiness_check", "during_copy"])
 @pytest.mark.parametrize("progressed", ["dispatching", "printing", "paused"])
 async def test_skip_is_successful_when_the_same_soak_already_progressed(handoff, monkeypatch, phase, progressed):
     async def advance():
@@ -206,6 +206,21 @@ async def test_skip_is_successful_when_the_same_soak_already_progressed(handoff,
 
     if phase == "before_request":
         await advance()
+    elif phase == "before_readiness_check":
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        original_commit = AsyncSession.commit
+        advanced = False
+
+        async def commit_then_advance(db):
+            nonlocal advanced
+            await original_commit(db)
+            if not advanced:
+                advanced = True
+                await advance()
+                handoff.states[1].state = "PAUSE" if progressed == "paused" else "RUNNING"
+
+        monkeypatch.setattr(AsyncSession, "commit", commit_then_advance)
     else:
         original = ArchiveService.archive_print
         copying = False
@@ -279,3 +294,68 @@ async def test_dispatch_entry_rejects_explicitly_clearing_the_selected_printer(a
         assert job.status == "queued" and job.printer_id == 1 and job.archive_id is None
         assert await observer.scalar(select(PrintArchive.id)) is None
     assert not list(settings.archive_dir.rglob("*.3mf"))
+
+
+@pytest.mark.parametrize("phase", ["before_copy", "during_copy", "at_cas"])
+@pytest.mark.parametrize("readiness", ["busy", "unready", "disconnected", "missing"])
+async def test_skip_preserves_soak_when_telemetry_cannot_dispatch(handoff, monkeypatch, phase, readiness):
+    now = heat.utcnow()
+    monkeypatch.setattr(heat, "utcnow", lambda: now)
+    copied, spawned = AsyncMock(), []
+    original_copy, original_ready = ArchiveService.archive_print, heat._dispatch_ready
+
+    def make_unavailable():
+        nonlocal now
+        now += timedelta(seconds=10)
+        state = handoff.states[1]
+        if readiness == "busy":
+            state.state = "RUNNING"
+            state.submission_id = "another-print"
+        elif readiness == "unready":
+            state.job_telemetry_ready = False
+        elif readiness == "disconnected":
+            state.connected = False
+        else:
+            handoff.states.pop(1)
+
+    if phase == "before_copy":
+        make_unavailable()
+
+    async def prepare(service, **kwargs):
+        await copied()
+        attempt = await original_copy(service, **kwargs)
+        if phase == "during_copy":
+            make_unavailable()
+        return attempt
+
+    checks = 0
+
+    def ready(printer_id):
+        nonlocal checks
+        checks += 1
+        if phase == "at_cas" and checks == 3:
+            make_unavailable()
+        return original_ready(printer_id)
+
+    def collect(coroutine, **kwargs):
+        spawned.append(kwargs["name"])
+        coroutine.close()
+
+    monkeypatch.setattr(ArchiveService, "archive_print", prepare)
+    monkeypatch.setattr(heat, "_dispatch_ready", ready)
+    monkeypatch.setattr(heat, "spawn_background_task", collect)
+    async with handoff.sessions() as db:
+        with pytest.raises(HTTPException) as failure:
+            await skip_queue_item_heat_soak(handoff.job_id, db=db, auth_result=(None, True))
+        assert failure.value.status_code == 409 and "not ready" in failure.value.detail
+    async with handoff.sessions() as db:
+        job = await db.get(PrintQueueItem, handoff.job_id)
+        assert job.status == "preheating" and job.chamber_heat_soak
+        assert job.preheat_owner == handoff.service.owner and job.preheat_checked_at == now
+        assert job.archive_id is None and job.physical_outcome is None
+        assert await db.scalar(select(PrintArchive.id)) is None
+    assert copied.await_count == int(phase != "before_copy")
+    assert not any(name.startswith("skip-heat-soak-dispatch-") for name in spawned)
+    assert not list(settings.archive_dir.rglob("*.3mf"))
+    assert not list((settings.archive_dir / "1").glob("*"))
+    assert handoff.source_path.exists()

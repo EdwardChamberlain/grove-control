@@ -801,9 +801,23 @@ class TestPrintQueueAPI:
         source_archive.file_path = str(source)
         await db_session.commit()
 
+        from types import SimpleNamespace
+
+        from backend.app.services.printer_manager import printer_manager
+
+        monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
+        monkeypatch.setattr(
+            printer_manager,
+            "get_status",
+            lambda _id: SimpleNamespace(state="IDLE", connected=True, job_telemetry_ready=True),
+        )
+
         from unittest.mock import patch
 
-        with patch("backend.app.core.tasks.spawn_background_task", side_effect=lambda coro, **kwargs: coro.close()):
+        with patch(
+            "backend.app.services.chamber_heat_soak.spawn_background_task",
+            side_effect=lambda coro, **kwargs: coro.close(),
+        ):
             response = await async_client.post(f"/api/v1/queue/{item.id}/skip-heat-soak")
 
         assert response.status_code == 200, response.text

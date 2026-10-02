@@ -28,6 +28,10 @@
   explicit Failed hold directly. Skip succeeds when the same attempt has
   already progressed, without launching another worker. Repeated completion
   callbacks still repair proven legacy links and preserve physical outcomes.
+  Skip also checks fresh printer readiness before and after copying and at
+  handoff; unsafe telemetry retains the soak heartbeat and removes the prepared
+  copy. Reconnect repairs proven legacy links for already-ended jobs without
+  replaying completion effects, including after Clear Plate or a cached completion.
 
 - Queue jobs now persist **Paused** from matching printer telemetry, including
   startup and reconnect, and return to Printing on resume. Paused jobs retain

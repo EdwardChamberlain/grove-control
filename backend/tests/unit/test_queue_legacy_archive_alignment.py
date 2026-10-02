@@ -245,3 +245,129 @@ async def test_legacy_association_does_not_guess_or_modify_another_attempt(legac
         await db.refresh(archive)
         assert (archive.status, archive.subtask_id, archive.dispatched_queue_item_id, archive.completed_at) == original
         assert job.status == "failed" and job.physical_outcome == "failed"
+
+
+@pytest.mark.parametrize("cached", [False, True])
+@pytest.mark.parametrize(
+    "status,outcome",
+    [
+        ("finished", "completed"),
+        ("failed", "failed"),
+        ("successful", "completed"),
+        ("unsuccessful", "failed"),
+        ("unsuccessful", "aborted"),
+    ],
+)
+async def test_reconnect_repairs_terminal_legacy_archive_without_replaying_completion(
+    legacy, monkeypatch, cached, status, outcome
+):
+    import backend.app.main as main
+    from backend.app.services.printer_manager import printer_manager
+
+    completed = datetime(2026, 10, 1, 12)
+    reason = "Original HMS failure" if outcome == "failed" else "User cancelled" if outcome == "aborted" else None
+    live = SimpleNamespace(
+        connected=True,
+        job_telemetry_ready=True,
+        state="FINISH" if outcome == "completed" else "FAILED",
+        submission_id="123",
+        subtask_id="123",
+        raw_data={},
+    )
+    monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
+    monkeypatch.setattr(main, "async_session", legacy.sessions)
+    cache = {1: legacy.job_id} if cached else {}
+    monkeypatch.setattr(main, "_completed_job_events", cache)
+    monkeypatch.setattr(main, "_user_stopped_printers", set())
+    notified, completed_event, relayed = AsyncMock(), AsyncMock(), AsyncMock()
+    usage = AsyncMock()
+    monkeypatch.setattr(main.notification_service, "on_queue_completed", notified)
+    monkeypatch.setattr(main.ws_manager, "send_print_complete", completed_event)
+    monkeypatch.setattr(main.mqtt_relay, "on_queue_job_completed", relayed)
+    monkeypatch.setattr(main, "_bump_library_file_usage_if_completed", usage)
+    monkeypatch.setattr(main, "spawn_background_task", lambda coroutine, **_kwargs: coroutine.close())
+    async with legacy.sessions() as db:
+        job = await db.get(PrintQueueItem, legacy.job_id)
+        await db.execute(
+            PrintQueueItem.__table__.update()
+            .where(PrintQueueItem.id == job.id)
+            .values(
+                status=status,
+                completed_at=completed,
+                error_message="Original display reason",
+                physical_outcome=outcome,
+                physical_completed_at=completed,
+                physical_failure_reason=reason,
+            )
+        )
+        await db.commit()
+        await db.refresh(job)
+        snapshot = (
+            job.status,
+            job.completed_at,
+            job.error_message,
+            job.physical_outcome,
+            job.physical_completed_at,
+            job.physical_failure_reason,
+        )
+    await main.reconcile_stale_active_prints(1)
+    # A conflicting late report must neither rewrite facts nor replay effects.
+    await main.on_print_complete(
+        1, {"submission_id": "123", "status": "failed" if outcome == "completed" else "completed"}
+    )
+    async with legacy.sessions() as db:
+        job = await db.get(PrintQueueItem, legacy.job_id)
+        archive = await db.get(PrintArchive, legacy.archive_id)
+        assert archive.dispatched_queue_item_id == job.id and archive.status == outcome
+        assert archive.completed_at == completed and archive.failure_reason == reason
+        assert archive.started_at == job.started_at
+        assert (
+            job.status,
+            job.completed_at,
+            job.error_message,
+            job.physical_outcome,
+            job.physical_completed_at,
+            job.physical_failure_reason,
+        ) == snapshot
+        assert await db.scalar(select(PrintLogEntry.id)) is None
+    for effect in (notified, completed_event, relayed, usage):
+        effect.assert_not_awaited()
+    assert cache == ({1: legacy.job_id} if cached else {})
+
+
+@pytest.mark.parametrize("duplicate", ["archive", "job"])
+async def test_reconnect_terminal_legacy_repair_rejects_ambiguous_identity(legacy, monkeypatch, duplicate):
+    import backend.app.main as main
+    from backend.app.services.printer_manager import printer_manager
+
+    monkeypatch.setattr(
+        printer_manager,
+        "get_status",
+        lambda _id: SimpleNamespace(
+            connected=True, job_telemetry_ready=True, state="FAILED", submission_id="123", raw_data={}
+        ),
+    )
+    monkeypatch.setattr(main, "async_session", legacy.sessions)
+    monkeypatch.setattr(main, "_completed_job_events", {})
+    completed = datetime(2026, 10, 1, 12)
+    async with legacy.sessions() as db:
+        await db.execute(
+            PrintQueueItem.__table__.update()
+            .where(PrintQueueItem.id == legacy.job_id)
+            .values(status="failed", physical_outcome="failed", physical_completed_at=completed)
+        )
+        if duplicate == "archive":
+            db.add(
+                PrintArchive(
+                    printer_id=1, filename="other.3mf", file_path="", file_size=0, status="printing", subtask_id="123"
+                )
+            )
+        else:
+            db.add(PrintQueueItem(printer_id=1, status="successful", dispatch_subtask_id="123"))
+        await db.commit()
+    await main.reconcile_stale_active_prints(1)
+    async with legacy.sessions() as db:
+        archive = await db.get(PrintArchive, legacy.archive_id)
+        job = await db.get(PrintQueueItem, legacy.job_id)
+        assert archive.dispatched_queue_item_id is None and archive.status == "printing"
+        assert job.status == "failed" and job.physical_completed_at == completed

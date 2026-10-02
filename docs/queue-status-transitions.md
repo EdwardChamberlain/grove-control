@@ -130,9 +130,10 @@ starts, and previously ended identities cannot establish a transfer. The new
 job follows the normal completion and plate-clear rules, including after restart.
 
 The unconfirmed-dispatch prompt requires an attempt ID, a send timestamp, and
-an expired acknowledgement window after preparation has finished. Upload and
-Archive-copy workers remain `queued` or `preheating`, with cancellation/Stop
-available. The prepared attempt and `dispatching` hold are persisted together
+an expired acknowledgement window after preparation has finished. Archive-copy
+workers remain `queued` or `preheating`, with cancellation/Stop available;
+upload workers hold the printer in `dispatching`. The prepared attempt and
+`dispatching` hold are persisted together
 after copying, without holding a control lock during preparation. The send timer
 starts after upload, and both REST serialization and resolution reject
 attempts still owned by a preparation worker.
@@ -251,6 +252,10 @@ work with the conditional transition writer:
   Check readiness before copying too: unready telemetry keeps the heartbeat
   alive without producing repeated copies. Per-item database/flush errors
   roll back only that item and preserve earlier committed handoffs.
+  Skip uses the same fresh telemetry checks before copying, after re-locking
+  and at the conditional handoff. Missing, disconnected, busy or unready
+  telemetry returns HTTP 409, retains the soak and heartbeat, and discards any
+  prepared copy without launching a worker.
 - Successful upload is no longer required for an Archive entry. Upload,
   drying-policy and command failures update the attempt to `failed` and retain
   the printer hold. A copy failure holds the job as `failed` without sending
@@ -273,6 +278,9 @@ work with the conditional transition writer:
   Clear Plate and printer deletion do not rewrite the physical outcome.
   Repeated completion callbacks still repair proven restored legacy links,
   while ordinary same-status heartbeat/metadata writes skip those queries.
+  Reconnect reconciliation also repairs already-ended jobs, including final
+  jobs after Clear Plate and cached completions, without replaying completion
+  effects or changing the retained physical facts.
   A restored active Archive without its dispatch link is associated inside the
   same transition only when its printer and submission ID uniquely identify
   the job. Reused IDs, historical sources and other attempts are never adopted.

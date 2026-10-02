@@ -150,6 +150,11 @@ async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> bool:
     item_id, owner, printer_id = item.id, item.preheat_owner, item.printer_id
     item.preheat_checked_at = utcnow()
     await db.commit()
+    if not _dispatch_ready(printer_id):
+        item = await lock_queue_item(db, item_id)
+        started = bool(item and item.printer_id == printer_id and await heat_soak_dispatch_started(db, item))
+        await db.rollback()
+        return started
     preparation = await prepare_dispatch_attempt(db, item, {})
     item = await lock_queue_item(db, item_id)
     if not item or item.status != "preheating" or item.preheat_owner != owner or item.printer_id != printer_id:
@@ -157,6 +162,11 @@ async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> bool:
         started = bool(item and item.printer_id == printer_id and await heat_soak_dispatch_started(db, item))
         await db.rollback()
         return started
+    if not _dispatch_ready(printer_id):
+        discard_prepared_archive(db, preparation.archive)
+        item.preheat_checked_at = utcnow()
+        await db.commit()
+        return False
     if preparation.error_message:
         await abort_heat_soak(db, item, preparation.error_message, schedule_auto_off=True)
         return False
@@ -169,6 +179,7 @@ async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> bool:
             "preheating",
             "dispatching",
             conditions=(PrintQueueItem.preheat_owner == owner, PrintQueueItem.printer_id == printer_id),
+            dispatch_guard=lambda: _dispatch_ready(printer_id),
             values={
                 "chamber_heat_soak": False,
                 "manual_start": False,
@@ -184,7 +195,15 @@ async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> bool:
         await db.commit()
     except QueueTransitionConflict:
         await db.rollback()
-        return False
+        # A last-moment telemetry change must not discard the soak's liveness.
+        item = await lock_queue_item(db, item_id)
+        if item and item.status == "preheating" and item.preheat_owner == owner and item.printer_id == printer_id:
+            item.preheat_checked_at = utcnow()
+            await db.commit()
+            return False
+        started = bool(item and item.printer_id == printer_id and await heat_soak_dispatch_started(db, item))
+        await db.rollback()
+        return started
     _show_preheating(printer_id, False)
     spawn_background_task(scheduler._dispatch_after_heat_soak(item_id), name=f"skip-heat-soak-dispatch-{item_id}")
     return True

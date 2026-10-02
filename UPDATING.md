@@ -209,8 +209,14 @@ refreshes the failed job. Pool copy failures send a failure notification;
 assignment notifications require a successful dispatch handoff.
 Skip succeeds when the same job's exact attempt has already progressed during
 the request; it neither copies again nor launches another dispatch worker.
+Skip checks fresh ready/idle telemetry before copying and at handoff. If the
+printer becomes busy, disconnected or unready, it returns HTTP 409 and keeps
+the soak alive; any prepared attempt is discarded and no worker starts.
 Repeated completion callbacks still repair proven restored legacy Archive links
 without rewriting the job's recorded physical outcome.
+Reconnect reconciliation reaches this repair for already-ended and final jobs,
+including cached completions, without replaying notifications or other completion
+effects. Duplicate identities still cannot establish a link.
 Retry starts with empty physical-outcome
 fields; cancelling the retry while queued does not inherit the old result.
 Hidden Queue uploads remain available while any nonfinal job references them,

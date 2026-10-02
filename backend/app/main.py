@@ -118,7 +118,7 @@ from backend.app.services.printer_manager import (
     printer_state_to_dict,
 )
 from backend.app.services.queue_source_cleanup import start_queue_source_cleanup, stop_queue_source_cleanup
-from backend.app.services.queue_transitions import QueueTransitionConflict, transition_queue_item
+from backend.app.services.queue_transitions import FINAL_STATUSES, QueueTransitionConflict, transition_queue_item
 from backend.app.services.slot_nozzle import (
     resolve_slot_nozzle,
 )
@@ -4400,7 +4400,7 @@ async def _complete_identified_print(printer_id: int, data: dict):
     """Handle print completion - update the archive status."""
     import time
 
-    from backend.app.models.print_queue import PrintQueueItem
+    from backend.app.models.print_queue import AWAITING_PLATE_CLEAR_STATUSES, PrintQueueItem
 
     logger = logging.getLogger(__name__)
     start_time = time.time()
@@ -4435,6 +4435,27 @@ async def _complete_identified_print(printer_id: int, data: dict):
         if data.get("_recovered_dispatch"):
             statuses += ("finished", "failed", "successful")
         matched_job = await find_job(db, printer_id, identity, statuses)
+        if matched_job is None or _completed_job_events.get(printer_id) == matched_job.id:
+            terminal_statuses = (*AWAITING_PLATE_CLEAR_STATUSES, *FINAL_STATUSES)
+            ended_job = matched_job or await find_job(db, printer_id, identity, terminal_statuses)
+            if ended_job is not None and ended_job.status in terminal_statuses:
+                # Repair a restored link even when completion effects already ran.
+                # The writer requires unique identity and retains physical facts.
+                try:
+                    await transition_queue_item(
+                        db,
+                        ended_job,
+                        ended_job.status,
+                        ended_job.status,
+                        conditions=(
+                            PrintQueueItem.printer_id == printer_id,
+                            PrintQueueItem.dispatch_subtask_id == identity,
+                        ),
+                    )
+                    await db.commit()
+                except QueueTransitionConflict:
+                    await db.rollback()
+                return None
         if matched_job is None and identity:
             # An external print archived by an older version may finish while
             # Grove is offline. Its exact ID can establish a job on reconnect;
