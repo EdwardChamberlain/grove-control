@@ -1200,6 +1200,8 @@ class ArchiveService:
         commit: bool = True,
         dispatched_queue_item_id: int | None = None,
         flush: bool = True,
+        unique_dir: bool = False,
+        created_dirs: list[Path] | None = None,
     ) -> PrintArchive | None:
         """Archive a 3MF file with metadata.
 
@@ -1228,6 +1230,8 @@ class ArchiveService:
                 atomically before publishing the print command.
             flush: When False with commit=False, prepare without writing the row.
                 The queue transition flushes it only after acquiring the hold.
+            unique_dir: Give this copy a private directory, even for matching names.
+            created_dirs: Record directories for caller-owned cleanup.
         """
         # Verify printer exists if specified
         if printer_id is not None:
@@ -1240,8 +1244,7 @@ class ArchiveService:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         display_stem = resolve_display_stem(original_filename if original_filename else source_file.name)
         archive_name = f"{timestamp}_{display_stem}"
-        if not commit and not flush:
-            # A prepared copy must never share paths with a committed attempt.
+        if unique_dir:
             archive_name += f"_{uuid4().hex}"
         # Use "unassigned" folder for archives without a printer
         printer_folder = str(printer_id) if printer_id is not None else "unassigned"
@@ -1249,8 +1252,8 @@ class ArchiveService:
             settings.archive_dir / printer_folder / archive_name
         )  # SEC-PATH-OK: printer_folder = str(int|None) → digits or "unassigned"; archive_name = f"{timestamp}_{display_stem}" where resolve_display_stem strips path components via Path(filename).name
         archive_dir.mkdir(parents=True, exist_ok=True)
-        if not commit and not flush:
-            self.db.sync_session.info.setdefault("queue_archive_artifacts", []).append(archive_dir)
+        if created_dirs is not None:
+            created_dirs.append(archive_dir)
 
         # Copy 3MF file with an explicit fsync'd loop (avoids a sendfile
         # short-read quirk that silently truncated 3MF archives on some

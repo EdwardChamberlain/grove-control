@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from sqlalchemy import delete, func, select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import set_committed_value
@@ -3901,6 +3901,18 @@ class PrintScheduler:
             unassigned = binding is not None and binding.unassigned
             if not self._is_printer_idle(printer_id):
                 return
+            from backend.app.services.queue_archive import prepare_dispatch_archive
+
+            values = {"waiting_reason": None, **(binding.values() if binding is not None else {})}
+            copy_failed = False
+            attempt = None
+            try:
+                attempt = await prepare_dispatch_archive(db, item, values)
+            except SQLAlchemyError:
+                raise
+            except Exception:
+                logger.exception("Queue item %s: failed to prepare dispatch Archive", item_id)
+                copy_failed = True
             try:
                 await transition_queue_item(
                     db,
@@ -3911,23 +3923,39 @@ class PrintScheduler:
                         PrintQueueItem.printer_id.is_(None) if unassigned else PrintQueueItem.printer_id == printer_id,
                         PrintQueueItem.dispatching_at == item.dispatching_at,
                     ),
-                    values={"waiting_reason": None, **(binding.values() if binding is not None else {})},
+                    values=values,
                     dispatch_guard=lambda: self._is_printer_idle(printer_id),
+                    attempt=attempt,
                 )
+                if copy_failed:
+                    await transition_queue_item(
+                        db,
+                        item,
+                        "dispatching",
+                        "failed",
+                        values={"error_message": "Failed to create Archive record for dispatch"},
+                    )
                 await db.commit()
             except IntegrityError:
                 await db.rollback()
                 logger.info("Printer %s was reserved concurrently; job %s remains queued", printer_id, item_id)
                 return
-            if unassigned:
-                await self._notify_pool_assignment(db, item)
 
         # Entry into dispatching committed the immutable, injected attempt.
         # Upload that copy, including for a completed or skipped heat soak.
         if item.status != "dispatching":
             if item.status == "failed":
+                await notification_service.on_queue_job_failed(
+                    job_name=filename.replace(".gcode.3mf", "").replace(".3mf", ""),
+                    printer_id=printer.id,
+                    printer_name=printer.name,
+                    reason=item.error_message,
+                    db=db,
+                )
                 await self._power_off_if_needed(db, item)
             return
+        if not heat_soak_complete and unassigned:
+            await self._notify_pool_assignment(db, item)
         archive = await db.get(PrintArchive, item.archive_id) if item.archive_id else None
         if archive is None or archive.dispatched_queue_item_id != item.id:
             await self._fail_queue_item(db, item, "Dispatch Archive is missing; inspect and retry")

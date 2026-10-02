@@ -131,8 +131,10 @@ job follows the normal completion and plate-clear rules, including after restart
 
 The unconfirmed-dispatch prompt requires an attempt ID, a send timestamp, and
 an expired acknowledgement window after preparation has finished. Upload and
-Archive-copy workers remain `dispatching` with Stop available. The send timer
-starts after the Archive copy, and both REST serialization and resolution reject
+Archive-copy workers remain `queued` or `preheating`, with cancellation/Stop
+available. The prepared attempt and `dispatching` hold are persisted together
+after copying, without holding a control lock during preparation. The send timer
+starts after upload, and both REST serialization and resolution reject
 attempts still owned by a preparation worker.
 
 **Retry** on a failed or cancelled attempt creates a separate, unlinked
@@ -231,8 +233,10 @@ Stage 2's strict printer/job identity matching and stage 4's durable `paused`
 transitions remain in place. Stage 5 aligns Archive and hidden-source lifecycle
 work with the conditional transition writer:
 
-- Entering `dispatching` prepares an immutable copy (with current injection),
-  then commits its exact Archive link and the printer hold together. FTP reads
+- Callers prepare an immutable copy (with current injection) before entering
+  `dispatching`; the transition writer only flushes and links that unflushed
+  attempt after its conditional update. Its exact Archive link and printer
+  hold commit together. FTP reads
   that copy. A losing cancellation/claim or rollback removes the uncommitted
   copy; preparation never locks a waiting job before the conditional update.
   Recheck idle telemetry after copying, before taking the hold, so a new
@@ -241,10 +245,19 @@ work with the conditional transition writer:
   handoffs still start their dispatch workers.
   The guard reads current telemetry even if reconnection replaced the client
   during copying; missing, disconnected or unready telemetry cannot dispatch.
+  Heat-soak and Skip controls commit their heartbeat and release the write
+  lock before copying, then re-lock and verify status and `preheat_owner`.
+  Check readiness before copying too: unready telemetry keeps the heartbeat
+  alive without producing repeated copies. Per-item database/flush errors
+  roll back only that item and preserve earlier committed handoffs.
 - Successful upload is no longer required for an Archive entry. Upload,
   drying-policy and command failures update the attempt to `failed` and retain
   the printer hold. A copy failure holds the job as `failed` without sending
   and runs configured Auto Off after commit, including heat-soak handoffs.
+  Preparation rejects soft-deleted Files or Archive sources. Skip failures
+  return HTTP 409 with the committed job error; the Queue displays it and
+  refreshes the failed job. Pool copy failures send a failure notification,
+  and assignment notifications are sent only after successful handoff.
 - Entry into `finished`, `failed`, or `cancelled` records the Archive outcome
   (`completed`, `failed`, or `aborted`) in the same transaction. Exact job and
   Archive columns must both match. Pause/resume, duplicate terminal observations,

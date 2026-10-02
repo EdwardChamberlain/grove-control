@@ -172,7 +172,13 @@ backfill; an older `unsuccessful` job without that evidence stays unknown.
 Display reasons are never used to guess whether a print failed or was stopped.
 
 New attempts create their exact Archive copy atomically with entry into
-Dispatching, before uploading to the printer. An upload or command failure
+Dispatching, before uploading to the printer. Callers prepare that copy before
+taking the transition lock; the writer only conditionally changes the job and
+flushes its prepared Archive. Heat-soak and Skip preparation release the control
+lock after committing a heartbeat, allowing Stop to win during copying.
+The handoff rechecks the job's status and owner before linking the attempt;
+cancelled preparations leave no Archive row or prepared directory.
+An upload or command failure
 therefore appears in Archive while its
 job holds the printer on the Queue. Jobs cancelled while waiting, or stopped
 or failed during preheating, still create no Archive entry.
@@ -184,7 +190,15 @@ An external Archive download that finishes after Clear Plate uses the retained
 physical outcome, timestamp and failure reason. Copy failures also honor the
 job's Auto Off setting, including completed and skipped heat-soak handoffs.
 Heat-soak handoffs check current telemetry after copying, including when a
-reconnection replaces the client. Retry starts with empty physical-outcome
+reconnection replaces the client. They also check readiness before copying;
+unready telemetry keeps the heartbeat alive without repeated copies. Database
+or flush errors in one handoff preserve other committed handoffs from the tick.
+Preparation rejects deleted Files and Archive sources. A Skip copy failure
+commits Failed with its printer hold and Auto Off, then returns HTTP 409 with
+the job's error instead of reporting success. The Queue shows that error and
+refreshes the failed job. Pool copy failures send a failure notification;
+assignment notifications require a successful dispatch handoff.
+Retry starts with empty physical-outcome
 fields; cancelling the retry while queued does not inherit the old result.
 Hidden Queue uploads remain available while any nonfinal job references them,
 including a queued file variant; deletion happens after the last job finalizes

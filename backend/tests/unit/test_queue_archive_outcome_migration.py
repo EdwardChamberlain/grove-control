@@ -3,7 +3,7 @@
 from datetime import datetime
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import event, select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 import backend.app.models  # noqa: F401
@@ -103,5 +103,48 @@ async def test_upgrade_backfills_only_proven_outcomes_and_runs_once():
             await conn.execute(text("UPDATE print_queue SET physical_outcome = NULL, status = 'failed' WHERE id = 8"))
             await _migrate_queue_archive_outcomes(conn)
             assert await conn.scalar(select(PrintQueueItem.physical_outcome).where(PrintQueueItem.id == 8)) is None
+    finally:
+        await engine.dispose()
+
+
+async def test_backfill_reads_attempts_together_without_rewriting_queue_to_lock():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    statements = []
+
+    def capture(_conn, _cursor, statement, _parameters, _context, _executemany):
+        statements.append(statement)
+
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(
+                PrintQueueItem.__table__.insert(),
+                [{"id": i, "status": "unsuccessful", "archive_id": i} for i in range(1, 11)],
+            )
+            await conn.execute(
+                PrintArchive.__table__.insert(),
+                [
+                    {
+                        "id": i,
+                        "filename": "attempt.3mf",
+                        "file_path": "attempt.3mf",
+                        "file_size": 1,
+                        "status": "failed",
+                        "dispatched_queue_item_id": i,
+                    }
+                    for i in range(1, 11)
+                ],
+            )
+            event.listen(engine.sync_engine, "before_cursor_execute", capture)
+            try:
+                await _migrate_queue_archive_outcomes(conn)
+            finally:
+                event.remove(engine.sync_engine, "before_cursor_execute", capture)
+            assert len([sql for sql in statements if "LEFT OUTER JOIN print_archives" in sql]) == 1
+            assert not any(
+                "FROM print_archives" in sql or "SET id=print_queue.id" in sql or "SET id = id" in sql
+                for sql in statements
+            )
+            assert set(await conn.scalars(select(PrintQueueItem.physical_outcome))) == {"failed"}
     finally:
         await engine.dispose()

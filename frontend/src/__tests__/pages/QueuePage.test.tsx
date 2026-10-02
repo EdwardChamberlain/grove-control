@@ -356,6 +356,37 @@ describe('QueuePage', () => {
       });
     });
 
+    it('shows the Skip heat soak failure reason and refreshes the failed job', async () => {
+      const user = userEvent.setup();
+      let failed = false;
+      const reason = 'Failed to create Archive record for dispatch';
+      server.use(
+        http.get('/api/v1/queue/', () => HttpResponse.json([
+          {
+            ...mockQueueItems[0],
+            id: 4,
+            status: failed ? 'failed' : 'preheating',
+            error_message: failed ? reason : null,
+            archive_name: 'Skip this soak',
+            chamber_heat_soak: true,
+            heat_soak_minutes: 10,
+            preheat_started_at: new Date().toISOString(),
+          },
+        ])),
+        http.post('/api/v1/queue/:id/skip-heat-soak', () => {
+          failed = true;
+          return HttpResponse.json({ detail: reason }, { status: 409 });
+        }),
+      );
+      render(<QueuePage />);
+      await user.click(await screen.findByTitle('Skip heat soak'));
+      await waitFor(() => {
+        expect(screen.getAllByText(reason).length).toBeGreaterThan(0);
+        expect(screen.getByRole('button', { name: 'Clear plate' })).toBeInTheDocument();
+        expect(screen.queryByText('Heat soak skipped')).not.toBeInTheDocument();
+      });
+    });
+
     it('shows finished jobs with Clear Plate in the live queue', async () => {
       render(<QueuePage />);
       expect(await screen.findByText('Completed Print')).toBeInTheDocument();

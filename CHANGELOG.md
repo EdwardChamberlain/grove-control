@@ -16,6 +16,12 @@
   Restored active Archives without a dispatch link are associated by unique
   printer and submission identity, so their completion, failure or Stop is
   recorded atomically with the job.
+  Dispatch callers prepare files before taking the transition lock, so Stop
+  can win during heat-soak and Skip copies too. Unready telemetry keeps the
+  soak heartbeat alive without repeated copies, and one failed handoff cannot
+  strand other printers. Deleted sources are rejected. Skip copy failures
+  return the job's error and refresh the Queue; pool copy failures send a
+  failure notification instead of an assignment notification.
 
 - Queue jobs now persist **Paused** from matching printer telemetry, including
   startup and reconnect, and return to Printing on resume. Paused jobs retain

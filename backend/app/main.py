@@ -2585,24 +2585,25 @@ async def _observe_print_start(printer_id: int, data: dict):
     await _archive_print_start(printer_id, data, queue_archive_id=queue_archive_id)
     async with async_session() as db:
         from backend.app.models.archive import PrintArchive
+        from backend.app.models.print_queue import PrintQueueItem
         from backend.app.services.chamber_heat_soak import lock_queue_item
 
-        # Serialize the short association transaction with Clear Plate/Stop;
-        # its snapshot must still be current at the conditional update.
+        item = await db.get(PrintQueueItem, item_id)
+        if item is None or item.archive_id is not None:
+            return
+        query = select(PrintArchive).where(
+            PrintArchive.printer_id == printer_id,
+            PrintArchive.subtask_id == identity,
+            PrintArchive.dispatched_queue_item_id.is_(None),
+            PrintArchive.status == "printing",
+        )
+        archives = list((await db.scalars(query)).all())
+        if len(archives) != 1:
+            return
+        # Lock only for association, then recheck both sides against Stop/Clear Plate.
         item = await lock_queue_item(db, item_id)
         if item and item.archive_id is None:
-            archives = list(
-                (
-                    await db.scalars(
-                        select(PrintArchive).where(
-                            PrintArchive.printer_id == printer_id,
-                            PrintArchive.subtask_id == identity,
-                            PrintArchive.dispatched_queue_item_id.is_(None),
-                            PrintArchive.status == "printing",
-                        )
-                    )
-                ).all()
-            )
+            archives = list((await db.scalars(query.with_for_update().execution_options(populate_existing=True))).all())
             if len(archives) == 1:
                 archives[0].dispatched_queue_item_id = item.id
                 await transition_queue_item(db, item, item.status, item.status, values={"archive_id": archives[0].id})

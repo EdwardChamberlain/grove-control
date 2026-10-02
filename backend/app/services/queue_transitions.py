@@ -14,7 +14,6 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import event, select
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
@@ -23,12 +22,21 @@ from sqlalchemy.sql.elements import ColumnElement
 from backend.app.models.print_queue import ACTIVE_STATUSES, AWAITING_PLATE_CLEAR_STATUSES, HOLDING_STATUSES
 
 if TYPE_CHECKING:
+    from backend.app.models.archive import PrintArchive
     from backend.app.models.print_queue import PrintQueueItem
 
 
 FINAL_STATUSES = ("successful", "unsuccessful")
 ARCHIVE_OUTCOMES = {"finished": "completed", "failed": "failed", "cancelled": "aborted"}
 logger = logging.getLogger(__name__)
+
+
+def physical_failure_reason(outcome: str, error_message: str | None, override: str | None = None) -> str | None:
+    if outcome == "failed":
+        return (override or error_message or "Print failed")[:100]
+    return "User cancelled" if outcome == "aborted" else None
+
+
 ALLOWED_TRANSITIONS = {
     "queued": frozenset({"preheating", "dispatching", "unsuccessful"}),
     "preheating": frozenset({"dispatching", "failed", "cancelled", "unsuccessful"}),
@@ -167,6 +175,7 @@ async def transition_queue_item(
     migration: bool = False,
     archive_failure_reason: str | None = None,
     dispatch_guard: Callable[[], bool] | None = None,
+    attempt: PrintArchive | None = None,
 ) -> None:
     """Conditionally change a persisted item, or raise without writing it.
 
@@ -181,7 +190,8 @@ async def transition_queue_item(
     several items in one transaction, skips this item and continues. This
     function never commits or rolls back the caller's transaction. ORM status
     is synchronized without a second, unconditional status UPDATE at flush
-    time.
+    time. Callers prepare any dispatch Archive before taking a write lock;
+    a supplied attempt is flushed and linked only after the conditional update.
     """
     from backend.app.models.print_queue import PrintQueueItem
 
@@ -222,11 +232,13 @@ async def transition_queue_item(
                     table.c.id == item_id, table.c.status == expected_status, *conditions
                 )
             )
-    archive = None
-    archive_error = False
-    artifact_offset = (
-        len(db.sync_session.info.get("queue_archive_artifacts", [])) if isinstance(db, AsyncSession) else 0
-    )
+    from backend.app.services.queue_archive import discard_prepared_archive
+
+    archive = attempt
+    if archive is not None and (
+        not isinstance(db, AsyncSession) or status != "dispatching" or expected_status == status
+    ):
+        raise ValueError("A prepared Archive requires entry into dispatching on a session")
     if isinstance(db, AsyncSession) and expected_status != status:
         if status in AWAITING_PLATE_CLEAR_STATUSES:
             metadata.setdefault("completed_at", datetime.now(timezone.utc))
@@ -239,40 +251,16 @@ async def transition_queue_item(
             metadata.update(
                 physical_outcome=ARCHIVE_OUTCOMES[status],
                 physical_completed_at=metadata["completed_at"],
-                physical_failure_reason=(archive_failure_reason or (reason or "Print failed")[:100])
-                if status == "failed"
-                else "User cancelled"
-                if status == "cancelled"
-                else None,
+                physical_failure_reason=physical_failure_reason(
+                    ARCHIVE_OUTCOMES[status], reason, archive_failure_reason
+                ),
             )
-        if status == "dispatching":
-            from backend.app.services.queue_archive import prepare_dispatch_archive
-
-            dispatch_item = await db.get(PrintQueueItem, item_id) if isinstance(item, int) else item
-            if dispatch_item is not None:
-                try:
-                    with db.no_autoflush:
-                        archive = await prepare_dispatch_archive(db, dispatch_item, metadata)
-                except SQLAlchemyError:
-                    raise
-                except Exception:
-                    logger.exception("Queue item %s: failed to prepare dispatch Archive", item_id)
-                    archive_error = True
-                    artifacts = db.sync_session.info.get("queue_archive_artifacts", [])
-                    for directory in artifacts[artifact_offset:]:
-                        shutil.rmtree(directory, ignore_errors=True)
-                    del artifacts[artifact_offset:]
     # SQLAlchemy 2.1 autoflushes Core statements regardless of their statement
     # execution options. Suppress it at the session boundary so a losing CAS
     # cannot flush stale metadata first. Startup repairs use AsyncConnection.
     if dispatch_guard is not None and not dispatch_guard():
         if isinstance(db, AsyncSession):
-            if archive is not None:
-                db.expunge(archive)
-            artifacts = db.sync_session.info.get("queue_archive_artifacts", [])
-            for directory in artifacts[artifact_offset:]:
-                shutil.rmtree(directory, ignore_errors=True)
-            del artifacts[artifact_offset:]
+            discard_prepared_archive(db, archive)
         raise QueueTransitionConflict("Printer is no longer available after Archive preparation")
     with db.no_autoflush if isinstance(db, AsyncSession) else nullcontext():
         result = await db.execute(
@@ -283,12 +271,7 @@ async def transition_queue_item(
         )
     if result.rowcount != 1:
         if isinstance(db, AsyncSession):
-            if archive is not None:
-                db.expunge(archive)
-            artifacts = db.sync_session.info.get("queue_archive_artifacts", [])
-            for directory in artifacts[artifact_offset:]:
-                shutil.rmtree(directory, ignore_errors=True)
-            del artifacts[artifact_offset:]
+            discard_prepared_archive(db, archive)
         raise QueueTransitionConflict(f"Queue item {item_id} no longer matches expected status {expected_status}")
     if not isinstance(item, int):
         set_committed_value(item, "status", status)
@@ -302,64 +285,52 @@ async def transition_queue_item(
                 set_committed_value(item, "archive_id", archive.id)
                 # Existing loaded source relationships must follow the attempt.
                 set_committed_value(item, "archive", archive)
-        if archive_error:
-            await transition_queue_item(
-                db,
-                item,
-                "dispatching",
-                "failed",
-                values={"error_message": "Failed to create Archive record for dispatch"},
-            )
-            return
-        from backend.app.models.archive import PrintArchive
+        if expected_status != status or "archive_id" in metadata or "dispatch_subtask_id" in metadata:
+            from backend.app.models.archive import PrintArchive as ArchiveModel
 
-        # Only the exact attempt, never the Archive used as a reprint source.
-        row = (await db.execute(select(table).where(table.c.id == item_id))).one()
-        attempt = (
-            await db.scalar(
-                select(PrintArchive).where(
-                    PrintArchive.id == row.archive_id, PrintArchive.dispatched_queue_item_id == item_id
-                )
-            )
-            if row.archive_id is not None
-            else None
-        )
-        linked_legacy = attempt is None and await _link_legacy_archive_attempt(db, row, previous_identity)
-        if linked_legacy:
-            attempt = await db.scalar(
-                select(PrintArchive)
-                .where(PrintArchive.id == row.archive_id, PrintArchive.dispatched_queue_item_id == item_id)
-                .execution_options(populate_existing=True)
-            )
-        if attempt is not None:
-            attaching = "archive_id" in metadata or linked_legacy
-            if status == "dispatching" and "dispatch_subtask_id" in metadata:
-                attempt.subtask_id = metadata["dispatch_subtask_id"]
-            if (expected_status == "dispatching" and status == "printing") or (
-                attaching and status in ("printing", "paused")
-            ):
-                attempt.status = "printing"
-                attempt.started_at = row.started_at or datetime.now(timezone.utc)
-            if (status in AWAITING_PLATE_CLEAR_STATUSES and expected_status != status) or (
-                attaching and status in (*AWAITING_PLATE_CLEAR_STATUSES, *FINAL_STATUSES)
-            ):
-                outcome = row.physical_outcome or ARCHIVE_OUTCOMES.get(status)
-                if outcome is None and status == "successful":
-                    outcome = "completed"  # Unambiguous legacy final state.
-                if outcome is not None:
-                    attempt.status = outcome
-                    attempt.completed_at = row.physical_completed_at or row.completed_at
-                    attempt.failure_reason = (
-                        row.physical_failure_reason
-                        if row.physical_outcome is not None
-                        else (row.error_message or "Print failed")[:100]
-                        if outcome == "failed"
-                        else "User cancelled"
-                        if outcome == "aborted"
-                        else None
+            # Only the exact attempt, never the Archive used as a reprint source.
+            row = (await db.execute(select(table).where(table.c.id == item_id))).one()
+            attempt = (
+                await db.scalar(
+                    select(ArchiveModel).where(
+                        ArchiveModel.id == row.archive_id, ArchiveModel.dispatched_queue_item_id == item_id
                     )
-                    if attaching and row.started_at is not None:
-                        attempt.started_at = row.started_at
+                )
+                if row.archive_id is not None
+                else None
+            )
+            linked_legacy = attempt is None and await _link_legacy_archive_attempt(db, row, previous_identity)
+            if linked_legacy:
+                attempt = await db.scalar(
+                    select(ArchiveModel)
+                    .where(ArchiveModel.id == row.archive_id, ArchiveModel.dispatched_queue_item_id == item_id)
+                    .execution_options(populate_existing=True)
+                )
+            if attempt is not None:
+                attaching = "archive_id" in metadata or linked_legacy
+                if status == "dispatching" and "dispatch_subtask_id" in metadata:
+                    attempt.subtask_id = metadata["dispatch_subtask_id"]
+                if (expected_status == "dispatching" and status == "printing") or (
+                    attaching and status in ("printing", "paused")
+                ):
+                    attempt.status = "printing"
+                    attempt.started_at = row.started_at or datetime.now(timezone.utc)
+                if (status in AWAITING_PLATE_CLEAR_STATUSES and expected_status != status) or (
+                    attaching and status in (*AWAITING_PLATE_CLEAR_STATUSES, *FINAL_STATUSES)
+                ):
+                    outcome = row.physical_outcome or ARCHIVE_OUTCOMES.get(status)
+                    if outcome is None and status == "successful":
+                        outcome = "completed"  # Unambiguous legacy final state.
+                    if outcome is not None:
+                        attempt.status = outcome
+                        attempt.completed_at = row.physical_completed_at or row.completed_at
+                        attempt.failure_reason = (
+                            row.physical_failure_reason
+                            if row.physical_outcome is not None
+                            else physical_failure_reason(outcome, row.error_message)
+                        )
+                        if attaching and row.started_at is not None:
+                            attempt.started_at = row.started_at
         if status in FINAL_STATUSES and expected_status != status:
             from backend.app.models.print_queue import PrintQueueVariant
             from backend.app.services.queue_source_cleanup import remove_queue_only_source_if_unused

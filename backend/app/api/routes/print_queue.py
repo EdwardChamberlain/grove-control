@@ -1768,7 +1768,14 @@ async def skip_queue_item_heat_soak(
     if item.status != "preheating":
         raise HTTPException(400, f"Can only skip heat soak for preheating items, current status: '{item.status}'")
 
-    await skip_heat_soak(db, item)
+    if not await skip_heat_soak(db, item):
+        current = await db.get(PrintQueueItem, item_id, populate_existing=True)
+        raise HTTPException(
+            409,
+            (current.error_message or "Heat soak changed during preparation; refresh and retry")
+            if current
+            else "Queue item no longer exists",
+        )
     logger.info("Skipped heat soak for queue item %s", item_id)
     return {"message": "Heat soak skipped"}
 

@@ -1047,7 +1047,10 @@ export function QueuePage() {
       queryClient.invalidateQueries({ queryKey: ['queue'] });
       showToast(t('heatSoak.skipped'));
     },
-    onError: () => showToast(t('heatSoak.skipFailed'), 'error'),
+    onError: (error: Error) => {
+      queryClient.invalidateQueries({ queryKey: ['queue'] });
+      showToast(error.message || t('heatSoak.skipFailed'), 'error');
+    },
   });
 
   // Filament-deficit confirmation state (#1496). When the backend returns

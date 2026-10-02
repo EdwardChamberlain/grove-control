@@ -144,6 +144,8 @@ async def _dispatch_library_item(
         prefer_filename_for_name=False,
         commit=True,
         flush=True,
+        unique_dir=False,
+        created_dirs=None,
     ):
         if archive_failure:
             raise RuntimeError("archive copy failed")
@@ -151,7 +153,8 @@ async def _dispatch_library_item(
         archive_rel_path = Path("archives") / f"attempt-{ctx.queue_item_id}" / "copy.3mf"
         ctx.archive_path = ctx.base_dir / archive_rel_path
         ctx.archive_path.parent.mkdir(parents=True, exist_ok=True)
-        self.db.sync_session.info.setdefault("queue_archive_artifacts", []).append(ctx.archive_path.parent)
+        if created_dirs is not None:
+            created_dirs.append(ctx.archive_path.parent)
         ctx.archive_path.write_bytes(Path(source_file).read_bytes())
         if during_archive:
             await during_archive()

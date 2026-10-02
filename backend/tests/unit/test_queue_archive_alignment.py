@@ -20,6 +20,7 @@ from backend.app.models.printer import Printer
 from backend.app.models.settings import Settings
 from backend.app.services.archive import ArchiveService
 from backend.app.services.queue_actions import cancel_job
+from backend.app.services.queue_archive import prepare_dispatch_archive
 from backend.app.services.queue_source_cleanup import remove_queue_only_source_if_unused
 from backend.app.services.queue_transitions import QueueTransitionConflict, clear_job_plate, transition_queue_item
 
@@ -67,7 +68,7 @@ async def test_archive_and_hold_commit_together_and_same_state_never_copies_agai
             await transition_queue_item(db, job, "queued", "preheating")
             await db.commit()
             assert await db.scalar(select(PrintArchive.id)) is None
-        await transition_queue_item(db, job, before, "dispatching")
+        await transition_queue_item(db, job, before, "dispatching", attempt=await prepare_dispatch_archive(db, job, {}))
         attempt = await db.get(PrintArchive, job.archive_id)
         copied = settings.base_dir / attempt.file_path
         assert copied.read_bytes() == alignment.source_path.read_bytes()
@@ -87,7 +88,7 @@ async def test_archive_and_hold_commit_together_and_same_state_never_copies_agai
 async def test_rollback_discards_archive_row_and_prepared_files(alignment, close_only):
     db = alignment.sessions()
     job = await db.get(PrintQueueItem, alignment.job_id)
-    await transition_queue_item(db, job, "queued", "dispatching")
+    await transition_queue_item(db, job, "queued", "dispatching", attempt=await prepare_dispatch_archive(db, job, {}))
     attempt = await db.get(PrintArchive, job.archive_id)
     copied = settings.base_dir / attempt.file_path
     assert copied.exists()
@@ -114,7 +115,9 @@ async def test_cancel_during_copy_wins_without_an_archive_or_losing_pending_row(
     async with alignment.sessions() as worker:
         stale = await worker.get(PrintQueueItem, alignment.job_id)
         with pytest.raises(QueueTransitionConflict):
-            await transition_queue_item(worker, stale, "queued", "dispatching")
+            await transition_queue_item(
+                worker, stale, "queued", "dispatching", attempt=await prepare_dispatch_archive(worker, stale, {})
+            )
         # A scheduler handling several jobs may commit after skipping a loser.
         await worker.commit()
     async with alignment.sessions() as db:
@@ -131,7 +134,9 @@ async def test_outcome_commits_on_entry_and_plate_clear_does_not_rewrite_it(alig
     async with alignment.sessions() as db:
         db.add(Settings(key="require_plate_clear", value="false" if automatic else "true"))
         job = await db.get(PrintQueueItem, alignment.job_id)
-        await transition_queue_item(db, job, "queued", "dispatching")
+        await transition_queue_item(
+            db, job, "queued", "dispatching", attempt=await prepare_dispatch_archive(db, job, {})
+        )
         now = datetime.now(timezone.utc)
         await transition_queue_item(db, job, "dispatching", "printing", values={"started_at": now})
         await transition_queue_item(db, job, "printing", "paused")
@@ -160,7 +165,9 @@ async def test_reprint_source_is_immutable_and_outcome_uses_both_link_columns(al
         job.library_file_id = None
         job.archive_id = source.id
         await db.commit()
-        await transition_queue_item(db, job, "queued", "dispatching")
+        await transition_queue_item(
+            db, job, "queued", "dispatching", attempt=await prepare_dispatch_archive(db, job, {})
+        )
         attempt = await db.get(PrintArchive, job.archive_id)
         await transition_queue_item(db, job, "dispatching", "failed", values={"error_message": "Upload failed"})
         await db.commit()
@@ -219,11 +226,16 @@ async def test_preheat_failure_creates_no_archive_or_early_source_cleanup(alignm
 
 
 async def test_archive_copy_failure_holds_the_first_job_without_touching_source(alignment, monkeypatch):
+    from backend.app.services.print_scheduler import PrintScheduler
+    from backend.app.services.printer_manager import printer_manager
+
+    monkeypatch.setattr(printer_manager, "get_status", lambda _id: SimpleNamespace(state="IDLE", connected=True))
+    monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
+    monkeypatch.setattr(printer_manager, "is_awaiting_plate_clear", lambda _id: False)
     monkeypatch.setattr(ArchiveService, "archive_print", AsyncMock(side_effect=OSError("Disk full")))
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
-        await transition_queue_item(db, job, "queued", "dispatching")
-        await db.commit()
+        await PrintScheduler()._start_print(db, job)
         assert job.status == "failed" and job.printer_id is not None
         assert job.archive_id is None and alignment.source_path.exists()
 
@@ -423,7 +435,9 @@ async def test_retry_does_not_inherit_physical_outcome_even_when_cancelled_while
         if source_kind == "variants":
             db.add(PrintQueueVariant(queue_item_id=old.id, library_file_id=alignment.source_id, target_model="X1C"))
             await db.commit()
-        await transition_queue_item(db, old, "queued", "dispatching")
+        await transition_queue_item(
+            db, old, "queued", "dispatching", attempt=await prepare_dispatch_archive(db, old, {})
+        )
         await transition_queue_item(
             db,
             old,

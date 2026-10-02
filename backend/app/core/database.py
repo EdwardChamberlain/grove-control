@@ -1115,46 +1115,55 @@ async def _ensure_active_queue_printer_reservation(conn) -> None:
 
 async def _migrate_queue_archive_outcomes(conn) -> None:
     """Retain known physical outcomes once; never guess from display reasons."""
-    from sqlalchemy import select, text
+    from sqlalchemy import and_, select, text
 
     from backend.app.models.archive import PrintArchive
     from backend.app.models.print_queue import PrintQueueItem
     from backend.app.models.settings import Settings
-    from backend.app.services.queue_transitions import ARCHIVE_OUTCOMES
+    from backend.app.services.queue_transitions import ARCHIVE_OUTCOMES, physical_failure_reason
 
     version_key = "queue_archive_outcome_version"
     if await conn.scalar(select(Settings.value).where(Settings.key == version_key)) == "1":
         return
     if conn.dialect.name == "postgresql":
         await conn.execute(text("LOCK TABLE print_queue IN SHARE ROW EXCLUSIVE MODE"))
-    else:
-        await conn.execute(text("UPDATE print_queue SET id = id"))
+    await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value=Settings.value))
     version = await conn.scalar(select(Settings.value).where(Settings.key == version_key))
     if version == "1":
         return
 
     table = PrintQueueItem.__table__
     archives = PrintArchive.__table__
-    rows = (await conn.execute(select(table).where(table.c.physical_outcome.is_(None)))).mappings().all()
-    for row in rows:
-        attempt = (
-            (
-                await conn.execute(
-                    select(archives.c.status, archives.c.completed_at, archives.c.failure_reason).where(
-                        archives.c.id == row["archive_id"],
-                        archives.c.dispatched_queue_item_id == row["id"],
-                        archives.c.status.in_(("completed", "failed", "aborted", "cancelled")),
+    rows = (
+        (
+            await conn.execute(
+                select(
+                    table,
+                    archives.c.status.label("attempt_status"),
+                    archives.c.completed_at.label("attempt_completed_at"),
+                    archives.c.failure_reason.label("attempt_failure_reason"),
+                )
+                .select_from(
+                    table.outerjoin(
+                        archives,
+                        and_(
+                            archives.c.id == table.c.archive_id,
+                            archives.c.dispatched_queue_item_id == table.c.id,
+                            archives.c.status.in_(("completed", "failed", "aborted", "cancelled")),
+                        ),
                     )
                 )
+                .where(table.c.physical_outcome.is_(None))
             )
-            .mappings()
-            .one_or_none()
-            if row["archive_id"] is not None
-            else None
         )
+        .mappings()
+        .all()
+    )
+    for row in rows:
+        attempt_status = row["attempt_status"]
         outcome = (
-            ("aborted" if attempt["status"] == "cancelled" else attempt["status"])
-            if attempt
+            ("aborted" if attempt_status == "cancelled" else attempt_status)
+            if attempt_status is not None
             else ARCHIVE_OUTCOMES.get(row["status"])
         )
         if outcome is None and row["status"] == "successful":
@@ -1162,22 +1171,18 @@ async def _migrate_queue_archive_outcomes(conn) -> None:
         if outcome is None:
             continue  # A legacy unsuccessful job alone cannot prove failure vs Stop.
         reason = (
-            attempt["failure_reason"]
-            if attempt
-            else (
-                (row["error_message"] or "Print failed")[:100]
-                if outcome == "failed"
-                else "User cancelled"
-                if outcome == "aborted"
-                else None
-            )
+            row["attempt_failure_reason"]
+            if attempt_status is not None
+            else physical_failure_reason(outcome, row["error_message"])
         )
         await conn.execute(
             table.update()
             .where(table.c.id == row["id"])
             .values(
                 physical_outcome=outcome,
-                physical_completed_at=attempt["completed_at"] if attempt else row["completed_at"],
+                physical_completed_at=row["attempt_completed_at"]
+                if attempt_status is not None
+                else row["completed_at"],
                 physical_failure_reason=reason,
             )
         )

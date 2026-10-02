@@ -13,13 +13,14 @@ from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import and_, or_, select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.tasks import spawn_background_task
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services.printer_manager import printer_manager, supports_chamber_heater
+from backend.app.services.queue_archive import discard_prepared_archive, prepare_dispatch_archive
 from backend.app.services.queue_transitions import QueueTransitionConflict, transition_queue_item
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,17 @@ def _show_preheating(printer_id: int, active: bool) -> None:
         )
 
 
+def _dispatch_ready(printer_id: int) -> bool:
+    live = printer_manager.get_status(printer_id)
+    return bool(
+        live
+        and printer_manager.is_connected(printer_id)
+        and live.connected
+        and getattr(live, "job_telemetry_ready", True)
+        and live.state in ("IDLE", "FINISH", "FAILED")
+    )
+
+
 def _heaters_off(printer: Printer) -> None:
     client = printer_manager.get_client(printer.id)
     if not client or not printer_manager.is_connected(printer.id):
@@ -101,8 +113,6 @@ async def abort_heat_soak(
     if printer:
         printer.heat_soak_shutdown_pending = True
         printer.heat_soak_shutdown_at = utcnow()
-    item.error_message = reason
-    item.completed_at = utcnow()
     item.preheat_owner = None
     item.preheat_started_at = None
     item.preheat_checked_at = None
@@ -118,32 +128,57 @@ async def abort_heat_soak(
         await scheduler._power_off_if_needed(db, item)
 
 
-async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> None:
-    """Continue an active soak into dispatch while retaining its printer hold.
-
-    Skipping is different from stopping: keep the printer's current heater
-    targets so the print can start immediately, and disable the soak for
-    this queue item.
-    """
-    await transition_queue_item(db, item, item.status, "dispatching")
-    if item.status == "failed":
-        await abort_heat_soak(db, item, item.error_message, schedule_auto_off=True)
-        return
-    item.chamber_heat_soak = False
-    item.manual_start = False
-    item.error_message = None
-    item.completed_at = None
+async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> bool:
+    """Prepare outside the control lock, then conditionally hand off the soak."""
+    item_id, owner, printer_id = item.id, item.preheat_owner, item.printer_id
+    item.preheat_checked_at = utcnow()
+    await db.commit()
+    attempt = None
+    copy_failed = False
+    try:
+        attempt = await prepare_dispatch_archive(db, item, {})
+    except SQLAlchemyError:
+        await db.rollback()
+        raise
+    except Exception:
+        logger.exception("Queue item %s: failed to prepare heat-soak Archive", item_id)
+        copy_failed = True
+    item = await lock_queue_item(db, item_id)
+    if not item or item.status != "preheating" or item.preheat_owner != owner or item.printer_id != printer_id:
+        discard_prepared_archive(db, attempt)
+        await db.rollback()
+        return False
+    if copy_failed:
+        await abort_heat_soak(db, item, "Failed to create Archive record for dispatch", schedule_auto_off=True)
+        return False
     from backend.app.services.print_scheduler import scheduler
 
-    item.preheat_owner = scheduler._heat_soak.owner
-    item.preheat_requested_at = None
-    item.preheat_checked_at = None
-    item.preheat_started_at = None
-    await db.commit()
-    _show_preheating(item.printer_id, False)
-    from backend.app.core.tasks import spawn_background_task
-
-    spawn_background_task(scheduler._dispatch_after_heat_soak(item.id), name=f"skip-heat-soak-dispatch-{item.id}")
+    try:
+        await transition_queue_item(
+            db,
+            item,
+            "preheating",
+            "dispatching",
+            conditions=(PrintQueueItem.preheat_owner == owner, PrintQueueItem.printer_id == printer_id),
+            values={
+                "chamber_heat_soak": False,
+                "manual_start": False,
+                "error_message": None,
+                "completed_at": None,
+                "preheat_owner": scheduler._heat_soak.owner,
+                "preheat_requested_at": None,
+                "preheat_checked_at": None,
+                "preheat_started_at": None,
+            },
+            attempt=attempt,
+        )
+        await db.commit()
+    except QueueTransitionConflict:
+        await db.rollback()
+        return False
+    _show_preheating(printer_id, False)
+    spawn_background_task(scheduler._dispatch_after_heat_soak(item_id), name=f"skip-heat-soak-dispatch-{item_id}")
+    return True
 
 
 class ChamberHeatSoak:
@@ -269,86 +304,110 @@ class ChamberHeatSoak:
         ready = []
         visible: set[int] = set()
         for item_id in ids:
-            item = await lock_queue_item(db, item_id)
-            if not item or item.status not in ("preheating", "dispatching") or item.dispatch_subtask_id:
-                await db.rollback()
-                continue
-            now = utcnow()
-            elapsed = (now - item.preheat_checked_at).total_seconds() if item.preheat_checked_at else HEARTBEAT_TIMEOUT
-            if item.preheat_owner != self.owner:
-                # There is no submission ID before dispatch, so telemetry cannot
-                # prove this interrupted soak. Preserve the reservation until
-                # the user chooses Stop or Skip heat soak in the Queue.
-                if 0 <= elapsed < HEARTBEAT_TIMEOUT:
+            try:
+                item = await lock_queue_item(db, item_id)
+                if not item or item.status not in ("preheating", "dispatching") or item.dispatch_subtask_id:
                     await db.rollback()
                     continue
-                item.error_message = "Heat soak interrupted; inspect the printer, then stop or skip heat soak"
-                _show_preheating(item.printer_id, True)
-                visible.add(item.printer_id)
-                await db.commit()
-                continue
-            if elapsed < 0 or elapsed >= HEARTBEAT_TIMEOUT:
-                await abort_heat_soak(db, item, "Heat soak interrupted by restart or scheduler timeout; retry required")
-                continue
-            if item.status == "dispatching":
-                await db.rollback()
-                continue
-            visible.add(item.printer_id)
-            _show_preheating(item.printer_id, True)
-            printer = await db.get(Printer, item.printer_id)
-            state = printer_manager.get_status(item.printer_id)
-            requested = item.preheat_requested_at
-            disconnected_at = getattr(state, "heat_soak_disconnected_at", 0) if state else 0
-            if (
-                not printer
-                or not printer.is_active
-                or not state
-                or not printer_manager.is_connected(item.printer_id)
-                or not requested
-                or disconnected_at >= requested.replace(tzinfo=timezone.utc).timestamp()
-                or state.state not in ("IDLE", "FINISH", "FAILED")
-            ):
-                await abort_heat_soak(
-                    db, item, "Printer disconnected or became unavailable during heat soak; retry required"
+                now = utcnow()
+                elapsed = (
+                    (now - item.preheat_checked_at).total_seconds() if item.preheat_checked_at else HEARTBEAT_TIMEOUT
                 )
-                continue
-            if item.preheat_started_at is None:
-                await abort_heat_soak(db, item, "Heat-soak start time missing; retry required")
-                continue
-            if (now - item.preheat_started_at).total_seconds() >= item.heat_soak_minutes * 60:
-                _show_preheating(item.printer_id, False)
-                try:
-                    await transition_queue_item(
-                        db,
-                        item,
-                        item.status,
-                        "dispatching",
-                        dispatch_guard=lambda item=item: (
-                            (live := printer_manager.get_status(item.printer_id)) is not None
-                            and printer_manager.is_connected(item.printer_id)
-                            and live.connected
-                            and getattr(live, "job_telemetry_ready", True)
-                            and live.state in ("IDLE", "FINISH", "FAILED")
-                        ),
+                if item.preheat_owner != self.owner:
+                    # There is no submission ID before dispatch, so telemetry cannot
+                    # prove this interrupted soak. Preserve the reservation until
+                    # the user chooses Stop or Skip heat soak in the Queue.
+                    if 0 <= elapsed < HEARTBEAT_TIMEOUT:
+                        await db.rollback()
+                        continue
+                    item.error_message = "Heat soak interrupted; inspect the printer, then stop or skip heat soak"
+                    _show_preheating(item.printer_id, True)
+                    visible.add(item.printer_id)
+                    await db.commit()
+                    continue
+                if elapsed < 0 or elapsed >= HEARTBEAT_TIMEOUT:
+                    await abort_heat_soak(
+                        db, item, "Heat soak interrupted by restart or scheduler timeout; retry required"
                     )
-                except QueueTransitionConflict:
-                    # Earlier handoffs already committed. Keep their IDs so a
-                    # competing Stop or fresh activity on this printer cannot
-                    # prevent the other printers' workers from being spawned.
+                    continue
+                if item.status == "dispatching":
                     await db.rollback()
-                    logger.info("Queue item %s changed or became unavailable during heat-soak handoff", item_id)
                     continue
-                if item.status == "failed":
-                    await abort_heat_soak(db, item, item.error_message, schedule_auto_off=True)
+                visible.add(item.printer_id)
+                _show_preheating(item.printer_id, True)
+                printer = await db.get(Printer, item.printer_id)
+                state = printer_manager.get_status(item.printer_id)
+                requested = item.preheat_requested_at
+                disconnected_at = getattr(state, "heat_soak_disconnected_at", 0) if state else 0
+                if (
+                    not printer
+                    or not printer.is_active
+                    or not state
+                    or not printer_manager.is_connected(item.printer_id)
+                    or not requested
+                    or disconnected_at >= requested.replace(tzinfo=timezone.utc).timestamp()
+                    or state.state not in ("IDLE", "FINISH", "FAILED")
+                ):
+                    await abort_heat_soak(
+                        db, item, "Printer disconnected or became unavailable during heat soak; retry required"
+                    )
                     continue
-                # No acknowledgement timeout until the upload and send boundary.
-                item.dispatched_at = None
-                ready.append(item.id)
-            client = printer_manager.get_client(item.printer_id)
-            if client:
-                client.request_status_update()
-            item.preheat_checked_at = now
-            await db.commit()
+                if item.preheat_started_at is None:
+                    await abort_heat_soak(db, item, "Heat-soak start time missing; retry required")
+                    continue
+                client = printer_manager.get_client(item.printer_id)
+                if client:
+                    client.request_status_update()
+                item.preheat_checked_at = now
+                # Persist liveness and release the control lock before expensive I/O.
+                await db.commit()
+                if (now - item.preheat_started_at).total_seconds() < item.heat_soak_minutes * 60:
+                    continue
+                if not _dispatch_ready(item.printer_id):
+                    continue
+                attempt = None
+                copy_failed = False
+                try:
+                    attempt = await prepare_dispatch_archive(db, item, {})
+                except SQLAlchemyError:
+                    raise
+                except Exception:
+                    logger.exception("Queue item %s: failed to prepare heat-soak Archive", item_id)
+                    copy_failed = True
+                item = await lock_queue_item(db, item_id)
+                if not item or item.status != "preheating" or item.preheat_owner != self.owner:
+                    discard_prepared_archive(db, attempt)
+                    await db.rollback()
+                    continue
+                if not _dispatch_ready(item.printer_id):
+                    discard_prepared_archive(db, attempt)
+                    item.preheat_checked_at = utcnow()
+                    await db.commit()
+                    continue
+                if copy_failed:
+                    await abort_heat_soak(
+                        db, item, "Failed to create Archive record for dispatch", schedule_auto_off=True
+                    )
+                    continue
+                await transition_queue_item(
+                    db,
+                    item,
+                    "preheating",
+                    "dispatching",
+                    conditions=(PrintQueueItem.preheat_owner == self.owner,),
+                    dispatch_guard=lambda item=item: _dispatch_ready(item.printer_id),
+                    attempt=attempt,
+                    values={"dispatched_at": None, "preheat_checked_at": utcnow()},
+                )
+                await db.commit()
+                _show_preheating(item.printer_id, False)
+                ready.append(item_id)
+            except QueueTransitionConflict:
+                await db.rollback()
+                logger.info("Queue item %s changed during heat-soak handoff", item_id)
+            except Exception:
+                await db.rollback()
+                logger.exception("Queue item %s: heat-soak handoff failed", item_id)
         for printer_id in self._visible_printers - visible:
             _show_preheating(printer_id, False)
         self._visible_printers = visible
