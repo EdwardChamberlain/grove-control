@@ -250,8 +250,11 @@ work with the conditional transition writer:
   Heat-soak and Skip controls commit their heartbeat and release the write
   lock before copying, then re-lock and verify status and `preheat_owner`.
   Check readiness before copying too: unready telemetry keeps the heartbeat
-  alive without producing repeated copies. Per-item database/flush errors
-  roll back only that item and preserve earlier committed handoffs.
+  alive without producing repeated copies. If the final guard rejects a slow
+  copy, rollback discards the attempt, then a fresh lock verifies the same
+  preheating job, owner and printer before committing its heartbeat. A Stop or
+  ownership change wins. Per-item database/flush errors, including heartbeat
+  recovery, roll back only that item and preserve earlier committed handoffs.
   Skip uses the same fresh telemetry checks before copying, after re-locking
   and at the conditional handoff. Missing, disconnected, busy or unready
   telemetry returns HTTP 409, retains the soak and heartbeat, and discards any

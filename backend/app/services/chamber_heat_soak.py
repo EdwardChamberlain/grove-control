@@ -332,11 +332,13 @@ class ChamberHeatSoak:
         ready = []
         visible: set[int] = set()
         for item_id in ids:
+            printer_id = None
             try:
                 item = await lock_queue_item(db, item_id)
                 if not item or item.status not in ("preheating", "dispatching") or item.dispatch_subtask_id:
                     await db.rollback()
                     continue
+                printer_id = item.printer_id
                 now = utcnow()
                 elapsed = (
                     (now - item.preheat_checked_at).total_seconds() if item.preheat_checked_at else HEARTBEAT_TIMEOUT
@@ -422,6 +424,23 @@ class ChamberHeatSoak:
                 ready.append(item_id)
             except QueueTransitionConflict:
                 await db.rollback()
+                try:
+                    # A long copy can outlive the heartbeat. A final guard
+                    # rejection must keep this same soak alive, as Skip does.
+                    item = await lock_queue_item(db, item_id)
+                    if (
+                        item
+                        and item.status == "preheating"
+                        and item.preheat_owner == self.owner
+                        and item.printer_id == printer_id
+                    ):
+                        item.preheat_checked_at = utcnow()
+                        await db.commit()
+                    else:
+                        await db.rollback()
+                except Exception:
+                    await db.rollback()
+                    logger.exception("Queue item %s: could not refresh heat-soak heartbeat", item_id)
                 logger.info("Queue item %s changed during heat-soak handoff", item_id)
             except Exception:
                 await db.rollback()

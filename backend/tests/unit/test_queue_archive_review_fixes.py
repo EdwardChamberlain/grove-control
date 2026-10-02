@@ -91,7 +91,7 @@ async def test_stop_during_heat_soak_archive_copy_wins_without_rows_or_directori
     assert not list((settings.archive_dir / "1").iterdir())
 
 
-@pytest.mark.parametrize("boundary", ["preparation", "flush"])
+@pytest.mark.parametrize("boundary", ["preparation", "flush", "heartbeat"])
 async def test_database_error_in_second_heat_soak_preserves_first_dispatch(handoff, monkeypatch, boundary):
     async with handoff.sessions() as db:
         first = await db.get(PrintQueueItem, handoff.job_id)
@@ -112,6 +112,27 @@ async def test_database_error_in_second_heat_soak_preserves_first_dispatch(hando
         await db.commit()
     handoff.states[2] = SimpleNamespace(**vars(handoff.states[1]))
     original = ArchiveService.archive_print
+    original_ready, original_lock = heat._dispatch_ready, heat.lock_queue_item
+    readiness_checks = lock_checks = 0
+
+    def ready(printer_id):
+        nonlocal readiness_checks
+        if boundary == "heartbeat" and printer_id == 2:
+            readiness_checks += 1
+            if readiness_checks == 3:
+                handoff.states[2].job_telemetry_ready = False
+        return original_ready(printer_id)
+
+    async def lock(db, item_id):
+        nonlocal lock_checks
+        if boundary == "heartbeat" and item_id != handoff.job_id:
+            lock_checks += 1
+            if lock_checks == 3:
+                raise OperationalError("UPDATE", {}, RuntimeError("heartbeat unavailable"))
+        return await original_lock(db, item_id)
+
+    monkeypatch.setattr(heat, "_dispatch_ready", ready)
+    monkeypatch.setattr(heat, "lock_queue_item", lock)
 
     async def second_copy_fails(service, **kwargs):
         if boundary == "preparation" and kwargs["printer_id"] == 2:
@@ -170,6 +191,137 @@ async def test_unready_telemetry_keeps_heat_soak_alive_without_copying(handoff, 
             assert job.archive_id is None and await observer.scalar(select(PrintArchive.id)) is None
     assert copy.await_count == int(initially_ready)
     assert not list(settings.archive_dir.rglob("*.3mf"))
+
+
+@pytest.mark.parametrize("skip", [False, True])
+async def test_final_guard_keeps_heat_soak_alive_after_slow_preparation(handoff, monkeypatch, skip):
+    now = heat.utcnow()
+    monkeypatch.setattr(heat, "utcnow", lambda: now)
+    original_copy, original_ready = ArchiveService.archive_print, heat._dispatch_ready
+    copies, dispatched = AsyncMock(), []
+    checks = 0
+
+    async def slow_copy(service, **kwargs):
+        nonlocal now
+        await copies()
+        attempt = await original_copy(service, **kwargs)
+        now += timedelta(seconds=heat.HEARTBEAT_TIMEOUT + 1)
+        return attempt
+
+    def ready(printer_id):
+        nonlocal checks
+        checks += 1
+        if checks == 3:
+            handoff.states[1].job_telemetry_ready = False
+        return original_ready(printer_id)
+
+    def collect(coroutine, *, name):
+        dispatched.append(name)
+        coroutine.close()
+
+    monkeypatch.setattr(ArchiveService, "archive_print", slow_copy)
+    monkeypatch.setattr(heat, "_dispatch_ready", ready)
+    monkeypatch.setattr(heat, "spawn_background_task", collect)
+    monkeypatch.setattr(scheduling, "spawn_background_task", collect)
+    async with handoff.sessions() as db:
+        if skip:
+            job = await heat.lock_queue_item(db, handoff.job_id)
+            assert await heat.skip_heat_soak(db, job) is False
+        else:
+            assert await handoff.service.check(db) == []
+    for _ in range(heat.HEARTBEAT_TIMEOUT // 10 + 4):
+        async with handoff.sessions() as db:
+            job = await db.get(PrintQueueItem, handoff.job_id)
+            assert job.status == "preheating" and job.preheat_checked_at == now
+            assert job.preheat_owner == handoff.service.owner and job.printer_id == 1
+            assert job.archive_id is None and job.physical_outcome is None and job.error_message is None
+            assert await db.scalar(select(PrintArchive.id)) is None
+        assert not list(settings.archive_dir.rglob("*.3mf"))
+        assert not list((settings.archive_dir / "1").glob("*"))
+        assert not any("dispatch-" in name for name in dispatched)
+        copies.assert_awaited_once()
+        now += timedelta(seconds=10)
+        async with handoff.sessions() as db:
+            await handoff.scheduler._check_heat_soaks(db)
+    # Fresh telemetry can still complete this same soak with one new attempt.
+    handoff.states[1].job_telemetry_ready = True
+    async with handoff.sessions() as db:
+        await handoff.scheduler._check_heat_soaks(db)
+    async with handoff.sessions() as db:
+        job = await db.get(PrintQueueItem, handoff.job_id)
+        attempt = await db.get(PrintArchive, job.archive_id)
+        assert job.status == "dispatching" and job.physical_outcome is None
+        assert attempt.dispatched_queue_item_id == job.id and attempt.printer_id == 1
+        assert list(await db.scalars(select(PrintArchive.id))) == [attempt.id]
+    assert copies.await_count == 2
+    assert [name for name in dispatched if "dispatch-" in name] == [f"heat-soak-dispatch-{handoff.job_id}"]
+    assert handoff.source_path.exists()
+
+
+@pytest.mark.parametrize("change", ["stop", "owner", "printer"])
+async def test_guard_conflict_does_not_refresh_a_changed_soak(handoff, monkeypatch, change):
+    now = heat.utcnow()
+    original_heartbeat = now
+    monkeypatch.setattr(heat, "utcnow", lambda: now)
+    original_copy, original_ready = ArchiveService.archive_print, heat._dispatch_ready
+    checks = 0
+
+    async def slow_copy(service, **kwargs):
+        nonlocal now
+        attempt = await original_copy(service, **kwargs)
+        now += timedelta(seconds=heat.HEARTBEAT_TIMEOUT + 1)
+        return attempt
+
+    def ready(printer_id):
+        nonlocal checks
+        checks += 1
+        if checks == 3:
+            handoff.states[1].job_telemetry_ready = False
+        return original_ready(printer_id)
+
+    monkeypatch.setattr(ArchiveService, "archive_print", slow_copy)
+    monkeypatch.setattr(heat, "_dispatch_ready", ready)
+    async with handoff.sessions() as db:
+        if change == "printer":
+            db.add(Printer(id=2, name="Second", serial_number="SECOND", ip_address="127.0.0.2", access_code="code"))
+            await db.commit()
+        rollback = db.rollback
+        changed = False
+
+        async def rollback_then_change():
+            nonlocal changed
+            await rollback()
+            if checks == 3 and not changed:
+                changed = True
+                # A control wins after rollback releases the handoff lock.
+                async with handoff.sessions() as control:
+                    job = await heat.lock_queue_item(control, handoff.job_id)
+                    if change == "stop":
+                        await cancel_job(control, job)
+                    else:
+                        values = {"preheat_checked_at": original_heartbeat}
+                        values["preheat_owner" if change == "owner" else "printer_id"] = (
+                            "another-owner" if change == "owner" else 2
+                        )
+                        await transition_queue_item(control, job, "preheating", "preheating", values=values)
+                        await control.commit()
+
+        monkeypatch.setattr(db, "rollback", rollback_then_change)
+        assert await handoff.service.check(db) == []
+        assert changed
+    async with handoff.sessions() as db:
+        job = await db.get(PrintQueueItem, handoff.job_id)
+        assert job.archive_id is None and await db.scalar(select(PrintArchive.id)) is None
+        if change == "stop":
+            assert job.status == "cancelled" and job.physical_outcome == "aborted"
+            assert job.preheat_owner is None and job.preheat_checked_at is None
+        else:
+            assert job.status == "preheating" and job.physical_outcome is None
+            assert job.preheat_checked_at == original_heartbeat
+            assert job.preheat_owner == ("another-owner" if change == "owner" else handoff.service.owner)
+            assert job.printer_id == (2 if change == "printer" else 1)
+    assert not list(settings.archive_dir.rglob("*.3mf"))
+    assert not list((settings.archive_dir / "1").glob("*"))
 
 
 @pytest.mark.parametrize("source_kind", ["file", "archive"])

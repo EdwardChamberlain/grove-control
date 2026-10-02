@@ -32,6 +32,8 @@
   handoff; unsafe telemetry retains the soak heartbeat and removes the prepared
   copy. Reconnect repairs proven legacy links for already-ended jobs without
   replaying completion effects, including after Clear Plate or a cached completion.
+  Automatic heat-soak handoffs retain their heartbeat when readiness changes
+  after a slow copy, so preparation does not cause a scheduler-timeout failure.
 
 - Queue jobs now persist **Paused** from matching printer telemetry, including
   startup and reconnect, and return to Printing on resume. Paused jobs retain

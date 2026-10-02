@@ -193,8 +193,11 @@ physical outcome, timestamp and failure reason. Copy failures also honor the
 job's Auto Off setting, including completed and skipped heat-soak handoffs.
 Heat-soak handoffs check current telemetry after copying, including when a
 reconnection replaces the client. They also check readiness before copying;
-unready telemetry keeps the heartbeat alive without repeated copies. Database
-or flush errors in one handoff preserve other committed handoffs from the tick.
+unready telemetry keeps the heartbeat alive without repeated copies. A final
+readiness rejection after a slow copy refreshes the same soak's heartbeat,
+preventing a false scheduler-timeout failure. Database or flush errors in one
+handoff, including heartbeat recovery, preserve other committed handoffs from
+the tick.
 Missing/deleted sources found before taking the printer stay parked for manual
 start, including reprints of trashed Archives. Preparation also rejects sources
 deleted during heat soaking. If a source disappears between the eligibility
