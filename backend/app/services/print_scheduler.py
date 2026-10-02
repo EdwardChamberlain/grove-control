@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from sqlalchemy import delete, func, select, update
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import set_committed_value
@@ -3731,9 +3731,9 @@ class PrintScheduler:
         - archive_id: Print from an existing archive
         - library_file_id: Print from a library file (file manager)
 
-        Nothing before the hold transition can fail a queued job: it was not
-        sent anywhere, so it stays in the pool with a reason. ``binding`` is
-        the scheduler's decision: the printer (chosen, for an "Any machine"
+        Source eligibility failures leave the job parked in the pool. A copy
+        failure explicitly takes a failed hold without entering dispatching.
+        ``binding`` is the scheduler's decision: the printer (chosen, for an "Any machine"
         job) and its tray mapping. The hold transition is the only write that
         records them on the job.
         """
@@ -3799,9 +3799,11 @@ class PrintScheduler:
             # Print from archive
             result = await db.execute(select(PrintArchive).where(PrintArchive.id == item.archive_id))
             archive = result.scalar_one_or_none()
-            if not archive:
+            if not archive or archive.deleted_at is not None:
                 logger.error("Queue item %s: Archive %s not found", item.id, item.archive_id)
-                await self._abandon_attempt(db, item, "Archive not found", park=True)
+                await self._abandon_attempt(
+                    db, item, "Archive source was deleted" if archive else "Archive not found", park=True
+                )
                 return
 
             if await _defer_incompatible_dispatch(
@@ -3901,40 +3903,27 @@ class PrintScheduler:
             unassigned = binding is not None and binding.unassigned
             if not self._is_printer_idle(printer_id):
                 return
-            from backend.app.services.queue_archive import prepare_dispatch_archive
+            from backend.app.services.queue_archive import prepare_dispatch_attempt
 
             values = {"waiting_reason": None, **(binding.values() if binding is not None else {})}
-            copy_failed = False
-            attempt = None
-            try:
-                attempt = await prepare_dispatch_archive(db, item, values)
-            except SQLAlchemyError:
-                raise
-            except Exception:
-                logger.exception("Queue item %s: failed to prepare dispatch Archive", item_id)
-                copy_failed = True
+            preparation = await prepare_dispatch_attempt(db, item, values)
+            if preparation.error_message:
+                values["error_message"] = preparation.error_message
             try:
                 await transition_queue_item(
                     db,
                     item,
                     "queued",
-                    "dispatching",
+                    "failed" if preparation.error_message else "dispatching",
                     conditions=(
                         PrintQueueItem.printer_id.is_(None) if unassigned else PrintQueueItem.printer_id == printer_id,
                         PrintQueueItem.dispatching_at == item.dispatching_at,
                     ),
                     values=values,
+                    action="archive_preparation_failed" if preparation.error_message else None,
                     dispatch_guard=lambda: self._is_printer_idle(printer_id),
-                    attempt=attempt,
+                    attempt=preparation.archive,
                 )
-                if copy_failed:
-                    await transition_queue_item(
-                        db,
-                        item,
-                        "dispatching",
-                        "failed",
-                        values={"error_message": "Failed to create Archive record for dispatch"},
-                    )
                 await db.commit()
             except IntegrityError:
                 await db.rollback()

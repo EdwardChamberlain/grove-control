@@ -36,7 +36,7 @@ from backend.app.schemas.print_queue import (
     QueueVariantCreate,
     QueueVariantSummary,
 )
-from backend.app.services.chamber_heat_soak import lock_queue_item, skip_heat_soak
+from backend.app.services.chamber_heat_soak import heat_soak_dispatch_started, lock_queue_item, skip_heat_soak
 from backend.app.services.filament_deficit import compute_deficit_for_queue_item
 from backend.app.services.filament_requirements import (
     build_queue_filament_overrides,
@@ -1766,6 +1766,9 @@ async def skip_queue_item_heat_soak(
             raise HTTPException(403, "You can only update your own queue items")
 
     if item.status != "preheating":
+        if await heat_soak_dispatch_started(db, item):
+            await db.rollback()
+            return {"message": "Heat soak skipped"}
         raise HTTPException(400, f"Can only skip heat soak for preheating items, current status: '{item.status}'")
 
     if not await skip_heat_soak(db, item):

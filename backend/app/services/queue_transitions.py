@@ -13,7 +13,7 @@ from contextlib import nullcontext
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import event, select
+from sqlalchemy import event, inspect, select
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
@@ -38,7 +38,7 @@ def physical_failure_reason(outcome: str, error_message: str | None, override: s
 
 
 ALLOWED_TRANSITIONS = {
-    "queued": frozenset({"preheating", "dispatching", "unsuccessful"}),
+    "queued": frozenset({"preheating", "dispatching", "failed", "unsuccessful"}),
     "preheating": frozenset({"dispatching", "failed", "cancelled", "unsuccessful"}),
     "dispatching": frozenset({"printing", "failed", "cancelled", "unsuccessful"}),
     "printing": frozenset({"paused", "finished", "failed", "cancelled", "unsuccessful"}),
@@ -192,6 +192,9 @@ async def transition_queue_item(
     is synchronized without a second, unconditional status UPDATE at flush
     time. Callers prepare any dispatch Archive before taking a write lock;
     a supplied attempt is flushed and linked only after the conditional update.
+    Entry into dispatching requires this job's unflushed prepared attempt.
+    An explicit copy failure can instead take a failed hold directly from
+    queued; it never enters dispatching without an Archive.
     """
     from backend.app.models.print_queue import PrintQueueItem
 
@@ -202,6 +205,12 @@ async def transition_queue_item(
     ):
         raise InvalidQueueTransition(f"Invalid queue transition: {expected_status} -> {status}")
     if not upgrading and status != expected_status:
+        if (
+            expected_status == "queued"
+            and status == "failed"
+            and (action != "archive_preparation_failed" or not (values or {}).get("error_message"))
+        ):
+            raise InvalidQueueTransition("Only an explicit Archive preparation failure may hold a queued job as failed")
         if expected_status == "queued" and status == "unsuccessful" and action != "cancel":
             raise InvalidQueueTransition("Only a user cancellation may end a queued job")
         if expected_status in ACTIVE_STATUSES and status == "unsuccessful" and action != "printer_deleted":
@@ -235,6 +244,26 @@ async def transition_queue_item(
     from backend.app.services.queue_archive import discard_prepared_archive
 
     archive = attempt
+    if status == "dispatching" and expected_status != status:
+        if not isinstance(db, AsyncSession) or archive is None:
+            raise InvalidQueueTransition("Entry into dispatching requires a prepared Archive")
+        printer_id = metadata.get("printer_id")
+        if printer_id is None:
+            if isinstance(item, int):
+                with db.no_autoflush:
+                    printer_id = await db.scalar(select(table.c.printer_id).where(table.c.id == item_id))
+            else:
+                printer_id = item.printer_id
+        if (
+            archive not in db
+            or not inspect(archive).pending
+            or archive.dispatched_queue_item_id != item_id
+            or archive.printer_id != printer_id
+            or archive.status != "dispatching"
+            or archive.deleted_at is not None
+            or not archive.file_path
+        ):
+            raise InvalidQueueTransition("Entry into dispatching requires this job's prepared Archive")
     if archive is not None and (
         not isinstance(db, AsyncSession) or status != "dispatching" or expected_status == status
     ):
@@ -285,7 +314,12 @@ async def transition_queue_item(
                 set_committed_value(item, "archive_id", archive.id)
                 # Existing loaded source relationships must follow the attempt.
                 set_committed_value(item, "archive", archive)
-        if expected_status != status or "archive_id" in metadata or "dispatch_subtask_id" in metadata:
+        if (
+            expected_status != status
+            or "archive_id" in metadata
+            or "dispatch_subtask_id" in metadata
+            or status in (*AWAITING_PLATE_CLEAR_STATUSES, *FINAL_STATUSES)
+        ):
             from backend.app.models.archive import PrintArchive as ArchiveModel
 
             # Only the exact attempt, never the Archive used as a reprint source.

@@ -13,14 +13,14 @@ from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import and_, or_, select, update
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.tasks import spawn_background_task
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services.printer_manager import printer_manager, supports_chamber_heater
-from backend.app.services.queue_archive import discard_prepared_archive, prepare_dispatch_archive
+from backend.app.services.queue_archive import discard_prepared_archive, prepare_dispatch_attempt
 from backend.app.services.queue_transitions import QueueTransitionConflict, transition_queue_item
 
 logger = logging.getLogger(__name__)
@@ -128,28 +128,37 @@ async def abort_heat_soak(
         await scheduler._power_off_if_needed(db, item)
 
 
+async def heat_soak_dispatch_started(db: AsyncSession, item: PrintQueueItem) -> bool:
+    """Recognize a winning handoff by the exact committed attempt, not status alone."""
+    from backend.app.models.archive import PrintArchive
+
+    if item.status not in ("dispatching", "printing", "paused", "finished", "successful") or item.archive_id is None:
+        return False
+    return (
+        await db.scalar(
+            select(PrintArchive.id).where(
+                PrintArchive.id == item.archive_id,
+                PrintArchive.dispatched_queue_item_id == item.id,
+                PrintArchive.printer_id == item.printer_id,
+            )
+        )
+    ) is not None
+
+
 async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> bool:
     """Prepare outside the control lock, then conditionally hand off the soak."""
     item_id, owner, printer_id = item.id, item.preheat_owner, item.printer_id
     item.preheat_checked_at = utcnow()
     await db.commit()
-    attempt = None
-    copy_failed = False
-    try:
-        attempt = await prepare_dispatch_archive(db, item, {})
-    except SQLAlchemyError:
-        await db.rollback()
-        raise
-    except Exception:
-        logger.exception("Queue item %s: failed to prepare heat-soak Archive", item_id)
-        copy_failed = True
+    preparation = await prepare_dispatch_attempt(db, item, {})
     item = await lock_queue_item(db, item_id)
     if not item or item.status != "preheating" or item.preheat_owner != owner or item.printer_id != printer_id:
-        discard_prepared_archive(db, attempt)
+        discard_prepared_archive(db, preparation.archive)
+        started = bool(item and item.printer_id == printer_id and await heat_soak_dispatch_started(db, item))
         await db.rollback()
-        return False
-    if copy_failed:
-        await abort_heat_soak(db, item, "Failed to create Archive record for dispatch", schedule_auto_off=True)
+        return started
+    if preparation.error_message:
+        await abort_heat_soak(db, item, preparation.error_message, schedule_auto_off=True)
         return False
     from backend.app.services.print_scheduler import scheduler
 
@@ -170,7 +179,7 @@ async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> bool:
                 "preheat_checked_at": None,
                 "preheat_started_at": None,
             },
-            attempt=attempt,
+            attempt=preparation.archive,
         )
         await db.commit()
     except QueueTransitionConflict:
@@ -365,29 +374,19 @@ class ChamberHeatSoak:
                     continue
                 if not _dispatch_ready(item.printer_id):
                     continue
-                attempt = None
-                copy_failed = False
-                try:
-                    attempt = await prepare_dispatch_archive(db, item, {})
-                except SQLAlchemyError:
-                    raise
-                except Exception:
-                    logger.exception("Queue item %s: failed to prepare heat-soak Archive", item_id)
-                    copy_failed = True
+                preparation = await prepare_dispatch_attempt(db, item, {})
                 item = await lock_queue_item(db, item_id)
                 if not item or item.status != "preheating" or item.preheat_owner != self.owner:
-                    discard_prepared_archive(db, attempt)
+                    discard_prepared_archive(db, preparation.archive)
                     await db.rollback()
                     continue
                 if not _dispatch_ready(item.printer_id):
-                    discard_prepared_archive(db, attempt)
+                    discard_prepared_archive(db, preparation.archive)
                     item.preheat_checked_at = utcnow()
                     await db.commit()
                     continue
-                if copy_failed:
-                    await abort_heat_soak(
-                        db, item, "Failed to create Archive record for dispatch", schedule_auto_off=True
-                    )
+                if preparation.error_message:
+                    await abort_heat_soak(db, item, preparation.error_message, schedule_auto_off=True)
                     continue
                 await transition_queue_item(
                     db,
@@ -396,7 +395,7 @@ class ChamberHeatSoak:
                     "dispatching",
                     conditions=(PrintQueueItem.preheat_owner == self.owner,),
                     dispatch_guard=lambda item=item: _dispatch_ready(item.printer_id),
-                    attempt=attempt,
+                    attempt=preparation.archive,
                     values={"dispatched_at": None, "preheat_checked_at": utcnow()},
                 )
                 await db.commit()

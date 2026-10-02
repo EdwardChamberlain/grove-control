@@ -43,7 +43,7 @@ for other upgrades; ambiguous jobs retain Stop as their way out.
 
 | From | Allowed destinations |
 | --- | --- |
-| `queued` | `preheating`, `dispatching`, `unsuccessful` (user cancellation) |
+| `queued` | `preheating`, `dispatching`, `failed` (explicit Archive-copy failure), `unsuccessful` (user cancellation) |
 | `preheating` | `dispatching`, `failed`, `cancelled` |
 | `dispatching` | `printing`, `failed`, `cancelled` |
 | `printing` | `paused`, `finished`, `failed`, `cancelled` |
@@ -236,7 +236,8 @@ work with the conditional transition writer:
 - Callers prepare an immutable copy (with current injection) before entering
   `dispatching`; the transition writer only flushes and links that unflushed
   attempt after its conditional update. Its exact Archive link and printer
-  hold commit together. FTP reads
+  hold commit together. The writer rejects entry without this job's prepared
+  attempt. FTP reads
   that copy. A losing cancellation/claim or rollback removes the uncommitted
   copy; preparation never locks a waiting job before the conditional update.
   Recheck idle telemetry after copying, before taking the hold, so a new
@@ -254,14 +255,22 @@ work with the conditional transition writer:
   drying-policy and command failures update the attempt to `failed` and retain
   the printer hold. A copy failure holds the job as `failed` without sending
   and runs configured Auto Off after commit, including heat-soak handoffs.
-  Preparation rejects soft-deleted Files or Archive sources. Skip failures
+  Ordinary copy failures use an explicit conditional `queued → failed` edge;
+  they never enter `dispatching` without an Archive. All dispatch callers share
+  preparation/error reporting, preserving the actual copy error in the job.
+  Deleted or missing sources found before taking a hold stay parked in the
+  queue. Preparation also rejects sources deleted during heat soaking. Skip failures
   return HTTP 409 with the committed job error; the Queue displays it and
-  refreshes the failed job. Pool copy failures send a failure notification,
+  refreshes the failed job. Skip succeeds if the same job's exact attempt already
+  progressed while the request was preparing, without copying again or spawning
+  another dispatch worker. Pool copy failures send a failure notification,
   and assignment notifications are sent only after successful handoff.
 - Entry into `finished`, `failed`, or `cancelled` records the Archive outcome
   (`completed`, `failed`, or `aborted`) in the same transaction. Exact job and
   Archive columns must both match. Pause/resume, duplicate terminal observations,
   Clear Plate and printer deletion do not rewrite the physical outcome.
+  Repeated completion callbacks still repair proven restored legacy links,
+  while ordinary same-status heartbeat/metadata writes skip those queries.
   A restored active Archive without its dispatch link is associated inside the
   same transition only when its printer and submission ID uniquely identify
   the job. Reused IDs, historical sources and other attempts are never adopted.

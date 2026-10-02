@@ -188,6 +188,7 @@ async def test_deleted_heat_soak_source_fails_without_an_attempt(handoff, source
         assert await handoff.service.check(db) == []
         await db.refresh(job)
         assert job.status == "failed" and job.physical_outcome == "failed"
+        assert "Dispatch source was deleted" in job.error_message
         assert await db.scalar(select(PrintArchive.id).where(PrintArchive.dispatched_queue_item_id == job.id)) is None
         await db.refresh(source)
         assert source.deleted_at is not None

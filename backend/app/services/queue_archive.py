@@ -3,9 +3,11 @@
 import json
 import logging
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 
 from sqlalchemy import inspect
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.config import settings
@@ -19,6 +21,28 @@ from backend.app.utils.safe_path import safe_join_under
 from backend.app.utils.threemf_tools import inject_gcode_into_3mf
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class DispatchArchivePreparation:
+    archive: PrintArchive | None
+    error_message: str | None = None
+
+
+async def prepare_dispatch_attempt(db: AsyncSession, item: PrintQueueItem, values: dict) -> DispatchArchivePreparation:
+    """Share copy-error reporting without hiding transaction failures.
+
+    Callers retain their conditional handoff and heater/notification effects.
+    A failed preparation never authorizes entry into dispatching.
+    """
+    try:
+        return DispatchArchivePreparation(await prepare_dispatch_archive(db, item, values))
+    except SQLAlchemyError:
+        raise
+    except Exception as error:
+        logger.exception("Queue item %s: failed to prepare dispatch Archive", item.id)
+        cause = str(error).strip() or type(error).__name__
+        return DispatchArchivePreparation(None, f"Failed to create Archive record for dispatch: {cause}")
 
 
 def discard_prepared_archive(
@@ -35,23 +59,21 @@ def discard_prepared_archive(
     artifacts[:] = [directory for directory in artifacts if directory not in directories]
 
 
-async def prepare_dispatch_archive(db: AsyncSession, item: PrintQueueItem, values: dict) -> PrintArchive | None:
+async def prepare_dispatch_archive(db: AsyncSession, item: PrintQueueItem, values: dict) -> PrintArchive:
     """Copy without flushing, so cancellation can win during preparation.
 
     The transition writer adds the exact link only after its conditional update
-    succeeds. Synthetic/source-less legacy jobs have no artifact to copy.
+    succeeds. Every new dispatch requires a source and a prepared attempt.
     """
     from backend.app.api.routes.settings import get_setting
 
     # Tentative scheduler bindings and the prepared row must not flush before CAS.
     with db.no_autoflush:
-        source = await db.get(PrintArchive, item.archive_id) if item.archive_id else None
+        source = await db.get(PrintArchive, item.archive_id, populate_existing=True) if item.archive_id else None
         if source is None and item.library_file_id:
-            source = await db.get(LibraryFile, item.library_file_id)
+            source = await db.get(LibraryFile, item.library_file_id, populate_existing=True)
         if source is None:
-            if item.archive_id or item.library_file_id:
-                raise RuntimeError("Dispatch source no longer exists")
-            return None
+            raise RuntimeError("Dispatch source no longer exists")
         if source.deleted_at is not None:
             raise RuntimeError("Dispatch source was deleted")
         printer_id = values.get("printer_id", item.printer_id)

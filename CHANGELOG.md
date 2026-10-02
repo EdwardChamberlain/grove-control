@@ -22,6 +22,12 @@
   strand other printers. Deleted sources are rejected. Skip copy failures
   return the job's error and refresh the Queue; pool copy failures send a
   failure notification instead of an assignment notification.
+  Trashed Archive reprints stay parked before taking a printer. All dispatch
+  paths share copy-error reporting and retain the actual cause. The writer
+  requires a prepared attempt on entry to Dispatching; copy failures take an
+  explicit Failed hold directly. Skip succeeds when the same attempt has
+  already progressed, without launching another worker. Repeated completion
+  callbacks still repair proven legacy links and preserve physical outcomes.
 
 - Queue jobs now persist **Paused** from matching printer telemetry, including
   startup and reconnect, and return to Printing on resume. Paused jobs retain

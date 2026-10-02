@@ -1,5 +1,6 @@
 """Exercise the actual status writer and transaction boundaries on a database."""
 
+import zipfile
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -8,7 +9,9 @@ from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import backend.app.models  # noqa: F401
+from backend.app.core.config import settings
 from backend.app.core.database import Base
+from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services.print_scheduler import PrintScheduler
@@ -21,7 +24,11 @@ from backend.app.services.queue_transitions import (
 
 
 @pytest.fixture
-async def sessions(tmp_path):
+async def sessions(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "base_dir", tmp_path)
+    monkeypatch.setattr(settings, "archive_dir", tmp_path / "archives")
+    with zipfile.ZipFile(tmp_path / "source.3mf", "w") as source_zip:
+        source_zip.writestr("Metadata/plate_1.gcode", "G28\nM400\n")
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'queue.db'}")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -32,6 +39,20 @@ async def sessions(tmp_path):
 
 async def make_item(sessions, status="queued", **kwargs):
     async with sessions() as db:
+        if status == "queued":
+            printer = await db.scalar(select(Printer).limit(1))
+            if printer is None:
+                printer = Printer(name="Test", serial_number="TEST", ip_address="127.0.0.1", access_code="code")
+                db.add(printer)
+                await db.flush()
+            source_path = settings.base_dir / "source.3mf"
+            source = LibraryFile(
+                filename="source.3mf", file_path=str(source_path), file_type="3mf", file_size=source_path.stat().st_size
+            )
+            db.add(source)
+            await db.flush()
+            kwargs.setdefault("printer_id", printer.id)
+            kwargs.setdefault("library_file_id", source.id)
         item = PrintQueueItem(status=status, **kwargs)
         db.add(item)
         await db.commit()
@@ -63,6 +84,7 @@ async def test_existing_workflows_keep_their_status_paths(sessions, path):
                 else "clear_plate"
                 if before in ("finished", "failed", "cancelled")
                 else None,
+                attempt=await prepare_dispatch_archive(db, item, {}) if after == "dispatching" else None,
             )
             await db.commit()
             assert item.status == after
@@ -203,7 +225,7 @@ async def test_flush_does_not_emit_an_unconditional_status_write(sessions):
     status_writes = [statement for statement in statements if "status=" in statement.split(" WHERE ")[0]]
     assert len(status_writes) == 1
     assert "print_queue.status =" in status_writes[0].split(" WHERE ")[1]
-    assert len(statements) == 2  # Subsequent metadata flush must not rewrite status.
+    assert len(statements) == 3  # Conditional status, exact Archive link, then metadata only.
 
 
 @pytest.mark.parametrize("detached", [False, True])

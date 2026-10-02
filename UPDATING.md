@@ -174,7 +174,9 @@ Display reasons are never used to guess whether a print failed or was stopped.
 New attempts create their exact Archive copy atomically with entry into
 Dispatching, before uploading to the printer. Callers prepare that copy before
 taking the transition lock; the writer only conditionally changes the job and
-flushes its prepared Archive. Heat-soak and Skip preparation release the control
+flushes its prepared Archive. Entry without this job's prepared attempt is
+rejected. A copy failure takes a Failed hold directly, without entering
+Dispatching or sending a print. Heat-soak and Skip preparation release the control
 lock after committing a heartbeat, allowing Stop to win during copying.
 The handoff rechecks the job's status and owner before linking the attempt;
 cancelled preparations leave no Archive row or prepared directory.
@@ -193,11 +195,19 @@ Heat-soak handoffs check current telemetry after copying, including when a
 reconnection replaces the client. They also check readiness before copying;
 unready telemetry keeps the heartbeat alive without repeated copies. Database
 or flush errors in one handoff preserve other committed handoffs from the tick.
-Preparation rejects deleted Files and Archive sources. A Skip copy failure
+Missing/deleted sources found before taking the printer stay parked for manual
+start, including reprints of trashed Archives. Preparation also rejects sources
+deleted during heat soaking. All three dispatch paths share preparation-error
+reporting, so the job and Skip response retain the cause, such as a deleted
+source or a full disk. A Skip copy failure
 commits Failed with its printer hold and Auto Off, then returns HTTP 409 with
 the job's error instead of reporting success. The Queue shows that error and
 refreshes the failed job. Pool copy failures send a failure notification;
 assignment notifications require a successful dispatch handoff.
+Skip succeeds when the same job's exact attempt has already progressed during
+the request; it neither copies again nor launches another dispatch worker.
+Repeated completion callbacks still repair proven restored legacy Archive links
+without rewriting the job's recorded physical outcome.
 Retry starts with empty physical-outcome
 fields; cancelling the retry while queued does not inherit the old result.
 Hidden Queue uploads remain available while any nonfinal job references them,
