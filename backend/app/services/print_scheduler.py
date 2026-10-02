@@ -50,10 +50,8 @@ from backend.app.services.printer_manager import (
 )
 from backend.app.services.queue_transitions import HOLDING_STATUSES, QueueTransitionConflict, transition_queue_item
 from backend.app.services.smart_plug_manager import smart_plug_manager
-from backend.app.utils.filename import derive_queue_remote_filename
 from backend.app.utils.local_time import utcnow_naive
 from backend.app.utils.printer_models import is_gcode_compatible, normalize_printer_model
-from backend.app.utils.safe_path import assert_under, safe_join_under
 
 logger = logging.getLogger(__name__)
 
@@ -642,15 +640,6 @@ class PrintScheduler:
                     db, item, "finished" if telemetry_status == "completed" else telemetry_status, completed_at=now
                 ):
                     continue
-                from backend.app.services.archive import record_dispatch_outcome
-
-                await record_dispatch_outcome(
-                    db,
-                    status=telemetry_status,
-                    dispatched_queue_item_id=item.id,
-                    archive_id=item.archive_id,
-                    completed_at=now,
-                )
                 changed = True
                 filename = getattr(printer_status, "gcode_file", None)
                 if not filename and item.archive_id is not None:
@@ -3742,9 +3731,9 @@ class PrintScheduler:
         - archive_id: Print from an existing archive
         - library_file_id: Print from a library file (file manager)
 
-        Nothing before the hold transition can fail a queued job: it was not
-        sent anywhere, so it stays in the pool with a reason. ``binding`` is
-        the scheduler's decision: the printer (chosen, for an "Any machine"
+        Source eligibility failures leave the job parked in the pool. A copy
+        failure explicitly takes a failed hold without entering dispatching.
+        ``binding`` is the scheduler's decision: the printer (chosen, for an "Any machine"
         job) and its tray mapping. The hold transition is the only write that
         records them on the job.
         """
@@ -3808,11 +3797,15 @@ class PrintScheduler:
 
         if item.archive_id:
             # Print from archive
-            result = await db.execute(select(PrintArchive).where(PrintArchive.id == item.archive_id))
+            result = await db.execute(
+                select(PrintArchive).where(PrintArchive.id == item.archive_id).execution_options(populate_existing=True)
+            )
             archive = result.scalar_one_or_none()
-            if not archive:
+            if not archive or archive.deleted_at is not None:
                 logger.error("Queue item %s: Archive %s not found", item.id, item.archive_id)
-                await self._abandon_attempt(db, item, "Archive not found", park=True)
+                await self._abandon_attempt(
+                    db, item, "Archive source was deleted" if archive else "Archive not found", park=True
+                )
                 return
 
             if await _defer_incompatible_dispatch(
@@ -3912,59 +3905,58 @@ class PrintScheduler:
             unassigned = binding is not None and binding.unassigned
             if not self._is_printer_idle(printer_id):
                 return
+            from backend.app.services.queue_archive import prepare_dispatch_attempt
+
+            values = {"waiting_reason": None, **(binding.values() if binding is not None else {})}
+            preparation = await prepare_dispatch_attempt(db, item, values)
+            if preparation.source_unavailable:
+                await self._keep_queued(db, item, preparation.error_message, park=True)
+                return
+            if preparation.error_message:
+                values["error_message"] = preparation.error_message
             try:
                 await transition_queue_item(
                     db,
                     item,
                     "queued",
-                    "dispatching",
+                    "failed" if preparation.error_message else "dispatching",
                     conditions=(
                         PrintQueueItem.printer_id.is_(None) if unassigned else PrintQueueItem.printer_id == printer_id,
                         PrintQueueItem.dispatching_at == item.dispatching_at,
                     ),
-                    values={"waiting_reason": None, **(binding.values() if binding is not None else {})},
+                    values=values,
+                    action="archive_preparation_failed" if preparation.error_message else None,
+                    dispatch_guard=lambda: self._is_printer_idle(printer_id),
+                    attempt=preparation.archive,
                 )
                 await db.commit()
             except IntegrityError:
                 await db.rollback()
                 logger.info("Printer %s was reserved concurrently; job %s remains queued", printer_id, item_id)
                 return
-            if unassigned:
-                await self._notify_pool_assignment(db, item)
 
-        # Strip Grove snippets from every source before dispatch. Archive and
-        # Files copies can contain snippets from an earlier print, even when
-        # this queue item has injection disabled. Only add current snippets
-        # when the user opted in for this attempt.
-        injected_path = None
-        start_gc = None
-        end_gc = None
-        if item.gcode_injection:
-            try:
-                snippets_raw = await self._get_setting(db, "gcode_snippets")
-                if snippets_raw:
-                    snippets = json.loads(snippets_raw)
-                    model_snippets = snippets.get(printer.model, {})
-                    start_gc = (model_snippets.get("start_gcode") or "").strip() or None
-                    end_gc = (model_snippets.get("end_gcode") or "").strip() or None
-            except Exception as e:
-                logger.warning("Queue item %s: Could not load G-code snippets: %s", item.id, e)
-
-        try:
-            from backend.app.utils.threemf_tools import inject_gcode_into_3mf
-
-            injected_path = inject_gcode_into_3mf(file_path, item.plate_id or 1, start_gc, end_gc)
-            if injected_path:
-                file_path = injected_path
-                logger.info("Queue item %s: Grove G-code prepared for model %s", item.id, printer.model)
-            elif start_gc or end_gc:
-                logger.warning("Queue item %s: G-code injection returned no result, using original", item.id)
-        except Exception as e:
-            logger.warning("Queue item %s: G-code preparation failed, using original: %s", item.id, e)
-
-        # Upload to root directory (not /cache/) - the start_print command references
-        # files by name only (ftp://{filename}), so they must be in the root
-        remote_filename = derive_queue_remote_filename(filename)
+        # Entry into dispatching committed the immutable, injected attempt.
+        # Upload that copy, including for a completed or skipped heat soak.
+        if item.status != "dispatching":
+            if item.status == "failed":
+                await notification_service.on_queue_job_failed(
+                    job_name=filename.replace(".gcode.3mf", "").replace(".3mf", ""),
+                    printer_id=printer.id,
+                    printer_name=printer.name,
+                    reason=item.error_message,
+                    db=db,
+                )
+                await self._power_off_if_needed(db, item)
+            return
+        if not heat_soak_complete and unassigned:
+            await self._notify_pool_assignment(db, item)
+        archive = await db.get(PrintArchive, item.archive_id) if item.archive_id else None
+        if archive is None or archive.dispatched_queue_item_id != item.id:
+            await self._fail_queue_item(db, item, "Dispatch Archive is missing; inspect and retry")
+            return
+        file_path = settings.base_dir / archive.file_path
+        filename = archive.filename
+        remote_filename = archive.extra_data["remote_filename"]
         remote_path = f"/{remote_filename}"
 
         # Get FTP retry settings
@@ -3974,10 +3966,8 @@ class PrintScheduler:
         # Heat-soak handoffs have already released their validation lock above;
         # this closes the read transaction reopened while preparing the source
         # file and settings, so cancellation and other queue writers remain
-        # responsive during slow printer I/O. Regular dispatches retain their
-        # existing transaction boundary until the durable dispatch reservation.
-        if heat_soak_complete:
-            await db.commit()
+        # responsive during slow printer I/O.
+        await db.commit()
 
         logger.info(
             f"Queue item {item.id}: FTP upload starting - printer={printer.name} ({printer.model}), "
@@ -4041,11 +4031,7 @@ class PrintScheduler:
             logger.error("Queue item %s: FTP error: %s (type: %s)", item.id, e, type(e).__name__)
 
         if not uploaded:
-            # No Archive event exists until the command is about to be sent.
-            # The injected source is only temporary preparation data on this
-            # pre-dispatch failure path.
-            if injected_path and injected_path.exists():
-                injected_path.unlink(missing_ok=True)
+            # This failed dispatch retains its Archive and printer hold.
             cooloff_after = ftps_handshake_cooloff_deadline(printer.ip_address)
             error_msg = upload_error or (
                 "The printer's file service did not answer over TLS; the SD card is not involved."
@@ -4085,8 +4071,6 @@ class PrintScheduler:
             remote_path=remote_path,
             ftp_timeout=ftp_timeout,
         ):
-            if injected_path and injected_path.exists():
-                injected_path.unlink(missing_ok=True)
             return
 
         # Parse AMS mapping if stored
@@ -4107,16 +4091,12 @@ class PrintScheduler:
                 item.id,
                 item.printer_id,
             )
-            if injected_path and injected_path.exists():
-                injected_path.unlink(missing_ok=True)
             return
 
         if heat_soak_complete:
             item = await lock_queue_item(db, item.id)
             if not item or item.status != "dispatching" or not printer_manager.is_connected(item.printer_id):
                 await db.rollback()
-                if injected_path and injected_path.exists():
-                    injected_path.unlink(missing_ok=True)
                 return
 
         # Propagate the queue item's owner into printer_manager so the
@@ -4138,6 +4118,24 @@ class PrintScheduler:
         conditions = (PrintQueueItem.printer_id == dispatch_printer_id,)
         if claim_timestamp is not None:
             conditions += (PrintQueueItem.dispatching_at == claim_timestamp,)
+        # Either conditional update can lose after upload. Capture connection
+        # values before rollback expires ORM state; retain the committed Archive.
+        printer_ip, printer_code, printer_model = printer.ip_address, printer.access_code, printer.model
+
+        async def cleanup_losing_upload():
+            await db.rollback()
+            logger.info("Queue item %s lost its dispatch claim; cleaning up uploaded file", dispatch_item_id)
+            try:
+                await delete_file_async(
+                    printer_ip,
+                    printer_code,
+                    remote_path,
+                    socket_timeout=ftp_timeout,
+                    printer_model=printer_model,
+                )
+            except Exception as cleanup_err:
+                logger.debug("Queue item %s: cancelled-dispatch cleanup failed: %s", dispatch_item_id, cleanup_err)
+
         try:
             await transition_queue_item(
                 db,
@@ -4163,23 +4161,7 @@ class PrintScheduler:
             )
             return
         except QueueTransitionConflict:
-            # Cancellation, deletion or a replaced claim won during the upload.
-            # Capture connection values before rollback expires ORM attributes.
-            printer_ip, printer_code, printer_model = printer.ip_address, printer.access_code, printer.model
-            await db.rollback()
-            logger.info("Queue item %s lost its dispatch claim; cleaning up uploaded file", dispatch_item_id)
-            try:
-                await delete_file_async(
-                    printer_ip,
-                    printer_code,
-                    remote_path,
-                    socket_timeout=ftp_timeout,
-                    printer_model=printer_model,
-                )
-            except Exception as cleanup_err:
-                logger.debug("Queue item %s: cancelled-dispatch cleanup failed: %s", dispatch_item_id, cleanup_err)
-            if injected_path and injected_path.exists():
-                injected_path.unlink(missing_ok=True)
+            await cleanup_losing_upload()
             return
 
         logger.info("Queue item %s: Status set to 'dispatching'; performing final pre-send checks", item.id)
@@ -4217,112 +4199,27 @@ class PrintScheduler:
                 item.id,
                 item.printer_id,
             )
-            if injected_path and injected_path.exists():
-                injected_path.unlink(missing_ok=True)
             return
 
         if heat_soak_complete:
             item = await lock_queue_item(db, item.id)
             if not item or item.status != "dispatching" or not printer_manager.is_connected(item.printer_id):
                 await db.rollback()
-                if injected_path and injected_path.exists():
-                    injected_path.unlink(missing_ok=True)
                 return
 
-        # Create one historical Archive for this attempt at the actual
-        # dispatch boundary. Queue admission, FTP preparation, a cancelled
-        # upload, or a pre-send deferral must not turn an intention into print
-        # history. Copy the exact local artifact that was uploaded (including
-        # any requested G-code injection), and persist the Archive link before
-        # publishing project_file so later device events update this attempt.
-        source_archive = archive
-        source_archive_id = source_archive.id if source_archive else None
-        attempt_archive = None
-        queue_item_id = item.id
+        # Start the acknowledgement window only once upload is complete.
         try:
-            from backend.app.services.archive import ArchiveService
-
-            attempt_archive = await ArchiveService(db).archive_print(
-                printer_id=item.printer_id,
-                source_file=file_path,
-                print_data={
-                    "status": "dispatching",
-                    "source": "queue_dispatch",
-                    "source_archive_id": source_archive_id,
-                    "dispatch_subtask_id": dispatch_subtask_id,
-                },
-                created_by_id=item.created_by_id,
-                original_filename=filename,
-                project_id=item.project_id or (source_archive.project_id if source_archive else None),
-                subtask_id=dispatch_subtask_id,
-                dispatched_queue_item_id=item.id,
-                commit=False,
-            )
-            if not attempt_archive:
-                raise RuntimeError("ArchiveService did not create an attempt record")
-
-            archive = attempt_archive
-            extra_data = dict(archive.extra_data or {})
-            extra_data["remote_filename"] = remote_filename
-            if source_archive_id is not None:
-                extra_data["source_archive_id"] = source_archive_id
-            archive.extra_data = extra_data
-
-            # Queue cards and cover downloads now use the immutable attempt
-            # copy. A one-off direct-to-queue source stays until the job is
-            # final, for Retry; the transition to a final state removes it.
-            file_path = settings.base_dir / archive.file_path
-            filename = archive.filename
-            # Copying the Archive may take minutes. Only now start the
-            # acknowledgement timeout, and recheck cancellation/claim fencing
-            # before committing the exact attempt link and sending MQTT.
             await transition_queue_item(
                 db,
                 item,
                 "dispatching",
                 "dispatching",
                 conditions=conditions,
-                values={"archive_id": archive.id, "dispatched_at": datetime.now(timezone.utc)},
+                values={"dispatched_at": datetime.now(timezone.utc)},
             )
             await db.commit()
-        except Exception:
-            await db.rollback()
-            logger.exception("Queue item %s: failed to create dispatch Archive", queue_item_id)
-            if attempt_archive:
-                for stored_path in (attempt_archive.file_path, attempt_archive.thumbnail_path):
-                    if stored_path:
-                        stored = Path(stored_path)
-                        path = (
-                            assert_under(Path(settings.archive_dir), stored, http=False)
-                            if stored.is_absolute()
-                            else safe_join_under(Path(settings.base_dir), stored_path, http=False)
-                        )
-                        try:
-                            path.unlink(missing_ok=True)
-                        except OSError:
-                            logger.warning("Failed to clean incomplete Archive file %s", path)
-            try:
-                await delete_file_async(
-                    printer.ip_address,
-                    printer.access_code,
-                    remote_path,
-                    socket_timeout=ftp_timeout,
-                    printer_model=printer.model,
-                )
-            except Exception as cleanup_err:
-                logger.debug("Queue item %s: failed to remove staged printer file: %s", queue_item_id, cleanup_err)
-            if injected_path and injected_path.exists():
-                injected_path.unlink(missing_ok=True)
-            item = await db.get(PrintQueueItem, queue_item_id)
-            if item and item.status == "dispatching" and item.dispatch_subtask_id == dispatch_subtask_id:
-                await self._fail_queue_item(
-                    db,
-                    item,
-                    "Failed to create Archive record for dispatch",
-                    dispatched_at=None,
-                    dispatch_subtask_id=None,
-                )
-                await self._power_off_if_needed(db, item)
+        except QueueTransitionConflict:
+            await cleanup_losing_upload()
             return
 
         from backend.app.main import register_expected_print
@@ -4335,22 +4232,6 @@ class PrintScheduler:
             created_by_id=item.created_by_id,
             plate_id=item.plate_id,
         )
-
-        for cleanup_path in [*([injected_path] if injected_path else [])]:
-            try:
-                cleanup_path.unlink(missing_ok=True)
-            except OSError as cleanup_err:
-                logger.warning(
-                    "TRANSIENT_LIBRARY_FILE_ORPHAN %s",
-                    json.dumps(
-                        {
-                            "queue_item_id": item.id,
-                            "path": str(cleanup_path),
-                            "error": str(cleanup_err),
-                        },
-                        sort_keys=True,
-                    ),
-                )
 
         try:
             started = printer_manager.start_print(
@@ -4413,24 +4294,19 @@ class PrintScheduler:
             except Exception:
                 pass  # Best-effort — don't fail the error handler
 
-            # Print command failed - revert status
-            await transition_queue_item(db, item, item.status, "failed")
-            item.dispatched_at = None
-            item.dispatch_subtask_id = None
-            item.started_at = None
-            item.error_message = "Failed to send print command to printer"
-            item.completed_at = datetime.now(timezone.utc)
-            if archive:
-                from backend.app.services.archive import record_dispatch_outcome
-
-                await record_dispatch_outcome(
-                    db,
-                    status="failed",
-                    dispatched_queue_item_id=item.id,
-                    archive_id=item.archive_id,
-                    completed_at=item.completed_at,
-                    failure_reason="Failed to send print command",
-                )
+            await transition_queue_item(
+                db,
+                item,
+                item.status,
+                "failed",
+                values={
+                    "dispatched_at": None,
+                    "dispatch_subtask_id": None,
+                    "started_at": None,
+                    "error_message": "Failed to send print command to printer",
+                    "completed_at": datetime.now(timezone.utc),
+                },
+            )
             await db.commit()
             if archive:
                 from backend.app.main import unregister_expected_print

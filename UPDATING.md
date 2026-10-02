@@ -163,6 +163,86 @@ the existing Prometheus queue printing gauge does the same. Pause/resume does
 not create another Archive or change its physical outcome. See the
 [lifecycle guide and stage 4 hardware checklist](docs/queue-status-transitions.md).
 
+## Queue Archive alignment (stage 5)
+
+The upgrade adds nullable physical-outcome fields to Queue jobs and backfills
+known outcomes once, controlled by `queue_archive_outcome_version = 1`.
+An exact Archive/job link or an unambiguous terminal job state supplies the
+backfill; an older `unsuccessful` job without that evidence stays unknown.
+Display reasons are never used to guess whether a print failed or was stopped.
+
+New attempts create their exact Archive copy atomically with entry into
+Dispatching, before uploading to the printer. Callers prepare that copy before
+taking the transition lock; the writer only conditionally changes the job and
+flushes its prepared Archive. Entry without this job's prepared attempt is
+rejected. A copy failure takes a Failed hold directly, without entering
+Dispatching or sending a print. Heat-soak and Skip preparation release the control
+lock after committing a heartbeat, allowing Stop to win during copying.
+The handoff rechecks the job's status and owner before linking the attempt;
+cancelled preparations leave no Archive row or prepared directory.
+An upload or command failure
+therefore appears in Archive while its
+job holds the printer on the Queue. Jobs cancelled while waiting, or stopped
+or failed during preheating, still create no Archive entry.
+
+Archive outcomes commit when jobs enter Finished, Failed, or Cancelled.
+Clear Plate changes only the job. Existing Archive outcome names remain
+`completed`, `failed`, and `aborted`, including for paused and external jobs.
+An external Archive download that finishes after Clear Plate uses the retained
+physical outcome, timestamp and failure reason. Copy failures also honor the
+job's Auto Off setting, including completed and skipped heat-soak handoffs.
+Heat-soak handoffs check current telemetry after copying, including when a
+reconnection replaces the client. They also check readiness before copying;
+unready telemetry keeps the heartbeat alive without repeated copies. A final
+readiness rejection after a slow copy refreshes the same soak's heartbeat,
+preventing a false scheduler-timeout failure. Database or flush errors in one
+handoff, including heartbeat recovery, preserve other committed handoffs from
+the tick.
+Missing/deleted sources found before taking the printer stay parked for manual
+start, including reprints of trashed Archives. Preparation also rejects sources
+deleted during heat soaking. If a source disappears between the eligibility
+read and preparation, a queued job still parks without taking the printer;
+an existing heat soak shuts down and retains its Failed hold.
+All three dispatch paths share user-safe preparation-error reporting. A deleted
+source and insufficient disk space have specific messages; other copy failures
+use a generic message. Full exceptions, including server paths, stay in the log.
+A Skip copy failure
+commits Failed with its printer hold and Auto Off, then returns HTTP 409 with
+the job's error instead of reporting success. The Queue shows that error and
+refreshes the failed job. Pool copy failures send a failure notification;
+assignment notifications require a successful dispatch handoff.
+Skip succeeds when the same job's exact attempt has already progressed during
+the request; it neither copies again nor launches another dispatch worker.
+Skip checks fresh ready/idle telemetry before copying and at handoff. If the
+printer becomes busy, disconnected or unready, it returns HTTP 409 and keeps
+the soak alive; any prepared attempt is discarded and no worker starts.
+The response describes current readiness or a changed soak, rather than an
+older job error. Only a copy-failure response uses the newly committed job error.
+A readiness rejection at the final handoff also reports that the printer is
+not ready. The same soak keeps its heartbeat and remains available to retry.
+When cancellation wins a dispatch update after upload, staged printer-file
+cleanup is attempted without removing the committed cancelled Archive or hold.
+Repeated completion callbacks still repair proven restored legacy Archive links
+without rewriting the job's recorded physical outcome.
+Reconnect reconciliation reaches this repair for already-ended and final jobs,
+including cached completions, without replaying notifications or other completion
+effects. Duplicate identities still cannot establish a link.
+Retry starts with empty physical-outcome
+fields; cancelling the retry while queued does not inherit the old result.
+Hidden Queue uploads remain available while any nonfinal job references them,
+including a queued file variant; deletion happens after the last job finalizes
+and its transaction commits. Files copies remain independent.
+
+Existing active attempts retain their Archive and use the normal identity
+checks. When an older active Archive lacks its job link, the transition writer
+establishes it only if printer and submission IDs match uniquely and the Archive
+is still printing. The link, any late firmware-ID binding and physical outcome
+commit together. Reused IDs, other jobs' attempts, deleted Archives and historical
+reprint sources remain untouched. No additional schema migration is needed.
+An older in-flight upload with no attempt Archive remains held for
+inspection and Retry rather than sending without an Archive. Review the
+[stage 5 qualification checklist](docs/queue-status-transitions.md).
+
 ## Timezone
 
 `TZ` is the authoritative timezone for the container and for scheduled local

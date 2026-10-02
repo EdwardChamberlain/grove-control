@@ -1,6 +1,7 @@
 """Real-database regression coverage for queue heat-soak reservations and cleanup."""
 
 import time
+import zipfile
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -11,6 +12,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
+from backend.app.core.config import settings
 from backend.app.core.database import Base, _ensure_active_queue_printer_reservation
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem
@@ -26,11 +28,17 @@ from backend.app.services.library_trash import release_queue_references
 async def soak(tmp_path, monkeypatch):
     import backend.app.models  # noqa: F401
 
+    monkeypatch.setattr(settings, "base_dir", tmp_path)
+    monkeypatch.setattr(settings, "archive_dir", tmp_path / "archives")
+    source_path = tmp_path / "soak.3mf"
+    with zipfile.ZipFile(source_path, "w") as source_zip:
+        source_zip.writestr("Metadata/plate_1.gcode", "G28\nM400\n")
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'soak.db'}")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await _ensure_active_queue_printer_reservation(conn)
-    state = PrinterState(connected=True, state="IDLE")
+    # This connected client has already reported its idle job state.
+    state = PrinterState(connected=True, state="IDLE", job_telemetry_ready=True)
     client = MagicMock()
     client.set_bed_temperature.return_value = True
     client.set_chamber_temperature.return_value = True
@@ -45,8 +53,15 @@ async def soak(tmp_path, monkeypatch):
         printer = Printer(
             id=1, name="Test", serial_number="TEST", ip_address="127.0.0.1", access_code="12345678", model="H2D"
         )
-        item = PrintQueueItem(id=1, printer_id=1, chamber_heat_soak=True, heat_soak_minutes=1, status="queued")
-        db.add_all([printer, item])
+        source = LibraryFile(
+            filename="soak.3mf", file_path=str(source_path), file_type="3mf", file_size=source_path.stat().st_size
+        )
+        db.add_all([printer, source])
+        await db.flush()
+        item = PrintQueueItem(
+            id=1, printer_id=1, library_file_id=source.id, chamber_heat_soak=True, heat_soak_minutes=1, status="queued"
+        )
+        db.add(item)
         await db.commit()
         yield SimpleNamespace(
             engine=engine,
@@ -439,13 +454,31 @@ async def test_no_upload_or_print_until_soak_then_normal_correlated_dispatch(soa
     scheduler._propagate_owner_to_printer_manager = AsyncMock()
     scheduler._schedule_dispatch_confirmation = MagicMock()
     upload = AsyncMock(return_value=True)
-    archiving = AsyncMock(return_value=archive)
+
+    async def copy_attempt(_self, **kwargs):
+        attempt = PrintArchive(
+            printer_id=kwargs["printer_id"],
+            filename="test.3mf",
+            file_path=str(source),
+            file_size=10,
+            status="dispatching",
+            dispatched_queue_item_id=kwargs["dispatched_queue_item_id"],
+        )
+        _self.db.add(attempt)
+        return attempt
+
+    archiving = AsyncMock(side_effect=lambda **kwargs: None)
+
+    async def archive_print(service, **kwargs):
+        await archiving(**kwargs)
+        return await copy_attempt(service, **kwargs)
+
     monkeypatch.setattr(scheduling, "printer_manager", soak.manager)
     monkeypatch.setattr(scheduling, "upload_file_async", upload)
     monkeypatch.setattr(scheduling, "delete_file_async", AsyncMock())
     monkeypatch.setattr(scheduling, "get_ftp_retry_settings", AsyncMock(return_value=(False, 0, 0, 1)))
     monkeypatch.setattr(scheduling, "cache_3mf_download", MagicMock())
-    monkeypatch.setattr(ArchiveService, "archive_print", archiving)
+    monkeypatch.setattr(ArchiveService, "archive_print", archive_print)
     monkeypatch.setattr(scheduling, "async_session", lambda: AsyncSession(soak.engine, expire_on_commit=False))
     soak.manager.start_print.return_value = True
 

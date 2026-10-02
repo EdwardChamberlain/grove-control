@@ -159,6 +159,12 @@ class PrintQueueItem(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Immutable physical outcome, retained after Clear Plate even if an
+    # external print's Archive download has not finished. Display reasons and
+    # the released job state cannot distinguish a failure from a user Stop.
+    physical_outcome: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    physical_completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    physical_failure_reason: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

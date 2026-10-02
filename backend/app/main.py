@@ -118,7 +118,7 @@ from backend.app.services.printer_manager import (
     printer_state_to_dict,
 )
 from backend.app.services.queue_source_cleanup import start_queue_source_cleanup, stop_queue_source_cleanup
-from backend.app.services.queue_transitions import QueueTransitionConflict, transition_queue_item
+from backend.app.services.queue_transitions import FINAL_STATUSES, QueueTransitionConflict, transition_queue_item
 from backend.app.services.slot_nozzle import (
     resolve_slot_nozzle,
 )
@@ -2586,24 +2586,27 @@ async def _observe_print_start(printer_id: int, data: dict):
     async with async_session() as db:
         from backend.app.models.archive import PrintArchive
         from backend.app.models.print_queue import PrintQueueItem
+        from backend.app.services.chamber_heat_soak import lock_queue_item
 
         item = await db.get(PrintQueueItem, item_id)
+        if item is None or item.archive_id is not None:
+            return
+        query = select(PrintArchive).where(
+            PrintArchive.printer_id == printer_id,
+            PrintArchive.subtask_id == identity,
+            PrintArchive.dispatched_queue_item_id.is_(None),
+            PrintArchive.status == "printing",
+        )
+        archives = list((await db.scalars(query)).all())
+        if len(archives) != 1:
+            return
+        # Lock only for association, then recheck both sides against Stop/Clear Plate.
+        item = await lock_queue_item(db, item_id)
         if item and item.archive_id is None:
-            archives = list(
-                (
-                    await db.scalars(
-                        select(PrintArchive).where(
-                            PrintArchive.printer_id == printer_id,
-                            PrintArchive.subtask_id == identity,
-                            PrintArchive.dispatched_queue_item_id.is_(None),
-                            PrintArchive.status == "printing",
-                        )
-                    )
-                ).all()
-            )
+            archives = list((await db.scalars(query.with_for_update().execution_options(populate_existing=True))).all())
             if len(archives) == 1:
-                item.archive_id = archives[0].id
                 archives[0].dispatched_queue_item_id = item.id
+                await transition_queue_item(db, item, item.status, item.status, values={"archive_id": archives[0].id})
                 await db.commit()
 
 
@@ -2879,18 +2882,13 @@ async def _archive_print_start(printer_id: int, data: dict, *, queue_archive_id:
             archive = result.scalar_one_or_none()
 
             if archive:
-                from backend.app.services.archive import record_dispatch_outcome
-
-                await record_dispatch_outcome(
-                    db,
-                    status="printing",
-                    dispatched_queue_item_id=archive.dispatched_queue_item_id,
-                    archive_id=archive.id,
-                    started_at=datetime.now(timezone.utc),
-                    clear_failure_reason=True,
-                    clear_completed_at=True,
-                )
-
+                # The identified job transition already recorded its start.
+                # Unlinked legacy/virtual-printer intake has no job writer yet.
+                if archive.dispatched_queue_item_id is None:
+                    archive.status = "printing"
+                    archive.started_at = datetime.now(timezone.utc)
+                    archive.completed_at = None
+                    archive.failure_reason = None
                 # Reprint of an archive reuses the source row. Without resetting
                 # ``timelapse_path`` _scan_for_timelapse_with_retries early-returns
                 # ("already has timelapse") and _capture_finish_photo_from_timelapse
@@ -3085,15 +3083,11 @@ async def _archive_print_start(printer_id: int, data: dict, *, queue_archive_id:
                         existing_archive.id,
                         subtask_id,
                     )
-                    from backend.app.services.archive import record_dispatch_outcome
-
-                    await record_dispatch_outcome(
-                        db,
-                        status="printing",
-                        dispatched_queue_item_id=existing_archive.dispatched_queue_item_id,
-                        archive_id=existing_archive.id,
-                        clear_failure_reason=True,
-                    )
+                    # Only an unlinked legacy Archive may be revived here.
+                    # A linked attempt follows its job's transition instead.
+                    if existing_archive.dispatched_queue_item_id is None:
+                        existing_archive.status = "printing"
+                        existing_archive.failure_reason = None
                     await db.commit()
                 else:
                     logger.info("Resuming archive %s on subtask_id match (%s)", existing_archive.id, subtask_id)
@@ -4406,7 +4400,7 @@ async def _complete_identified_print(printer_id: int, data: dict):
     """Handle print completion - update the archive status."""
     import time
 
-    from backend.app.models.print_queue import PrintQueueItem
+    from backend.app.models.print_queue import AWAITING_PLATE_CLEAR_STATUSES, PrintQueueItem
 
     logger = logging.getLogger(__name__)
     start_time = time.time()
@@ -4441,6 +4435,43 @@ async def _complete_identified_print(printer_id: int, data: dict):
         if data.get("_recovered_dispatch"):
             statuses += ("finished", "failed", "successful")
         matched_job = await find_job(db, printer_id, identity, statuses)
+        if matched_job is None or _completed_job_events.get(printer_id) == matched_job.id:
+            terminal_statuses = (*AWAITING_PLATE_CLEAR_STATUSES, *FINAL_STATUSES)
+            ended_job = matched_job or await find_job(db, printer_id, identity, terminal_statuses)
+            if ended_job is not None and ended_job.status in terminal_statuses:
+                from backend.app.models.archive import PrintArchive
+
+                # Exact modern attempts need no repair or write lock. Only an
+                # unlinked, still-active Archive can need the writer's proof.
+                legacy_archive = (
+                    await db.scalar(
+                        select(PrintArchive.id).where(
+                            PrintArchive.id == ended_job.archive_id,
+                            PrintArchive.dispatched_queue_item_id.is_(None),
+                            PrintArchive.printer_id == ended_job.printer_id,
+                            PrintArchive.status == "printing",
+                            PrintArchive.completed_at.is_(None),
+                        )
+                    )
+                    if ended_job.archive_id is not None
+                    else None
+                )
+                if legacy_archive is not None:
+                    try:
+                        await transition_queue_item(
+                            db,
+                            ended_job,
+                            ended_job.status,
+                            ended_job.status,
+                            conditions=(
+                                PrintQueueItem.printer_id == printer_id,
+                                PrintQueueItem.dispatch_subtask_id == identity,
+                            ),
+                        )
+                        await db.commit()
+                    except QueueTransitionConflict:
+                        await db.rollback()
+                return None
         if matched_job is None and identity:
             # An external print archived by an older version may finish while
             # Grove is offline. Its exact ID can establish a job on reconnect;
@@ -4490,28 +4521,32 @@ async def _complete_identified_print(printer_id: int, data: dict):
             # Exact terminal identity also proves this dispatch was accepted.
             await transition_queue_item(db, matched_job, "dispatching", "printing")
         if matched_job.status not in ("successful", "unsuccessful"):
-            await transition_queue_item(db, matched_job, matched_job.status, destination)
-            matched_job.completed_at = datetime.now(timezone.utc)
-            if queue_status == "failed" and not matched_job.error_message:
-                matched_job.error_message = _format_hms_error_summary(data.get("hms_errors") or [])
+            reason = matched_job.error_message
+            if queue_status == "failed" and not reason:
+                reason = _format_hms_error_summary(data.get("hms_errors") or [])
+            await transition_queue_item(
+                db,
+                matched_job,
+                matched_job.status,
+                destination,
+                values={
+                    "completed_at": matched_job.completed_at or datetime.now(timezone.utc),
+                    "error_message": reason,
+                },
+                archive_failure_reason=derive_failure_reason(reported_status, data.get("hms_errors")),
+            )
         remote_filename = archive_filename = None
         if matched_job.archive_id:
-            from backend.app.services.archive import record_dispatch_outcome
+            from backend.app.models.archive import PrintArchive
 
-            attempt_archive = await record_dispatch_outcome(
-                db,
-                status="aborted" if queue_status == "cancelled" else queue_status,
-                dispatched_queue_item_id=matched_job.id,
-                archive_id=matched_job.archive_id,
-                completed_at=matched_job.completed_at,
-                failure_reason=(matched_job.error_message or "Print failed")[:100]
-                if queue_status == "failed"
-                else None,
-                preserve_failure_reason=True,
+            attempt_archive = await db.scalar(
+                select(PrintArchive).where(
+                    PrintArchive.id == matched_job.archive_id, PrintArchive.dispatched_queue_item_id == matched_job.id
+                )
             )
             if attempt_archive:
-                # Capture cleanup identity before automatic Clear Plate can
-                # release the hold and make this Archive eligible for deletion.
+                # Capture cleanup identity before automatic Clear Plate releases
+                # the hold and makes this Archive eligible for deletion.
                 remote_filename = (attempt_archive.extra_data or {}).get("remote_filename")
                 archive_filename = attempt_archive.filename
         await _bump_library_file_usage_if_completed(db, matched_job, queue_status)
@@ -5002,16 +5037,12 @@ async def _complete_identified_print(printer_id: int, data: dict):
             elif status == "failed" and hms_errors:
                 logger.info("[ARCHIVE] HMS errors present but none matched a known failure-reason short code")
 
-            await service.update_archive_status(
-                archive_id,
-                status=archive_status,
-                completed_at=(
-                    datetime.now(timezone.utc)
-                    if archive_status in ("completed", "failed", "aborted", "cancelled")
-                    else None
-                ),
-                failure_reason=failure_reason,
-            )
+            # The physical outcome committed with the identified job. Later
+            # effects must never overwrite it (including after a user Stop).
+            attempt = await service.get_archive(archive_id)
+            if attempt is not None:
+                archive_status = attempt.status
+                failure_reason = attempt.failure_reason
             logger.info(
                 "[ARCHIVE] Archive %s status updated to %s, failure_reason=%s",
                 archive_id,

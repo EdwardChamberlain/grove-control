@@ -4,6 +4,45 @@
 
 ### Added
 
+- Queue attempts now enter Archive when they enter Dispatching, before upload.
+  The immutable copy includes the G-code sent for that attempt. Upload and
+  command failures record their physical outcome in the same transaction as
+  the Queue state; Clear Plate preserves that outcome, including external
+  Archives downloaded later. Copy failures honor configured Auto Off, and a
+  heat-soak handoff race does not strand other printers. Hidden uploads remain
+  available until every referencing job, including file variants, is final.
+  Heat-soak handoffs check fresh telemetry after reconnecting during copying,
+  and Retry starts with no physical outcome from the previous job.
+  Restored active Archives without a dispatch link are associated by unique
+  printer and submission identity, so their completion, failure or Stop is
+  recorded atomically with the job.
+  Dispatch callers prepare files before taking the transition lock, so Stop
+  can win during heat-soak and Skip copies too. Unready telemetry keeps the
+  soak heartbeat alive without repeated copies, and one failed handoff cannot
+  strand other printers. Deleted sources are rejected. Skip copy failures
+  return the job's error and refresh the Queue; pool copy failures send a
+  failure notification instead of an assignment notification.
+  Trashed Archive reprints stay parked before taking a printer. All dispatch
+  paths report safe copy errors, including disk-space causes; server paths and
+  raw exception details stay in the log. The writer
+  requires a prepared attempt on entry to Dispatching; copy failures take an
+  explicit Failed hold directly. Skip succeeds when the same attempt has
+  already progressed, without launching another worker. Repeated completion
+  callbacks still repair proven legacy links and preserve physical outcomes.
+  Skip also checks fresh printer readiness before and after copying and at
+  handoff; unsafe telemetry retains the soak heartbeat and removes the prepared
+  copy. Reconnect repairs proven legacy links for already-ended jobs without
+  replaying completion effects, including after Clear Plate or a cached completion.
+  Automatic heat-soak handoffs retain their heartbeat when readiness changes
+  after a slow copy, so preparation does not cause a scheduler-timeout failure.
+  Skip refusals show the current readiness or soak-change reason instead of
+  an older job error. Copy failures show the newly committed failure message.
+  Duplicate completions of modern jobs avoid a write transaction; proven
+  restored legacy links still receive their repair.
+  A dispatch update that loses to Stop attempts to remove its staged printer
+  file while retaining the cancelled Archive and printer hold. Skip also reports
+  printer readiness when telemetry drops at the final handoff.
+
 - Queue jobs now persist **Paused** from matching printer telemetry, including
   startup and reconnect, and return to Printing on resume. Paused jobs retain
   their printer hold, appear in Active jobs and Timeline, and keep Stop Print

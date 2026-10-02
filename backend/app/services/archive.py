@@ -8,6 +8,7 @@ import shutil
 import zipfile
 from datetime import date, datetime, time, timezone
 from pathlib import Path
+from uuid import uuid4
 
 from defusedxml import ElementTree as ET
 from sqlalchemy import and_, or_, select, text, update
@@ -52,56 +53,6 @@ async def _guard_archive_deletion(db: AsyncSession, archive_id: int) -> bool:
             "Stop active jobs and clear their plates first."
         )
     return True
-
-
-async def record_dispatch_outcome(
-    db: AsyncSession,
-    *,
-    status: str,
-    dispatched_queue_item_id: int | None = None,
-    archive_id: int | None = None,
-    started_at: datetime | None = None,
-    completed_at: datetime | None = None,
-    failure_reason: str | None = None,
-    preserve_failure_reason: bool = False,
-    clear_failure_reason: bool = False,
-    clear_completed_at: bool = False,
-) -> PrintArchive | None:
-    """Record one dispatch lifecycle outcome on its exact Archive attempt.
-
-    Queue outcomes are resolved through the durable, unique queue-item link.
-    ``archive_id`` further constrains that lookup when available, preventing a
-    stale queue row from mutating another attempt. For non-queue printer events
-    the explicit Archive ID remains a valid target. The caller owns commit.
-    """
-    query = select(PrintArchive)
-    if dispatched_queue_item_id is not None:
-        query = query.where(PrintArchive.dispatched_queue_item_id == dispatched_queue_item_id)
-        if archive_id is not None:
-            query = query.where(PrintArchive.id == archive_id)
-    elif archive_id is not None:
-        query = query.where(PrintArchive.id == archive_id)
-    else:
-        return None
-
-    result = await db.execute(query)
-    archive = result.scalar_one_or_none()
-    if archive is None:
-        return None
-
-    archive.status = status
-    if started_at is not None:
-        archive.started_at = started_at
-    if completed_at is not None:
-        archive.completed_at = completed_at
-    elif clear_completed_at:
-        archive.completed_at = None
-    if failure_reason is not None:
-        if not preserve_failure_reason or not archive.failure_reason:
-            archive.failure_reason = failure_reason
-    elif clear_failure_reason:
-        archive.failure_reason = None
-    return archive
 
 
 async def detach_dispatch_archive_links(db: AsyncSession, queue_item_ids: list[int]) -> None:
@@ -1248,6 +1199,9 @@ class ArchiveService:
         prefer_filename_for_name: bool = False,
         commit: bool = True,
         dispatched_queue_item_id: int | None = None,
+        flush: bool = True,
+        unique_dir: bool = False,
+        created_dirs: list[Path] | None = None,
     ) -> PrintArchive | None:
         """Archive a 3MF file with metadata.
 
@@ -1274,6 +1228,10 @@ class ArchiveService:
             commit: When False, flush the row but leave the transaction to the caller.
                 Dispatch uses this to save the Archive event and its PrintQueue link
                 atomically before publishing the print command.
+            flush: When False with commit=False, prepare without writing the row.
+                The queue transition flushes it only after acquiring the hold.
+            unique_dir: Give this copy a private directory, even for matching names.
+            created_dirs: Record directories for caller-owned cleanup.
         """
         # Verify printer exists if specified
         if printer_id is not None:
@@ -1286,12 +1244,16 @@ class ArchiveService:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         display_stem = resolve_display_stem(original_filename if original_filename else source_file.name)
         archive_name = f"{timestamp}_{display_stem}"
+        if unique_dir:
+            archive_name += f"_{uuid4().hex}"
         # Use "unassigned" folder for archives without a printer
         printer_folder = str(printer_id) if printer_id is not None else "unassigned"
         archive_dir = (
             settings.archive_dir / printer_folder / archive_name
         )  # SEC-PATH-OK: printer_folder = str(int|None) → digits or "unassigned"; archive_name = f"{timestamp}_{display_stem}" where resolve_display_stem strips path components via Path(filename).name
         archive_dir.mkdir(parents=True, exist_ok=True)
+        if created_dirs is not None:
+            created_dirs.append(archive_dir)
 
         # Copy 3MF file with an explicit fsync'd loop (avoids a sendfile
         # short-read quirk that silently truncated 3MF archives on some
@@ -1433,7 +1395,7 @@ class ArchiveService:
         if commit:
             await self.db.commit()
             await self.db.refresh(archive)
-        else:
+        elif flush:
             await self.db.flush()
 
         return archive

@@ -36,7 +36,12 @@ from backend.app.schemas.print_queue import (
     QueueVariantCreate,
     QueueVariantSummary,
 )
-from backend.app.services.chamber_heat_soak import lock_queue_item, skip_heat_soak
+from backend.app.services.chamber_heat_soak import (
+    SkipHeatSoakResult,
+    heat_soak_dispatch_started,
+    lock_queue_item,
+    skip_heat_soak,
+)
 from backend.app.services.filament_deficit import compute_deficit_for_queue_item
 from backend.app.services.filament_requirements import (
     build_queue_filament_overrides,
@@ -1595,6 +1600,9 @@ async def retry_queue_item(
         "position",
         "started_at",
         "completed_at",
+        "physical_outcome",
+        "physical_completed_at",
+        "physical_failure_reason",
         "dispatched_at",
         "dispatch_subtask_id",
         "dispatching_at",
@@ -1700,7 +1708,6 @@ async def resolve_queue_dispatch(
     ),
 ):
     """Resolve an unconfirmed dispatch after checking the physical printer."""
-    from backend.app.services.archive import record_dispatch_outcome
     from backend.app.services.print_scheduler import scheduler
     from backend.app.services.printer_manager import printer_manager
 
@@ -1735,15 +1742,6 @@ async def resolve_queue_dispatch(
     }
     values["started_at" if data.outcome == "printing" else "completed_at"] = now
     await transition_queue_item(db, item, "dispatching", data.outcome, values=values)
-    await record_dispatch_outcome(
-        db,
-        status=data.outcome,
-        dispatched_queue_item_id=item.id,
-        archive_id=item.archive_id,
-        started_at=now if data.outcome == "printing" else None,
-        completed_at=now if data.outcome == "failed" else None,
-        failure_reason=values["error_message"] if data.outcome == "failed" else None,
-    )
     await db.commit()
     if data.outcome == "printing":
         await scheduler._publish_queue_job_started(item.id)
@@ -1773,9 +1771,24 @@ async def skip_queue_item_heat_soak(
             raise HTTPException(403, "You can only update your own queue items")
 
     if item.status != "preheating":
+        if await heat_soak_dispatch_started(db, item):
+            await db.rollback()
+            return {"message": "Heat soak skipped"}
         raise HTTPException(400, f"Can only skip heat soak for preheating items, current status: '{item.status}'")
 
-    await skip_heat_soak(db, item)
+    result = await skip_heat_soak(db, item)
+    if result == SkipHeatSoakResult.COPY_FAILED:
+        current = await db.get(PrintQueueItem, item_id, populate_existing=True)
+        raise HTTPException(
+            409,
+            (current.error_message or "Failed to create Archive record for dispatch")
+            if current
+            else "Queue item no longer exists",
+        )
+    if result == SkipHeatSoakResult.PRINTER_NOT_READY:
+        raise HTTPException(409, "Printer is not ready to start; wait for it to report idle, then retry")
+    if result != SkipHeatSoakResult.SKIPPED:
+        raise HTTPException(409, "Heat soak changed during preparation; refresh and retry")
     logger.info("Skipped heat soak for queue item %s", item_id)
     return {"message": "Heat soak skipped"}
 

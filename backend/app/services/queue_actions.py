@@ -14,7 +14,6 @@ logger = logging.getLogger(__name__)
 async def cancel_job(db: AsyncSession, item: PrintQueueItem) -> None:
     """Cancel waiting work or stop active work, retaining every active hold."""
     from backend.app.models.printer import Printer
-    from backend.app.services.archive import record_dispatch_outcome
     from backend.app.services.chamber_heat_soak import _heaters_off, _show_preheating, utcnow
     from backend.app.services.printer_manager import printer_manager
 
@@ -42,15 +41,6 @@ async def cancel_job(db: AsyncSession, item: PrintQueueItem) -> None:
         item.preheat_owner = None
         item.preheat_started_at = None
         item.preheat_checked_at = None
-    if not queued:
-        await record_dispatch_outcome(
-            db,
-            status="aborted",
-            dispatched_queue_item_id=item_id,
-            archive_id=item.archive_id,
-            completed_at=item.completed_at,
-            clear_failure_reason=True,
-        )
     # Ending a queued job releases its one-off source inside the transition;
     # the files are removed once this commit succeeds.
     await db.commit()
