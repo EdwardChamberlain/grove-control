@@ -21,7 +21,8 @@ from backend.tests.unit.test_queue_legacy_archive_alignment import legacy  # noq
 
 
 @pytest.mark.parametrize("heat_soak", [False, True])
-async def test_trashed_reprint_stays_parked_without_a_printer_hold(handoff, monkeypatch, heat_soak):
+@pytest.mark.parametrize("cached_source", [False, True])
+async def test_trashed_reprint_stays_parked_without_a_printer_hold(handoff, monkeypatch, heat_soak, cached_source):
     scheduler = handoff.scheduler
     assigned, failed, power_off = AsyncMock(), AsyncMock(), AsyncMock()
     monkeypatch.setattr(scheduler, "_notify_pool_assignment", assigned)
@@ -29,7 +30,8 @@ async def test_trashed_reprint_stays_parked_without_a_printer_hold(handoff, monk
     monkeypatch.setattr(scheduling.notification_service, "on_queue_job_failed", failed)
     async with handoff.sessions() as db:
         source = await ArchiveService(db).archive_print(None, handoff.source_path)
-        source.deleted_at = heat.utcnow()
+        if not cached_source:
+            source.deleted_at = heat.utcnow()
         await db.execute(
             PrintQueueItem.__table__.update()
             .where(PrintQueueItem.id == handoff.job_id)
@@ -43,6 +45,11 @@ async def test_trashed_reprint_stays_parked_without_a_printer_hold(handoff, monk
             )
         )
         await db.commit()
+        if cached_source:
+            async with handoff.sessions() as trash:
+                (await trash.get(PrintArchive, source.id)).deleted_at = heat.utcnow()
+                await trash.commit()
+            assert source.deleted_at is None  # Retained identity-map snapshot.
         job = await db.get(PrintQueueItem, handoff.job_id, populate_existing=True)
         binding = scheduling._DispatchBinding.for_item(job, 1, None, unassigned=True)
         await scheduler._start_print(db, job, binding=binding)
@@ -200,4 +207,18 @@ async def test_dispatch_entry_rejects_another_jobs_prepared_archive(alignment):
         with pytest.raises(InvalidQueueTransition, match="prepared Archive"):
             await transition_queue_item(db, job, "queued", "dispatching", attempt=attempt)
         await db.rollback()
+    assert not list(settings.archive_dir.rglob("*.3mf"))
+
+
+async def test_dispatch_entry_rejects_explicitly_clearing_the_selected_printer(alignment):
+    async with alignment.sessions() as db:
+        job = await db.get(PrintQueueItem, alignment.job_id)
+        attempt = await prepare_dispatch_archive(db, job, {})
+        with pytest.raises(InvalidQueueTransition, match="prepared Archive"):
+            await transition_queue_item(db, job, "queued", "dispatching", values={"printer_id": None}, attempt=attempt)
+        await db.rollback()
+    async with alignment.sessions() as observer:
+        job = await observer.get(PrintQueueItem, alignment.job_id)
+        assert job.status == "queued" and job.printer_id == 1 and job.archive_id is None
+        assert await observer.scalar(select(PrintArchive.id)) is None
     assert not list(settings.archive_dir.rglob("*.3mf"))

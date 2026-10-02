@@ -247,13 +247,13 @@ async def transition_queue_item(
     if status == "dispatching" and expected_status != status:
         if not isinstance(db, AsyncSession) or archive is None:
             raise InvalidQueueTransition("Entry into dispatching requires a prepared Archive")
-        printer_id = metadata.get("printer_id")
-        if printer_id is None:
-            if isinstance(item, int):
-                with db.no_autoflush:
-                    printer_id = await db.scalar(select(table.c.printer_id).where(table.c.id == item_id))
-            else:
-                printer_id = item.printer_id
+        if "printer_id" in metadata:
+            printer_id = metadata["printer_id"]
+        elif isinstance(item, int):
+            with db.no_autoflush:
+                printer_id = await db.scalar(select(table.c.printer_id).where(table.c.id == item_id))
+        else:
+            printer_id = item.printer_id
         if (
             archive not in db
             or not inspect(archive).pending

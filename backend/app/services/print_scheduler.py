@@ -3797,7 +3797,9 @@ class PrintScheduler:
 
         if item.archive_id:
             # Print from archive
-            result = await db.execute(select(PrintArchive).where(PrintArchive.id == item.archive_id))
+            result = await db.execute(
+                select(PrintArchive).where(PrintArchive.id == item.archive_id).execution_options(populate_existing=True)
+            )
             archive = result.scalar_one_or_none()
             if not archive or archive.deleted_at is not None:
                 logger.error("Queue item %s: Archive %s not found", item.id, item.archive_id)
