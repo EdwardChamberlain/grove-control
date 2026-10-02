@@ -3909,6 +3909,9 @@ class PrintScheduler:
 
             values = {"waiting_reason": None, **(binding.values() if binding is not None else {})}
             preparation = await prepare_dispatch_attempt(db, item, values)
+            if preparation.source_unavailable:
+                await self._keep_queued(db, item, preparation.error_message, park=True)
+                return
             if preparation.error_message:
                 values["error_message"] = preparation.error_message
             try:

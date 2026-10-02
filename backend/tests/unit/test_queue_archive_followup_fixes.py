@@ -10,6 +10,7 @@ from sqlalchemy import select
 from backend.app.api.routes.print_queue import skip_queue_item_heat_soak
 from backend.app.core.config import settings
 from backend.app.models.archive import PrintArchive
+from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem
 from backend.app.services import chamber_heat_soak as heat, print_scheduler as scheduling
 from backend.app.services.archive import ArchiveService
@@ -59,6 +60,60 @@ async def test_trashed_reprint_stays_parked_without_a_printer_hold(handoff, monk
         assert job.physical_outcome is None and job.archive_id == source.id
         assert await db.scalar(select(PrintQueueItem.id).where(PrintQueueItem.status.in_(HOLDING_STATUSES))) is None
         assert list(await db.scalars(select(PrintArchive.id))) == [source.id]
+        assigned.assert_not_awaited()
+        failed.assert_not_awaited()
+        power_off.assert_not_awaited()
+
+
+@pytest.mark.parametrize("source_kind", ["archive", "library"])
+@pytest.mark.parametrize("remove", ["trash", "delete"])
+async def test_source_removed_after_eligibility_read_stays_parked(handoff, monkeypatch, source_kind, remove):
+    from backend.app.services import queue_archive
+
+    model = PrintArchive if source_kind == "archive" else LibraryFile
+    assigned, failed, power_off = AsyncMock(), AsyncMock(), AsyncMock()
+    monkeypatch.setattr(handoff.scheduler, "_notify_pool_assignment", assigned)
+    monkeypatch.setattr(handoff.scheduler, "_power_off_if_needed", power_off)
+    monkeypatch.setattr(scheduling.notification_service, "on_queue_job_failed", failed)
+    async with handoff.sessions() as db:
+        source_id = handoff.source_id
+        if source_kind == "archive":
+            source_id = (await ArchiveService(db).archive_print(None, handoff.source_path)).id
+        await db.execute(
+            PrintQueueItem.__table__.update()
+            .where(PrintQueueItem.id == handoff.job_id)
+            .values(
+                status="queued",
+                printer_id=None,
+                chamber_heat_soak=False,
+                preheat_owner=None,
+                archive_id=source_id if source_kind == "archive" else None,
+                library_file_id=source_id if source_kind == "library" else None,
+            )
+        )
+        await db.commit()
+        original = queue_archive.prepare_dispatch_archive
+
+        async def remove_before_preparation(db, item, values):
+            async with handoff.sessions() as user:
+                source = await user.get(model, source_id)
+                if remove == "trash":
+                    source.deleted_at = heat.utcnow()
+                else:
+                    await user.delete(source)
+                await user.commit()
+            return await original(db, item, values)
+
+        monkeypatch.setattr(queue_archive, "prepare_dispatch_archive", remove_before_preparation)
+        job = await db.get(PrintQueueItem, handoff.job_id, populate_existing=True)
+        binding = scheduling._DispatchBinding.for_item(job, 1, None, unassigned=True)
+        await handoff.scheduler._start_print(db, job, binding=binding)
+        await db.refresh(job)
+        assert job.status == "queued" and job.printer_id is None and job.manual_start
+        assert "Dispatch source" in job.waiting_reason
+        assert job.physical_outcome is None
+        assert await db.scalar(select(PrintQueueItem.id).where(PrintQueueItem.status.in_(HOLDING_STATUSES))) is None
+        assert await db.scalar(select(PrintArchive.id).where(PrintArchive.dispatched_queue_item_id == job.id)) is None
         assigned.assert_not_awaited()
         failed.assert_not_awaited()
         power_off.assert_not_awaited()

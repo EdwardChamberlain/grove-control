@@ -259,7 +259,9 @@ work with the conditional transition writer:
   they never enter `dispatching` without an Archive. All dispatch callers share
   preparation/error reporting, preserving the actual copy error in the job.
   Deleted or missing sources found before taking a hold stay parked in the
-  queue. Preparation also rejects sources deleted during heat soaking. Skip failures
+  queue, including deletion between eligibility checks and preparation.
+  Typed source failures decide that policy; display messages do not.
+  Preparation also rejects sources deleted during heat soaking. Skip failures
   return HTTP 409 with the committed job error; the Queue displays it and
   refreshes the failed job. Skip succeeds if the same job's exact attempt already
   progressed while the request was preparing, without copying again or spawning

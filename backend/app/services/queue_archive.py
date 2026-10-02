@@ -23,10 +23,15 @@ from backend.app.utils.threemf_tools import inject_gcode_into_3mf
 logger = logging.getLogger(__name__)
 
 
+class DispatchSourceUnavailable(RuntimeError):
+    """The dispatch source row is missing or soft-deleted."""
+
+
 @dataclass(frozen=True)
 class DispatchArchivePreparation:
     archive: PrintArchive | None
     error_message: str | None = None
+    source_unavailable: bool = False
 
 
 async def prepare_dispatch_attempt(db: AsyncSession, item: PrintQueueItem, values: dict) -> DispatchArchivePreparation:
@@ -42,7 +47,11 @@ async def prepare_dispatch_attempt(db: AsyncSession, item: PrintQueueItem, value
     except Exception as error:
         logger.exception("Queue item %s: failed to prepare dispatch Archive", item.id)
         cause = str(error).strip() or type(error).__name__
-        return DispatchArchivePreparation(None, f"Failed to create Archive record for dispatch: {cause}")
+        return DispatchArchivePreparation(
+            None,
+            f"Failed to create Archive record for dispatch: {cause}",
+            source_unavailable=isinstance(error, DispatchSourceUnavailable),
+        )
 
 
 def discard_prepared_archive(
@@ -73,9 +82,9 @@ async def prepare_dispatch_archive(db: AsyncSession, item: PrintQueueItem, value
         if source is None and item.library_file_id:
             source = await db.get(LibraryFile, item.library_file_id, populate_existing=True)
         if source is None:
-            raise RuntimeError("Dispatch source no longer exists")
+            raise DispatchSourceUnavailable("Dispatch source no longer exists")
         if source.deleted_at is not None:
-            raise RuntimeError("Dispatch source was deleted")
+            raise DispatchSourceUnavailable("Dispatch source was deleted")
         printer_id = values.get("printer_id", item.printer_id)
         printer = await db.get(Printer, printer_id)
         if printer is None:

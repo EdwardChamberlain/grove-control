@@ -197,7 +197,10 @@ unready telemetry keeps the heartbeat alive without repeated copies. Database
 or flush errors in one handoff preserve other committed handoffs from the tick.
 Missing/deleted sources found before taking the printer stay parked for manual
 start, including reprints of trashed Archives. Preparation also rejects sources
-deleted during heat soaking. All three dispatch paths share preparation-error
+deleted during heat soaking. If a source disappears between the eligibility
+read and preparation, a queued job still parks without taking the printer;
+an existing heat soak shuts down and retains its Failed hold.
+All three dispatch paths share preparation-error
 reporting, so the job and Skip response retain the cause, such as a deleted
 source or a full disk. A Skip copy failure
 commits Failed with its printer hold and Auto Off, then returns HTTP 409 with
