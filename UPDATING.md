@@ -165,15 +165,24 @@ not create another Archive or change its physical outcome. See the
 
 ## Queue Archive alignment (stage 5)
 
-No additional schema migration is required. New attempts create their exact
-Archive copy atomically with entry into Dispatching, before uploading to the
-printer. An upload or command failure therefore appears in Archive while its
+The upgrade adds nullable physical-outcome fields to Queue jobs and backfills
+known outcomes once, controlled by `queue_archive_outcome_version = 1`.
+An exact Archive/job link or an unambiguous terminal job state supplies the
+backfill; an older `unsuccessful` job without that evidence stays unknown.
+Display reasons are never used to guess whether a print failed or was stopped.
+
+New attempts create their exact Archive copy atomically with entry into
+Dispatching, before uploading to the printer. An upload or command failure
+therefore appears in Archive while its
 job holds the printer on the Queue. Jobs cancelled while waiting, or stopped
 or failed during preheating, still create no Archive entry.
 
 Archive outcomes commit when jobs enter Finished, Failed, or Cancelled.
 Clear Plate changes only the job. Existing Archive outcome names remain
 `completed`, `failed`, and `aborted`, including for paused and external jobs.
+An external Archive download that finishes after Clear Plate uses the retained
+physical outcome, timestamp and failure reason. Copy failures also honor the
+job's Auto Off setting, including completed and skipped heat-soak handoffs.
 Hidden Queue uploads remain available while any nonfinal job references them,
 including a queued file variant; deletion happens after the last job finalizes
 and its transaction commits. Files copies remain independent.

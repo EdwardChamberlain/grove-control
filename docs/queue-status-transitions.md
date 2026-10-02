@@ -237,19 +237,28 @@ work with the conditional transition writer:
   copy; preparation never locks a waiting job before the conditional update.
   Recheck idle telemetry after copying, before taking the hold, so a new
   external print cannot be displaced while its callback is still pending.
+  A heat-soak handoff conflict rolls back only that item; earlier committed
+  handoffs still start their dispatch workers.
 - Successful upload is no longer required for an Archive entry. Upload,
   drying-policy and command failures update the attempt to `failed` and retain
-  the printer hold. A copy failure holds the job as `failed` without sending.
+  the printer hold. A copy failure holds the job as `failed` without sending
+  and runs configured Auto Off after commit, including heat-soak handoffs.
 - Entry into `finished`, `failed`, or `cancelled` records the Archive outcome
   (`completed`, `failed`, or `aborted`) in the same transaction. Exact job and
   Archive columns must both match. Pause/resume, duplicate terminal observations,
   Clear Plate and printer deletion do not rewrite the physical outcome.
+  The job retains the outcome, timestamp and failure reason separately from
+  its released state, so a delayed external Archive can attach after Clear
+  Plate or restart. Association briefly locks the job against Stop/Clear Plate.
 - Hidden sources are retained by every nonfinal reference, including variants.
   Finalization detaches final references and removes sources; artifact deletion
   waits for commit. Files storage and external sources are preserved.
 
-There is no new schema migration. Older in-flight attempts without an Archive
-remain held for user inspection rather than publishing a command without one.
+Startup adds the nullable physical-outcome columns and performs the versioned
+`queue_archive_outcome_version = 1` backfill once. Only unambiguous job states
+or exact Archive/job links supply outcomes; display reasons and reprint-source
+Archives do not. Older in-flight attempts without an Archive remain held for
+user inspection rather than publishing a command without one.
 
 Real database tests cover the transition table, stale sessions, rollback,
 claim replacement, cancellation/confirmation/recovery races, all holding states,
@@ -294,6 +303,10 @@ and timestamps before and after Clear Plate. Retain a shared hidden upload
 until every direct and variant reference is final, and confirm saved Files
 copies remain. PostgreSQL must additionally exercise competing dispatch/Stop,
 rollback and shared-source finalization with real concurrent connections.
+Also finish a slow external Archive download after failure/Stop and Clear
+Plate, advance multiple heat soaks while one printer becomes busy during
+copying, and confirm Auto Off after a copy failure on ordinary and heat-soak
+jobs. Verify the one-time outcome backfill on a pre-stage-5 PostgreSQL database.
 
 `test_queue_archive_alignment.py` covers real-database dispatch/Archive commit,
 rollback (including session close), cancellation during copying, duplicate

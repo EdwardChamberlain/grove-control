@@ -7,7 +7,9 @@
 - Queue attempts now enter Archive when they enter Dispatching, before upload.
   The immutable copy includes the G-code sent for that attempt. Upload and
   command failures record their physical outcome in the same transaction as
-  the Queue state; Clear Plate preserves that outcome. Hidden uploads remain
+  the Queue state; Clear Plate preserves that outcome, including external
+  Archives downloaded later. Copy failures honor configured Auto Off, and a
+  heat-soak handoff race does not strand other printers. Hidden uploads remain
   available until every referencing job, including file variants, is final.
 
 - Queue jobs now persist **Paused** from matching printer telemetry, including

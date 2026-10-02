@@ -27,6 +27,8 @@ archived artifact is the exact local file uploaded to the printer, including
 any G-code injection applied for that dispatch. Upload failures therefore
 appear in Archive too. The attempt records its outcome when its job enters
 Finished, Failed, or Cancelled; Clear Plate preserves that physical outcome.
+An external Archive download that finishes after Clear Plate uses the job's
+retained physical outcome and original timestamps.
 Waiting cancellations and preheating failures or stops create no Archive. A reprint creates a new
 dispatch attempt when submitted through the Queue.
 

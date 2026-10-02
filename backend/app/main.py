@@ -2585,9 +2585,11 @@ async def _observe_print_start(printer_id: int, data: dict):
     await _archive_print_start(printer_id, data, queue_archive_id=queue_archive_id)
     async with async_session() as db:
         from backend.app.models.archive import PrintArchive
-        from backend.app.models.print_queue import PrintQueueItem
+        from backend.app.services.chamber_heat_soak import lock_queue_item
 
-        item = await db.get(PrintQueueItem, item_id)
+        # Serialize the short association transaction with Clear Plate/Stop;
+        # its snapshot must still be current at the conditional update.
+        item = await lock_queue_item(db, item_id)
         if item and item.archive_id is None:
             archives = list(
                 (

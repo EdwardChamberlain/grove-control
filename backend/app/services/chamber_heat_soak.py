@@ -85,7 +85,14 @@ def _heaters_off(printer: Printer) -> None:
             logger.exception("Heat-soak heater shutdown failed for printer %s", printer.id)
 
 
-async def abort_heat_soak(db: AsyncSession, item: PrintQueueItem, reason: str, *, status: str = "failed") -> None:
+async def abort_heat_soak(
+    db: AsyncSession,
+    item: PrintQueueItem,
+    reason: str,
+    *,
+    status: str = "failed",
+    schedule_auto_off: bool = False,
+) -> None:
     """Caller holds the queue write lock. Persist cleanup even if the item is deleted."""
     await transition_queue_item(
         db, item, item.status, status, values={"error_message": reason, "completed_at": utcnow()}
@@ -105,6 +112,10 @@ async def abort_heat_soak(db: AsyncSession, item: PrintQueueItem, reason: str, *
     if printer:
         _heaters_off(printer)
     _show_preheating(item.printer_id, False)
+    if schedule_auto_off:
+        from backend.app.services.print_scheduler import scheduler
+
+        await scheduler._power_off_if_needed(db, item)
 
 
 async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> None:
@@ -116,7 +127,7 @@ async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> None:
     """
     await transition_queue_item(db, item, item.status, "dispatching")
     if item.status == "failed":
-        await abort_heat_soak(db, item, item.error_message)
+        await abort_heat_soak(db, item, item.error_message, schedule_auto_off=True)
         return
     item.chamber_heat_soak = False
     item.manual_start = False
@@ -306,17 +317,26 @@ class ChamberHeatSoak:
                 continue
             if (now - item.preheat_started_at).total_seconds() >= item.heat_soak_minutes * 60:
                 _show_preheating(item.printer_id, False)
-                await transition_queue_item(
-                    db,
-                    item,
-                    item.status,
-                    "dispatching",
-                    dispatch_guard=lambda item=item, state=state: (
-                        printer_manager.is_connected(item.printer_id) and state.state in ("IDLE", "FINISH", "FAILED")
-                    ),
-                )
+                try:
+                    await transition_queue_item(
+                        db,
+                        item,
+                        item.status,
+                        "dispatching",
+                        dispatch_guard=lambda item=item, state=state: (
+                            printer_manager.is_connected(item.printer_id)
+                            and state.state in ("IDLE", "FINISH", "FAILED")
+                        ),
+                    )
+                except QueueTransitionConflict:
+                    # Earlier handoffs already committed. Keep their IDs so a
+                    # competing Stop or fresh activity on this printer cannot
+                    # prevent the other printers' workers from being spawned.
+                    await db.rollback()
+                    logger.info("Queue item %s changed or became unavailable during heat-soak handoff", item_id)
+                    continue
                 if item.status == "failed":
-                    await abort_heat_soak(db, item, item.error_message)
+                    await abort_heat_soak(db, item, item.error_message, schedule_auto_off=True)
                     continue
                 # No acknowledgement timeout until the upload and send boundary.
                 item.dispatched_at = None

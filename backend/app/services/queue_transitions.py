@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 
 
 FINAL_STATUSES = ("successful", "unsuccessful")
+ARCHIVE_OUTCOMES = {"finished": "completed", "failed": "failed", "cancelled": "aborted"}
 logger = logging.getLogger(__name__)
 ALLOWED_TRANSITIONS = {
     "queued": frozenset({"preheating", "dispatching", "unsuccessful"}),
@@ -148,6 +149,8 @@ async def transition_queue_item(
     metadata = dict(values or {})
     if "status" in metadata or "id" in metadata:
         raise ValueError("Transition metadata cannot override status or id")
+    if any(key.startswith("physical_") for key in metadata):
+        raise ValueError("Physical outcomes are recorded only on entry to an awaiting-plate-clear state")
     item_id = item if isinstance(item, int) else item.id
 
     table = PrintQueueItem.__table__
@@ -159,6 +162,21 @@ async def transition_queue_item(
     if isinstance(db, AsyncSession) and expected_status != status:
         if status in AWAITING_PLATE_CLEAR_STATUSES:
             metadata.setdefault("completed_at", datetime.now(timezone.utc))
+            # Capture facts before finalization collapses failed/cancelled into
+            # unsuccessful. No state decision ever reads this projection.
+            reason = metadata.get("error_message")
+            if reason is None:
+                with db.no_autoflush:
+                    reason = await db.scalar(select(table.c.error_message).where(table.c.id == item_id))
+            metadata.update(
+                physical_outcome=ARCHIVE_OUTCOMES[status],
+                physical_completed_at=metadata["completed_at"],
+                physical_failure_reason=(archive_failure_reason or (reason or "Print failed")[:100])
+                if status == "failed"
+                else "User cancelled"
+                if status == "cancelled"
+                else None,
+            )
         if status == "dispatching":
             from backend.app.services.queue_archive import prepare_dispatch_archive
 
@@ -247,23 +265,26 @@ async def transition_queue_item(
             ):
                 attempt.status = "printing"
                 attempt.started_at = row.started_at or datetime.now(timezone.utc)
-            if (status in AWAITING_PLATE_CLEAR_STATUSES and (expected_status != status or attaching)) or (
-                attaching and status == "successful"
+            if (status in AWAITING_PLATE_CLEAR_STATUSES and expected_status != status) or (
+                attaching and status in (*AWAITING_PLATE_CLEAR_STATUSES, *FINAL_STATUSES)
             ):
-                attempt.status = {
-                    "finished": "completed",
-                    "successful": "completed",
-                    "failed": "failed",
-                    "cancelled": "aborted",
-                }[status]
-                attempt.completed_at = row.completed_at
-                attempt.failure_reason = (
-                    (archive_failure_reason or (row.error_message or "Print failed")[:100])
-                    if status == "failed"
-                    else "User cancelled"
-                    if status == "cancelled"
-                    else None
-                )
+                outcome = row.physical_outcome or ARCHIVE_OUTCOMES.get(status)
+                if outcome is None and status == "successful":
+                    outcome = "completed"  # Unambiguous legacy final state.
+                if outcome is not None:
+                    attempt.status = outcome
+                    attempt.completed_at = row.physical_completed_at or row.completed_at
+                    attempt.failure_reason = (
+                        row.physical_failure_reason
+                        if row.physical_outcome is not None
+                        else (row.error_message or "Print failed")[:100]
+                        if outcome == "failed"
+                        else "User cancelled"
+                        if outcome == "aborted"
+                        else None
+                    )
+                    if attaching and row.started_at is not None:
+                        attempt.started_at = row.started_at
         if status in FINAL_STATUSES and expected_status != status:
             from backend.app.models.print_queue import PrintQueueVariant
             from backend.app.services.queue_source_cleanup import remove_queue_only_source_if_unused

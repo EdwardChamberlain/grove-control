@@ -3925,6 +3925,8 @@ class PrintScheduler:
         # Entry into dispatching committed the immutable, injected attempt.
         # Upload that copy, including for a completed or skipped heat soak.
         if item.status != "dispatching":
+            if item.status == "failed":
+                await self._power_off_if_needed(db, item)
             return
         archive = await db.get(PrintArchive, item.archive_id) if item.archive_id else None
         if archive is None or archive.dispatched_queue_item_id != item.id:
