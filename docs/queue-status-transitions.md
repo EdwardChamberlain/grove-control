@@ -1,8 +1,43 @@
-# Queue job lifecycle (issue #194, stage 3)
+# Queue job lifecycle (issue #194, stages 3 and 4)
 
 The Queue shows waiting jobs, active jobs, jobs awaiting plate clear, and a
 Timeline. Completed job history lives in Archives. Queue History, Clear History,
 Resume after failure, and the Require previous success option have been removed.
+
+## Pause and resume (stage 4)
+
+Fresh, connected `PAUSE` telemetry moves the identified job from `printing` to
+`paused`; matching `RUNNING` telemetry moves it back to `printing`. The job keeps
+its printer, Archive, original start time, and print settings throughout.
+Neither transition sends a printer command or repeats print-start effects.
+Pause/Resume controls send commands as before; the job changes only when the
+printer reports the result. Runout, HMS pauses, and touchscreen pauses use the
+same telemetry path.
+
+If the first observation of a dispatched or external print is `PAUSE`, Grove
+records its accepted `printing` job and then moves it to `paused` in the same
+transaction. Startup and reconnect apply the same matching code to persisted
+`printing` and `paused` jobs. Missing/different IDs, disconnected or uninitialized
+telemetry, and preparation states do not resume a paused job. Delayed callbacks
+are checked against the current live identity and state before writing.
+An external job whose firmware ID arrives while paused keeps the same job and
+Archive when that ID is bound to its session identity.
+
+Paused jobs stay visible in Active jobs and Timeline, with **Paused** and
+**Stop Print**. Stop, completion, failure, printer deletion, and Clear Plate
+retain the stage 3 rules. Queue REST payloads expose `paused`; the webhook Queue
+view maps it to `printing`, and its printing count and the existing Prometheus
+queue printing gauge include paused work, preserving integration behavior.
+Project counts and filament tracking also retain paused work.
+
+The sidebar Queue badge and printer queue counts request `queued` waiting
+jobs. Frontend queue filters accept only the lifecycle's status values, so
+legacy filter names fail TypeScript checks.
+
+Stage 4 needs no schema change or new migration: stage 3 already added `paused`
+to the state table and unique holding index. On upgrade, the next matching
+telemetry observation updates an existing active job. Back up the database as
+for other upgrades; ambiguous jobs retain Stop as their way out.
 
 ## States and actions
 
@@ -180,7 +215,7 @@ clearing (`successful`, `unsuccessful`) publishes no integration event.
 | `preheating` | `preheating` | Heat soak running; printer held | `preheating` |
 | `dispatching` | `dispatching` | Sending the job; waiting for the printer to accept it | `dispatching` |
 | `printing` | `printing` | Printing | `printing` |
-| `paused` | (none) | Paused on the printer (stage 4) | Not yet emitted |
+| `paused` | `printing` | Paused on the printer; printer held | `printing` (webhook Queue status) |
 | `finished` | `completed` | Printed; plate not yet cleared; printer held | Print event `completed` |
 | `failed` | `failed` | Error after leaving the queue; plate not yet cleared | Print event `failed` |
 | `cancelled` | `cancelled`, `aborted` | Stopped after leaving the queue; plate not yet cleared | Print event `cancelled` for a stop from Grove; `aborted` for a stop on the printer |
@@ -192,11 +227,10 @@ The MQTT relay's queue job events keep their names: `job_completed` for
 
 ## Scope and verification
 
-Stage 2's strict printer/job identity matching remains in place. PAUSE telemetry
-still uses the existing active print behavior: emitting durable `paused`
-transitions is stage 4. Moving Archive creation to entry into `dispatching` and
-consolidating all lifecycle effects are stage 5; this stage keeps the current
-Archive creation timing.
+Stage 2's strict printer/job identity matching remains in place. Stage 4 adds
+durable `paused` transitions without changing Archive outcomes. Moving Archive
+creation to entry into `dispatching` and consolidating all lifecycle effects
+remain stage 5; Archive creation timing is unchanged here.
 
 Real database tests cover the transition table, stale sessions, rollback,
 claim replacement, cancellation/confirmation/recovery races, all holding states,
@@ -205,6 +239,11 @@ Queue-only source retention. Upload confirmation, user deletion with FK cascades
 touchscreen hold transfer, stale starts, and active-printer Clear Plate guards
 also use real database tests. The full backend and frontend suites remain part
 of validation.
+
+`test_queue_paused.py` adds real-database pause/resume, initial PAUSE, external
+identity binding, recovery, stale-event, and cancellation-race coverage. Queue
+UI, webhook, project, and metrics regressions verify that paused work remains
+visible. No existing tests are removed in stage 4.
 
 Tests for the removed previous-success skip, cancellation cascade, independent
 Printer flag persistence, and Resume after failure were replaced by
@@ -220,3 +259,8 @@ printers working independently. Also start a touchscreen/SD print while an old
 job awaits Clear Plate, confirm that its hold transfers, and try the old Clear
 Plate action while the new print is running. The original stage 2 identity qualification
 checklist remains in [queue-job-identity.md](queue-job-identity.md).
+For stage 4, additionally verify manual Pause/Resume, filament runout and HMS
+pauses, touchscreen/SD starts first observed in PAUSE, restart/reconnect while
+paused, Stop while paused, and completion/failure directly from PAUSE. Confirm
+the same job/Archive IDs and printer hold throughout, with no repeated start
+notification. Physical printer and PostgreSQL qualification remain outstanding.

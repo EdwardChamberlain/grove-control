@@ -274,7 +274,7 @@ async def test_start_requires_exact_dispatch_id_and_uses_transition(sessions):
         ("FINISH", None, True, "printing"),
         ("IDLE", "123", True, "printing"),
         ("FINISH", "123", False, "printing"),
-        ("PAUSE", "123", True, "printing"),
+        ("PAUSE", "123", True, "paused"),
     ],
 )
 async def test_startup_checks_already_printing_jobs_by_id(sessions, state, identity, connected, expected):

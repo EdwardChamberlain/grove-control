@@ -167,6 +167,22 @@ class TestPlateClearGate:
         assert completion.item.status == "printing"
         assert all(not call.args[1] for call in completion.manager.set_awaiting_plate_clear.call_args_list)
 
+    @pytest.mark.parametrize("outcome", ["completed", "failed", "aborted"])
+    async def test_paused_job_completes_through_the_same_plate_clear_path(self, outcome, completion, db_session):
+        from backend.app.services.queue_transitions import transition_queue_item
+
+        await transition_queue_item(db_session, completion.item, "printing", "paused")
+        await db_session.commit()
+        await completion.complete(completion.printer.id, {"submission_id": "123", "status": outcome})
+        await db_session.refresh(completion.item)
+        assert completion.item.status == {"completed": "finished", "failed": "failed", "aborted": "cancelled"}[outcome]
+        assert completion.item.printer_id == completion.printer.id
+        assert completion.item.completed_at is not None
+        assert any(
+            call.args == (completion.printer.id, True)
+            for call in completion.manager.set_awaiting_plate_clear.call_args_list
+        )
+
     async def test_touchscreen_print_on_a_held_printer_completes_as_its_own_job(self, completion, db_session):
         from backend.app import main
         from backend.app.api.routes.print_queue import clear_queue_plate

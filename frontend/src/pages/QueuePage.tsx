@@ -82,17 +82,7 @@ function formatHeatSoakCountdown(totalSeconds: number): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
-function StatusBadge({ status, printerState, t }: { status: PrintQueueItem['status']; printerState?: string | null; t: (key: string) => string }) {
-  // Special case: printing but printer is paused
-  if (status === 'printing' && printerState === 'PAUSE') {
-    return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border text-yellow-400 bg-yellow-400/10 border-yellow-400/20">
-        <Pause className="w-3.5 h-3.5" />
-        {t('queue.status.paused')}
-      </span>
-    );
-  }
-
+function StatusBadge({ status, t }: { status: PrintQueueItem['status']; t: (key: string) => string }) {
   const config = {
     queued: { icon: Clock, color: 'text-status-warning bg-status-warning/10 border-status-warning/20', label: t('queue.status.queued') },
     preheating: { icon: Timer, color: 'text-amber-300 bg-amber-500/10 border-amber-500/20', label: t('heatSoak.status') },
@@ -100,7 +90,7 @@ function StatusBadge({ status, printerState, t }: { status: PrintQueueItem['stat
     printing: { icon: Play, color: 'text-blue-400 bg-blue-400/10 border-blue-400/20', label: t('queue.status.printing') },
     finished: { icon: CheckCircle, color: 'text-status-ok bg-status-ok/10 border-status-ok/20', label: t('queue.status.finished') },
     failed: { icon: XCircle, color: 'text-status-error bg-status-error/10 border-status-error/20', label: t('queue.status.failed') },
-    paused: { icon: Pause, color: 'text-yellow-400', label: t('queue.status.paused') },
+    paused: { icon: Pause, color: 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20', label: t('queue.status.paused') },
     successful: { icon: CheckCircle, color: 'text-status-ok', label: t('queue.status.successful') },
     unsuccessful: { icon: XCircle, color: 'text-status-error', label: t('queue.status.unsuccessful') },
     cancelled: { icon: X, color: 'text-gray-400 bg-gray-400/10 border-gray-400/20', label: t('queue.status.cancelled') },
@@ -348,7 +338,6 @@ function SortableQueueItem({
   onToggleSelect,
   hasPermission,
   canModify,
-  printerState,
   onMoveUp,
   onMoveDown,
   t,
@@ -371,7 +360,6 @@ function SortableQueueItem({
   onToggleSelect?: () => void;
   hasPermission: (permission: Permission) => boolean;
   canModify: (resource: 'queue' | 'archives' | 'library', action: 'update' | 'delete' | 'reprint', createdById: number | null | undefined) => boolean;
-  printerState?: string | null;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
   t: (key: string, options?: Record<string, unknown>) => string;
@@ -381,7 +369,7 @@ function SortableQueueItem({
     queryKey: ['printerStatus', item.printer_id],
     queryFn: () => api.getPrinterStatus(item.printer_id!),
     refetchInterval: 30000,
-    enabled: item.printer_id != null && printerState === 'printing',
+    enabled: item.printer_id != null && (item.status === 'printing' || item.status === 'paused'),
   });
 
   // Determine if we're printing a library file
@@ -794,7 +782,7 @@ function SortableQueueItem({
 
         {/* Status badge + Actions */}
         <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2 sm:gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-          <StatusBadge status={item.status} printerState={printerState} t={t} />
+          <StatusBadge status={item.status} t={t} />
 
           <div className="flex items-center gap-0.5 sm:gap-1">
             {item.status === 'preheating' && onSkipHeatSoak && (
@@ -939,7 +927,7 @@ export function QueuePage() {
   const { showToast } = useToast();
   const { hasPermission, hasAnyPermission, canModify } = useAuth();
   const [filterPrinter, setFilterPrinter] = useState<number | null>(null);
-  const [filterStatus, setFilterStatus] = useState<string>('');
+  const [filterStatus, setFilterStatus] = useState<PrintQueueItem['status'] | ''>('');
   const [filterLocation, setFilterLocation] = useState<string>('');
   const [editItem, setEditItem] = useState<PrintQueueItem | null>(null);
   const [showQueueUpload, setShowQueueUpload] = useState(false);
@@ -1229,7 +1217,7 @@ export function QueuePage() {
   };
 
   const activeItems = useMemo(() => {
-    let items = queue?.filter(i => i.status === 'preheating' || i.status === 'dispatching' || i.status === 'printing') || [];
+    let items = queue?.filter(i => ['preheating', 'dispatching', 'printing', 'paused'].includes(i.status)) || [];
     if (filterLocation) {
       items = items.filter(matchesLocationFilter);
     }
@@ -1258,18 +1246,6 @@ export function QueuePage() {
       refetchInterval: 5000,
     })),
   });
-
-  // Build a map of printer_id -> state for quick lookup
-  const printerStateMap = useMemo(() => {
-    const map: Record<number, string | null> = {};
-    activePrinterIds.forEach((printerId, index) => {
-      const result = printerStatusQueries[index];
-      if (result?.data?.state) {
-        map[printerId] = result.data.state;
-      }
-    });
-    return map;
-  }, [activePrinterIds, printerStatusQueries]);
 
   // Build a map of printer_id -> full status for timeline view
   const printerStatusMap = useMemo(() => {
@@ -1636,7 +1612,7 @@ export function QueuePage() {
           ]}
         />
 
-        <ToolbarDropdown
+        <ToolbarDropdown<PrintQueueItem['status'] | ''>
           value={filterStatus}
           onChange={setFilterStatus}
           minWidthClass="min-w-32"
@@ -1646,6 +1622,7 @@ export function QueuePage() {
             { value: 'preheating', label: t('heatSoak.status') },
             { value: 'dispatching', label: t('queue.status.dispatching') },
             { value: 'printing', label: t('queue.status.printing') },
+            { value: 'paused', label: t('queue.status.paused') },
             { value: 'finished', label: t('queue.status.finished') },
             { value: 'failed', label: t('queue.status.failed') },
             { value: 'cancelled', label: t('queue.status.cancelled') },
@@ -1731,7 +1708,7 @@ export function QueuePage() {
           onItemClick={(item) => {
             if (item.status === 'queued') {
               setEditItem(item);
-            } else if (item.status === 'preheating' || item.status === 'dispatching' || item.status === 'printing') {
+            } else if (['preheating', 'dispatching', 'printing', 'paused'].includes(item.status)) {
               setConfirmAction({ type: 'stop', item });
             }
           }}
@@ -1777,7 +1754,6 @@ export function QueuePage() {
                     timeFormat={timeFormat}
                     hasPermission={hasPermission}
                     canModify={canModify}
-                    printerState={item.printer_id ? printerStateMap[item.printer_id] : null}
                     t={t}
                   />
                 ))}

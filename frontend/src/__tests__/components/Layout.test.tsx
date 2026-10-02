@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { render } from '../utils';
 import { Layout } from '../../components/Layout';
 import { http, HttpResponse } from 'msw';
@@ -141,6 +141,26 @@ describe('Layout', () => {
   });
 
   describe('navigation', () => {
+    it('shows the sidebar Queue badge for queued jobs', async () => {
+      const jobs = [
+        { id: 1, printer_id: 1, status: 'queued' },
+        { id: 2, printer_id: 1, status: 'queued' },
+        { id: 3, printer_id: 1, status: 'paused' },
+      ];
+      server.use(
+        http.get('/api/v1/queue/', ({ request }) => {
+          const status = new URL(request.url).searchParams.get('status');
+          return HttpResponse.json(jobs.filter(job => job.status === status));
+        }),
+      );
+
+      render(<Layout />);
+
+      const sidebar = await screen.findByRole('complementary');
+      const queueLink = within(sidebar).getByRole('link', { name: /Queue/ });
+      expect(await within(queueLink).findByText('2')).toBeInTheDocument();
+    });
+
     it('has navigation items', async () => {
       render(<Layout />);
 

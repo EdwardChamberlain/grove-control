@@ -53,7 +53,7 @@ class TestProjectsAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_project_queue_counts_include_dispatching(
+    async def test_project_queue_counts_include_dispatching_and_paused(
         self, async_client: AsyncClient, project_factory, db_session
     ):
         """Dispatching is active work, not an invisible gap between queue states."""
@@ -66,6 +66,7 @@ class TestProjectsAPI:
                 PrintQueueItem(project_id=project.id, position=2, status="dispatching"),
                 PrintQueueItem(project_id=project.id, position=3, status="printing"),
                 PrintQueueItem(project_id=project.id, position=4, status="completed"),
+                PrintQueueItem(project_id=project.id, position=5, status="paused"),
             ]
         )
         await db_session.commit()
@@ -73,13 +74,13 @@ class TestProjectsAPI:
         list_response = await async_client.get("/api/v1/projects/")
         assert list_response.status_code == 200
         listed_project = next(item for item in list_response.json() if item["id"] == project.id)
-        assert listed_project["queue_count"] == 3
+        assert listed_project["queue_count"] == 4
 
         detail_response = await async_client.get(f"/api/v1/projects/{project.id}")
         assert detail_response.status_code == 200
         stats = detail_response.json()["stats"]
         assert stats["queued_prints"] == 1
-        assert stats["in_progress_prints"] == 2
+        assert stats["in_progress_prints"] == 3
 
     @pytest.mark.asyncio
     @pytest.mark.integration

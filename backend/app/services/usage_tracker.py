@@ -654,7 +654,7 @@ async def on_print_start(
         queue_result = await db.execute(
             select(PrintQueueItem)
             .where(PrintQueueItem.printer_id == printer_id)
-            .where(PrintQueueItem.status == "printing")
+            .where(PrintQueueItem.status.in_(("printing", "paused")))
         )
         queue_item = queue_result.scalars().first()
         if queue_item is not None:

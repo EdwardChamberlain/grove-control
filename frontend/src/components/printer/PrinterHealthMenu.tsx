@@ -82,9 +82,9 @@ export function PrinterHealthMenu({
   const [showFirmwareModal, setShowFirmwareModal] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
-  const { data: pendingQueue = [] } = useQuery({
-    queryKey: ['queue', printer.id, 'pending'],
-    queryFn: () => api.getQueue(printer.id, 'pending'),
+  const { data: queuedJobs = [] } = useQuery({
+    queryKey: ['queue', printer.id, 'queued'],
+    queryFn: () => api.getQueue(printer.id, 'queued'),
     enabled: queueCount === undefined && isOpen,
   });
 
@@ -115,7 +115,7 @@ export function PrinterHealthMenu({
   const plannedOfflineClass = 'bg-blue-500/20 text-blue-400';
   const maintenanceDueCount = maintenanceInfo?.due_count ?? 0;
   const maintenanceWarningCount = maintenanceInfo?.warning_count ?? 0;
-  const effectiveQueueCount = queueCount ?? pendingQueue.length;
+  const effectiveQueueCount = queueCount ?? queuedJobs.length;
   const plateState = isPrintingOrPaused
     ? t('printers.plateStatus.inUse')
     : needsPlateClear

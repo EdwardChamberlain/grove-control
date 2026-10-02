@@ -297,7 +297,7 @@ async def store_print_data(
         queue_result = await db.execute(
             select(PrintQueueItem)
             .where(PrintQueueItem.archive_id == archive_id)
-            .where(PrintQueueItem.status == "printing")
+            .where(PrintQueueItem.status.in_(("printing", "paused")))
         )
         queue_item = queue_result.scalar_one_or_none()
         # Caller-supplied plate_id wins (direct-Print path); fall back to the queue

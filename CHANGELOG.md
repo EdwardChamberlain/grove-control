@@ -4,6 +4,11 @@
 
 ### Added
 
+- Queue jobs now persist **Paused** from matching printer telemetry, including
+  startup and reconnect, and return to Printing on resume. Paused jobs retain
+  their printer hold, appear in Active jobs and Timeline, and keep Stop Print
+  available. Existing webhook status names and printing counts are preserved.
+  See [the lifecycle and upgrade guide](docs/queue-status-transitions.md).
 - The live Queue now keeps finished, failed, and cancelled attempts visible
   until Clear Plate. Retry creates a new job without releasing the original
   printer hold; failed attempts hold even with confirmation disabled.
@@ -62,6 +67,8 @@
 
 ### Fixed
 
+- The sidebar Queue badge, printer-card queue count, and printer health menu
+  now include waiting jobs from the `queued` lifecycle.
 - Normal Queue uploads no longer offer unconfirmed-dispatch actions before
   a command is sent. Archive and user-item deletion cannot bypass Clear Plate.
   Touchscreen prints on an uncleared printer take over its durable hold, and

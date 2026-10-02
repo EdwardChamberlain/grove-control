@@ -41,7 +41,7 @@ from backend.app.services.chamber_heat_soak import ChamberHeatSoak, abort_heat_s
 from backend.app.services.filament_deficit import compute_deficit_for_queue_item
 from backend.app.services.filament_requirements import canonical_filament_type
 from backend.app.services.ha_sensor_manager import ha_sensor_manager
-from backend.app.services.job_identity import telemetry_identity
+from backend.app.services.job_identity import sync_print_state, telemetry_identity
 from backend.app.services.notification_service import notification_service
 from backend.app.services.printer_manager import (
     printer_manager,
@@ -594,7 +594,9 @@ class PrintScheduler:
         telemetry cannot prove rejection, so stale attempts remain held for
         manual review rather than risking an automatic duplicate print.
         """
-        result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.status.in_(("dispatching", "printing"))))
+        result = await db.execute(
+            select(PrintQueueItem).where(PrintQueueItem.status.in_(("dispatching", "printing", "paused")))
+        )
         dispatches = list(result.scalars().all())
         if not dispatches:
             return
@@ -680,12 +682,17 @@ class PrintScheduler:
                 )
                 continue
 
-            if telemetry_status == "printing" and item.status == "dispatching":
-                if not await self._transition_or_skip(db, item, "printing", started_at=now, error_message=None):
+            if telemetry_status == "printing":
+                if item.status == "dispatching":
+                    if not await self._transition_or_skip(db, item, "printing", started_at=now, error_message=None):
+                        continue
+                    changed = True
+                    promoted_ids.append(item.id)
+                    logger.info("Recovered dispatched queue item %s as printer-confirmed printing", item.id)
+                try:
+                    changed = await sync_print_state(db, item, printer_status) or changed
+                except QueueTransitionConflict:
                     continue
-                changed = True
-                promoted_ids.append(item.id)
-                logger.info("Recovered dispatched queue item %s as printer-confirmed printing", item.id)
                 continue
 
             if item.status != "dispatching":
@@ -4493,6 +4500,7 @@ class PrintScheduler:
                     return False
                 try:
                     await transition_queue_item(db, item, "dispatching", "printing")
+                    await sync_print_state(db, item, printer_manager.get_status(printer_id))
                 except QueueTransitionConflict:
                     await db.rollback()
                     return False
@@ -4564,7 +4572,7 @@ class PrintScheduler:
                     .where(PrintQueueItem.id == queue_item_id)
                 )
                 item = result.scalar_one_or_none()
-                if not item or item.status != "printing" or not item.printer:
+                if not item or item.status not in ("printing", "paused") or not item.printer:
                     return
 
                 source = item.archive or item.library_file
