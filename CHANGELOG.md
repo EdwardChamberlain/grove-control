@@ -13,6 +13,9 @@
   available until every referencing job, including file variants, is final.
   Heat-soak handoffs check fresh telemetry after reconnecting during copying,
   and Retry starts with no physical outcome from the previous job.
+  Restored active Archives without a dispatch link are associated by unique
+  printer and submission identity, so their completion, failure or Stop is
+  recorded atomically with the job.
 
 - Queue jobs now persist **Paused** from matching printer telemetry, including
   startup and reconnect, and return to Printing on resume. Paused jobs retain

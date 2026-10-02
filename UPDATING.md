@@ -191,7 +191,12 @@ including a queued file variant; deletion happens after the last job finalizes
 and its transaction commits. Files copies remain independent.
 
 Existing active attempts retain their Archive and use the normal identity
-checks. An older in-flight upload with no attempt Archive remains held for
+checks. When an older active Archive lacks its job link, the transition writer
+establishes it only if printer and submission IDs match uniquely and the Archive
+is still printing. The link, any late firmware-ID binding and physical outcome
+commit together. Reused IDs, other jobs' attempts, deleted Archives and historical
+reprint sources remain untouched. No additional schema migration is needed.
+An older in-flight upload with no attempt Archive remains held for
 inspection and Retry rather than sending without an Archive. Review the
 [stage 5 qualification checklist](docs/queue-status-transitions.md).
 

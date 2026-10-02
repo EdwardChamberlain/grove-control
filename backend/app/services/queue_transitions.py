@@ -97,6 +97,64 @@ class QueueTransitionConflict(RuntimeError):
     """The expected row/status/claim no longer exists; abort this transaction."""
 
 
+async def _link_legacy_archive_attempt(db: AsyncSession, row, previous_identity: str | None) -> bool:
+    """Repair a proven active legacy link while the transition holds its job.
+
+    A referenced Archive alone might be a reprint source. Require a still-active
+    Archive with the same printer/run ID, and reject reused IDs or another exact
+    attempt. The conditional Archive update serializes competing associations;
+    its link and the physical outcome share the caller's commit or rollback.
+    """
+    from backend.app.models.archive import PrintArchive
+    from backend.app.models.print_queue import PrintQueueItem
+    from backend.app.services.job_identity import normalize_id
+
+    current_identity = normalize_id(row.dispatch_subtask_id)
+    identity = normalize_id(previous_identity) or current_identity
+    if (
+        row.archive_id is None
+        or row.printer_id is None
+        or identity is None
+        or current_identity is None
+        or (row.status not in ("dispatching", "printing", "paused") and row.physical_outcome is None)
+    ):
+        return False
+    identities = {identity, current_identity}
+    archives = PrintArchive.__table__
+    other_archives = archives.alias("other_legacy_archives")
+    other_jobs = PrintQueueItem.__table__.alias("other_legacy_jobs")
+    with db.no_autoflush:
+        result = await db.execute(
+            archives.update()
+            .where(
+                archives.c.id == row.archive_id,
+                archives.c.printer_id == row.printer_id,
+                archives.c.subtask_id == identity,
+                archives.c.dispatched_queue_item_id.is_(None),
+                archives.c.status == "printing",
+                archives.c.completed_at.is_(None),
+                archives.c.deleted_at.is_(None),
+                ~select(other_jobs.c.id)
+                .where(
+                    other_jobs.c.id != row.id,
+                    other_jobs.c.printer_id == row.printer_id,
+                    other_jobs.c.dispatch_subtask_id.in_(identities),
+                )
+                .exists(),
+                ~select(other_archives.c.id)
+                .where(
+                    other_archives.c.id != row.archive_id,
+                    other_archives.c.printer_id == row.printer_id,
+                    other_archives.c.subtask_id.in_(identities),
+                )
+                .exists(),
+                ~select(other_archives.c.id).where(other_archives.c.dispatched_queue_item_id == row.id).exists(),
+            )
+            .values(dispatched_queue_item_id=row.id, subtask_id=row.dispatch_subtask_id)
+        )
+    return result.rowcount == 1
+
+
 async def transition_queue_item(
     db: AsyncSession | AsyncConnection,
     item: PrintQueueItem | int,
@@ -154,6 +212,16 @@ async def transition_queue_item(
     item_id = item if isinstance(item, int) else item.id
 
     table = PrintQueueItem.__table__
+    previous_identity = None
+    if isinstance(db, AsyncSession) and expected_status in ("printing", "paused") and "dispatch_subtask_id" in metadata:
+        # A firmware ID can arrive after a session-local ID. Preserve the
+        # proven old Archive identity until the job's conditional rebind wins.
+        with db.no_autoflush:
+            previous_identity = await db.scalar(
+                select(table.c.dispatch_subtask_id).where(
+                    table.c.id == item_id, table.c.status == expected_status, *conditions
+                )
+            )
     archive = None
     archive_error = False
     artifact_offset = (
@@ -256,8 +324,15 @@ async def transition_queue_item(
             if row.archive_id is not None
             else None
         )
+        linked_legacy = attempt is None and await _link_legacy_archive_attempt(db, row, previous_identity)
+        if linked_legacy:
+            attempt = await db.scalar(
+                select(PrintArchive)
+                .where(PrintArchive.id == row.archive_id, PrintArchive.dispatched_queue_item_id == item_id)
+                .execution_options(populate_existing=True)
+            )
         if attempt is not None:
-            attaching = "archive_id" in metadata
+            attaching = "archive_id" in metadata or linked_legacy
             if status == "dispatching" and "dispatch_subtask_id" in metadata:
                 attempt.subtask_id = metadata["dispatch_subtask_id"]
             if (expected_status == "dispatching" and status == "printing") or (

@@ -249,6 +249,9 @@ work with the conditional transition writer:
   (`completed`, `failed`, or `aborted`) in the same transaction. Exact job and
   Archive columns must both match. Pause/resume, duplicate terminal observations,
   Clear Plate and printer deletion do not rewrite the physical outcome.
+  A restored active Archive without its dispatch link is associated inside the
+  same transition only when its printer and submission ID uniquely identify
+  the job. Reused IDs, historical sources and other attempts are never adopted.
   The job retains the outcome, timestamp and failure reason separately from
   its released state, so a delayed external Archive can attach after Clear
   Plate or restart. Association briefly locks the job against Stop/Clear Plate.
@@ -315,6 +318,11 @@ Reconnect during a heat-soak Archive copy and verify fresh busy or unready
 telemetry prevents upload and dispatch; a fresh idle report permits the
 handoff. Retry failed and cancelled jobs from Files, Archive and variants,
 then cancel the queued retry and confirm the original outcome is unchanged.
+Restore an active job referencing an older unlinked Archive, then finish, fail,
+Stop or recover it by exact submission ID. Confirm the link and outcome commit
+together and Clear Plate preserves them; repeat with reused IDs and source
+Archives to confirm they remain untouched. Include a late firmware-ID rebind
+and concurrent Stop/completion on PostgreSQL.
 
 `test_queue_archive_alignment.py` covers real-database dispatch/Archive commit,
 rollback (including session close), cancellation during copying, duplicate
@@ -323,3 +331,6 @@ failure, and variant-source retention. No existing tests were removed in
 stage 5. Earlier late-Archive and original-source upload expectations in
 `test_scheduler_cleanup_library.py` are replaced by early failed-attempt and
 immutable-copy checks; the same cancellation and MQTT fencing cases remain.
+`test_queue_legacy_archive_alignment.py` additionally exercises real migrations,
+completion callbacks and independent lifecycle paths for restored active
+Archives, plus rollback, stale completion, late ID binding and ambiguous matches.
