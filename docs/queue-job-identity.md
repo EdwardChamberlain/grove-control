@@ -55,8 +55,14 @@ telemetry. Cached state from before a reconnect is not evidence. A matching
 active ID confirms dispatch; a matching FINISH or FAILED records the physical
 outcome and runs normal completion handling. The recovered terminal job retains the printer reservation until Clear Plate
 (or automatic Clear Plate for successful completion with confirmation off).
-Missing IDs, mismatches, disconnected printers and ambiguous IDLE reports leave
-the job in its current state.
+Mismatches, disconnected printers and ambiguous IDLE reports leave a possibly
+sent job held. A held dispatch with no submission ID and no send timestamp can
+never have sent `project_file`; after a restart clears its worker claim, Grove
+marks that attempt failed for inspection, whether Archive linking had finished
+or not.
+The first active observation after application restart restores job and Archive
+association without rerunning new-print plate detection, start notifications,
+smart-plug actions or usage-session initialization.
 
 An interrupted heat soak stays reserved until the user chooses Stop or Skip
 heat soak. A second live scheduler does not take over another worker's timer.

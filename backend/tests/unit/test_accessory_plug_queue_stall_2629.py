@@ -33,6 +33,7 @@ def registered_client():
     client = BambuMQTTClient(ip_address="10.0.0.5", serial_number="SER2629", access_code="12345678")
     client.state.connected = True
     client.state.state = "FINISH"
+    client.state.job_telemetry_ready = True
     printer_manager._clients[PRINTER_ID] = client
     try:
         yield client

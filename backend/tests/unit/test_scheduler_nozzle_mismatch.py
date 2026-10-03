@@ -236,6 +236,7 @@ async def _run_start_print(ctx, *, installed_nozzles, nozzle_rack=None):
     status = SimpleNamespace(
         state="IDLE",
         connected=True,
+        job_telemetry_ready=True,
         raw_data={},
         nozzles=[SimpleNamespace(nozzle_diameter=d) for d in installed_nozzles],
         nozzle_rack=nozzle_rack or [],
@@ -262,7 +263,6 @@ async def _run_start_print(ctx, *, installed_nozzles, nozzle_rack=None):
         patch("backend.app.services.notification_service.notification_service.on_queue_job_failed", AsyncMock()),
         patch("backend.app.services.mqtt_relay.mqtt_relay.on_queue_job_started", AsyncMock()),
         patch.object(scheduler, "_propagate_owner_to_printer_manager", AsyncMock()),
-        patch.object(scheduler, "_power_off_if_needed", AsyncMock()),
     ]
     with ExitStack() as stack:
         for p in patches:

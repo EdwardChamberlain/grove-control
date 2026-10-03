@@ -6,7 +6,12 @@ from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models.print_queue import PrintQueueItem
-from backend.app.services.queue_transitions import ACTIVE_STATUSES, InvalidQueueTransition, transition_queue_item
+from backend.app.services.queue_transitions import (
+    ACTIVE_STATUSES,
+    InvalidQueueTransition,
+    QueueTransitionConflict,
+    transition_queue_item,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +19,7 @@ logger = logging.getLogger(__name__)
 async def cancel_job(db: AsyncSession, item: PrintQueueItem) -> None:
     """Cancel waiting work or stop active work, retaining every active hold."""
     from backend.app.models.printer import Printer
-    from backend.app.services.chamber_heat_soak import _heaters_off, _show_preheating, utcnow
+    from backend.app.services.chamber_heat_soak import utcnow
     from backend.app.services.printer_manager import printer_manager
 
     queued = item.status == "queued"
@@ -23,6 +28,7 @@ async def cancel_job(db: AsyncSession, item: PrintQueueItem) -> None:
     printer_id, item_id = item.printer_id, item.id
     heating = not queued and item.chamber_heat_soak
     printer = await db.get(Printer, printer_id) if heating else None
+    requested_at = datetime.now(timezone.utc)
     await transition_queue_item(
         db,
         item,
@@ -30,8 +36,9 @@ async def cancel_job(db: AsyncSession, item: PrintQueueItem) -> None:
         "unsuccessful" if queued else "cancelled",
         action="cancel",
         values={
-            "error_message": "Cancelled before printing" if queued else "Stopped by user",
-            "completed_at": datetime.now(timezone.utc),
+            "error_message": "Cancelled before printing" if queued else "Stop requested by user",
+            "completed_at": requested_at,
+            **({"stop_requested_at": requested_at} if not queued else {}),
         },
     )
     if heating:
@@ -54,19 +61,24 @@ async def cancel_job(db: AsyncSession, item: PrintQueueItem) -> None:
         mark_printer_stopped_by_user(printer_id)
         unregister_expected_print(printer_id)
         try:
-            printer_manager.stop_print(printer_id)
+            stop_sent = printer_manager.stop_print(printer_id)
         except Exception:
             logger.exception("Stop command failed for cancelled job %s; printer remains held", item_id)
-        if heating:
-            if printer:
-                _heaters_off(printer)
-            _show_preheating(printer_id, False)
-        if item.auto_off_after:
-            from backend.app.services.smart_plug_manager import smart_plug_manager
-
-            # The cancellation is committed; a smart-plug failure must not
-            # report the Stop itself as failed.
+            stop_sent = False
+        if not stop_sent:
+            logger.warning("Stop command could not be sent for cancelled job %s; printer remains held", item_id)
             try:
-                await smart_plug_manager.schedule_off_after_queue_job(printer_id, db)
+                await transition_queue_item(
+                    db,
+                    item,
+                    "cancelled",
+                    "cancelled",
+                    conditions=(PrintQueueItem.physical_outcome.is_(None),),
+                    values={"error_message": "Stop command not sent; inspect the printer before clearing the plate"},
+                )
+                await db.commit()
+            except QueueTransitionConflict:
+                await db.rollback()  # A printer observation already settled this job.
             except Exception:
-                logger.warning("Auto-off could not be scheduled for printer %s", printer_id, exc_info=True)
+                await db.rollback()
+                logger.exception("Could not record failed Stop delivery for job %s", item_id)

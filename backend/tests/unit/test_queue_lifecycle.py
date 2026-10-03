@@ -1,5 +1,6 @@
 """Stage 3's physical holds, user actions and one-time upgrade on real SQLite."""
 
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -95,7 +96,13 @@ async def test_stop_succeeds_when_auto_off_cannot_be_scheduled(sessions):
         item = PrintQueueItem(printer_id=1, status="printing", auto_off_after=True)
         db.add(item)
         await db.commit()
-        failing_plug = AsyncMock(side_effect=RuntimeError("plug unreachable"))
+        attempted = asyncio.Event()
+
+        async def fail_plug(*_args, **_kwargs):
+            attempted.set()
+            raise RuntimeError("plug unreachable")
+
+        failing_plug = AsyncMock(side_effect=fail_plug)
         with (
             patch("backend.app.services.printer_manager.printer_manager.stop_print") as stop,
             patch(
@@ -104,6 +111,7 @@ async def test_stop_succeeds_when_auto_off_cannot_be_scheduled(sessions):
             ),
         ):
             await cancel_job(db, item)  # Does not raise after the committed stop.
+            await asyncio.wait_for(attempted.wait(), 2)
         failing_plug.assert_awaited_once()
         stop.assert_called_once_with(1)
         await db.refresh(item)

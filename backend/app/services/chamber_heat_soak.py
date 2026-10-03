@@ -21,7 +21,6 @@ from backend.app.core.tasks import spawn_background_task
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services.printer_manager import printer_manager, supports_chamber_heater
-from backend.app.services.queue_archive import discard_prepared_archive, prepare_dispatch_attempt
 from backend.app.services.queue_transitions import QueueTransitionConflict, transition_queue_item
 
 logger = logging.getLogger(__name__)
@@ -104,7 +103,6 @@ async def abort_heat_soak(
     reason: str,
     *,
     status: str = "failed",
-    schedule_auto_off: bool = False,
 ) -> None:
     """Caller holds the queue write lock. Persist cleanup even if the item is deleted."""
     await transition_queue_item(
@@ -120,47 +118,27 @@ async def abort_heat_soak(
     # An explicit retry must repeat the complete soak.
     item.manual_start = True
     await db.commit()
-    if printer:
-        _heaters_off(printer)
-    _show_preheating(item.printer_id, False)
-    if schedule_auto_off:
-        from backend.app.services.print_scheduler import scheduler
-
-        await scheduler._power_off_if_needed(db, item)
 
 
-async def heat_soak_dispatch_started(db: AsyncSession, item: PrintQueueItem) -> bool:
-    """Recognize a winning handoff by the exact committed attempt, not status alone."""
-    from backend.app.models.archive import PrintArchive
-
-    if item.status not in ("dispatching", "printing", "paused", "finished", "successful") or item.archive_id is None:
-        return False
-    return (
-        await db.scalar(
-            select(PrintArchive.id).where(
-                PrintArchive.id == item.archive_id,
-                PrintArchive.dispatched_queue_item_id == item.id,
-                PrintArchive.printer_id == item.printer_id,
-            )
-        )
-    ) is not None
+def heat_soak_dispatch_started(item: PrintQueueItem) -> bool:
+    """The durable hold itself proves that this soak has handed off."""
+    return item.status in ("dispatching", "printing", "paused", "finished", "successful")
 
 
 class SkipHeatSoakResult(str, Enum):
     SKIPPED = "skipped"
     PRINTER_NOT_READY = "printer_not_ready"
     SOAK_CHANGED = "soak_changed"
-    COPY_FAILED = "copy_failed"
 
 
 async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> SkipHeatSoakResult:
-    """Prepare outside the control lock, then conditionally hand off the soak."""
+    """Conditionally hand off the soak; the worker copies after commit."""
     item_id, owner, printer_id = item.id, item.preheat_owner, item.printer_id
     item.preheat_checked_at = utcnow()
     await db.commit()
     if not _dispatch_ready(printer_id):
         item = await lock_queue_item(db, item_id)
-        started = bool(item and item.printer_id == printer_id and await heat_soak_dispatch_started(db, item))
+        started = bool(item and item.printer_id == printer_id and heat_soak_dispatch_started(item))
         same_soak = bool(
             item and item.status == "preheating" and item.preheat_owner == owner and item.printer_id == printer_id
         )
@@ -168,21 +146,15 @@ async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> SkipHeatSoak
         if started:
             return SkipHeatSoakResult.SKIPPED
         return SkipHeatSoakResult.PRINTER_NOT_READY if same_soak else SkipHeatSoakResult.SOAK_CHANGED
-    preparation = await prepare_dispatch_attempt(db, item, {})
     item = await lock_queue_item(db, item_id)
     if not item or item.status != "preheating" or item.preheat_owner != owner or item.printer_id != printer_id:
-        discard_prepared_archive(db, preparation.archive)
-        started = bool(item and item.printer_id == printer_id and await heat_soak_dispatch_started(db, item))
+        started = bool(item and item.printer_id == printer_id and heat_soak_dispatch_started(item))
         await db.rollback()
         return SkipHeatSoakResult.SKIPPED if started else SkipHeatSoakResult.SOAK_CHANGED
     if not _dispatch_ready(printer_id):
-        discard_prepared_archive(db, preparation.archive)
         item.preheat_checked_at = utcnow()
         await db.commit()
         return SkipHeatSoakResult.PRINTER_NOT_READY
-    if preparation.error_message:
-        await abort_heat_soak(db, item, preparation.error_message, schedule_auto_off=True)
-        return SkipHeatSoakResult.COPY_FAILED
     from backend.app.services.print_scheduler import scheduler
 
     try:
@@ -198,12 +170,10 @@ async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> SkipHeatSoak
                 "manual_start": False,
                 "error_message": None,
                 "completed_at": None,
+                "dispatching_at": utcnow(),
                 "preheat_owner": scheduler._heat_soak.owner,
-                "preheat_requested_at": None,
                 "preheat_checked_at": None,
-                "preheat_started_at": None,
             },
-            attempt=preparation.archive,
         )
         await db.commit()
     except QueueTransitionConflict:
@@ -215,7 +185,7 @@ async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> SkipHeatSoak
             await db.commit()
             # The handoff conditions still match, so the live readiness guard refused.
             return SkipHeatSoakResult.PRINTER_NOT_READY
-        started = bool(item and item.printer_id == printer_id and await heat_soak_dispatch_started(db, item))
+        started = bool(item and item.printer_id == printer_id and heat_soak_dispatch_started(item))
         await db.rollback()
         return SkipHeatSoakResult.SKIPPED if started else SkipHeatSoakResult.SOAK_CHANGED
     _show_preheating(printer_id, False)
@@ -409,19 +379,13 @@ class ChamberHeatSoak:
                     continue
                 if not _dispatch_ready(item.printer_id):
                     continue
-                preparation = await prepare_dispatch_attempt(db, item, {})
                 item = await lock_queue_item(db, item_id)
                 if not item or item.status != "preheating" or item.preheat_owner != self.owner:
-                    discard_prepared_archive(db, preparation.archive)
                     await db.rollback()
                     continue
                 if not _dispatch_ready(item.printer_id):
-                    discard_prepared_archive(db, preparation.archive)
                     item.preheat_checked_at = utcnow()
                     await db.commit()
-                    continue
-                if preparation.error_message:
-                    await abort_heat_soak(db, item, preparation.error_message, schedule_auto_off=True)
                     continue
                 await transition_queue_item(
                     db,
@@ -430,8 +394,7 @@ class ChamberHeatSoak:
                     "dispatching",
                     conditions=(PrintQueueItem.preheat_owner == self.owner,),
                     dispatch_guard=lambda item=item: _dispatch_ready(item.printer_id),
-                    attempt=preparation.archive,
-                    values={"dispatched_at": None, "preheat_checked_at": utcnow()},
+                    values={"dispatched_at": None, "dispatching_at": utcnow(), "preheat_checked_at": utcnow()},
                 )
                 await db.commit()
                 _show_preheating(item.printer_id, False)
@@ -439,8 +402,7 @@ class ChamberHeatSoak:
             except QueueTransitionConflict:
                 await db.rollback()
                 try:
-                    # A long copy can outlive the heartbeat. A final guard
-                    # rejection must keep this same soak alive, as Skip does.
+                    # A final guard rejection keeps this same soak alive.
                     item = await lock_queue_item(db, item_id)
                     if (
                         item

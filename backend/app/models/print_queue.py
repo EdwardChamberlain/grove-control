@@ -159,6 +159,10 @@ class PrintQueueItem(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Durable user intent; an MQTT terminal event alone confirms the physical
+    # outcome. Kept after Clear Plate so a late Archive can show the stopped
+    # attempt without pretending the printer confirmed an abort.
+    stop_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # Immutable physical outcome, retained after Clear Plate even if an
     # external print's Archive download has not finished. Display reasons and
     # the released job state cannot distinguish a failure from a user Stop.

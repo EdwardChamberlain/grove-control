@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from sqlalchemy import event, select
 
-from backend.app.core.database import _migrate_queue_archive_outcomes, _migrate_queue_lifecycle
+from backend.app.core.database import (
+    _migrate_queue_archive_outcomes,
+    _migrate_queue_legacy_archive_links,
+    _migrate_queue_lifecycle,
+)
 from backend.app.models.archive import PrintArchive
 from backend.app.models.print_log import PrintLogEntry
 from backend.app.models.print_queue import PrintQueueItem
@@ -17,11 +21,11 @@ from backend.app.services.job_identity import bind_observed_id
 from backend.app.services.queue_actions import cancel_job
 from backend.app.services.queue_archive import prepare_dispatch_archive
 from backend.app.services.queue_transitions import QueueTransitionConflict, clear_job_plate, transition_queue_item
-from backend.tests.unit.test_queue_archive_alignment import alignment  # noqa: F401
+from backend.tests.unit.test_queue_archive_alignment import alignment, hold_and_link  # noqa: F401
 
 
 @pytest.fixture
-async def legacy(alignment):
+async def legacy_unmigrated(alignment):
     async with alignment.sessions() as db:
         archive = await ArchiveService(db).archive_print(
             1, alignment.source_path, print_data={"status": "printing"}, subtask_id="123"
@@ -38,6 +42,13 @@ async def legacy(alignment):
         await _migrate_queue_lifecycle(conn)
         await _migrate_queue_archive_outcomes(conn)
     return SimpleNamespace(**vars(alignment), archive_id=archive_id)
+
+
+@pytest.fixture
+async def legacy(legacy_unmigrated):
+    async with legacy_unmigrated.sessions.kw["bind"].begin() as conn:
+        await _migrate_queue_legacy_archive_links(conn)
+    return legacy_unmigrated
 
 
 @pytest.mark.parametrize("outcome", ["completed", "failed", "aborted"])
@@ -119,14 +130,7 @@ async def test_legacy_link_and_outcome_commit_through_independent_lifecycle_path
             await db.commit()
         else:
             completed = datetime.now(timezone.utc).replace(tzinfo=None)
-            # A restored stage-5 job already recorded its outcome but still
-            # references an unlinked legacy Archive when the user clears it.
-            await db.execute(
-                PrintQueueItem.__table__.update()
-                .where(PrintQueueItem.id == job.id)
-                .values(status="failed", physical_outcome="failed", physical_completed_at=completed)
-            )
-            await db.refresh(job)
+            await transition_queue_item(db, job, "printing", "failed", values={"completed_at": completed})
             await clear_job_plate(db, job)
             await db.commit()
     async with legacy.sessions() as observer:
@@ -137,10 +141,10 @@ async def test_legacy_link_and_outcome_commit_through_independent_lifecycle_path
             archive.status
             == {"stop": "aborted", "recovery": "failed", "pause": "completed", "clear_plate": "failed"}[path]
         )
-        assert archive.completed_at == job.physical_completed_at
+        assert archive.completed_at == (job.completed_at if path == "stop" else job.physical_completed_at)
 
 
-async def test_legacy_link_rolls_back_with_the_job_outcome(legacy):
+async def test_migrated_link_survives_a_rolled_back_job_outcome(legacy):
     async with legacy.sessions() as db:
         job = await db.get(PrintQueueItem, legacy.job_id)
         # Include a preloaded Archive to catch stale identity-map projections.
@@ -151,7 +155,7 @@ async def test_legacy_link_rolls_back_with_the_job_outcome(legacy):
     async with legacy.sessions() as observer:
         assert (await observer.get(PrintQueueItem, legacy.job_id)).status == "printing"
         archive = await observer.get(PrintArchive, legacy.archive_id)
-        assert archive.dispatched_queue_item_id is None and archive.status == "printing"
+        assert archive.dispatched_queue_item_id == legacy.job_id and archive.status == "printing"
         assert archive.completed_at is None
 
 
@@ -168,7 +172,7 @@ async def test_stale_completion_cannot_rewrite_a_legacy_stop_outcome(legacy):
         archive = await observer.get(PrintArchive, legacy.archive_id)
         assert job.status == "cancelled" and archive.status == "aborted"
         assert archive.dispatched_queue_item_id == job.id
-        assert archive.completed_at == job.physical_completed_at
+        assert job.physical_outcome is None and archive.completed_at == job.completed_at
 
 
 async def test_late_firmware_identity_binds_the_legacy_archive_in_the_same_transaction(legacy):
@@ -200,7 +204,8 @@ async def test_late_firmware_identity_binds_the_legacy_archive_in_the_same_trans
         "other_attempt",
     ],
 )
-async def test_legacy_association_does_not_guess_or_modify_another_attempt(legacy, mismatch):
+async def test_legacy_association_does_not_guess_or_modify_another_attempt(legacy_unmigrated, mismatch):
+    legacy = legacy_unmigrated
     async with legacy.sessions() as db:
         job = await db.get(PrintQueueItem, legacy.job_id)
         archive = await db.get(PrintArchive, legacy.archive_id)
@@ -241,6 +246,8 @@ async def test_legacy_association_does_not_guess_or_modify_another_attempt(legac
             )
         await db.commit()
         original = (archive.status, archive.subtask_id, archive.dispatched_queue_item_id, archive.completed_at)
+        async with legacy.sessions.kw["bind"].begin() as conn:
+            await _migrate_queue_legacy_archive_links(conn)
         await transition_queue_item(db, job, "printing", "failed")
         await db.commit()
         await db.refresh(archive)
@@ -254,14 +261,16 @@ async def test_legacy_association_does_not_guess_or_modify_another_attempt(legac
     [
         ("finished", "completed"),
         ("failed", "failed"),
+        ("cancelled", "aborted"),
         ("successful", "completed"),
         ("unsuccessful", "failed"),
         ("unsuccessful", "aborted"),
     ],
 )
 async def test_reconnect_repairs_terminal_legacy_archive_without_replaying_completion(
-    legacy, monkeypatch, cached, status, outcome
+    legacy_unmigrated, monkeypatch, cached, status, outcome
 ):
+    legacy = legacy_unmigrated
     import backend.app.main as main
     from backend.app.services.printer_manager import printer_manager
 
@@ -311,6 +320,8 @@ async def test_reconnect_repairs_terminal_legacy_archive_without_replaying_compl
             job.physical_completed_at,
             job.physical_failure_reason,
         )
+    async with legacy.sessions.kw["bind"].begin() as conn:
+        await _migrate_queue_legacy_archive_links(conn)
     await main.reconcile_stale_active_prints(1)
     # A conflicting late report must neither rewrite facts nor replay effects.
     await main.on_print_complete(
@@ -337,7 +348,8 @@ async def test_reconnect_repairs_terminal_legacy_archive_without_replaying_compl
 
 
 @pytest.mark.parametrize("duplicate", ["archive", "job"])
-async def test_reconnect_terminal_legacy_repair_rejects_ambiguous_identity(legacy, monkeypatch, duplicate):
+async def test_reconnect_terminal_legacy_repair_rejects_ambiguous_identity(legacy_unmigrated, monkeypatch, duplicate):
+    legacy = legacy_unmigrated
     import backend.app.main as main
     from backend.app.services.printer_manager import printer_manager
 
@@ -366,6 +378,8 @@ async def test_reconnect_terminal_legacy_repair_rejects_ambiguous_identity(legac
         else:
             db.add(PrintQueueItem(printer_id=1, status="successful", dispatch_subtask_id="123"))
         await db.commit()
+    async with legacy.sessions.kw["bind"].begin() as conn:
+        await _migrate_queue_legacy_archive_links(conn)
     await main.reconcile_stale_active_prints(1)
     async with legacy.sessions() as db:
         archive = await db.get(PrintArchive, legacy.archive_id)
@@ -382,8 +396,7 @@ async def test_duplicate_modern_completion_needs_no_write_transaction(alignment,
 
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
-        attempt = await prepare_dispatch_archive(db, job, {})
-        await transition_queue_item(db, job, "queued", "dispatching", attempt=attempt)
+        attempt = await hold_and_link(db, job)
         await transition_queue_item(db, job, "dispatching", "printing", values={"dispatch_subtask_id": "123"})
         awaiting = "finished" if status in ("finished", "successful") else "failed"
         await transition_queue_item(db, job, "printing", awaiting, values={"error_message": "Original reason"})

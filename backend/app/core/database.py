@@ -303,6 +303,7 @@ async def init_db():
         # safety net for interrupted upgrades and restored databases.
         await ensure_queue_insert_schema(conn)
         await _migrate_queue_lifecycle(conn)
+        await _migrate_queue_legacy_archive_links(conn)
         await _migrate_queue_archive_outcomes(conn)
 
     # Re-encrypt any legacy plaintext OIDC client_secret / TOTP secret rows
@@ -655,6 +656,7 @@ _QUEUE_INSERT_COLUMN_DEFINITIONS: dict[str, tuple[str, str]] = {
     "started_at": ("DATETIME", "TIMESTAMP"),
     "completed_at": ("DATETIME", "TIMESTAMP"),
     "error_message": ("TEXT", "TEXT"),
+    "stop_requested_at": ("DATETIME", "TIMESTAMP"),
     "physical_outcome": ("VARCHAR(20)", "VARCHAR(20)"),
     "physical_completed_at": ("DATETIME", "TIMESTAMP"),
     "physical_failure_reason": ("VARCHAR(100)", "VARCHAR(100)"),
@@ -1111,6 +1113,101 @@ async def _migrate_queue_lifecycle(conn) -> None:
 async def _ensure_active_queue_printer_reservation(conn) -> None:
     # Compatibility for callers of the old migration helper.
     await _migrate_queue_lifecycle(conn)
+
+
+async def _migrate_queue_legacy_archive_links(conn) -> None:
+    """Link only unambiguous pre-#194 attempts, once during the upgrade."""
+    from sqlalchemy import select, text
+
+    from backend.app.models.archive import PrintArchive
+    from backend.app.models.print_queue import PrintQueueItem
+    from backend.app.models.settings import Settings
+    from backend.app.services.job_identity import normalize_id
+    from backend.app.services.queue_transitions import ARCHIVE_OUTCOMES, physical_failure_reason
+
+    version_key = "queue_legacy_archive_link_version"
+    if await conn.scalar(select(Settings.value).where(Settings.key == version_key)) == "1":
+        return
+    if conn.dialect.name == "postgresql":
+        await conn.execute(text("LOCK TABLE print_queue IN SHARE ROW EXCLUSIVE MODE"))
+    await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value=Settings.value))
+    if await conn.scalar(select(Settings.value).where(Settings.key == version_key)) == "1":
+        return
+
+    jobs = PrintQueueItem.__table__
+    archives = PrintArchive.__table__
+    other_jobs = jobs.alias("other_legacy_jobs")
+    other_archives = archives.alias("other_legacy_archives")
+    rows = (
+        (
+            await conn.execute(
+                select(jobs).where(jobs.c.archive_id.is_not(None), jobs.c.dispatch_subtask_id.is_not(None))
+            )
+        )
+        .mappings()
+        .all()
+    )
+    for row in rows:
+        identity = normalize_id(row["dispatch_subtask_id"])
+        if (
+            identity is None
+            or row["printer_id"] is None
+            or (
+                row["status"] not in ("dispatching", "printing", "paused")
+                and row["physical_outcome"] is None
+                and row["stop_requested_at"] is None
+            )
+        ):
+            continue
+        outcome = row["physical_outcome"] or ARCHIVE_OUTCOMES.get(row["status"])
+        if outcome is None and row["status"] == "successful":
+            outcome = "completed"
+        if outcome is None and row["status"] == "unsuccessful" and row["stop_requested_at"] is not None:
+            outcome = "aborted"
+        values = {"dispatched_queue_item_id": row["id"]}
+        if outcome is not None:
+            values.update(
+                status=outcome,
+                completed_at=row["physical_completed_at"] or row["completed_at"],
+                failure_reason=row["physical_failure_reason"]
+                if row["physical_outcome"] is not None
+                else physical_failure_reason(outcome, row["error_message"]),
+            )
+        if row["started_at"] is not None:
+            values["started_at"] = row["started_at"]
+        await conn.execute(
+            archives.update()
+            .where(
+                archives.c.id == row["archive_id"],
+                archives.c.printer_id == row["printer_id"],
+                archives.c.subtask_id == identity,
+                archives.c.dispatched_queue_item_id.is_(None),
+                archives.c.status == "printing",
+                archives.c.completed_at.is_(None),
+                archives.c.deleted_at.is_(None),
+                ~select(other_jobs.c.id)
+                .where(
+                    other_jobs.c.id != row["id"],
+                    other_jobs.c.printer_id == row["printer_id"],
+                    other_jobs.c.dispatch_subtask_id == row["dispatch_subtask_id"],
+                )
+                .exists(),
+                ~select(other_archives.c.id)
+                .where(
+                    other_archives.c.id != row["archive_id"],
+                    other_archives.c.printer_id == row["printer_id"],
+                    other_archives.c.subtask_id == identity,
+                )
+                .exists(),
+                ~select(other_archives.c.id).where(other_archives.c.dispatched_queue_item_id == row["id"]).exists(),
+            )
+            .values(**values)
+        )
+    version = await conn.scalar(select(Settings.value).where(Settings.key == version_key))
+    if version is None:
+        await conn.execute(Settings.__table__.insert().values(key=version_key, value="1"))
+    else:
+        await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value="1"))
 
 
 async def _migrate_queue_archive_outcomes(conn) -> None:
@@ -2874,6 +2971,7 @@ async def run_migrations(conn):
     _physical_completed_type = "DATETIME" if is_sqlite() else "TIMESTAMP"
     await _safe_execute(conn, f"ALTER TABLE print_queue ADD COLUMN physical_completed_at {_physical_completed_type}")
     await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN physical_failure_reason VARCHAR(100)")
+    await _safe_execute(conn, f"ALTER TABLE print_queue ADD COLUMN stop_requested_at {_physical_completed_type}")
 
     # Migration: Create smart_plug_energy_snapshots table (#941)
     # Hourly snapshots of each plug's lifetime counter, so date-range queries in

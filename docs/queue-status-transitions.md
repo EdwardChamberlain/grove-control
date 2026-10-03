@@ -1,4 +1,4 @@
-# Queue job lifecycle (issue #194, stages 3 and 4)
+# Queue job lifecycle (issue #194)
 
 The Queue shows waiting jobs, active jobs, jobs awaiting plate clear, and a
 Timeline. Completed job history lives in Archives. Queue History, Clear History,
@@ -43,7 +43,7 @@ for other upgrades; ambiguous jobs retain Stop as their way out.
 
 | From | Allowed destinations |
 | --- | --- |
-| `queued` | `preheating`, `dispatching`, `failed` (explicit Archive-copy failure), `unsuccessful` (user cancellation) |
+| `queued` | `preheating`, `dispatching`, `unsuccessful` (user cancellation) |
 | `preheating` | `dispatching`, `failed`, `cancelled` |
 | `dispatching` | `printing`, `failed`, `cancelled` |
 | `printing` | `paused`, `finished`, `failed`, `cancelled` |
@@ -112,6 +112,13 @@ on active jobs both use `cancel_job`: commit `cancelled`, then stop the device
 and shut down heat soak if needed. A failed stop command or disconnected
 printer leaves an actionable hold. Editing or deleting a holding job is refused.
 **Skip heat soak** proceeds into `dispatching` while keeping the same hold.
+The stop request is durable, but `physical_outcome` remains empty until an
+identified terminal printer report arrives. If Stop was not sent, the Queue
+shows an inspection reason. A later identified completion moves the job from
+`cancelled` to `finished` and corrects its attempt Archive to `completed`.
+An identified abort confirms the `cancelled` outcome. Clear Plate can still
+finalize an unconfirmed stop after inspection; `stop_requested_at` preserves
+the attempted Stop for an Archive that finishes downloading later.
 
 **Clear Plate** is available from the job and the printer, including while the
 printer is offline. Inspect and physically clear the plate before using it.
@@ -129,14 +136,15 @@ the new print. Different active reservations, disconnected telemetry, delayed
 starts, and previously ended identities cannot establish a transfer. The new
 job follows the normal completion and plate-clear rules, including after restart.
 
-The unconfirmed-dispatch prompt requires an attempt ID, a send timestamp, and
-an expired acknowledgement window after preparation has finished. Archive-copy
-workers remain `queued` or `preheating`, with cancellation/Stop available;
-upload workers hold the printer in `dispatching`. The prepared attempt and
-`dispatching` hold are persisted together
-after copying, without holding a control lock during preparation. The send timer
-starts after upload, and both REST serialization and resolution reject
-attempts still owned by a preparation worker.
+The unconfirmed-dispatch prompt requires a submission ID, a send timestamp, and
+an expired acknowledgement window. The worker first commits a `dispatching`
+hold, then copies and links its Archive, then uploads it. No print command is
+sent without a linked Archive. An Archive-copy failure is an ordinary
+`dispatching` → `failed` transition. A restart clears stale worker claims; a
+held dispatch with no submission ID or send timestamp can be failed safely,
+while an attempt that might have sent its command remains held for telemetry or
+manual review. The send timer starts after upload, and REST serialization and
+resolution reject attempts still owned by a worker.
 
 **Retry** on a failed or cancelled attempt creates a separate, unlinked
 `queued` job at the top of the same printer/model queue, carrying the print
@@ -185,6 +193,12 @@ commit. Rollback discards pending view and artifact updates. The old Printer
 flag columns remain solely for upgrade compatibility and are not runtime
 reservation authorities.
 
+Committed `failed` and `cancelled` transitions schedule one outcome step keyed
+by job and state. It handles failure notification, configured Auto Off, heat-soak
+shutdown, and cleanup of that attempt's unique SD upload. A rollback schedules
+none of these effects. Each committed status change also writes a compact log
+entry with job, prior/new state, printer, Archive and action for support reports.
+
 ## One-time upgrade
 
 Startup performs the migration after legacy table rebuilds and schema repair,
@@ -203,6 +217,8 @@ only ensure the holding index exists. Back up the database before upgrading.
 - Conflicting legacy active reservations are repaired conservatively before
   creating the unique holding index; the strongest existing active attempt is
   retained, and other attempts become `unsuccessful` with an upgrade reason.
+- A separate one-time migration links only unambiguous legacy active Archives
+  by printer and submission ID. Runtime transitions never guess a legacy link.
 
 ## Names for integrations
 
@@ -221,7 +237,7 @@ clearing (`successful`, `unsuccessful`) publishes no integration event.
 | `paused` | `printing` | Paused on the printer; printer held | `printing` (webhook Queue status) |
 | `finished` | `completed` | Printed; plate not yet cleared; printer held | Print event `completed` |
 | `failed` | `failed` | Error after leaving the queue; plate not yet cleared | Print event `failed` |
-| `cancelled` | `cancelled`, `aborted` | Stopped after leaving the queue; plate not yet cleared | Print event `cancelled` for a stop from Grove; `aborted` for a stop on the printer |
+| `cancelled` | `cancelled`, `aborted` | Stop requested or reported; plate not yet cleared | Print event `cancelled` after an identified Stop report; `aborted` for a stop on the printer |
 | `successful` | `completed` | Finished, and the plate was cleared | No event |
 | `unsuccessful` | `failed`, `cancelled`, `skipped` | Failed or cancelled, and the plate was cleared; or cancelled while waiting | No event |
 
@@ -234,64 +250,41 @@ Stage 2's strict printer/job identity matching and stage 4's durable `paused`
 transitions remain in place. Stage 5 aligns Archive and hidden-source lifecycle
 work with the conditional transition writer:
 
-- Callers prepare an immutable copy (with current injection) before entering
-  `dispatching`; the transition writer only flushes and links that unflushed
-  attempt after its conditional update. Its exact Archive link and printer
-  hold commit together. The writer rejects entry without this job's prepared
-  attempt. FTP reads
-  that copy. A losing cancellation/claim or rollback removes the uncommitted
-  copy; preparation never locks a waiting job before the conditional update.
-  Recheck idle telemetry after copying, before taking the hold, so a new
-  external print cannot be displaced while its callback is still pending.
-  A heat-soak handoff conflict rolls back only that item; earlier committed
-  handoffs still start their dispatch workers.
-  The guard reads current telemetry even if reconnection replaced the client
-  during copying; missing, disconnected or unready telemetry cannot dispatch.
-  Heat-soak and Skip controls commit their heartbeat and release the write
-  lock before copying, then re-lock and verify status and `preheat_owner`.
-  Check readiness before copying too: unready telemetry keeps the heartbeat
-  alive without producing repeated copies. If the final guard rejects a slow
-  copy, rollback discards the attempt, then a fresh lock verifies the same
-  preheating job, owner and printer before committing its heartbeat. A Stop or
-  ownership change wins. Per-item database/flush errors, including heartbeat
-  recovery, roll back only that item and preserve earlier committed handoffs.
-  Skip uses the same fresh telemetry checks before copying, after re-locking
-  and at the conditional handoff. Missing, disconnected, busy or unready
-  telemetry returns HTTP 409, retains the soak and heartbeat, and discards any
-  prepared copy without launching a worker.
-- Successful upload is no longer required for an Archive entry. Upload,
-  drying-policy and command failures update the attempt to `failed` and retain
-  the printer hold. A copy failure holds the job as `failed` without sending
-  and runs configured Auto Off after commit, including heat-soak handoffs.
-  Ordinary copy failures use an explicit conditional `queued → failed` edge;
-  they never enter `dispatching` without an Archive. All dispatch callers share
-  preparation/error reporting, preserving the actual copy error in the job.
-  Deleted or missing sources found before taking a hold stay parked in the
-  queue, including deletion between eligibility checks and preparation.
-  Typed source failures decide that policy; display messages do not.
-  Preparation also rejects sources deleted during heat soaking. Skip failures
-  return HTTP 409 with the committed job error; the Queue displays it and
-  refreshes the failed job. Skip succeeds if the same job's exact attempt already
-  progressed while the request was preparing, without copying again or spawning
-  another dispatch worker. Pool copy failures send a failure notification,
-  and assignment notifications are sent only after successful handoff.
-- Entry into `finished`, `failed`, or `cancelled` records the Archive outcome
-  (`completed`, `failed`, or `aborted`) in the same transaction. Exact job and
-  Archive columns must both match. Pause/resume, duplicate terminal observations,
-  Clear Plate and printer deletion do not rewrite the physical outcome.
-  Repeated completion callbacks still repair proven restored legacy links,
-  while ordinary same-status heartbeat/metadata writes skip those queries.
-  Reconnect reconciliation also repairs already-ended jobs, including final
-  jobs after Clear Plate and cached completions, without replaying completion
-  effects or changing the retained physical facts.
-  A restored active Archive without its dispatch link is associated inside the
-  same transition only when its printer and submission ID uniquely identify
-  the job. Reused IDs, historical sources and other attempts are never adopted.
-  The job retains the outcome, timestamp and failure reason separately from
-  its released state, so a delayed external Archive can attach after Clear
-  Plate or restart. Association briefly locks the job against Stop/Clear Plate.
-  Retry starts with no physical outcome, completion timestamp or failure reason
-  from the previous job, including when the retry is cancelled while queued.
+- The worker commits the printer hold before copying. It copies the source
+  with current G-code injection, then conditionally links that immutable
+  attempt to the held job before FTP upload. A losing Stop, claim, or rollback
+  removes the unlinked copy. No `project_file` command is sent without the
+  exact committed Archive link. A source missing before the hold keeps the
+  job queued and parked; a copy failure after the hold fails the job and keeps
+  the printer reserved for inspection.
+- Fresh, connected idle telemetry is required before the hold, after copying,
+  and immediately before the print command. A different print observed during
+  copy or upload fails the held attempt. The final synchronous command runs
+  under the job's short write lock, so a concurrent Stop either wins first or
+  follows the send. A committed submission ID lets restart recovery distinguish
+  an uncertain command from an unsent attempt.
+- Heat-soak and Skip handoffs commit `preheating` → `dispatching` first, then
+  let the dispatch worker copy and link. Busy or unready telemetry before the
+  handoff retains the soak and returns HTTP 409 for Skip. A subsequent copy
+  failure follows the same failed-dispatch path as an ordinary job. A worker
+  failure affects only its own transaction and job.
+- Upload, drying-policy, and rejected-command failures update the exact linked
+  Archive to `failed` and retain the printer hold. Failure effects run from the
+  committed transition. An Any machine assignment notice waits until the
+  Archive link succeeds. Each upload has a unique SD name, so delayed cleanup
+  cannot delete another attempt's file.
+- An identified terminal event records the physical outcome and updates the
+  exact linked Archive in the same transaction. A user Stop immediately marks
+  the attempt Archive `aborted` for workflow display but leaves the physical
+  outcome unconfirmed. An identified completion after a failed Stop corrects
+  both job and Archive to `completed`; a confirmed abort fills the physical
+  outcome once. Exact job and Archive columns must both match. Pause/resume,
+  duplicate terminal observations, Clear Plate and printer deletion do not
+  rewrite a confirmed physical outcome. One-time startup migration associates
+  only proven legacy job/Archive pairs; reconnect and ordinary transitions do
+  not perform that repair. The job retains the outcome, timestamp and failure
+  reason separately from its released state. Retry starts without those facts
+  from the prior attempt.
 - Hidden sources are retained by every nonfinal reference, including variants.
   Finalization detaches final references and removes sources; artifact deletion
   waits for commit. Files storage and external sources are preserved.
@@ -299,8 +292,8 @@ work with the conditional transition writer:
 Startup adds the nullable physical-outcome columns and performs the versioned
 `queue_archive_outcome_version = 1` backfill once. Only unambiguous job states
 or exact Archive/job links supply outcomes; display reasons and reprint-source
-Archives do not. Older in-flight attempts without an Archive remain held for
-user inspection rather than publishing a command without one.
+Archives do not. An old dispatch without a submission ID or send timestamp is
+failed on restart; one that might have sent a command stays held for inspection.
 
 Real database tests cover the transition table, stale sessions, rollback,
 claim replacement, cancellation/confirmation/recovery races, all holding states,
@@ -354,10 +347,10 @@ telemetry prevents upload and dispatch; a fresh idle report permits the
 handoff. Retry failed and cancelled jobs from Files, Archive and variants,
 then cancel the queued retry and confirm the original outcome is unchanged.
 Restore an active job referencing an older unlinked Archive, then finish, fail,
-Stop or recover it by exact submission ID. Confirm the link and outcome commit
-together and Clear Plate preserves them; repeat with reused IDs and source
-Archives to confirm they remain untouched. Include a late firmware-ID rebind
-and concurrent Stop/completion on PostgreSQL.
+Stop or recover it by exact submission ID. Confirm the one-time migration links
+only an unambiguous attempt and that later outcomes update that link; repeat
+with reused IDs and source Archives to confirm they remain untouched. Include
+a late firmware-ID rebind and concurrent Stop/completion on PostgreSQL.
 
 `test_queue_archive_alignment.py` covers real-database dispatch/Archive commit,
 rollback (including session close), cancellation during copying, duplicate
@@ -369,3 +362,7 @@ immutable-copy checks; the same cancellation and MQTT fencing cases remain.
 `test_queue_legacy_archive_alignment.py` additionally exercises real migrations,
 completion callbacks and independent lifecycle paths for restored active
 Archives, plus rollback, stale completion, late ID binding and ambiguous matches.
+`test_queue_dispatch_contracts.py`, `test_queue_dispatch_races.py`, and
+`test_queue_outcome_effects.py` cover hold-first copying, Stop races, rollback,
+and after-commit effects. Scheduler watchdog tests cover restart before a
+command has an ID, both before and after Archive linking.

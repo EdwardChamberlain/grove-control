@@ -1,5 +1,6 @@
 """Exercise the actual status writer and transaction boundaries on a database."""
 
+import logging
 import zipfile
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -15,7 +16,6 @@ from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services.print_scheduler import PrintScheduler
-from backend.app.services.queue_archive import prepare_dispatch_archive
 from backend.app.services.queue_transitions import (
     InvalidQueueTransition,
     QueueTransitionConflict,
@@ -84,7 +84,6 @@ async def test_existing_workflows_keep_their_status_paths(sessions, path):
                 else "clear_plate"
                 if before in ("finished", "failed", "cancelled")
                 else None,
-                attempt=await prepare_dispatch_archive(db, item, {}) if after == "dispatching" else None,
             )
             await db.commit()
             assert item.status == after
@@ -141,7 +140,6 @@ async def test_cancellation_wins_against_stale_dispatch_and_its_metadata(session
                 "queued",
                 "dispatching",
                 values={"dispatch_subtask_id": "123"},
-                attempt=await prepare_dispatch_archive(worker, stale, {"dispatch_subtask_id": "123"}),
             )
         await worker.rollback()
     async with sessions() as db:
@@ -156,9 +154,7 @@ async def test_deleted_item_cannot_be_transitioned(sessions):
         await db.delete(item)
         await db.commit()
         with pytest.raises(QueueTransitionConflict):
-            await transition_queue_item(
-                db, item, "queued", "dispatching", attempt=await prepare_dispatch_archive(db, item, {})
-            )
+            await transition_queue_item(db, item, "queued", "dispatching")
 
 
 async def test_replaced_dispatch_claim_is_rejected_even_while_pending(sessions):
@@ -174,7 +170,6 @@ async def test_replaced_dispatch_claim_is_rejected_even_while_pending(sessions):
                 "dispatching",
                 conditions=(PrintQueueItem.dispatching_at == now - timedelta(seconds=1),),
                 values={"dispatch_subtask_id": "123"},
-                attempt=await prepare_dispatch_archive(db, item, {"dispatch_subtask_id": "123"}),
             )
         await db.rollback()
         await db.refresh(item)
@@ -192,7 +187,6 @@ async def test_status_and_metadata_share_callers_transaction(sessions):
             "queued",
             "dispatching",
             values={"error_message": "Upload failed"},
-            attempt=await prepare_dispatch_archive(db, item, {"error_message": "Upload failed"}),
         )
         item.completed_at = datetime.now()
         await db.flush()
@@ -200,6 +194,20 @@ async def test_status_and_metadata_share_callers_transaction(sessions):
         await db.rollback()
         await db.refresh(item)
         assert (item.status, item.error_message, item.completed_at) == ("queued", None, None)
+
+
+async def test_transition_log_records_only_committed_edges(sessions, caplog):
+    item_id = await make_item(sessions)
+    with caplog.at_level(logging.INFO, logger="backend.app.services.queue_transitions"):
+        async with sessions() as db:
+            item = await db.get(PrintQueueItem, item_id)
+            await transition_queue_item(db, item, "queued", "dispatching")
+            assert f"Queue job {item_id}: queued -> dispatching" not in caplog.text
+            await db.rollback()
+            item = await db.get(PrintQueueItem, item_id)
+            await transition_queue_item(db, item, "queued", "dispatching")
+            await db.commit()
+    assert caplog.text.count(f"Queue job {item_id}: queued -> dispatching") == 1
 
 
 async def test_flush_does_not_emit_an_unconditional_status_write(sessions):
@@ -215,9 +223,7 @@ async def test_flush_does_not_emit_an_unconditional_status_write(sessions):
 
         event.listen(engine, "before_cursor_execute", capture)
         try:
-            await transition_queue_item(
-                db, item, "queued", "dispatching", attempt=await prepare_dispatch_archive(db, item, {})
-            )
+            await transition_queue_item(db, item, "queued", "dispatching")
             item.error_message = "Upload failed"
             await db.commit()
         finally:
@@ -225,7 +231,7 @@ async def test_flush_does_not_emit_an_unconditional_status_write(sessions):
     status_writes = [statement for statement in statements if "status=" in statement.split(" WHERE ")[0]]
     assert len(status_writes) == 1
     assert "print_queue.status =" in status_writes[0].split(" WHERE ")[1]
-    assert len(statements) == 3  # Conditional status, exact Archive link, then metadata only.
+    assert len(statements) == 2  # Conditional status, then metadata only.
 
 
 @pytest.mark.parametrize("detached", [False, True])
@@ -249,7 +255,6 @@ async def test_late_scheduler_failure_cannot_overwrite_cancel_or_power_off(sessi
         printer_id = printer.id
     item_id = await make_item(sessions, printer_id=printer_id)
     scheduler = PrintScheduler()
-    power_off = AsyncMock()
     async with sessions() as worker, sessions() as user:
         stale = await worker.get(PrintQueueItem, item_id)
         await worker.commit()
@@ -258,12 +263,10 @@ async def test_late_scheduler_failure_cannot_overwrite_cancel_or_power_off(sessi
         await user.commit()
         with (
             patch("backend.app.services.print_scheduler.printer_manager.is_connected", return_value=False),
-            patch.object(scheduler, "_power_off_if_needed", power_off),
             pytest.raises(QueueTransitionConflict),
         ):
             await scheduler._start_print(worker, stale)
         await worker.rollback()
-    power_off.assert_not_awaited()
     async with sessions() as db:
         assert await db.scalar(select(PrintQueueItem.status).where(PrintQueueItem.id == item_id)) == "unsuccessful"
 
@@ -326,9 +329,7 @@ async def test_conflict_does_not_autoflush_dirty_metadata(sessions):
         event.listen(engine, "before_cursor_execute", capture)
         try:
             with pytest.raises(QueueTransitionConflict):
-                await transition_queue_item(
-                    worker, stale, "queued", "dispatching", attempt=await prepare_dispatch_archive(worker, stale, {})
-                )
+                await transition_queue_item(worker, stale, "queued", "dispatching")
         finally:
             event.remove(engine, "before_cursor_execute", capture)
             await worker.rollback()

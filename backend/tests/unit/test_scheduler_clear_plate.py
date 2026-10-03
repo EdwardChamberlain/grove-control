@@ -148,6 +148,16 @@ class TestSchedulerIdleCheckWithPlateCleared:
         assert scheduler._is_printer_idle(1) is True
 
     @patch("backend.app.services.print_scheduler.printer_manager")
+    def test_reconnected_cached_idle_waits_for_fresh_job_telemetry(self, mock_pm, scheduler):
+        mock_pm.is_connected.return_value = True
+        mock_pm.is_awaiting_plate_clear.return_value = False
+        state = MagicMock(state="IDLE", connected=True, job_telemetry_ready=False)
+        mock_pm.get_status.return_value = state
+        assert scheduler._is_printer_idle(1) is False
+        state.job_telemetry_ready = True
+        assert scheduler._is_printer_idle(1) is True
+
+    @patch("backend.app.services.print_scheduler.printer_manager")
     def test_running_state_not_idle(self, mock_pm, scheduler):
         """RUNNING state is never idle."""
         mock_pm.is_connected.return_value = True
