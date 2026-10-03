@@ -110,7 +110,12 @@ async def queue_factory(tmp_path):
             )
 
     try:
-        yield make_case
+        # This fixture uses one in-memory SQLite connection across sessions.
+        # Outcome effects have file-backed coverage elsewhere; running a fresh
+        # effect session concurrently here would share and roll back that
+        # connection's unrelated test transaction.
+        with patch("backend.app.services.queue_outcome_effects.run_queue_outcome_effects", new=AsyncMock()):
+            yield make_case
     finally:
         await engine.dispose()
 
@@ -223,7 +228,6 @@ async def _dispatch_library_item(
         ),
         patch("backend.app.services.mqtt_relay.mqtt_relay.on_queue_job_started", AsyncMock()),
         patch.object(scheduler, "_propagate_owner_to_printer_manager", AsyncMock()),
-        patch.object(scheduler, "_power_off_if_needed", AsyncMock()),
         patch.object(scheduler, "_schedule_dispatch_confirmation", MagicMock()),
     ]
     if unlink_side_effect:
@@ -320,24 +324,18 @@ async def test_archive_preparation_is_unsent_and_cancellation_still_fences_mqtt(
         nonlocal preparation_finished
         async with ctx.session_maker() as db:
             item = await db.get(PrintQueueItem, ctx.queue_item_id)
-            assert item.status == "queued" and item.dispatch_subtask_id is None
+            assert item.status == "dispatching" and item.dispatch_subtask_id is None
             assert item.dispatched_at is None and not needs_dispatch_resolution(item)
             if cancelled:
-                await transition_queue_item(db, item, "queued", "unsuccessful", action="cancel")
+                await transition_queue_item(db, item, "dispatching", "cancelled", action="cancel")
                 await db.commit()
         preparation_finished = datetime.now(timezone.utc)
 
-    if cancelled:
-        from backend.app.services.queue_transitions import QueueTransitionConflict
-
-        with pytest.raises(QueueTransitionConflict):
-            await _dispatch_library_item(ctx, during_archive=copying)
-    else:
-        await _dispatch_library_item(ctx, during_archive=copying)
+    await _dispatch_library_item(ctx, during_archive=copying)
     item, _, archive = await _queue_snapshot(ctx)
     if cancelled:
         ctx.start_print.assert_not_called()
-        assert item.status == "unsuccessful" and item.dispatched_at is None and archive is None
+        assert item.status == "cancelled" and item.dispatched_at is None and archive is None
         assert not ctx.archive_path.exists()
     else:
         ctx.start_print.assert_called_once()
@@ -962,20 +960,17 @@ async def test_unedited_job_with_a_start_time_is_dispatched_with_its_decision(qu
     ctx.upload.assert_awaited_once()
 
 
-async def test_printer_becoming_busy_during_archive_copy_is_rechecked_before_hold_and_ftp(queue_factory):
-    from backend.app.services.queue_transitions import QueueTransitionConflict
-
+async def test_printer_becoming_busy_during_archive_copy_fails_the_hold_before_ftp(queue_factory):
     ctx = await queue_factory(cleanup=False)
-    state = SimpleNamespace(state="IDLE", connected=True, raw_data={})
+    state = SimpleNamespace(state="IDLE", connected=True, job_telemetry_ready=True, raw_data={})
 
     async def external_start():
         # Fresh telemetry can precede the external-job callback's database hold.
         state.state = "RUNNING"
 
-    with pytest.raises(QueueTransitionConflict):
-        await _dispatch_library_item(ctx, printer_status=state, during_archive=external_start)
+    await _dispatch_library_item(ctx, printer_status=state, during_archive=external_start)
     job, _, attempt = await _queue_snapshot(ctx)
-    assert job.status == "queued" and attempt is None
+    assert job.status == "failed" and attempt is None
     assert not ctx.archive_path.exists()
     ctx.upload.assert_not_awaited()
     ctx.start_print.assert_not_called()

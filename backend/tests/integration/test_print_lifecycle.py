@@ -77,6 +77,7 @@ class TestPlateClearGate:
         await db_session.commit()
         sessions = async_sessionmaker(test_engine, expire_on_commit=False)
         main._completed_job_events.clear()
+        main._user_stopped_printers.clear()
         manager = MagicMock()
         manager.get_status.return_value = None
         manager.get_printer.return_value = None
@@ -92,6 +93,7 @@ class TestPlateClearGate:
             patch.object(main, "ws_manager", AsyncMock()),
             patch.object(main, "mqtt_relay", AsyncMock()),
             patch.object(main, "spawn_background_task", discard_background),
+            patch("backend.app.services.queue_outcome_effects.run_queue_outcome_effects", new=AsyncMock()),
             patch("backend.app.services.usage_tracker.on_print_complete", AsyncMock(return_value=[])),
             patch("backend.app.services.usage_tracker.discard_session", AsyncMock()),
         ):
@@ -122,6 +124,33 @@ class TestPlateClearGate:
         assert completion.item.physical_outcome == "completed"
         assert completion.item.physical_completed_at is not None
         assert completion.item.error_message is None
+
+    async def test_identified_failure_during_dispatch_skips_preprint_effects(self, completion, db_session):
+        from sqlalchemy import update
+
+        from backend.app.models.print_queue import PrintQueueItem
+        from backend.app.services import queue_outcome_effects
+
+        await db_session.execute(
+            update(PrintQueueItem).where(PrintQueueItem.id == completion.item.id).values(status="dispatching")
+        )
+        await db_session.commit()
+        await db_session.refresh(completion.item)
+        effects = []
+
+        async def record_effect(_engine, effect):
+            effects.append(effect)
+
+        with patch.object(queue_outcome_effects, "run_queue_outcome_effects", record_effect):
+            await completion.complete(completion.printer.id, {"subtask_id": "123", "status": "failed"})
+            await asyncio.sleep(0)
+
+        await db_session.refresh(completion.item)
+        assert completion.item.status == "failed"
+        assert completion.item.physical_outcome == "failed"
+        assert len(effects) == 1
+        assert effects[0].notify_failure is False
+        assert effects[0].clean_sd_copy is False
 
     @pytest.mark.parametrize(
         ("printer_outcome", "stopped_in_grove", "job_status", "reported"),

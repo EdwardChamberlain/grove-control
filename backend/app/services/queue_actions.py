@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 async def cancel_job(db: AsyncSession, item: PrintQueueItem) -> None:
     """Cancel waiting work or stop active work, retaining every active hold."""
     from backend.app.models.printer import Printer
-    from backend.app.services.chamber_heat_soak import _heaters_off, _show_preheating, utcnow
+    from backend.app.services.chamber_heat_soak import utcnow
     from backend.app.services.printer_manager import printer_manager
 
     queued = item.status == "queued"
@@ -82,16 +82,3 @@ async def cancel_job(db: AsyncSession, item: PrintQueueItem) -> None:
             except Exception:
                 await db.rollback()
                 logger.exception("Could not record failed Stop delivery for job %s", item_id)
-        if heating:
-            if printer:
-                _heaters_off(printer)
-            _show_preheating(printer_id, False)
-        if item.auto_off_after:
-            from backend.app.services.smart_plug_manager import smart_plug_manager
-
-            # The cancellation is committed; a smart-plug failure must not
-            # report the Stop itself as failed.
-            try:
-                await smart_plug_manager.schedule_off_after_queue_job(printer_id, db)
-            except Exception:
-                logger.warning("Auto-off could not be scheduled for printer %s", printer_id, exc_info=True)

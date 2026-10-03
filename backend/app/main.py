@@ -4447,38 +4447,6 @@ async def _complete_identified_print(printer_id: int, data: dict):
             terminal_statuses = (*AWAITING_PLATE_CLEAR_STATUSES, *FINAL_STATUSES)
             ended_job = matched_job or await find_job(db, printer_id, identity, terminal_statuses)
             if ended_job is not None and ended_job.status in terminal_statuses:
-                from backend.app.models.archive import PrintArchive
-
-                # Exact modern attempts need no repair or write lock. Only an
-                # unlinked, still-active Archive can need the writer's proof.
-                legacy_archive = (
-                    await db.scalar(
-                        select(PrintArchive.id).where(
-                            PrintArchive.id == ended_job.archive_id,
-                            PrintArchive.dispatched_queue_item_id.is_(None),
-                            PrintArchive.printer_id == ended_job.printer_id,
-                            PrintArchive.status == "printing",
-                            PrintArchive.completed_at.is_(None),
-                        )
-                    )
-                    if ended_job.archive_id is not None
-                    else None
-                )
-                if legacy_archive is not None:
-                    try:
-                        await transition_queue_item(
-                            db,
-                            ended_job,
-                            ended_job.status,
-                            ended_job.status,
-                            conditions=(
-                                PrintQueueItem.printer_id == printer_id,
-                                PrintQueueItem.dispatch_subtask_id == identity,
-                            ),
-                        )
-                        await db.commit()
-                    except QueueTransitionConflict:
-                        await db.rollback()
                 return None
         if matched_job is None and identity:
             # An external print archived by an older version may finish while
@@ -4549,7 +4517,7 @@ async def _complete_identified_print(printer_id: int, data: dict):
                 },
                 archive_failure_reason=derive_failure_reason(reported_outcome, data.get("hms_errors")),
                 observed_outcome=("aborted" if reported_outcome == "cancelled" else reported_outcome)
-                if completing_cancelled
+                if matched_job.physical_outcome is None
                 else None,
             )
         remote_filename = archive_filename = None
@@ -4814,7 +4782,9 @@ async def _complete_identified_print(printer_id: int, data: dict):
             # power on a loaded print (#1890). Previously an inline block here
             # hardcoded a 50°C / 600s cooldown wait and powered off on the
             # timeout regardless of print state — cutting a touchscreen reprint.
-            if queue_auto_off:
+            # Failed and cancelled transitions schedule this in the central
+            # after-commit outcome step. Completion still uses this callback.
+            if queue_auto_off and queue_status == "completed":
                 try:
                     async with async_session() as db:
                         await smart_plug_manager.schedule_off_after_queue_job(printer_id, db)
