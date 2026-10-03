@@ -60,8 +60,6 @@ the job in its current state.
 The first active observation after application restart restores job and Archive
 association without rerunning new-print plate detection, start notifications,
 smart-plug actions or usage-session initialization.
-After a presumed power cut, a partial MQTT packet restores connectivity but
-cannot authorize another dispatch until a fresh job-state report arrives.
 
 An interrupted heat soak stays reserved until the user chooses Stop or Skip
 heat soak. A second live scheduler does not take over another worker's timer.
