@@ -254,6 +254,7 @@ async def test_legacy_association_does_not_guess_or_modify_another_attempt(legac
     [
         ("finished", "completed"),
         ("failed", "failed"),
+        ("cancelled", "aborted"),
         ("successful", "completed"),
         ("unsuccessful", "failed"),
         ("unsuccessful", "aborted"),

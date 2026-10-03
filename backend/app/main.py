@@ -4439,9 +4439,11 @@ async def _complete_identified_print(printer_id: int, data: dict):
         if data.get("_recovered_dispatch"):
             statuses += ("finished", "failed", "successful")
         matched_job = await find_job(db, printer_id, identity, statuses)
-        if matched_job is not None and matched_job.status == "cancelled" and matched_job.physical_outcome is not None:
-            return None  # This Stop already has an identified physical outcome.
-        if matched_job is None or _completed_job_events.get(printer_id) == matched_job.id:
+        if (
+            matched_job is None
+            or _completed_job_events.get(printer_id) == matched_job.id
+            or (matched_job.status == "cancelled" and matched_job.physical_outcome is not None)
+        ):
             terminal_statuses = (*AWAITING_PLATE_CLEAR_STATUSES, *FINAL_STATUSES)
             ended_job = matched_job or await find_job(db, printer_id, identity, terminal_statuses)
             if ended_job is not None and ended_job.status in terminal_statuses:
