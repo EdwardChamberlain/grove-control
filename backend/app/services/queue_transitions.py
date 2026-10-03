@@ -332,9 +332,9 @@ async def transition_queue_item(
                 db.sync_session.info.setdefault("queue_source_artifacts", []).extend(paths)
         row = (
             await db.execute(
-                select(table.c.printer_id, table.c.archive_id, table.c.preheat_requested_at).where(
-                    table.c.id == item_id
-                )
+                select(
+                    table.c.printer_id, table.c.archive_id, table.c.preheat_requested_at, table.c.chamber_heat_soak
+                ).where(table.c.id == item_id)
             )
         ).one()
         if expected_status != status or archive is not None:
@@ -349,13 +349,22 @@ async def transition_queue_item(
                 )
             )
         if status in ("failed", "cancelled") and expected_status != status:
+            from backend.app.models.printer import Printer
             from backend.app.services.queue_outcome_effects import QueueOutcomeEffect
 
+            # Keep shutdown retryable after disconnect, deletion of the job,
+            # or a process exit before the after-commit effect gets to run.
+            heating = row.preheat_requested_at is not None or row.chamber_heat_soak
+            if heating and row.printer_id is not None:
+                printer = await db.get(Printer, row.printer_id)
+                if printer is not None:
+                    printer.heat_soak_shutdown_pending = True
+                    printer.heat_soak_shutdown_at = datetime.now(timezone.utc)
             effect = QueueOutcomeEffect(
                 job_id=item_id,
                 new_state=status,
                 printer_id=row.printer_id,
-                shut_down_heaters=row.preheat_requested_at is not None,
+                shut_down_heaters=heating,
                 notify_failure=status == "failed"
                 and expected_status in ("preheating", "dispatching")
                 and observed_outcome is None,

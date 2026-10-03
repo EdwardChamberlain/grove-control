@@ -9,7 +9,8 @@ import pytest
 
 from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import PrintQueueItem
-from backend.app.services import queue_outcome_effects
+from backend.app.models.printer import Printer
+from backend.app.services import print_scheduler, queue_outcome_effects
 from backend.app.services.printer_manager import printer_manager
 from backend.app.services.queue_transitions import transition_queue_item
 from backend.tests.unit.test_queue_archive_alignment import alignment, hold_and_link  # noqa: F401
@@ -57,6 +58,10 @@ async def test_failed_dispatch_effects_run_only_after_commit(alignment, monkeypa
         else:
             await db.rollback()
 
+    async with alignment.sessions() as observer:
+        printer = await observer.get(Printer, 1)
+        assert printer.heat_soak_shutdown_pending is commit
+        assert (printer.heat_soak_shutdown_at is not None) is commit
     if commit:
         await asyncio.wait_for(done.wait(), 2)
         notified.assert_awaited_once()
@@ -104,3 +109,31 @@ async def test_cancelled_job_skips_failure_notice_and_sd_cleanup(alignment, monk
     powered_off.assert_awaited_once()
     notified.assert_not_awaited()
     deleted.assert_not_awaited()
+
+
+async def test_incompatible_uploaded_dispatch_uses_only_committed_cleanup(alignment, monkeypatch):
+    deleted = AsyncMock(return_value=True)
+    inline_delete = AsyncMock()
+    done = asyncio.Event()
+
+    async def delete_and_signal(*args, **kwargs):
+        await deleted(*args, **kwargs)
+        done.set()
+        return True
+
+    monkeypatch.setattr(queue_outcome_effects, "delete_file_async", delete_and_signal)
+    monkeypatch.setattr(print_scheduler, "delete_file_async", inline_delete)
+    monkeypatch.setattr(queue_outcome_effects.notification_service, "on_queue_job_failed", AsyncMock())
+    async with alignment.sessions() as db:
+        job = await db.get(PrintQueueItem, alignment.job_id)
+        await hold_and_link(db, job)
+        await db.commit()
+        printer = await db.get(Printer, job.printer_id)
+        archive = await db.get(PrintArchive, job.archive_id)
+        remote_path = f"/{archive.extra_data['remote_filename']}"
+        assert await print_scheduler._defer_incompatible_dispatch(db, job, printer, "A1", remote_path=remote_path)
+        assert job.status == "failed"
+    await asyncio.wait_for(done.wait(), 2)
+    deleted.assert_awaited_once()
+    assert deleted.call_args.args[2] == remote_path
+    inline_delete.assert_not_awaited()

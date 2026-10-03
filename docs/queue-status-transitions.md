@@ -49,7 +49,8 @@ for other upgrades; ambiguous jobs retain Stop as their way out.
 | `printing` | `paused`, `finished`, `failed`, `cancelled` |
 | `paused` | `printing`, `finished`, `failed`, `cancelled` |
 | `finished` | `successful` (Clear Plate) |
-| `failed`, `cancelled` | `unsuccessful` (Clear Plate) |
+| `failed` | `unsuccessful` (Clear Plate) |
+| `cancelled` | `finished` (identified completion), `unsuccessful` (Clear Plate) |
 | `successful`, `unsuccessful` | No different destination |
 
 Printer deletion additionally ends an active job as `unsuccessful`. It resolves
@@ -196,7 +197,9 @@ reservation authorities.
 Committed `failed` and `cancelled` transitions schedule one outcome step keyed
 by job and state. It handles failure notification, configured Auto Off, heat-soak
 shutdown, and cleanup of that attempt's unique SD upload. A rollback schedules
-none of these effects. Each committed status change also writes a compact log
+none of these effects. Heater shutdown remains pending until fresh zero-target
+telemetry confirms it, including after a failed heat-soak handoff or disconnect.
+Each committed status change also writes a compact log
 entry with job, prior/new state, printer, Archive and action for support reports.
 
 ## One-time upgrade

@@ -352,6 +352,30 @@ async def test_shutdown_retries_after_reconnect_until_fresh_zero_targets(soak, m
     soak.client.set_airduct_mode.assert_not_called()
 
 
+async def test_failed_dispatch_after_soak_preserves_offline_heater_shutdown_retry(soak):
+    from backend.app.services.print_scheduler import PrintScheduler
+
+    assert await soak.service.stage(soak.db, soak.item)
+    soak.item.preheat_started_at = heat.utcnow() - timedelta(minutes=2)
+    await soak.db.commit()
+    assert await soak.service.check(soak.db) == [soak.item.id]
+    soak.manager.is_connected.return_value = False
+    await PrintScheduler()._fail_queue_item(soak.db, soak.item, "Archive copy interrupted")
+    await soak.wait_effects()
+    await soak.db.refresh(soak.printer)
+    assert soak.printer.heat_soak_shutdown_pending
+    assert soak.printer.heat_soak_shutdown_at is not None
+    soak.client.reset_mock()
+    soak.manager.is_connected.return_value = True
+    await soak.service.cleanup(soak.db)
+    soak.client.set_bed_temperature.assert_called_once_with(0)
+    soak.client.set_chamber_temperature.assert_called_once_with(0)
+    assert soak.printer.heat_soak_shutdown_pending
+    confirm(soak, target=0)
+    await soak.service.cleanup(soak.db)
+    assert not soak.printer.heat_soak_shutdown_pending
+
+
 async def test_deleting_preheating_library_file_aborts_reservation_and_heaters(soak):
     """Deleting a source file must not leave its preheating reservation alive."""
     source = LibraryFile(

@@ -108,10 +108,6 @@ async def abort_heat_soak(
     await transition_queue_item(
         db, item, item.status, status, values={"error_message": reason, "completed_at": utcnow()}
     )
-    printer = await db.get(Printer, item.printer_id)
-    if printer:
-        printer.heat_soak_shutdown_pending = True
-        printer.heat_soak_shutdown_at = utcnow()
     item.preheat_owner = None
     item.preheat_started_at = None
     item.preheat_checked_at = None

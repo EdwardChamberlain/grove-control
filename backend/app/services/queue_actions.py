@@ -18,8 +18,6 @@ logger = logging.getLogger(__name__)
 
 async def cancel_job(db: AsyncSession, item: PrintQueueItem) -> None:
     """Cancel waiting work or stop active work, retaining every active hold."""
-    from backend.app.models.printer import Printer
-    from backend.app.services.chamber_heat_soak import utcnow
     from backend.app.services.printer_manager import printer_manager
 
     queued = item.status == "queued"
@@ -27,7 +25,6 @@ async def cancel_job(db: AsyncSession, item: PrintQueueItem) -> None:
         raise InvalidQueueTransition(f"Cannot cancel a job in {item.status}")
     printer_id, item_id = item.printer_id, item.id
     heating = not queued and item.chamber_heat_soak
-    printer = await db.get(Printer, printer_id) if heating else None
     requested_at = datetime.now(timezone.utc)
     await transition_queue_item(
         db,
@@ -42,9 +39,6 @@ async def cancel_job(db: AsyncSession, item: PrintQueueItem) -> None:
         },
     )
     if heating:
-        if printer:
-            printer.heat_soak_shutdown_pending = True
-            printer.heat_soak_shutdown_at = utcnow()
         item.preheat_owner = None
         item.preheat_started_at = None
         item.preheat_checked_at = None

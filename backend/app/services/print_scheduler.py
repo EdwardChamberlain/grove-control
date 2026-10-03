@@ -239,6 +239,7 @@ async def _defer_incompatible_dispatch(
     else:
         owns_handoff = bool(current and current.status in ("queued", "dispatching"))
 
+    failed_handoff = owns_handoff and current.status == "dispatching"
     if owns_handoff:
         if current.status == "queued":
             current.waiting_reason = reason
@@ -256,7 +257,7 @@ async def _defer_incompatible_dispatch(
 
     # A committed failed transition handles its own SD copy. A lost claim
     # still needs immediate cleanup because another state won the race.
-    if remote_path and not (owns_handoff and current.status == "dispatching"):
+    if remote_path and not failed_handoff:
         try:
             await delete_file_async(
                 printer.ip_address,

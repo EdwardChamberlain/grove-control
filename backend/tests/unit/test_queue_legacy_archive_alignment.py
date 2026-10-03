@@ -16,6 +16,7 @@ from backend.app.models.archive import PrintArchive
 from backend.app.models.print_log import PrintLogEntry
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
+from backend.app.models.settings import Settings
 from backend.app.services.archive import ArchiveService
 from backend.app.services.job_identity import bind_observed_id
 from backend.app.services.queue_actions import cancel_job
@@ -49,6 +50,26 @@ async def legacy(legacy_unmigrated):
     async with legacy_unmigrated.sessions.kw["bind"].begin() as conn:
         await _migrate_queue_legacy_archive_links(conn)
     return legacy_unmigrated
+
+
+async def test_legacy_archive_repair_runs_only_once(legacy_unmigrated):
+    legacy = legacy_unmigrated
+    async with legacy.sessions() as db:
+        archive = await db.get(PrintArchive, legacy.archive_id)
+        archive.subtask_id = "different-job"
+        await db.commit()
+    async with legacy.sessions.kw["bind"].begin() as conn:
+        await _migrate_queue_legacy_archive_links(conn)
+    async with legacy.sessions() as db:
+        archive = await db.get(PrintArchive, legacy.archive_id)
+        assert archive.dispatched_queue_item_id is None
+        assert await db.scalar(select(Settings.value).where(Settings.key == "queue_legacy_archive_link_version")) == "1"
+        archive.subtask_id = "123"
+        await db.commit()
+    async with legacy.sessions.kw["bind"].begin() as conn:
+        await _migrate_queue_legacy_archive_links(conn)
+    async with legacy.sessions() as db:
+        assert (await db.get(PrintArchive, legacy.archive_id)).dispatched_queue_item_id is None
 
 
 @pytest.mark.parametrize("outcome", ["completed", "failed", "aborted"])
@@ -267,7 +288,7 @@ async def test_legacy_association_does_not_guess_or_modify_another_attempt(legac
         ("unsuccessful", "aborted"),
     ],
 )
-async def test_reconnect_repairs_terminal_legacy_archive_without_replaying_completion(
+async def test_upgrade_repairs_terminal_legacy_archive_without_replaying_completion(
     legacy_unmigrated, monkeypatch, cached, status, outcome
 ):
     legacy = legacy_unmigrated
@@ -348,7 +369,7 @@ async def test_reconnect_repairs_terminal_legacy_archive_without_replaying_compl
 
 
 @pytest.mark.parametrize("duplicate", ["archive", "job"])
-async def test_reconnect_terminal_legacy_repair_rejects_ambiguous_identity(legacy_unmigrated, monkeypatch, duplicate):
+async def test_upgrade_rejects_ambiguous_terminal_legacy_identity(legacy_unmigrated, monkeypatch, duplicate):
     legacy = legacy_unmigrated
     import backend.app.main as main
     from backend.app.services.printer_manager import printer_manager
