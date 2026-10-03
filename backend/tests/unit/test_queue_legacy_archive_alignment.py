@@ -63,13 +63,79 @@ async def test_legacy_archive_repair_runs_only_once(legacy_unmigrated):
     async with legacy.sessions() as db:
         archive = await db.get(PrintArchive, legacy.archive_id)
         assert archive.dispatched_queue_item_id is None
-        assert await db.scalar(select(Settings.value).where(Settings.key == "queue_legacy_archive_link_version")) == "1"
+        assert await db.scalar(select(Settings.value).where(Settings.key == "queue_legacy_archive_link_version")) == "2"
         archive.subtask_id = "123"
         await db.commit()
     async with legacy.sessions.kw["bind"].begin() as conn:
         await _migrate_queue_legacy_archive_links(conn)
     async with legacy.sessions() as db:
         assert (await db.get(PrintArchive, legacy.archive_id)).dispatched_queue_item_id is None
+
+
+@pytest.mark.parametrize("previous_link_version", [None, "1"])
+@pytest.mark.parametrize(
+    "old_status,status,outcome",
+    [("completed", "finished", "completed"), ("failed", "failed", "failed"), ("cancelled", "cancelled", "aborted")],
+)
+async def test_full_startup_repairs_terminal_legacy_archives(
+    alignment, monkeypatch, previous_link_version, old_status, status, outcome
+):
+    from backend.app.core import database
+
+    completed = datetime(2026, 10, 1, 12)
+    engine = alignment.sessions.kw["bind"]
+    # The old installation has run its schema migrations before storing prints,
+    # including the Archive search-index triggers used by real startup.
+    async with engine.begin() as conn:
+        await database.run_migrations(conn)
+    async with alignment.sessions() as db:
+        archive = await ArchiveService(db).archive_print(
+            1, alignment.source_path, print_data={"status": "printing"}, subtask_id="123"
+        )
+        await db.execute(
+            PrintQueueItem.__table__.update()
+            .where(PrintQueueItem.id == alignment.job_id)
+            .values(
+                status=old_status,
+                archive_id=archive.id,
+                dispatch_subtask_id="123",
+                completed_at=completed,
+                error_message="Original failure" if outcome == "failed" else None,
+            )
+        )
+        printer = await db.get(Printer, 1)
+        printer.awaiting_plate_clear = True
+        printer.awaiting_plate_clear_archive_id = archive.id
+        await db.commit()
+        archive_id = archive.id
+    if previous_link_version:
+        # Reproduce the shipped startup order: the link step misses this row,
+        # then outcome backfill supplies the facts after its marker was saved.
+        async with engine.begin() as conn:
+            await _migrate_queue_lifecycle(conn)
+            await _migrate_queue_legacy_archive_links(conn)
+            await conn.execute(
+                Settings.__table__.update()
+                .where(Settings.key == "queue_legacy_archive_link_version")
+                .values(value=previous_link_version)
+            )
+            await _migrate_queue_archive_outcomes(conn)
+    monkeypatch.setattr(database, "engine", engine)
+    for name in (
+        "_migrate_encrypt_legacy_secrets",
+        "seed_notification_templates",
+        "seed_default_groups",
+        "seed_spool_catalog",
+        "seed_color_catalog",
+    ):
+        monkeypatch.setattr(database, name, AsyncMock())
+    await database.init_db()
+    async with alignment.sessions() as db:
+        job = await db.get(PrintQueueItem, alignment.job_id)
+        archive = await db.get(PrintArchive, archive_id)
+        assert (job.status, job.physical_outcome) == (status, outcome)
+        assert (archive.status, archive.dispatched_queue_item_id, archive.completed_at) == (outcome, job.id, completed)
+        assert await db.scalar(select(Settings.value).where(Settings.key == "queue_legacy_archive_link_version")) == "2"
 
 
 @pytest.mark.parametrize("outcome", ["completed", "failed", "aborted"])

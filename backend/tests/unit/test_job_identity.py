@@ -34,6 +34,7 @@ async def sessions(tmp_path):
 
     main._completed_job_events.clear()
     main._observed_job_starts.clear()
+    main._initialized_job_starts.clear()
     main._user_stopped_printers.clear()
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'jobs.db'}")
     async with engine.begin() as conn:
@@ -413,7 +414,7 @@ async def test_external_observation_survives_callbacks_and_restart(sessions):
 async def test_failed_archive_start_is_retried_for_the_same_job(sessions):
     import backend.app.main as main
 
-    archive = AsyncMock(side_effect=[RuntimeError("start WebSocket failed"), None])
+    archive = AsyncMock(side_effect=[RuntimeError("start WebSocket failed"), True])
     with patch.object(main, "async_session", sessions), patch.object(main, "_archive_print_start", archive):
         event = {"submission_id": "external", "filename": "same.3mf"}
         with pytest.raises(RuntimeError, match="start WebSocket failed"):
@@ -443,7 +444,11 @@ async def test_running_recovery_observes_job_without_new_start_effects(sessions)
             1, {"submission_id": "existing", "filename": "same.3mf", "raw_data": {"gcode_state": "RUNNING"}}
         )
     assert archive_start.await_count == 1
-    assert archive_start.await_args.kwargs == {"queue_archive_id": archive_id, "recovering": True}
+    assert archive_start.await_args.kwargs == {
+        "queue_archive_id": archive_id,
+        "queue_job_id": job_id,
+        "recovering": True,
+    }
     async with sessions() as db:
         assert (await db.get(PrintQueueItem, job_id)).status == "printing"
 
@@ -676,6 +681,7 @@ async def test_external_archive_is_linked_by_identity_not_name(sessions):
                 ]
             )
             await db.commit()
+        return True
 
     with patch.object(main, "async_session", sessions), patch.object(main, "_archive_print_start", archive_worker):
         await main.on_print_start(1, {"submission_id": "external", "filename": "same.3mf"})

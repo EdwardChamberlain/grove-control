@@ -10,7 +10,7 @@ from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services.bambu_ftp import delete_file_async
-from backend.app.services.chamber_heat_soak import _heaters_off, _show_preheating
+from backend.app.services.chamber_heat_soak import _show_preheating, cleanup_heat_soak_shutdown
 from backend.app.services.notification_service import notification_service
 from backend.app.services.smart_plug_manager import smart_plug_manager
 
@@ -38,6 +38,7 @@ async def run_queue_outcome_effects(engine: AsyncEngine, effect: QueueOutcomeEff
         archive = await db.get(PrintArchive, job.archive_id) if job.archive_id is not None else None
         attempt = archive if archive and archive.dispatched_queue_item_id == job.id else None
         remote_filename = (attempt.extra_data or {}).get("remote_filename") if attempt else None
+        connection = (printer.ip_address, printer.access_code, printer.model) if printer else None
 
         if effect.notify_failure:
             try:
@@ -65,23 +66,19 @@ async def run_queue_outcome_effects(engine: AsyncEngine, effect: QueueOutcomeEff
 
         if effect.shut_down_heaters:
             try:
-                if printer is not None:
-                    _heaters_off(printer)
-            except Exception:
-                logger.exception("Queue job %s: heater shutdown failed", effect.job_id)
-            try:
-                if effect.printer_id is not None:
+                if effect.printer_id is not None and await cleanup_heat_soak_shutdown(db, effect.printer_id):
                     _show_preheating(effect.printer_id, False)
             except Exception:
-                logger.exception("Queue job %s: preheating display update failed", effect.job_id)
+                await db.rollback()
+                logger.exception("Queue job %s: heater shutdown failed", effect.job_id)
 
-        if effect.clean_sd_copy and remote_filename and printer is not None:
+        if effect.clean_sd_copy and remote_filename and connection is not None:
             try:
                 await delete_file_async(
-                    printer.ip_address,
-                    printer.access_code,
+                    connection[0],
+                    connection[1],
                     f"/{remote_filename}",
-                    printer_model=printer.model,
+                    printer_model=connection[2],
                 )
             except Exception:
                 logger.exception("Queue job %s: failed to remove SD dispatch copy", effect.job_id)

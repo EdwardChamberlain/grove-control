@@ -78,6 +78,28 @@ async def hold_and_link(db, job, before="queued"):
     return prepared
 
 
+async def test_retry_resets_stop_intent_from_the_previous_attempt(alignment):
+    from backend.app.api.routes.print_queue import retry_queue_item
+
+    async with alignment.sessions() as db:
+        old = await db.get(PrintQueueItem, alignment.job_id)
+        await hold_and_link(db, old)
+        old.ams_mapping = "[2]"
+        old.bed_levelling = "false"
+        await db.commit()
+        await cancel_job(db, old)
+        await db.refresh(old)
+        requested_at = old.stop_requested_at
+        assert requested_at is not None
+        result = await retry_queue_item(old.id, db=db, auth_result=(None, True), _=None)
+        new = await db.get(PrintQueueItem, result.id)
+        assert new.id != old.id and new.status == "queued"
+        assert new.stop_requested_at is None
+        assert new.dispatch_subtask_id is None and new.dispatched_at is None
+        assert new.ams_mapping == "[2]" and new.bed_levelling == "false"
+        assert old.stop_requested_at == requested_at
+
+
 @pytest.mark.parametrize("before", ["queued", "preheating"])
 async def test_hold_commits_before_archive_link_and_same_state_never_copies_again(alignment, before):
     async with alignment.sessions() as db:
@@ -568,7 +590,7 @@ async def test_late_external_archive_preserves_failure_after_user_clears_plate(
 
     monkeypatch.setattr(sched, "spawn_background_task", wait_behind_start)
 
-    async def delayed_download(printer_id, data, *, queue_archive_id=None):
+    async def delayed_download(printer_id, data, *, queue_archive_id=None, queue_job_id=None):
         assert queue_archive_id is None
         live.state = "FAILED"
         # Reconciliation can commit the terminal observation while the slow
@@ -589,6 +611,7 @@ async def test_late_external_archive_preserves_failure_after_user_clears_plate(
             await ArchiveService(db).archive_print(
                 printer_id, alignment.source_path, print_data={"status": "printing"}, subtask_id=identity
             )
+        return True
 
     monkeypatch.setattr(main, "_archive_print_start", delayed_download)
     await main.on_print_start(

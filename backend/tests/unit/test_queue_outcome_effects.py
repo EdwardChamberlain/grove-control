@@ -10,7 +10,8 @@ import pytest
 from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services import print_scheduler, queue_outcome_effects
+from backend.app.services import chamber_heat_soak as heat, print_scheduler, queue_outcome_effects
+from backend.app.services.job_identity import observe_print
 from backend.app.services.printer_manager import printer_manager
 from backend.app.services.queue_transitions import transition_queue_item
 from backend.tests.unit.test_queue_archive_alignment import alignment, hold_and_link  # noqa: F401
@@ -20,7 +21,7 @@ from backend.tests.unit.test_queue_archive_alignment import alignment, hold_and_
 @pytest.mark.parametrize("heater_fails", [False, True])
 async def test_failed_dispatch_effects_run_only_after_commit(alignment, monkeypatch, commit, heater_fails):
     client = MagicMock()
-    state = SimpleNamespace(preheating=True)
+    state = SimpleNamespace(preheating=True, connected=True, job_telemetry_ready=True, state="IDLE")
     monkeypatch.setattr(printer_manager, "get_client", lambda _id: client)
     monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: state)
@@ -38,9 +39,8 @@ async def test_failed_dispatch_effects_run_only_after_commit(alignment, monkeypa
     monkeypatch.setattr(queue_outcome_effects.notification_service, "on_queue_job_failed", notified)
     monkeypatch.setattr(queue_outcome_effects.smart_plug_manager, "schedule_off_after_queue_job", powered_off)
     monkeypatch.setattr(queue_outcome_effects, "delete_file_async", delete_and_signal)
-    heater = MagicMock(side_effect=RuntimeError("heater unavailable")) if heater_fails else None
-    if heater is not None:
-        monkeypatch.setattr(queue_outcome_effects, "_heaters_off", heater)
+    if heater_fails:
+        client.set_bed_temperature.side_effect = RuntimeError("heater unavailable")
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
         await hold_and_link(db, job)
@@ -69,20 +69,54 @@ async def test_failed_dispatch_effects_run_only_after_commit(alignment, monkeypa
         powered_off.assert_awaited_once()
         deleted.assert_awaited_once()
         assert deleted.call_args.args[2] == f"/{remote_name}"
-        if heater is not None:
-            heater.assert_called_once()
-        else:
-            client.set_bed_temperature.assert_called_once_with(0)
+        client.set_bed_temperature.assert_called_once_with(0)
         assert state.preheating is False
     else:
         await asyncio.sleep(0)
         notified.assert_not_awaited()
         powered_off.assert_not_awaited()
         deleted.assert_not_awaited()
-        if heater is not None:
-            heater.assert_not_called()
-        else:
-            client.set_bed_temperature.assert_not_called()
+        client.set_bed_temperature.assert_not_called()
+
+
+async def test_delayed_failure_cannot_shut_down_a_new_external_print(alignment, monkeypatch):
+    entered, resume = asyncio.Event(), asyncio.Event()
+
+    async def slow_notification(**kwargs):
+        entered.set()
+        await resume.wait()
+
+    monkeypatch.setattr(queue_outcome_effects.notification_service, "on_queue_job_failed", slow_notification)
+    client = MagicMock()
+    live = SimpleNamespace(
+        state="RUNNING", connected=True, job_telemetry_ready=True, submission_id="new-run", preheating=False
+    )
+    monkeypatch.setattr(printer_manager, "get_client", lambda _id: client)
+    monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
+    monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
+    async with alignment.sessions() as db:
+        job = await db.get(PrintQueueItem, alignment.job_id)
+        await hold_and_link(db, job)
+        job.preheat_requested_at = heat.utcnow()
+        await db.commit()
+        await transition_queue_item(db, job, "dispatching", "failed")
+        await db.commit()
+    await asyncio.wait_for(entered.wait(), 2)
+    try:
+        async with alignment.sessions() as db:
+            new_job, _ = await observe_print(db, 1, "new-run", observed_state=live)
+            assert new_job is not None
+            await db.commit()
+            assert (await db.get(PrintQueueItem, alignment.job_id)).status == "unsuccessful"
+    finally:
+        resume.set()
+    from backend.app.core.tasks import _background_tasks
+
+    await asyncio.gather(*(t for t in tuple(_background_tasks) if "-effects-" in t.get_name()))
+    client.set_bed_temperature.assert_not_called()
+    client.set_chamber_temperature.assert_not_called()
+    async with alignment.sessions() as db:
+        assert (await db.get(Printer, 1)).heat_soak_shutdown_pending
 
 
 async def test_cancelled_job_skips_failure_notice_and_sd_cleanup(alignment, monkeypatch):

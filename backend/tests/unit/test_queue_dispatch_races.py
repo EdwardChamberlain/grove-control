@@ -1,7 +1,7 @@
 """Dispatch races across held jobs, heat soak, and printer upload."""
 
 import asyncio
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -21,7 +21,7 @@ from backend.app.services.printer_manager import printer_manager
 from backend.app.services.queue_actions import cancel_job
 from backend.app.services.queue_archive import prepare_dispatch_archive
 from backend.app.services.queue_transitions import QueueTransitionConflict, transition_queue_item
-from backend.tests.unit.test_queue_archive_alignment import alignment  # noqa: F401
+from backend.tests.unit.test_queue_archive_alignment import alignment, hold_and_link  # noqa: F401
 
 
 @pytest.fixture
@@ -206,6 +206,105 @@ async def test_losing_dispatch_update_cleans_its_upload_and_retains_the_cancelle
         assert archive.completed_at == job.completed_at and archive.failure_reason == "User cancelled"
         assert (settings.base_dir / archive.file_path).is_file()
     assert alignment.source_path.is_file()
+
+
+@pytest.mark.parametrize("heat_soak", [False, True])
+async def test_local_stop_drains_final_upload_ack_then_removes_only_its_unsent_copy(alignment, monkeypatch, heat_soak):
+    scheduler = scheduling.PrintScheduler()
+    live = SimpleNamespace(state="IDLE", connected=True, job_telemetry_ready=True, raw_data={})
+    monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
+    monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
+    monkeypatch.setattr(printer_manager, "get_client", lambda _id: None)
+    monkeypatch.setattr(scheduling, "scheduler", scheduler)
+    monkeypatch.setattr(scheduling, "async_session", alignment.sessions)
+    monkeypatch.setattr(scheduling, "get_ftp_retry_settings", AsyncMock(return_value=(False, 1, 0, 30)))
+    monkeypatch.setattr(scheduler, "_prepare_drying_for_dispatch", AsyncMock(return_value=True))
+    started = MagicMock()
+    monkeypatch.setattr(printer_manager, "start_print", started)
+    if heat_soak:
+        async with alignment.sessions() as db:
+            job = await db.get(PrintQueueItem, alignment.job_id)
+            await transition_queue_item(
+                db,
+                job,
+                "queued",
+                "preheating",
+                values={
+                    "chamber_heat_soak": True,
+                    "preheat_requested_at": heat.utcnow(),
+                    "preheat_owner": scheduler._heat_soak.owner,
+                },
+            )
+            await transition_queue_item(db, job, "preheating", "dispatching")
+            await db.commit()
+    uploaded, release_ack, drained = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    remote_files = {"/another-print.3mf": b"another print"}
+
+    async def upload(_ip, _code, path, remote_path, **kwargs):
+        remote_files[remote_path] = path.read_bytes()  # Last block is already on SD.
+        uploaded.set()
+        try:
+            await asyncio.Event().wait()  # Blocking worker waits for server 226.
+        except asyncio.CancelledError:
+            await release_ack.wait()  # Model upload_file_async draining its worker.
+            drained.set()
+            raise
+
+    async def delete(_ip, _code, remote_path, **kwargs):
+        if uploaded.is_set():
+            assert drained.is_set(), "cleanup must wait for the transfer to finish"
+        remote_files.pop(remote_path, None)
+        return True
+
+    uploads, deletions = AsyncMock(side_effect=upload), AsyncMock(side_effect=delete)
+    monkeypatch.setattr(scheduling, "upload_file_async", uploads)
+    monkeypatch.setattr(scheduling, "delete_file_async", deletions)
+    dispatch = (
+        scheduler._dispatch_after_heat_soak(alignment.job_id)
+        if heat_soak
+        else scheduler._dispatch_one(alignment.job_id, 1)
+    )
+    task = asyncio.create_task(dispatch)
+    scheduler._inflight[alignment.job_id] = (task, 1)
+    try:
+        await asyncio.wait_for(uploaded.wait(), 2)
+        remote_path = uploads.call_args.args[3]
+        async with alignment.sessions() as db:
+            await cancel_job(db, await db.get(PrintQueueItem, alignment.job_id))
+        assert task.cancelling() and remote_path in remote_files
+        release_ack.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 2)
+    finally:
+        release_ack.set()
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    assert drained.is_set()
+    assert remote_files == {"/another-print.3mf": b"another print"}
+    assert deletions.await_count == 2  # Pre-upload delete and drained cleanup.
+    started.assert_not_called()
+    async with alignment.sessions() as db:
+        job = await db.get(PrintQueueItem, alignment.job_id)
+        assert job.status == "cancelled" and job.dispatching_at is None
+        assert (await db.get(PrintArchive, job.archive_id)).status == "aborted"
+
+
+@pytest.mark.parametrize("status", ["dispatching", "cancelled", "unsuccessful", "printing", "paused"])
+async def test_cancellation_cleanup_keeps_a_copy_after_the_persisted_send_boundary(alignment, monkeypatch, status):
+    deleted = AsyncMock()
+    monkeypatch.setattr(scheduling, "delete_file_async", deleted)
+    async with alignment.sessions() as db:
+        job = await db.get(PrintQueueItem, alignment.job_id)
+        await hold_and_link(db, job)
+        await db.execute(
+            PrintQueueItem.__table__.update()
+            .where(PrintQueueItem.id == job.id)
+            .values(status=status, dispatched_at=datetime.now(timezone.utc))
+        )
+        await db.commit()
+        await scheduling.PrintScheduler()._cleanup_unsent_dispatch_upload(db, job.id)
+    deleted.assert_not_awaited()
 
 
 async def test_database_error_in_second_heat_soak_preserves_first_dispatch(handoff, monkeypatch):

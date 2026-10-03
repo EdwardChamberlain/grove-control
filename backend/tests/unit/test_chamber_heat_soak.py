@@ -194,6 +194,65 @@ async def test_bed_only_heating_starts_timer(soak):
     assert soak.item.preheat_started_at is not None
 
 
+@pytest.mark.parametrize("stale_field", ["connected", "job_telemetry_ready"])
+async def test_reconnect_during_staging_commit_cannot_send_heater_commands(soak, monkeypatch, stale_field):
+    commit = soak.db.commit
+
+    async def reconnect_after_hold():
+        await commit()
+        setattr(soak.state, stale_field, False)
+
+    monkeypatch.setattr(soak.db, "commit", reconnect_after_hold)
+    assert not await soak.service.stage(soak.db, soak.item)
+    await soak.wait_effects()
+    soak.client.set_bed_temperature.assert_not_called()
+    soak.client.set_chamber_temperature.assert_not_called()
+    soak.client.set_airduct_mode.assert_not_called()
+
+
+@pytest.mark.parametrize("active_state", ["PREPARE", "RUNNING", "PAUSE", "SLICING"])
+async def test_interrupted_soak_defers_shutdown_until_foreign_print_is_inactive(soak, active_state):
+    assert await soak.service.stage(soak.db, soak.item)
+    soak.client.reset_mock()
+    soak.state.state = active_state
+    soak.state.submission_id = "external-run"
+    assert await soak.service.check(soak.db) == []
+    await soak.wait_effects()
+    await soak.db.refresh(soak.printer)
+    assert soak.printer.heat_soak_shutdown_pending
+    # Zero targets from the active print cannot discharge the pending cleanup.
+    confirm(soak, target=0)
+    await soak.service.cleanup(soak.db)
+    assert soak.printer.heat_soak_shutdown_pending
+    soak.client.set_bed_temperature.assert_not_called()
+    soak.client.set_chamber_temperature.assert_not_called()
+    soak.client.set_airduct_mode.assert_not_called()
+
+    soak.state.state = "IDLE"
+    soak.state.job_telemetry_ready = False
+    await soak.service.cleanup(soak.db)
+    assert soak.printer.heat_soak_shutdown_pending
+    soak.client.set_bed_temperature.assert_not_called()
+    soak.state.job_telemetry_ready = True
+    confirm(soak, target=0)
+    await soak.service.cleanup(soak.db)
+    assert not soak.printer.heat_soak_shutdown_pending
+    soak.client.set_bed_temperature.assert_called_once_with(0)
+
+
+async def test_pending_shutdown_does_not_interrupt_another_reserved_soak(soak):
+    assert await soak.service.stage(soak.db, soak.item)
+    # A delayed shutdown obligation must not override a current heater owner.
+    soak.printer.heat_soak_shutdown_pending = True
+    soak.printer.heat_soak_shutdown_at = heat.utcnow()
+    await soak.db.commit()
+    soak.client.reset_mock()
+    confirm(soak, target=0)
+    await soak.service.cleanup(soak.db)
+    assert soak.printer.heat_soak_shutdown_pending
+    soak.client.set_bed_temperature.assert_not_called()
+
+
 @pytest.mark.parametrize(
     "interruption",
     [
@@ -395,6 +454,7 @@ async def test_deleting_preheating_library_file_aborts_reservation_and_heaters(s
     assert soak.item.status == "preheating"
 
     assert await release_queue_references(soak.db, [source.id]) == 1
+    await soak.db.commit()  # The deletion caller commits the remaining source detachment.
     await soak.wait_effects()
     await soak.db.refresh(soak.item)
     await soak.db.refresh(soak.printer)

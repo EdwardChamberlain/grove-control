@@ -1557,6 +1557,9 @@ class PrintScheduler:
                         binding.printer_id if binding is not None else item.printer_id,
                     )
                 await self._start_print(item_db, item, binding=binding)
+            except asyncio.CancelledError:
+                await self._cleanup_unsent_dispatch_upload(item_db, item_id)
+                raise
             except QueueTransitionConflict:
                 await item_db.rollback()
                 logger.info("Queue item %s changed while dispatch was in progress", item_id)
@@ -1566,6 +1569,30 @@ class PrintScheduler:
                 await self._recover_failed_worker(item_db, item_id)
             finally:
                 await self._clear_dispatch_claim(item_db, item_id)
+
+    async def _cleanup_unsent_dispatch_upload(self, db: AsyncSession, item_id: int) -> None:
+        """The FTP wrapper has drained its worker; remove only an unsent attempt."""
+        try:
+            await db.rollback()
+            job = await db.get(PrintQueueItem, item_id, populate_existing=True)
+            if (
+                job is None
+                or job.status not in ("dispatching", "cancelled", "unsuccessful")
+                or job.dispatched_at is not None
+                or job.started_at is not None
+            ):
+                return  # A persisted send boundary leaves delivery uncertain.
+            attempt = await db.get(PrintArchive, job.archive_id) if job.archive_id else None
+            printer = await db.get(Printer, job.printer_id) if job.printer_id else None
+            remote_name = (attempt.extra_data or {}).get("remote_filename") if attempt else None
+            if not printer or not remote_name or attempt.dispatched_queue_item_id != item_id:
+                return
+            connection = (printer.ip_address, printer.access_code, printer.model)
+            await db.commit()  # Keep the worker claim, release the read transaction.
+            await delete_file_async(connection[0], connection[1], f"/{remote_name}", printer_model=connection[2])
+        except Exception:
+            await db.rollback()
+            logger.exception("Queue item %s: cancelled-upload cleanup failed", item_id)
 
     async def _recover_failed_worker(self, db: AsyncSession, item_id: int) -> None:
         """Settle a job after an unexpected worker error, by where it got to.
@@ -3709,6 +3736,9 @@ class PrintScheduler:
             await db.commit()
             try:
                 await self._start_print(db, item, heat_soak_complete=True)
+            except asyncio.CancelledError:
+                await self._cleanup_unsent_dispatch_upload(db, item_id)
+                raise
             except QueueTransitionConflict:
                 # A cancel or delete won during file preparation. The cleanup
                 # below still turns the heaters off for whatever state it left.

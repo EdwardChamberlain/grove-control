@@ -42,6 +42,10 @@ If the firmware ID arrives after a partial start update, its callback carries
 the exact prior session ID. The same job and linked Archive are bound to the
 reported ID without repeating start effects. Archiving waits for file metadata
 when the first active update has none.
+Transient Archive write failures are retried on later observations. New-print
+initialization is tracked separately so that these retries do not repeat plate
+checks, notifications, usage-session resets, or power-on automation. Restoring
+printable objects during recovery preserves the printer's reported skipped objects.
 
 Start and completion callbacks are serialized per printer so a short external
 print cannot finish before its Archive link is stored. Other printers proceed

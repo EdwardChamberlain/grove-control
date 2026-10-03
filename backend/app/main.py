@@ -2487,7 +2487,7 @@ def _resolve_print_notification_owner_id(
     return archive_created_by_id
 
 
-def _load_objects_from_archive(archive, printer_id: int, logger) -> None:
+def _load_objects_from_archive(archive, printer_id: int, logger, *, reset_skipped: bool = True) -> None:
     """Extract printable objects from an archive's 3MF file and store in printer state."""
     try:
         from backend.app.services.archive import extract_printable_objects_from_3mf
@@ -2503,7 +2503,8 @@ def _load_objects_from_archive(archive, printer_id: int, logger) -> None:
                 if client:
                     client.state.printable_objects = printable_objects
                     client.state.printable_objects_bbox_all = bbox_all
-                    client.state.skipped_objects = []
+                    if reset_skipped:
+                        client.state.skipped_objects = []
                     logger.info("Loaded %s printable objects for printer %s", len(printable_objects), printer_id)
     except Exception as e:
         logger.debug("Failed to extract printable objects from archive: %s", e)
@@ -2513,6 +2514,7 @@ def _load_objects_from_archive(archive, printer_id: int, logger) -> None:
 # A short print must not finish before its Archive link has been persisted.
 _job_event_locks: dict[int, asyncio.Lock] = {}
 _observed_job_starts: dict[int, int] = {}
+_initialized_job_starts: dict[int, int] = {}
 _completed_job_events: dict[int, int] = {}
 
 
@@ -2579,10 +2581,11 @@ async def _observe_print_start(printer_id: int, data: dict, *, recovering: bool 
         return  # Keep the job; archive when a later active push supplies the file.
     if _observed_job_starts.get(printer_id) != item_id:
         # Archive code also receives the exact snapshot, including local run IDs.
-        archive_options = {"queue_archive_id": queue_archive_id}
-        if recovering:
+        archive_options = {"queue_archive_id": queue_archive_id, "queue_job_id": item_id}
+        if recovering or _initialized_job_starts.get(printer_id) == item_id:
             archive_options["recovering"] = True
-        await _archive_print_start(printer_id, {**data, "submission_id": identity}, **archive_options)
+        if not await _archive_print_start(printer_id, {**data, "submission_id": identity}, **archive_options):
+            return
         # A failed Archive/start effect must be retryable on the next observation.
         _observed_job_starts[printer_id] = item_id
     # Archive association is independently retryable, including when the
@@ -2615,8 +2618,13 @@ async def _observe_print_start(printer_id: int, data: dict, *, recovering: bool 
 
 
 async def _archive_print_start(
-    printer_id: int, data: dict, *, queue_archive_id: int | None = None, recovering: bool = False
-):
+    printer_id: int,
+    data: dict,
+    *,
+    queue_archive_id: int | None = None,
+    queue_job_id: int | None = None,
+    recovering: bool = False,
+) -> bool:
     """Handle print start - archive the 3MF file immediately."""
     logger = logging.getLogger(__name__)
 
@@ -2783,7 +2791,12 @@ async def _archive_print_start(
             logger.info("[CALLBACK] Skipping archive - printer not found in database")
             if not recovering and not notification_sent:
                 await _send_print_start_notification(printer_id, data, logger=logger)
-            return
+            return True
+
+        if queue_job_id is not None:
+            # Archive storage can fail after these new-print effects succeeded.
+            # Subsequent observations retry the Archive in recovery mode.
+            _initialized_job_starts[printer_id] = queue_job_id
 
         if not printer.auto_archive:
             # auto-archive disabled — check if there's an expected print (dispatched
@@ -2823,7 +2836,7 @@ async def _archive_print_start(
                             _no_archive_creator = popped_creator
                     _creator_data = {"created_by_id": _no_archive_creator} if _no_archive_creator else None
                     await _send_print_start_notification(printer_id, data, _creator_data, logger)
-                return
+                return True
             else:
                 logger.info("[CALLBACK] auto_archive disabled but expected print found — promoting archive")
 
@@ -2846,14 +2859,14 @@ async def _archive_print_start(
             logger.info("[CALLBACK] Skipping archive — internal printer file detected: %s", filename)
             if not recovering and not notification_sent:
                 await _send_print_start_notification(printer_id, data, logger=logger)
-            return
+            return True
 
         if not filename and not subtask_name:
             # Send notification without archive data (no filename)
             logger.info("[CALLBACK] Skipping archive - no filename or subtask_name")
             if not recovering and not notification_sent:
                 await _send_print_start_notification(printer_id, data, logger=logger)
-            return
+            return True
 
         # Check if this is an expected print from reprint/scheduled
         # Build list of possible keys to check
@@ -3023,7 +3036,7 @@ async def _archive_print_start(
                     await _send_print_start_notification(printer_id, data, archive_data, logger)
 
                 # Extract printable objects from the archived 3MF file
-                _load_objects_from_archive(archive, printer_id, logger)
+                _load_objects_from_archive(archive, printer_id, logger, reset_skipped=not recovering)
 
                 # A recovery must preserve the original remaining-filament
                 # snapshot; store_print_data replaces the persisted row.
@@ -3049,7 +3062,7 @@ async def _archive_print_start(
                 # (#1403 follow-up — see pwostran's 2026-05-18 support bundle).
                 await _capture_timelapse_baseline_at_start(printer, printer_id, logger)
 
-            return  # Skip creating a new archive
+            return True  # Skip creating a new archive
 
         # Check if there's already a "printing" archive for this printer/file
         # This prevents duplicates when backend restarts during an active print
@@ -3058,10 +3071,7 @@ async def _archive_print_start(
         existing_archive: PrintArchive | None = None
 
         # Preferred match: subtask_id equality. MQTT reports the same subtask_id
-        # across a backend restart for the same print, so this is the most
-        # reliable way to reattach. We also accept a previously stale-cancelled
-        # archive here so users upgrading mid-print get revived when the row
-        # their earlier Grove Control version wrongly cancelled reappears (#972).
+        # across a backend restart for the same print.
         if subtask_id:
             by_id = await db.execute(
                 select(PrintArchive)
@@ -3074,36 +3084,18 @@ async def _archive_print_start(
                 existing_archive = candidates[0]
 
         if existing_archive:
-            # subtask_id match → always resume, regardless of age. Same print,
-            # just a backend restart. Revive if it was previously stale-cancelled.
-            subtask_match = bool(subtask_id and existing_archive.subtask_id == subtask_id)
-
-            if subtask_match:
-                if existing_archive.status == "cancelled":
-                    logger.warning(
-                        "Reviving stale-cancelled archive %s — matching subtask_id %s confirms same print (#972)",
-                        existing_archive.id,
-                        subtask_id,
-                    )
-                    # Only an unlinked legacy Archive may be revived here.
-                    # A linked attempt follows its job's transition instead.
-                    if existing_archive.dispatched_queue_item_id is None:
-                        existing_archive.status = "printing"
-                        existing_archive.failure_reason = None
-                    await db.commit()
-                else:
-                    logger.info("Resuming archive %s on subtask_id match (%s)", existing_archive.id, subtask_id)
-                _active_prints[(printer_id, existing_archive.filename)] = existing_archive.id
-                if not recovering and existing_archive.energy_start_kwh is None:
-                    await _record_energy_start(existing_archive, printer_id, db, context="subtask-resume")
-                if not recovering and not notification_sent:
-                    archive_data = {
-                        "print_time_seconds": existing_archive.print_time_seconds,
-                        "created_by_id": existing_archive.created_by_id,
-                    }
-                    await _send_print_start_notification(printer_id, data, archive_data, logger)
-                _load_objects_from_archive(existing_archive, printer_id, logger)
-                return
+            logger.info("Resuming archive %s on subtask_id match (%s)", existing_archive.id, subtask_id)
+            _active_prints[(printer_id, existing_archive.filename)] = existing_archive.id
+            if not recovering and existing_archive.energy_start_kwh is None:
+                await _record_energy_start(existing_archive, printer_id, db, context="subtask-resume")
+            if not recovering and not notification_sent:
+                archive_data = {
+                    "print_time_seconds": existing_archive.print_time_seconds,
+                    "created_by_id": existing_archive.created_by_id,
+                }
+                await _send_print_start_notification(printer_id, data, archive_data, logger)
+            _load_objects_from_archive(existing_archive, printer_id, logger, reset_skipped=not recovering)
+            return True
 
         # Build list of possible 3MF filenames to try
         possible_names = []
@@ -3510,13 +3502,12 @@ async def _archive_print_start(
                 # Send notification without archive data (file not found)
                 if not recovering and not notification_sent:
                     await _send_print_start_notification(printer_id, data, logger=logger)
-                return
+                return True
             except Exception as e:
                 logger.error("Failed to create fallback archive: %s", e)
-                # Send notification without archive data (file not found)
                 if not recovering and not notification_sent:
                     await _send_print_start_notification(printer_id, data, logger=logger)
-                return
+                return False
 
         try:
             # Archive the file with status "printing"
@@ -3589,7 +3580,8 @@ async def _archive_print_start(
                         if client:
                             client.state.printable_objects = printable_objects
                             client.state.printable_objects_bbox_all = bbox_all
-                            client.state.skipped_objects = []  # Reset skipped objects for new print
+                            if not recovering:
+                                client.state.skipped_objects = []
                             logger.info(
                                 "Loaded %s printable objects for printer %s", len(printable_objects), printer_id
                             )
@@ -3612,6 +3604,7 @@ async def _archive_print_start(
 
                 # Capture timelapse file baseline for snapshot-diff on completion
                 await _capture_timelapse_baseline_at_start(printer, printer_id, logger)
+            return archive is not None
         finally:
             # Keep temp_path around until print completes so the cover endpoint
             # can reuse it (#972). Cache eviction in on_print_complete deletes

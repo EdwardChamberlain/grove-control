@@ -303,8 +303,8 @@ async def init_db():
         # safety net for interrupted upgrades and restored databases.
         await ensure_queue_insert_schema(conn)
         await _migrate_queue_lifecycle(conn)
-        await _migrate_queue_legacy_archive_links(conn)
         await _migrate_queue_archive_outcomes(conn)
+        await _migrate_queue_legacy_archive_links(conn)
 
     # Re-encrypt any legacy plaintext OIDC client_secret / TOTP secret rows
     # that exist from before the encryption key was configured.
@@ -1126,12 +1126,14 @@ async def _migrate_queue_legacy_archive_links(conn) -> None:
     from backend.app.services.queue_transitions import ARCHIVE_OUTCOMES, physical_failure_reason
 
     version_key = "queue_legacy_archive_link_version"
-    if await conn.scalar(select(Settings.value).where(Settings.key == version_key)) == "1":
+    # Version 1 ran before outcome backfill and missed terminal legacy jobs.
+    # Revisit those unlinked rows once; the identity/source guards still apply.
+    if await conn.scalar(select(Settings.value).where(Settings.key == version_key)) == "2":
         return
     if conn.dialect.name == "postgresql":
         await conn.execute(text("LOCK TABLE print_queue IN SHARE ROW EXCLUSIVE MODE"))
     await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value=Settings.value))
-    if await conn.scalar(select(Settings.value).where(Settings.key == version_key)) == "1":
+    if await conn.scalar(select(Settings.value).where(Settings.key == version_key)) == "2":
         return
 
     jobs = PrintQueueItem.__table__
@@ -1205,9 +1207,9 @@ async def _migrate_queue_legacy_archive_links(conn) -> None:
         )
     version = await conn.scalar(select(Settings.value).where(Settings.key == version_key))
     if version is None:
-        await conn.execute(Settings.__table__.insert().values(key=version_key, value="1"))
+        await conn.execute(Settings.__table__.insert().values(key=version_key, value="2"))
     else:
-        await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value="1"))
+        await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value="2"))
 
 
 async def _migrate_queue_archive_outcomes(conn) -> None:

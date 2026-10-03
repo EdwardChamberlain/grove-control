@@ -80,10 +80,12 @@ def _dispatch_ready(printer_id: int) -> bool:
     )
 
 
-def _heaters_off(printer: Printer) -> None:
+def _heaters_off(printer: Printer) -> bool:
     client = printer_manager.get_client(printer.id)
-    if not client or not printer_manager.is_connected(printer.id):
-        return
+    # A failed soak can outlive its hold. Never turn off a subsequent print's
+    # heaters, including while reconnect telemetry still describes an old run.
+    if not client or not _dispatch_ready(printer.id):
+        return False
     # Attempt every shutdown command even if another one fails.
     commands = [(client.set_bed_temperature, 0)]
     if supports_chamber_heater(printer.model):
@@ -95,6 +97,39 @@ def _heaters_off(printer: Printer) -> None:
             command(value)
         except Exception:
             logger.exception("Heat-soak heater shutdown failed for printer %s", printer.id)
+    return True
+
+
+async def cleanup_heat_soak_shutdown(db: AsyncSession, printer_id: int) -> bool:
+    """Retry a committed shutdown only while no new job is using the printer."""
+    # Staging takes this same lock before checking pending shutdown and heating.
+    await db.execute(update(Printer).where(Printer.id == printer_id).values(id=Printer.id))
+    printer = await db.get(Printer, printer_id, populate_existing=True)
+    if not printer or not printer.heat_soak_shutdown_pending:
+        await db.commit()
+        return False
+    active_job = await db.scalar(
+        select(PrintQueueItem.id).where(
+            PrintQueueItem.printer_id == printer_id,
+            PrintQueueItem.status.in_(("preheating", "dispatching", "printing", "paused")),
+        )
+    )
+    if active_job is not None or not _heaters_off(printer):
+        await db.commit()
+        return False
+    client = printer_manager.get_client(printer_id)
+    if client:
+        client.request_status_update()
+    state = printer_manager.get_status(printer_id)
+    since = printer.heat_soak_shutdown_at
+    confirmed = bool(_dispatch_ready(printer_id) and since and _reported(state, "bed_target", 0, since))
+    if supports_chamber_heater(printer.model):
+        confirmed = confirmed and _reported(state, "chamber_target", 0, since)
+    if confirmed:
+        printer.heat_soak_shutdown_pending = False
+        printer.heat_soak_shutdown_at = None
+    await db.commit()
+    return True
 
 
 async def abort_heat_soak(
@@ -253,17 +288,10 @@ class ChamberHeatSoak:
         if not item or item.status != "preheating" or item.preheat_owner != self.owner:
             await db.rollback()
             return False
+        await db.execute(update(Printer).where(Printer.id == printer_id).values(id=Printer.id))
         printer = await db.get(Printer, printer_id, populate_existing=True)
-        state = printer_manager.get_status(printer_id)
         client = printer_manager.get_client(printer_id)
-        if (
-            not printer
-            or printer.heat_soak_shutdown_pending
-            or not client
-            or not printer_manager.is_connected(printer_id)
-            or not state
-            or state.state not in ("IDLE", "FINISH", "FAILED")
-        ):
+        if not printer or printer.heat_soak_shutdown_pending or not client or not _dispatch_ready(printer_id):
             await abort_heat_soak(db, item, "Heat soak could not start: printer unavailable or heater shutdown pending")
             return False
         # The soak duration is measured from the heater command, not from a
@@ -423,33 +451,8 @@ class ChamberHeatSoak:
         return ready
 
     async def cleanup(self, db: AsyncSession) -> None:
-        printers = list((await db.scalars(select(Printer).where(Printer.heat_soak_shutdown_pending.is_(True)))).all())
-        for printer in printers:
-            # Lock the printer so cleanup cannot race a new staging attempt.
-            await db.execute(
-                update(Printer)
-                .where(Printer.id == printer.id)
-                .values(heat_soak_shutdown_pending=Printer.heat_soak_shutdown_pending)
-            )
-            await db.refresh(printer)
-            if not printer.heat_soak_shutdown_pending:
-                await db.rollback()
-                continue
-            _heaters_off(printer)
-            client = printer_manager.get_client(printer.id)
-            if client:
-                client.request_status_update()
-            state = printer_manager.get_status(printer.id)
-            since = printer.heat_soak_shutdown_at
-            confirmed = bool(
-                state
-                and since
-                and printer_manager.is_connected(printer.id)
-                and _reported(state, "bed_target", 0, since)
-            )
-            if supports_chamber_heater(printer.model):
-                confirmed = confirmed and _reported(state, "chamber_target", 0, since)
-            if confirmed:
-                printer.heat_soak_shutdown_pending = False
-                printer.heat_soak_shutdown_at = None
-            await db.commit()
+        printer_ids = list(
+            (await db.scalars(select(Printer.id).where(Printer.heat_soak_shutdown_pending.is_(True)))).all()
+        )
+        for printer_id in printer_ids:
+            await cleanup_heat_soak_shutdown(db, printer_id)

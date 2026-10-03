@@ -149,7 +149,9 @@ resolution reject attempts still owned by a worker.
 
 **Retry** on a failed or cancelled attempt creates a separate, unlinked
 `queued` job at the top of the same printer/model queue, carrying the print
-settings. Cross-model retries copy the available candidate slices and their
+settings. Stop intent, submission IDs, timestamps, and physical outcomes belong
+to the original attempt and are reset on the replacement. Cross-model retries
+copy the available candidate slices and their
 per-file settings, resetting candidate attempt counts. If none survive, Retry
 uses the selected Files source or the Archive copy. Inserting this replacement
 at the top requires `queue:insert_top`, as well as queue creation and ownership
@@ -171,6 +173,9 @@ Archive. Completion captures that filename before releasing the hold and deletes
 only that upload, including after restart. Printer display names and Files and
 Archive filenames retain the user's original name. Older/external prints keep
 their existing cleanup naming rules.
+When Stop cancels an upload, the worker drains the FTP transfer before removing
+its unsent copy. A persisted command-send boundary keeps the copy available
+while delivery or the printer's physical outcome remains uncertain.
 Live covers and object reloads use the matching job's recorded upload path,
 so the original display name still works with cached files and after restart.
 
@@ -199,6 +204,9 @@ by job and state. It handles failure notification, configured Auto Off, heat-soa
 shutdown, and cleanup of that attempt's unique SD upload. A rollback schedules
 none of these effects. Heater shutdown remains pending until fresh zero-target
 telemetry confirms it, including after a failed heat-soak handoff or disconnect.
+Both heater-on and heater-off commands require fresh connected idle telemetry.
+Shutdown also checks the current Queue holder: a delayed effect or retry never
+turns off another active print or reserved soak. It waits until that work ends.
 Each committed status change also writes a compact log
 entry with job, prior/new state, printer, Archive and action for support reports.
 
@@ -220,8 +228,10 @@ only ensure the holding index exists. Back up the database before upgrading.
 - Conflicting legacy active reservations are repaired conservatively before
   creating the unique holding index; the strongest existing active attempt is
   retained, and other attempts become `unsuccessful` with an upgrade reason.
-- A separate one-time migration links only unambiguous legacy active Archives
-  by printer and submission ID. Runtime transitions never guess a legacy link.
+- Physical outcomes are backfilled before a separate one-time migration links
+  unambiguous legacy active or terminal Archives by printer and submission ID.
+  Link migration version 2 revisits terminal jobs missed by version 1's startup
+  order. Runtime transitions never guess a legacy link.
 
 ## Names for integrations
 
