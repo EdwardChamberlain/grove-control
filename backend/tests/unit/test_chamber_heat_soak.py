@@ -46,6 +46,7 @@ async def soak(tmp_path, monkeypatch):
     manager = MagicMock()
     manager._broadcast_status_change = AsyncMock()
     manager.is_connected.return_value = True
+    manager.is_awaiting_plate_clear.return_value = False
     manager.get_client.return_value = client
     manager.get_status.return_value = state
     monkeypatch.setattr(heat, "printer_manager", manager)

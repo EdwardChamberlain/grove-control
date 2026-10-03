@@ -655,6 +655,7 @@ _QUEUE_INSERT_COLUMN_DEFINITIONS: dict[str, tuple[str, str]] = {
     "started_at": ("DATETIME", "TIMESTAMP"),
     "completed_at": ("DATETIME", "TIMESTAMP"),
     "error_message": ("TEXT", "TEXT"),
+    "stop_requested_at": ("DATETIME", "TIMESTAMP"),
     "physical_outcome": ("VARCHAR(20)", "VARCHAR(20)"),
     "physical_completed_at": ("DATETIME", "TIMESTAMP"),
     "physical_failure_reason": ("VARCHAR(100)", "VARCHAR(100)"),
@@ -2874,6 +2875,7 @@ async def run_migrations(conn):
     _physical_completed_type = "DATETIME" if is_sqlite() else "TIMESTAMP"
     await _safe_execute(conn, f"ALTER TABLE print_queue ADD COLUMN physical_completed_at {_physical_completed_type}")
     await _safe_execute(conn, "ALTER TABLE print_queue ADD COLUMN physical_failure_reason VARCHAR(100)")
+    await _safe_execute(conn, f"ALTER TABLE print_queue ADD COLUMN stop_requested_at {_physical_completed_type}")
 
     # Migration: Create smart_plug_energy_snapshots table (#941)
     # Hourly snapshots of each plug's lifetime counter, so date-range queries in

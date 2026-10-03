@@ -812,6 +812,9 @@ class BambuMQTTClient:
         # then discards, which would strand the printer on "unknown".
         self.state.connected = False
         self.state.state = "unknown"
+        # A partial packet can disprove the presumed power cut without saying
+        # whether a print started. Require a new job-state report for dispatch.
+        self.state.job_telemetry_ready = False
         # Only the first mark wins: a second call before any message arrives
         # must not overwrite the real state with the "unknown" it just wrote.
         # Nothing to restore if the state was already blank.

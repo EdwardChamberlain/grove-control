@@ -410,6 +410,44 @@ async def test_external_observation_survives_callbacks_and_restart(sessions):
         assert items[0].dispatch_subtask_id == "external"
 
 
+async def test_failed_archive_start_is_retried_for_the_same_job(sessions):
+    import backend.app.main as main
+
+    archive = AsyncMock(side_effect=[RuntimeError("start WebSocket failed"), None])
+    with patch.object(main, "async_session", sessions), patch.object(main, "_archive_print_start", archive):
+        event = {"submission_id": "external", "filename": "same.3mf"}
+        with pytest.raises(RuntimeError, match="start WebSocket failed"):
+            await main.on_print_start(1, event)
+        assert main._observed_job_starts.get(1) is None
+        await main.on_print_start(1, event)
+    assert archive.await_count == 2
+    async with sessions() as db:
+        job = await find_job(db, 1, "external")
+        assert main._observed_job_starts[1] == job.id
+
+
+async def test_running_recovery_observes_job_without_new_start_effects(sessions):
+    import backend.app.main as main
+
+    job_id, archive_id = await add_linked_job(sessions, "existing")
+    archive_start = AsyncMock()
+    live = SimpleNamespace(state="RUNNING", connected=True, job_telemetry_ready=True, submission_id="existing")
+    with (
+        patch.object(main, "async_session", sessions),
+        patch.object(main, "_archive_print_start", archive_start),
+        patch.object(main, "_restore_usage_tracking_session", AsyncMock()),
+        patch.object(main, "_capture_timelapse_baseline_at_start", AsyncMock()),
+        patch.object(main.printer_manager, "get_status", return_value=live),
+    ):
+        await main.on_print_running_observed(
+            1, {"submission_id": "existing", "filename": "same.3mf", "raw_data": {"gcode_state": "RUNNING"}}
+        )
+    assert archive_start.await_count == 1
+    assert archive_start.await_args.kwargs == {"queue_archive_id": archive_id, "recovering": True}
+    async with sessions() as db:
+        assert (await db.get(PrintQueueItem, job_id)).status == "printing"
+
+
 @pytest.mark.parametrize("previous_status", ["finished", "failed", "cancelled"])
 async def test_touchscreen_print_takes_over_the_hold_without_releasing_the_printer(sessions, previous_status):
     import backend.app.main as main

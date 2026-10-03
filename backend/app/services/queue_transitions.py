@@ -45,7 +45,7 @@ ALLOWED_TRANSITIONS = {
     "paused": frozenset({"printing", "finished", "failed", "cancelled", "unsuccessful"}),
     "finished": frozenset({"successful"}),
     "failed": frozenset({"unsuccessful"}),
-    "cancelled": frozenset({"unsuccessful"}),
+    "cancelled": frozenset({"finished", "unsuccessful"}),
     "successful": frozenset(),
     "unsuccessful": frozenset(),
 }
@@ -124,7 +124,11 @@ async def _link_legacy_archive_attempt(db: AsyncSession, row, previous_identity:
         or row.printer_id is None
         or identity is None
         or current_identity is None
-        or (row.status not in ("dispatching", "printing", "paused") and row.physical_outcome is None)
+        or (
+            row.status not in ("dispatching", "printing", "paused")
+            and row.physical_outcome is None
+            and row.stop_requested_at is None
+        )
     ):
         return False
     identities = {identity, current_identity}
@@ -174,6 +178,7 @@ async def transition_queue_item(
     action: str | None = None,
     migration: bool = False,
     archive_failure_reason: str | None = None,
+    observed_outcome: str | None = None,
     dispatch_guard: Callable[[], bool] | None = None,
     attempt: PrintArchive | None = None,
 ) -> None:
@@ -204,7 +209,17 @@ async def transition_queue_item(
         or (status != expected_status and status not in ALLOWED_TRANSITIONS[expected_status])
     ):
         raise InvalidQueueTransition(f"Invalid queue transition: {expected_status} -> {status}")
+    if observed_outcome is not None and (
+        observed_outcome not in ("completed", "failed", "aborted") or status not in AWAITING_PLATE_CLEAR_STATUSES
+    ):
+        raise InvalidQueueTransition("A confirmed physical outcome requires an awaiting-plate-clear job")
     if not upgrading and status != expected_status:
+        if (
+            expected_status == "cancelled"
+            and status == "finished"
+            and (action != "confirmed_completion" or observed_outcome != "completed")
+        ):
+            raise InvalidQueueTransition("Only an identified printer completion may finish a cancelled job")
         if (
             expected_status == "queued"
             and status == "failed"
@@ -219,6 +234,7 @@ async def transition_queue_item(
             "clear_plate",
             "printer_deleted",
             "hold_transferred",
+            "confirmed_completion",
         ):
             raise InvalidQueueTransition(
                 "A holding job requires Clear Plate, printer deletion, or an observed hold transfer"
@@ -268,8 +284,8 @@ async def transition_queue_item(
         not isinstance(db, AsyncSession) or status != "dispatching" or expected_status == status
     ):
         raise ValueError("A prepared Archive requires entry into dispatching on a session")
-    if isinstance(db, AsyncSession) and expected_status != status:
-        if status in AWAITING_PLATE_CLEAR_STATUSES:
+    if isinstance(db, AsyncSession) and (expected_status != status or observed_outcome is not None):
+        if status in AWAITING_PLATE_CLEAR_STATUSES and (action != "cancel" or observed_outcome is not None):
             metadata.setdefault("completed_at", datetime.now(timezone.utc))
             # Capture facts before finalization collapses failed/cancelled into
             # unsuccessful. No state decision ever reads this projection.
@@ -277,12 +293,13 @@ async def transition_queue_item(
             if reason is None:
                 with db.no_autoflush:
                     reason = await db.scalar(select(table.c.error_message).where(table.c.id == item_id))
+            outcome = observed_outcome or ARCHIVE_OUTCOMES[status]
             metadata.update(
-                physical_outcome=ARCHIVE_OUTCOMES[status],
-                physical_completed_at=metadata["completed_at"],
-                physical_failure_reason=physical_failure_reason(
-                    ARCHIVE_OUTCOMES[status], reason, archive_failure_reason
-                ),
+                physical_outcome=outcome,
+                physical_completed_at=datetime.now(timezone.utc)
+                if observed_outcome is not None
+                else metadata["completed_at"],
+                physical_failure_reason=physical_failure_reason(outcome, reason, archive_failure_reason),
             )
     # SQLAlchemy 2.1 autoflushes Core statements regardless of their statement
     # execution options. Suppress it at the session boundary so a losing CAS
@@ -292,9 +309,10 @@ async def transition_queue_item(
             discard_prepared_archive(db, archive)
         raise QueueTransitionConflict("Printer is no longer available after Archive preparation")
     with db.no_autoflush if isinstance(db, AsyncSession) else nullcontext():
+        outcome_condition = (table.c.physical_outcome.is_(None),) if observed_outcome is not None else ()
         result = await db.execute(
             table.update()
-            .where(table.c.id == item_id, table.c.status == expected_status, *conditions)
+            .where(table.c.id == item_id, table.c.status == expected_status, *conditions, *outcome_condition)
             .values(status=status, **metadata)
             .execution_options(autoflush=False)
         )
@@ -349,12 +367,15 @@ async def transition_queue_item(
                 ):
                     attempt.status = "printing"
                     attempt.started_at = row.started_at or datetime.now(timezone.utc)
-                if (status in AWAITING_PLATE_CLEAR_STATUSES and expected_status != status) or (
-                    attaching and status in (*AWAITING_PLATE_CLEAR_STATUSES, *FINAL_STATUSES)
-                ):
+                if (
+                    status in AWAITING_PLATE_CLEAR_STATUSES
+                    and (expected_status != status or observed_outcome is not None)
+                ) or (attaching and status in (*AWAITING_PLATE_CLEAR_STATUSES, *FINAL_STATUSES)):
                     outcome = row.physical_outcome or ARCHIVE_OUTCOMES.get(status)
                     if outcome is None and status == "successful":
                         outcome = "completed"  # Unambiguous legacy final state.
+                    if outcome is None and status == "unsuccessful" and row.stop_requested_at is not None:
+                        outcome = "aborted"  # The attempt was stopped; printer confirmation remains unknown.
                     if outcome is not None:
                         attempt.status = outcome
                         attempt.completed_at = row.physical_completed_at or row.completed_at

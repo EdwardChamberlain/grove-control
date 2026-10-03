@@ -106,6 +106,23 @@ class TestPlateClearGate:
         )
         completion.manager.set_awaiting_plate_clear.assert_any_call(completion.printer.id, True)
 
+    async def test_completed_print_reconciles_an_unconfirmed_stop_request(self, completion, db_session):
+        from backend.app.services.queue_actions import cancel_job
+
+        completion.manager.stop_print.return_value = False
+        await cancel_job(db_session, completion.item)
+        await db_session.refresh(completion.item)
+        assert completion.item.status == "cancelled"
+        assert completion.item.physical_outcome is None
+        assert "not sent" in completion.item.error_message
+
+        await completion.complete(completion.printer.id, {"subtask_id": "123", "status": "completed"})
+        await db_session.refresh(completion.item)
+        assert completion.item.status == "finished"
+        assert completion.item.physical_outcome == "completed"
+        assert completion.item.physical_completed_at is not None
+        assert completion.item.error_message is None
+
     @pytest.mark.parametrize(
         ("printer_outcome", "stopped_in_grove", "job_status", "reported"),
         [
@@ -121,17 +138,18 @@ class TestPlateClearGate:
         from types import SimpleNamespace
 
         from backend.app import main
-        from backend.app.services.queue_transitions import transition_queue_item
+        from backend.app.services.queue_actions import cancel_job
 
         completion.manager.get_printer.return_value = SimpleNamespace(name="P1", serial_number="SERIAL")
         if stopped_in_grove:
             # cancel_job commits `cancelled` before the printer reports the stop,
             # so this also holds after a restart loses the in-memory stop flag.
-            await transition_queue_item(db_session, completion.item, "printing", "cancelled")
-            await db_session.commit()
+            await cancel_job(db_session, completion.item)
         await completion.complete(completion.printer.id, {"subtask_id": "123", "status": printer_outcome})
         await db_session.refresh(completion.item)
         assert completion.item.status == job_status
+        if stopped_in_grove:
+            assert completion.item.physical_outcome == printer_outcome
         # The relay and notifications describe the physical outcome; a
         # touchscreen abort is not renamed to a Grove cancellation.
         assert main.mqtt_relay.on_print_complete.await_args.args[-1] == reported

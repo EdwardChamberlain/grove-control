@@ -122,6 +122,7 @@ async def _dispatch_library_item(
     unlink_side_effect=None,
     printer_status=None,
     printer_statuses=None,
+    drying_checks=None,
     before_reservation=None,
     during_archive=None,
     binding=None,
@@ -183,7 +184,11 @@ async def _dispatch_library_item(
         if state is not None:
             state.state = "IDLE"
             state.connected = True
-    printer_status = printer_status or SimpleNamespace(state="IDLE", connected=True, raw_data={})
+            if not hasattr(state, "job_telemetry_ready"):
+                state.job_telemetry_ready = True
+    printer_status = printer_status or SimpleNamespace(
+        state="IDLE", connected=True, job_telemetry_ready=True, raw_data={}
+    )
     status_mock = (
         MagicMock(side_effect=[printer_statuses[0], *printer_statuses])
         if printer_statuses is not None
@@ -225,6 +230,8 @@ async def _dispatch_library_item(
         patches.append(patch.object(type(ctx.source_path), "unlink", unlink_side_effect))
     if binding is not None:
         patches.append(patch.object(scheduler_module, "async_session", ctx.session_maker))
+    if drying_checks is not None:
+        patches.append(patch.object(scheduler, "_active_drying_ams_ids", side_effect=drying_checks))
 
     with ExitStack() as stack:
         for patcher in patches:
@@ -596,6 +603,27 @@ async def test_final_dispatch_boundary_stops_new_drying_and_does_not_send_print(
     ctx.start_print.assert_not_called()
 
 
+@pytest.mark.parametrize("after_upload_state", ["RUNNING", "FINISH"])
+async def test_external_print_during_upload_blocks_project_file(queue_factory, after_upload_state):
+    ctx = await queue_factory(cleanup=False)
+    status = SimpleNamespace(
+        state="IDLE", connected=True, job_telemetry_ready=True, submission_id="previous", raw_data={}
+    )
+
+    async def upload(*_args, **_kwargs):
+        status.state = after_upload_state
+        status.submission_id = "external-run"
+        return True
+
+    ctx.upload.side_effect = upload
+    await _dispatch_library_item(ctx, printer_status=status)
+
+    item, _, attempt = await _queue_snapshot(ctx)
+    assert item.status == "failed" and attempt.status == "failed"
+    assert "Printer activity changed" in item.error_message
+    ctx.start_print.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_final_dispatch_boundary_can_wait_for_natural_drying_completion(queue_factory):
     """A job held for natural drying has not crossed the dispatch boundary."""
@@ -632,7 +660,6 @@ async def test_command_boundary_retains_reservation_if_drying_starts_after_final
         wait_for_drying_complete=wait_for_drying_complete,
     )
     clear = SimpleNamespace(raw_data={"ams": [{"id": 0, "dry_time": 0}]})
-    drying = SimpleNamespace(raw_data={"ams": [{"id": 0, "dry_time": 120}]})
 
     with (
         patch("backend.app.main.register_expected_print") as register_expected,
@@ -643,10 +670,10 @@ async def test_command_boundary_retains_reservation_if_drying_starts_after_final
     ):
         await _dispatch_library_item(
             ctx,
-            # First read: clear at the post-upload check. Second read: drying
-            # at the command boundary. Under the stop-first policy, a third
-            # read lets _stop_drying confirm which AMS still needs the command.
-            printer_statuses=[clear, drying, drying],
+            printer_status=clear,
+            # First drying check: clear after upload. Second: drying at the
+            # command boundary. The third lets _stop_drying confirm it.
+            drying_checks=[(), (0,), (0,)],
         )
 
     item, library_file, archive = await _queue_snapshot(ctx)
@@ -662,7 +689,7 @@ async def test_command_boundary_retains_reservation_if_drying_starts_after_final
     assert ctx.archive_path.exists()
     register_expected.assert_not_called()
     unregister_expected.assert_not_called()
-    clear_current_print_user.assert_not_called()
+    clear_current_print_user.assert_called_once_with(ctx.printer_id)
     if wait_for_drying_complete:
         ctx.stop_drying.assert_not_called()
     else:

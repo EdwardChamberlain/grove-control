@@ -33,6 +33,7 @@ def registered_client():
     client = BambuMQTTClient(ip_address="10.0.0.5", serial_number="SER2629", access_code="12345678")
     client.state.connected = True
     client.state.state = "FINISH"
+    client.state.job_telemetry_ready = True
     printer_manager._clients[PRINTER_ID] = client
     try:
         yield client
@@ -60,6 +61,13 @@ def test_printer_recovers_and_queue_can_dispatch_again(registered_client):
 
     assert printer_manager.get_status(PRINTER_ID).state == "FINISH"
     assert printer_manager.is_connected(PRINTER_ID) is True
+    assert scheduler._is_printer_idle(PRINTER_ID, require_plate_clear=False) is False
+
+    # The partial packet proves the connection recovered, but it carries no
+    # job state. Dispatch waits for an explicit post-reconnect idle report.
+    registered_client._on_message(
+        None, None, _Msg(registered_client.topic_subscribe, {"print": {"gcode_state": "IDLE"}})
+    )
     assert scheduler._is_printer_idle(PRINTER_ID, require_plate_clear=False) is True
 
 

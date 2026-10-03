@@ -236,6 +236,7 @@ async def _run_start_print(ctx, *, installed_nozzles, nozzle_rack=None):
     status = SimpleNamespace(
         state="IDLE",
         connected=True,
+        job_telemetry_ready=True,
         raw_data={},
         nozzles=[SimpleNamespace(nozzle_diameter=d) for d in installed_nozzles],
         nozzle_rack=nozzle_rack or [],

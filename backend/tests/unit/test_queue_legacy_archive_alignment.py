@@ -137,7 +137,7 @@ async def test_legacy_link_and_outcome_commit_through_independent_lifecycle_path
             archive.status
             == {"stop": "aborted", "recovery": "failed", "pause": "completed", "clear_plate": "failed"}[path]
         )
-        assert archive.completed_at == job.physical_completed_at
+        assert archive.completed_at == (job.completed_at if path == "stop" else job.physical_completed_at)
 
 
 async def test_legacy_link_rolls_back_with_the_job_outcome(legacy):
@@ -168,7 +168,7 @@ async def test_stale_completion_cannot_rewrite_a_legacy_stop_outcome(legacy):
         archive = await observer.get(PrintArchive, legacy.archive_id)
         assert job.status == "cancelled" and archive.status == "aborted"
         assert archive.dispatched_queue_item_id == job.id
-        assert archive.completed_at == job.physical_completed_at
+        assert job.physical_outcome is None and archive.completed_at == job.completed_at
 
 
 async def test_late_firmware_identity_binds_the_legacy_archive_in_the_same_transaction(legacy):

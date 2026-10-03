@@ -112,6 +112,13 @@ on active jobs both use `cancel_job`: commit `cancelled`, then stop the device
 and shut down heat soak if needed. A failed stop command or disconnected
 printer leaves an actionable hold. Editing or deleting a holding job is refused.
 **Skip heat soak** proceeds into `dispatching` while keeping the same hold.
+The stop request is durable, but `physical_outcome` remains empty until an
+identified terminal printer report arrives. If Stop was not sent, the Queue
+shows an inspection reason. A later identified completion moves the job from
+`cancelled` to `finished` and corrects its attempt Archive to `completed`.
+An identified abort confirms the `cancelled` outcome. Clear Plate can still
+finalize an unconfirmed stop after inspection; `stop_requested_at` preserves
+the attempted Stop for an Archive that finishes downloading later.
 
 **Clear Plate** is available from the job and the printer, including while the
 printer is offline. Inspect and physically clear the plate before using it.
@@ -221,7 +228,7 @@ clearing (`successful`, `unsuccessful`) publishes no integration event.
 | `paused` | `printing` | Paused on the printer; printer held | `printing` (webhook Queue status) |
 | `finished` | `completed` | Printed; plate not yet cleared; printer held | Print event `completed` |
 | `failed` | `failed` | Error after leaving the queue; plate not yet cleared | Print event `failed` |
-| `cancelled` | `cancelled`, `aborted` | Stopped after leaving the queue; plate not yet cleared | Print event `cancelled` for a stop from Grove; `aborted` for a stop on the printer |
+| `cancelled` | `cancelled`, `aborted` | Stop requested or reported; plate not yet cleared | Print event `cancelled` after an identified Stop report; `aborted` for a stop on the printer |
 | `successful` | `completed` | Finished, and the plate was cleared | No event |
 | `unsuccessful` | `failed`, `cancelled`, `skipped` | Failed or cancelled, and the plate was cleared; or cancelled while waiting | No event |
 
@@ -247,6 +254,10 @@ work with the conditional transition writer:
   handoffs still start their dispatch workers.
   The guard reads current telemetry even if reconnection replaced the client
   during copying; missing, disconnected or unready telemetry cannot dispatch.
+  Ordinary queue dispatch applies the same readiness check, then compares the
+  printer's job identity again immediately before publishing `project_file`.
+  A print that starts during FTP upload, or finishes with a different identity,
+  fails the reserved attempt and keeps its printer hold for inspection.
   Heat-soak and Skip controls commit their heartbeat and release the write
   lock before copying, then re-lock and verify status and `preheat_owner`.
   Check readiness before copying too: unready telemetry keeps the heartbeat
@@ -275,10 +286,14 @@ work with the conditional transition writer:
   progressed while the request was preparing, without copying again or spawning
   another dispatch worker. Pool copy failures send a failure notification,
   and assignment notifications are sent only after successful handoff.
-- Entry into `finished`, `failed`, or `cancelled` records the Archive outcome
-  (`completed`, `failed`, or `aborted`) in the same transaction. Exact job and
-  Archive columns must both match. Pause/resume, duplicate terminal observations,
-  Clear Plate and printer deletion do not rewrite the physical outcome.
+- An identified terminal event records the physical outcome and updates the
+  exact linked Archive in the same transaction. A user Stop immediately marks
+  the attempt Archive `aborted` for workflow display but leaves the physical
+  outcome unconfirmed. An identified completion after a failed Stop corrects
+  both job and Archive to `completed`; a confirmed abort fills the physical
+  outcome once. Exact job and Archive columns must both match. Pause/resume,
+  duplicate terminal observations, Clear Plate and printer deletion do not
+  rewrite a confirmed physical outcome.
   Repeated completion callbacks still repair proven restored legacy links,
   while ordinary same-status heartbeat/metadata writes skip those queries.
   Reconnect reconciliation also repairs already-ended jobs, including final

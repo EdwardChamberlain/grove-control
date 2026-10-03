@@ -2771,7 +2771,7 @@ class PrintScheduler:
         return mapping
 
     def _is_printer_idle(self, printer_id: int, require_plate_clear: bool = True) -> bool:
-        """Check if a printer is connected and idle."""
+        """Check a fresh, connected printer report before dispatch."""
         if not printer_manager.is_connected(printer_id):
             logger.debug("Printer %d: not connected", printer_id)
             return False
@@ -2779,6 +2779,9 @@ class PrintScheduler:
         state = printer_manager.get_status(printer_id)
         if not state:
             logger.debug("Printer %d: no status available", printer_id)
+            return False
+        if not state.connected or not getattr(state, "job_telemetry_ready", False):
+            logger.debug("Printer %d: idle state is not backed by fresh job telemetry", printer_id)
             return False
 
         # Plate-clear gate: if the printer finished/failed a previous print and the user
@@ -3948,6 +3951,10 @@ class PrintScheduler:
                 )
                 await self._power_off_if_needed(db, item)
             return
+        if not self._is_printer_idle(item.printer_id):
+            await self._fail_queue_item(db, item, "Printer became unavailable before upload; inspect the printer")
+            return
+        idle_identity_before_upload = telemetry_identity(printer_manager.get_status(item.printer_id))
         if not heat_soak_complete and unassigned:
             await self._notify_pool_assignment(db, item)
         archive = await db.get(PrintArchive, item.archive_id) if item.archive_id else None
@@ -4220,6 +4227,20 @@ class PrintScheduler:
             await db.commit()
         except QueueTransitionConflict:
             await cleanup_losing_upload()
+            return
+
+        # The database hold cannot prevent a touchscreen/SD print starting
+        # during FTP. A different terminal ID also proves that a complete
+        # external print came and went while this upload was in progress.
+        live_before_command = printer_manager.get_status(item.printer_id)
+        if (
+            not self._is_printer_idle(item.printer_id)
+            or telemetry_identity(live_before_command) != idle_identity_before_upload
+        ):
+            await self._fail_queue_item(
+                db, item, "Printer activity changed before the print command; inspect the printer"
+            )
+            printer_manager.clear_current_print_user(item.printer_id)
             return
 
         from backend.app.main import register_expected_print

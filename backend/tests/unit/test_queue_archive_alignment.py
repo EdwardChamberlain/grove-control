@@ -157,6 +157,53 @@ async def test_outcome_commits_on_entry_and_plate_clear_does_not_rewrite_it(alig
         assert not alignment.source_path.exists()
 
 
+async def test_completed_print_corrects_cancelled_attempt_archive(alignment):
+    async with alignment.sessions() as db:
+        job = await db.get(PrintQueueItem, alignment.job_id)
+        await transition_queue_item(
+            db, job, "queued", "dispatching", attempt=await prepare_dispatch_archive(db, job, {})
+        )
+        await transition_queue_item(db, job, "dispatching", "printing")
+        await db.commit()
+        await cancel_job(db, job)
+        attempt = await db.get(PrintArchive, job.archive_id)
+        assert job.status == "cancelled" and job.physical_outcome is None
+        assert attempt.status == "aborted"
+
+        await transition_queue_item(
+            db,
+            job,
+            "cancelled",
+            "finished",
+            action="confirmed_completion",
+            observed_outcome="completed",
+            values={"error_message": None, "completed_at": datetime.now(timezone.utc)},
+        )
+        await db.commit()
+        assert job.status == "finished" and job.physical_outcome == "completed"
+        assert attempt.status == "completed" and attempt.failure_reason is None
+        assert attempt.completed_at == job.physical_completed_at.replace(tzinfo=None)
+
+
+async def test_cancelled_job_records_abort_only_after_matching_terminal_report(alignment):
+    async with alignment.sessions() as db:
+        job = await db.get(PrintQueueItem, alignment.job_id)
+        await transition_queue_item(
+            db, job, "queued", "dispatching", attempt=await prepare_dispatch_archive(db, job, {})
+        )
+        await transition_queue_item(db, job, "dispatching", "printing")
+        await db.commit()
+        await cancel_job(db, job)
+        assert job.physical_outcome is None
+        await transition_queue_item(db, job, "cancelled", "cancelled", observed_outcome="aborted")
+        await db.commit()
+        assert job.physical_outcome == "aborted" and job.physical_completed_at is not None
+        attempt = await db.get(PrintArchive, job.archive_id)
+        assert attempt.status == "aborted" and attempt.completed_at == job.physical_completed_at.replace(tzinfo=None)
+        with pytest.raises(QueueTransitionConflict):
+            await transition_queue_item(db, job, "cancelled", "cancelled", observed_outcome="completed")
+
+
 async def test_reprint_source_is_immutable_and_outcome_uses_both_link_columns(alignment):
     async with alignment.sessions() as db:
         source = await ArchiveService(db).archive_print(None, alignment.source_path, print_data={"status": "completed"})
@@ -229,7 +276,11 @@ async def test_archive_copy_failure_holds_the_first_job_without_touching_source(
     from backend.app.services.print_scheduler import PrintScheduler
     from backend.app.services.printer_manager import printer_manager
 
-    monkeypatch.setattr(printer_manager, "get_status", lambda _id: SimpleNamespace(state="IDLE", connected=True))
+    monkeypatch.setattr(
+        printer_manager,
+        "get_status",
+        lambda _id: SimpleNamespace(state="IDLE", connected=True, job_telemetry_ready=True),
+    )
     monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
     monkeypatch.setattr(printer_manager, "is_awaiting_plate_clear", lambda _id: False)
     monkeypatch.setattr(ArchiveService, "archive_print", AsyncMock(side_effect=OSError("Disk full")))
@@ -348,6 +399,7 @@ async def test_heat_soak_dispatch_uses_current_telemetry_after_archive_copy(alig
     manager = MagicMock()
     manager.get_status.side_effect = states.get
     manager.is_connected.side_effect = lambda printer_id: bool(states[printer_id] and states[printer_id].connected)
+    manager.is_awaiting_plate_clear.return_value = False
     manager.get_client.return_value = None
     manager.start_print.return_value = True
     manager._broadcast_status_change = AsyncMock()
@@ -541,14 +593,18 @@ async def test_late_external_archive_preserves_failure_after_user_clears_plate(
         if outcome == "failed":
             assert recovered_callbacks
         assert attempt.status == archived, (job.status, attempt.status, attempt.completed_at)
-        assert attempt.completed_at == job.physical_completed_at
+        if outcome == "cancelled":
+            assert job.physical_outcome is None and job.physical_completed_at is None
+            assert attempt.completed_at == job.completed_at
+        else:
+            assert attempt.completed_at == job.physical_completed_at
 
 
 async def test_archive_copy_failure_still_runs_configured_auto_off(alignment, monkeypatch):
     from backend.app.services import print_scheduler as sched
     from backend.app.services.printer_manager import printer_manager
 
-    live = SimpleNamespace(state="IDLE", connected=True, raw_data={})
+    live = SimpleNamespace(state="IDLE", connected=True, job_telemetry_ready=True, raw_data={})
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
     monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
     monkeypatch.setattr(printer_manager, "is_awaiting_plate_clear", lambda _id: False)

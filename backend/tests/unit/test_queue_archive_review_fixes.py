@@ -85,7 +85,7 @@ async def test_stop_during_heat_soak_archive_copy_wins_without_rows_or_directori
             assert await handoff.service.check(db) == []
     async with handoff.sessions() as observer:
         job = await observer.get(PrintQueueItem, handoff.job_id)
-        assert job.status == "cancelled" and job.physical_outcome == "aborted"
+        assert job.status == "cancelled" and job.physical_outcome is None
         assert job.archive_id is None and await observer.scalar(select(PrintArchive.id)) is None
     assert not list(settings.archive_dir.rglob("*.3mf"))
     assert not list((settings.archive_dir / "1").iterdir())
@@ -165,9 +165,13 @@ async def test_losing_dispatch_update_cleans_its_upload_and_retains_the_cancelle
         job = await observer.get(PrintQueueItem, alignment.job_id)
         archive = await observer.get(PrintArchive, job.archive_id)
         assert job.status == "cancelled" and job.printer_id == 1 and job.dispatching_at is None
-        assert (job.physical_outcome, job.physical_completed_at, job.physical_failure_reason) == stopped
+        assert (
+            (job.physical_outcome, job.physical_completed_at, job.physical_failure_reason)
+            == stopped
+            == (None, None, None)
+        )
         assert archive.status == "aborted" and archive.dispatched_queue_item_id == job.id
-        assert (archive.completed_at, archive.failure_reason) == stopped[1:]
+        assert archive.completed_at == job.completed_at and archive.failure_reason == "User cancelled"
         assert (settings.base_dir / archive.file_path).is_file()
     assert alignment.source_path.is_file()
 
@@ -399,7 +403,7 @@ async def test_guard_conflict_does_not_refresh_a_changed_soak(handoff, monkeypat
         job = await db.get(PrintQueueItem, handoff.job_id)
         assert job.archive_id is None and await db.scalar(select(PrintArchive.id)) is None
         if change == "stop":
-            assert job.status == "cancelled" and job.physical_outcome == "aborted"
+            assert job.status == "cancelled" and job.physical_outcome is None
             assert job.preheat_owner is None and job.preheat_checked_at is None
         else:
             assert job.status == "preheating" and job.physical_outcome is None
@@ -448,7 +452,11 @@ async def test_skip_route_reports_archive_copy_failure(handoff, monkeypatch):
 
 
 async def test_pool_copy_failure_notifies_failure_without_assignment(alignment, monkeypatch):
-    monkeypatch.setattr(printer_manager, "get_status", lambda _id: SimpleNamespace(state="IDLE", connected=True))
+    monkeypatch.setattr(
+        printer_manager,
+        "get_status",
+        lambda _id: SimpleNamespace(state="IDLE", connected=True, job_telemetry_ready=True),
+    )
     monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
     monkeypatch.setattr(printer_manager, "is_awaiting_plate_clear", lambda _id: False)
     monkeypatch.setattr(ArchiveService, "archive_print", AsyncMock(side_effect=OSError("Disk full")))
