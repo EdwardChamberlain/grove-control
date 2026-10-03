@@ -35,6 +35,7 @@ async def alignment(tmp_path, monkeypatch):
 
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: None)
     monkeypatch.setattr(printer_manager, "stop_print", lambda _id: True)
+    monkeypatch.setattr(printer_manager, "is_awaiting_plate_clear", lambda _id: False)
     monkeypatch.setattr(printer_manager, "set_awaiting_plate_clear", lambda *_args: None)
     monkeypatch.setattr(printer_manager, "set_awaiting_plate_clear_archive_id", lambda *_args: None)
     monkeypatch.setattr(queue_outcome_effects, "delete_file_async", AsyncMock(return_value=True))

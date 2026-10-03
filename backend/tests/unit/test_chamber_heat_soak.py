@@ -1,5 +1,6 @@
 """Real-database regression coverage for queue heat-soak reservations and cleanup."""
 
+import asyncio
 import time
 import zipfile
 from datetime import timedelta
@@ -27,6 +28,22 @@ from backend.app.services.library_trash import release_queue_references
 @pytest.fixture
 async def soak(tmp_path, monkeypatch):
     import backend.app.models  # noqa: F401
+    from backend.app.core import tasks
+
+    outcome_tasks = []
+    spawn = tasks.spawn_background_task
+
+    def track_outcomes(coroutine, *, name=None):
+        task = spawn(coroutine, name=name)
+        if name and name.startswith("queue-") and "-effects-" in name:
+            outcome_tasks.append(task)
+        return task
+
+    async def wait_effects():
+        await asyncio.gather(*outcome_tasks)
+        outcome_tasks.clear()
+
+    monkeypatch.setattr(tasks, "spawn_background_task", track_outcomes)
 
     monkeypatch.setattr(settings, "base_dir", tmp_path)
     monkeypatch.setattr(settings, "archive_dir", tmp_path / "archives")
@@ -73,7 +90,9 @@ async def soak(tmp_path, monkeypatch):
             client=client,
             manager=manager,
             service=heat.ChamberHeatSoak(),
+            wait_effects=wait_effects,
         )
+        await wait_effects()
     await engine.dispose()
 
 
@@ -252,6 +271,7 @@ async def test_failed_command_stops_every_supported_heater(soak):
     assert not await soak.service.stage(soak.db, soak.item)
     await soak.db.refresh(soak.item)
     assert soak.item.status == "failed"
+    await soak.wait_effects()
     soak.client.set_bed_temperature.assert_called_with(0)
     soak.client.set_chamber_temperature.assert_called_with(0)
     soak.client.set_airduct_mode.assert_called_with("cooling")
@@ -262,6 +282,7 @@ async def test_delete_offline_preserves_cleanup_and_prevents_new_soak_until_off_
     soak.manager.is_connected.return_value = False
     item = await heat.lock_queue_item(soak.db, 1)
     await heat.abort_heat_soak(soak.db, item, "Cancelled", status="cancelled")
+    await soak.wait_effects()
     await soak.db.delete(item)
     await soak.db.commit()
     await soak.service.cleanup(soak.db)
@@ -298,6 +319,7 @@ async def test_shutdown_retries_after_reconnect_until_fresh_zero_targets(soak, m
     soak.manager.is_connected.return_value = False
     item = await heat.lock_queue_item(soak.db, soak.item.id)
     await heat.abort_heat_soak(soak.db, item, "Stopped while offline", status="cancelled")
+    await soak.wait_effects()
     soak.client.reset_mock()
     await soak.service.cleanup(soak.db)
     soak.client.set_bed_temperature.assert_not_called()
@@ -349,6 +371,7 @@ async def test_deleting_preheating_library_file_aborts_reservation_and_heaters(s
     assert soak.item.status == "preheating"
 
     assert await release_queue_references(soak.db, [source.id]) == 1
+    await soak.wait_effects()
     await soak.db.refresh(soak.item)
     await soak.db.refresh(soak.printer)
     assert soak.item.status == "cancelled"
@@ -365,6 +388,7 @@ async def test_cancel_at_timer_boundary_cannot_dispatch(soak):
     await soak.db.commit()
     item = await heat.lock_queue_item(soak.db, 1)
     await heat.abort_heat_soak(soak.db, item, "Cancelled", status="cancelled")
+    await soak.wait_effects()
     assert await soak.service.check(soak.db) == []
     await soak.db.refresh(soak.item)
     assert soak.item.status == "cancelled"
