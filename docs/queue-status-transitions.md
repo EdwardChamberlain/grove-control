@@ -151,10 +151,13 @@ hold transfer and printer reports have explicit action guards. After the write,
 the engine aligns the Archive attempt and runs the new state's entry steps.
 
 The caller owns the transaction. Lifecycle work queues after-commit effects and
-rollback cleanup in one registry, `services/lifecycle/effects.py`. Plate-clear
-flags and Archive IDs in printer views are projections, rehydrated at startup
-and published after commit. Rollback discards pending effects and prepared
-artifacts. Legacy Printer flag columns remain only for upgrade compatibility.
+rollback cleanup in one registry, `services/lifecycle/effects.py`. Effects run
+only after the outermost commit; savepoints neither run nor discard them, and a
+failing effect is logged without affecting the commit or later effects.
+Plate-clear flags and Archive IDs in printer views are projections, rehydrated
+at startup and published after commit. Rollback discards pending effects and
+prepared artifacts. Legacy Printer flag columns remain only for upgrade
+compatibility.
 
 One committed outcome step, keyed by job and new state, handles failure notices,
 configured Auto Off, heater shutdown and SD cleanup. Each effect uses independent

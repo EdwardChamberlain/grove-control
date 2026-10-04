@@ -1,8 +1,12 @@
 """After-commit effects of the print job lifecycle (#204).
 
-Effects queued in the caller's transaction run once it commits; a rollback or
-closed session runs the undo steps instead. A key replaces an earlier effect.
-Undo steps must be idempotent.
+Effects queued in the caller's transaction run, in order, once it commits. If
+it ends any other way (rollback, failed commit, closed session) they are
+discarded and the undo steps run instead. A key replaces an earlier effect in
+its original position. Each callback runs once; a failing one is logged and
+never undoes or misreports the commit, nor skips the others. Work is queued
+only in the outermost transaction: a savepoint can be released or rolled back
+on its own, so it neither runs nor discards the outer transaction's work.
 """
 
 import logging
@@ -22,37 +26,48 @@ from backend.app.services.notification_service import notification_service
 from backend.app.services.smart_plug_manager import smart_plug_manager
 
 logger = logging.getLogger(__name__)
-_COMMIT, _ROLLBACK = "lifecycle_after_commit", "lifecycle_after_rollback"
+_COMMIT, _UNDO = "lifecycle_after_commit", "lifecycle_undo"
 
 
 def after_commit(db: AsyncSession, effect: Callable[[], object], *, key: Hashable | None = None) -> None:
-    db.sync_session.info.setdefault(_COMMIT, {})[object() if key is None else key] = effect
+    _outermost(db).info.setdefault(_COMMIT, {})[object() if key is None else key] = effect
 
 
 def on_rollback(db: AsyncSession, undo: Callable[[], object]) -> None:
-    db.sync_session.info.setdefault(_ROLLBACK, []).append(undo)
+    _outermost(db).info.setdefault(_UNDO, []).append(undo)
+
+
+def _outermost(db: AsyncSession) -> Session:
+    if db.in_nested_transaction():
+        raise RuntimeError("Lifecycle effects cannot be queued inside a savepoint")
+    if not db.in_transaction():
+        db.sync_session.begin()  # Otherwise the work could leak into a later transaction.
+    return db.sync_session
+
+
+def _run(callbacks, kind: str) -> None:
+    for callback in callbacks:
+        try:
+            callback()
+        except Exception:
+            logger.exception("Lifecycle %s failed", kind)
 
 
 @event.listens_for(Session, "after_commit")
 def _run_effects(session: Session) -> None:
-    session.info.pop(_ROLLBACK, None)
-    for effect in session.info.pop(_COMMIT, {}).values():
-        effect()
-
-
-@event.listens_for(Session, "after_rollback")
-def _undo(session: Session) -> None:
-    session.info.pop(_COMMIT, None)
-    for undo in session.info.pop(_ROLLBACK, []):
-        undo()
+    # SQLAlchemy also dispatches this when a savepoint is released.
+    if not session.in_nested_transaction():
+        session.info.pop(_UNDO, None)
+        _run(session.info.pop(_COMMIT, {}).values(), "effect")
 
 
 @event.listens_for(Session, "after_transaction_end")
-def _discard_closed_transaction(session: Session, transaction) -> None:
-    # Session.close() rolls back without the explicit after_rollback event.
-    # Committed transactions already removed their pending work above.
+def _discard_uncommitted(session: Session, transaction) -> None:
+    # Rollback, a failed commit and Session.close() all end the outermost
+    # transaction here. A commit has already taken its pending work above.
     if transaction.parent is None:
-        _undo(session)
+        session.info.pop(_COMMIT, None)
+        _run(session.info.pop(_UNDO, []), "undo step")
 
 
 def printer_active(printer_id: int | None) -> bool:

@@ -242,6 +242,47 @@ class TestDurableDispatchingState:
         publish.assert_awaited_once_with(1)
 
     @pytest.mark.asyncio
+    async def test_restart_recovery_publishes_no_start_when_its_commit_fails(self, db_session):
+        """A recovered start is published only once the promotion has committed."""
+        from sqlalchemy import event
+        from sqlalchemy.exc import OperationalError
+
+        async with db_session() as db:
+            item = await db.get(PrintQueueItem, 1)
+            await hold_and_link(db, item)
+            item.dispatched_at = datetime.now(timezone.utc)
+            item.dispatch_subtask_id = "12345"
+            await db.commit()
+
+            scheduler = PrintScheduler()
+            publish, spawn = AsyncMock(), MagicMock()
+
+            def fail_commit(_connection):
+                raise OperationalError("COMMIT", {}, Exception("disk I/O error"))
+
+            engine = db.bind.sync_engine
+            event.listen(engine, "commit", fail_commit)
+            try:
+                with (
+                    patch(
+                        "backend.app.services.print_scheduler.printer_manager.get_status",
+                        return_value=_status("RUNNING", "12345"),
+                    ),
+                    patch("backend.app.services.print_scheduler.spawn_background_task", spawn),
+                    patch.object(scheduler, "_publish_queue_job_started", new=publish),
+                    pytest.raises(OperationalError),
+                ):
+                    await scheduler._recover_stale_dispatches(db)
+            finally:
+                event.remove(engine, "commit", fail_commit)
+            await db.rollback()
+
+        spawn.assert_not_called()
+        publish.assert_not_called()
+        async with db_session() as db:
+            assert (await db.get(PrintQueueItem, 1)).status == "dispatching"
+
+    @pytest.mark.asyncio
     async def test_restart_recovery_does_not_promote_an_active_print_with_another_submission_id(self, db_session):
         """An unrelated manual print must not acknowledge a durable dispatch."""
         async with db_session() as db:
