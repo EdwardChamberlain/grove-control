@@ -288,8 +288,13 @@ async def test_reprint_source_is_immutable_and_outcome_uses_both_link_columns(al
         job.library_file_id = None
         job.archive_id = source.id
         await db.commit()
-        await hold_and_link(db, job)
-        attempt = await db.get(PrintArchive, job.archive_id)
+        attempt = await hold_and_link(db, job)
+        # Core reads must see the new attempt even before commit or ORM autoflush.
+        with db.no_autoflush:
+            linked_id = await db.scalar(
+                select(PrintQueueItem.__table__.c.archive_id).where(PrintQueueItem.__table__.c.id == job.id)
+            )
+        assert linked_id == attempt.id
         await transition_queue_item(db, job, "dispatching", "failed", values={"error_message": "Upload failed"})
         await db.commit()
         await db.refresh(source)

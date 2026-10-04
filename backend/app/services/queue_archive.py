@@ -56,7 +56,9 @@ async def link_dispatch_archive(
         discard_prepared_archive(db, archive)
         raise
     await db.flush([archive])
-    item.archive_id = archive.id
+    await transition_queue_item(
+        db, item, "dispatching", "dispatching", values={"archive_id": archive.id}, conditions=conditions
+    )
     set_committed_value(item, "archive", archive)
     db.sync_session.info.setdefault("queue_transition_log", []).append(
         (item.id, "dispatching", "dispatching", item.printer_id, archive.id, "archive_link")
