@@ -38,6 +38,19 @@ def telemetry_identity(state) -> str | None:
     return normalize_id(getattr(state, "submission_id", None)) or normalize_id(getattr(state, "subtask_id", None))
 
 
+def printer_active(printer_id: int | None) -> bool:
+    """Fresh telemetry shows a print running on this printer."""
+    from backend.app.services.printer_manager import printer_manager
+
+    live = printer_manager.get_status(printer_id) if printer_id is not None else None
+    return bool(
+        live
+        and live.connected
+        and getattr(live, "job_telemetry_ready", True)
+        and live.state in ("PREPARE", "SLICING", "RUNNING", "PAUSE")
+    )
+
+
 def needs_dispatch_resolution(item: PrintQueueItem) -> bool:
     # The reservation covers preparation too. A live upload/Archive worker
     # has not yet handed the attempt to confirmation; it cannot be resolved

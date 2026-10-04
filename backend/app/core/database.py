@@ -1118,7 +1118,7 @@ async def _migrate_queue_legacy_archive_links(conn) -> None:
     from backend.app.models.print_queue import PrintQueueItem
     from backend.app.models.settings import Settings
     from backend.app.services.job_identity import normalize_id
-    from backend.app.services.queue_archive import ARCHIVE_OUTCOMES, physical_failure_reason
+    from backend.app.services.lifecycle.engine import ARCHIVE_OUTCOMES, physical_failure_reason
 
     version_key = "queue_legacy_archive_link_version"
     # Version 1 ran before outcome backfill and missed terminal legacy jobs.
@@ -1214,7 +1214,7 @@ async def _migrate_queue_archive_outcomes(conn) -> None:
     from backend.app.models.archive import PrintArchive
     from backend.app.models.print_queue import PrintQueueItem
     from backend.app.models.settings import Settings
-    from backend.app.services.queue_archive import ARCHIVE_OUTCOMES, physical_failure_reason
+    from backend.app.services.lifecycle.engine import ARCHIVE_OUTCOMES, physical_failure_reason
 
     version_key = "queue_archive_outcome_version"
     if await conn.scalar(select(Settings.value).where(Settings.key == version_key)) == "1":

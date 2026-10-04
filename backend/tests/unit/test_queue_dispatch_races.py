@@ -685,7 +685,8 @@ async def test_generic_archive_directory_tracking_is_explicit(alignment):
             1, alignment.source_path, commit=False, flush=False, unique_dir=True, created_dirs=created_dirs
         )
         assert first.file_path != second.file_path and len(created_dirs) == 2
-        assert "queue_archive_artifacts" not in db.sync_session.info
+        await db.rollback()  # Only queue_archive registers rollback cleanup for its own copies.
+        assert all(directory.exists() for directory in created_dirs)
 
 
 async def test_requested_snippets_use_settings_helper_and_warn_on_no_result(alignment, monkeypatch, caplog):

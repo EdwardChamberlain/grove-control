@@ -7,6 +7,7 @@ its original position. Each callback runs once; a failing one is logged and
 never undoes or misreports the commit, nor skips the others. Work is queued
 only in the outermost transaction: a savepoint can be released or rolled back
 on its own, so it neither runs nor discards the outer transaction's work.
+Effects must not queue further effects; those would be dropped unrun.
 """
 
 import logging
@@ -21,6 +22,7 @@ from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import AWAITING_PLATE_CLEAR_STATUSES, PrintQueueItem
 from backend.app.models.printer import Printer
+from backend.app.services import job_identity
 from backend.app.services.bambu_ftp import delete_file_async
 from backend.app.services.notification_service import notification_service
 from backend.app.services.smart_plug_manager import smart_plug_manager
@@ -50,7 +52,7 @@ def _run(callbacks, kind: str) -> None:
         try:
             callback()
         except Exception:
-            logger.exception("Lifecycle %s failed", kind)
+            logger.exception("Lifecycle %s failed: %r", kind, callback)
 
 
 @event.listens_for(Session, "after_commit")
@@ -68,19 +70,6 @@ def _discard_uncommitted(session: Session, transaction) -> None:
     if transaction.parent is None:
         session.info.pop(_COMMIT, None)
         _run(session.info.pop(_UNDO, []), "undo step")
-
-
-def printer_active(printer_id: int | None) -> bool:
-    """Fresh telemetry shows a print running on this printer."""
-    from backend.app.services.printer_manager import printer_manager
-
-    live = printer_manager.get_status(printer_id) if printer_id is not None else None
-    return bool(
-        live
-        and live.connected
-        and getattr(live, "job_telemetry_ready", True)
-        and live.state in ("PREPARE", "SLICING", "RUNNING", "PAUSE")
-    )
 
 
 def publish_printer_view(db: AsyncSession, printer_id: int, status: str, archive_id: int | None) -> None:
@@ -173,7 +162,7 @@ async def run_queue_outcome_effects(engine: AsyncEngine, effect: QueueOutcomeEff
             logger.exception("Queue job %s: heater shutdown failed", effect.job_id)
 
     if effect.clean_sd_copy and remote_filename and connection is not None:
-        if effect.new_state == "unsuccessful" and printer_active(effect.printer_id):
+        if effect.new_state == "unsuccessful" and job_identity.printer_active(effect.printer_id):
             logger.info("Queue job %s: skipping plate-clear SD cleanup while printer is active", effect.job_id)
             return  # A reconnect or new start overtook Clear Plate.
         try:

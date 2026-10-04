@@ -1,8 +1,8 @@
 """Contracts of the lifecycle after-commit and rollback registry (#204)."""
 
-import logging
 import sqlite3
 from collections import Counter
+from contextlib import closing
 
 import pytest
 from sqlalchemy import func, select
@@ -40,7 +40,7 @@ async def test_effects_run_in_order_once_the_commit_is_durable(database):
 
     def committed() -> int:
         # A separate connection sees only committed rows.
-        with sqlite3.connect(path) as observer:
+        with closing(sqlite3.connect(path)) as observer:
             return observer.execute("SELECT count(*) FROM printers").fetchone()[0]
 
     async with sessions() as db:
@@ -197,8 +197,3 @@ async def test_effects_belong_to_the_session_that_queued_them(sessions):
         assert seen == []
         await first.commit()
     assert seen == ["first"]
-
-
-@pytest.fixture(autouse=True)
-def _errors_only(caplog):
-    caplog.set_level(logging.ERROR, logger=effects.logger.name)

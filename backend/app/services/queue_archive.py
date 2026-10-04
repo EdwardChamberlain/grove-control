@@ -22,6 +22,7 @@ from backend.app.models.print_queue import AWAITING_PLATE_CLEAR_STATUSES, FINAL_
 from backend.app.models.printer import Printer
 from backend.app.services.archive import ArchiveService
 from backend.app.services.lifecycle import effects
+from backend.app.services.lifecycle.engine import ARCHIVE_OUTCOMES, physical_failure_reason
 from backend.app.utils.filename import derive_queue_remote_filename
 from backend.app.utils.safe_path import safe_join_under
 from backend.app.utils.threemf_tools import inject_gcode_into_3mf
@@ -30,13 +31,6 @@ if TYPE_CHECKING:
     from backend.app.services.lifecycle.engine import Transition
 
 logger = logging.getLogger(__name__)
-ARCHIVE_OUTCOMES = {"finished": "completed", "failed": "failed", "cancelled": "aborted"}
-
-
-def physical_failure_reason(outcome: str, error_message: str | None, override: str | None = None) -> str | None:
-    if outcome == "failed":
-        return (override or error_message or "Print failed")[:100]
-    return "User cancelled" if outcome == "aborted" else None
 
 
 async def align_attempt(change: "Transition") -> None:

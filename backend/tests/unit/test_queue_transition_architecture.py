@@ -21,24 +21,40 @@ def test_table_covers_every_api_status():
         assert targets <= api_statuses
 
 
-def _queue_table_names(tree: ast.AST) -> set[str]:
-    """``PrintQueueItem.__table__`` and the local names bound to it, including by unpacking."""
-    names = {"PrintQueueItem.__table__"}
+def _queue_targets(tree: ast.AST) -> set[str]:
+    """The queue model, its table, and local names bound to the table (assignment, unpacking, walrus)."""
+    names = {"PrintQueueItem", "PrintQueueItem.__table__"}
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
+            bindings = []
             for target in node.targets:
                 unpacked = isinstance(target, ast.Tuple) and isinstance(node.value, ast.Tuple)
-                pairs = zip(target.elts, node.value.elts, strict=False) if unpacked else [(target, node.value)]
-                names.update(
-                    name.id
-                    for name, value in pairs
-                    if isinstance(name, ast.Name) and ast.unparse(value) == "PrintQueueItem.__table__"
-                )
+                bindings += zip(target.elts, node.value.elts, strict=False) if unpacked else [(target, node.value)]
+        elif isinstance(node, ast.AnnAssign | ast.NamedExpr) and node.value is not None:
+            bindings = [(node.target, node.value)]
+        else:
+            continue
+        names.update(
+            name.id
+            for name, value in bindings
+            if isinstance(name, ast.Name) and ast.unparse(value) == "PrintQueueItem.__table__"
+        )
     return names
 
 
-def _builds_status_update_of_queue_items(call: ast.Call, tables: set[str]) -> bool:
-    """True for ``update(PrintQueueItem)…values(status=…)`` or the ``__table__`` form."""
+def _update_functions(tree: ast.AST) -> set[str]:
+    """``update`` and any local alias of SQLAlchemy's ``update``."""
+    return {"update"} | {
+        alias.asname
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("sqlalchemy")
+        for alias in node.names
+        if alias.name == "update" and alias.asname
+    }
+
+
+def _builds_status_update_of_queue_items(call: ast.Call, targets: set[str], updates: set[str]) -> bool:
+    """True for ``update(PrintQueueItem or its table)…values(status=…)`` or ``<table>.update()…``."""
     if not (isinstance(call.func, ast.Attribute) and call.func.attr == "values"):
         return False
     if not any(keyword.arg == "status" for keyword in call.keywords):
@@ -46,10 +62,10 @@ def _builds_status_update_of_queue_items(call: ast.Call, tables: set[str]) -> bo
     node = call.func.value
     while isinstance(node, ast.Call | ast.Attribute):
         if isinstance(node, ast.Call):
-            if isinstance(node.func, ast.Name) and node.func.id == "update":
-                return bool(node.args) and ast.unparse(node.args[0]) == "PrintQueueItem"
+            if isinstance(node.func, ast.Name) and node.func.id in updates:
+                return bool(node.args) and ast.unparse(node.args[0]) in targets
             if isinstance(node.func, ast.Attribute) and node.func.attr == "update":
-                if ast.unparse(node.func.value) in tables:
+                if ast.unparse(node.func.value) in targets - {"PrintQueueItem"}:
                     return True
             node = node.func
         else:
@@ -59,7 +75,7 @@ def _builds_status_update_of_queue_items(call: ast.Call, tables: set[str]) -> bo
 
 def _status_updates(path: Path) -> list[int]:
     tree = ast.parse(path.read_text(), filename=str(path))
-    tables = _queue_table_names(tree)
+    targets, updates = _queue_targets(tree), _update_functions(tree)
     return [
         node.lineno
         for node in ast.walk(tree)
@@ -68,7 +84,7 @@ def _status_updates(path: Path) -> list[int]:
             and isinstance(node.value, str)
             and re.search(r"\bUPDATE\s+print_queue\s+SET\s+[^;]*?\bstatus\s*=", node.value, re.I | re.S)
         )
-        or (isinstance(node, ast.Call) and _builds_status_update_of_queue_items(node, tables))
+        or (isinstance(node, ast.Call) and _builds_status_update_of_queue_items(node, targets, updates))
     ]
 
 

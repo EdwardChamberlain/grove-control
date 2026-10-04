@@ -55,6 +55,15 @@ LEGACY_TRANSITIONS = {
 }
 
 
+ARCHIVE_OUTCOMES = {"finished": "completed", "failed": "failed", "cancelled": "aborted"}
+
+
+def physical_failure_reason(outcome: str, error_message: str | None, override: str | None = None) -> str | None:
+    if outcome == "failed":
+        return (override or error_message or "Print failed")[:100]
+    return "User cancelled" if outcome == "aborted" else None
+
+
 class InvalidQueueTransition(ValueError):
     """A caller requested an edge outside the current lifecycle."""
 
@@ -172,13 +181,16 @@ async def _written(change: Transition) -> None:
     linked = change.values.keys() & {"archive_id", "dispatch_subtask_id"}
     if entered or linked or change.after in (*AWAITING_PLATE_CLEAR_STATUSES, *FINAL_STATUSES):
         await align_attempt(change)
+    holding = change.before in HOLDING_STATUSES or change.after in HOLDING_STATUSES
+    if not (entered or holding or change.action):
+        return  # No log, printer view or entry step applies (e.g. a waiting reason).
     names = ("printer_id", "archive_id", "library_file_id", "preheat_requested_at", "chamber_heat_soak")
     row = (await db.execute(select(*(table.c[name] for name in names)).where(table.c.id == change.item_id))).one()
     if entered or change.action is not None:
         log = "Queue job %s: %s -> %s (printer=%s, archive=%s, action=%s)"
         args = (change.item_id, change.before, change.after, row.printer_id, row.archive_id, change.action)
         effects.after_commit(db, partial(logger.info, log, *args))
-    if row.printer_id is not None and (change.before in HOLDING_STATUSES or change.after in HOLDING_STATUSES):
+    if row.printer_id is not None and holding:
         effects.publish_printer_view(db, row.printer_id, change.after, row.archive_id)
     for enter in _ENTRY.get(change.after, ()) if entered else ():
         await enter(change, row)
@@ -192,8 +204,6 @@ async def _record_physical_outcome(
     db: AsyncSession, item_id: int, status: str, metadata: dict, confirmed: bool, override: str | None
 ) -> None:
     """Capture facts before Clear Plate collapses them; no state decision reads them."""
-    from backend.app.services.queue_archive import ARCHIVE_OUTCOMES, physical_failure_reason
-
     metadata.setdefault("completed_at", datetime.now(timezone.utc))
     reason = metadata.get("error_message")
     if reason is None:
@@ -251,7 +261,14 @@ async def _enter_final(change: Transition, row) -> None:
         await remove_queue_only_source_if_unused(change.db, source_id)
     if change.action == "clear_plate" and change.after == "unsuccessful":
         # The failed attempt's sent upload is removed once its plate is clear.
-        effect = effects.QueueOutcomeEffect(change.item_id, change.after, row.printer_id, False, False, True)
+        effect = effects.QueueOutcomeEffect(
+            job_id=change.item_id,
+            new_state=change.after,
+            printer_id=row.printer_id,
+            shut_down_heaters=False,
+            notify_failure=False,
+            clean_sd_copy=True,
+        )
         effects.queue_outcome_effect(change.db, effect)
 
 
@@ -265,7 +282,7 @@ _ENTRY = {
 
 
 async def clear_job_plate(db: AsyncSession, item: PrintQueueItem | int, *, automatic: bool = False) -> None:
-    from backend.app.services.lifecycle.effects import printer_active
+    from backend.app.services.job_identity import printer_active
 
     if isinstance(item, int):
         item = await db.get(PrintQueueItem, item)
