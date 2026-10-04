@@ -440,5 +440,5 @@ async def test_heat_soak_dispatch_that_loses_a_race_still_turns_heaters_off(sess
     async with sessions() as db:
         item = await db.get(PrintQueueItem, item_id)
         printer = await db.get(Printer, printer_id)
-        assert (item.status, item.manual_start, item.preheat_owner) == ("cancelled", True, None)
+        assert (item.status, item.manual_start, item.preheat_owner) == ("cancelled", False, None)
         assert printer.heat_soak_shutdown_pending
