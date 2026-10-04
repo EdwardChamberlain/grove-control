@@ -21,7 +21,7 @@ from backend.app.models.printer import Printer
 from backend.app.models.settings import Settings
 from backend.app.services.archive import ArchiveService
 from backend.app.services.queue_actions import cancel_job
-from backend.app.services.queue_archive import prepare_dispatch_archive
+from backend.app.services.queue_archive import link_dispatch_archive, prepare_dispatch_archive
 from backend.app.services.queue_source_cleanup import remove_queue_only_source_if_unused
 from backend.app.services.queue_transitions import QueueTransitionConflict, clear_job_plate, transition_queue_item
 
@@ -74,7 +74,7 @@ async def hold_and_link(db, job, before="queued"):
     await transition_queue_item(db, job, before, "dispatching")
     await db.commit()
     prepared = await prepare_dispatch_archive(db, job)
-    await transition_queue_item(db, job, "dispatching", "dispatching", attempt=prepared)
+    await link_dispatch_archive(db, job, prepared)
     return prepared
 
 
@@ -148,7 +148,7 @@ async def test_hold_commits_before_archive_link_and_same_state_never_copies_agai
             assert (await observer.get(PrintQueueItem, job.id)).status == "dispatching"
             assert await observer.scalar(select(PrintArchive.id)) is None
         prepared = await prepare_dispatch_archive(db, job)
-        await transition_queue_item(db, job, "dispatching", "dispatching", attempt=prepared)
+        await link_dispatch_archive(db, job, prepared)
         attempt = await db.get(PrintArchive, job.archive_id)
         copied = settings.base_dir / attempt.file_path
         assert copied.read_bytes() == alignment.source_path.read_bytes()
@@ -171,7 +171,7 @@ async def test_rollback_discards_archive_row_and_prepared_files(alignment, close
     await transition_queue_item(db, job, "queued", "dispatching")
     await db.commit()
     prepared = await prepare_dispatch_archive(db, job)
-    await transition_queue_item(db, job, "dispatching", "dispatching", attempt=prepared)
+    await link_dispatch_archive(db, job, prepared)
     attempt = await db.get(PrintArchive, job.archive_id)
     copied = settings.base_dir / attempt.file_path
     assert copied.exists()
@@ -200,9 +200,7 @@ async def test_cancel_during_copy_wins_without_an_archive_or_losing_pending_row(
         await transition_queue_item(worker, stale, "queued", "dispatching")
         await worker.commit()
         with pytest.raises(QueueTransitionConflict):
-            await transition_queue_item(
-                worker, stale, "dispatching", "dispatching", attempt=await prepare_dispatch_archive(worker, stale)
-            )
+            await link_dispatch_archive(worker, stale, await prepare_dispatch_archive(worker, stale))
         # A scheduler handling several jobs may commit after skipping a loser.
         await worker.commit()
     async with alignment.sessions() as db:
@@ -256,8 +254,7 @@ async def test_completed_print_corrects_cancelled_attempt_archive(alignment):
             job,
             "cancelled",
             "finished",
-            action="confirmed_completion",
-            observed_outcome="completed",
+            action="printer_report",
             values={"error_message": None, "completed_at": datetime.now(timezone.utc)},
         )
         await db.commit()
@@ -274,13 +271,13 @@ async def test_cancelled_job_records_abort_only_after_matching_terminal_report(a
         await db.commit()
         await cancel_job(db, job)
         assert job.physical_outcome is None
-        await transition_queue_item(db, job, "cancelled", "cancelled", observed_outcome="aborted")
+        await transition_queue_item(db, job, "cancelled", "cancelled", action="printer_report")
         await db.commit()
         assert job.physical_outcome == "aborted" and job.physical_completed_at is not None
         attempt = await db.get(PrintArchive, job.archive_id)
         assert attempt.status == "aborted" and attempt.completed_at == job.physical_completed_at.replace(tzinfo=None)
         with pytest.raises(QueueTransitionConflict):
-            await transition_queue_item(db, job, "cancelled", "cancelled", observed_outcome="completed")
+            await transition_queue_item(db, job, "cancelled", "finished", action="printer_report")
 
 
 async def test_reprint_source_is_immutable_and_outcome_uses_both_link_columns(alignment):
@@ -456,6 +453,7 @@ async def test_heat_soak_dispatch_uses_current_telemetry_after_archive_copy(alig
     from backend.app.services import chamber_heat_soak as heat, print_scheduler as sched
 
     scheduler = sched.PrintScheduler()
+    monkeypatch.setattr(sched, "DISPATCH_TELEMETRY_WAIT_SECONDS", 0.01)
     service = scheduler._heat_soak
     states = {
         1: SimpleNamespace(
@@ -526,16 +524,16 @@ async def test_heat_soak_dispatch_uses_current_telemetry_after_archive_copy(alig
         for item_id in ready:
             await scheduler._dispatch_after_heat_soak(item_id)
         await db.refresh(job)
+        attempt = await db.get(PrintArchive, job.archive_id)
+        assert attempt.dispatched_queue_item_id == job.id
         if current == "reconnected_idle":
             assert ready == [job.id] and job.status == "dispatching"
-            attempt = await db.get(PrintArchive, job.archive_id)
-            assert attempt.dispatched_queue_item_id == job.id
             upload.assert_awaited_once()
             manager.start_print.assert_called_once()
         else:
-            assert ready == [job.id] and job.status == "failed"
-            assert job.archive_id is None and await db.scalar(select(PrintArchive.id)) is None
-            assert list(settings.archive_dir.rglob("*.3mf")) == []
+            assert ready == [job.id]
+            assert job.status == ("failed" if current in ("busy", "reconnected_busy") else "dispatching")
+            assert attempt.status == job.status
             upload.assert_not_awaited()
             manager.start_print.assert_not_called()
 
@@ -612,7 +610,7 @@ async def test_late_external_archive_preserves_failure_after_user_clears_plate(
     )
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
     monkeypatch.setattr(main, "async_session", alignment.sessions)
-    monkeypatch.setattr(main, "_observed_job_starts", {})
+    monkeypatch.setattr(main, "_started_job_effects", {})
     monkeypatch.setattr(main, "_completed_job_events", {})
     monkeypatch.setattr(main, "_user_stopped_printers", set())
     recovered_callbacks = []

@@ -22,17 +22,14 @@ import pytest
 
 from backend.app.core.config import settings as app_settings
 from backend.app.main import (
-    _active_prints,
     _timelapse_baselines,
 )
 
 
 @pytest.fixture(autouse=True)
 def _clear_dicts():
-    _active_prints.clear()
     _timelapse_baselines.clear()
     yield
-    _active_prints.clear()
     _timelapse_baselines.clear()
 
 

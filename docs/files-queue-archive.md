@@ -21,12 +21,16 @@ keep it safe.
 
 ## Print Archives
 
-Entry into Dispatching creates an Archive attempt linked to the exact queue
-item, in the same transaction as its printer hold and before upload. The
+The worker commits Dispatching to hold the printer, then copies and links an
+Archive attempt to that exact job before upload. A copy failure fails the held
+job without an Archive; nothing is sent. The
 archived artifact is the exact local file uploaded to the printer, including
 any G-code injection applied for that dispatch. Upload failures therefore
 appear in Archive too. The attempt records its outcome when its job enters
 Finished, Failed, or Cancelled; Clear Plate preserves that physical outcome.
+A Stop request displays Aborted while confirmation remains pending. Firmware
+FAILED after Grove Stop confirms Aborted with User cancelled; identified FINISH
+after an unconfirmed Stop corrects the outcome to Completed.
 An external Archive download that finishes after Clear Plate uses the job's
 retained physical outcome and original timestamps.
 Waiting cancellations and preheating failures or stops create no Archive. A reprint creates a new

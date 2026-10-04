@@ -19,9 +19,90 @@ from backend.app.services import chamber_heat_soak as heat, print_scheduler as s
 from backend.app.services.archive import ArchiveService
 from backend.app.services.printer_manager import printer_manager
 from backend.app.services.queue_actions import cancel_job
-from backend.app.services.queue_archive import prepare_dispatch_archive
+from backend.app.services.queue_archive import link_dispatch_archive, prepare_dispatch_archive
 from backend.app.services.queue_transitions import QueueTransitionConflict, transition_queue_item
 from backend.tests.unit.test_queue_archive_alignment import alignment, hold_and_link  # noqa: F401
+from backend.tests.unit.test_scheduler_cleanup_library import _dispatch_library_item, queue_factory  # noqa: F401
+
+
+@pytest.mark.parametrize("phase", ["copy", "upload"])
+@pytest.mark.parametrize("previous_id", ["firmware-id", "local-run-id"])
+@pytest.mark.parametrize("reconnect", ["idle", "unavailable", "different-id", "active"])
+async def test_reconnect_during_dispatch_waits_for_evidence(queue_factory, monkeypatch, phase, previous_id, reconnect):
+    from backend.app.services.bambu_mqtt import PrinterState
+
+    ctx = await queue_factory(cleanup=False)
+    live = PrinterState(connected=True, job_telemetry_ready=True, state="IDLE", submission_id=previous_id)
+    monkeypatch.setattr(scheduling, "DISPATCH_TELEMETRY_WAIT_SECONDS", 0.03)
+    async with ctx.session_maker() as db:
+        job = await db.get(PrintQueueItem, ctx.queue_item_id)
+        job.auto_off_after = True
+        await db.commit()
+
+    async def disconnect():
+        # These are the identity and freshness resets performed by MQTT reconnect.
+        live.submission_id = None
+        live.subtask_id = None
+        live.job_telemetry_ready = False
+        if reconnect in ("different-id", "active"):
+            live.job_telemetry_ready = True
+            live.state = "RUNNING" if reconnect == "active" else "IDLE"
+            live.submission_id = "another-print"
+
+    waits = []
+    original_wait = scheduling.PrintScheduler._wait_for_dispatch_telemetry
+
+    async def wait(self, *args, **kwargs):
+        if not live.job_telemetry_ready:
+            waits.append(1)
+            if reconnect == "idle":
+
+                async def restore():
+                    await asyncio.sleep(0)
+                    live.job_telemetry_ready = True
+                    live.state = "IDLE"  # A local firmware print has no ID after reconnect.
+
+                task = asyncio.create_task(restore())
+                try:
+                    return await original_wait(self, *args, **kwargs)
+                finally:
+                    await task
+        return await original_wait(self, *args, **kwargs)
+
+    monkeypatch.setattr(scheduling.PrintScheduler, "_wait_for_dispatch_telemetry", wait)
+    if phase == "upload":
+
+        async def upload(*args, **kwargs):
+            await disconnect()
+            return True
+
+        ctx.upload.side_effect = upload
+    # queue_factory already replaces effects while its in-memory connection is
+    # shared. Use that mock without nesting another patch with different teardown.
+    from backend.app.services.queue_outcome_effects import run_queue_outcome_effects as effects
+
+    await _dispatch_library_item(ctx, printer_status=live, during_archive=disconnect if phase == "copy" else None)
+    await asyncio.sleep(0)
+
+    async with ctx.session_maker() as db:
+        job = await db.get(PrintQueueItem, ctx.queue_item_id)
+        archive = await db.get(PrintArchive, job.archive_id)
+        assert archive is not None and archive.dispatched_queue_item_id == job.id
+        if reconnect in ("different-id", "active"):
+            assert job.status == "failed" and archive.status == "failed"
+            assert effects.await_args.args[1].new_state == "failed"
+        else:
+            assert waits and job.status == "dispatching"
+            assert archive.status == "dispatching"
+            effects.assert_not_awaited()  # No failure notice, Auto Off, or heater shutdown.
+            if reconnect == "unavailable":
+                assert job.dispatched_at is None and job.dispatch_subtask_id is None
+                assert "telemetry unavailable" in job.error_message
+                # The ordinary scheduler must not turn this live timeout into failure.
+                await scheduling.PrintScheduler()._recover_stale_dispatches(db)
+                await db.refresh(job)
+                assert job.status == "dispatching"
+    assert ctx.start_print.call_count == int(reconnect == "idle")
 
 
 @pytest.fixture
@@ -530,7 +611,7 @@ async def test_transition_uses_prepared_attempt_without_file_io(alignment, monke
         attempt = await prepare_dispatch_archive(db, job)
         copy = AsyncMock(side_effect=AssertionError("The writer must not prepare files"))
         monkeypatch.setattr(ArchiveService, "archive_print", copy)
-        await transition_queue_item(db, job, "dispatching", "dispatching", attempt=attempt)
+        await link_dispatch_archive(db, job, attempt)
         await db.commit()
         assert job.archive_id == attempt.id and attempt.dispatched_queue_item_id == job.id
         copy.assert_not_awaited()
@@ -565,16 +646,9 @@ async def test_losing_preparation_does_not_discard_another_attempt(alignment):
         winner_file = settings.base_dir / winner.file_path
         loser_file = settings.base_dir / loser.file_path
         with pytest.raises(QueueTransitionConflict):
-            await transition_queue_item(
-                db,
-                second,
-                "dispatching",
-                "dispatching",
-                conditions=(PrintQueueItem.preheat_owner == "other-owner",),
-                attempt=loser,
-            )
+            await link_dispatch_archive(db, second, loser, conditions=(PrintQueueItem.preheat_owner == "other-owner",))
         assert winner_file.exists() and not loser_file.parent.exists()
-        await transition_queue_item(db, first, "dispatching", "dispatching", attempt=winner)
+        await link_dispatch_archive(db, first, winner)
         await db.commit()
         assert winner_file.exists() and await db.scalar(select(PrintArchive.id)) == winner.id
 
@@ -640,7 +714,7 @@ async def test_print_start_does_not_take_association_lock_without_a_candidate(al
             await transition_queue_item(db, job, "queued", "dispatching")
             await db.commit()
             attempt = await prepare_dispatch_archive(db, job)
-            await transition_queue_item(db, job, "dispatching", "dispatching", attempt=attempt)
+            await link_dispatch_archive(db, job, attempt)
             await transition_queue_item(db, job, "dispatching", "printing", values={"dispatch_subtask_id": "123"})
         else:
             await transition_queue_item(db, job, "queued", "unsuccessful", action="cancel")
@@ -648,7 +722,7 @@ async def test_print_start_does_not_take_association_lock_without_a_candidate(al
     live = SimpleNamespace(state="RUNNING", connected=True, job_telemetry_ready=True, submission_id="123")
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
     monkeypatch.setattr(main, "async_session", alignment.sessions)
-    monkeypatch.setattr(main, "_observed_job_starts", {})
+    monkeypatch.setattr(main, "_started_job_effects", {})
     monkeypatch.setattr(main, "_archive_print_start", AsyncMock())
     monkeypatch.setattr(main.print_scheduler, "_publish_queue_job_started", AsyncMock())
     lock = AsyncMock(side_effect=AssertionError("No association needs a write lock"))

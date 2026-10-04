@@ -17,17 +17,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from backend.app.main import (
-    _active_prints,
     _timelapse_baselines,
 )
 
 
 @pytest.fixture(autouse=True)
 def _clear_dicts():
-    _active_prints.clear()
     _timelapse_baselines.clear()
     yield
-    _active_prints.clear()
     _timelapse_baselines.clear()
 
 
@@ -285,11 +282,18 @@ async def test_expected_archive_path_captures_timelapse_baseline():
         mock_relay.on_print_start = AsyncMock()
         mock_pm.get_printer = MagicMock(return_value=MagicMock(name="Test", serial_number="TEST123"))
 
+        from types import SimpleNamespace
+
+        mock_pm.get_status.return_value = SimpleNamespace(
+            connected=True, job_telemetry_ready=True, state="RUNNING", submission_id="run"
+        )
+
         from backend.app.main import _archive_print_start as on_print_start
 
         await on_print_start(
             1,
             {
+                "submission_id": "run",
                 "filename": "bambu_lab_a1_tool_plate_3.gcode.3mf",
                 "subtask_name": "bambu_lab_a1_tool_plate_3",
             },

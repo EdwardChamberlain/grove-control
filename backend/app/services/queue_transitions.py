@@ -13,7 +13,7 @@ from contextlib import nullcontext
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import event, inspect, select
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
@@ -22,7 +22,6 @@ from sqlalchemy.sql.elements import ColumnElement
 from backend.app.models.print_queue import ACTIVE_STATUSES, AWAITING_PLATE_CLEAR_STATUSES, HOLDING_STATUSES
 
 if TYPE_CHECKING:
-    from backend.app.models.archive import PrintArchive
     from backend.app.models.print_queue import PrintQueueItem
 
 
@@ -135,9 +134,7 @@ async def transition_queue_item(
     action: str | None = None,
     migration: bool = False,
     archive_failure_reason: str | None = None,
-    observed_outcome: str | None = None,
     dispatch_guard: Callable[[], bool] | None = None,
-    attempt: PrintArchive | None = None,
 ) -> None:
     """Conditionally change a persisted item, or raise without writing it.
 
@@ -153,7 +150,7 @@ async def transition_queue_item(
     function never commits or rolls back the caller's transaction. ORM status
     is synchronized without a second, unconditional status UPDATE at flush
     time. Entry into dispatching reserves the printer before any file copy.
-    A supplied attempt is linked by a later guarded same-state update.
+    Archive linking uses its own conditional claim after the copy succeeds.
     """
     from backend.app.models.print_queue import PrintQueueItem
 
@@ -163,16 +160,11 @@ async def transition_queue_item(
         or (status != expected_status and status not in ALLOWED_TRANSITIONS[expected_status])
     ):
         raise InvalidQueueTransition(f"Invalid queue transition: {expected_status} -> {status}")
-    if observed_outcome is not None and (
-        observed_outcome not in ("completed", "failed", "aborted") or status not in AWAITING_PLATE_CLEAR_STATUSES
-    ):
+    confirmed = action == "printer_report"
+    if confirmed and status not in AWAITING_PLATE_CLEAR_STATUSES:
         raise InvalidQueueTransition("A confirmed physical outcome requires an awaiting-plate-clear job")
     if not upgrading and status != expected_status:
-        if (
-            expected_status == "cancelled"
-            and status == "finished"
-            and (action != "confirmed_completion" or observed_outcome != "completed")
-        ):
+        if expected_status == "cancelled" and status == "finished" and not confirmed:
             raise InvalidQueueTransition("Only an identified printer completion may finish a cancelled job")
         if expected_status == "queued" and status == "unsuccessful" and action != "cancel":
             raise InvalidQueueTransition("Only a user cancellation may end a queued job")
@@ -182,7 +174,7 @@ async def transition_queue_item(
             "clear_plate",
             "printer_deleted",
             "hold_transferred",
-            "confirmed_completion",
+            "printer_report",
         ):
             raise InvalidQueueTransition(
                 "A holding job requires Clear Plate, printer deletion, or an observed hold transfer"
@@ -199,31 +191,8 @@ async def transition_queue_item(
         printer_id = metadata.get("printer_id", item.printer_id if not isinstance(item, int) else None)
         if printer_id is None:
             raise InvalidQueueTransition("Dispatch requires a selected printer")
-    from backend.app.services.queue_archive import discard_prepared_archive
-
-    archive = attempt
-    if archive is not None:
-        if not isinstance(db, AsyncSession) or status != "dispatching" or expected_status != status:
-            raise ValueError("A prepared Archive can only attach to a held dispatch")
-        if "printer_id" in metadata:
-            printer_id = metadata["printer_id"]
-        elif isinstance(item, int):
-            with db.no_autoflush:
-                printer_id = await db.scalar(select(table.c.printer_id).where(table.c.id == item_id))
-        else:
-            printer_id = item.printer_id
-        if (
-            archive not in db
-            or not inspect(archive).pending
-            or archive.dispatched_queue_item_id != item_id
-            or archive.printer_id != printer_id
-            or archive.status != "dispatching"
-            or archive.deleted_at is not None
-            or not archive.file_path
-        ):
-            raise InvalidQueueTransition("Dispatch Archive does not belong to this held job")
-    if isinstance(db, AsyncSession) and (expected_status != status or observed_outcome is not None):
-        if status in AWAITING_PLATE_CLEAR_STATUSES and (action != "cancel" or observed_outcome is not None):
+    if isinstance(db, AsyncSession) and (expected_status != status or confirmed):
+        if status in AWAITING_PLATE_CLEAR_STATUSES and action != "cancel":
             metadata.setdefault("completed_at", datetime.now(timezone.utc))
             # Capture facts before finalization collapses failed/cancelled into
             # unsuccessful. No state decision ever reads this projection.
@@ -231,23 +200,19 @@ async def transition_queue_item(
             if reason is None:
                 with db.no_autoflush:
                     reason = await db.scalar(select(table.c.error_message).where(table.c.id == item_id))
-            outcome = observed_outcome or ARCHIVE_OUTCOMES[status]
+            outcome = ARCHIVE_OUTCOMES[status]
             metadata.update(
                 physical_outcome=outcome,
-                physical_completed_at=datetime.now(timezone.utc)
-                if observed_outcome is not None
-                else metadata["completed_at"],
+                physical_completed_at=datetime.now(timezone.utc) if confirmed else metadata["completed_at"],
                 physical_failure_reason=physical_failure_reason(outcome, reason, archive_failure_reason),
             )
     # SQLAlchemy 2.1 autoflushes Core statements regardless of their statement
     # execution options. Suppress it at the session boundary so a losing CAS
     # cannot flush stale metadata first. Startup repairs use AsyncConnection.
     if dispatch_guard is not None and not dispatch_guard():
-        if isinstance(db, AsyncSession):
-            discard_prepared_archive(db, archive)
         raise QueueTransitionConflict("Printer is no longer available for dispatch")
     with db.no_autoflush if isinstance(db, AsyncSession) else nullcontext():
-        outcome_condition = (table.c.physical_outcome.is_(None),) if observed_outcome is not None else ()
+        outcome_condition = (table.c.physical_outcome.is_(None),) if confirmed else ()
         result = await db.execute(
             table.update()
             .where(table.c.id == item_id, table.c.status == expected_status, *conditions, *outcome_condition)
@@ -255,21 +220,12 @@ async def transition_queue_item(
             .execution_options(autoflush=False)
         )
     if result.rowcount != 1:
-        if isinstance(db, AsyncSession):
-            discard_prepared_archive(db, archive)
         raise QueueTransitionConflict(f"Queue item {item_id} no longer matches expected status {expected_status}")
     if not isinstance(item, int):
         set_committed_value(item, "status", status)
         for key, value in metadata.items():
             set_committed_value(item, key, value)
     if isinstance(db, AsyncSession):
-        if archive is not None:
-            await db.flush()
-            await db.execute(table.update().where(table.c.id == item_id).values(archive_id=archive.id))
-            if not isinstance(item, int):
-                set_committed_value(item, "archive_id", archive.id)
-                # Existing loaded source relationships must follow the attempt.
-                set_committed_value(item, "archive", archive)
         if (
             expected_status != status
             or "archive_id" in metadata
@@ -287,7 +243,7 @@ async def transition_queue_item(
                 query = query.where(ArchiveModel.id == row.archive_id)
             attempt = await db.scalar(query)
             if attempt is not None:
-                attaching = "archive_id" in metadata or archive is not None or row.archive_id is None
+                attaching = "archive_id" in metadata or row.archive_id is None
                 if row.archive_id is None:
                     # The unique attempt owner survives a failed Queue-link
                     # transaction. Restore that projection before applying the
@@ -303,10 +259,9 @@ async def transition_queue_item(
                 ):
                     attempt.status = "printing"
                     attempt.started_at = row.started_at or datetime.now(timezone.utc)
-                if (
-                    status in AWAITING_PLATE_CLEAR_STATUSES
-                    and (expected_status != status or observed_outcome is not None)
-                ) or (attaching and status in (*AWAITING_PLATE_CLEAR_STATUSES, *FINAL_STATUSES)):
+                if (status in AWAITING_PLATE_CLEAR_STATUSES and (expected_status != status or confirmed)) or (
+                    attaching and status in (*AWAITING_PLATE_CLEAR_STATUSES, *FINAL_STATUSES)
+                ):
                     outcome = row.physical_outcome or ARCHIVE_OUTCOMES.get(status)
                     if outcome is None and status == "successful":
                         outcome = "completed"  # Unambiguous legacy final state.
@@ -342,7 +297,7 @@ async def transition_queue_item(
                 ).where(table.c.id == item_id)
             )
         ).one()
-        if expected_status != status or archive is not None:
+        if expected_status != status:
             db.sync_session.info.setdefault("queue_transition_log", []).append(
                 (
                     item_id,
@@ -350,7 +305,7 @@ async def transition_queue_item(
                     status,
                     row.printer_id,
                     row.archive_id,
-                    action or ("archive_link" if archive is not None else None),
+                    action,
                 )
             )
         clearing_failed_plate = action == "clear_plate" and status == "unsuccessful" and expected_status != status
@@ -373,9 +328,9 @@ async def transition_queue_item(
                 shut_down_heaters=heating,
                 notify_failure=status == "failed"
                 and expected_status in ("preheating", "dispatching")
-                and observed_outcome is None,
+                and not confirmed,
                 clean_sd_copy=clearing_failed_plate
-                or (status == "failed" and expected_status == "dispatching" and observed_outcome is None),
+                or (status == "failed" and expected_status == "dispatching" and not confirmed),
             )
             db.sync_session.info.setdefault("queue_outcome_effects", {})[(item_id, status)] = (db.bind, effect)
         if row.printer_id is not None and (expected_status in HOLDING_STATUSES or status in HOLDING_STATUSES):

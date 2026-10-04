@@ -45,7 +45,7 @@ async def test_recovery_archive_work_does_not_replay_plate_check_or_start_notifi
         patch.object(main, "_send_print_start_notification", new_callable=AsyncMock) as notify_start,
         patch("backend.app.services.plate_detection.check_plate_empty", new_callable=AsyncMock) as plate_check,
     ):
-        await main._archive_print_start(1, {"submission_id": "existing", "filename": "same.3mf"}, recovering=True)
+        await main._archive_print_start(1, {"submission_id": "existing", "filename": "same.3mf"})
     websocket_start.assert_not_awaited()
     notify_start.assert_not_awaited()
     plate_check.assert_not_awaited()

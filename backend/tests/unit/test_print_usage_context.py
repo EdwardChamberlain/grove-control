@@ -30,9 +30,7 @@ async def test_start_context_comes_from_identified_job_without_filename_registra
     live = SimpleNamespace(state="RUNNING", connected=True, job_telemetry_ready=True, submission_id="123")
     monkeypatch.setattr(main, "async_session", alignment.sessions)
     monkeypatch.setattr(main.printer_manager, "get_status", lambda _id: live)
-    monkeypatch.setattr(main, "_observed_job_starts", {})
-    monkeypatch.setattr(main, "_initialized_job_starts", {})
-    monkeypatch.setattr(main, "_pending_archive_starts", {})
+    monkeypatch.setattr(main, "_started_job_effects", {})
     monkeypatch.setattr(main, "_archive_print_start", observed)
     await main._observe_print_start(
         1,

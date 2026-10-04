@@ -22,7 +22,7 @@ from backend.app.services.queue_transitions import QueueTransitionConflict, tran
 async def sessions(tmp_path):
     import backend.app.main as main
 
-    main._observed_job_starts.clear()
+    main._started_job_effects.clear()
     main._completed_job_events.clear()
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'paused.db'}")
     async with engine.begin() as conn:
@@ -229,7 +229,7 @@ async def test_print_start_skips_a_stop_that_wins_after_the_job_is_read(sessions
             await main.on_print_start(1, {"submission_id": "123", "filename": "same.3mf"})
             archive_start.assert_not_awaited()
             publish.assert_not_awaited()
-            assert 1 not in main._observed_job_starts
+            assert 1 not in main._started_job_effects
     async with sessions() as db:
         item = await db.get(PrintQueueItem, item_id)
         assert item.status == "cancelled"
@@ -259,7 +259,7 @@ async def test_external_print_start_conflict_rolls_back_the_job_and_hold_transfe
         sync.assert_awaited_once()
         archive_start.assert_not_awaited()
         publish.assert_not_awaited()
-        assert 1 not in main._observed_job_starts
+        assert 1 not in main._started_job_effects
     async with sessions() as db:
         items = (await db.scalars(select(PrintQueueItem))).all()
         assert len(items) == 1

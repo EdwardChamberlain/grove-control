@@ -671,3 +671,25 @@ async def test_upgrade_defaults_existing_rows_to_off(tmp_path):
             assert tuple(row) == (0, 60, 30, None)
     finally:
         await engine.dispose()
+
+
+@pytest.mark.parametrize("worker", ["unsent", "uploading", "possibly_sent"])
+async def test_deferred_unsent_dispatch_cools_without_releasing_hold(soak, worker):
+    from backend.app.services.queue_transitions import transition_queue_item
+
+    await transition_queue_item(soak.db, soak.item, "queued", "dispatching")
+    soak.item.dispatching_at = heat.utcnow() if worker == "uploading" else None
+    soak.item.dispatched_at = heat.utcnow() if worker == "possibly_sent" else None
+    soak.printer.heat_soak_shutdown_pending = True
+    soak.printer.heat_soak_shutdown_at = heat.utcnow()
+    await soak.db.commit()
+    result = await heat.cleanup_heat_soak_shutdown(soak.db, soak.printer.id)
+    assert result == (worker == "unsent")
+    if worker == "unsent":
+        soak.client.set_bed_temperature.assert_called_once_with(0)
+        soak.client.set_chamber_temperature.assert_called_once_with(0)
+    else:
+        soak.client.set_bed_temperature.assert_not_called()
+        soak.client.set_chamber_temperature.assert_not_called()
+    assert soak.item.status == "dispatching"
+    assert soak.printer.heat_soak_shutdown_pending  # Still awaiting fresh zero targets.

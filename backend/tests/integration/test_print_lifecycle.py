@@ -41,9 +41,9 @@ class TestPrintStartLogic:
             mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
             mock_session_maker.return_value = mock_session
 
-            from backend.app.main import _archive_print_start as on_print_start
+            from backend.app.main import _begin_new_print
 
-            await on_print_start(
+            await _begin_new_print(
                 1,
                 {
                     "filename": "/data/Metadata/test.gcode",
@@ -186,18 +186,36 @@ class TestPlateClearGate:
         from types import SimpleNamespace
 
         from backend.app import main
+        from backend.app.models.archive import PrintArchive
         from backend.app.services.queue_actions import cancel_job
 
+        archive = PrintArchive(
+            printer_id=completion.printer.id,
+            filename="stopped.3mf",
+            file_path="",
+            file_size=0,
+            status="printing",
+            dispatched_queue_item_id=completion.item.id,
+        )
+        db_session.add(archive)
+        await db_session.flush()
+        completion.item.archive_id = archive.id
+        await db_session.commit()
         completion.manager.get_printer.return_value = SimpleNamespace(name="P1", serial_number="SERIAL")
         if stopped_in_grove:
             # cancel_job commits `cancelled` before the printer reports the stop,
             # so this also holds after a restart loses the in-memory stop flag.
             await cancel_job(db_session, completion.item)
+            main._user_stopped_printers.clear()
         await completion.complete(completion.printer.id, {"subtask_id": "123", "status": printer_outcome})
         await db_session.refresh(completion.item)
         assert completion.item.status == job_status
-        if stopped_in_grove:
-            assert completion.item.physical_outcome == printer_outcome
+        await db_session.refresh(archive)
+        archived_outcome = "aborted" if reported in ("cancelled", "aborted") else reported
+        assert completion.item.physical_outcome == archived_outcome
+        assert archive.status == archived_outcome
+        if archived_outcome == "aborted":
+            assert archive.failure_reason == "User cancelled"
         # The relay and notifications describe the physical outcome; a
         # touchscreen abort is not renamed to a Grove cancellation.
         assert main.mqtt_relay.on_print_complete.await_args.args[-1] == reported

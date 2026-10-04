@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.services.print_scheduler import PrintScheduler
-from backend.app.services.queue_archive import prepare_dispatch_archive
+from backend.app.services.queue_archive import link_dispatch_archive, prepare_dispatch_archive
 from backend.app.services.queue_transitions import transition_queue_item
 
 
@@ -52,7 +52,7 @@ async def hold_and_link(db, item):
     await transition_queue_item(db, item, item.status, "dispatching")
     await db.commit()
     prepared = await prepare_dispatch_archive(db, item)
-    await transition_queue_item(db, item, "dispatching", "dispatching", attempt=prepared)
+    await link_dispatch_archive(db, item, prepared)
 
 
 def _status(state: str, subtask_id: str | None = None, gcode_file: str | None = None):
@@ -301,9 +301,10 @@ class TestDurableDispatchingState:
                     return_value=_status("RUNNING", "unrelated-job"),
                 ),
                 patch("backend.app.services.printer_manager.printer_manager.start_print") as start,
+                patch("backend.app.services.print_scheduler.async_session", db_session),
                 patch("backend.app.services.queue_outcome_effects.run_queue_outcome_effects", new=AsyncMock()),
             ):
-                await PrintScheduler()._recover_stale_dispatches(db)
+                await PrintScheduler()._clear_stale_dispatch_claims()
 
             await db.refresh(item)
             assert item.status == "failed"
@@ -313,6 +314,7 @@ class TestDurableDispatchingState:
             from backend.app.models.archive import PrintArchive
 
             attempt = await db.get(PrintArchive, attempt_id)
+            await db.refresh(attempt)
             assert attempt.status == ("failed" if archive_linked else "completed")
 
     @pytest.mark.asyncio

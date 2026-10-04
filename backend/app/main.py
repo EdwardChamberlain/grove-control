@@ -351,7 +351,6 @@ logging.info("Grove Control starting - debug=%s, log_level=%s", app_settings.deb
 
 
 # Track active prints: {(printer_id, filename): archive_id}
-_active_prints: dict[tuple[int, str], int] = {}
 
 # #1721: stage-22 pre-captured finish photo bytes per printer. on_finish_photo_moment
 # fires when stg_cur enters 22 ("Filament unloading") at end-of-print — toolhead
@@ -996,9 +995,6 @@ async def _maybe_notify_printer_offline(printer_id: int) -> None:
 
 async def on_printer_status_change(printer_id: int, state: PrinterState):
     """Handle printer status changes - broadcast via WebSocket."""
-    # Retry failed Archive work even when this push does not change state or
-    # trigger another print-start callback. Keep slow storage off the broadcast.
-    _schedule_pending_archive_retry(printer_id, state)
     # Connected-edge reconciliation (#1542 follow-up). When the printer
     # transitions disconnected → connected — which covers both Grove Control
     # startup (no prior connection) and a mid-session MQTT reconnect — fire
@@ -2379,59 +2375,8 @@ def _load_objects_from_archive(archive, printer_id: int, logger, *, reset_skippe
 # Serialize MQTT start/finish callbacks per printer, including slow archiving.
 # A short print must not finish before its Archive link has been persisted.
 _job_event_locks: dict[int, asyncio.Lock] = {}
-_observed_job_starts: dict[int, int] = {}
-_initialized_job_starts: dict[int, int] = {}
-_pending_archive_starts: dict[int, tuple[str, dict, bool]] = {}
+_started_job_effects: dict[int, int] = {}
 _completed_job_events: dict[int, int] = {}
-
-
-def _schedule_pending_archive_retry(printer_id: int, state: PrinterState) -> None:
-    pending = _pending_archive_starts.get(printer_id)
-    if pending is None:
-        return
-    identity, data, recovering = pending
-
-    def matches(live) -> bool:
-        return bool(
-            live
-            and live.connected
-            and live.job_telemetry_ready
-            and live.state in ("PREPARE", "SLICING", "RUNNING", "PAUSE")
-            and telemetry_identity(live) == identity
-            and (
-                live.gcode_file
-                or live.current_print
-                or live.subtask_name
-                or data.get("filename")
-                or data.get("subtask_name")
-            )
-        )
-
-    lock = _job_event_locks.setdefault(printer_id, asyncio.Lock())
-    if lock.locked() or not matches(state):
-        return
-    # Consume before scheduling so a burst of pushes queues only one retry.
-    # An unsuccessful observation restores its pending marker for a later push.
-    _pending_archive_starts.pop(printer_id)
-
-    async def retry() -> None:
-        async with lock:
-            live = printer_manager.get_status(printer_id)
-            if not matches(live):
-                _pending_archive_starts.setdefault(printer_id, pending)
-                return
-            snapshot = {
-                **data,
-                "filename": live.gcode_file or live.current_print or data.get("filename"),
-                "subtask_name": live.subtask_name or data.get("subtask_name"),
-            }
-            try:
-                await _observe_print_start(printer_id, snapshot, recovering=recovering)
-            except Exception:
-                _pending_archive_starts.setdefault(printer_id, pending)
-                raise
-
-    spawn_background_task(retry(), name=f"retry-print-archive-{printer_id}")
 
 
 async def on_print_state_change(printer_id: int, data: dict):
@@ -2511,138 +2456,202 @@ async def _observe_print_start(printer_id: int, data: dict, *, recovering: bool 
         await db.commit()
     if was_dispatching:
         await print_scheduler._publish_queue_job_started(item_id)
-    if _observed_job_starts.get(printer_id) != item_id:
-        _pending_archive_starts[printer_id] = (identity, archive_data, recovering)
-    if not (data.get("filename") or data.get("subtask_name")):
-        return  # Keep the job; archive when a later active push supplies the file.
-    if _observed_job_starts.get(printer_id) != item_id:
-        # Archive code also receives the exact snapshot, including local run IDs.
-        archive_options = {"queue_archive_id": queue_archive_id, "queue_job_id": item_id}
-        if recovering or _initialized_job_starts.get(printer_id) == item_id:
-            archive_options["recovering"] = True
-        if not await _archive_print_start(printer_id, archive_data, **archive_options):
-            return
-        # A failed Archive/start effect must be retryable on the next observation.
-        _observed_job_starts[printer_id] = item_id
-    # Archive association is independently retryable, including when the
-    # Archive appears after a first observation with incomplete file metadata.
+    new_start = not recovering and _started_job_effects.get(printer_id) != item_id
+    _started_job_effects[printer_id] = item_id
+    archive_id = queue_archive_id
+    try:
+        if new_start:
+            await _begin_new_print(printer_id, archive_data)
+        if data.get("filename") or data.get("subtask_name"):
+            await _archive_print_start(
+                printer_id, archive_data, queue_archive_id=queue_archive_id, queue_job_id=item_id
+            )
+        archive_id = await _link_observed_archive(printer_id, item_id, identity)
+    finally:
+        if new_start:
+            await _finish_new_print(printer_id, archive_data, archive_id)
+
+
+async def _link_observed_archive(printer_id: int, item_id: int, identity: str) -> int | None:
+    """Link the owned attempt, or a single unowned legacy Archive with this ID."""
+    from backend.app.models.archive import PrintArchive
+    from backend.app.models.print_queue import PrintQueueItem
+    from backend.app.services.chamber_heat_soak import lock_queue_item
+
     async with async_session() as db:
-        from backend.app.models.archive import PrintArchive
-        from backend.app.models.print_queue import PrintQueueItem
-        from backend.app.services.chamber_heat_soak import lock_queue_item
-
         item = await db.get(PrintQueueItem, item_id)
-        if item is None or item.archive_id is not None:
-            _pending_archive_starts.pop(printer_id, None)
-            return
-        query = select(PrintArchive).where(
-            PrintArchive.printer_id == printer_id,
-            PrintArchive.subtask_id == identity,
-            or_(PrintArchive.dispatched_queue_item_id.is_(None), PrintArchive.dispatched_queue_item_id == item_id),
-            PrintArchive.status == "printing",
+        if item is None:
+            return None
+        if item.archive_id is not None:
+            return item.archive_id
+        archive = await db.scalar(
+            select(PrintArchive).where(
+                PrintArchive.printer_id == printer_id, PrintArchive.dispatched_queue_item_id == item_id
+            )
         )
-        archives = list((await db.scalars(query)).all())
-        if len(archives) != 1:
-            _pending_archive_starts.pop(printer_id, None)
-            return
-        # Lock only for association, then recheck both sides against Stop/Clear Plate.
+        if archive is None:
+            candidates = list(
+                await db.scalars(
+                    select(PrintArchive).where(
+                        PrintArchive.printer_id == printer_id,
+                        PrintArchive.subtask_id == identity,
+                        PrintArchive.dispatched_queue_item_id.is_(None),
+                        PrintArchive.status == "printing",
+                    )
+                )
+            )
+            if len(candidates) != 1:
+                return None
+            archive = candidates[0]
+        archive_id = archive.id
         item = await lock_queue_item(db, item_id)
-        if item and item.archive_id is None:
-            archives = list((await db.scalars(query.with_for_update().execution_options(populate_existing=True))).all())
-            if len(archives) == 1:
-                archives[0].dispatched_queue_item_id = item.id
-                await transition_queue_item(db, item, item.status, item.status, values={"archive_id": archives[0].id})
-                await db.commit()
-    _pending_archive_starts.pop(printer_id, None)
+        if item is None:
+            return None
+        if item.archive_id is not None:
+            return item.archive_id
+        archive = await db.scalar(
+            select(PrintArchive)
+            .where(
+                PrintArchive.id == archive_id,
+                PrintArchive.printer_id == printer_id,
+                or_(PrintArchive.dispatched_queue_item_id.is_(None), PrintArchive.dispatched_queue_item_id == item_id),
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if archive is None:
+            return None
+        archive.dispatched_queue_item_id = item_id
+        await transition_queue_item(db, item, item.status, item.status, values={"archive_id": archive.id})
+        await db.commit()
+        return archive.id
 
 
-async def _archive_print_start(
-    printer_id: int,
-    data: dict,
-    *,
-    queue_archive_id: int | None = None,
-    queue_job_id: int | None = None,
-    recovering: bool = False,
-) -> bool:
-    """Handle print start - archive the 3MF file immediately."""
+async def reconcile_print_archives() -> None:
+    """Repair missing Archive projections in one paced scheduler pass."""
+    from backend.app.models.print_queue import PrintQueueItem
+    from backend.app.models.printer import Printer
+
+    live_ids = [
+        (pid, telemetry_identity(state))
+        for pid, state in printer_manager.get_all_statuses().items()
+        if state.connected and state.job_telemetry_ready and telemetry_identity(state)
+    ]
+    if not live_ids:
+        return
+    async with async_session() as db:
+        jobs = (
+            await db.execute(
+                select(
+                    PrintQueueItem.id,
+                    PrintQueueItem.printer_id,
+                    PrintQueueItem.dispatch_subtask_id,
+                    PrintQueueItem.ams_mapping,
+                    PrintQueueItem.plate_id,
+                    PrintQueueItem.created_by_id,
+                )
+                .join(Printer)
+                .where(
+                    PrintQueueItem.archive_id.is_(None),
+                    PrintQueueItem.started_at.is_not(None),
+                    Printer.auto_archive.is_(True),
+                    or_(
+                        *[
+                            (PrintQueueItem.printer_id == pid) & (PrintQueueItem.dispatch_subtask_id == identity)
+                            for pid, identity in live_ids
+                        ]
+                    ),
+                )
+            )
+        ).all()
+    for job in jobs:
+        lock = _job_event_locks.setdefault(job.printer_id, asyncio.Lock())
+        if lock.locked():
+            continue
+        async with lock:
+            live = printer_manager.get_status(job.printer_id)
+            if (
+                not live
+                or not live.connected
+                or not live.job_telemetry_ready
+                or telemetry_identity(live) != job.dispatch_subtask_id
+            ):
+                continue
+            data = {
+                "submission_id": job.dispatch_subtask_id,
+                "filename": live.gcode_file or live.current_print,
+                "subtask_name": live.subtask_name,
+                "raw_data": dict(live.raw_data or {}),
+                "ams_mapping": _job_ams_mapping(job.ams_mapping, None),
+                "plate_id": job.plate_id,
+                "owner_id": job.created_by_id,
+            }
+            try:
+                if data["filename"] or data["subtask_name"]:
+                    await _archive_print_start(job.printer_id, data, queue_job_id=job.id)
+                    await _link_observed_archive(job.printer_id, job.id, job.dispatch_subtask_id)
+            except Exception:
+                logging.getLogger(__name__).exception("Archive reconciliation failed for Queue job %s", job.id)
+
+
+async def _begin_new_print(printer_id: int, data: dict) -> None:
+    """Run new-print actions once, independently of Archive recovery."""
     logger = logging.getLogger(__name__)
+    client = printer_manager.get_client(printer_id)
+    if client:
+        client.state.skipped_objects = []
+    _user_stopped_printers.discard(printer_id)
+    _stage22_finish_frames.pop(printer_id, None)
+    _timelapse_baselines.pop(printer_id, None)
+    if _bed_cool_waiters.pop(printer_id, None):
+        logger.info("[BED-COOL] Cancelled bed cooldown waiter for printer %s (new print started)", printer_id)
+    from backend.app.api.routes.printers import clear_cover_cache
 
-    logger.info("[CALLBACK] on_print_start called for printer %s, data keys: %s", printer_id, list(data.keys()))
+    clear_cover_cache(printer_id)
+    await ws_manager.send_print_start(printer_id, data)
+    await notify_missing_spool_assignments_on_print_start(printer_id, data, logger)
+    try:
+        printer_info = printer_manager.get_printer(printer_id)
+        if printer_info:
+            await mqtt_relay.on_print_start(
+                printer_id,
+                printer_info.name,
+                printer_info.serial_number,
+                data.get("filename", ""),
+                data.get("subtask_name", ""),
+            )
+    except Exception:
+        pass
+    try:
+        async with async_session() as db:
+            from backend.app.api.routes.settings import get_setting
+            from backend.app.services.usage_tracker import on_print_start as usage_on_print_start
 
-    if not recovering:
-        # Recovery restores the existing job and Archive. These actions belong
-        # only to a new print; a mid-print restart must not check its occupied
-        # plate, restart integrations, or emit a second start notification.
-        _user_stopped_printers.discard(printer_id)
-        _stage22_finish_frames.pop(printer_id, None)
-        if _bed_cool_waiters.pop(printer_id, None):
-            logger.info("[BED-COOL] Cancelled bed cooldown waiter for printer %s (new print started)", printer_id)
-
-        from backend.app.api.routes.printers import clear_cover_cache
-
-        clear_cover_cache(printer_id)
-        await ws_manager.send_print_start(printer_id, data)
-        await notify_missing_spool_assignments_on_print_start(printer_id, data, logger)
-
-        try:
-            printer_info = printer_manager.get_printer(printer_id)
-            if printer_info:
-                await mqtt_relay.on_print_start(
-                    printer_id,
-                    printer_info.name,
-                    printer_info.serial_number,
-                    data.get("filename", ""),
-                    data.get("subtask_name", ""),
-                )
-        except Exception:
-            pass  # Don't fail print start callback if MQTT fails
-
-        # Recovery restores the persisted usage session below. Reinitialising
-        # it here would lose the work recorded before the restart.
-        try:
-            async with async_session() as db:
-                from backend.app.api.routes.settings import get_setting
-                from backend.app.services.usage_tracker import on_print_start as usage_on_print_start
-
-                _spoolman_on = await get_setting(db, "spoolman_enabled")
-                await usage_on_print_start(
-                    printer_id,
-                    data,
-                    printer_manager,
-                    db=db,
-                    spoolman_owns_usage=bool(_spoolman_on) and _spoolman_on.lower() == "true",
-                )
-        except Exception as e:
-            logger.warning("Usage tracker on_print_start failed: %s", e)
-
-    # Track if notification was sent (to avoid sending twice)
-    notification_sent = False
-
-    # Smart plug automation: turn on plug when print starts
-    if not recovering:
-        try:
-            async with async_session() as db:
-                await smart_plug_manager.on_print_start(printer_id, db)
-        except Exception as e:
-            logger.warning("Smart plug on_print_start failed: %s", e)
-
+            _spoolman_on = await get_setting(db, "spoolman_enabled")
+            await usage_on_print_start(
+                printer_id,
+                data,
+                printer_manager,
+                db=db,
+                spoolman_owns_usage=bool(_spoolman_on) and _spoolman_on.lower() == "true",
+            )
+    except Exception as e:
+        logger.warning("Usage tracker on_print_start failed: %s", e)
+    try:
+        async with async_session() as db:
+            await smart_plug_manager.on_print_start(printer_id, db)
+    except Exception as e:
+        logger.warning("Smart plug on_print_start failed: %s", e)
     async with async_session() as db:
         from backend.app.models.printer import Printer
-        from backend.app.services.bambu_ftp import list_files_async
 
         result = await db.execute(select(Printer).where(Printer.id == printer_id))
         printer = result.scalar_one_or_none()
-
-        # Plate detection check - pause if objects detected on build plate
-        logger.info(
-            f"[PLATE CHECK] printer_id={printer_id}, plate_detection_enabled={printer.plate_detection_enabled if printer else 'NO PRINTER'}"
-        )
-        if printer and printer.plate_detection_enabled and not recovering:
+        if printer and printer.plate_detection_enabled:
             logger.info("[PLATE CHECK] ENTERING plate detection code for printer %s", printer_id)
             try:
                 from backend.app.services.plate_detection import check_plate_empty
 
-                # Build ROI tuple from printer settings if available
                 roi = None
                 if all(
                     [
@@ -2658,8 +2667,6 @@ async def _archive_print_start(
                         printer.plate_detection_roi_w,
                         printer.plate_detection_roi_h,
                     )
-
-                # Auto-turn on chamber light if it's off for better detection
                 light_was_off = False
                 client = printer_manager.get_client(printer_id)
                 if client and client.state:
@@ -2667,9 +2674,7 @@ async def _archive_print_start(
                     if light_was_off:
                         logger.info("[PLATE CHECK] Turning on chamber light for printer %s", printer_id)
                         client.set_chamber_light(True)
-                        # Wait for light to physically turn on and camera to adjust exposure
                         await asyncio.sleep(2.5)
-
                 logger.info("[PLATE CHECK] Running plate detection for printer %s", printer_id)
                 plate_result = await check_plate_empty(
                     printer_id=printer_id,
@@ -2683,24 +2688,17 @@ async def _archive_print_start(
                     roi=roi,
                     external_camera_snapshot_url=printer.external_camera_snapshot_url,
                 )
-
-                # Restore chamber light to original state
                 if light_was_off and client:
                     logger.info("[PLATE CHECK] Restoring chamber light to off for printer %s", printer_id)
                     client.set_chamber_light(False)
-
-                if not plate_result.needs_calibration and not plate_result.is_empty:
-                    # Objects detected - pause the print!
+                if not plate_result.needs_calibration and (not plate_result.is_empty):
                     logger.warning(
-                        f"[PLATE CHECK] Objects detected on plate for printer {printer_id}! "
-                        f"Confidence: {plate_result.confidence:.0%}, Diff: {plate_result.difference_percent:.1f}%"
+                        f"[PLATE CHECK] Objects detected on plate for printer {printer_id}! Confidence: {plate_result.confidence:.0%}, Diff: {plate_result.difference_percent:.1f}%"
                     )
                     client = printer_manager.get_client(printer_id)
                     if client:
                         client.pause_print()
                         logger.info("[PLATE CHECK] Print paused for printer %s", printer_id)
-
-                    # Send notification about plate not empty
                     await ws_manager.broadcast(
                         {
                             "type": "plate_not_empty",
@@ -2709,8 +2707,6 @@ async def _archive_print_start(
                             "message": f"Objects detected on build plate! Print paused. (Diff: {plate_result.difference_percent:.1f}%)",
                         }
                     )
-
-                    # Also send push notification
                     try:
                         await notification_service.on_plate_not_empty(
                             printer_id=printer_id,
@@ -2723,195 +2719,114 @@ async def _archive_print_start(
                 else:
                     logger.info("[PLATE CHECK] Plate is empty for printer %s, proceeding with print", printer_id)
             except Exception as plate_err:
-                # Don't block print on plate detection errors
                 logger.warning("[PLATE CHECK] Plate detection failed for printer %s: %s", printer_id, plate_err)
 
+
+async def _finish_new_print(printer_id: int, data: dict, archive_id: int | None) -> None:
+    """Initialize Archive tracking and notify once for a new print."""
+    from backend.app.models.archive import PrintArchive
+
+    logger = logging.getLogger(__name__)
+    archive_data = None
+    async with async_session() as db:
+        archive = await db.get(PrintArchive, archive_id) if archive_id is not None else None
+        if archive is not None:
+            archive_data = {
+                "print_time_seconds": archive.print_time_seconds,
+                "created_by_id": archive.created_by_id,
+                "owner_id": data.get("owner_id") or archive.created_by_id,
+            }
+            # Legacy reprints may reuse a row. Modern attempts already have fresh media.
+            if archive.timelapse_path:
+                stale_path = app_settings.base_dir / archive.timelapse_path
+                archive.timelapse_path = None
+                await db.commit()
+                try:
+                    stale_path.unlink(missing_ok=True)
+                except OSError:
+                    logger.warning("Could not remove old timelapse for Archive %s", archive_id)
+            if archive.energy_start_kwh is None:
+                await _record_energy_start(archive, printer_id, db, context="print-start")
+            try:
+                await _store_spoolman_print_data(
+                    printer_id,
+                    archive.id,
+                    archive.file_path,
+                    db,
+                    printer_manager,
+                    ams_mapping=data.get("ams_mapping"),
+                    plate_id=data.get("plate_id"),
+                )
+            except Exception:
+                logger.exception("Could not initialize filament tracking for Archive %s", archive_id)
+    await _send_print_start_notification(printer_id, data, archive_data, logger)
+
+
+async def _archive_print_start(
+    printer_id: int, data: dict, *, queue_archive_id: int | None = None, queue_job_id: int | None = None
+) -> bool:
+    """Associate the exact job Archive and restore its metadata.
+
+    FTP names locate files; job IDs identify attempts. Cached downloads are reused,
+    and this path never repeats new-print notifications, plate checks or usage resets.
+    """
+    logger = logging.getLogger(__name__)
+    async with async_session() as db:
+        from backend.app.models.printer import Printer
+        from backend.app.services.bambu_ftp import list_files_async
+
+        result = await db.execute(select(Printer).where(Printer.id == printer_id))
+        printer = result.scalar_one_or_none()
+        from backend.app.models.archive import PrintArchive
+
+        if queue_archive_id is None and queue_job_id is not None:
+            owned_archive = await db.scalar(
+                select(PrintArchive).where(
+                    PrintArchive.dispatched_queue_item_id == queue_job_id, PrintArchive.printer_id == printer_id
+                )
+            )
+            if owned_archive is not None:
+                queue_archive_id = owned_archive.id
         if not printer:
             logger.info("[CALLBACK] Skipping archive - printer not found in database")
-            if not recovering and not notification_sent:
-                await _send_print_start_notification(printer_id, data, logger=logger)
             return True
-
-        if queue_job_id is not None:
-            # Archive storage can fail after these new-print effects succeeded.
-            # Subsequent observations retry the Archive in recovery mode.
-            _initialized_job_starts[printer_id] = queue_job_id
-
         if not printer.auto_archive and queue_archive_id is None:
             logger.info("[CALLBACK] Skipping Archive for external print: auto_archive is disabled")
-            if not recovering and not notification_sent:
-                await _send_print_start_notification(printer_id, data, logger=logger)
             return True
-
-        # Get the filename and subtask_name
         filename = data.get("filename", "")
         subtask_name = data.get("subtask_name", "")
-
-        # MQTT subtask_id uniquely identifies a print job on the printer. When
-        # present, it lets us match an archive across a backend restart (#972):
-        # same id → same print → resume the existing row instead of cancelling
-        # it and recreating from scratch (which loses started_at). Treat "0"
-        # and "" as absent — Bambu reports "0" for non-cloud / local prints.
         subtask_id = event_identity(data)
-
         logger.info("[CALLBACK] Print start detected - filename: %s, subtask: %s", filename, subtask_name)
-
-        # Skip calibration prints — internal printer files should not be archived
-        # Bambu calibration gcode lives under /usr/ (e.g. /usr/etc/print/auto_cali_for_user.gcode)
         if filename and filename.startswith("/usr/"):
             logger.info("[CALLBACK] Skipping archive — internal printer file detected: %s", filename)
-            if not recovering and not notification_sent:
-                await _send_print_start_notification(printer_id, data, logger=logger)
             return True
-
-        if not filename and not subtask_name:
-            # Send notification without archive data (no filename)
+        if not filename and (not subtask_name):
             logger.info("[CALLBACK] Skipping archive - no filename or subtask_name")
-            if not recovering and not notification_sent:
-                await _send_print_start_notification(printer_id, data, logger=logger)
             return True
-
-        # Only the identified Queue job supplies an existing attempt.
         expected_archive_id = queue_archive_id
-
         if expected_archive_id:
-            # This is a reprint/scheduled print - use existing archive, don't create new one
             logger.info("Using expected archive %s for print (skipping duplicate)", expected_archive_id)
             from backend.app.models.archive import PrintArchive
 
             result = await db.execute(select(PrintArchive).where(PrintArchive.id == expected_archive_id))
             archive = result.scalar_one_or_none()
-
             if archive:
-                # The identified job transition already recorded its start.
-                # Unlinked legacy/virtual-printer intake has no job writer yet.
                 if archive.dispatched_queue_item_id is None:
                     archive.status = "printing"
                     archive.started_at = datetime.now(timezone.utc)
                     archive.completed_at = None
                     archive.failure_reason = None
-                # Reprint of an archive reuses the source row. Without resetting
-                # ``timelapse_path`` _scan_for_timelapse_with_retries early-returns
-                # ("already has timelapse") and _capture_finish_photo_from_timelapse
-                # extracts the *original* print's last frame, which then ships in
-                # the completion notification (#1707). Clear the path so the
-                # scanner runs fresh; also unlink the old video file so reprints
-                # don't accumulate orphans in the archive directory. Photos list
-                # is left alone — accumulating one finish photo per run is fine.
-                stale_timelapse_relpath = archive.timelapse_path
-                if stale_timelapse_relpath and not recovering:
-                    archive.timelapse_path = None
-                    try:
-                        stale_path = app_settings.base_dir / stale_timelapse_relpath
-                        if stale_path.is_file():
-                            stale_path.unlink()
-                            logger.info(
-                                "Deleted stale timelapse %s on reprint of archive %s",
-                                stale_timelapse_relpath,
-                                expected_archive_id,
-                            )
-                    except OSError as e:
-                        logger.warning(
-                            "Failed to delete stale timelapse %s on reprint: %s",
-                            stale_timelapse_relpath,
-                            e,
-                        )
                 if subtask_id and archive.subtask_id != subtask_id:
                     archive.subtask_id = subtask_id
-                # #1403 follow-up: VP-queue archives are created with
-                # printer_id=None at queue-add time (we don't know which
-                # printer will run the job yet). When the print actually
-                # starts on a specific printer the expected-archive lookup
-                # used to skip this assignment, leaving printer_id=None
-                # forever — which then disables the "Scan for timelapse"
-                # button in ArchivesPage (gated on !archive.printer_id).
                 if archive.printer_id != printer_id:
                     archive.printer_id = printer_id
                 await db.commit()
-
-                # Track as active print
-                _active_prints[(printer_id, archive.filename)] = archive.id
-                if subtask_name:
-                    _active_prints[(printer_id, f"{subtask_name}.3mf")] = archive.id
-
-                # Start timelapse session if external camera is enabled (#1353).
-                # Queue / VP-dispatched prints land here in the expected-archive
-                # branch and used to skip start_session entirely — frames were
-                # never captured and the post-print stitch silently returned None.
-                _maybe_start_layer_timelapse(printer, printer_id, archive.id)
-
-                # Restore missing usage context from the identified job, also
-                # for sessions created before the Archive was associated.
-                from backend.app.services.usage_tracker import _active_sessions, update_persisted_session_context
-
-                usage_session = _active_sessions.get(printer_id)
-                if usage_session:
-                    if not usage_session.ams_mapping:
-                        usage_session.ams_mapping = data.get("ams_mapping")
-                    if usage_session.plate_id is None:
-                        usage_session.plate_id = data.get("plate_id")
-                await update_persisted_session_context(
-                    db, printer_id, ams_mapping=data.get("ams_mapping"), plate_id=data.get("plate_id")
-                )
-
-                # Set up energy tracking (#941: persist start on archive row)
-                if not recovering and archive.energy_start_kwh is None:
-                    await _record_energy_start(archive, printer_id, db, context="expected-print")
-
-                await ws_manager.send_archive_updated(
-                    {
-                        "id": archive.id,
-                        "status": "printing",
-                    }
-                )
-
-                # Send notification with archive data (reprint/scheduled)
-                if not recovering and not notification_sent:
-                    owner_id = data.get("owner_id") or archive.created_by_id
-                    archive_data = {
-                        "print_time_seconds": archive.print_time_seconds,
-                        "created_by_id": archive.created_by_id,
-                        "owner_id": owner_id,
-                    }
-                    await _send_print_start_notification(printer_id, data, archive_data, logger)
-
-                # Extract printable objects from the archived 3MF file
-                _load_objects_from_archive(archive, printer_id, logger, reset_skipped=not recovering)
-
-                # A recovery must preserve the original remaining-filament
-                # snapshot; store_print_data replaces the persisted row.
-                if not recovering:
-                    try:
-                        await _store_spoolman_print_data(
-                            printer_id,
-                            archive.id,
-                            archive.file_path,
-                            db,
-                            printer_manager,
-                            ams_mapping=data.get("ams_mapping"),
-                            plate_id=data.get("plate_id"),
-                        )
-                    except Exception as e:
-                        logger.warning("[SPOOLMAN] Failed to store tracking data: %s", e)
-
-                # Capture timelapse file baseline for snapshot-diff on completion
-                # (mirrors the new-archive branch). Queue / VP-dispatched prints
-                # hit this branch — without the baseline the completion-time scan
-                # falls into its "take baseline now" fallback, which snapshots
-                # AFTER the new MP4 already exists and never matches a diff
-                # (#1403 follow-up — see pwostran's 2026-05-18 support bundle).
-                await _capture_timelapse_baseline_at_start(printer, printer_id, logger)
-
-            return True  # Skip creating a new archive
-
-        # Check if there's already a "printing" archive for this printer/file
-        # This prevents duplicates when backend restarts during an active print
+                await ws_manager.send_archive_updated({"id": archive.id, "status": archive.status})
+                await _restore_archive_print_context(db, printer, archive, data)
+            return True
         from backend.app.models.archive import PrintArchive
 
         existing_archive: PrintArchive | None = None
-
-        # Preferred match: subtask_id equality. MQTT reports the same subtask_id
-        # across a backend restart for the same print.
         if subtask_id:
             by_id = await db.execute(
                 select(PrintArchive)
@@ -2922,34 +2837,15 @@ async def _archive_print_start(
             candidates = list(by_id.scalars().all())
             if len(candidates) == 1:
                 existing_archive = candidates[0]
-
         if existing_archive:
             logger.info("Resuming archive %s on subtask_id match (%s)", existing_archive.id, subtask_id)
-            _active_prints[(printer_id, existing_archive.filename)] = existing_archive.id
-            if not recovering and existing_archive.energy_start_kwh is None:
-                await _record_energy_start(existing_archive, printer_id, db, context="subtask-resume")
-            if not recovering and not notification_sent:
-                archive_data = {
-                    "print_time_seconds": existing_archive.print_time_seconds,
-                    "created_by_id": existing_archive.created_by_id,
-                }
-                await _send_print_start_notification(printer_id, data, archive_data, logger)
-            _load_objects_from_archive(existing_archive, printer_id, logger, reset_skipped=not recovering)
+            await _restore_archive_print_context(db, printer, existing_archive, data)
             return True
-
-        # Build list of possible 3MF filenames to try
         possible_names = []
-
-        # Bambu printers typically store files as "Name.gcode.3mf"
-        # The subtask_name is usually the best source for the filename
         if subtask_name:
-            # Try common Bambu naming patterns
             possible_names.append(f"{subtask_name}.gcode.3mf")
             possible_names.append(f"{subtask_name}.3mf")
-
-        # Try original filename with .3mf extension
         if filename:
-            # Extract just the filename part, not the full path
             fname = filename.split("/")[-1] if "/" in filename else filename
             if fname.endswith(".3mf"):
                 possible_names.append(fname)
@@ -2960,29 +2856,16 @@ async def _archive_print_start(
             else:
                 possible_names.append(f"{fname}.gcode.3mf")
                 possible_names.append(f"{fname}.3mf")
-
-        # Also try with spaces converted to underscores (Bambu Studio may normalize filenames)
         space_variants = []
         for name in possible_names:
             if " " in name:
                 space_variants.append(name.replace(" ", "_"))
         possible_names.extend(space_variants)
-
-        # Remove duplicates while preserving order
         seen = set()
         possible_names = [x for x in possible_names if not (x in seen or seen.add(x))]
-
         logger.info("Trying filenames: %s", possible_names)
-
-        # Try to find and download the 3MF file
         temp_path = None
         downloaded_filename = None
-
-        # Cache check: cover endpoint may have already pulled this 3MF during
-        # the print (frontend opens the card and shows the thumbnail) — reuse
-        # that file instead of re-downloading 36MB over the same FTP link that
-        # just served it (#972). The cache keys on a normalized filename so
-        # variants like "X", "X.3mf", "X.gcode.3mf" all collapse to one entry.
         for try_filename in possible_names:
             if not try_filename.endswith(".3mf"):
                 continue
@@ -2992,18 +2875,10 @@ async def _archive_print_start(
                 temp_path = cached
                 downloaded_filename = try_filename
                 break
-
-        # Get FTP retry settings
         ftp_retry_enabled, ftp_retry_count, ftp_retry_delay, ftp_timeout = await get_ftp_retry_settings()
-
         for try_filename in possible_names if not downloaded_filename else []:
             if not try_filename.endswith(".3mf"):
                 continue
-
-            # Root (/) is where BambuStudio/OrcaSlicer uploads land on A1/P1-series
-            # printers, so try it first — deferring it to last cost #972's reporter
-            # ~48 minutes of retries on /cache//model//data//data/Metadata before
-            # landing on the path that actually had the file.
             remote_paths = [
                 f"/{try_filename}",
                 f"/cache/{try_filename}",
@@ -3011,10 +2886,8 @@ async def _archive_print_start(
                 f"/data/{try_filename}",
                 f"/data/Metadata/{try_filename}",
             ]
-
             temp_path = app_settings.archive_dir / "temp" / try_filename
             temp_path.parent.mkdir(parents=True, exist_ok=True)
-
             for remote_path in remote_paths:
                 logger.debug("Trying FTP download: %s", remote_path)
                 try:
@@ -3047,22 +2920,14 @@ async def _archive_print_start(
                     if downloaded:
                         downloaded_filename = try_filename
                         logger.info("Downloaded: %s", remote_path)
-                        # Populate shared cache so the cover endpoint (if it
-                        # runs next) doesn't refetch the same 36MB over FTP.
                         cache_3mf_download(printer_id, try_filename, temp_path)
                         break
                 except FileNotOnPrinterError:
-                    # 550 — file isn't at this path. Advance to next candidate
-                    # without burning the retry budget.
                     logger.debug("3MF not at %s (550), trying next path", remote_path)
                 except Exception as e:
                     logger.debug("FTP download failed for %s: %s", remote_path, e)
-
             if downloaded_filename:
                 break
-
-        # If still not found, try listing directories to find matching file
-        # Different printer models use different directory structures
         if not downloaded_filename and (filename or subtask_name):
             search_term = (subtask_name or filename).lower().replace(".gcode", "").replace(".3mf", "")
             logger.info("Direct FTP download failed, searching directories for '%s'", search_term)
@@ -3077,13 +2942,12 @@ async def _archive_print_start(
                     threemf_files = [f.get("name") for f in dir_files if f.get("name", "").endswith(".3mf")]
                     if threemf_files:
                         logger.info(
-                            f"Found {len(threemf_files)} 3MF files in {search_dir}: {threemf_files[:5]}{'...' if len(threemf_files) > 5 else ''}"
+                            f"Found {len(threemf_files)} 3MF files in {search_dir}: {threemf_files[:5]}{('...' if len(threemf_files) > 5 else '')}"
                         )
                     for f in dir_files:
                         if f.get("is_directory"):
                             continue
                         fname = f.get("name", "")
-                        # Normalize both for comparison (spaces and underscores are equivalent)
                         fname_normalized = fname.lower().replace(" ", "_")
                         search_normalized = search_term.replace(" ", "_")
                         if fname.endswith(".3mf") and search_normalized in fname_normalized:
@@ -3123,20 +2987,12 @@ async def _archive_print_start(
                                 break
                 except Exception as e:
                     logger.debug("Failed to list %s: %s", search_dir, e)
-
-        # Validate the downloaded 3MF actually matches the plate that's running
-        # (#1204): subtask_name lags across consecutive plates of the same model,
-        # so the first FTP candidate (built from subtask_name) can land on the
-        # previous plate's still-resident upload. Cross-check the slice_info
-        # plate index against the plate parsed from gcode_file (always fresh —
-        # it's the field whose change triggered this callback).
         if downloaded_filename and temp_path:
             expected_plate = parse_plate_id(filename)
             actual_plate = peek_plate_index_in_3mf(temp_path) if expected_plate is not None else None
-            if expected_plate is not None and actual_plate is not None and actual_plate != expected_plate:
+            if expected_plate is not None and actual_plate is not None and (actual_plate != expected_plate):
                 logger.warning(
-                    "[CALLBACK] 3MF plate mismatch: downloaded %s reports plate %s but printer is "
-                    "running plate %s — subtask_name=%r appears stale, retrying with corrected name",
+                    "[CALLBACK] 3MF plate mismatch: downloaded %s reports plate %s but printer is running plate %s — subtask_name=%r appears stale, retrying with corrected name",
                     downloaded_filename,
                     actual_plate,
                     expected_plate,
@@ -3184,8 +3040,7 @@ async def _archive_print_start(
                                     )
                                 if downloaded and peek_plate_index_in_3mf(retry_temp_path) == expected_plate:
                                     logger.info(
-                                        "[CALLBACK] Re-download succeeded with corrected name %s "
-                                        "(plate %s) — replacing wrong file",
+                                        "[CALLBACK] Re-download succeeded with corrected name %s (plate %s) — replacing wrong file",
                                         try_filename,
                                         expected_plate,
                                     )
@@ -3200,7 +3055,6 @@ async def _archive_print_start(
                                     retry_succeeded = True
                                     break
                                 elif downloaded:
-                                    # Wrong plate again — discard and keep trying
                                     try:
                                         retry_temp_path.unlink(missing_ok=True)
                                     except OSError:
@@ -3211,9 +3065,6 @@ async def _archive_print_start(
                                 logger.debug("Re-download failed for %s: %s", remote_path, e)
                         if retry_succeeded:
                             break
-                # If the retry didn't find a matching file, drop the wrong 3MF
-                # so the no-3MF fallback below creates an archive whose name
-                # at least reflects the right plate.
                 if not retry_succeeded:
                     logger.warning(
                         "[CALLBACK] Could not re-download correct plate %s — falling back to no-3MF archive",
@@ -3225,53 +3076,34 @@ async def _archive_print_start(
                         pass
                     temp_path = None
                     downloaded_filename = None
-                    # Override the stale subtask_name so the fallback archive's
-                    # print_name reflects the correct plate. Prefer the swapped
-                    # name when we have one; otherwise let filename win.
                     if corrected_subtask:
                         subtask_name = corrected_subtask
                     else:
                         subtask_name = ""
-
         if not downloaded_filename or not temp_path:
             logger.warning("Could not find 3MF file for print: %s", filename or subtask_name)
-            # Create a fallback archive without 3MF data so the print is still tracked
-            # This commonly happens with P1S/A1 printers where FTP has file size limitations
             try:
                 from backend.app.models.archive import PrintArchive
 
-                # Derive print name from subtask_name or filename
                 print_name = subtask_name or filename
                 if print_name:
-                    # Clean up the name (remove extensions, path parts)
                     print_name = print_name.split("/")[-1]
                     print_name = print_name.replace(".gcode.3mf", "").replace(".gcode", "").replace(".3mf", "")
                 else:
                     print_name = "Unknown Print"
-
-                # Recover estimated print time from MQTT (best-effort for notifications)
                 fallback_print_time = None
                 mqtt_remaining = data.get("remaining_time")
-                if mqtt_remaining and isinstance(mqtt_remaining, (int, float)) and mqtt_remaining > 0:
+                if mqtt_remaining and isinstance(mqtt_remaining, (int, float)) and (mqtt_remaining > 0):
                     fallback_print_time = int(mqtt_remaining)
                 if fallback_print_time is None:
                     mc_remaining = (data.get("raw_data") or {}).get("mc_remaining_time")
-                    if mc_remaining and isinstance(mc_remaining, (int, float)) and mc_remaining > 0:
+                    if mc_remaining and isinstance(mc_remaining, (int, float)) and (mc_remaining > 0):
                         fallback_print_time = int(mc_remaining * 60)
-
-                # Best-effort filament metadata from MQTT — see
-                # _extract_filament_data_from_mqtt. Without this the fallback
-                # archive's filament fields stayed NULL even though the AMS
-                # state at print start was sitting right there in `data`.
-                # The slicer's ams_mapping (when present) narrows the result
-                # to slots actually used by the print (#1533).
                 mqtt_filament_meta = _extract_filament_data_from_mqtt(data, data.get("ams_mapping"))
-
-                # Create minimal archive entry
                 fallback_archive = PrintArchive(
                     printer_id=printer_id,
                     filename=filename or f"{print_name}.3mf",
-                    file_path="",  # Empty - no 3MF file available
+                    file_path="",
                     file_size=0,
                     print_name=print_name,
                     print_time_seconds=fallback_print_time,
@@ -3283,28 +3115,11 @@ async def _archive_print_start(
                     filament_color=mqtt_filament_meta.get("filament_color"),
                     extra_data={"no_3mf_available": True, "original_subtask": subtask_name, "_print_data": data},
                 )
-
                 db.add(fallback_archive)
                 await db.commit()
                 await db.refresh(fallback_archive)
-
                 logger.info("Created fallback archive %s for %s (no 3MF available)", fallback_archive.id, print_name)
-
-                _maybe_start_layer_timelapse(printer, printer_id, fallback_archive.id)
-
-                # Track as active print
-                _active_prints[(printer_id, fallback_archive.filename)] = fallback_archive.id
-                if filename:
-                    _active_prints[(printer_id, filename)] = fallback_archive.id
-                if subtask_name:
-                    _active_prints[(printer_id, f"{subtask_name}.3mf")] = fallback_archive.id
-                    _active_prints[(printer_id, subtask_name)] = fallback_archive.id
-
-                # Record starting energy if smart plug available (#941: persisted column)
-                if not recovering:
-                    await _record_energy_start(fallback_archive, printer_id, db, context="fallback")
-
-                # Send WebSocket notification
+                await _restore_archive_print_context(db, printer, fallback_archive, data)
                 await ws_manager.send_archive_created(
                     {
                         "id": fallback_archive.id,
@@ -3314,8 +3129,6 @@ async def _archive_print_start(
                         "status": fallback_archive.status,
                     }
                 )
-
-                # MQTT relay - publish archive created
                 try:
                     await mqtt_relay.on_archive_created(
                         archive_id=fallback_archive.id,
@@ -3324,34 +3137,12 @@ async def _archive_print_start(
                         status=fallback_archive.status,
                     )
                 except Exception:
-                    pass  # Don't fail if MQTT fails
-
-                if not recovering:
-                    try:
-                        await _store_spoolman_print_data(
-                            printer_id,
-                            fallback_archive.id,
-                            fallback_archive.file_path,
-                            db,
-                            printer_manager,
-                            ams_mapping=data.get("ams_mapping"),
-                            plate_id=data.get("plate_id"),
-                        )
-                    except Exception as e:
-                        logger.debug("[SPOOLMAN] Could not store tracking for fallback archive: %s", e)
-
-                # Send notification without archive data (file not found)
-                if not recovering and not notification_sent:
-                    await _send_print_start_notification(printer_id, data, logger=logger)
+                    pass
                 return True
             except Exception as e:
                 logger.error("Failed to create fallback archive: %s", e)
-                if not recovering and not notification_sent:
-                    await _send_print_start_notification(printer_id, data, logger=logger)
                 return False
-
         try:
-            # Archive the file with status "printing"
             service = ArchiveService(db)
             archive = await service.archive_print(
                 printer_id=printer_id,
@@ -3360,23 +3151,9 @@ async def _archive_print_start(
                 subtask_id=subtask_id,
                 dispatched_queue_item_id=queue_job_id,
             )
-
             if archive:
-                # Track this active print (use both original filename and downloaded filename)
-                _active_prints[(printer_id, downloaded_filename)] = archive.id
-                if filename and filename != downloaded_filename:
-                    _active_prints[(printer_id, filename)] = archive.id
-                if subtask_name:
-                    _active_prints[(printer_id, f"{subtask_name}.3mf")] = archive.id
-
                 logger.info("Created archive %s for %s", archive.id, downloaded_filename)
-
-                _maybe_start_layer_timelapse(printer, printer_id, archive.id)
-
-                # Record starting energy from smart plug if available (#941: persisted column)
-                if not recovering:
-                    await _record_energy_start(archive, printer_id, db, context="auto-archive")
-
+                await _restore_archive_print_context(db, printer, archive, data)
                 await ws_manager.send_archive_created(
                     {
                         "id": archive.id,
@@ -3386,8 +3163,6 @@ async def _archive_print_start(
                         "status": archive.status,
                     }
                 )
-
-                # MQTT relay - publish archive created
                 try:
                     await mqtt_relay.on_archive_created(
                         archive_id=archive.id,
@@ -3396,65 +3171,47 @@ async def _archive_print_start(
                         status=archive.status,
                     )
                 except Exception:
-                    pass  # Don't fail if MQTT fails
-
-                # Send notification with archive data (new archive created)
-                if not recovering and not notification_sent:
-                    archive_data = {
-                        "print_time_seconds": archive.print_time_seconds,
-                        "created_by_id": archive.created_by_id,
-                    }
-                    await _send_print_start_notification(printer_id, data, archive_data, logger)
-
-                # Extract printable objects for skip object functionality
-                try:
-                    from backend.app.services.archive import extract_printable_objects_from_3mf
-
-                    with open(temp_path, "rb") as f:
-                        threemf_data = f.read()
-                    # Extract with positions for UI overlay
-                    printable_objects, bbox_all = extract_printable_objects_from_3mf(
-                        threemf_data, include_positions=True
-                    )
-                    if printable_objects:
-                        # Store objects in printer state
-                        client = printer_manager.get_client(printer_id)
-                        if client:
-                            client.state.printable_objects = printable_objects
-                            client.state.printable_objects_bbox_all = bbox_all
-                            if not recovering:
-                                client.state.skipped_objects = []
-                            logger.info(
-                                "Loaded %s printable objects for printer %s", len(printable_objects), printer_id
-                            )
-                except Exception as e:
-                    logger.debug("Failed to extract printable objects: %s", e)
-
-                if not recovering:
-                    try:
-                        await _store_spoolman_print_data(
-                            printer_id,
-                            archive.id,
-                            archive.file_path,
-                            db,
-                            printer_manager,
-                            ams_mapping=data.get("ams_mapping"),
-                            plate_id=data.get("plate_id"),
-                        )
-                    except Exception as e:
-                        logger.warning("[SPOOLMAN] Failed to store tracking data: %s", e)
-
-                # Capture timelapse file baseline for snapshot-diff on completion
-                await _capture_timelapse_baseline_at_start(printer, printer_id, logger)
+                    pass
             return archive is not None
         finally:
-            # Keep temp_path around until print completes so the cover endpoint
-            # can reuse it (#972). Cache eviction in on_print_complete deletes
-            # the file. If the cache entry was evicted early (file vanished),
-            # clean up any stragglers here to avoid leaking disk on retries.
             cached_now = get_cached_3mf(printer_id, downloaded_filename) if downloaded_filename else None
-            if temp_path and temp_path.exists() and cached_now != temp_path:
+            if temp_path and temp_path.exists() and (cached_now != temp_path):
                 temp_path.unlink()
+
+
+async def _restore_archive_print_context(db, printer, archive, data: dict) -> None:
+    """Restore runtime context only while this exact print is still active."""
+    from backend.app.models.print_queue import PrintQueueItem
+
+    if archive.dispatched_queue_item_id is not None:
+        job = await db.get(PrintQueueItem, archive.dispatched_queue_item_id)
+        if job is None or job.status not in ("printing", "paused"):
+            return
+    live = printer_manager.get_status(printer.id)
+    if (
+        not live
+        or not live.connected
+        or not live.job_telemetry_ready
+        or live.state not in ("PREPARE", "SLICING", "RUNNING", "PAUSE")
+        or telemetry_identity(live) != event_identity(data)
+    ):
+        return  # A completion or another print overtook slow Archive I/O.
+    from backend.app.services.usage_tracker import _active_sessions, update_persisted_session_context
+
+    usage_session = _active_sessions.get(printer.id)
+    if usage_session:
+        if not usage_session.ams_mapping:
+            usage_session.ams_mapping = data.get("ams_mapping")
+        if usage_session.plate_id is None:
+            usage_session.plate_id = data.get("plate_id")
+    await update_persisted_session_context(
+        db, printer.id, ams_mapping=data.get("ams_mapping"), plate_id=data.get("plate_id")
+    )
+    logger = logging.getLogger(__name__)
+    _maybe_start_layer_timelapse(printer, printer.id, archive.id)
+    _load_objects_from_archive(archive, printer.id, logger, reset_skipped=False)
+    if printer.id not in _timelapse_baselines:
+        await _capture_timelapse_baseline_at_start(printer, printer.id, logger)
 
 
 _TIMELAPSE_VIDEO_EXTENSIONS = (".mp4", ".avi")
@@ -4288,17 +4045,14 @@ async def _complete_identified_print(printer_id: int, data: dict):
                 matched_job,
                 matched_job.status,
                 destination,
-                action="confirmed_completion" if completing_cancelled and destination == "finished" else None,
+                action="printer_report" if matched_job.physical_outcome is None else None,
                 values={
                     "completed_at": datetime.now(timezone.utc)
                     if completing_cancelled
                     else matched_job.completed_at or datetime.now(timezone.utc),
                     "error_message": reason,
                 },
-                archive_failure_reason=derive_failure_reason(reported_outcome, data.get("hms_errors")),
-                observed_outcome=("aborted" if reported_outcome == "cancelled" else reported_outcome)
-                if matched_job.physical_outcome is None
-                else None,
+                archive_failure_reason=derive_failure_reason(reported_status, data.get("hms_errors")),
             )
         remote_filename = archive_filename = None
         if matched_job.archive_id:
@@ -4336,7 +4090,6 @@ async def _complete_identified_print(printer_id: int, data: dict):
     if record is None:
         return False
     _completed_job_events[printer_id] = record.job_id
-    _pending_archive_starts.pop(printer_id, None)
     data = {**data, "status": record.reported_status, "ams_mapping": record.ams_mapping, "plate_id": record.plate_id}
     queue_item_id = record.job_id
     queue_item_owner_id = record.owner_id
@@ -4410,9 +4163,6 @@ async def _complete_identified_print(printer_id: int, data: dict):
 
     archive_id = matched_archive_id
     # Names remain useful for display and cleanup, never attribution.
-    for key, value in list(_active_prints.items()):
-        if value == archive_id:
-            _active_prints.pop(key, None)
 
     # Cleanup: delete uploaded file from printer SD card to prevent phantom prints (Issue #374, #1542)
     # The print scheduler uploads files to the SD card root (/). Some printers (e.g. P1S, A1)

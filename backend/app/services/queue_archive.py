@@ -4,10 +4,13 @@ import errno
 import json
 import logging
 import shutil
+from collections.abc import Sequence
 from pathlib import Path
 
 from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
+from sqlalchemy.sql.elements import ColumnElement
 
 from backend.app.core.config import settings
 from backend.app.models.archive import PrintArchive
@@ -20,6 +23,44 @@ from backend.app.utils.safe_path import safe_join_under
 from backend.app.utils.threemf_tools import inject_gcode_into_3mf
 
 logger = logging.getLogger(__name__)
+
+
+async def link_dispatch_archive(
+    db: AsyncSession,
+    item: PrintQueueItem,
+    archive: PrintArchive,
+    *,
+    conditions: Sequence[ColumnElement[bool]] = (),
+) -> None:
+    """Claim the held job before flushing its copy; caller commits both together."""
+    from backend.app.services.queue_transitions import (
+        InvalidQueueTransition,
+        QueueTransitionConflict,
+        transition_queue_item,
+    )
+
+    if (
+        item.status != "dispatching"
+        or archive not in db
+        or not inspect(archive).pending
+        or archive.dispatched_queue_item_id != item.id
+        or archive.printer_id != item.printer_id
+        or archive.status != "dispatching"
+        or archive.deleted_at is not None
+        or not archive.file_path
+    ):
+        raise InvalidQueueTransition("Dispatch Archive does not belong to this held job")
+    try:
+        await transition_queue_item(db, item, "dispatching", "dispatching", conditions=conditions)
+    except QueueTransitionConflict:
+        discard_prepared_archive(db, archive)
+        raise
+    await db.flush([archive])
+    item.archive_id = archive.id
+    set_committed_value(item, "archive", archive)
+    db.sync_session.info.setdefault("queue_transition_log", []).append(
+        (item.id, "dispatching", "dispatching", item.printer_id, archive.id, "archive_link")
+    )
 
 
 class DispatchSourceUnavailable(RuntimeError):

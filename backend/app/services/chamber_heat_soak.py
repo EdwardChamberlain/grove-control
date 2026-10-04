@@ -112,6 +112,13 @@ async def cleanup_heat_soak_shutdown(db: AsyncSession, printer_id: int) -> bool:
         select(PrintQueueItem.id).where(
             PrintQueueItem.printer_id == printer_id,
             PrintQueueItem.status.in_(("preheating", "dispatching", "printing", "paused")),
+            # An unsent dispatch whose worker has stopped can cool while its
+            # plate hold remains. An uploading or potentially sent job cannot.
+            or_(
+                PrintQueueItem.status != "dispatching",
+                PrintQueueItem.dispatching_at.is_not(None),
+                PrintQueueItem.dispatched_at.is_not(None),
+            ),
         )
     )
     if active_job is not None or not _heaters_off(printer):

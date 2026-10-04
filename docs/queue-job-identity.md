@@ -45,13 +45,13 @@ If the firmware ID arrives after a partial start update, its callback carries
 the exact prior session ID. The same job and linked Archive are bound to the
 reported ID without repeating start effects. Archiving waits for file metadata
 when the first active update has none.
-Transient Archive write failures are retried by ordinary MQTT status pushes,
-including unchanged active status. The retry requires fresh connected telemetry
-for the same active identity, claims one pending attempt per printer, and
-rechecks identity under the existing event lock before doing storage work. New-print
-initialization is tracked separately so that these retries do not repeat plate
-checks, notifications, usage-session resets, or power-on automation. Restoring
-printable objects during recovery preserves the printer's reported skipped objects.
+Missing Archive projections for started jobs are reconciled by the scheduler at
+most once per minute, with one pass at a time. Status pushes launch no retries.
+Repair rechecks fresh telemetry and the exact identity under the event lock,
+reuses committed owned Archives and cached 3MF downloads, and never repeats
+new-print plate checks, notifications, usage resets or power-on automation.
+Runtime restoration preserves skipped objects and requires that print to remain
+active; late repair after completion uses its retained physical outcome.
 
 New external Archives record their unique job owner when created. If linking
 the Queue projection fails, a later firmware ID still rebinds that exact

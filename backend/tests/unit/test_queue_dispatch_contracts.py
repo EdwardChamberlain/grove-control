@@ -17,7 +17,7 @@ from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services import chamber_heat_soak as heat, print_scheduler as scheduling
 from backend.app.services.archive import ArchiveService
-from backend.app.services.queue_archive import prepare_dispatch_archive
+from backend.app.services.queue_archive import link_dispatch_archive, prepare_dispatch_archive
 from backend.app.services.queue_transitions import InvalidQueueTransition, transition_queue_item
 from backend.tests.unit.test_queue_archive_alignment import alignment  # noqa: F401
 from backend.tests.unit.test_queue_dispatch_races import handoff  # noqa: F401
@@ -198,7 +198,7 @@ async def test_skip_is_successful_when_the_same_soak_already_progressed(handoff,
             job = await worker.get(PrintQueueItem, handoff.job_id)
             if progressed != "dispatching":
                 prepared = await prepare_dispatch_archive(worker, job)
-                await transition_queue_item(worker, job, "dispatching", "dispatching", attempt=prepared)
+                await link_dispatch_archive(worker, job, prepared)
                 await transition_queue_item(worker, job, "dispatching", "printing")
                 if progressed == "paused":
                     await transition_queue_item(worker, job, "printing", "paused")
@@ -269,7 +269,7 @@ async def test_dispatch_entry_rejects_another_jobs_prepared_archive(alignment):
         await db.commit()
         attempt = await prepare_dispatch_archive(db, other)
         with pytest.raises(InvalidQueueTransition, match="does not belong"):
-            await transition_queue_item(db, job, "dispatching", "dispatching", attempt=attempt)
+            await link_dispatch_archive(db, job, attempt)
         await db.rollback()
     assert not list(settings.archive_dir.rglob("*.3mf"))
 

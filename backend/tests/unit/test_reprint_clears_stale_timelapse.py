@@ -19,17 +19,14 @@ import pytest
 
 from backend.app.core.config import settings as app_settings
 from backend.app.main import (
-    _active_prints,
     _timelapse_baselines,
 )
 
 
 @pytest.fixture(autouse=True)
 def _clear_dicts():
-    _active_prints.clear()
     _timelapse_baselines.clear()
     yield
-    _active_prints.clear()
     _timelapse_baselines.clear()
 
 
@@ -75,6 +72,7 @@ def _build_mocks(mock_printer, mock_archive):
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock()
     mock_session.execute = AsyncMock(side_effect=execute_router)
+    mock_session.get = AsyncMock(return_value=mock_archive)
     mock_session.commit = AsyncMock()
     return mock_session
 
@@ -151,11 +149,12 @@ async def test_reprint_clears_timelapse_path_and_unlinks_stale_file(tmp_path):
         mock_relay.on_print_start = AsyncMock()
         mock_pm.get_printer = MagicMock(return_value=MagicMock(name="Test", serial_number="TEST123"))
 
-        from backend.app.main import _archive_print_start as on_print_start
+        from backend.app.main import _archive_print_start as on_print_start, _finish_new_print
 
         await on_print_start(
             1, {"filename": "MyModel.3mf", "subtask_name": "MyModel"}, queue_archive_id=mock_archive.id
         )
+        await _finish_new_print(1, {}, mock_archive.id)
 
     assert mock_archive.timelapse_path is None, (
         "expected-archive branch must clear timelapse_path on reprint so "
@@ -231,11 +230,12 @@ async def test_reprint_with_no_timelapse_path_is_noop(tmp_path):
         mock_relay.on_print_start = AsyncMock()
         mock_pm.get_printer = MagicMock(return_value=MagicMock(name="Test", serial_number="TEST123"))
 
-        from backend.app.main import _archive_print_start as on_print_start
+        from backend.app.main import _archive_print_start as on_print_start, _finish_new_print
 
         await on_print_start(
             1, {"filename": "FreshFile.3mf", "subtask_name": "FreshFile"}, queue_archive_id=mock_archive.id
         )
+        await _finish_new_print(1, {}, mock_archive.id)
 
     assert mock_archive.timelapse_path is None
     assert mock_archive.status == "printing"
@@ -306,9 +306,10 @@ async def test_reprint_with_missing_stale_file_does_not_raise(tmp_path):
         mock_relay.on_print_start = AsyncMock()
         mock_pm.get_printer = MagicMock(return_value=MagicMock(name="Test", serial_number="TEST123"))
 
-        from backend.app.main import _archive_print_start as on_print_start
+        from backend.app.main import _archive_print_start as on_print_start, _finish_new_print
 
         await on_print_start(1, {"filename": "Ghost.3mf", "subtask_name": "Ghost"}, queue_archive_id=mock_archive.id)
+        await _finish_new_print(1, {}, mock_archive.id)
 
     assert mock_archive.timelapse_path is None
     assert mock_archive.status == "printing"
