@@ -966,7 +966,8 @@ async def test_printer_becoming_busy_during_archive_copy_fails_the_hold_before_f
 
     await _dispatch_library_item(ctx, printer_status=state, during_archive=external_start)
     job, _, attempt = await _queue_snapshot(ctx)
-    assert job.status == "failed" and attempt is None
-    assert not ctx.archive_path.exists()
+    assert job.status == "failed" and attempt.status == "failed"
+    assert attempt.dispatched_queue_item_id == job.id
+    assert ctx.archive_path.exists()
     ctx.upload.assert_not_awaited()
     ctx.start_print.assert_not_called()
