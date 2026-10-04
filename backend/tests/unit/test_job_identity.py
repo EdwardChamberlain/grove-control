@@ -718,6 +718,20 @@ async def test_debug_completion_uses_identified_active_attempt(sessions, monkeyp
     monkeypatch.setattr(main, "on_print_complete", complete)
     _, archive_id = await add_linked_job(sessions, "current")
     async with sessions() as db:
+        ended = PrintQueueItem(printer_id=1, status="unsuccessful", dispatch_subtask_id="ended")
+        db.add(ended)
+        await db.flush()
+        db.add(
+            PrintArchive(
+                printer_id=1,
+                filename="stale.3mf",
+                file_path="",
+                file_size=0,
+                status="printing",
+                subtask_id="ended",
+                dispatched_queue_item_id=ended.id,
+            )
+        )
         db.add(
             PrintArchive(
                 printer_id=1, filename="old.3mf", file_path="", file_size=0, status="completed", subtask_id="old"

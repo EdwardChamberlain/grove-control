@@ -2998,9 +2998,11 @@ async def debug_simulate_print_complete(
     # Simulate the identified active attempt, never unrelated historical work.
     result = await db.execute(
         select(PrintArchive)
+        .join(PrintQueueItem, PrintQueueItem.id == PrintArchive.dispatched_queue_item_id)
         .where(PrintArchive.printer_id == printer_id)
         .where(PrintArchive.status == "printing")
-        .where(PrintArchive.dispatched_queue_item_id.is_not(None))
+        .where(PrintQueueItem.status.in_(("printing", "paused")))
+        .where(PrintQueueItem.dispatch_subtask_id == PrintArchive.subtask_id)
         .where(PrintArchive.subtask_id.is_not(None))
         .order_by(PrintArchive.created_at.desc())
         .limit(1)
