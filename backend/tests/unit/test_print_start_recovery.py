@@ -1,5 +1,6 @@
 """Archive retries and object restoration during an already observed print."""
 
+import asyncio
 import zipfile
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -14,11 +15,14 @@ from backend.tests.unit.test_job_identity import add_linked_job, sessions  # noq
 
 
 @pytest.mark.parametrize("recovering", [False, True])
-async def test_real_fallback_write_failure_retries_archive_without_repeating_start_effects(
-    sessions, monkeypatch, tmp_path, recovering
+@pytest.mark.parametrize("burst", [False, True])
+async def test_mqtt_updates_retry_archive_write_without_repeating_start_effects(
+    sessions, monkeypatch, tmp_path, recovering, burst
 ):
     import backend.app.main as main
+    from backend.app.core.tasks import _background_tasks
     from backend.app.services import bambu_ftp, usage_tracker
+    from backend.app.services.bambu_mqtt import BambuMQTTClient
 
     attempts = []
 
@@ -31,9 +35,16 @@ async def test_real_fallback_write_failure_retries_archive_without_repeating_sta
             return await super().commit()
 
     failing_sessions = async_sessionmaker(sessions.kw["bind"], class_=FailFirstArchiveCommit, expire_on_commit=False)
-    live = SimpleNamespace(state="RUNNING", connected=True, job_telemetry_ready=True, submission_id="external-run")
+    client = BambuMQTTClient(ip_address="127.0.0.1", serial_number="TEST", access_code="12345678")
+    client.state.connected = True
     monkeypatch.setattr(main, "async_session", failing_sessions)
-    monkeypatch.setattr(main.printer_manager, "get_status", lambda _id: live)
+    monkeypatch.setattr(main.printer_manager, "get_status", lambda _id: client.state)
+    monkeypatch.setattr(main.printer_manager, "get_client", lambda _id: client)
+    monkeypatch.setattr(main.printer_manager, "get_printer", lambda _id: None)
+    monkeypatch.setattr(main, "_job_event_locks", {})
+    monkeypatch.setattr(main, "_printer_reconciled_since_connect", {1: True})
+    monkeypatch.setattr(main, "_printer_last_connected", {1: True})
+    monkeypatch.setattr(main, "_last_status_broadcast", {})
     monkeypatch.setattr(main, "get_ftp_retry_settings", AsyncMock(return_value=(False, 0, 0, 1)))
     monkeypatch.setattr(main, "download_file_async", AsyncMock(return_value=False))
     monkeypatch.setattr(bambu_ftp, "list_files_async", AsyncMock(return_value=[]))
@@ -44,6 +55,8 @@ async def test_real_fallback_write_failure_retries_archive_without_repeating_sta
     monkeypatch.setattr(main, "_record_energy_start", AsyncMock())
     monkeypatch.setattr(main, "_store_spoolman_print_data", AsyncMock())
     monkeypatch.setattr(main.ws_manager, "send_archive_created", AsyncMock())
+    monkeypatch.setattr(main.ws_manager, "broadcast", AsyncMock())
+    monkeypatch.setattr(main, "_capture_timelapse_baseline_at_start", AsyncMock())
     monkeypatch.setattr(main.mqtt_relay, "on_print_start", AsyncMock())
     monkeypatch.setattr(main.mqtt_relay, "on_archive_created", AsyncMock())
     started, notified, powered_on, usage = AsyncMock(), AsyncMock(), AsyncMock(), AsyncMock()
@@ -51,11 +64,32 @@ async def test_real_fallback_write_failure_retries_archive_without_repeating_sta
     monkeypatch.setattr(main, "_send_print_start_notification", notified)
     monkeypatch.setattr(main.smart_plug_manager, "on_print_start", powered_on)
     monkeypatch.setattr(usage_tracker, "on_print_start", usage)
-    data = {"submission_id": "external-run", "filename": "same.3mf", "raw_data": {"gcode_state": "RUNNING"}}
-    await main._observe_print_start(1, data, recovering=recovering)
+    callbacks = []
+    client.on_print_start = lambda data: callbacks.append(asyncio.create_task(main.on_print_start(1, data)))
+    client.on_print_running_observed = lambda data: callbacks.append(
+        asyncio.create_task(main.on_print_running_observed(1, data))
+    )
+    client.on_state_change = lambda state: callbacks.append(
+        asyncio.create_task(main.on_printer_status_change(1, state))
+    )
+
+    async def push(state, count=1):
+        for _ in range(count):
+            client._process_message(
+                {"print": {"gcode_state": state, "subtask_id": "external-run", "gcode_file": "same.3mf"}}
+            )
+        await asyncio.gather(*callbacks)
+        callbacks.clear()
+        await asyncio.gather(*(t for t in tuple(_background_tasks) if t.get_name() == "retry-print-archive-1"))
+
+    if not recovering:
+        await push("IDLE")
+    await push("RUNNING" if recovering else "PREPARE")
     assert attempts == [1] and main._observed_job_starts.get(1) is None
-    await main._observe_print_start(1, data, recovering=recovering)
-    await main._observe_print_start(1, data, recovering=recovering)
+    # Ordinary MQTT pushes, including identical status broadcasts, must drive
+    # recovery. No direct second call to a print-start callback is made.
+    await push("RUNNING", count=20 if burst else 1)
+    await push("RUNNING")
     assert attempts == [1, 1]
     async with sessions() as db:
         job = await db.scalar(select(PrintQueueItem))
@@ -63,9 +97,62 @@ async def test_real_fallback_write_failure_retries_archive_without_repeating_sta
         assert archive is not None and archive.dispatched_queue_item_id == job.id
         assert archive.subtask_id == "external-run"
         assert main._observed_job_starts[1] == job.id
+        assert 1 not in main._pending_archive_starts
         assert len(list(await db.scalars(select(PrintArchive)))) == 1
     for effect in (started, notified, powered_on, usage):
         assert effect.await_count == int(not recovering)
+
+
+@pytest.mark.parametrize("guard", ["disconnected", "uninitialized", "foreign", "terminal", "busy"])
+async def test_archive_retry_requires_a_fresh_matching_active_job(monkeypatch, guard):
+    import backend.app.main as main
+    from backend.app.services.bambu_mqtt import PrinterState
+
+    live = PrinterState(connected=True, job_telemetry_ready=True, state="RUNNING", submission_id="run")
+    pending = ("run", {"filename": "same.3mf"}, True)
+    monkeypatch.setattr(main, "_pending_archive_starts", {1: pending})
+    lock = asyncio.Lock()
+    monkeypatch.setattr(main, "_job_event_locks", {1: lock})
+    scheduled = []
+    monkeypatch.setattr(main, "spawn_background_task", lambda coro, **kwargs: scheduled.append(coro))
+    if guard == "disconnected":
+        live.connected = False
+    elif guard == "uninitialized":
+        live.job_telemetry_ready = False
+    elif guard == "foreign":
+        live.submission_id = "another-run"
+    elif guard == "terminal":
+        live.state = "FINISH"
+    else:
+        await lock.acquire()
+    try:
+        main._schedule_pending_archive_retry(1, live)
+        assert scheduled == []
+        assert main._pending_archive_starts[1] == pending
+    finally:
+        if lock.locked():
+            lock.release()
+
+
+async def test_archive_retry_rechecks_identity_before_restoring_work(monkeypatch):
+    import backend.app.main as main
+    from backend.app.services.bambu_mqtt import PrinterState
+
+    live = PrinterState(connected=True, job_telemetry_ready=True, state="RUNNING", submission_id="run")
+    pending = ("run", {"filename": "same.3mf"}, True)
+    monkeypatch.setattr(main, "_pending_archive_starts", {1: pending})
+    monkeypatch.setattr(main, "_job_event_locks", {})
+    monkeypatch.setattr(main.printer_manager, "get_status", lambda _id: live)
+    scheduled, observed = [], AsyncMock()
+    monkeypatch.setattr(main, "spawn_background_task", lambda coro, **kwargs: scheduled.append(coro))
+    monkeypatch.setattr(main, "_observe_print_start", observed)
+    main._schedule_pending_archive_retry(1, live)
+    main._schedule_pending_archive_retry(1, live)
+    assert len(scheduled) == 1  # Claim the retry before the task starts.
+    live.submission_id = "another-run"
+    await scheduled[0]
+    observed.assert_not_awaited()
+    assert main._pending_archive_starts[1] == pending
 
 
 @pytest.mark.parametrize("archive_kind", ["linked", "unlinked", "downloaded"])

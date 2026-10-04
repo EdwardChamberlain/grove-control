@@ -6,8 +6,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from sqlalchemy import event, select
+from sqlalchemy.exc import OperationalError
 
 from backend.app.models.archive import PrintArchive
+from backend.app.models.notification import NotificationLog, NotificationProvider
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services import chamber_heat_soak as heat, print_scheduler, queue_outcome_effects
@@ -15,6 +18,85 @@ from backend.app.services.job_identity import observe_print
 from backend.app.services.printer_manager import printer_manager
 from backend.app.services.queue_transitions import transition_queue_item
 from backend.tests.unit.test_queue_archive_alignment import alignment, hold_and_link  # noqa: F401
+
+
+@pytest.mark.parametrize(
+    "failing_step", ["notification_source", "notification_log", "notification_status", "power", "heaters"]
+)
+async def test_database_failure_in_one_effect_does_not_skip_later_cleanup(alignment, monkeypatch, failing_step):
+    from backend.app.core import tasks
+
+    committed = []
+    monkeypatch.setattr(tasks, "spawn_background_task", lambda coro, **kwargs: committed.append(coro))
+    client = MagicMock()
+    state = SimpleNamespace(state="IDLE", connected=True, job_telemetry_ready=True, preheating=True)
+    monkeypatch.setattr(printer_manager, "get_client", lambda _id: client)
+    monkeypatch.setattr(printer_manager, "get_status", lambda _id: state)
+    monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
+    monkeypatch.setattr(printer_manager, "_broadcast_status_change", AsyncMock())
+    # Exercise the real notification service's status/log commits; replace
+    # only network delivery, then fail the SQL statement under review.
+    monkeypatch.setattr(
+        queue_outcome_effects.notification_service, "_send_to_provider", AsyncMock(return_value=(True, ""))
+    )
+    powered_off, deleted = AsyncMock(), AsyncMock(return_value=True)
+
+    async def power(printer_id, db):
+        await powered_off(printer_id)
+        assert await db.scalar(select(Printer.id).where(Printer.id == printer_id)) == printer_id
+        if failing_step == "power":
+            db.add(NotificationLog(provider_id=None, event_type="test", title="test", message="test"))
+            await db.flush()  # Real failed flush expires ORM rows and poisons this session.
+
+    monkeypatch.setattr(queue_outcome_effects.smart_plug_manager, "schedule_off_after_queue_job", power)
+    monkeypatch.setattr(queue_outcome_effects, "delete_file_async", deleted)
+    async with alignment.sessions() as db:
+        job = await db.get(PrintQueueItem, alignment.job_id)
+        if failing_step == "notification_source":
+            await transition_queue_item(db, job, "queued", "dispatching")
+        else:
+            await hold_and_link(db, job)
+        job.auto_off_after = True
+        job.preheat_requested_at = heat.utcnow()
+        db.add(NotificationProvider(name="Test", provider_type="ntfy", config="{}", on_queue_job_failed=True))
+        await db.commit()
+        attempt = await db.get(PrintArchive, job.archive_id) if job.archive_id else None
+        remote_name = attempt.extra_data["remote_filename"] if attempt else None
+        await transition_queue_item(db, job, "dispatching", "failed")
+        await db.commit()
+    assert len(committed) == 1
+    engine = alignment.sessions.kw["bind"]
+    failures = []
+
+    def fail_statement(connection, cursor, statement, parameters, context, executemany):
+        sql = statement.lstrip().upper()
+        prefixes = {
+            "notification_log": "INSERT INTO NOTIFICATION_LOGS",
+            "notification_status": "UPDATE NOTIFICATION_PROVIDERS",
+            "heaters": "UPDATE PRINTERS",
+        }
+        if (failing_step == "notification_source" and "FROM LIBRARY_FILES" in sql) or (
+            failing_step in prefixes and sql.startswith(prefixes[failing_step])
+        ):
+            failures.append(statement)
+            raise OperationalError(statement, parameters, Exception("database is locked"))
+
+    event.listen(engine.sync_engine, "before_cursor_execute", fail_statement)
+    try:
+        await committed[0]
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", fail_statement)
+    assert bool(failures) is (failing_step != "power")
+    powered_off.assert_awaited_once()
+    if remote_name:
+        deleted.assert_awaited_once()
+        assert deleted.call_args.args[2] == f"/{remote_name}"
+    else:
+        deleted.assert_not_awaited()
+    assert client.set_bed_temperature.call_count == int(failing_step != "heaters")
+    async with alignment.sessions() as db:
+        assert (await db.get(PrintQueueItem, alignment.job_id)).status == "failed"
+        assert (await db.get(Printer, 1)).heat_soak_shutdown_pending
 
 
 @pytest.mark.parametrize("commit", [False, True])

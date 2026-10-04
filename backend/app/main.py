@@ -1133,6 +1133,9 @@ async def _maybe_notify_printer_offline(printer_id: int) -> None:
 
 async def on_printer_status_change(printer_id: int, state: PrinterState):
     """Handle printer status changes - broadcast via WebSocket."""
+    # Retry failed Archive work even when this push does not change state or
+    # trigger another print-start callback. Keep slow storage off the broadcast.
+    _schedule_pending_archive_retry(printer_id, state)
     # Connected-edge reconciliation (#1542 follow-up). When the printer
     # transitions disconnected → connected — which covers both Grove Control
     # startup (no prior connection) and a mid-session MQTT reconnect — fire
@@ -2515,7 +2518,57 @@ def _load_objects_from_archive(archive, printer_id: int, logger, *, reset_skippe
 _job_event_locks: dict[int, asyncio.Lock] = {}
 _observed_job_starts: dict[int, int] = {}
 _initialized_job_starts: dict[int, int] = {}
+_pending_archive_starts: dict[int, tuple[str, dict, bool]] = {}
 _completed_job_events: dict[int, int] = {}
+
+
+def _schedule_pending_archive_retry(printer_id: int, state: PrinterState) -> None:
+    pending = _pending_archive_starts.get(printer_id)
+    if pending is None:
+        return
+    identity, data, recovering = pending
+
+    def matches(live) -> bool:
+        return bool(
+            live
+            and live.connected
+            and live.job_telemetry_ready
+            and live.state in ("PREPARE", "SLICING", "RUNNING", "PAUSE")
+            and telemetry_identity(live) == identity
+            and (
+                live.gcode_file
+                or live.current_print
+                or live.subtask_name
+                or data.get("filename")
+                or data.get("subtask_name")
+            )
+        )
+
+    lock = _job_event_locks.setdefault(printer_id, asyncio.Lock())
+    if lock.locked() or not matches(state):
+        return
+    # Consume before scheduling so a burst of pushes queues only one retry.
+    # An unsuccessful observation restores its pending marker for a later push.
+    _pending_archive_starts.pop(printer_id)
+
+    async def retry() -> None:
+        async with lock:
+            live = printer_manager.get_status(printer_id)
+            if not matches(live):
+                _pending_archive_starts.setdefault(printer_id, pending)
+                return
+            snapshot = {
+                **data,
+                "filename": live.gcode_file or live.current_print or data.get("filename"),
+                "subtask_name": live.subtask_name or data.get("subtask_name"),
+            }
+            try:
+                await _observe_print_start(printer_id, snapshot, recovering=recovering)
+            except Exception:
+                _pending_archive_starts.setdefault(printer_id, pending)
+                raise
+
+    spawn_background_task(retry(), name=f"retry-print-archive-{printer_id}")
 
 
 async def on_print_state_change(printer_id: int, data: dict):
@@ -2577,6 +2630,9 @@ async def _observe_print_start(printer_id: int, data: dict, *, recovering: bool 
         await db.commit()
     if was_dispatching:
         await print_scheduler._publish_queue_job_started(item_id)
+    archive_data = {**data, "submission_id": identity}
+    if _observed_job_starts.get(printer_id) != item_id:
+        _pending_archive_starts[printer_id] = (identity, archive_data, recovering)
     if not (data.get("filename") or data.get("subtask_name")):
         return  # Keep the job; archive when a later active push supplies the file.
     if _observed_job_starts.get(printer_id) != item_id:
@@ -2584,7 +2640,7 @@ async def _observe_print_start(printer_id: int, data: dict, *, recovering: bool 
         archive_options = {"queue_archive_id": queue_archive_id, "queue_job_id": item_id}
         if recovering or _initialized_job_starts.get(printer_id) == item_id:
             archive_options["recovering"] = True
-        if not await _archive_print_start(printer_id, {**data, "submission_id": identity}, **archive_options):
+        if not await _archive_print_start(printer_id, archive_data, **archive_options):
             return
         # A failed Archive/start effect must be retryable on the next observation.
         _observed_job_starts[printer_id] = item_id
@@ -2597,6 +2653,7 @@ async def _observe_print_start(printer_id: int, data: dict, *, recovering: bool 
 
         item = await db.get(PrintQueueItem, item_id)
         if item is None or item.archive_id is not None:
+            _pending_archive_starts.pop(printer_id, None)
             return
         query = select(PrintArchive).where(
             PrintArchive.printer_id == printer_id,
@@ -2606,6 +2663,7 @@ async def _observe_print_start(printer_id: int, data: dict, *, recovering: bool 
         )
         archives = list((await db.scalars(query)).all())
         if len(archives) != 1:
+            _pending_archive_starts.pop(printer_id, None)
             return
         # Lock only for association, then recheck both sides against Stop/Clear Plate.
         item = await lock_queue_item(db, item_id)
@@ -2615,6 +2673,7 @@ async def _observe_print_start(printer_id: int, data: dict, *, recovering: bool 
                 archives[0].dispatched_queue_item_id = item.id
                 await transition_queue_item(db, item, item.status, item.status, values={"archive_id": archives[0].id})
                 await db.commit()
+    _pending_archive_starts.pop(printer_id, None)
 
 
 async def _archive_print_start(
@@ -4547,6 +4606,7 @@ async def _complete_identified_print(printer_id: int, data: dict):
     if record is None:
         return False
     _completed_job_events[printer_id] = record.job_id
+    _pending_archive_starts.pop(printer_id, None)
     data = {**data, "status": record.reported_status}
     queue_item_id = record.job_id
     queue_item_owner_id = record.owner_id

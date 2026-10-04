@@ -35,6 +35,7 @@ async def sessions(tmp_path):
     main._completed_job_events.clear()
     main._observed_job_starts.clear()
     main._initialized_job_starts.clear()
+    main._pending_archive_starts.clear()
     main._user_stopped_printers.clear()
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'jobs.db'}")
     async with engine.begin() as conn:
@@ -46,6 +47,7 @@ async def sessions(tmp_path):
         await db.commit()
     yield maker
     main._user_stopped_printers.clear()
+    main._pending_archive_starts.clear()
     await engine.dispose()
 
 

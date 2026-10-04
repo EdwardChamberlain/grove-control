@@ -202,7 +202,9 @@ reservation authorities.
 Committed `failed` and `cancelled` transitions schedule one outcome step keyed
 by job and state. It handles failure notification, configured Auto Off, heat-soak
 shutdown, and cleanup of that attempt's unique SD upload. A rollback schedules
-none of these effects. Heater shutdown remains pending until fresh zero-target
+none of these effects. Notification, Auto Off, and heater cleanup each use a
+separate database session; a failed query, flush, or commit in one effect cannot
+prevent the later cleanup steps. Heater shutdown remains pending until fresh zero-target
 telemetry confirms it, including after a failed heat-soak handoff or disconnect.
 Both heater-on and heater-off commands require fresh connected idle telemetry.
 Shutdown also checks the current Queue holder: a delayed effect or retry never

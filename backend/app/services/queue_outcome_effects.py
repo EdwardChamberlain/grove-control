@@ -39,46 +39,53 @@ async def run_queue_outcome_effects(engine: AsyncEngine, effect: QueueOutcomeEff
         attempt = archive if archive and archive.dispatched_queue_item_id == job.id else None
         remote_filename = (attempt.extra_data or {}).get("remote_filename") if attempt else None
         connection = (printer.ip_address, printer.access_code, printer.model) if printer else None
+        auto_off = bool(job.auto_off_after)
+        filename = archive.filename if archive else None
+        library_file_id = job.library_file_id
+        printer_name = printer.name if printer else None
+        reason = job.error_message or "Print failed"
 
-        if effect.notify_failure:
-            try:
-                source = archive
-                if source is None and job.library_file_id is not None:
-                    source = await db.get(LibraryFile, job.library_file_id)
-                job_name = (
-                    (source.filename if source else f"Job #{job.id}").replace(".gcode.3mf", "").replace(".3mf", "")
-                )
+    # Keep only scalar inputs after the read session closes. A failed flush in
+    # one effect expires ORM rows and poisons its session, never the next effect.
+    if effect.notify_failure:
+        try:
+            async with sessions() as db:
+                if filename is None and library_file_id is not None:
+                    source = await db.get(LibraryFile, library_file_id)
+                    filename = source.filename if source else None
+                job_name = (filename or f"Job #{effect.job_id}").replace(".gcode.3mf", "").replace(".3mf", "")
                 await notification_service.on_queue_job_failed(
                     job_name=job_name,
                     printer_id=effect.printer_id,
-                    printer_name=printer.name if printer else None,
-                    reason=job.error_message or "Print failed",
+                    printer_name=printer_name,
+                    reason=reason,
                     db=db,
                 )
-            except Exception:
-                logger.exception("Queue job %s: failure notification failed", effect.job_id)
+        except Exception:
+            logger.exception("Queue job %s: failure notification failed", effect.job_id)
 
-        if job.auto_off_after and effect.printer_id is not None:
-            try:
+    if auto_off and effect.printer_id is not None:
+        try:
+            async with sessions() as db:
                 await smart_plug_manager.schedule_off_after_queue_job(effect.printer_id, db)
-            except Exception:
-                logger.exception("Queue job %s: auto power-off scheduling failed", effect.job_id)
+        except Exception:
+            logger.exception("Queue job %s: auto power-off scheduling failed", effect.job_id)
 
-        if effect.shut_down_heaters:
-            try:
+    if effect.shut_down_heaters:
+        try:
+            async with sessions() as db:
                 if effect.printer_id is not None and await cleanup_heat_soak_shutdown(db, effect.printer_id):
                     _show_preheating(effect.printer_id, False)
-            except Exception:
-                await db.rollback()
-                logger.exception("Queue job %s: heater shutdown failed", effect.job_id)
+        except Exception:
+            logger.exception("Queue job %s: heater shutdown failed", effect.job_id)
 
-        if effect.clean_sd_copy and remote_filename and connection is not None:
-            try:
-                await delete_file_async(
-                    connection[0],
-                    connection[1],
-                    f"/{remote_filename}",
-                    printer_model=connection[2],
-                )
-            except Exception:
-                logger.exception("Queue job %s: failed to remove SD dispatch copy", effect.job_id)
+    if effect.clean_sd_copy and remote_filename and connection is not None:
+        try:
+            await delete_file_async(
+                connection[0],
+                connection[1],
+                f"/{remote_filename}",
+                printer_model=connection[2],
+            )
+        except Exception:
+            logger.exception("Queue job %s: failed to remove SD dispatch copy", effect.job_id)
