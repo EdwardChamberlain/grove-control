@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import PrintQueueItem
-from backend.app.services.queue_transitions import transition_queue_item
+from backend.app.services.lifecycle.engine import transition_queue_item
 from backend.tests.unit.test_job_identity import add_linked_job, sessions  # noqa: F401
 
 

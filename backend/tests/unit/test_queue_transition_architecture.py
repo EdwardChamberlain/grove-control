@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import get_args
 
 from backend.app.schemas.print_queue import PrintQueueItemResponse
-from backend.app.services.queue_transitions import ALLOWED_TRANSITIONS
+from backend.app.services.lifecycle.engine import ALLOWED_TRANSITIONS
 
 APP_DIR = Path(__file__).parents[2] / "app"
 
@@ -40,7 +40,7 @@ def _builds_status_update_of_queue_items(call: ast.Call) -> bool:
 def test_no_other_module_updates_queue_status():
     offenders = []
     for path in APP_DIR.rglob("*.py"):
-        if path.name == "queue_transitions.py":
+        if path.name == "engine.py":
             continue
         for node in ast.walk(ast.parse(path.read_text(), filename=str(path))):
             raw_status_update = (

@@ -20,7 +20,7 @@ from backend.app.core.database import get_db
 from backend.app.core.permissions import Permission
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
-from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
+from backend.app.models.print_queue import FINAL_STATUSES, HOLDING_STATUSES, PrintQueueItem, PrintQueueVariant
 from backend.app.models.printer import Printer
 from backend.app.models.project import Project
 from backend.app.models.user import User
@@ -49,17 +49,14 @@ from backend.app.services.filament_requirements import (
     overrides_for_plate,
 )
 from backend.app.services.job_identity import needs_dispatch_resolution, telemetry_identity
-from backend.app.services.notification_service import notification_service
-from backend.app.services.queue_source_cleanup import (
-    remove_queue_only_artifacts,
-    remove_queue_only_source_if_unused,
-)
-from backend.app.services.queue_transitions import (
-    FINAL_STATUSES,
-    HOLDING_STATUSES,
+from backend.app.services.lifecycle.engine import (
     InvalidQueueTransition,
     clear_job_plate,
     transition_queue_item,
+)
+from backend.app.services.notification_service import notification_service
+from backend.app.services.queue_source_cleanup import (
+    remove_queue_only_source_if_unused,
 )
 from backend.app.utils.printer_models import is_gcode_compatible
 from backend.app.utils.safe_path import safe_join_under
@@ -118,11 +115,10 @@ async def discard_queue_source(
     # Closing the setup modal means no more fan-out requests can arrive. The
     # cleanup helper still protects any queue items already using this source.
     library_file.queue_source_sealed = True
-    paths = await remove_queue_only_source_if_unused(db, file_id)
+    await remove_queue_only_source_if_unused(db, file_id)
     await db.flush()
     deleted = await db.get(LibraryFile, file_id) is None
     await db.commit()
-    remove_queue_only_artifacts(paths)
     return {"deleted": deleted}
 
 
@@ -1389,20 +1385,6 @@ async def update_queue_item(
     return _enrich_response(item)
 
 
-async def _cleanup_transient_library_source(
-    db: AsyncSession,
-    library_file_id: int,
-    *,
-    exclude_item_id: int,
-) -> list[Path]:
-    """Remove an auto-uploaded Queue source once no queue item needs it."""
-    return await remove_queue_only_source_if_unused(
-        db,
-        library_file_id,
-        exclude_item_id=exclude_item_id,
-    )
-
-
 @router.delete("/{item_id}")
 async def delete_queue_item(
     item_id: int,
@@ -1435,11 +1417,10 @@ async def delete_queue_item(
 
     await detach_dispatch_archive_links(db, [item.id])
     await db.delete(item)
-    cleanup_paths: list[Path] = []
     if library_file_id is not None:
-        cleanup_paths = await _cleanup_transient_library_source(db, library_file_id, exclude_item_id=item_id)
+        # Remove an auto-uploaded Queue source once no queue item needs it.
+        await remove_queue_only_source_if_unused(db, library_file_id, exclude_item_id=item_id)
     await db.commit()
-    remove_queue_only_artifacts(cleanup_paths)
 
     from backend.app.services.print_scheduler import scheduler
 

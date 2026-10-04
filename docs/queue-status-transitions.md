@@ -140,19 +140,21 @@ cleanup, deletion is skipped. FTP failure does not undo plate clearing.
 
 ## Transactions and effects
 
-`transition_queue_item` is the sole status writer. It checks allowed edges and
-conditionally matches ID, expected state and supplied claim. Metadata is written
-atomically; ORM synchronization cannot flush a second unconditional status
-update. Same-state writes still check persisted state. Reasons are display-only.
-A losing update raises `QueueTransitionConflict`; callers roll back before
-publishing effects. Invalid edges fail before writing. User cancellation,
-Clear Plate, printer deletion, hold transfer and printer reports have explicit
-action guards.
+`transition_queue_item` in `services/lifecycle/engine.py` is the sole status
+writer. It checks allowed edges and conditionally matches ID, expected state
+and supplied claim. Metadata is written atomically; ORM synchronization cannot
+flush a second unconditional status update. Same-state writes still check
+persisted state. Reasons are display-only. A losing update raises
+`QueueTransitionConflict`; callers roll back before publishing effects. Invalid
+edges fail before writing. User cancellation, Clear Plate, printer deletion,
+hold transfer and printer reports have explicit action guards. After the write,
+the engine aligns the Archive attempt and runs the new state's entry steps.
 
-The caller owns the transaction. Plate-clear flags and Archive IDs in printer
-views are projections, rehydrated at startup and published after commit.
-Rollback discards pending effects and prepared artifacts. Legacy Printer flag
-columns remain only for upgrade compatibility.
+The caller owns the transaction. Lifecycle work queues after-commit effects and
+rollback cleanup in one registry, `services/lifecycle/effects.py`. Plate-clear
+flags and Archive IDs in printer views are projections, rehydrated at startup
+and published after commit. Rollback discards pending effects and prepared
+artifacts. Legacy Printer flag columns remain only for upgrade compatibility.
 
 One committed outcome step, keyed by job and new state, handles failure notices,
 configured Auto Off, heater shutdown and SD cleanup. Each effect uses independent
@@ -160,8 +162,9 @@ scalar inputs and database sessions, so a failed notification cannot prevent
 cleanup. Heater shutdown remains pending until fresh zero-target reports confirm
 it. It requires idle telemetry and no uploading or potentially sent job. Auto
 Off rechecks both live printing and active Queue reservations immediately before
-switching the plug; a failed lookup defers it. Every committed state change logs
-job, old/new state, printer, Archive and action. A persisted transition table
+switching the plug; a failed lookup defers it. Every committed state change, and
+every same-state write that names an action, logs job, old/new state, printer,
+Archive and action. A persisted transition table
 remains separately tracked in #202.
 
 Hidden Queue sources survive every nonfinal direct or variant reference.

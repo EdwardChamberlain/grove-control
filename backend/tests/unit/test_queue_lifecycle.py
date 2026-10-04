@@ -19,9 +19,7 @@ from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
 from backend.app.models.printer import Printer
 from backend.app.models.settings import Settings
-from backend.app.services.printer_manager import PrinterManager
-from backend.app.services.queue_actions import cancel_job
-from backend.app.services.queue_transitions import (
+from backend.app.services.lifecycle.engine import (
     ACTIVE_STATUSES,
     AWAITING_PLATE_CLEAR_STATUSES,
     HOLDING_STATUSES,
@@ -29,6 +27,8 @@ from backend.app.services.queue_transitions import (
     clear_job_plate,
     transition_queue_item,
 )
+from backend.app.services.printer_manager import PrinterManager
+from backend.app.services.queue_actions import cancel_job
 
 
 @pytest.fixture

@@ -104,6 +104,7 @@ from backend.app.services.job_identity import (
     telemetry_identity,
 )
 from backend.app.services.library_trash import library_trash_service
+from backend.app.services.lifecycle.engine import QueueTransitionConflict, transition_queue_item
 from backend.app.services.local_backup import local_backup_service
 from backend.app.services.location_ha_sensor_manager import location_ha_sensor_manager
 from backend.app.services.mqtt_relay import mqtt_relay
@@ -118,7 +119,6 @@ from backend.app.services.printer_manager import (
     printer_state_to_dict,
 )
 from backend.app.services.queue_source_cleanup import start_queue_source_cleanup, stop_queue_source_cleanup
-from backend.app.services.queue_transitions import FINAL_STATUSES, QueueTransitionConflict, transition_queue_item
 from backend.app.services.slot_nozzle import (
     resolve_slot_nozzle,
 )
@@ -3941,7 +3941,7 @@ async def _complete_identified_print(printer_id: int, data: dict):
     """Handle print completion - update the archive status."""
     import time
 
-    from backend.app.models.print_queue import AWAITING_PLATE_CLEAR_STATUSES, PrintQueueItem
+    from backend.app.models.print_queue import AWAITING_PLATE_CLEAR_STATUSES, FINAL_STATUSES, PrintQueueItem
 
     logger = logging.getLogger(__name__)
     start_time = time.time()

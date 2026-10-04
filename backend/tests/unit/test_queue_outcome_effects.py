@@ -13,11 +13,12 @@ from backend.app.models.archive import PrintArchive
 from backend.app.models.notification import NotificationLog, NotificationProvider
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services import chamber_heat_soak as heat, print_scheduler, queue_outcome_effects
+from backend.app.services import chamber_heat_soak as heat, print_scheduler
 from backend.app.services.job_identity import observe_print
+from backend.app.services.lifecycle import effects as queue_outcome_effects
+from backend.app.services.lifecycle.engine import clear_job_plate, transition_queue_item
 from backend.app.services.printer_manager import printer_manager
 from backend.app.services.queue_actions import cancel_job
-from backend.app.services.queue_transitions import clear_job_plate, transition_queue_item
 from backend.tests.unit.test_queue_archive_alignment import alignment, hold_and_link  # noqa: F401
 
 

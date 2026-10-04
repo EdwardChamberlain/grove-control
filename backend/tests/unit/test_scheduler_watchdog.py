@@ -9,9 +9,9 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from backend.app.models.print_queue import PrintQueueItem
+from backend.app.services.lifecycle.engine import transition_queue_item
 from backend.app.services.print_scheduler import PrintScheduler
 from backend.app.services.queue_archive import link_dispatch_archive, prepare_dispatch_archive
-from backend.app.services.queue_transitions import transition_queue_item
 
 
 @pytest.fixture
@@ -302,7 +302,7 @@ class TestDurableDispatchingState:
                 ),
                 patch("backend.app.services.printer_manager.printer_manager.start_print") as start,
                 patch("backend.app.services.print_scheduler.async_session", db_session),
-                patch("backend.app.services.queue_outcome_effects.run_queue_outcome_effects", new=AsyncMock()),
+                patch("backend.app.services.lifecycle.effects.run_queue_outcome_effects", new=AsyncMock()),
             ):
                 await PrintScheduler()._clear_stale_dispatch_claims()
 

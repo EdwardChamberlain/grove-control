@@ -358,7 +358,7 @@ async def test_delete_offline_preserves_cleanup_and_prevents_new_soak_until_off_
     await soak.service.cleanup(soak.db)
     await soak.db.refresh(soak.printer)
     assert not soak.printer.heat_soak_shutdown_pending
-    from backend.app.services.queue_transitions import clear_job_plate
+    from backend.app.services.lifecycle.engine import clear_job_plate
 
     await clear_job_plate(soak.db, new_item)
     await soak.db.commit()
@@ -675,7 +675,7 @@ async def test_upgrade_defaults_existing_rows_to_off(tmp_path):
 
 @pytest.mark.parametrize("worker", ["unsent", "uploading", "possibly_sent"])
 async def test_deferred_unsent_dispatch_cools_without_releasing_hold(soak, worker):
-    from backend.app.services.queue_transitions import transition_queue_item
+    from backend.app.services.lifecycle.engine import transition_queue_item
 
     await transition_queue_item(soak.db, soak.item, "queued", "dispatching")
     soak.item.dispatching_at = heat.utcnow() if worker == "uploading" else None

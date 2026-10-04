@@ -379,7 +379,7 @@ async def delete_user(
         )
 
     if delete_items:
-        from backend.app.services.queue_transitions import HOLDING_STATUSES
+        from backend.app.models.print_queue import HOLDING_STATUSES
 
         archives = select(PrintArchive.id).where(PrintArchive.created_by_id == user_id)
         files = select(LibraryFile.id).where(LibraryFile.created_by_id == user_id)

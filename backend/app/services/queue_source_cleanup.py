@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
+from functools import partial
 from pathlib import Path
 
 from sqlalchemy import or_, select, update
@@ -10,8 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.config import settings
 from backend.app.models.library import LibraryFile
-from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
-from backend.app.services.queue_transitions import FINAL_STATUSES
+from backend.app.models.print_queue import FINAL_STATUSES, PrintQueueItem, PrintQueueVariant
+from backend.app.services.lifecycle import effects
 from backend.app.utils.safe_path import safe_join_under
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,8 @@ async def remove_queue_only_source_if_unused(
 
     Every nonfinal job keeps its source available for retry.
     Historical queue rows are detached before deleting the library row so the
-    FK's cascade cannot erase queue history.
+    FK's cascade cannot erase queue history. Its files are removed once the
+    caller commits.
     """
     result = await db.execute(
         select(LibraryFile)
@@ -72,6 +74,7 @@ async def remove_queue_only_source_if_unused(
             path = stored if stored.is_absolute() else safe_join_under(Path(settings.base_dir), stored_path, http=False)
             paths.append(path)
     await db.delete(library_file)
+    effects.after_commit(db, partial(remove_queue_only_artifacts, paths))
     return paths
 
 
@@ -136,7 +139,6 @@ async def sweep_stale_queue_sources(db: AsyncSession, *, now: datetime | None = 
         paths.extend(await remove_queue_only_source_if_unused(db, library_file_id))
 
     await db.commit()
-    remove_queue_only_artifacts(paths)
     if sealed_count:
         logger.info(
             "Sealed %d stale Queue-only source(s) and removed %d source artifact(s)",

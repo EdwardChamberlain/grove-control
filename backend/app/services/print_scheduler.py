@@ -19,7 +19,7 @@ from backend.app.core.database import async_session, run_with_retry
 from backend.app.core.tasks import spawn_background_task
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
-from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
+from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem, PrintQueueVariant
 from backend.app.models.printer import Printer
 from backend.app.models.scheduled_drying import ScheduledDrying
 from backend.app.models.settings import Settings
@@ -42,13 +42,13 @@ from backend.app.services.filament_deficit import compute_deficit_for_queue_item
 from backend.app.services.filament_requirements import canonical_filament_type
 from backend.app.services.ha_sensor_manager import ha_sensor_manager
 from backend.app.services.job_identity import sync_print_state, telemetry_identity
+from backend.app.services.lifecycle.engine import QueueTransitionConflict, transition_queue_item
 from backend.app.services.notification_service import notification_service
 from backend.app.services.printer_manager import (
     printer_manager,
     supports_drying,
     supports_drying_while_printing,
 )
-from backend.app.services.queue_transitions import HOLDING_STATUSES, QueueTransitionConflict, transition_queue_item
 from backend.app.services.smart_plug_manager import smart_plug_manager
 from backend.app.utils.local_time import utcnow_naive
 from backend.app.utils.printer_models import is_gcode_compatible, normalize_printer_model

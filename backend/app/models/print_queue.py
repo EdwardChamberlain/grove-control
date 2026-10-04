@@ -5,11 +5,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.core.database import Base
 
-# Job states that hold their printer (#194). Defined with the table because the
-# unique holding index below is built from them; queue_transitions re-exports.
+# Job state groups (#194). Defined with the table because the unique holding
+# index below is built from the states that hold their printer.
 ACTIVE_STATUSES = ("preheating", "dispatching", "printing", "paused")
 AWAITING_PLATE_CLEAR_STATUSES = ("finished", "failed", "cancelled")
 HOLDING_STATUSES = ACTIVE_STATUSES + AWAITING_PLATE_CLEAR_STATUSES
+FINAL_STATUSES = ("successful", "unsuccessful")
 HOLDING_INDEX_NAME = "uq_print_queue_holding_printer"
 HOLDING_INDEX_WHERE = "printer_id IS NOT NULL AND status IN ({})".format(
     ", ".join(f"'{status}'" for status in HOLDING_STATUSES)
@@ -122,8 +123,8 @@ class PrintQueueItem(Base):
     # Nozzle offset calibration — dual-nozzle printers only, MQTT-gated (#1682)
     nozzle_offset_cali: Mapped[str] = mapped_column(String(8), default="auto")
 
-    # queued, active, awaiting plate clear, or final; see queue_transitions.
-    # Persisted status changes go through services.queue_transitions.transition_queue_item.
+    # queued, active, awaiting plate clear, or final; see services.lifecycle.engine.
+    # Persisted status changes go through its transition_queue_item.
     status: Mapped[str] = mapped_column(String(20), default="queued")
 
     # Durable dispatch claim. A queue worker stamps this before slow source
@@ -265,7 +266,7 @@ def _reject_direct_status_write(target: PrintQueueItem, value, oldvalue, initiat
     # Register with the model so the guard also applies when no service has
     # imported the transition helper yet. New rows may set their initial state.
     if inspect(target).has_identity:
-        from backend.app.services.queue_transitions import InvalidQueueTransition
+        from backend.app.services.lifecycle.engine import InvalidQueueTransition
 
         raise InvalidQueueTransition("Queue status must only be changed through transition_queue_item")
 

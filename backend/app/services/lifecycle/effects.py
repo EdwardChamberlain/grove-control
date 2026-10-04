@@ -1,20 +1,84 @@
-"""Effects emitted after Queue outcomes and failed-attempt plate clearing commit."""
+"""After-commit effects of the print job lifecycle (#204).
+
+Effects queued in the caller's transaction run once it commits; a rollback or
+closed session runs the undo steps instead. A key replaces an earlier effect.
+Undo steps must be idempotent.
+"""
 
 import logging
+from collections.abc import Callable, Hashable
 from dataclasses import dataclass
 
-from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
+from sqlalchemy import event
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from sqlalchemy.orm import Session
 
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
-from backend.app.models.print_queue import PrintQueueItem
+from backend.app.models.print_queue import AWAITING_PLATE_CLEAR_STATUSES, PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services.bambu_ftp import delete_file_async
-from backend.app.services.chamber_heat_soak import _show_preheating, cleanup_heat_soak_shutdown
 from backend.app.services.notification_service import notification_service
 from backend.app.services.smart_plug_manager import smart_plug_manager
 
 logger = logging.getLogger(__name__)
+_COMMIT, _ROLLBACK = "lifecycle_after_commit", "lifecycle_after_rollback"
+
+
+def after_commit(db: AsyncSession, effect: Callable[[], object], *, key: Hashable | None = None) -> None:
+    db.sync_session.info.setdefault(_COMMIT, {})[object() if key is None else key] = effect
+
+
+def on_rollback(db: AsyncSession, undo: Callable[[], object]) -> None:
+    db.sync_session.info.setdefault(_ROLLBACK, []).append(undo)
+
+
+@event.listens_for(Session, "after_commit")
+def _run_effects(session: Session) -> None:
+    session.info.pop(_ROLLBACK, None)
+    for effect in session.info.pop(_COMMIT, {}).values():
+        effect()
+
+
+@event.listens_for(Session, "after_rollback")
+def _undo(session: Session) -> None:
+    session.info.pop(_COMMIT, None)
+    for undo in session.info.pop(_ROLLBACK, []):
+        undo()
+
+
+@event.listens_for(Session, "after_transaction_end")
+def _discard_closed_transaction(session: Session, transaction) -> None:
+    # Session.close() rolls back without the explicit after_rollback event.
+    # Committed transactions already removed their pending work above.
+    if transaction.parent is None:
+        _undo(session)
+
+
+def printer_active(printer_id: int | None) -> bool:
+    """Fresh telemetry shows a print running on this printer."""
+    from backend.app.services.printer_manager import printer_manager
+
+    live = printer_manager.get_status(printer_id) if printer_id is not None else None
+    return bool(
+        live
+        and live.connected
+        and getattr(live, "job_telemetry_ready", True)
+        and live.state in ("PREPARE", "SLICING", "RUNNING", "PAUSE")
+    )
+
+
+def publish_printer_view(db: AsyncSession, printer_id: int, status: str, archive_id: int | None) -> None:
+    """Show the committed holding state in the printer's plate-clear view."""
+
+    def publish() -> None:
+        from backend.app.services.printer_manager import printer_manager
+
+        awaiting = status in AWAITING_PLATE_CLEAR_STATUSES
+        printer_manager.set_awaiting_plate_clear(printer_id, awaiting)
+        printer_manager.set_awaiting_plate_clear_archive_id(printer_id, archive_id if awaiting else None)
+
+    after_commit(db, publish, key=("printer_view", printer_id))
 
 
 @dataclass(frozen=True)
@@ -27,8 +91,22 @@ class QueueOutcomeEffect:
     clean_sd_copy: bool
 
 
+def queue_outcome_effect(db: AsyncSession, effect: QueueOutcomeEffect) -> None:
+    engine = db.bind
+
+    def spawn() -> None:
+        from backend.app.core.tasks import spawn_background_task
+
+        name = f"queue-{effect.new_state}-effects-{effect.job_id}"
+        spawn_background_task(run_queue_outcome_effects(engine, effect), name=name)
+
+    after_commit(db, spawn, key=("outcome", effect.job_id, effect.new_state))
+
+
 async def run_queue_outcome_effects(engine: AsyncEngine, effect: QueueOutcomeEffect) -> None:
     """Use committed data and let each best-effort effect fail independently."""
+    from backend.app.services.chamber_heat_soak import _show_preheating, cleanup_heat_soak_shutdown
+
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     async with sessions() as db:
         job = await db.get(PrintQueueItem, effect.job_id)
@@ -80,18 +158,9 @@ async def run_queue_outcome_effects(engine: AsyncEngine, effect: QueueOutcomeEff
             logger.exception("Queue job %s: heater shutdown failed", effect.job_id)
 
     if effect.clean_sd_copy and remote_filename and connection is not None:
-        if effect.new_state == "unsuccessful":
-            from backend.app.services.printer_manager import printer_manager
-
-            live = printer_manager.get_status(effect.printer_id)
-            if (
-                live
-                and live.connected
-                and getattr(live, "job_telemetry_ready", True)
-                and live.state in ("PREPARE", "SLICING", "RUNNING", "PAUSE")
-            ):
-                logger.info("Queue job %s: skipping plate-clear SD cleanup while printer is active", effect.job_id)
-                return  # A reconnect or new start overtook Clear Plate.
+        if effect.new_state == "unsuccessful" and printer_active(effect.printer_id):
+            logger.info("Queue job %s: skipping plate-clear SD cleanup while printer is active", effect.job_id)
+            return  # A reconnect or new start overtook Clear Plate.
         try:
             await delete_file_async(
                 connection[0],

@@ -37,8 +37,7 @@ def _related_queue_items_filter(archive_id: int):
 
 
 async def _guard_archive_deletion(db: AsyncSession, archive_id: int) -> bool:
-    from backend.app.models.print_queue import PrintQueueItem
-    from backend.app.services.queue_transitions import HOLDING_STATUSES
+    from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem
 
     queue = PrintQueueItem.__table__
     archive = PrintArchive.__table__
@@ -1028,8 +1027,7 @@ async def _count_related_queue_items(db: AsyncSession, archive_id: int) -> tuple
     """Return ``(total, holding)`` jobs for deletion pre-flight."""
     from sqlalchemy import func as sa_func, select as sa_select
 
-    from backend.app.models.print_queue import PrintQueueItem
-    from backend.app.services.queue_transitions import HOLDING_STATUSES
+    from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem
 
     related = _related_queue_items_filter(archive_id)
     total = (await db.execute(sa_select(sa_func.count()).select_from(PrintQueueItem).where(related))).scalar_one()
