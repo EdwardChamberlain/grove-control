@@ -146,8 +146,6 @@ async def abort_heat_soak(
     item.preheat_owner = None
     item.preheat_started_at = None
     item.preheat_checked_at = None
-    # An explicit retry must repeat the complete soak.
-    item.manual_start = True
     await db.commit()
 
 

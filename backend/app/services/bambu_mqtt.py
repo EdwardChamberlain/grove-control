@@ -651,8 +651,6 @@ class BambuMQTTClient:
         self._finish_photo_captured: bool = False
         self._last_valid_progress: float = 0.0  # Last non-zero progress (firmware resets on cancel)
         self._last_valid_layer_num: int = 0  # Last non-zero layer (firmware resets on cancel)
-        # Diagnostic only; observed events never use the last sent command ID.
-        self.last_dispatch_subtask_id: str | None = None
         self._previous_job_id: str | None = None
         self._local_submission_id: bool = False
         self._is_dual_nozzle: bool = False  # Set when device.extruder.info has >= 2 entries
@@ -4258,7 +4256,6 @@ class BambuMQTTClient:
             submission_id = submission_id or str(int(time.time() * 1000) % 2_147_483_647 or 1)
             # Remember it so on_print_start can persist a restart-stable id on
             # the archive even before the printer echoes subtask_id back (#1485).
-            self.last_dispatch_subtask_id = submission_id
 
             # Tri-state calibration options → BambuStudio's getValueInt encoding:
             # off=0 (never), on=1 (force every print), auto=2 (printer runs it

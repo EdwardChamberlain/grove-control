@@ -4323,17 +4323,6 @@ class PrintScheduler:
             printer_manager.clear_current_print_user(dispatch_printer_id)
             return
 
-        from backend.app.main import register_expected_print
-
-        register_expected_print(
-            item.printer_id,
-            remote_filename,
-            archive.id,
-            ams_mapping=ams_mapping,
-            created_by_id=item.created_by_id,
-            plate_id=item.plate_id,
-        )
-
         try:
             started = printer_manager.start_print(
                 item.printer_id,
@@ -4393,10 +4382,6 @@ class PrintScheduler:
                 dispatch_subtask_id=None,
                 started_at=None,
             )
-            if archive:
-                from backend.app.main import unregister_expected_print
-
-                unregister_expected_print(item.printer_id, remote_filename)
             logger.error(
                 f"Queue item {item.id}: Failed to start print on {printer.name} ({printer.model}) - "
                 f"printer_manager.start_print() returned False. "

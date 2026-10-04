@@ -738,7 +738,7 @@ async def on_print_complete(
     default_filament_cost = float(default_cost_str) if default_cost_str else 0.0
 
     # Fall back to ams_mapping captured at print start (needed when auto-archive is off
-    # and the caller can't retrieve the mapping from _print_ams_mappings without archive_id)
+    # and the caller has no identified job context to supply its mapping)
     if not ams_mapping and session and session.ams_mapping:
         ams_mapping = session.ams_mapping
 

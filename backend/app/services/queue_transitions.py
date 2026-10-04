@@ -353,13 +353,14 @@ async def transition_queue_item(
                     action or ("archive_link" if archive is not None else None),
                 )
             )
-        if status in ("failed", "cancelled") and expected_status != status:
+        clearing_failed_plate = action == "clear_plate" and status == "unsuccessful" and expected_status != status
+        if (status in ("failed", "cancelled") and expected_status != status) or clearing_failed_plate:
             from backend.app.models.printer import Printer
             from backend.app.services.queue_outcome_effects import QueueOutcomeEffect
 
             # Keep shutdown retryable after disconnect, deletion of the job,
             # or a process exit before the after-commit effect gets to run.
-            heating = row.preheat_requested_at is not None or row.chamber_heat_soak
+            heating = not clearing_failed_plate and (row.preheat_requested_at is not None or row.chamber_heat_soak)
             if heating and row.printer_id is not None:
                 printer = await db.get(Printer, row.printer_id)
                 if printer is not None:
@@ -373,7 +374,8 @@ async def transition_queue_item(
                 notify_failure=status == "failed"
                 and expected_status in ("preheating", "dispatching")
                 and observed_outcome is None,
-                clean_sd_copy=status == "failed" and expected_status == "dispatching" and observed_outcome is None,
+                clean_sd_copy=clearing_failed_plate
+                or (status == "failed" and expected_status == "dispatching" and observed_outcome is None),
             )
             db.sync_session.info.setdefault("queue_outcome_effects", {})[(item_id, status)] = (db.bind, effect)
         if row.printer_id is not None and (expected_status in HOLDING_STATUSES or status in HOLDING_STATUSES):

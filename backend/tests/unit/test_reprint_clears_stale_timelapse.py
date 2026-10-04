@@ -20,28 +20,15 @@ import pytest
 from backend.app.core.config import settings as app_settings
 from backend.app.main import (
     _active_prints,
-    _expected_print_creators,
-    _expected_print_registered_at,
-    _expected_prints,
-    _print_ams_mappings,
     _timelapse_baselines,
-    register_expected_print,
 )
 
 
 @pytest.fixture(autouse=True)
 def _clear_dicts():
-    _expected_prints.clear()
-    _expected_print_registered_at.clear()
-    _expected_print_creators.clear()
-    _print_ams_mappings.clear()
     _active_prints.clear()
     _timelapse_baselines.clear()
     yield
-    _expected_prints.clear()
-    _expected_print_registered_at.clear()
-    _expected_print_creators.clear()
-    _print_ams_mappings.clear()
     _active_prints.clear()
     _timelapse_baselines.clear()
 
@@ -126,8 +113,6 @@ async def test_reprint_clears_timelapse_path_and_unlinks_stale_file(tmp_path):
     mock_archive.energy_start_kwh = None
     mock_archive.timelapse_path = relpath  # stale from the original run
 
-    register_expected_print(1, "MyModel.3mf", archive_id=42, ams_mapping=None)
-
     mock_session = _build_mocks(mock_printer, mock_archive)
 
     (
@@ -208,8 +193,6 @@ async def test_reprint_with_no_timelapse_path_is_noop(tmp_path):
     mock_archive.energy_start_kwh = None
     mock_archive.timelapse_path = None  # nothing to clean up
 
-    register_expected_print(1, "FreshFile.3mf", archive_id=99, ams_mapping=None)
-
     mock_session = _build_mocks(mock_printer, mock_archive)
 
     (
@@ -284,8 +267,6 @@ async def test_reprint_with_missing_stale_file_does_not_raise(tmp_path):
     mock_archive.energy_start_kwh = None
     # Path points at a file that doesn't exist under tmp_path.
     mock_archive.timelapse_path = "archives/7/timelapse/vanished.mp4"
-
-    register_expected_print(1, "Ghost.3mf", archive_id=7, ams_mapping=None)
 
     mock_session = _build_mocks(mock_printer, mock_archive)
 

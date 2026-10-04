@@ -21,7 +21,7 @@ async def db_session(tmp_path, monkeypatch):
 
     import backend.app.models  # noqa: F401 - populate Base.metadata
     from backend.app.core.config import settings
-    from backend.app.core.database import Base, _ensure_active_queue_printer_reservation
+    from backend.app.core.database import Base, _migrate_queue_lifecycle
     from backend.app.models.archive import PrintArchive
     from backend.app.models.printer import Printer
 
@@ -33,7 +33,7 @@ async def db_session(tmp_path, monkeypatch):
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        await _ensure_active_queue_printer_reservation(conn)
+        await _migrate_queue_lifecycle(conn)
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
 
     async with session_maker() as db:
@@ -144,8 +144,8 @@ class TestDurableDispatchingState:
             client.force_reconnect_stale_session.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_unacknowledged_dispatch_keeps_its_expected_print(self, db_session):
-        from backend.app.main import _expected_prints, register_expected_print, unregister_expected_print
+    async def test_unacknowledged_dispatch_keeps_its_durable_attempt(self, db_session):
+        from backend.app.models.archive import PrintArchive
 
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
@@ -153,7 +153,6 @@ class TestDurableDispatchingState:
             item.dispatched_at = datetime.now(timezone.utc)
             await db.commit()
 
-        register_expected_print(42, "test.3mf", archive_id=99)
         scheduler = PrintScheduler()
         with (
             patch.object(
@@ -171,8 +170,12 @@ class TestDurableDispatchingState:
                 dispatch_subtask_id="12345",
             )
 
-        assert any(key[0] == 42 for key in _expected_prints)
-        unregister_expected_print(42)
+        async with db_session() as db:
+            item = await db.get(PrintQueueItem, 1)
+            archive = await db.get(PrintArchive, item.archive_id)
+            assert item.status == "dispatching"
+            assert archive.dispatched_queue_item_id == item.id
+            assert archive.subtask_id == item.dispatch_subtask_id
 
     @pytest.mark.asyncio
     async def test_correlated_terminal_dispatch_is_not_retried(self, db_session):

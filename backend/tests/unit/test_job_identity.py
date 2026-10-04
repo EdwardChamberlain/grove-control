@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import backend.app.models  # noqa: F401
 from backend.app.api.routes.print_queue import clear_queue_plate, resolve_queue_dispatch, stop_queue_item
-from backend.app.core.database import Base, _ensure_active_queue_printer_reservation
+from backend.app.core.database import Base, _migrate_queue_lifecycle
 from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
@@ -40,7 +40,7 @@ async def sessions(tmp_path):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'jobs.db'}")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        await _ensure_active_queue_printer_reservation(conn)
+        await _migrate_queue_lifecycle(conn)
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
         db.add(Printer(id=1, name="Printer", serial_number="TEST", ip_address="127.0.0.1", access_code="12345678"))
@@ -619,7 +619,6 @@ def test_mqtt_start_snapshot_uses_observed_id_never_last_command():
     from backend.app.services.bambu_mqtt import BambuMQTTClient
 
     client = BambuMQTTClient(ip_address="127.0.0.1", serial_number="TEST", access_code="12345678")
-    client.last_dispatch_subtask_id = "stale-command"
     starts = []
     client.on_print_running_observed = starts.append
     client._process_message({"print": {"subtask_id": "123", "gcode_state": "PREPARE"}})

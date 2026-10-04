@@ -99,6 +99,25 @@ class TestPlateClearGate:
         ):
             yield SimpleNamespace(printer=printer, item=item, manager=manager, complete=main.on_print_complete)
 
+    @pytest.mark.parametrize("mapping", ["[2, -1]", "invalid legacy mapping"])
+    async def test_completion_uses_durable_usage_context_without_filename_registry(
+        self, completion, db_session, mapping
+    ):
+        from backend.app.services import usage_tracker
+
+        completion.item.ams_mapping = mapping
+        completion.item.plate_id = 3
+        await db_session.commit()
+        await completion.complete(
+            completion.printer.id, {"subtask_id": "123", "status": "completed", "ams_mapping": [99], "plate_id": 9}
+        )
+        usage_tracker.on_print_complete.assert_awaited_once()
+        call = usage_tracker.on_print_complete.await_args
+        assert call.kwargs["ams_mapping"] == ([2, -1] if mapping == "[2, -1]" else [99])
+        assert call.args[1]["plate_id"] == 3
+        await db_session.refresh(completion.item)
+        assert completion.item.status == "finished"
+
     @pytest.mark.parametrize("status", ["completed", "failed", "aborted", "cancelled"])
     async def test_plate_clear_gate_raised_for_every_terminal_status(self, status, completion, db_session):
         await completion.complete(completion.printer.id, {"subtask_id": "123", "status": status})

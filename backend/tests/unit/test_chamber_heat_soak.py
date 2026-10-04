@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from backend.app.core.config import settings
-from backend.app.core.database import Base, _ensure_active_queue_printer_reservation
+from backend.app.core.database import Base, _migrate_queue_lifecycle
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
@@ -53,7 +53,7 @@ async def soak(tmp_path, monkeypatch):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'soak.db'}")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        await _ensure_active_queue_printer_reservation(conn)
+        await _migrate_queue_lifecycle(conn)
     # This connected client has already reported its idle job state.
     state = PrinterState(connected=True, state="IDLE", job_telemetry_ready=True)
     client = MagicMock()
@@ -264,7 +264,7 @@ async def test_pending_shutdown_does_not_interrupt_another_reserved_soak(soak):
         "disabled",
     ],
 )
-async def test_interruptions_release_item_for_manual_retry_and_shutdown(soak, interruption):
+async def test_interruptions_fail_attempt_and_shutdown_without_changing_start_policy(soak, interruption):
     await soak.service.stage(soak.db, soak.item)
     await soak.db.refresh(soak.item)
     if interruption == "disconnect":
@@ -289,7 +289,7 @@ async def test_interruptions_release_item_for_manual_retry_and_shutdown(soak, in
         assert "inspect" in soak.item.error_message
         return
     assert soak.item.status == "failed"
-    assert soak.item.manual_start is True
+    assert soak.item.manual_start is False
     assert soak.item.preheat_owner is None
     assert soak.item.preheat_started_at is None
     assert soak.item.error_message
@@ -465,6 +465,25 @@ async def test_deleting_preheating_library_file_aborts_reservation_and_heaters(s
     soak.client.set_bed_temperature.assert_called_with(0)
 
 
+async def test_abort_does_not_change_automatic_start_policy(soak):
+    assert await soak.service.stage(soak.db, soak.item)
+    await heat.abort_heat_soak(soak.db, soak.item, "Printer disconnected during soak")
+    await soak.db.refresh(soak.item)
+    assert soak.item.status == "failed"
+    assert soak.item.manual_start is False
+
+
+async def test_source_removal_preserves_queued_job_and_explains_missing_file(soak):
+    source_id = soak.item.library_file_id
+    assert await release_queue_references(soak.db, [source_id]) == 1
+    await soak.db.commit()
+    await soak.db.refresh(soak.item)
+    assert soak.item.status == "queued"
+    assert soak.item.library_file_id is None
+    assert "was deleted from the library" in soak.item.error_message
+    assert soak.item.completed_at is None
+
+
 async def test_cancel_at_timer_boundary_cannot_dispatch(soak):
     await soak.service.stage(soak.db, soak.item)
     await soak.service.check(soak.db)
@@ -531,8 +550,8 @@ async def test_index_upgrade_includes_preheating_when_old_index_exists(soak):
                 "WHERE status IN ('dispatching', 'printing')"
             )
         )
-        await _ensure_active_queue_printer_reservation(conn)
-        await _ensure_active_queue_printer_reservation(conn)
+        await _migrate_queue_lifecycle(conn)
+        await _migrate_queue_lifecycle(conn)
     await soak.service.stage(soak.db, soak.item)
     soak.db.add(PrintQueueItem(printer_id=1, status="preheating"))
     with pytest.raises(IntegrityError):

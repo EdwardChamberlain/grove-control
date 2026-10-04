@@ -1110,11 +1110,6 @@ async def _migrate_queue_lifecycle(conn) -> None:
         await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value="3"))
 
 
-async def _ensure_active_queue_printer_reservation(conn) -> None:
-    # Compatibility for callers of the old migration helper.
-    await _migrate_queue_lifecycle(conn)
-
-
 async def _migrate_queue_legacy_archive_links(conn) -> None:
     """Link only unambiguous pre-#194 attempts, once during the upgrade."""
     from sqlalchemy import select, text

@@ -109,22 +109,19 @@ async def test_stop_during_heat_soak_archive_copy_wins_without_rows_or_directori
 async def test_losing_dispatch_update_cleans_its_upload_and_retains_the_cancelled_archive(
     alignment, monkeypatch, boundary, cleanup_fails
 ):
-    import backend.app.main as main
-
     scheduler = scheduling.PrintScheduler()
     live = SimpleNamespace(state="IDLE", connected=True, job_telemetry_ready=True)
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
     monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
-    monkeypatch.setattr(main, "_user_stopped_printers", set())
+    monkeypatch.setattr("backend.app.main._user_stopped_printers", set())
     # A control from another worker cannot cancel this process's local task.
     monkeypatch.setattr(scheduling.scheduler, "cancel_inflight", lambda _id: False)
     monkeypatch.setattr(scheduling, "async_session", alignment.sessions)
     monkeypatch.setattr(scheduling, "get_ftp_retry_settings", AsyncMock(return_value=(False, 1, 0, 30)))
     monkeypatch.setattr(scheduler, "_prepare_drying_for_dispatch", AsyncMock(return_value=True))
     monkeypatch.setattr(scheduler, "_active_drying_ams_ids", lambda _id: [])
-    started, registered = MagicMock(), MagicMock()
+    started = MagicMock()
     monkeypatch.setattr(printer_manager, "start_print", started)
-    monkeypatch.setattr(main, "register_expected_print", registered)
     notified = AsyncMock()
     monkeypatch.setattr(scheduling.notification_service, "on_queue_job_failed", notified)
     remote_files = {"/another-print.3mf": b"another print"}
@@ -183,7 +180,6 @@ async def test_losing_dispatch_update_cleans_its_upload_and_retains_the_cancelle
     await scheduler._dispatch_one(alignment.job_id, 1)
     assert uploaded and stopped is not None
     started.assert_not_called()
-    registered.assert_not_called()
     notified.assert_not_awaited()
     uploads.assert_awaited_once()
     remote_path = uploads.call_args.args[3]

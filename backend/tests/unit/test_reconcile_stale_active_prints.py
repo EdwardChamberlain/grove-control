@@ -1,30 +1,9 @@
-"""Tests for the connected-edge reconciliation that recovers from missed
-PRINT COMPLETE events (#1542 follow-up).
-
-Background: the PRINT COMPLETE MQTT callback is purely reactive to a single
-state transition (RUNNING → IDLE / FINISH / FAILED). When the printer
-finishes during an MQTT disconnect window — typical on the A1 line with
-unstable MQTT keepalives — Grove Control never observes the transition. If a
-smart plug then cuts power between completion and the next reconnect, the
-firmware auto-replays whatever's still on the SD card and produces a ghost
-print on next power-up. Reporter (#1542 second case) saw this hit 4 out of
-4 of his A1s.
-
-These tests cover:
-  * `_is_active_archive_stale` — the pure decision function for whether an
-    archive in `status="printing"` should be reconciled given the printer's
-    current state.
-  * `reconcile_stale_active_prints` — the orchestrator that queries the DB,
-    runs the decision function, and synthesises `on_print_complete` for
-    each stale archive.
-"""
+"""Connected-edge reconciliation preserves active work and uses exact job identity."""
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-from backend.app.main import _is_active_archive_stale
 
 
 def _state(state: str, *, subtask_id: str = "", subtask_name: str = "", connected: bool = True) -> SimpleNamespace:
@@ -74,104 +53,6 @@ def _status_state(state: str, *, connected: bool = True) -> SimpleNamespace:
         subtask_name="",
         hms_errors=[],
     )
-
-
-class TestIsActiveArchiveStale:
-    """Decision function — covers all three stale triggers + the
-    intentionally-conservative no-op cases."""
-
-    # Trigger 1: printer is in a terminal state.
-    @pytest.mark.parametrize("terminal_state", ["IDLE", "FINISH", "FAILED", "idle", "finish", "failed"])
-    def test_terminal_state_marks_stale(self, terminal_state):
-        archive = _archive(subtask_id="ABC123")
-        state = _state(terminal_state, subtask_id="ABC123", subtask_name="ghost")
-        is_stale, reason = _is_active_archive_stale(archive, state)
-        assert is_stale is True
-        assert terminal_state.upper() in reason
-
-    # Trigger 2: printer is running a different subtask_id.
-    def test_subtask_id_changed_marks_stale(self):
-        archive = _archive(subtask_id="OLD_ID")
-        state = _state("RUNNING", subtask_id="NEW_ID", subtask_name="something")
-        is_stale, reason = _is_active_archive_stale(archive, state)
-        assert is_stale is True
-        assert "subtask_id" in reason
-        assert "OLD_ID" in reason
-        assert "NEW_ID" in reason
-
-    # Trigger 3: printer is running but doesn't know what it's running.
-    def test_empty_subtask_name_marks_stale(self):
-        archive = _archive(subtask_id="ABC123")
-        state = _state("RUNNING", subtask_id="", subtask_name="")
-        is_stale, reason = _is_active_archive_stale(archive, state)
-        assert is_stale is True
-        assert "empty" in reason.lower() or "subtask_name" in reason
-
-    # Healthy case: same subtask_id, running.
-    def test_matching_running_print_not_stale(self):
-        archive = _archive(subtask_id="ABC123")
-        state = _state("RUNNING", subtask_id="ABC123", subtask_name="ghost")
-        is_stale, _ = _is_active_archive_stale(archive, state)
-        assert is_stale is False
-
-    # PAUSE is not a stale signal — the print is paused, not ended.
-    def test_paused_print_with_matching_subtask_not_stale(self):
-        archive = _archive(subtask_id="ABC123")
-        state = _state("PAUSE", subtask_id="ABC123", subtask_name="ghost")
-        is_stale, _ = _is_active_archive_stale(archive, state)
-        assert is_stale is False
-
-    # PREPARE / SLICING are not stale either — pre-print phases.
-    @pytest.mark.parametrize("pre_running_state", ["PREPARE", "SLICING"])
-    def test_pre_running_states_with_matching_subtask_not_stale(self, pre_running_state):
-        archive = _archive(subtask_id="ABC123")
-        state = _state(pre_running_state, subtask_id="ABC123", subtask_name="ghost")
-        is_stale, _ = _is_active_archive_stale(archive, state)
-        assert is_stale is False
-
-    # Missing subtask_id on the archive side: don't have evidence either
-    # way, fall through to the empty-subtask_name check.
-    def test_archive_with_no_subtask_id_falls_to_subtask_name_check(self):
-        archive = _archive(subtask_id=None)
-        state = _state("RUNNING", subtask_id="ANYTHING", subtask_name="something")
-        # Subtask_name is populated → not stale, no false positive.
-        is_stale, _ = _is_active_archive_stale(archive, state)
-        assert is_stale is False
-
-    # Missing subtask_id on both sides: still triggers the empty-subtask_name
-    # branch if the printer doesn't know what it's running.
-    def test_both_subtask_ids_missing_running_with_empty_name_stale(self):
-        archive = _archive(subtask_id=None)
-        state = _state("RUNNING", subtask_id="", subtask_name="")
-        is_stale, _ = _is_active_archive_stale(archive, state)
-        assert is_stale is True
-
-    # IDLE wins over PRINT-STATE checks — the terminal-state branch fires
-    # first regardless of what the subtask fields look like.
-    def test_idle_state_overrides_matching_subtask(self):
-        archive = _archive(subtask_id="ABC123")
-        state = _state("IDLE", subtask_id="ABC123", subtask_name="ghost")
-        is_stale, reason = _is_active_archive_stale(archive, state)
-        assert is_stale is True
-        assert "IDLE" in reason
-
-    # #1679: defensive pre-push guard. Even if reconcile gets called against
-    # a PrinterState that's still on construction defaults (state="unknown"
-    # / empty / None, subtask_name=""), the function must NOT report stale —
-    # otherwise the reactive PRINT COMPLETE later creates a duplicate
-    # archive and filament gets double-counted. The on_printer_status_change
-    # caller is the primary fix (gates the reconcile spawn on real state),
-    # but this guard is belt-and-braces for any future caller.
-    @pytest.mark.parametrize("degenerate_state", ["unknown", "UNKNOWN", "Unknown", "", None])
-    def test_pre_push_state_returns_not_stale_even_with_empty_subtask(self, degenerate_state):
-        archive = _archive(subtask_id="ABC123")
-        state = _state(degenerate_state, subtask_id="", subtask_name="")
-        is_stale, _ = _is_active_archive_stale(archive, state)
-        assert is_stale is False, (
-            f"state.state={degenerate_state!r} means MQTT hasn't pushed real data yet; "
-            "treating an in-flight archive as stale here causes the #1679 "
-            "duplicate-archive + filament-double-count regression"
-        )
 
 
 class TestReconcileStaleActivePrints:

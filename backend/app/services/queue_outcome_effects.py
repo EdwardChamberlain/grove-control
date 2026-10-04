@@ -1,4 +1,4 @@
-"""Effects emitted once a failed or cancelled queue transition commits."""
+"""Effects emitted after Queue outcomes and failed-attempt plate clearing commit."""
 
 import logging
 from dataclasses import dataclass
@@ -64,7 +64,7 @@ async def run_queue_outcome_effects(engine: AsyncEngine, effect: QueueOutcomeEff
         except Exception:
             logger.exception("Queue job %s: failure notification failed", effect.job_id)
 
-    if auto_off and effect.printer_id is not None:
+    if auto_off and effect.new_state in ("failed", "cancelled") and effect.printer_id is not None:
         try:
             async with sessions() as db:
                 await smart_plug_manager.schedule_off_after_queue_job(effect.printer_id, db)
@@ -80,6 +80,18 @@ async def run_queue_outcome_effects(engine: AsyncEngine, effect: QueueOutcomeEff
             logger.exception("Queue job %s: heater shutdown failed", effect.job_id)
 
     if effect.clean_sd_copy and remote_filename and connection is not None:
+        if effect.new_state == "unsuccessful":
+            from backend.app.services.printer_manager import printer_manager
+
+            live = printer_manager.get_status(effect.printer_id)
+            if (
+                live
+                and live.connected
+                and getattr(live, "job_telemetry_ready", True)
+                and live.state in ("PREPARE", "SLICING", "RUNNING", "PAUSE")
+            ):
+                logger.info("Queue job %s: skipping plate-clear SD cleanup while printer is active", effect.job_id)
+                return  # A reconnect or new start overtook Clear Plate.
         try:
             await delete_file_async(
                 connection[0],

@@ -16,8 +16,73 @@ from backend.app.models.printer import Printer
 from backend.app.services import chamber_heat_soak as heat, print_scheduler, queue_outcome_effects
 from backend.app.services.job_identity import observe_print
 from backend.app.services.printer_manager import printer_manager
-from backend.app.services.queue_transitions import transition_queue_item
+from backend.app.services.queue_actions import cancel_job
+from backend.app.services.queue_transitions import clear_job_plate, transition_queue_item
 from backend.tests.unit.test_queue_archive_alignment import alignment, hold_and_link  # noqa: F401
+
+
+@pytest.mark.parametrize("status", ["dispatching", "printing"])
+@pytest.mark.parametrize("outcome", ["commit", "rollback", "ftp_failure", "reconnected"])
+async def test_clear_plate_cleans_sent_upload_after_offline_stop(alignment, monkeypatch, status, outcome):
+    from backend.app.core import tasks
+
+    pending = []
+    monkeypatch.setattr(tasks, "spawn_background_task", lambda coro, **kwargs: pending.append(coro))
+    live = SimpleNamespace(connected=False, state="IDLE", job_telemetry_ready=False)
+    monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
+    monkeypatch.setattr(printer_manager, "stop_print", lambda _id: False)
+    monkeypatch.setattr("backend.app.main._user_stopped_printers", set())
+    monkeypatch.setattr(print_scheduler.scheduler, "cancel_inflight", lambda _id: False)
+    notified, powered_off = AsyncMock(), AsyncMock()
+    deleted = AsyncMock(side_effect=OSError("offline") if outcome == "ftp_failure" else None, return_value=True)
+    monkeypatch.setattr(queue_outcome_effects.notification_service, "on_queue_job_failed", notified)
+    monkeypatch.setattr(queue_outcome_effects.smart_plug_manager, "schedule_off_after_queue_job", powered_off)
+    monkeypatch.setattr(queue_outcome_effects, "delete_file_async", deleted)
+    async with alignment.sessions() as db:
+        job = await db.get(PrintQueueItem, alignment.job_id)
+        await hold_and_link(db, job)
+        await transition_queue_item(
+            db,
+            job,
+            "dispatching",
+            status,
+            values={"dispatch_subtask_id": "123", "dispatched_at": datetime.now(timezone.utc)},
+        )
+        job.auto_off_after = True
+        await db.commit()
+        attempt = await db.get(PrintArchive, job.archive_id)
+        remote_filename = attempt.extra_data["remote_filename"]
+        await cancel_job(db, job)
+        assert job.status == "cancelled" and job.dispatched_at is not None
+        assert "Stop command not sent" in job.error_message
+    assert len(pending) == 1
+    await pending.pop()
+    powered_off.assert_awaited_once()
+    deleted.assert_not_awaited()  # The sent file is retained until the operator clears the plate.
+    async with alignment.sessions() as db:
+        job = await db.get(PrintQueueItem, alignment.job_id)
+        await clear_job_plate(db, job)
+        assert not pending
+        if outcome == "rollback":
+            await db.rollback()
+        else:
+            await db.commit()
+    if outcome != "rollback":
+        assert len(pending) == 1
+        if outcome == "reconnected":
+            live.connected = live.job_telemetry_ready = True
+            live.state = "RUNNING"
+        await pending.pop()
+    if outcome in ("commit", "ftp_failure"):
+        deleted.assert_awaited_once()
+        assert deleted.call_args.args[2] == f"/{remote_filename}"
+    else:
+        deleted.assert_not_awaited()
+    powered_off.assert_awaited_once()  # Clearing the plate does not replay completion effects.
+    notified.assert_not_awaited()
+    async with alignment.sessions() as db:
+        job = await db.get(PrintQueueItem, alignment.job_id)
+        assert job.status == ("cancelled" if outcome == "rollback" else "unsuccessful")
 
 
 @pytest.mark.parametrize(

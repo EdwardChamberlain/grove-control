@@ -1604,6 +1604,7 @@ async def retry_queue_item(
         "physical_completed_at",
         "physical_failure_reason",
         "stop_requested_at",
+        "manual_start",
         "dispatched_at",
         "dispatch_subtask_id",
         "dispatching_at",

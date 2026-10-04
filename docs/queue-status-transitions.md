@@ -149,7 +149,8 @@ resolution reject attempts still owned by a worker.
 
 **Retry** on a failed or cancelled attempt creates a separate, unlinked
 `queued` job at the top of the same printer/model queue, carrying the print
-settings. Stop intent, submission IDs, timestamps, and physical outcomes belong
+settings and enabling automatic scheduling. Manual-start staging, Stop intent,
+submission IDs, timestamps, and physical outcomes belong
 to the original attempt and are reset on the replacement. Cross-model retries
 copy the available candidate slices and their
 per-file settings, resetting candidate attempt counts. If none survive, Retry
@@ -160,6 +161,10 @@ is required before its replacement can use the same printer; model-based retries
 can use a different free, compatible printer. Queue-only sources remain
 available while a nonfinal job needs them and are removed after finalization
 and commit; other queued copies keep a shared source alive.
+An aborted heat soak keeps its configured start policy; the failed state already
+prevents another dispatch. Retry repeats the complete soak. Purging a Files
+source detaches it and records the missing-file reason on waiting jobs, which
+remain `queued` until the operator resolves or cancels them.
 
 Archive deletion and automatic purge refuse to remove a source backing any
 holding job. Purge previews exclude these Archives, and deletion rechecks the
@@ -176,6 +181,11 @@ their existing cleanup naming rules.
 When Stop cancels an upload, the worker drains the FTP transfer before removing
 its unsent copy. A persisted command-send boundary keeps the copy available
 while delivery or the printer's physical outcome remains uncertain.
+Clear Plate for a failed or cancelled attempt schedules a best-effort deletion
+of its recorded upload after commit, including after an offline Stop. It does
+not repeat notification or Auto Off effects. Cleanup is skipped if fresh telemetry
+reports active printing before the effect runs; an FTP failure does not undo
+plate clearing.
 Live covers and object reloads use the matching job's recorded upload path,
 so the original display name still works with cached files and after restart.
 

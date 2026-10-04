@@ -11,6 +11,9 @@ sending `project_file`. MQTT start and finish callbacks carry an identity
 snapshot. Queue and Archive attribution use that identity plus the printer;
 filenames, display names, the last command and the most recent job are never
 fallbacks for a missing ID. A delayed event cannot complete another job.
+Start and completion recover the job's AMS mapping, plate selection and owner
+from its persisted row. The old filename registry and last-command ID cache
+have been removed.
 
 A touchscreen, SD-card or slicer print observed in PREPARE, SLICING, RUNNING or PAUSE creates an
 ownerless `printing` Queue job. Duplicate observations reuse the same job. It

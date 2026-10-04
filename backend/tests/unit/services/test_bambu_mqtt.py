@@ -4259,22 +4259,12 @@ class TestStartPrintUniqueIdentityFields:
         assert int(cmd["task_id"]) > 0
         assert len(cmd["task_id"]) <= 64
 
-    def test_last_dispatch_subtask_id_records_the_minted_id(self, mqtt_client):
-        """#1485: start_print records the minted id on the client so
-        on_print_start can persist it on the archive before the printer
-        echoes subtask_id back — letting a later restart resume by id."""
-        assert mqtt_client.last_dispatch_subtask_id is None
-        mqtt_client.start_print("test.3mf")
-        cmd = self._get_published_command(mqtt_client)
-        assert mqtt_client.last_dispatch_subtask_id == cmd["subtask_id"]
-
     def test_scheduler_submission_id_is_used_verbatim(self, mqtt_client):
         """Queue recovery relies on the persisted id matching terminal MQTT telemetry."""
         mqtt_client.start_print("test.3mf", submission_id="123456")
         cmd = self._get_published_command(mqtt_client)
         assert cmd["task_id"] == "123456"
         assert cmd["subtask_id"] == "123456"
-        assert mqtt_client.last_dispatch_subtask_id == "123456"
 
     def test_unique_upload_path_keeps_the_original_display_name(self, mqtt_client):
         mqtt_client.start_print("Cube__grove_attempt.3mf", display_name="Cube.gcode.3mf", submission_id="123456")
@@ -4282,15 +4272,6 @@ class TestStartPrintUniqueIdentityFields:
         assert cmd["url"] == "ftp://Cube__grove_attempt.3mf"
         assert cmd["subtask_name"] == "Cube"
         assert cmd["subtask_id"] == "123456"
-
-    def test_last_dispatch_subtask_id_updates_per_submission(self, mqtt_client):
-        """Each dispatch overwrites the recorded id with the new submission's."""
-        mqtt_client.start_print("test.3mf")
-        first = mqtt_client.last_dispatch_subtask_id
-        time.sleep(0.002)
-        mqtt_client.start_print("test.3mf")
-        assert mqtt_client.last_dispatch_subtask_id != first
-        assert mqtt_client.last_dispatch_subtask_id == self._get_published_command(mqtt_client)["subtask_id"]
 
     def test_submission_id_fits_signed_int32(self, mqtt_client):
         """Regression for #1042: P1S firmware clamps oversized task identity

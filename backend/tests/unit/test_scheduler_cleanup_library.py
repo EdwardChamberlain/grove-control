@@ -660,8 +660,6 @@ async def test_command_boundary_retains_reservation_if_drying_starts_after_final
     clear = SimpleNamespace(raw_data={"ams": [{"id": 0, "dry_time": 0}]})
 
     with (
-        patch("backend.app.main.register_expected_print") as register_expected,
-        patch("backend.app.main.unregister_expected_print") as unregister_expected,
         patch(
             "backend.app.services.print_scheduler.printer_manager.clear_current_print_user"
         ) as clear_current_print_user,
@@ -685,8 +683,6 @@ async def test_command_boundary_retains_reservation_if_drying_starts_after_final
     assert archive.status == "failed"
     assert ctx.source_path.exists()
     assert ctx.archive_path.exists()
-    register_expected.assert_not_called()
-    unregister_expected.assert_not_called()
     clear_current_print_user.assert_called_once_with(ctx.printer_id)
     if wait_for_drying_complete:
         ctx.stop_drying.assert_not_called()

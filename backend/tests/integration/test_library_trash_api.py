@@ -6,6 +6,35 @@ import pytest
 from httpx import AsyncClient
 
 
+async def test_retention_sweep_detaches_source_without_cancelling_waiting_job(db_session, tmp_path):
+    from backend.app.models.library import LibraryFile
+    from backend.app.models.print_queue import PrintQueueItem
+    from backend.app.services.library_trash import LibraryTrashService
+
+    path = tmp_path / "expired.3mf"
+    path.write_bytes(b"queued file")
+    source = LibraryFile(
+        filename=path.name,
+        file_path=str(path),
+        file_size=path.stat().st_size,
+        file_type="3mf",
+        deleted_at=datetime.now(timezone.utc) - timedelta(days=60),
+    )
+    db_session.add(source)
+    await db_session.flush()
+    job = PrintQueueItem(library_file_id=source.id, status="queued", manual_start=False)
+    db_session.add(job)
+    await db_session.commit()
+    job_id, source_id = job.id, source.id
+    assert await LibraryTrashService()._sweep(db_session) == 1
+    db_session.expire_all()
+    job = await db_session.get(PrintQueueItem, job_id)
+    assert job.status == "queued" and job.completed_at is None and job.library_file_id is None
+    assert job.manual_start is False and "expired.3mf" in job.error_message
+    assert await db_session.get(LibraryFile, source_id) is None
+    assert not path.exists()
+
+
 @pytest.fixture
 async def file_factory(db_session):
     """Factory for LibraryFile rows with sensible defaults."""

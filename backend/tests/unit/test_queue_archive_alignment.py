@@ -479,7 +479,6 @@ async def test_heat_soak_dispatch_uses_current_telemetry_after_archive_copy(alig
     monkeypatch.setattr(sched, "cache_3mf_download", MagicMock())
     monkeypatch.setattr(scheduler, "_schedule_dispatch_confirmation", MagicMock())
     monkeypatch.setattr(scheduler, "_propagate_owner_to_printer_manager", AsyncMock())
-    monkeypatch.setattr(main, "register_expected_print", MagicMock())
     monkeypatch.setattr(sched, "async_session", alignment.sessions)
     original = ArchiveService.archive_print
 

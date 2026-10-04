@@ -50,10 +50,9 @@ async def cancel_job(db: AsyncSession, item: PrintQueueItem) -> None:
 
     scheduler.cancel_inflight(item_id)
     if not queued and printer_id is not None:
-        from backend.app.main import mark_printer_stopped_by_user, unregister_expected_print
+        from backend.app.main import mark_printer_stopped_by_user
 
         mark_printer_stopped_by_user(printer_id)
-        unregister_expected_print(printer_id)
         try:
             stop_sent = printer_manager.stop_print(printer_id)
         except Exception:
