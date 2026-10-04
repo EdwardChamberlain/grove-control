@@ -29,6 +29,29 @@ def _clear_baselines():
 
 
 @pytest.mark.asyncio
+async def test_recovery_archive_work_does_not_replay_plate_check_or_start_notifications():
+    import backend.app.main as main
+
+    printer = MagicMock(plate_detection_enabled=True, auto_archive=False)
+    printer.id = 1
+    result = MagicMock(scalar_one_or_none=MagicMock(return_value=printer))
+    db = AsyncMock()
+    db.__aenter__ = AsyncMock(return_value=db)
+    db.__aexit__ = AsyncMock()
+    db.execute = AsyncMock(return_value=result)
+    with (
+        patch.object(main, "async_session", return_value=db),
+        patch.object(main.ws_manager, "send_print_start", new_callable=AsyncMock) as websocket_start,
+        patch.object(main, "_send_print_start_notification", new_callable=AsyncMock) as notify_start,
+        patch("backend.app.services.plate_detection.check_plate_empty", new_callable=AsyncMock) as plate_check,
+    ):
+        await main._archive_print_start(1, {"submission_id": "existing", "filename": "same.3mf"})
+    websocket_start.assert_not_awaited()
+    notify_start.assert_not_awaited()
+    plate_check.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_running_observed_captures_baseline_on_restart_recovery():
     """The handler must capture the printer's existing-videos snapshot so
     the completion-time scan has something to set-diff against. This is

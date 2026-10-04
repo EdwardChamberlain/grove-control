@@ -1,5 +1,6 @@
 """Real-database regression coverage for queue heat-soak reservations and cleanup."""
 
+import asyncio
 import time
 import zipfile
 from datetime import timedelta
@@ -13,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from backend.app.core.config import settings
-from backend.app.core.database import Base, _ensure_active_queue_printer_reservation
+from backend.app.core.database import Base, _migrate_queue_lifecycle
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
@@ -27,6 +28,22 @@ from backend.app.services.library_trash import release_queue_references
 @pytest.fixture
 async def soak(tmp_path, monkeypatch):
     import backend.app.models  # noqa: F401
+    from backend.app.core import tasks
+
+    outcome_tasks = []
+    spawn = tasks.spawn_background_task
+
+    def track_outcomes(coroutine, *, name=None):
+        task = spawn(coroutine, name=name)
+        if name and name.startswith("queue-") and "-effects-" in name:
+            outcome_tasks.append(task)
+        return task
+
+    async def wait_effects():
+        await asyncio.gather(*outcome_tasks)
+        outcome_tasks.clear()
+
+    monkeypatch.setattr(tasks, "spawn_background_task", track_outcomes)
 
     monkeypatch.setattr(settings, "base_dir", tmp_path)
     monkeypatch.setattr(settings, "archive_dir", tmp_path / "archives")
@@ -36,7 +53,7 @@ async def soak(tmp_path, monkeypatch):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'soak.db'}")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        await _ensure_active_queue_printer_reservation(conn)
+        await _migrate_queue_lifecycle(conn)
     # This connected client has already reported its idle job state.
     state = PrinterState(connected=True, state="IDLE", job_telemetry_ready=True)
     client = MagicMock()
@@ -46,6 +63,7 @@ async def soak(tmp_path, monkeypatch):
     manager = MagicMock()
     manager._broadcast_status_change = AsyncMock()
     manager.is_connected.return_value = True
+    manager.is_awaiting_plate_clear.return_value = False
     manager.get_client.return_value = client
     manager.get_status.return_value = state
     monkeypatch.setattr(heat, "printer_manager", manager)
@@ -72,7 +90,9 @@ async def soak(tmp_path, monkeypatch):
             client=client,
             manager=manager,
             service=heat.ChamberHeatSoak(),
+            wait_effects=wait_effects,
         )
+        await wait_effects()
     await engine.dispose()
 
 
@@ -174,6 +194,65 @@ async def test_bed_only_heating_starts_timer(soak):
     assert soak.item.preheat_started_at is not None
 
 
+@pytest.mark.parametrize("stale_field", ["connected", "job_telemetry_ready"])
+async def test_reconnect_during_staging_commit_cannot_send_heater_commands(soak, monkeypatch, stale_field):
+    commit = soak.db.commit
+
+    async def reconnect_after_hold():
+        await commit()
+        setattr(soak.state, stale_field, False)
+
+    monkeypatch.setattr(soak.db, "commit", reconnect_after_hold)
+    assert not await soak.service.stage(soak.db, soak.item)
+    await soak.wait_effects()
+    soak.client.set_bed_temperature.assert_not_called()
+    soak.client.set_chamber_temperature.assert_not_called()
+    soak.client.set_airduct_mode.assert_not_called()
+
+
+@pytest.mark.parametrize("active_state", ["PREPARE", "RUNNING", "PAUSE", "SLICING"])
+async def test_interrupted_soak_defers_shutdown_until_foreign_print_is_inactive(soak, active_state):
+    assert await soak.service.stage(soak.db, soak.item)
+    soak.client.reset_mock()
+    soak.state.state = active_state
+    soak.state.submission_id = "external-run"
+    assert await soak.service.check(soak.db) == []
+    await soak.wait_effects()
+    await soak.db.refresh(soak.printer)
+    assert soak.printer.heat_soak_shutdown_pending
+    # Zero targets from the active print cannot discharge the pending cleanup.
+    confirm(soak, target=0)
+    await soak.service.cleanup(soak.db)
+    assert soak.printer.heat_soak_shutdown_pending
+    soak.client.set_bed_temperature.assert_not_called()
+    soak.client.set_chamber_temperature.assert_not_called()
+    soak.client.set_airduct_mode.assert_not_called()
+
+    soak.state.state = "IDLE"
+    soak.state.job_telemetry_ready = False
+    await soak.service.cleanup(soak.db)
+    assert soak.printer.heat_soak_shutdown_pending
+    soak.client.set_bed_temperature.assert_not_called()
+    soak.state.job_telemetry_ready = True
+    confirm(soak, target=0)
+    await soak.service.cleanup(soak.db)
+    assert not soak.printer.heat_soak_shutdown_pending
+    soak.client.set_bed_temperature.assert_called_once_with(0)
+
+
+async def test_pending_shutdown_does_not_interrupt_another_reserved_soak(soak):
+    assert await soak.service.stage(soak.db, soak.item)
+    # A delayed shutdown obligation must not override a current heater owner.
+    soak.printer.heat_soak_shutdown_pending = True
+    soak.printer.heat_soak_shutdown_at = heat.utcnow()
+    await soak.db.commit()
+    soak.client.reset_mock()
+    confirm(soak, target=0)
+    await soak.service.cleanup(soak.db)
+    assert soak.printer.heat_soak_shutdown_pending
+    soak.client.set_bed_temperature.assert_not_called()
+
+
 @pytest.mark.parametrize(
     "interruption",
     [
@@ -185,7 +264,7 @@ async def test_bed_only_heating_starts_timer(soak):
         "disabled",
     ],
 )
-async def test_interruptions_release_item_for_manual_retry_and_shutdown(soak, interruption):
+async def test_interruptions_fail_attempt_and_shutdown_without_changing_start_policy(soak, interruption):
     await soak.service.stage(soak.db, soak.item)
     await soak.db.refresh(soak.item)
     if interruption == "disconnect":
@@ -210,7 +289,7 @@ async def test_interruptions_release_item_for_manual_retry_and_shutdown(soak, in
         assert "inspect" in soak.item.error_message
         return
     assert soak.item.status == "failed"
-    assert soak.item.manual_start is True
+    assert soak.item.manual_start is False
     assert soak.item.preheat_owner is None
     assert soak.item.preheat_started_at is None
     assert soak.item.error_message
@@ -251,6 +330,7 @@ async def test_failed_command_stops_every_supported_heater(soak):
     assert not await soak.service.stage(soak.db, soak.item)
     await soak.db.refresh(soak.item)
     assert soak.item.status == "failed"
+    await soak.wait_effects()
     soak.client.set_bed_temperature.assert_called_with(0)
     soak.client.set_chamber_temperature.assert_called_with(0)
     soak.client.set_airduct_mode.assert_called_with("cooling")
@@ -261,6 +341,7 @@ async def test_delete_offline_preserves_cleanup_and_prevents_new_soak_until_off_
     soak.manager.is_connected.return_value = False
     item = await heat.lock_queue_item(soak.db, 1)
     await heat.abort_heat_soak(soak.db, item, "Cancelled", status="cancelled")
+    await soak.wait_effects()
     await soak.db.delete(item)
     await soak.db.commit()
     await soak.service.cleanup(soak.db)
@@ -297,6 +378,7 @@ async def test_shutdown_retries_after_reconnect_until_fresh_zero_targets(soak, m
     soak.manager.is_connected.return_value = False
     item = await heat.lock_queue_item(soak.db, soak.item.id)
     await heat.abort_heat_soak(soak.db, item, "Stopped while offline", status="cancelled")
+    await soak.wait_effects()
     soak.client.reset_mock()
     await soak.service.cleanup(soak.db)
     soak.client.set_bed_temperature.assert_not_called()
@@ -329,6 +411,30 @@ async def test_shutdown_retries_after_reconnect_until_fresh_zero_targets(soak, m
     soak.client.set_airduct_mode.assert_not_called()
 
 
+async def test_failed_dispatch_after_soak_preserves_offline_heater_shutdown_retry(soak):
+    from backend.app.services.print_scheduler import PrintScheduler
+
+    assert await soak.service.stage(soak.db, soak.item)
+    soak.item.preheat_started_at = heat.utcnow() - timedelta(minutes=2)
+    await soak.db.commit()
+    assert await soak.service.check(soak.db) == [soak.item.id]
+    soak.manager.is_connected.return_value = False
+    await PrintScheduler()._fail_queue_item(soak.db, soak.item, "Archive copy interrupted")
+    await soak.wait_effects()
+    await soak.db.refresh(soak.printer)
+    assert soak.printer.heat_soak_shutdown_pending
+    assert soak.printer.heat_soak_shutdown_at is not None
+    soak.client.reset_mock()
+    soak.manager.is_connected.return_value = True
+    await soak.service.cleanup(soak.db)
+    soak.client.set_bed_temperature.assert_called_once_with(0)
+    soak.client.set_chamber_temperature.assert_called_once_with(0)
+    assert soak.printer.heat_soak_shutdown_pending
+    confirm(soak, target=0)
+    await soak.service.cleanup(soak.db)
+    assert not soak.printer.heat_soak_shutdown_pending
+
+
 async def test_deleting_preheating_library_file_aborts_reservation_and_heaters(soak):
     """Deleting a source file must not leave its preheating reservation alive."""
     source = LibraryFile(
@@ -348,6 +454,8 @@ async def test_deleting_preheating_library_file_aborts_reservation_and_heaters(s
     assert soak.item.status == "preheating"
 
     assert await release_queue_references(soak.db, [source.id]) == 1
+    await soak.db.commit()  # The deletion caller commits the remaining source detachment.
+    await soak.wait_effects()
     await soak.db.refresh(soak.item)
     await soak.db.refresh(soak.printer)
     assert soak.item.status == "cancelled"
@@ -357,6 +465,25 @@ async def test_deleting_preheating_library_file_aborts_reservation_and_heaters(s
     soak.client.set_bed_temperature.assert_called_with(0)
 
 
+async def test_abort_does_not_change_automatic_start_policy(soak):
+    assert await soak.service.stage(soak.db, soak.item)
+    await heat.abort_heat_soak(soak.db, soak.item, "Printer disconnected during soak")
+    await soak.db.refresh(soak.item)
+    assert soak.item.status == "failed"
+    assert soak.item.manual_start is False
+
+
+async def test_source_removal_preserves_queued_job_and_explains_missing_file(soak):
+    source_id = soak.item.library_file_id
+    assert await release_queue_references(soak.db, [source_id]) == 1
+    await soak.db.commit()
+    await soak.db.refresh(soak.item)
+    assert soak.item.status == "queued"
+    assert soak.item.library_file_id is None
+    assert "was deleted from the library" in soak.item.error_message
+    assert soak.item.completed_at is None
+
+
 async def test_cancel_at_timer_boundary_cannot_dispatch(soak):
     await soak.service.stage(soak.db, soak.item)
     await soak.service.check(soak.db)
@@ -364,6 +491,7 @@ async def test_cancel_at_timer_boundary_cannot_dispatch(soak):
     await soak.db.commit()
     item = await heat.lock_queue_item(soak.db, 1)
     await heat.abort_heat_soak(soak.db, item, "Cancelled", status="cancelled")
+    await soak.wait_effects()
     assert await soak.service.check(soak.db) == []
     await soak.db.refresh(soak.item)
     assert soak.item.status == "cancelled"
@@ -422,8 +550,8 @@ async def test_index_upgrade_includes_preheating_when_old_index_exists(soak):
                 "WHERE status IN ('dispatching', 'printing')"
             )
         )
-        await _ensure_active_queue_printer_reservation(conn)
-        await _ensure_active_queue_printer_reservation(conn)
+        await _migrate_queue_lifecycle(conn)
+        await _migrate_queue_lifecycle(conn)
     await soak.service.stage(soak.db, soak.item)
     soak.db.add(PrintQueueItem(printer_id=1, status="preheating"))
     with pytest.raises(IntegrityError):
@@ -543,3 +671,25 @@ async def test_upgrade_defaults_existing_rows_to_off(tmp_path):
             assert tuple(row) == (0, 60, 30, None)
     finally:
         await engine.dispose()
+
+
+@pytest.mark.parametrize("worker", ["unsent", "uploading", "possibly_sent"])
+async def test_deferred_unsent_dispatch_cools_without_releasing_hold(soak, worker):
+    from backend.app.services.queue_transitions import transition_queue_item
+
+    await transition_queue_item(soak.db, soak.item, "queued", "dispatching")
+    soak.item.dispatching_at = heat.utcnow() if worker == "uploading" else None
+    soak.item.dispatched_at = heat.utcnow() if worker == "possibly_sent" else None
+    soak.printer.heat_soak_shutdown_pending = True
+    soak.printer.heat_soak_shutdown_at = heat.utcnow()
+    await soak.db.commit()
+    result = await heat.cleanup_heat_soak_shutdown(soak.db, soak.printer.id)
+    assert result == (worker == "unsent")
+    if worker == "unsent":
+        soak.client.set_bed_temperature.assert_called_once_with(0)
+        soak.client.set_chamber_temperature.assert_called_once_with(0)
+    else:
+        soak.client.set_bed_temperature.assert_not_called()
+        soak.client.set_chamber_temperature.assert_not_called()
+    assert soak.item.status == "dispatching"
+    assert soak.printer.heat_soak_shutdown_pending  # Still awaiting fresh zero targets.

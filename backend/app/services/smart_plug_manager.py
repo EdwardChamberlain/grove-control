@@ -419,6 +419,25 @@ class SmartPlugManager:
         )
         self._pending_off[plug.id] = task
 
+    async def _printer_has_active_work(self, printer_id: int) -> bool:
+        """Protect reserved heat soaks/uploads before MQTT reports a loaded print."""
+        from backend.app.core.database import async_session
+        from backend.app.models.print_queue import ACTIVE_STATUSES, PrintQueueItem
+
+        if printer_manager.is_print_active(printer_id):
+            return True
+        try:
+            async with async_session() as db:
+                job_id = await db.scalar(
+                    select(PrintQueueItem.id)
+                    .where(PrintQueueItem.printer_id == printer_id, PrintQueueItem.status.in_(ACTIVE_STATUSES))
+                    .limit(1)
+                )
+            return job_id is not None or printer_manager.is_print_active(printer_id)
+        except Exception:
+            logger.exception("Could not check active Queue work for printer %s; deferring auto-off", printer_id)
+            return True
+
     async def _delayed_off(
         self,
         plug_id: int,
@@ -472,6 +491,10 @@ class SmartPlugManager:
 
             plug_info = PlugInfo()
             service = await self.get_service_for_plug(plug_info)
+            if await self._printer_has_active_work(printer_id):
+                logger.info("Skipping auto-off for plug %s: printer %s has active Queue work", plug_id, printer_id)
+                await self._mark_auto_off_pending(plug_id, False)
+                return
             success = await service.turn_off(plug_info)
             logger.info("Turned off plug %s after time delay", plug_id)
 
@@ -600,6 +623,13 @@ class SmartPlugManager:
 
                         plug_info = PlugInfo()
                         service = await self.get_service_for_plug(plug_info)
+                        if await self._printer_has_active_work(printer_id):
+                            logger.info(
+                                "Deferring auto-off for plug %s: printer %s has active Queue work", plug_id, printer_id
+                            )
+                            await asyncio.sleep(check_interval)
+                            elapsed += check_interval
+                            continue
                         success = await service.turn_off(plug_info)
                         logger.info(
                             f"Turned off plug {plug_id} after nozzle temp dropped to "

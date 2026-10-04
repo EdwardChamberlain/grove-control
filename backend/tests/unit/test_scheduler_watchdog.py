@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.services.print_scheduler import PrintScheduler
-from backend.app.services.queue_archive import prepare_dispatch_archive
+from backend.app.services.queue_archive import link_dispatch_archive, prepare_dispatch_archive
 from backend.app.services.queue_transitions import transition_queue_item
 
 
@@ -21,7 +21,7 @@ async def db_session(tmp_path, monkeypatch):
 
     import backend.app.models  # noqa: F401 - populate Base.metadata
     from backend.app.core.config import settings
-    from backend.app.core.database import Base, _ensure_active_queue_printer_reservation
+    from backend.app.core.database import Base, _migrate_queue_lifecycle
     from backend.app.models.archive import PrintArchive
     from backend.app.models.printer import Printer
 
@@ -33,7 +33,7 @@ async def db_session(tmp_path, monkeypatch):
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        await _ensure_active_queue_printer_reservation(conn)
+        await _migrate_queue_lifecycle(conn)
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
 
     async with session_maker() as db:
@@ -48,6 +48,13 @@ async def db_session(tmp_path, monkeypatch):
         await engine.dispose()
 
 
+async def hold_and_link(db, item):
+    await transition_queue_item(db, item, item.status, "dispatching")
+    await db.commit()
+    prepared = await prepare_dispatch_archive(db, item)
+    await link_dispatch_archive(db, item, prepared)
+
+
 def _status(state: str, subtask_id: str | None = None, gcode_file: str | None = None):
     return SimpleNamespace(connected=True, state=state, subtask_id=subtask_id, gcode_file=gcode_file)
 
@@ -57,9 +64,7 @@ class TestDurableDispatchingState:
     async def test_confirmation_promotes_only_after_active_telemetry(self, db_session):
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            await transition_queue_item(
-                db, item, item.status, "dispatching", attempt=await prepare_dispatch_archive(db, item, {})
-            )
+            await hold_and_link(db, item)
             item.dispatched_at = datetime.now(timezone.utc)
             item.dispatch_subtask_id = "12345"
             await db.commit()
@@ -105,9 +110,7 @@ class TestDurableDispatchingState:
     ):
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            await transition_queue_item(
-                db, item, item.status, "dispatching", attempt=await prepare_dispatch_archive(db, item, {})
-            )
+            await hold_and_link(db, item)
             item.dispatched_at = datetime.now(timezone.utc)
             await db.commit()
 
@@ -141,18 +144,15 @@ class TestDurableDispatchingState:
             client.force_reconnect_stale_session.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_unacknowledged_dispatch_keeps_its_expected_print(self, db_session):
-        from backend.app.main import _expected_prints, register_expected_print, unregister_expected_print
+    async def test_unacknowledged_dispatch_keeps_its_durable_attempt(self, db_session):
+        from backend.app.models.archive import PrintArchive
 
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            await transition_queue_item(
-                db, item, item.status, "dispatching", attempt=await prepare_dispatch_archive(db, item, {})
-            )
+            await hold_and_link(db, item)
             item.dispatched_at = datetime.now(timezone.utc)
             await db.commit()
 
-        register_expected_print(42, "test.3mf", archive_id=99)
         scheduler = PrintScheduler()
         with (
             patch.object(
@@ -170,16 +170,18 @@ class TestDurableDispatchingState:
                 dispatch_subtask_id="12345",
             )
 
-        assert any(key[0] == 42 for key in _expected_prints)
-        unregister_expected_print(42)
+        async with db_session() as db:
+            item = await db.get(PrintQueueItem, 1)
+            archive = await db.get(PrintArchive, item.archive_id)
+            assert item.status == "dispatching"
+            assert archive.dispatched_queue_item_id == item.id
+            assert archive.subtask_id == item.dispatch_subtask_id
 
     @pytest.mark.asyncio
     async def test_correlated_terminal_dispatch_is_not_retried(self, db_session):
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            await transition_queue_item(
-                db, item, item.status, "dispatching", attempt=await prepare_dispatch_archive(db, item, {})
-            )
+            await hold_and_link(db, item)
             item.dispatched_at = datetime.now(timezone.utc)
             item.dispatch_subtask_id = "12345"
             await db.commit()
@@ -209,9 +211,7 @@ class TestDurableDispatchingState:
     async def test_restart_recovery_publishes_the_normal_start_event(self, db_session):
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            await transition_queue_item(
-                db, item, item.status, "dispatching", attempt=await prepare_dispatch_archive(db, item, {})
-            )
+            await hold_and_link(db, item)
             item.dispatched_at = datetime.now(timezone.utc)
             item.dispatch_subtask_id = "12345"
             await db.commit()
@@ -246,9 +246,7 @@ class TestDurableDispatchingState:
         """An unrelated manual print must not acknowledge a durable dispatch."""
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            await transition_queue_item(
-                db, item, item.status, "dispatching", attempt=await prepare_dispatch_archive(db, item, {})
-            )
+            await hold_and_link(db, item)
             item.dispatched_at = datetime.now(timezone.utc)
             item.dispatch_subtask_id = "12345"
             await db.commit()
@@ -268,9 +266,7 @@ class TestDurableDispatchingState:
         """Legacy rows without an id must not accept an uncorrelated active print."""
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            await transition_queue_item(
-                db, item, item.status, "dispatching", attempt=await prepare_dispatch_archive(db, item, {})
-            )
+            await hold_and_link(db, item)
             item.dispatched_at = datetime.now(timezone.utc)
             item.dispatch_subtask_id = None
             await db.commit()
@@ -286,6 +282,42 @@ class TestDurableDispatchingState:
             assert item.started_at is None
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("archive_linked", [False, True])
+    async def test_restart_fails_a_held_dispatch_before_any_command_id(self, db_session, archive_linked):
+        """A dead worker cannot leave an unsent hold waiting for manual review."""
+        async with db_session() as db:
+            item = await db.get(PrintQueueItem, 1)
+            if archive_linked:
+                await hold_and_link(db, item)
+            else:
+                await transition_queue_item(db, item, "queued", "dispatching")
+            item.dispatching_at = None  # Startup clears the dead worker's claim.
+            await db.commit()
+            attempt_id = item.archive_id
+
+            with (
+                patch(
+                    "backend.app.services.print_scheduler.printer_manager.get_status",
+                    return_value=_status("RUNNING", "unrelated-job"),
+                ),
+                patch("backend.app.services.printer_manager.printer_manager.start_print") as start,
+                patch("backend.app.services.print_scheduler.async_session", db_session),
+                patch("backend.app.services.queue_outcome_effects.run_queue_outcome_effects", new=AsyncMock()),
+            ):
+                await PrintScheduler()._clear_stale_dispatch_claims()
+
+            await db.refresh(item)
+            assert item.status == "failed"
+            assert item.error_message == "Dispatch interrupted before print command; retry required"
+            assert item.dispatch_subtask_id is None
+            start.assert_not_called()
+            from backend.app.models.archive import PrintArchive
+
+            attempt = await db.get(PrintArchive, attempt_id)
+            await db.refresh(attempt)
+            assert attempt.status == ("failed" if archive_linked else "completed")
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize("printer_subtask_id", ["other-job", None])
     async def test_restart_recovery_holds_stale_active_dispatch_without_matching_id(
         self, db_session, printer_subtask_id
@@ -293,9 +325,7 @@ class TestDurableDispatchingState:
         """An uncorrelated active printer is unsafe to requeue automatically."""
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            await transition_queue_item(
-                db, item, item.status, "dispatching", attempt=await prepare_dispatch_archive(db, item, {})
-            )
+            await hold_and_link(db, item)
             item.dispatched_at = datetime.now(timezone.utc) - timedelta(seconds=300)
             item.dispatch_subtask_id = "12345"
             await db.commit()
@@ -316,9 +346,7 @@ class TestDurableDispatchingState:
     async def test_restart_recovery_holds_stale_uncertain_dispatch(self, db_session, printer_status):
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            await transition_queue_item(
-                db, item, item.status, "dispatching", attempt=await prepare_dispatch_archive(db, item, {})
-            )
+            await hold_and_link(db, item)
             item.dispatched_at = datetime.now(timezone.utc) - timedelta(seconds=300)
             item.dispatch_subtask_id = "12345"
             await db.commit()
@@ -339,9 +367,7 @@ class TestDurableDispatchingState:
         """Unknown terminal telemetry must not cause a duplicate retry."""
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            await transition_queue_item(
-                db, item, item.status, "dispatching", attempt=await prepare_dispatch_archive(db, item, {})
-            )
+            await hold_and_link(db, item)
             item.dispatched_at = datetime.now(timezone.utc) - timedelta(seconds=300)
             item.dispatch_subtask_id = "12345"
             await db.commit()
@@ -375,9 +401,7 @@ class TestDurableDispatchingState:
         """
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            await transition_queue_item(
-                db, item, item.status, "dispatching", attempt=await prepare_dispatch_archive(db, item, {})
-            )
+            await hold_and_link(db, item)
             item.dispatched_at = datetime.now(timezone.utc) - timedelta(seconds=300)
             item.dispatch_subtask_id = "12345"
             await db.commit()
@@ -428,9 +452,7 @@ class TestDurableDispatchingState:
         dispatched_at = datetime.now(timezone.utc)
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
-            await transition_queue_item(
-                db, item, item.status, "dispatching", attempt=await prepare_dispatch_archive(db, item, {})
-            )
+            await hold_and_link(db, item)
             item.dispatched_at = dispatched_at
             item.dispatch_subtask_id = "NEW_SUBTASK"
             await db.commit()
@@ -533,9 +555,7 @@ class TestActivePrinterReservation:
     async def test_database_allows_only_one_active_queue_item_per_printer(self, db_session):
         async with db_session() as db:
             first = await db.get(PrintQueueItem, 1)
-            await transition_queue_item(
-                db, first, first.status, "dispatching", attempt=await prepare_dispatch_archive(db, first, {})
-            )
+            await hold_and_link(db, first)
             await db.commit()
 
             db.add(PrintQueueItem(id=2, printer_id=42, archive_id=100, status="dispatching"))

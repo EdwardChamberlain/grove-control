@@ -6,11 +6,23 @@ that were identified as common regression points.
 
 import asyncio
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy import select
 
+from backend.app.models.print_queue import PrintQueueItem
 from backend.app.services.smart_plug_manager import SmartPlugManager
+
+
+@pytest.fixture
+def queue_sessions(test_engine, monkeypatch):
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from backend.app.core import database
+
+    monkeypatch.setattr(database, "async_session", async_sessionmaker(test_engine, expire_on_commit=False))
 
 
 class TestSmartPlugManager:
@@ -882,6 +894,76 @@ class TestActivePrintGuard:
     def manager(self):
         return SmartPlugManager()
 
+    @pytest.mark.parametrize("strategy", ["time", "temperature"])
+    @pytest.mark.parametrize(
+        ("reserved_state", "reserve_late"),
+        [
+            ("preheating", False),
+            ("dispatching", False),
+            ("printing", False),
+            ("paused", False),
+            ("preheating", True),
+            ("failed", False),
+        ],
+    )
+    async def test_auto_off_respects_committed_queue_work(
+        self, manager, queue_sessions, db_session, printer_factory, monkeypatch, strategy, reserved_state, reserve_late
+    ):
+        from backend.app.services.printer_manager import printer_manager
+
+        printer = await printer_factory()
+
+        async def reserve():
+            db_session.add(PrintQueueItem(printer_id=printer.id, status=reserved_state))
+            await db_session.commit()
+
+        if not reserve_late:
+            await reserve()
+        monkeypatch.setattr(printer_manager, "is_print_active", lambda _id: False)
+        monkeypatch.setattr(
+            printer_manager, "get_status", lambda _id: SimpleNamespace(state="IDLE", temperatures={"nozzle": 30})
+        )
+        service = AsyncMock()
+        service.turn_off.return_value = True
+
+        async def resolve_service(plug):
+            if reserve_late:
+                await reserve()
+            return service
+
+        monkeypatch.setattr(manager, "get_service_for_plug", resolve_service)
+        monkeypatch.setattr(manager, "_mark_auto_off_pending", AsyncMock())
+        monkeypatch.setattr(manager, "_mark_auto_off_executed", AsyncMock())
+        sleep = AsyncMock(side_effect=asyncio.CancelledError() if strategy == "temperature" else None)
+        with patch("backend.app.services.smart_plug_manager.asyncio.sleep", sleep):
+            if strategy == "time":
+                await manager._delayed_off(1, "tasmota", "1.2.3.4", None, None, None, printer.id, 0)
+            else:
+                await manager._temp_based_off(1, "tasmota", "1.2.3.4", None, None, None, printer.id, 55)
+        if reserved_state == "failed":
+            service.turn_off.assert_awaited_once()
+        else:
+            service.turn_off.assert_not_awaited()
+        assert await db_session.scalar(select(PrintQueueItem.status)) == reserved_state
+
+    async def test_queue_lookup_failure_defers_auto_off(self, manager, queue_sessions, test_engine, monkeypatch):
+        from sqlalchemy import event
+        from sqlalchemy.exc import OperationalError
+
+        from backend.app.services.printer_manager import printer_manager
+
+        monkeypatch.setattr(printer_manager, "is_print_active", lambda _id: False)
+
+        def fail_queue_query(connection, cursor, statement, parameters, context, executemany):
+            if "FROM print_queue" in statement:
+                raise OperationalError(statement, parameters, Exception("database unavailable"))
+
+        event.listen(test_engine.sync_engine, "before_cursor_execute", fail_queue_query)
+        try:
+            assert await manager._printer_has_active_work(1)
+        finally:
+            event.remove(test_engine.sync_engine, "before_cursor_execute", fail_queue_query)
+
     @pytest.fixture
     def mock_plug(self):
         plug = MagicMock()
@@ -922,7 +1004,7 @@ class TestActivePrintGuard:
             mock_mark_pending.assert_awaited_with(1, False)  # pending flag cleared
 
     @pytest.mark.asyncio
-    async def test_delayed_off_powers_off_when_idle(self, manager):
+    async def test_delayed_off_powers_off_when_idle(self, manager, queue_sessions):
         """When the printer is genuinely idle, the delayed off still fires."""
         mock_service = AsyncMock()
         mock_service.turn_off = AsyncMock(return_value=True)
@@ -960,7 +1042,7 @@ class TestActivePrintGuard:
             mock_get_svc.assert_not_called()  # never turned off despite temp < threshold
 
     @pytest.mark.asyncio
-    async def test_temp_based_off_powers_off_when_cool_and_idle(self, manager):
+    async def test_temp_based_off_powers_off_when_cool_and_idle(self, manager, queue_sessions):
         """Cool nozzle + idle printer → turn off using the plug's threshold."""
         mock_service = AsyncMock()
         mock_service.turn_off = AsyncMock(return_value=True)
@@ -1100,7 +1182,7 @@ class TestAccessoryPlugDoesNotMarkPrinterOffline:
         return plug
 
     @pytest.mark.asyncio
-    async def test_delayed_off_skips_offline_mark_for_accessory(self, manager):
+    async def test_delayed_off_skips_offline_mark_for_accessory(self, manager, queue_sessions):
         mock_service = AsyncMock()
         mock_service.turn_off = AsyncMock(return_value=True)
         with (
@@ -1118,7 +1200,7 @@ class TestAccessoryPlugDoesNotMarkPrinterOffline:
             mock_pm.mark_printer_offline.assert_not_called()  # but the printer is untouched
 
     @pytest.mark.asyncio
-    async def test_temp_based_off_skips_offline_mark_for_accessory(self, manager):
+    async def test_temp_based_off_skips_offline_mark_for_accessory(self, manager, queue_sessions):
         mock_service = AsyncMock()
         mock_service.turn_off = AsyncMock(return_value=True)
         with (

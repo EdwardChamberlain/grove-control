@@ -41,9 +41,9 @@ class TestPrintStartLogic:
             mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
             mock_session_maker.return_value = mock_session
 
-            from backend.app.main import _archive_print_start as on_print_start
+            from backend.app.main import _begin_new_print
 
-            await on_print_start(
+            await _begin_new_print(
                 1,
                 {
                     "filename": "/data/Metadata/test.gcode",
@@ -77,6 +77,7 @@ class TestPlateClearGate:
         await db_session.commit()
         sessions = async_sessionmaker(test_engine, expire_on_commit=False)
         main._completed_job_events.clear()
+        main._user_stopped_printers.clear()
         manager = MagicMock()
         manager.get_status.return_value = None
         manager.get_printer.return_value = None
@@ -92,10 +93,30 @@ class TestPlateClearGate:
             patch.object(main, "ws_manager", AsyncMock()),
             patch.object(main, "mqtt_relay", AsyncMock()),
             patch.object(main, "spawn_background_task", discard_background),
+            patch("backend.app.services.queue_outcome_effects.run_queue_outcome_effects", new=AsyncMock()),
             patch("backend.app.services.usage_tracker.on_print_complete", AsyncMock(return_value=[])),
             patch("backend.app.services.usage_tracker.discard_session", AsyncMock()),
         ):
             yield SimpleNamespace(printer=printer, item=item, manager=manager, complete=main.on_print_complete)
+
+    @pytest.mark.parametrize("mapping", ["[2, -1]", "invalid legacy mapping"])
+    async def test_completion_uses_durable_usage_context_without_filename_registry(
+        self, completion, db_session, mapping
+    ):
+        from backend.app.services import usage_tracker
+
+        completion.item.ams_mapping = mapping
+        completion.item.plate_id = 3
+        await db_session.commit()
+        await completion.complete(
+            completion.printer.id, {"subtask_id": "123", "status": "completed", "ams_mapping": [99], "plate_id": 9}
+        )
+        usage_tracker.on_print_complete.assert_awaited_once()
+        call = usage_tracker.on_print_complete.await_args
+        assert call.kwargs["ams_mapping"] == ([2, -1] if mapping == "[2, -1]" else [99])
+        assert call.args[1]["plate_id"] == 3
+        await db_session.refresh(completion.item)
+        assert completion.item.status == "finished"
 
     @pytest.mark.parametrize("status", ["completed", "failed", "aborted", "cancelled"])
     async def test_plate_clear_gate_raised_for_every_terminal_status(self, status, completion, db_session):
@@ -105,6 +126,50 @@ class TestPlateClearGate:
             "cancelled" if status == "aborted" else "finished" if status == "completed" else status
         )
         completion.manager.set_awaiting_plate_clear.assert_any_call(completion.printer.id, True)
+
+    async def test_completed_print_reconciles_an_unconfirmed_stop_request(self, completion, db_session):
+        from backend.app.services.queue_actions import cancel_job
+
+        completion.manager.stop_print.return_value = False
+        await cancel_job(db_session, completion.item)
+        await db_session.refresh(completion.item)
+        assert completion.item.status == "cancelled"
+        assert completion.item.physical_outcome is None
+        assert "not sent" in completion.item.error_message
+
+        await completion.complete(completion.printer.id, {"subtask_id": "123", "status": "completed"})
+        await db_session.refresh(completion.item)
+        assert completion.item.status == "finished"
+        assert completion.item.physical_outcome == "completed"
+        assert completion.item.physical_completed_at is not None
+        assert completion.item.error_message is None
+
+    async def test_identified_failure_during_dispatch_skips_preprint_effects(self, completion, db_session):
+        from sqlalchemy import update
+
+        from backend.app.models.print_queue import PrintQueueItem
+        from backend.app.services import queue_outcome_effects
+
+        await db_session.execute(
+            update(PrintQueueItem).where(PrintQueueItem.id == completion.item.id).values(status="dispatching")
+        )
+        await db_session.commit()
+        await db_session.refresh(completion.item)
+        effects = []
+
+        async def record_effect(_engine, effect):
+            effects.append(effect)
+
+        with patch.object(queue_outcome_effects, "run_queue_outcome_effects", record_effect):
+            await completion.complete(completion.printer.id, {"subtask_id": "123", "status": "failed"})
+            await asyncio.sleep(0)
+
+        await db_session.refresh(completion.item)
+        assert completion.item.status == "failed"
+        assert completion.item.physical_outcome == "failed"
+        assert len(effects) == 1
+        assert effects[0].notify_failure is False
+        assert effects[0].clean_sd_copy is False
 
     @pytest.mark.parametrize(
         ("printer_outcome", "stopped_in_grove", "job_status", "reported"),
@@ -121,17 +186,36 @@ class TestPlateClearGate:
         from types import SimpleNamespace
 
         from backend.app import main
-        from backend.app.services.queue_transitions import transition_queue_item
+        from backend.app.models.archive import PrintArchive
+        from backend.app.services.queue_actions import cancel_job
 
+        archive = PrintArchive(
+            printer_id=completion.printer.id,
+            filename="stopped.3mf",
+            file_path="",
+            file_size=0,
+            status="printing",
+            dispatched_queue_item_id=completion.item.id,
+        )
+        db_session.add(archive)
+        await db_session.flush()
+        completion.item.archive_id = archive.id
+        await db_session.commit()
         completion.manager.get_printer.return_value = SimpleNamespace(name="P1", serial_number="SERIAL")
         if stopped_in_grove:
             # cancel_job commits `cancelled` before the printer reports the stop,
             # so this also holds after a restart loses the in-memory stop flag.
-            await transition_queue_item(db_session, completion.item, "printing", "cancelled")
-            await db_session.commit()
+            await cancel_job(db_session, completion.item)
+            main._user_stopped_printers.clear()
         await completion.complete(completion.printer.id, {"subtask_id": "123", "status": printer_outcome})
         await db_session.refresh(completion.item)
         assert completion.item.status == job_status
+        await db_session.refresh(archive)
+        archived_outcome = "aborted" if reported in ("cancelled", "aborted") else reported
+        assert completion.item.physical_outcome == archived_outcome
+        assert archive.status == archived_outcome
+        if archived_outcome == "aborted":
+            assert archive.failure_reason == "User cancelled"
         # The relay and notifications describe the physical outcome; a
         # touchscreen abort is not renamed to a Grove cancellation.
         assert main.mqtt_relay.on_print_complete.await_args.args[-1] == reported

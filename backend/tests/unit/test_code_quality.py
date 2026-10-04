@@ -222,7 +222,7 @@ class TestModuleImports:
         IMPORTANT: We must NOT ``del sys.modules[name]`` to force a fresh
         import here. ``backend.app.main`` is a stateful module — re-importing
         it builds NEW module-level dicts (_timelapse_baselines,
-        _expected_prints, _active_prints, …) and re-runs ``root_logger.
+        _job_event_locks, _active_prints, …) and re-runs ``root_logger.
         addHandler(console_handler)``. Any test that already bound those
         names via ``from backend.app.main import _timelapse_baselines`` now
         holds a stale reference, while production code resolves the symbol

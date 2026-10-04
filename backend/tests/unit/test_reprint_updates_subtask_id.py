@@ -22,30 +22,14 @@ import pytest
 
 from backend.app.core.config import settings as app_settings
 from backend.app.main import (
-    _active_prints,
-    _expected_print_creators,
-    _expected_print_registered_at,
-    _expected_prints,
-    _print_ams_mappings,
     _timelapse_baselines,
-    register_expected_print,
 )
 
 
 @pytest.fixture(autouse=True)
 def _clear_dicts():
-    _expected_prints.clear()
-    _expected_print_registered_at.clear()
-    _expected_print_creators.clear()
-    _print_ams_mappings.clear()
-    _active_prints.clear()
     _timelapse_baselines.clear()
     yield
-    _expected_prints.clear()
-    _expected_print_registered_at.clear()
-    _expected_print_creators.clear()
-    _print_ams_mappings.clear()
-    _active_prints.clear()
     _timelapse_baselines.clear()
 
 
@@ -125,7 +109,6 @@ async def _drive(tmp_path, mock_archive, mqtt_subtask_id: str | None):
     given ``subtask_id`` (the printer-echoed id at PRINT START — set by the
     queue dispatcher's fresh ``submission_id``)."""
     mock_printer = _make_printer()
-    register_expected_print(1, mock_archive.filename, archive_id=mock_archive.id, ams_mapping=None)
     mock_session = _build_mocks(mock_printer, mock_archive)
 
     (
@@ -163,8 +146,7 @@ async def _drive(tmp_path, mock_archive, mqtt_subtask_id: str | None):
         mock_ws.send_archive_updated = AsyncMock()
         mock_relay.on_print_start = AsyncMock()
         mock_pm.get_printer = MagicMock(return_value=MagicMock(name="Test", serial_number="TEST123"))
-        # last_dispatch_subtask_id fallback shouldn't fire — MQTT carried one.
-        mock_pm.get_client = MagicMock(return_value=MagicMock(last_dispatch_subtask_id=None))
+        mock_pm.get_client = MagicMock(return_value=MagicMock())
 
         from backend.app.main import _archive_print_start as on_print_start
 

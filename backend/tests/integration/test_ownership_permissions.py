@@ -1083,7 +1083,7 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
     async def test_bulk_delete_nested_folder_releases_queue_reference(
         self, async_client: AsyncClient, auth_setup, db_session
     ):
-        """Nested files must be detached/cancelled before folder cascade."""
+        """Folder deletion detaches sources without ending waiting jobs."""
         from backend.app.models.library import LibraryFile, LibraryFolder
         from backend.app.models.print_queue import PrintQueueItem
 
@@ -1116,8 +1116,10 @@ class TestLibraryOwnershipPermissions(TestOwnershipPermissionsSetup):
 
         assert response.status_code == 200
         await db_session.refresh(queue_item)
-        assert queue_item.status == "unsuccessful"
+        assert queue_item.status == "queued"
         assert queue_item.library_file_id is None
+        assert queue_item.completed_at is None
+        assert queue_item.error_message == "'nested.3mf' was deleted from the library"
 
     @pytest.mark.asyncio
     @pytest.mark.integration

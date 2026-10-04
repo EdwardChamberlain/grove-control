@@ -49,15 +49,15 @@ class TestCalibrationPrintFiltering:
 
             # Mock _send_print_start_notification
             with patch("backend.app.main._send_print_start_notification", new_callable=AsyncMock) as mock_notif_send:
-                from backend.app.main import _archive_print_start as on_print_start
+                from backend.app.main import _archive_print_start, _finish_new_print
 
-                await on_print_start(
-                    1,
-                    {
-                        "filename": "/usr/etc/print/auto_cali_for_user.gcode",
-                        "subtask_name": "auto_cali_for_user",
-                    },
-                )
+                data = {
+                    "filename": "/usr/etc/print/auto_cali_for_user.gcode",
+                    "subtask_name": "auto_cali_for_user",
+                }
+                await _archive_print_start(1, data)
+                mock_notif_send.assert_not_awaited()
+                await _finish_new_print(1, data, None)
 
                 # Notification should still be sent
                 mock_notif_send.assert_called_once()

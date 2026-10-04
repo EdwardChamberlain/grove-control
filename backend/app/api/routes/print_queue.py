@@ -1603,6 +1603,8 @@ async def retry_queue_item(
         "physical_outcome",
         "physical_completed_at",
         "physical_failure_reason",
+        "stop_requested_at",
+        "manual_start",
         "dispatched_at",
         "dispatch_subtask_id",
         "dispatching_at",
@@ -1771,20 +1773,12 @@ async def skip_queue_item_heat_soak(
             raise HTTPException(403, "You can only update your own queue items")
 
     if item.status != "preheating":
-        if await heat_soak_dispatch_started(db, item):
+        if heat_soak_dispatch_started(item):
             await db.rollback()
             return {"message": "Heat soak skipped"}
         raise HTTPException(400, f"Can only skip heat soak for preheating items, current status: '{item.status}'")
 
     result = await skip_heat_soak(db, item)
-    if result == SkipHeatSoakResult.COPY_FAILED:
-        current = await db.get(PrintQueueItem, item_id, populate_existing=True)
-        raise HTTPException(
-            409,
-            (current.error_message or "Failed to create Archive record for dispatch")
-            if current
-            else "Queue item no longer exists",
-        )
     if result == SkipHeatSoakResult.PRINTER_NOT_READY:
         raise HTTPException(409, "Printer is not ready to start; wait for it to report idle, then retry")
     if result != SkipHeatSoakResult.SKIPPED:

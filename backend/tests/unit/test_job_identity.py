@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import backend.app.models  # noqa: F401
 from backend.app.api.routes.print_queue import clear_queue_plate, resolve_queue_dispatch, stop_queue_item
-from backend.app.core.database import Base, _ensure_active_queue_printer_reservation
+from backend.app.core.database import Base, _migrate_queue_lifecycle
 from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
@@ -33,12 +33,12 @@ async def sessions(tmp_path):
     import backend.app.main as main
 
     main._completed_job_events.clear()
-    main._observed_job_starts.clear()
+    main._started_job_effects.clear()
     main._user_stopped_printers.clear()
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'jobs.db'}")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        await _ensure_active_queue_printer_reservation(conn)
+        await _migrate_queue_lifecycle(conn)
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
         db.add(Printer(id=1, name="Printer", serial_number="TEST", ip_address="127.0.0.1", access_code="12345678"))
@@ -394,20 +394,72 @@ async def test_wrong_or_missing_completion_id_has_no_side_effects(sessions, iden
 async def test_external_observation_survives_callbacks_and_restart(sessions):
     import backend.app.main as main
 
-    main._observed_job_starts.clear()
+    main._started_job_effects.clear()
     with (
         patch.object(main, "async_session", sessions),
         patch.object(main, "_archive_print_start", AsyncMock()) as archive,
+        patch.object(main, "_begin_new_print", AsyncMock()) as begin,
+        patch.object(main, "_finish_new_print", AsyncMock()) as finish,
     ):
         await main.on_print_start(1, {"submission_id": "external", "filename": "same.3mf"})
         await main.on_print_start(1, {"submission_id": "external", "filename": "renamed.3mf"})
-        archive.assert_awaited_once()
-        main._observed_job_starts.clear()  # Simulate a new application process.
+        assert archive.await_count == 2
+        begin.assert_awaited_once()
+        finish.assert_awaited_once()
+        main._started_job_effects.clear()  # Simulate a new application process.
         await main.on_print_start(1, {"submission_id": "external", "filename": "same.3mf"})
     async with sessions() as db:
         items = list((await db.scalars(select(PrintQueueItem))).all())
         assert len(items) == 1
         assert items[0].dispatch_subtask_id == "external"
+
+
+async def test_failed_archive_start_is_retried_for_the_same_job(sessions):
+    import backend.app.main as main
+
+    archive = AsyncMock(side_effect=[RuntimeError("start WebSocket failed"), True])
+    with (
+        patch.object(main, "async_session", sessions),
+        patch.object(main, "_archive_print_start", archive),
+        patch.object(main, "_begin_new_print", AsyncMock()) as begin,
+        patch.object(main, "_finish_new_print", AsyncMock()) as finish,
+    ):
+        event = {"submission_id": "external", "filename": "same.3mf"}
+        with pytest.raises(RuntimeError, match="start WebSocket failed"):
+            await main.on_print_start(1, event)
+        assert main._started_job_effects.get(1) is not None
+        await main.on_print_start(1, event)
+        begin.assert_awaited_once()
+        finish.assert_awaited_once()
+    assert archive.await_count == 2
+    async with sessions() as db:
+        job = await find_job(db, 1, "external")
+        assert main._started_job_effects[1] == job.id
+
+
+async def test_running_recovery_observes_job_without_new_start_effects(sessions):
+    import backend.app.main as main
+
+    job_id, archive_id = await add_linked_job(sessions, "existing")
+    archive_start = AsyncMock()
+    live = SimpleNamespace(state="RUNNING", connected=True, job_telemetry_ready=True, submission_id="existing")
+    with (
+        patch.object(main, "async_session", sessions),
+        patch.object(main, "_archive_print_start", archive_start),
+        patch.object(main, "_restore_usage_tracking_session", AsyncMock()),
+        patch.object(main, "_capture_timelapse_baseline_at_start", AsyncMock()),
+        patch.object(main.printer_manager, "get_status", return_value=live),
+    ):
+        await main.on_print_running_observed(
+            1, {"submission_id": "existing", "filename": "same.3mf", "raw_data": {"gcode_state": "RUNNING"}}
+        )
+    assert archive_start.await_count == 1
+    assert archive_start.await_args.kwargs == {
+        "queue_archive_id": archive_id,
+        "queue_job_id": job_id,
+    }
+    async with sessions() as db:
+        assert (await db.get(PrintQueueItem, job_id)).status == "printing"
 
 
 @pytest.mark.parametrize("previous_status", ["finished", "failed", "cancelled"])
@@ -429,10 +481,14 @@ async def test_touchscreen_print_takes_over_the_hold_without_releasing_the_print
         patch("backend.app.services.printer_manager.printer_manager", manager),
         patch.object(manager, "get_status", return_value=live),
         patch.object(main, "_archive_print_start", AsyncMock()) as archive_print,
+        patch.object(main, "_begin_new_print", AsyncMock()) as begin,
+        patch.object(main, "_finish_new_print", AsyncMock()) as finish,
     ):
         await main.on_print_start(1, {"submission_id": "touchscreen", "filename": "same.3mf"})
         await main.on_print_start(1, {"submission_id": "touchscreen", "filename": "same.3mf"})
-        archive_print.assert_awaited_once()
+        assert archive_print.await_count == 2
+        begin.assert_awaited_once()
+        finish.assert_awaited_once()
         async with sessions() as db:
             new = await find_job(db, 1, "touchscreen")
             assert new is not None and new.id != old_id and new.status == "printing"
@@ -443,7 +499,7 @@ async def test_touchscreen_print_takes_over_the_hold_without_releasing_the_print
                 await clear_queue_plate(old_id, db, None)
             assert conflict.value.status_code == 409
             await db.rollback()
-        main._observed_job_starts.clear()  # Simulate restart while the touchscreen print is running.
+        main._started_job_effects.clear()  # Simulate restart while the touchscreen print is running.
         await main.on_print_start(1, {"submission_id": "touchscreen", "filename": "same.3mf"})
         async with sessions() as db:
             new = await find_job(db, 1, "touchscreen")
@@ -574,7 +630,6 @@ def test_mqtt_start_snapshot_uses_observed_id_never_last_command():
     from backend.app.services.bambu_mqtt import BambuMQTTClient
 
     client = BambuMQTTClient(ip_address="127.0.0.1", serial_number="TEST", access_code="12345678")
-    client.last_dispatch_subtask_id = "stale-command"
     starts = []
     client.on_print_running_observed = starts.append
     client._process_message({"print": {"subtask_id": "123", "gcode_state": "PREPARE"}})
@@ -613,7 +668,7 @@ async def test_external_archive_is_linked_by_identity_not_name(sessions):
     import backend.app.main as main
     from backend.app.models.archive import PrintArchive
 
-    main._observed_job_starts.clear()
+    main._started_job_effects.clear()
 
     async def archive_worker(printer_id, data, **kwargs):
         async with sessions() as db:
@@ -638,6 +693,7 @@ async def test_external_archive_is_linked_by_identity_not_name(sessions):
                 ]
             )
             await db.commit()
+        return True
 
     with patch.object(main, "async_session", sessions), patch.object(main, "_archive_print_start", archive_worker):
         await main.on_print_start(1, {"submission_id": "external", "filename": "same.3mf"})
@@ -652,3 +708,47 @@ async def test_external_archive_is_linked_by_identity_not_name(sessions):
         assert archive.subtask_id == "firmware"
         assert await find_job(db, 1, "external") is None
         assert (await find_job(db, 1, "firmware")).id == item.id
+
+
+async def test_debug_completion_uses_identified_active_attempt(sessions, monkeypatch):
+    import backend.app.main as main
+    from backend.app.api.routes.printers import debug_simulate_print_complete
+
+    complete = AsyncMock()
+    monkeypatch.setattr(main, "on_print_complete", complete)
+    _, archive_id = await add_linked_job(sessions, "current")
+    async with sessions() as db:
+        ended = PrintQueueItem(printer_id=1, status="unsuccessful", dispatch_subtask_id="ended")
+        db.add(ended)
+        await db.flush()
+        db.add(
+            PrintArchive(
+                printer_id=1,
+                filename="stale.3mf",
+                file_path="",
+                file_size=0,
+                status="printing",
+                subtask_id="ended",
+                dispatched_queue_item_id=ended.id,
+            )
+        )
+        db.add(
+            PrintArchive(
+                printer_id=1, filename="old.3mf", file_path="", file_size=0, status="completed", subtask_id="old"
+            )
+        )
+        db.add(
+            PrintArchive(
+                printer_id=1, filename="unowned.3mf", file_path="", file_size=0, status="printing", subtask_id="other"
+            )
+        )
+        await db.commit()
+        result = await debug_simulate_print_complete(1, db=db, _=None)
+        assert result["archive_id"] == archive_id
+        assert complete.await_args.args[1]["submission_id"] == "current"
+        (await db.get(PrintArchive, archive_id)).status = "completed"
+        await db.commit()
+        with pytest.raises(HTTPException) as error:
+            await debug_simulate_print_complete(1, db=db, _=None)
+        assert error.value.status_code == 404
+        complete.assert_awaited_once()

@@ -6,7 +6,7 @@
  * - 'edit-queue-item': Edit an existing queue item
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type React from 'react';
 import { fireEvent, screen, waitFor, within, render as rtlRender } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -62,6 +62,8 @@ const createMockQueueItem = (overrides: Partial<PrintQueueItem> = {}): PrintQueu
 describe('PrintModal', () => {
   const mockOnClose = vi.fn();
   const mockOnSuccess = vi.fn();
+
+  afterEach(() => vi.useRealTimers());
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1164,6 +1166,7 @@ describe('PrintModal', () => {
     });
 
     it('prevents a postponed print from using a past start time', async () => {
+      vi.setSystemTime(new Date(2026, 9, 4, 23, 58));
       const user = userEvent.setup();
       render(
         <PrintModal
@@ -1177,6 +1180,10 @@ describe('PrintModal', () => {
 
       await user.click(screen.getByRole('button', { name: /queue options/i }));
       await user.click(screen.getByRole('checkbox', { name: 'Postpone print' }));
+      // The next scheduling slot can be tomorrow near midnight.
+      fireEvent.change(screen.getByLabelText('Do not start before'), {
+        target: { value: formatDateInput(new Date(), 'system') },
+      });
       fireEvent.change(screen.getByLabelText('Postpone time'), { target: { value: '00:00' } });
 
       expect(screen.getByText('Choose a future date and time')).toBeInTheDocument();

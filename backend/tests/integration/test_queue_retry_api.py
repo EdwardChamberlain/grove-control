@@ -8,6 +8,33 @@ from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
 
 
+async def test_retry_clears_legacy_manual_start_after_heat_soak_abort(
+    async_client, db_session, printer_factory, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(settings, "base_dir", tmp_path)
+    printer = await printer_factory()
+    source = await _source(db_session, tmp_path / "soak.3mf", "X1C")
+    old = PrintQueueItem(
+        printer_id=printer.id,
+        library_file_id=source.id,
+        status="failed",
+        chamber_heat_soak=True,
+        heat_soak_minutes=10,
+        manual_start=True,
+    )
+    db_session.add(old)
+    await db_session.commit()
+    response = await async_client.post(f"/api/v1/queue/{old.id}/retry")
+    assert response.status_code == 200, response.text
+    retry = response.json()
+    assert retry["manual_start"] is False
+    assert retry["status"] == "queued"
+    assert retry["chamber_heat_soak"] is True and retry["heat_soak_minutes"] == 10
+    assert retry["id"] != old.id
+    await db_session.refresh(old)
+    assert old.status == "failed" and old.manual_start is True
+
+
 async def _source(db, path, model):
     path.write_bytes(b"print source")
     source = LibraryFile(

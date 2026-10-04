@@ -17,30 +17,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from backend.app.main import (
-    _active_prints,
-    _expected_print_creators,
-    _expected_print_registered_at,
-    _expected_prints,
-    _print_ams_mappings,
     _timelapse_baselines,
-    register_expected_print,
 )
 
 
 @pytest.fixture(autouse=True)
 def _clear_dicts():
-    _expected_prints.clear()
-    _expected_print_registered_at.clear()
-    _expected_print_creators.clear()
-    _print_ams_mappings.clear()
-    _active_prints.clear()
     _timelapse_baselines.clear()
     yield
-    _expected_prints.clear()
-    _expected_print_registered_at.clear()
-    _expected_print_creators.clear()
-    _print_ams_mappings.clear()
-    _active_prints.clear()
     _timelapse_baselines.clear()
 
 
@@ -70,8 +54,6 @@ async def test_expected_archive_path_assigns_printer_id_when_unset():
     mock_archive.status = "archived"
     mock_archive.file_path = "/tmp/fake.3mf"  # nosec B108 — mock path; nothing ever writes to it
     mock_archive.energy_start_kwh = None
-
-    register_expected_print(1, "bambu_lab_a1_tool_plate_3.gcode.3mf", archive_id=42, ams_mapping=None)
 
     def execute_router(stmt, *args, **kwargs):
         sql = str(stmt).lower()
@@ -160,8 +142,6 @@ async def test_expected_archive_path_preserves_existing_printer_id():
     mock_archive.file_path = "/tmp/fake.3mf"  # nosec B108 — mock path; nothing ever writes to it
     mock_archive.energy_start_kwh = None
 
-    register_expected_print(7, "MyModel.3mf", archive_id=99, ams_mapping=None)
-
     def execute_router(stmt, *args, **kwargs):
         sql = str(stmt).lower()
         if "from printers" in sql or "from printer " in sql:
@@ -248,8 +228,6 @@ async def test_expected_archive_path_captures_timelapse_baseline():
     mock_archive.file_path = "/tmp/fake.3mf"  # nosec B108 — mock path; nothing ever writes to it
     mock_archive.energy_start_kwh = None
 
-    register_expected_print(1, "bambu_lab_a1_tool_plate_3.gcode.3mf", archive_id=42, ams_mapping=None)
-
     # Two pre-existing files on the printer's SD card before this print starts.
     # The fake completion scan would diff against this set.
     existing_videos = [
@@ -304,11 +282,18 @@ async def test_expected_archive_path_captures_timelapse_baseline():
         mock_relay.on_print_start = AsyncMock()
         mock_pm.get_printer = MagicMock(return_value=MagicMock(name="Test", serial_number="TEST123"))
 
+        from types import SimpleNamespace
+
+        mock_pm.get_status.return_value = SimpleNamespace(
+            connected=True, job_telemetry_ready=True, state="RUNNING", submission_id="run"
+        )
+
         from backend.app.main import _archive_print_start as on_print_start
 
         await on_print_start(
             1,
             {
+                "submission_id": "run",
                 "filename": "bambu_lab_a1_tool_plate_3.gcode.3mf",
                 "subtask_name": "bambu_lab_a1_tool_plate_3",
             },

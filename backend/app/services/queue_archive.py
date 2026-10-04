@@ -1,15 +1,16 @@
-"""Prepare the immutable artifact committed with entry into dispatching."""
+"""Copy a held dispatch's source into its own immutable Archive."""
 
 import errno
 import json
 import logging
 import shutil
-from dataclasses import dataclass
+from collections.abc import Sequence
 from pathlib import Path
 
 from sqlalchemy import inspect
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
+from sqlalchemy.sql.elements import ColumnElement
 
 from backend.app.core.config import settings
 from backend.app.models.archive import PrintArchive
@@ -24,6 +25,46 @@ from backend.app.utils.threemf_tools import inject_gcode_into_3mf
 logger = logging.getLogger(__name__)
 
 
+async def link_dispatch_archive(
+    db: AsyncSession,
+    item: PrintQueueItem,
+    archive: PrintArchive,
+    *,
+    conditions: Sequence[ColumnElement[bool]] = (),
+) -> None:
+    """Claim the held job before flushing its copy; caller commits both together."""
+    from backend.app.services.queue_transitions import (
+        InvalidQueueTransition,
+        QueueTransitionConflict,
+        transition_queue_item,
+    )
+
+    if (
+        item.status != "dispatching"
+        or archive not in db
+        or not inspect(archive).pending
+        or archive.dispatched_queue_item_id != item.id
+        or archive.printer_id != item.printer_id
+        or archive.status != "dispatching"
+        or archive.deleted_at is not None
+        or not archive.file_path
+    ):
+        raise InvalidQueueTransition("Dispatch Archive does not belong to this held job")
+    try:
+        await transition_queue_item(db, item, "dispatching", "dispatching", conditions=conditions)
+    except QueueTransitionConflict:
+        discard_prepared_archive(db, archive)
+        raise
+    await db.flush([archive])
+    await transition_queue_item(
+        db, item, "dispatching", "dispatching", values={"archive_id": archive.id}, conditions=conditions
+    )
+    set_committed_value(item, "archive", archive)
+    db.sync_session.info.setdefault("queue_transition_log", []).append(
+        (item.id, "dispatching", "dispatching", item.printer_id, archive.id, "archive_link")
+    )
+
+
 class DispatchSourceUnavailable(RuntimeError):
     """The dispatch source row is missing or soft-deleted."""
 
@@ -32,41 +73,19 @@ class DispatchPreparationError(RuntimeError):
     """A preparation failure with a message safe to show to users."""
 
 
-@dataclass(frozen=True)
-class DispatchArchivePreparation:
-    archive: PrintArchive | None
-    error_message: str | None = None
-    source_unavailable: bool = False
-
-
-async def prepare_dispatch_attempt(db: AsyncSession, item: PrintQueueItem, values: dict) -> DispatchArchivePreparation:
-    """Share copy-error reporting without hiding transaction failures.
-
-    Callers retain their conditional handoff and heater/notification effects.
-    A failed preparation never authorizes entry into dispatching.
-    """
-    try:
-        return DispatchArchivePreparation(await prepare_dispatch_archive(db, item, values))
-    except SQLAlchemyError:
-        raise
-    except Exception as error:
-        logger.exception("Queue item %s: failed to prepare dispatch Archive", item.id)
-        message = "Failed to create Archive record for dispatch"
-        # Keep server paths and parser details in the log, not notifications.
-        if isinstance(error, (DispatchSourceUnavailable, DispatchPreparationError)):
-            message += f": {error}"
-        elif isinstance(error, OSError):
-            cause = (
-                "Not enough disk space to copy the print file"
-                if error.errno == errno.ENOSPC
-                else "Could not copy the print file"
-            )
-            message += f": {cause}"
-        return DispatchArchivePreparation(
-            None,
-            message,
-            source_unavailable=isinstance(error, DispatchSourceUnavailable),
+def dispatch_copy_error(error: Exception) -> str:
+    """Return a useful failure without exposing server paths or parser details."""
+    message = "Failed to create Archive record for dispatch"
+    if isinstance(error, (DispatchSourceUnavailable, DispatchPreparationError)):
+        message += f": {error}"
+    elif isinstance(error, OSError):
+        cause = (
+            "Not enough disk space to copy the print file"
+            if error.errno == errno.ENOSPC
+            else "Could not copy the print file"
         )
+        message += f": {cause}"
+    return message
 
 
 def discard_prepared_archive(
@@ -83,15 +102,11 @@ def discard_prepared_archive(
     artifacts[:] = [directory for directory in artifacts if directory not in directories]
 
 
-async def prepare_dispatch_archive(db: AsyncSession, item: PrintQueueItem, values: dict) -> PrintArchive:
-    """Copy without flushing, so cancellation can win during preparation.
-
-    The transition writer adds the exact link only after its conditional update
-    succeeds. Every new dispatch requires a source and a prepared attempt.
-    """
+async def prepare_dispatch_archive(db: AsyncSession, item: PrintQueueItem) -> PrintArchive:
+    """Copy after the hold commits; leave the new row unflushed until linking."""
     from backend.app.api.routes.settings import get_setting
 
-    # Tentative scheduler bindings and the prepared row must not flush before CAS.
+    # The prepared row must not flush before the guarded link wins.
     with db.no_autoflush:
         source = await db.get(PrintArchive, item.archive_id, populate_existing=True) if item.archive_id else None
         if source is None and item.library_file_id:
@@ -100,7 +115,7 @@ async def prepare_dispatch_archive(db: AsyncSession, item: PrintQueueItem, value
             raise DispatchSourceUnavailable("Dispatch source no longer exists")
         if source.deleted_at is not None:
             raise DispatchSourceUnavailable("Dispatch source was deleted")
-        printer_id = values.get("printer_id", item.printer_id)
+        printer_id = item.printer_id
         printer = await db.get(Printer, printer_id)
         if printer is None:
             raise DispatchPreparationError("Dispatch printer no longer exists")

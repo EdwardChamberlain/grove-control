@@ -29,7 +29,6 @@ from backend.app.core.database import async_session
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
 from backend.app.models.settings import Settings
-from backend.app.services.queue_transitions import transition_queue_item
 
 logger = logging.getLogger(__name__)
 
@@ -395,7 +394,7 @@ class LibraryTrashService:
 
 
 async def release_queue_references(db: AsyncSession, file_ids: list[int]) -> int:
-    """Cancel source-owned jobs and detach queue rows before deletion.
+    """Detach deleted sources, leaving waiting jobs queued for the operator.
 
     A ``preheating`` row owns a durable printer reservation and may already
     have turned the heaters on, so it must go through the heat-soak abort path
@@ -429,8 +428,7 @@ async def release_queue_references(db: AsyncSession, file_ids: list[int]) -> int
     names = dict(
         (await db.execute(select(LibraryFile.id, LibraryFile.filename).where(LibraryFile.id.in_(file_ids)))).all()
     )
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    cancelled = 0
+    released = 0
     reason_by_file = {
         file_id: f"'{names.get(file_id, 'The library file')}' was deleted from the library" for file_id in file_ids
     }
@@ -452,19 +450,17 @@ async def release_queue_references(db: AsyncSession, file_ids: list[int]) -> int
                 reason_by_file.get(item.library_file_id, "The library file was deleted"),
                 status="cancelled",
             )
-            cancelled += 1
+            released += 1
         elif item.status == "queued":
-            await transition_queue_item(db, item, item.status, "unsuccessful", action="cancel")
-            item.completed_at = now
             item.error_message = reason_by_file.get(item.library_file_id, "The library file was deleted")
-            cancelled += 1
+            released += 1
 
     await db.execute(
         PrintQueueItem.__table__.update()
         .where(PrintQueueItem.library_file_id.in_(file_ids))
         .values(library_file_id=None)
     )
-    return cancelled
+    return released
 
 
 async def delete_dependent_variants(db: AsyncSession, file_ids: list[int]) -> None:

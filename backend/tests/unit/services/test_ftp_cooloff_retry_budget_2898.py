@@ -346,7 +346,9 @@ async def _failed_dispatch_message(dispatch_case, *, handshake_fails: bool) -> s
             patch("backend.app.services.print_scheduler.printer_manager.is_connected", MagicMock(return_value=True)),
             patch(
                 "backend.app.services.print_scheduler.printer_manager.get_status",
-                MagicMock(return_value=SimpleNamespace(state="IDLE", connected=True, raw_data={})),
+                MagicMock(
+                    return_value=SimpleNamespace(state="IDLE", connected=True, job_telemetry_ready=True, raw_data={})
+                ),
             ),
             patch("backend.app.services.print_scheduler.printer_manager.is_awaiting_plate_clear", return_value=False),
             patch(
@@ -357,7 +359,6 @@ async def _failed_dispatch_message(dispatch_case, *, handshake_fails: bool) -> s
             patch("backend.app.services.print_scheduler.upload_file_async", _upload),
             patch("backend.app.services.print_scheduler.notification_service.on_queue_job_failed", AsyncMock()),
             patch.object(scheduler, "_propagate_owner_to_printer_manager", AsyncMock()),
-            patch.object(scheduler, "_power_off_if_needed", AsyncMock()),
         ]
         with ExitStack() as stack:
             for p in patches:

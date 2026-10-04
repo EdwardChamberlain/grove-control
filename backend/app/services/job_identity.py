@@ -127,18 +127,20 @@ async def bind_observed_id(db: AsyncSession, printer_id: int, identity: str | No
         values={"dispatch_subtask_id": identity},
         conditions=(PrintQueueItem.dispatch_subtask_id == previous,),
     )
-    if item.archive_id:
-        from backend.app.models.archive import PrintArchive
+    from backend.app.models.archive import PrintArchive
 
-        await db.execute(
-            update(PrintArchive)
-            .where(
-                PrintArchive.id == item.archive_id,
-                PrintArchive.dispatched_queue_item_id == item.id,
-                PrintArchive.subtask_id == previous,
-            )
-            .values(subtask_id=identity)
+    # Creation records the attempt's owner before the Queue projection links
+    # it. A transient link failure must not detach it when firmware reports
+    # its ID later; the unique owner column identifies the same attempt.
+    await db.execute(
+        update(PrintArchive)
+        .where(
+            PrintArchive.dispatched_queue_item_id == item.id,
+            PrintArchive.printer_id == printer_id,
+            PrintArchive.subtask_id == previous,
         )
+        .values(subtask_id=identity)
+    )
 
 
 async def observe_print(

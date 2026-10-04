@@ -11,6 +11,9 @@ sending `project_file`. MQTT start and finish callbacks carry an identity
 snapshot. Queue and Archive attribution use that identity plus the printer;
 filenames, display names, the last command and the most recent job are never
 fallbacks for a missing ID. A delayed event cannot complete another job.
+Start and completion recover the job's AMS mapping, plate selection and owner
+from its persisted row. The old filename registry and last-command ID cache
+have been removed.
 
 A touchscreen, SD-card or slicer print observed in PREPARE, SLICING, RUNNING or PAUSE creates an
 ownerless `printing` Queue job. Duplicate observations reuse the same job. It
@@ -42,6 +45,20 @@ If the firmware ID arrives after a partial start update, its callback carries
 the exact prior session ID. The same job and linked Archive are bound to the
 reported ID without repeating start effects. Archiving waits for file metadata
 when the first active update has none.
+Missing Archive projections for started jobs are reconciled by the scheduler at
+most once per minute, with one pass at a time. Status pushes launch no retries.
+Repair rechecks fresh telemetry and the exact identity under the event lock,
+reuses committed owned Archives and cached 3MF downloads, and never repeats
+new-print plate checks, notifications, usage resets or power-on automation.
+Runtime restoration preserves skipped objects and requires that print to remain
+active; late repair after completion uses its retained physical outcome.
+
+New external Archives record their unique job owner when created. If linking
+the Queue projection fails, a later firmware ID still rebinds that exact
+attempt. The transition writer restores a missing Queue link from the owner
+column before recording Stop, completion, or Clear Plate.
+Archive deletion and retention recognise that owner even before the Queue
+projection links, preserving files and history while the job holds its printer.
 
 Start and completion callbacks are serialized per printer so a short external
 print cannot finish before its Archive link is stored. Other printers proceed
@@ -55,8 +72,14 @@ telemetry. Cached state from before a reconnect is not evidence. A matching
 active ID confirms dispatch; a matching FINISH or FAILED records the physical
 outcome and runs normal completion handling. The recovered terminal job retains the printer reservation until Clear Plate
 (or automatic Clear Plate for successful completion with confirmation off).
-Missing IDs, mismatches, disconnected printers and ambiguous IDLE reports leave
-the job in its current state.
+Mismatches, disconnected printers and ambiguous IDLE reports leave a possibly
+sent job held. A held dispatch with no submission ID and no send timestamp can
+never have sent `project_file`; after a restart clears its worker claim, Grove
+marks that attempt failed for inspection, whether Archive linking had finished
+or not.
+The first active observation after application restart restores job and Archive
+association without rerunning new-print plate detection, start notifications,
+smart-plug actions or usage-session initialization.
 
 An interrupted heat soak stays reserved until the user chooses Stop or Skip
 heat soak. A second live scheduler does not take over another worker's timer.

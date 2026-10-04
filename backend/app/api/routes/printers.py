@@ -2992,30 +2992,33 @@ async def debug_simulate_print_complete(
     This triggers the same code path as a real print completion,
     without needing to wait for an actual print to finish.
     """
-    from backend.app.main import _active_prints, on_print_complete
+    from backend.app.main import on_print_complete
     from backend.app.models.archive import PrintArchive
 
-    # Get the most recent archive for this printer
+    # Simulate the identified active attempt, never unrelated historical work.
     result = await db.execute(
         select(PrintArchive)
+        .join(PrintQueueItem, PrintQueueItem.id == PrintArchive.dispatched_queue_item_id)
         .where(PrintArchive.printer_id == printer_id)
+        .where(PrintArchive.status == "printing")
+        .where(PrintQueueItem.status.in_(("printing", "paused")))
+        .where(PrintQueueItem.dispatch_subtask_id == PrintArchive.subtask_id)
+        .where(PrintArchive.subtask_id.is_not(None))
         .order_by(PrintArchive.created_at.desc())
         .limit(1)
     )
     archive = result.scalar_one_or_none()
 
     if not archive:
-        raise HTTPException(status_code=404, detail="No archives found for this printer")
+        raise HTTPException(status_code=404, detail="No identified active Archive found for this printer")
 
-    # Register this archive as "active" so on_print_complete can find it
     filename = archive.file_path.split("/")[-1] if archive.file_path else "test.3mf"
     subtask_name = archive.print_name or "Test Print"
-    _active_prints[(printer_id, filename)] = archive.id
-    _active_prints[(printer_id, subtask_name)] = archive.id
 
     # Simulate print completion data
     data = {
         "status": "completed",
+        "submission_id": archive.subtask_id,
         "filename": filename,
         "subtask_name": subtask_name,
         "timelapse_was_active": False,
