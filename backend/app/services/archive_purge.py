@@ -16,7 +16,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core import database as _database
@@ -67,7 +67,10 @@ def _last_activity_expr():
 
 def _unheld_archive_filter():
     return ~exists().where(
-        PrintQueueItem.archive_id == PrintArchive.id,
+        or_(
+            PrintQueueItem.archive_id == PrintArchive.id,
+            PrintQueueItem.id == PrintArchive.dispatched_queue_item_id,
+        ),
         PrintQueueItem.status.in_(HOLDING_STATUSES),
     )
 

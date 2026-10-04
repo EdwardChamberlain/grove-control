@@ -78,6 +78,40 @@ async def hold_and_link(db, job, before="queued"):
     return prepared
 
 
+@pytest.mark.parametrize("terminal", ["finished", "failed", "cancelled"])
+@pytest.mark.parametrize("clear", [False, True])
+async def test_owned_archive_restores_missing_queue_link_before_outcome(alignment, terminal, clear):
+    async with alignment.sessions() as db:
+        job = await db.get(PrintQueueItem, alignment.job_id)
+        await transition_queue_item(db, job, "queued", "dispatching")
+        await transition_queue_item(db, job, "dispatching", "printing")
+        # An external Archive creation committed, but its Queue link failed.
+        attempt = PrintArchive(
+            printer_id=job.printer_id,
+            dispatched_queue_item_id=job.id,
+            filename="same.3mf",
+            file_path="",
+            file_size=0,
+            status="printing",
+        )
+        db.add(attempt)
+        await db.commit()
+        assert job.archive_id is None
+        if terminal == "cancelled":
+            await cancel_job(db, job)
+        else:
+            await transition_queue_item(db, job, "printing", terminal)
+            await db.commit()
+        if clear:
+            await clear_job_plate(db, job)
+            await db.commit()
+        await db.refresh(attempt)
+        assert job.archive_id == attempt.id
+        assert attempt.status == {"finished": "completed", "failed": "failed", "cancelled": "aborted"}[terminal]
+        assert job.physical_outcome == (None if terminal == "cancelled" else attempt.status)
+        assert attempt.dispatched_queue_item_id == job.id
+
+
 async def test_retry_resets_stop_intent_from_the_previous_attempt(alignment):
     from backend.app.api.routes.print_queue import retry_queue_item
 

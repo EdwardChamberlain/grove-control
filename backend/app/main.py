@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, or_, select, text
 
 from backend.app.api.routes import (
     ams_history,
@@ -2658,7 +2658,7 @@ async def _observe_print_start(printer_id: int, data: dict, *, recovering: bool 
         query = select(PrintArchive).where(
             PrintArchive.printer_id == printer_id,
             PrintArchive.subtask_id == identity,
-            PrintArchive.dispatched_queue_item_id.is_(None),
+            or_(PrintArchive.dispatched_queue_item_id.is_(None), PrintArchive.dispatched_queue_item_id == item_id),
             PrintArchive.status == "printing",
         )
         archives = list((await db.scalars(query)).all())
@@ -3497,6 +3497,7 @@ async def _archive_print_start(
                     status="printing",
                     started_at=datetime.now(timezone.utc),
                     subtask_id=subtask_id,
+                    dispatched_queue_item_id=queue_job_id,
                     filament_type=mqtt_filament_meta.get("filament_type"),
                     filament_color=mqtt_filament_meta.get("filament_color"),
                     extra_data={"no_3mf_available": True, "original_subtask": subtask_name, "_print_data": data},
@@ -3576,6 +3577,7 @@ async def _archive_print_start(
                 source_file=temp_path,
                 print_data={**data, "status": "printing"},
                 subtask_id=subtask_id,
+                dispatched_queue_item_id=queue_job_id,
             )
 
             if archive:

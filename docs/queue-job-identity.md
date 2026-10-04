@@ -50,6 +50,13 @@ initialization is tracked separately so that these retries do not repeat plate
 checks, notifications, usage-session resets, or power-on automation. Restoring
 printable objects during recovery preserves the printer's reported skipped objects.
 
+New external Archives record their unique job owner when created. If linking
+the Queue projection fails, a later firmware ID still rebinds that exact
+attempt. The transition writer restores a missing Queue link from the owner
+column before recording Stop, completion, or Clear Plate.
+Archive deletion and retention recognise that owner even before the Queue
+projection links, preserving files and history while the job holds its printer.
+
 Start and completion callbacks are serialized per printer so a short external
 print cannot finish before its Archive link is stored. Other printers proceed
 independently. External jobs reference their Archive using the existing column;

@@ -28,6 +28,14 @@ class ArchiveDeletionConflict(RuntimeError):
     """An Archive still backs a job that holds a printer."""
 
 
+def _related_queue_items_filter(archive_id: int):
+    """Include the durable owner even if its Queue projection failed to link."""
+    from backend.app.models.print_queue import PrintQueueItem
+
+    owner_id = select(PrintArchive.dispatched_queue_item_id).where(PrintArchive.id == archive_id).scalar_subquery()
+    return or_(PrintQueueItem.archive_id == archive_id, PrintQueueItem.id == owner_id)
+
+
 async def _guard_archive_deletion(db: AsyncSession, archive_id: int) -> bool:
     from backend.app.models.print_queue import PrintQueueItem
     from backend.app.services.queue_transitions import HOLDING_STATUSES
@@ -38,15 +46,14 @@ async def _guard_archive_deletion(db: AsyncSession, archive_id: int) -> bool:
     # Archive PK lock also fences new FK references on PostgreSQL. Re-lock
     # references admitted while waiting for that lock before checking holds.
     with db.no_autoflush:
-        lock_jobs = queue.update().where(queue.c.archive_id == archive_id).values(id=queue.c.id)
+        related = _related_queue_items_filter(archive_id)
+        lock_jobs = queue.update().where(related).values(id=queue.c.id)
         await db.execute(lock_jobs)
         locked = await db.execute(archive.update().where(archive.c.id == archive_id).values(id=archive.c.id))
         if locked.rowcount != 1:
             return False
         await db.execute(lock_jobs)
-        holding = await db.scalar(
-            select(queue.c.id).where(queue.c.archive_id == archive_id, queue.c.status.in_(HOLDING_STATUSES)).limit(1)
-        )
+        holding = await db.scalar(select(queue.c.id).where(related, queue.c.status.in_(HOLDING_STATUSES)).limit(1))
     if holding is not None:
         raise ArchiveDeletionConflict(
             "Cannot delete archive while a related job is dispatching, printing, or awaiting plate clear. "
@@ -1010,10 +1017,10 @@ async def _delete_related_queue_items(db: AsyncSession, archive_id: int) -> int:
     from backend.app.models.print_queue import PrintQueueItem
 
     queue_item_ids = list(
-        (await db.scalars(select(PrintQueueItem.id).where(PrintQueueItem.archive_id == archive_id))).all()
+        (await db.scalars(select(PrintQueueItem.id).where(_related_queue_items_filter(archive_id)))).all()
     )
     await detach_dispatch_archive_links(db, queue_item_ids)
-    result = await db.execute(sa_delete(PrintQueueItem).where(PrintQueueItem.archive_id == archive_id))
+    result = await db.execute(sa_delete(PrintQueueItem).where(PrintQueueItem.id.in_(queue_item_ids)))
     return result.rowcount or 0
 
 
@@ -1024,17 +1031,14 @@ async def _count_related_queue_items(db: AsyncSession, archive_id: int) -> tuple
     from backend.app.models.print_queue import PrintQueueItem
     from backend.app.services.queue_transitions import HOLDING_STATUSES
 
-    total = (
-        await db.execute(
-            sa_select(sa_func.count()).select_from(PrintQueueItem).where(PrintQueueItem.archive_id == archive_id)
-        )
-    ).scalar_one()
+    related = _related_queue_items_filter(archive_id)
+    total = (await db.execute(sa_select(sa_func.count()).select_from(PrintQueueItem).where(related))).scalar_one()
     active = (
         await db.execute(
             sa_select(sa_func.count())
             .select_from(PrintQueueItem)
             .where(
-                PrintQueueItem.archive_id == archive_id,
+                related,
                 PrintQueueItem.status.in_(HOLDING_STATUSES),
             )
         )

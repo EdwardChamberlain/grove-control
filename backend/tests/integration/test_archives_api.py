@@ -299,8 +299,17 @@ class TestArchivesAPI:
     @pytest.mark.parametrize(
         "status", ["preheating", "dispatching", "printing", "paused", "finished", "failed", "cancelled"]
     )
+    @pytest.mark.parametrize("linked", [True, False])
     async def test_delete_archive_blocked_when_related_queue_item_active(
-        self, async_client: AsyncClient, archive_factory, printer_factory, db_session, status, tmp_path, monkeypatch
+        self,
+        async_client: AsyncClient,
+        archive_factory,
+        printer_factory,
+        db_session,
+        status,
+        tmp_path,
+        monkeypatch,
+        linked,
     ):
         """Deletion must preserve active sources, physical holds, files and logs."""
         from sqlalchemy import select
@@ -317,8 +326,12 @@ class TestArchivesAPI:
         source.write_bytes(b"attempt copy")
         printer = await printer_factory()
         archive = await archive_factory(printer.id)
-        item = PrintQueueItem(printer_id=printer.id, archive_id=archive.id, status=status, position=1)
+        item = PrintQueueItem(
+            printer_id=printer.id, archive_id=archive.id if linked else None, status=status, position=1
+        )
         db_session.add(item)
+        await db_session.flush()
+        archive.dispatched_queue_item_id = item.id
         await db_session.commit()
         item_id, archive_id = item.id, archive.id
 
@@ -336,6 +349,34 @@ class TestArchivesAPI:
         assert (await db_session.get(PrintArchive, archive_id)).deleted_at is None
         assert await db_session.scalar(select(PrintLogEntry.id).where(PrintLogEntry.archive_id == archive_id))
         assert source.read_bytes() == b"attempt copy"
+
+    @pytest.mark.parametrize("purge_stats", [False, True])
+    async def test_delete_archive_removes_released_owner_without_queue_link(
+        self, async_client, archive_factory, printer_factory, db_session, purge_stats
+    ):
+        from backend.app.models.archive import PrintArchive
+        from backend.app.models.print_queue import PrintQueueItem
+
+        printer = await printer_factory()
+        archive = await archive_factory(printer.id)
+        item = PrintQueueItem(printer_id=printer.id, status="completed")
+        db_session.add(item)
+        await db_session.flush()
+        archive.dispatched_queue_item_id = item.id
+        await db_session.commit()
+        item_id, archive_id = item.id, archive.id
+
+        impact = await async_client.get(f"/api/v1/archives/{archive_id}/delete-impact")
+        assert impact.json() == {"related_queue_items": 1, "currently_printing": 0}
+        response = await async_client.delete(f"/api/v1/archives/{archive_id}", params={"purge_stats": purge_stats})
+        assert response.status_code == 200
+        db_session.expire_all()
+        assert await db_session.get(PrintQueueItem, item_id) is None
+        remaining = await db_session.get(PrintArchive, archive_id)
+        if purge_stats:
+            assert remaining is None
+        else:
+            assert remaining.deleted_at is not None and remaining.dispatched_queue_item_id is None
 
     @pytest.mark.asyncio
     @pytest.mark.integration

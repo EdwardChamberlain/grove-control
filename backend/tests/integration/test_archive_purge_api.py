@@ -10,8 +10,9 @@ from backend.app.services.queue_transitions import HOLDING_STATUSES
 
 @pytest.mark.parametrize("status", HOLDING_STATUSES)
 @pytest.mark.parametrize("purge_stats", [False, True])
+@pytest.mark.parametrize("linked", [True, False])
 async def test_purge_retains_held_archives_and_excludes_them_from_preview(
-    async_client, archive_factory, printer_factory, db_session, tmp_path, monkeypatch, status, purge_stats
+    async_client, archive_factory, printer_factory, db_session, tmp_path, monkeypatch, status, purge_stats, linked
 ):
     from sqlalchemy import select
 
@@ -28,8 +29,10 @@ async def test_purge_retains_held_archives_and_excludes_them_from_preview(
     printer = await printer_factory()
     archive = await archive_factory(printer.id)
     archive.created_at = datetime.now(timezone.utc) - timedelta(days=400)
-    item = PrintQueueItem(printer_id=printer.id, archive_id=archive.id, status=status)
+    item = PrintQueueItem(printer_id=printer.id, archive_id=archive.id if linked else None, status=status)
     db_session.add(item)
+    await db_session.flush()
+    archive.dispatched_queue_item_id = item.id
     await db_session.commit()
     item_id, archive_id = item.id, archive.id
 
@@ -69,8 +72,9 @@ async def test_purge_retains_held_archives_and_excludes_them_from_preview(
 
 
 @pytest.mark.parametrize("purge_stats", [False, True])
+@pytest.mark.parametrize("linked", [True, False])
 async def test_purge_rechecks_a_hold_acquired_after_selection(
-    async_client, archive_factory, printer_factory, db_session, monkeypatch, purge_stats
+    async_client, archive_factory, printer_factory, db_session, monkeypatch, purge_stats, linked
 ):
     from sqlalchemy import select
 
@@ -89,7 +93,10 @@ async def test_purge_rechecks_a_hold_acquired_after_selection(
 
     async def acquire_hold_then_delete(service, selected_id, **kwargs):
         assert selected_id == archive_id
-        service.db.add(PrintQueueItem(printer_id=printer_id, archive_id=selected_id, status="finished"))
+        item = PrintQueueItem(printer_id=printer_id, archive_id=selected_id if linked else None, status="finished")
+        service.db.add(item)
+        await service.db.flush()
+        (await service.db.get(PrintArchive, selected_id)).dispatched_queue_item_id = item.id
         await service.db.commit()
         return await original(service, selected_id, **kwargs)
 
@@ -107,7 +114,7 @@ async def test_purge_rechecks_a_hold_acquired_after_selection(
     assert await db_session.scalar(select(PrintLogEntry.id).where(PrintLogEntry.archive_id == archive_id))
     assert await db_session.scalar(
         select(PrintQueueItem.id).where(
-            PrintQueueItem.archive_id == archive_id,
+            PrintQueueItem.id == (await db_session.get(PrintArchive, archive_id)).dispatched_queue_item_id,
             PrintQueueItem.status == "finished",
         )
     )

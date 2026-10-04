@@ -6,7 +6,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.app.models.archive import PrintArchive
@@ -16,8 +17,9 @@ from backend.tests.unit.test_job_identity import add_linked_job, sessions  # noq
 
 @pytest.mark.parametrize("recovering", [False, True])
 @pytest.mark.parametrize("burst", [False, True])
+@pytest.mark.parametrize("failure", ["write", "link", "link_then_id"])
 async def test_mqtt_updates_retry_archive_write_without_repeating_start_effects(
-    sessions, monkeypatch, tmp_path, recovering, burst
+    sessions, monkeypatch, tmp_path, recovering, burst, failure
 ):
     import backend.app.main as main
     from backend.app.core.tasks import _background_tasks
@@ -30,7 +32,7 @@ async def test_mqtt_updates_retry_archive_write_without_repeating_start_effects(
         async def commit(self):
             if any(isinstance(row, PrintArchive) for row in self.new):
                 attempts.append(1)
-                if len(attempts) == 1:
+                if failure == "write" and len(attempts) == 1:
                     raise RuntimeError("temporary archive write failure")
             return await super().commit()
 
@@ -73,24 +75,45 @@ async def test_mqtt_updates_retry_archive_write_without_repeating_start_effects(
         asyncio.create_task(main.on_printer_status_change(1, state))
     )
 
-    async def push(state, count=1):
+    async def push(state, count=1, subtask_id="external-run"):
         for _ in range(count):
             client._process_message(
-                {"print": {"gcode_state": state, "subtask_id": "external-run", "gcode_file": "same.3mf"}}
+                {"print": {"gcode_state": state, "subtask_id": subtask_id, "gcode_file": "same.3mf"}}
             )
-        await asyncio.gather(*callbacks)
+        results = await asyncio.gather(*callbacks, return_exceptions=True)
         callbacks.clear()
         await asyncio.gather(*(t for t in tuple(_background_tasks) if t.get_name() == "retry-print-archive-1"))
+        return [result for result in results if isinstance(result, Exception)]
+
+    failed_links = []
+
+    def fail_link(connection, cursor, statement, parameters, context, executemany):
+        sql = statement.lstrip().upper()
+        if failure != "write" and not failed_links and sql.startswith("UPDATE PRINT_QUEUE") and "ARCHIVE_ID=" in sql:
+            failed_links.append(statement)
+            raise OperationalError(statement, parameters, Exception("temporary Archive link failure"))
 
     if not recovering:
-        await push("IDLE")
-    await push("RUNNING" if recovering else "PREPARE")
-    assert attempts == [1] and main._observed_job_starts.get(1) is None
+        assert await push("IDLE") == []
+    engine = sessions.kw["bind"]
+    event.listen(engine.sync_engine, "before_cursor_execute", fail_link)
+    try:
+        errors = await push(
+            "RUNNING" if recovering else "PREPARE", subtask_id="0" if failure == "link_then_id" else "external-run"
+        )
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", fail_link)
+    assert attempts == [1]
+    assert len(errors) == int(failure != "write")
+    if errors:
+        assert isinstance(errors[0], OperationalError)
+    else:
+        assert main._observed_job_starts.get(1) is None
     # Ordinary MQTT pushes, including identical status broadcasts, must drive
     # recovery. No direct second call to a print-start callback is made.
-    await push("RUNNING", count=20 if burst else 1)
-    await push("RUNNING")
-    assert attempts == [1, 1]
+    assert await push("RUNNING", count=20 if burst else 1) == []
+    assert await push("RUNNING") == []
+    assert attempts == ([1, 1] if failure == "write" else [1])
     async with sessions() as db:
         job = await db.scalar(select(PrintQueueItem))
         archive = await db.get(PrintArchive, job.archive_id)

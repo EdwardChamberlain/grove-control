@@ -209,6 +209,10 @@ telemetry confirms it, including after a failed heat-soak handoff or disconnect.
 Both heater-on and heater-off commands require fresh connected idle telemetry.
 Shutdown also checks the current Queue holder: a delayed effect or retry never
 turns off another active print or reserved soak. It waits until that work ends.
+Automatic power-off checks both live printing and active Queue reservations
+immediately before switching the plug, after resolving its service. This
+protects heat soak and upload while MQTT still reports idle. A failed Queue
+lookup defers power-off; awaiting-plate-clear jobs can still power off.
 Each committed status change also writes a compact log
 entry with job, prior/new state, printer, Archive and action for support reports.
 
@@ -366,6 +370,10 @@ Stop or recover it by exact submission ID. Confirm the one-time migration links
 only an unambiguous attempt and that later outcomes update that link; repeat
 with reused IDs and source Archives to confirm they remain untouched. Include
 a late firmware-ID rebind and concurrent Stop/completion on PostgreSQL.
+Fail an external Archive link after creation, then supply its firmware ID or
+Stop and Clear Plate; verify the same Archive records the outcome. Let an old
+Auto Off task become due during a new heat soak/upload, including during plug
+service resolution, and confirm the reserved printer retains power.
 
 `test_queue_archive_alignment.py` covers real-database dispatch/Archive commit,
 rollback (including session close), cancellation during copying, duplicate

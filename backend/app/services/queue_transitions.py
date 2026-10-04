@@ -280,17 +280,22 @@ async def transition_queue_item(
 
             # Only the exact attempt, never the Archive used as a reprint source.
             row = (await db.execute(select(table).where(table.c.id == item_id))).one()
-            attempt = (
-                await db.scalar(
-                    select(ArchiveModel).where(
-                        ArchiveModel.id == row.archive_id, ArchiveModel.dispatched_queue_item_id == item_id
-                    )
-                )
-                if row.archive_id is not None
-                else None
+            query = select(ArchiveModel).where(
+                ArchiveModel.dispatched_queue_item_id == item_id, ArchiveModel.printer_id == row.printer_id
             )
+            if row.archive_id is not None:
+                query = query.where(ArchiveModel.id == row.archive_id)
+            attempt = await db.scalar(query)
             if attempt is not None:
-                attaching = "archive_id" in metadata or archive is not None
+                attaching = "archive_id" in metadata or archive is not None or row.archive_id is None
+                if row.archive_id is None:
+                    # The unique attempt owner survives a failed Queue-link
+                    # transaction. Restore that projection before applying the
+                    # outcome, including Stop/Clear Plate during recovery.
+                    await db.execute(table.update().where(table.c.id == item_id).values(archive_id=attempt.id))
+                    if not isinstance(item, int):
+                        set_committed_value(item, "archive_id", attempt.id)
+                        set_committed_value(item, "archive", attempt)
                 if status == "dispatching" and "dispatch_subtask_id" in metadata:
                     attempt.subtask_id = metadata["dispatch_subtask_id"]
                 if (expected_status == "dispatching" and status == "printing") or (
