@@ -7,7 +7,7 @@ import shutil
 from collections.abc import Sequence
 from pathlib import Path
 
-from sqlalchemy import inspect
+from sqlalchemy import inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.sql.elements import ColumnElement
@@ -60,9 +60,9 @@ async def link_dispatch_archive(
         db, item, "dispatching", "dispatching", values={"archive_id": archive.id}, conditions=conditions
     )
     set_committed_value(item, "archive", archive)
-    db.sync_session.info.setdefault("queue_transition_log", []).append(
-        (item.id, "dispatching", "dispatching", item.printer_id, archive.id, "archive_link")
-    )
+    from backend.app.services.print_lifecycle.effects import log_transition
+
+    log_transition(db, item.id, "dispatching", "dispatching", item.printer_id, archive.id, "archive_link")
 
 
 class DispatchSourceUnavailable(RuntimeError):
@@ -176,3 +176,60 @@ async def prepare_dispatch_archive(db: AsyncSession, item: PrintQueueItem) -> Pr
                     injected_path.unlink(missing_ok=True)
                 except OSError:
                     logger.warning("Queue item %s: could not remove temporary G-code copy %s", item.id, injected_path)
+
+
+async def sync_job_archive(db, item, row, expected_status, status, metadata, confirmed) -> int | None:
+    """Project an outcome only onto the exactly owned attempt, never its source."""
+    from datetime import datetime, timezone
+
+    from backend.app.services.queue_transitions import (
+        ARCHIVE_OUTCOMES,
+        AWAITING_PLATE_CLEAR_STATUSES,
+        FINAL_STATUSES,
+        physical_failure_reason,
+    )
+
+    item_id = row.id
+    query = select(PrintArchive).where(
+        PrintArchive.dispatched_queue_item_id == item_id, PrintArchive.printer_id == row.printer_id
+    )
+    if row.archive_id is not None:
+        query = query.where(PrintArchive.id == row.archive_id)
+    attempt = await db.scalar(query)
+    if attempt is None:
+        return row.archive_id
+    attaching = "archive_id" in metadata or row.archive_id is None
+    if row.archive_id is None:
+        # The unique attempt owner survives a failed Queue-link
+        # transaction. Restore that projection before applying the
+        # outcome, including Stop/Clear Plate during recovery.
+        await db.execute(
+            PrintQueueItem.__table__.update().where(PrintQueueItem.id == item_id).values(archive_id=attempt.id)
+        )
+        if not isinstance(item, int):
+            set_committed_value(item, "archive_id", attempt.id)
+            set_committed_value(item, "archive", attempt)
+    if status == "dispatching" and "dispatch_subtask_id" in metadata:
+        attempt.subtask_id = metadata["dispatch_subtask_id"]
+    if (expected_status == "dispatching" and status == "printing") or (attaching and status in ("printing", "paused")):
+        attempt.status = "printing"
+        attempt.started_at = row.started_at or datetime.now(timezone.utc)
+    if (status in AWAITING_PLATE_CLEAR_STATUSES and (expected_status != status or confirmed)) or (
+        attaching and status in (*AWAITING_PLATE_CLEAR_STATUSES, *FINAL_STATUSES)
+    ):
+        outcome = row.physical_outcome or ARCHIVE_OUTCOMES.get(status)
+        if outcome is None and status == "successful":
+            outcome = "completed"  # Unambiguous legacy final state.
+        if outcome is None and status == "unsuccessful" and row.stop_requested_at is not None:
+            outcome = "aborted"  # The attempt was stopped; printer confirmation remains unknown.
+        if outcome is not None:
+            attempt.status = outcome
+            attempt.completed_at = row.physical_completed_at or row.completed_at
+            attempt.failure_reason = (
+                row.physical_failure_reason
+                if row.physical_outcome is not None
+                else physical_failure_reason(outcome, row.error_message)
+            )
+            if attaching and row.started_at is not None:
+                attempt.started_at = row.started_at
+    return attempt.id if row.archive_id is None else row.archive_id

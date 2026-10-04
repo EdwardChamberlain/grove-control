@@ -50,6 +50,7 @@ from backend.app.services.filament_requirements import (
 )
 from backend.app.services.job_identity import needs_dispatch_resolution, telemetry_identity
 from backend.app.services.notification_service import notification_service
+from backend.app.services.print_lifecycle.effects import queue_start
 from backend.app.services.queue_source_cleanup import (
     remove_queue_only_artifacts,
     remove_queue_only_source_if_unused,
@@ -1744,9 +1745,10 @@ async def resolve_queue_dispatch(
     }
     values["started_at" if data.outcome == "printing" else "completed_at"] = now
     await transition_queue_item(db, item, "dispatching", data.outcome, values=values)
+    effect = queue_start(db, item.id, scheduler._publish_queue_job_started) if data.outcome == "printing" else None
     await db.commit()
-    if data.outcome == "printing":
-        await scheduler._publish_queue_job_started(item.id)
+    if effect:
+        await effect.run()
     return {"message": "Dispatch resolved"}
 
 

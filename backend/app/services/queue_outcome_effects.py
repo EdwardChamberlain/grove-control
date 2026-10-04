@@ -1,5 +1,6 @@
 """Effects emitted after Queue outcomes and failed-attempt plate clearing commit."""
 
+import asyncio
 import logging
 from dataclasses import dataclass
 
@@ -15,6 +16,62 @@ from backend.app.services.notification_service import notification_service
 from backend.app.services.smart_plug_manager import smart_plug_manager
 
 logger = logging.getLogger(__name__)
+
+
+async def cleanup_print_sd_files(printer_id, remote_filename, archive_filename, subtask_name, sessions) -> None:
+    """Clean the recorded upload, retaining legacy filenames and transient-error retries."""
+    from backend.app.services.bambu_ftp import DeleteResult, delete_file_async
+    from backend.app.utils.filename import derive_remote_filename
+
+    if not (remote_filename or subtask_name):
+        return
+    try:
+        async with sessions() as db:
+            printer = await db.get(Printer, printer_id)
+        if printer is None:
+            return
+        paths = (
+            [f"/{remote_filename}"]
+            if remote_filename
+            else list(
+                dict.fromkeys(
+                    ([f"/{derive_remote_filename(archive_filename)}"] if archive_filename else [])
+                    + [f"/{subtask_name}{extension}" for extension in (".3mf", ".gcode")]
+                )
+            )
+        )
+        deleted = failed = missing = False
+        for path in paths:
+            for attempt in range(1, 4):
+                try:
+                    result = await delete_file_async(
+                        printer.ip_address, printer.access_code, path, printer_model=printer.model
+                    )
+                except Exception as exc:
+                    result = DeleteResult.FAILED
+                    logger.warning("SD card cleanup attempt %d/3 raised for %s: %s", attempt, path, exc)
+                if result == DeleteResult.DELETED:
+                    deleted = True
+                    logger.info("Deleted %s from printer %s SD card", path, printer.name)
+                    break
+                if result == DeleteResult.NOT_FOUND:
+                    missing = True
+                    break
+                if attempt < 3:
+                    await asyncio.sleep(2)
+                else:
+                    failed = True
+                    logger.warning(
+                        "SD card cleanup failed after 3 attempts for %s (network/auth/transient error — file may linger on SD card)",
+                        path,
+                    )
+        if not deleted and not failed and missing:
+            logger.debug(
+                "SD card cleanup: nothing to delete on %s — every candidate returned 550 (printer likely self-cleaned)",
+                printer.name,
+            )
+    except Exception as exc:
+        logger.warning("SD card file cleanup failed for printer %s: %s", printer_id, exc)
 
 
 @dataclass(frozen=True)

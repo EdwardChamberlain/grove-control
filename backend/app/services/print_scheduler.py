@@ -43,6 +43,7 @@ from backend.app.services.filament_requirements import canonical_filament_type
 from backend.app.services.ha_sensor_manager import ha_sensor_manager
 from backend.app.services.job_identity import sync_print_state, telemetry_identity
 from backend.app.services.notification_service import notification_service
+from backend.app.services.print_lifecycle.effects import CommittedEffect, queue_start
 from backend.app.services.printer_manager import (
     printer_manager,
     supports_drying,
@@ -633,7 +634,6 @@ class PrintScheduler:
         now = datetime.now(timezone.utc)
         stale_before = now.timestamp() - 270
         changed = False
-        promoted_ids: list[int] = []
         terminal_dispatches: list[tuple[int, int, dict]] = []
         for item in dispatches:
             if item.status == "dispatching" and item.dispatching_at is not None:
@@ -715,7 +715,7 @@ class PrintScheduler:
                     if not await self._transition_or_skip(db, item, "printing", started_at=now, error_message=None):
                         continue
                     changed = True
-                    promoted_ids.append(item.id)
+                    queue_start(db, item.id, self._publish_queue_job_started, delivery="background")
                     logger.info("Recovered dispatched queue item %s as printer-confirmed printing", item.id)
                 try:
                     changed = await sync_print_state(db, item, printer_status) or changed
@@ -746,11 +746,6 @@ class PrintScheduler:
 
         if changed:
             await db.commit()
-        for queue_item_id in promoted_ids:
-            spawn_background_task(
-                self._publish_queue_job_started(queue_item_id),
-                name=f"publish-recovered-queue-start-{queue_item_id}",
-            )
         for queue_item_id, printer_id, completion_data in terminal_dispatches:
             if queue_item_id in self._terminal_dispatch_recoveries:
                 continue
@@ -4488,26 +4483,27 @@ class PrintScheduler:
             telemetry_status, last_status = None, None
         if telemetry_status == "printing":
 
-            async def _promote(db: AsyncSession) -> bool:
+            async def _promote(db: AsyncSession) -> CommittedEffect | None:
                 item = await db.get(PrintQueueItem, queue_item_id)
                 if not item or item.status != "dispatching":
-                    return False
+                    return None
                 try:
                     await transition_queue_item(db, item, "dispatching", "printing")
                     await sync_print_state(db, item, printer_manager.get_status(printer_id))
                 except QueueTransitionConflict:
                     await db.rollback()
-                    return False
+                    return None
                 item.started_at = datetime.now(timezone.utc)
                 item.error_message = None
+                effect = queue_start(db, item.id, self._publish_queue_job_started)
                 await db.commit()
-                return True
+                return effect
 
             promoted = await run_with_retry(_promote, label=f"confirm queue dispatch {queue_item_id}")
             if not promoted:
                 return
 
-            await self._publish_queue_job_started(queue_item_id)
+            await promoted.run()
             return
 
         if telemetry_status in ("completed", "failed"):

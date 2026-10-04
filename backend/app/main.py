@@ -8,6 +8,7 @@ import secrets
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from functools import partial
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import NamedTuple
@@ -110,6 +111,7 @@ from backend.app.services.mqtt_relay import mqtt_relay
 from backend.app.services.mqtt_smart_plug import mqtt_smart_plug_service
 from backend.app.services.notification_service import notification_service
 from backend.app.services.obico_detection import obico_detection_service
+from backend.app.services.print_lifecycle.effects import after_commit, run_print_start, run_queue_completion
 from backend.app.services.print_scheduler import scheduler as print_scheduler
 from backend.app.services.printer_manager import (
     init_printer_connections,
@@ -2453,23 +2455,14 @@ async def _observe_print_start(printer_id: int, data: dict, *, recovering: bool 
             "plate_id": item.plate_id if item.plate_id is not None else data.get("plate_id"),
             "owner_id": item.created_by_id,
         }
+        effect = after_commit(
+            db,
+            ("start", item_id),
+            partial(run_print_start, printer_id, archive_data, item_id, queue_archive_id, was_dispatching, recovering),
+            delivery="caller",
+        )
         await db.commit()
-    if was_dispatching:
-        await print_scheduler._publish_queue_job_started(item_id)
-    new_start = not recovering and _started_job_effects.get(printer_id) != item_id
-    _started_job_effects[printer_id] = item_id
-    archive_id = queue_archive_id
-    try:
-        if new_start:
-            await _begin_new_print(printer_id, archive_data)
-        if data.get("filename") or data.get("subtask_name"):
-            await _archive_print_start(
-                printer_id, archive_data, queue_archive_id=queue_archive_id, queue_job_id=item_id
-            )
-        archive_id = await _link_observed_archive(printer_id, item_id, identity)
-    finally:
-        if new_start:
-            await _finish_new_print(printer_id, archive_data, archive_id)
+    await effect.run()
 
 
 async def _link_observed_archive(printer_id: int, item_id: int, identity: str) -> int | None:
@@ -3941,15 +3934,12 @@ async def _complete_identified_print(printer_id: int, data: dict):
     """Handle print completion - update the archive status."""
     import time
 
-    from backend.app.models.print_queue import AWAITING_PLATE_CLEAR_STATUSES, PrintQueueItem
+    from backend.app.models.print_queue import AWAITING_PLATE_CLEAR_STATUSES
 
     logger = logging.getLogger(__name__)
     start_time = time.time()
 
-    # Connected-edge reconciliation runs in the background and can race with
-    # queue dispatch. A synthetic completion must never enter this handler
-    # while any print is active: this callback has printer-level side effects,
-    # so even a stale archive for a different job must be deferred.
+    # Defer synthetic completions while a print is active: effects act on the printer.
     if data.get("_reconciled") and _is_printer_actively_printing(printer_manager.get_status(printer_id)):
         logger.info(
             "[CALLBACK] Ignoring stale reconciled completion for printer %s while a print is active",
@@ -3970,7 +3960,7 @@ async def _complete_identified_print(printer_id: int, data: dict):
         return False
     reported_outcome = data.get("status", "completed")
 
-    async def _record_outcome(db) -> _CompletionRecord | None:
+    async def _record_outcome(db):
         await bind_observed_id(db, printer_id, identity, data.get("previous_submission_id"))
         statuses = ("dispatching", "printing", "paused", "cancelled")
         if data.get("_recovered_dispatch"):
@@ -3986,9 +3976,7 @@ async def _complete_identified_print(printer_id: int, data: dict):
             if ended_job is not None and ended_job.status in terminal_statuses:
                 return None
         if matched_job is None and identity:
-            # An external print archived by an older version may finish while
-            # Grove is offline. Its exact ID can establish a job on reconnect;
-            # ID-less or filename-only history cannot establish continuity.
+            # Exact legacy Archive identity can establish an external job on reconnect.
             from backend.app.models.archive import PrintArchive
 
             archives = list(
@@ -4025,9 +4013,7 @@ async def _complete_identified_print(printer_id: int, data: dict):
             "failed",
             "aborted",
         ):
-            # A stop from Grove is reported as "cancelled", now also after a
-            # restart. Every other outcome, including a touchscreen "aborted",
-            # keeps the printer's own name for notifications and integrations.
+            # Preserve Grove's Stop intent across restart; other outcomes retain firmware names.
             reported_status = "cancelled"
         destination = "finished" if queue_status == "completed" else queue_status
         if matched_job.status == "dispatching" and destination == "finished":
@@ -4064,13 +4050,11 @@ async def _complete_identified_print(printer_id: int, data: dict):
                 )
             )
             if attempt_archive:
-                # Capture cleanup identity before automatic Clear Plate releases
-                # the hold and makes this Archive eligible for deletion.
+                # Capture cleanup identity before automatic Clear Plate permits Archive deletion.
                 remote_filename = (attempt_archive.extra_data or {}).get("remote_filename")
                 archive_filename = attempt_archive.filename
         await _bump_library_file_usage_if_completed(db, matched_job, queue_status)
-        await db.commit()
-        return _CompletionRecord(
+        record = _CompletionRecord(
             job_id=matched_job.id,
             owner_id=matched_job.created_by_id,
             queue_status=queue_status,
@@ -4083,18 +4067,28 @@ async def _complete_identified_print(printer_id: int, data: dict):
             plate_id=matched_job.plate_id if matched_job.plate_id is not None else data.get("plate_id"),
         )
 
-    # The terminal transition, Archive outcome and printer hold commit together.
-    # A locked SQLite database retries the whole transaction in a fresh session,
-    # so a busy writer cannot leave the job printing with no effects run (#897).
-    record = await run_with_retry(_record_outcome, label="queue completion", session_factory=async_session)
-    if record is None:
+        effect = after_commit(
+            db,
+            ("completion", record.job_id),
+            partial(_run_print_completion, printer_id, dict(data), record, start_time),
+            delivery="caller",
+        )
+        await db.commit()
+        return effect
+
+    # Retry the whole outcome transaction before any completion effects (#897).
+    effect = await run_with_retry(_record_outcome, label="queue completion", session_factory=async_session)
+    if effect is None:
         return False
+    return await effect.run()
+
+
+async def _run_print_completion(printer_id: int, data: dict, record: _CompletionRecord, start_time: float):
+    logger = logging.getLogger(__name__)
     _completed_job_events[printer_id] = record.job_id
     data = {**data, "status": record.reported_status, "ams_mapping": record.ams_mapping, "plate_id": record.plate_id}
     queue_item_id = record.job_id
     queue_item_owner_id = record.owner_id
-    queue_status = record.queue_status
-    queue_auto_off = record.auto_off
     matched_archive_id = record.archive_id
     remote_filename = record.remote_filename
     archive_filename = record.archive_filename
@@ -4105,9 +4099,7 @@ async def _complete_identified_print(printer_id: int, data: dict):
 
     logger.info("[CALLBACK] on_print_complete started for printer %s", printer_id)
 
-    # Drop the 3MF download cache for this printer (#972). The print is over,
-    # nothing else legitimately needs the bytes; keeping them would only risk
-    # handing a stale file to the next print if it reuses the same name.
+    # A completed print must not supply cached bytes to the next print (#972).
     clear_3mf_cache(printer_id)
 
     try:
@@ -4128,9 +4120,7 @@ async def _complete_identified_print(printer_id: int, data: dict):
     # Clear current print user tracking (Issue #206)
     printer_manager.clear_current_print_user(printer_id)
 
-    # If the user explicitly stopped this print from the queue UI the printer will
-    # report "failed" or "aborted" via MQTT.  Override that to "cancelled" so the
-    # correct "print stopped" notification/email is sent instead of a failure alert.
+    # Grove Stop reports use the stopped notification even if firmware reports failure.
     _raw_status = data.get("status", "completed")
     if printer_id in _user_stopped_printers and _raw_status in ("failed", "aborted"):
         logger.info(
@@ -4164,173 +4154,17 @@ async def _complete_identified_print(printer_id: int, data: dict):
     archive_id = matched_archive_id
     # Names remain useful for display and cleanup, never attribution.
 
-    # Cleanup: delete uploaded file from printer SD card to prevent phantom prints (Issue #374, #1542)
-    # The print scheduler uploads files to the SD card root (/). Some printers (e.g. P1S, A1)
-    # auto-start files found in root on power cycle, causing ghost prints.
-    # Must run before the archive_id early-return so it executes even when archiving is disabled.
-    try:
-        if remote_filename or subtask_name:
-            async with async_session() as db:
-                from backend.app.models.printer import Printer
+    from backend.app.services.queue_outcome_effects import cleanup_print_sd_files
 
-                result = await db.execute(select(Printer).where(Printer.id == printer_id))
-                printer = result.scalar_one_or_none()
-
-            if printer:
-                from backend.app.services.bambu_ftp import DeleteResult, delete_file_async
-                from backend.app.utils.filename import derive_remote_filename
-
-                # Modern Queue attempts clean only their recorded upload.
-                # Display names may be reused while this callback awaits FTP.
-                # Legacy/external prints retain the old naming fallbacks.
-                candidate_paths: list[str] = []
-                if remote_filename:
-                    candidate_paths.append(f"/{remote_filename}")
-                else:
-                    if archive_filename:
-                        candidate_paths.append(f"/{derive_remote_filename(archive_filename)}")
-                    for ext in (".3mf", ".gcode"):
-                        fallback = f"/{subtask_name}{ext}"
-                        if fallback not in candidate_paths:
-                            candidate_paths.append(fallback)
-
-                # Three outcomes track across all candidates so the final log
-                # line reflects what actually happened. The A1 in #1721 always
-                # ends here with ``any_not_found=True`` and the others False
-                # — its firmware auto-cleans the SD card before our cleanup
-                # runs, every candidate FTP-DELE returns 550, and the old
-                # code burned 3 retries × 2 s × 3 candidates per print
-                # logging a misleading "may linger" WARNING on a successful
-                # print.
-                any_deleted = False
-                any_real_failure = False
-                any_not_found = False
-
-                for remote_path in candidate_paths:
-                    # Retry only the FAILED case — 550 NOT_FOUND will never
-                    # recover by waiting, so a "file isn't here" answer
-                    # advances immediately to the next candidate without
-                    # consuming the retry budget.
-                    for attempt in range(1, 4):
-                        try:
-                            delete_result = await delete_file_async(
-                                printer.ip_address,
-                                printer.access_code,
-                                remote_path,
-                                printer_model=printer.model,
-                            )
-                        except Exception as e:
-                            delete_result = DeleteResult.FAILED
-                            logger.warning(
-                                "SD card cleanup attempt %d/3 raised for %s: %s",
-                                attempt,
-                                remote_path,
-                                e,
-                            )
-
-                        if delete_result == DeleteResult.DELETED:
-                            any_deleted = True
-                            logger.info("Deleted %s from printer %s SD card", remote_path, printer.name)
-                            break
-                        if delete_result == DeleteResult.NOT_FOUND:
-                            any_not_found = True
-                            break  # 550 will not recover; try next candidate
-                        # FAILED: real error — retry with backoff, then give up
-                        if attempt < 3:
-                            await asyncio.sleep(2)
-                        else:
-                            any_real_failure = True
-                            logger.warning(
-                                "SD card cleanup failed after 3 attempts for %s "
-                                "(network/auth/transient error — file may linger on SD card)",
-                                remote_path,
-                            )
-
-                if not any_deleted and not any_real_failure and any_not_found:
-                    # Every candidate said "not here." Either the printer
-                    # firmware swept the SD card itself (common on A1) or the
-                    # dispatcher's upload path doesn't match our candidate
-                    # rule. Either way: nothing to clean up, no warning.
-                    logger.debug(
-                        "SD card cleanup: nothing to delete on %s — every candidate returned 550 "
-                        "(printer likely self-cleaned)",
-                        printer.name,
-                    )
-    except Exception as e:
-        logger.warning("SD card file cleanup failed for printer %s: %s", printer_id, e)
+    await cleanup_print_sd_files(printer_id, remote_filename, archive_filename, subtask_name, async_session)
 
     log_timing("SD card cleanup")
 
-    # The physical outcome and printer hold committed before completion effects.
-    try:
-        # Post-commit side effects (notifications, MQTT relay, auto-off) use
-        # their own sessions and have their own error handling — no retry needed.
-        if queue_item_id is not None:
-            # MQTT relay - publish queue job completed
-            try:
-                printer_info = printer_manager.get_printer(printer_id)
-                await mqtt_relay.on_queue_job_completed(
-                    job_id=queue_item_id,
-                    filename=filename or subtask_name,
-                    printer_id=printer_id,
-                    printer_name=printer_info.name if printer_info else "Unknown",
-                    status=queue_status,
-                )
-            except Exception:
-                pass  # Don't fail if MQTT fails
-
-            # Check if queue is now empty and send notification
-            try:
-                from sqlalchemy import func as sa_func
-
-                async with async_session() as db:
-                    count_result = await db.execute(
-                        select(sa_func.count(PrintQueueItem.id)).where(PrintQueueItem.status == "queued")
-                    )
-                    pending_count = count_result.scalar() or 0
-
-                    if pending_count == 0:
-                        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-                        completed_result = await db.execute(
-                            select(sa_func.count(PrintQueueItem.id)).where(
-                                PrintQueueItem.status.in_(
-                                    ["finished", "successful", "failed", "cancelled", "unsuccessful"]
-                                ),
-                                PrintQueueItem.completed_at >= today_start,
-                            )
-                        )
-                        completed_count = completed_result.scalar() or 1
-
-                        await notification_service.on_queue_completed(
-                            completed_count=completed_count,
-                            db=db,
-                        )
-            except Exception:
-                pass  # Don't fail if notification fails
-
-            # Handle auto_off_after - power off printer if the queue item opted
-            # in. Delegates to the smart-plug manager so the off honours each
-            # plug's configured strategy (time delay or temperature threshold),
-            # is cancelled if the printer starts printing again, and never cuts
-            # power on a loaded print (#1890). Previously an inline block here
-            # hardcoded a 50°C / 600s cooldown wait and powered off on the
-            # timeout regardless of print state — cutting a touchscreen reprint.
-            # Failed and cancelled transitions schedule this in the central
-            # after-commit outcome step. Completion still uses this callback.
-            if queue_auto_off and queue_status == "completed":
-                try:
-                    async with async_session() as db:
-                        await smart_plug_manager.schedule_off_after_queue_job(printer_id, db)
-                except Exception as e:
-                    logger.warning("Failed to schedule queue auto-off for printer %s: %s", printer_id, e)
-    except Exception as e:
-        logging.getLogger(__name__).warning(f"Queue item update failed: {e}")
+    await run_queue_completion(printer_id, data, record)
 
     log_timing("Queue item update")
 
-    # Register bed cooldown waiter (event-driven via on_bed_temp_update callback).
-    # Must run before archive_id early-return so it fires for all prints (including
-    # prints started from BambuStudio/touchscreen that have no archive).
+    # Register cooldown notifications even when archiving is disabled.
     if data.get("status") == "completed":
         try:
             from backend.app.api.routes.settings import get_setting
@@ -4358,8 +4192,7 @@ async def _complete_identified_print(printer_id: int, data: dict):
         except Exception as e:
             logger.warning("[BED-COOL] Failed to register waiter: %s", e)
 
-    # --- Track filament consumption (must run before archive_id early-return so usage
-    # is recorded even when auto-archive is disabled) ---
+    # Track filament consumption even when archiving is disabled.
     usage_results: list[dict] = []
     # Queue callbacks carry the committed job's mapping and plate selection;
     # external prints use the metadata observed in their MQTT event.
@@ -4397,9 +4230,7 @@ async def _complete_identified_print(printer_id: int, data: dict):
     except Exception as e:
         logger.warning("Usage tracker on_print_complete failed: %s", e)
 
-    # Clear the persisted print-start context for both inventory backends. The
-    # Spoolman path skips the internal completion tracker, so it cannot clear
-    # the row as a side effect.
+    # Clear persisted context for both inventory backends, including Spoolman.
     try:
         from backend.app.services.usage_tracker import discard_session
 

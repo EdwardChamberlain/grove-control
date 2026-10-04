@@ -140,7 +140,10 @@ cleanup, deletion is skipped. FTP failure does not undo plate clearing.
 
 ## Transactions and effects
 
-`transition_queue_item` is the sole status writer. It checks allowed edges and
+`print_lifecycle.engine.transition_queue_item` is the sole transition entry point,
+also re-exported by `queue_transitions` for existing callers. The latter owns only
+the table, guards and conditional write. The engine applies Archive projections,
+source release and effect registration inside the caller's transaction. The writer checks allowed edges and
 conditionally matches ID, expected state and supplied claim. Metadata is written
 atomically; ORM synchronization cannot flush a second unconditional status
 update. Same-state writes still check persisted state. Reasons are display-only.
@@ -149,10 +152,13 @@ publishing effects. Invalid edges fail before writing. User cancellation,
 Clear Plate, printer deletion, hold transfer and printer reports have explicit
 action guards.
 
-The caller owns the transaction. Plate-clear flags and Archive IDs in printer
-views are projections, rehydrated at startup and published after commit.
-Rollback discards pending effects and prepared artifacts. Legacy Printer flag
-columns remain only for upgrade compatibility.
+The caller owns the transaction. `print_lifecycle.effects` holds one registry
+for start, completion, failure, release, diagnostics and printer projections.
+MQTT handlers await committed effects under their existing printer lock; recovery
+and failure effects run in the background. Rollback or session close discards
+pending effects and prepared artifacts. Plate-clear flags and Archive IDs in
+printer views remain projections, rehydrated at startup and published after
+commit. Legacy Printer flag columns remain only for upgrade compatibility.
 
 One committed outcome step, keyed by job and new state, handles failure notices,
 configured Auto Off, heater shutdown and SD cleanup. Each effect uses independent
