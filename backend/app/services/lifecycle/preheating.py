@@ -1,12 +1,12 @@
 """Preheating (#204): hold the printer, heat it for a bounded soak, then hand off to dispatching.
 
-Enter: ``ChamberHeatSoak.stage`` commits the hold before any heater command.
-Wait: ``ChamberHeatSoak.check`` keeps the heartbeat, ends an interrupted
-soak, and hands off when the timer has run. Exit: the engine calls ``exit``
-with the reason. Recover: a soak whose owner missed its heartbeat keeps its
-hold until a person chooses Stop or Skip heat soak. Database write locks
-serialize controls with cancellation; no other process resumes a soak's timer
-or dispatches its job. There is no material or keep-warm policy.
+Enter: ``ChamberHeatSoak.stage`` commits the hold, then ``enter`` turns the
+heaters on. Wait: ``ChamberHeatSoak.check`` keeps the heartbeat, ends an
+interrupted soak, and hands off when the timer has run. Exit: the engine calls
+``exit`` with the reason. Recover: a soak whose owner missed its heartbeat
+keeps its hold until a person chooses Stop or Skip heat soak. Database write
+locks serialize controls with cancellation; no other process resumes a soak's
+timer or dispatches its job. There is no material or keep-warm policy.
 """
 
 import logging
@@ -271,7 +271,7 @@ class ChamberHeatSoak:
         bind_values: Mapping[str, Any] | None = None,
         unassigned: bool = False,
     ) -> bool:
-        """Enter: hold the printer, then turn the heaters on.
+        """Hold the printer, commit, then ``enter`` preheating.
 
         ``bind_values`` records the scheduler's decision (printer and tray
         mapping) with the hold. With ``unassigned``, an "Any machine" job is
@@ -316,8 +316,14 @@ class ChamberHeatSoak:
         except (IntegrityError, QueueTransitionConflict):
             await db.rollback()
             return False
-        # Reservation is durable before any heater command. Re-lock to ensure
-        # a cancellation during commit cannot be followed by heater-on commands.
+        return await self.enter(db, item_id, printer_id)
+
+    async def enter(self, db: AsyncSession, item_id: int, printer_id: int) -> bool:
+        """Enter: turn the heaters on for this worker's committed hold.
+
+        The hold is durable before any heater command. Re-lock so that a Stop
+        committed since then cannot be followed by heater-on commands.
+        """
         item = await lock_queue_item(db, item_id)
         if not item or item.status != "preheating" or item.preheat_owner != self.owner:
             await db.rollback()
