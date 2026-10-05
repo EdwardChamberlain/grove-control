@@ -420,8 +420,7 @@ class PrinterManager:
 
         try:
             async with async_session() as db:
-                from backend.app.models.print_queue import PrintQueueItem
-                from backend.app.services.queue_transitions import AWAITING_PLATE_CLEAR_STATUSES
+                from backend.app.models.print_queue import AWAITING_PLATE_CLEAR_STATUSES, PrintQueueItem
 
                 result = await db.execute(
                     select(PrintQueueItem.printer_id, PrintQueueItem.archive_id).where(

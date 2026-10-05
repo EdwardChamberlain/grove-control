@@ -20,8 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.core.tasks import spawn_background_task
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
+from backend.app.services.lifecycle.engine import QueueTransitionConflict, transition_queue_item
 from backend.app.services.printer_manager import printer_manager, supports_chamber_heater
-from backend.app.services.queue_transitions import QueueTransitionConflict, transition_queue_item
 
 logger = logging.getLogger(__name__)
 HEARTBEAT_TIMEOUT = 90

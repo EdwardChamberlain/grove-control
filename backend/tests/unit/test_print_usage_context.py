@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from backend.app.models.print_queue import PrintQueueItem
-from backend.app.services.queue_transitions import transition_queue_item
+from backend.app.services.lifecycle.engine import transition_queue_item
 from backend.tests.unit.test_queue_archive_alignment import alignment, hold_and_link  # noqa: F401
 
 

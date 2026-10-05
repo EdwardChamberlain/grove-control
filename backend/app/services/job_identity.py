@@ -10,14 +10,14 @@ from datetime import datetime, timezone
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.models.print_queue import PrintQueueItem
-from backend.app.models.printer import Printer
-from backend.app.services.queue_transitions import (
+from backend.app.models.print_queue import (
     ACTIVE_STATUSES,
     AWAITING_PLATE_CLEAR_STATUSES,
     HOLDING_STATUSES,
-    transition_queue_item,
+    PrintQueueItem,
 )
+from backend.app.models.printer import Printer
+from backend.app.services.lifecycle.engine import transition_queue_item
 
 
 def normalize_id(value) -> str | None:
@@ -36,6 +36,19 @@ def event_identity(data: dict) -> str | None:
 
 def telemetry_identity(state) -> str | None:
     return normalize_id(getattr(state, "submission_id", None)) or normalize_id(getattr(state, "subtask_id", None))
+
+
+def printer_active(printer_id: int | None) -> bool:
+    """Fresh telemetry shows a print running on this printer."""
+    from backend.app.services.printer_manager import printer_manager
+
+    live = printer_manager.get_status(printer_id) if printer_id is not None else None
+    return bool(
+        live
+        and live.connected
+        and getattr(live, "job_telemetry_ready", True)
+        and live.state in ("PREPARE", "SLICING", "RUNNING", "PAUSE")
+    )
 
 
 def needs_dispatch_resolution(item: PrintQueueItem) -> bool:

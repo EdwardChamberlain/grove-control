@@ -17,10 +17,10 @@ from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services import chamber_heat_soak as heat, print_scheduler as scheduling
 from backend.app.services.archive import ArchiveService
+from backend.app.services.lifecycle.engine import QueueTransitionConflict, transition_queue_item
 from backend.app.services.printer_manager import printer_manager
 from backend.app.services.queue_actions import cancel_job
 from backend.app.services.queue_archive import link_dispatch_archive, prepare_dispatch_archive
-from backend.app.services.queue_transitions import QueueTransitionConflict, transition_queue_item
 from backend.tests.unit.test_queue_archive_alignment import alignment, hold_and_link  # noqa: F401
 from backend.tests.unit.test_scheduler_cleanup_library import _dispatch_library_item, queue_factory  # noqa: F401
 
@@ -79,7 +79,7 @@ async def test_reconnect_during_dispatch_waits_for_evidence(queue_factory, monke
         ctx.upload.side_effect = upload
     # queue_factory already replaces effects while its in-memory connection is
     # shared. Use that mock without nesting another patch with different teardown.
-    from backend.app.services.queue_outcome_effects import run_queue_outcome_effects as effects
+    from backend.app.services.lifecycle.effects import run_queue_outcome_effects as effects
 
     await _dispatch_library_item(ctx, printer_status=live, during_archive=disconnect if phase == "copy" else None)
     await asyncio.sleep(0)
@@ -685,7 +685,8 @@ async def test_generic_archive_directory_tracking_is_explicit(alignment):
             1, alignment.source_path, commit=False, flush=False, unique_dir=True, created_dirs=created_dirs
         )
         assert first.file_path != second.file_path and len(created_dirs) == 2
-        assert "queue_archive_artifacts" not in db.sync_session.info
+        await db.rollback()  # Only queue_archive registers rollback cleanup for its own copies.
+        assert all(directory.exists() for directory in created_dirs)
 
 
 async def test_requested_snippets_use_settings_helper_and_warn_on_no_result(alignment, monkeypatch, caplog):

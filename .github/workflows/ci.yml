@@ -120,7 +120,8 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Enforce backend coverage
-        timeout-minutes: 15
+        # The traced full suite already takes about 14 minutes on two workers.
+        timeout-minutes: 25
         working-directory: backend
         run: |
           python -m pytest tests/ \

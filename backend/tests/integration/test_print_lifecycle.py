@@ -93,7 +93,7 @@ class TestPlateClearGate:
             patch.object(main, "ws_manager", AsyncMock()),
             patch.object(main, "mqtt_relay", AsyncMock()),
             patch.object(main, "spawn_background_task", discard_background),
-            patch("backend.app.services.queue_outcome_effects.run_queue_outcome_effects", new=AsyncMock()),
+            patch("backend.app.services.lifecycle.effects.run_queue_outcome_effects", new=AsyncMock()),
             patch("backend.app.services.usage_tracker.on_print_complete", AsyncMock(return_value=[])),
             patch("backend.app.services.usage_tracker.discard_session", AsyncMock()),
         ):
@@ -148,7 +148,7 @@ class TestPlateClearGate:
         from sqlalchemy import update
 
         from backend.app.models.print_queue import PrintQueueItem
-        from backend.app.services import queue_outcome_effects
+        from backend.app.services.lifecycle import effects as queue_outcome_effects
 
         await db_session.execute(
             update(PrintQueueItem).where(PrintQueueItem.id == completion.item.id).values(status="dispatching")
@@ -253,7 +253,7 @@ class TestPlateClearGate:
 
     @pytest.mark.parametrize("outcome", ["completed", "failed", "aborted"])
     async def test_paused_job_completes_through_the_same_plate_clear_path(self, outcome, completion, db_session):
-        from backend.app.services.queue_transitions import transition_queue_item
+        from backend.app.services.lifecycle.engine import transition_queue_item
 
         await transition_queue_item(db_session, completion.item, "printing", "paused")
         await db_session.commit()
@@ -272,7 +272,7 @@ class TestPlateClearGate:
         from backend.app.api.routes.print_queue import clear_queue_plate
         from backend.app.services.bambu_mqtt import BambuMQTTClient
         from backend.app.services.job_identity import find_job
-        from backend.app.services.queue_transitions import transition_queue_item
+        from backend.app.services.lifecycle.engine import transition_queue_item
 
         await transition_queue_item(db_session, completion.item, "printing", "failed")
         await db_session.commit()

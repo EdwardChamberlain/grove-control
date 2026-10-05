@@ -22,7 +22,13 @@ from backend.app.core.permissions import Permission
 from backend.app.core.tasks import spawn_background_task
 from backend.app.models.ams_label import AmsLabel
 from backend.app.models.archive import PrintArchive
-from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
+from backend.app.models.print_queue import (
+    ACTIVE_STATUSES,
+    AWAITING_PLATE_CLEAR_STATUSES,
+    HOLDING_STATUSES,
+    PrintQueueItem,
+    PrintQueueVariant,
+)
 from backend.app.models.printer import Printer
 from backend.app.models.slot_preset import SlotPresetMapping
 from backend.app.models.user import User
@@ -56,6 +62,11 @@ from backend.app.services.bambu_ftp import (
     list_files_async,
 )
 from backend.app.services.job_identity import find_job, telemetry_identity
+from backend.app.services.lifecycle.engine import (
+    InvalidQueueTransition,
+    clear_job_plate,
+    transition_queue_item,
+)
 from backend.app.services.printer_diagnostic import run_connection_diagnostic
 from backend.app.services.printer_manager import (
     drying_screen_only,
@@ -66,14 +77,6 @@ from backend.app.services.printer_manager import (
     supports_chamber_temp,
     supports_drying,
     supports_drying_while_printing,
-)
-from backend.app.services.queue_transitions import (
-    ACTIVE_STATUSES,
-    AWAITING_PLATE_CLEAR_STATUSES,
-    HOLDING_STATUSES,
-    InvalidQueueTransition,
-    clear_job_plate,
-    transition_queue_item,
 )
 from backend.app.services.slot_nozzle import resolve_slot_nozzle
 from backend.app.utils.http import build_content_disposition

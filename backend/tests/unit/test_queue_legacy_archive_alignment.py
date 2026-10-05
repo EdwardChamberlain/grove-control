@@ -19,9 +19,9 @@ from backend.app.models.printer import Printer
 from backend.app.models.settings import Settings
 from backend.app.services.archive import ArchiveService
 from backend.app.services.job_identity import bind_observed_id
+from backend.app.services.lifecycle.engine import QueueTransitionConflict, clear_job_plate, transition_queue_item
 from backend.app.services.queue_actions import cancel_job
 from backend.app.services.queue_archive import prepare_dispatch_archive
-from backend.app.services.queue_transitions import QueueTransitionConflict, clear_job_plate, transition_queue_item
 from backend.tests.unit.test_queue_archive_alignment import alignment, hold_and_link  # noqa: F401
 
 

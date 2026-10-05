@@ -15,12 +15,12 @@ from backend.app.core.database import Base
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services.print_scheduler import PrintScheduler
-from backend.app.services.queue_transitions import (
+from backend.app.services.lifecycle.engine import (
     InvalidQueueTransition,
     QueueTransitionConflict,
     transition_queue_item,
 )
+from backend.app.services.print_scheduler import PrintScheduler
 
 
 @pytest.fixture
@@ -198,7 +198,7 @@ async def test_status_and_metadata_share_callers_transaction(sessions):
 
 async def test_transition_log_records_only_committed_edges(sessions, caplog):
     item_id = await make_item(sessions)
-    with caplog.at_level(logging.INFO, logger="backend.app.services.queue_transitions"):
+    with caplog.at_level(logging.INFO, logger="backend.app.services.lifecycle.engine"):
         async with sessions() as db:
             item = await db.get(PrintQueueItem, item_id)
             await transition_queue_item(db, item, "queued", "dispatching")

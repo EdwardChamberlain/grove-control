@@ -5,13 +5,8 @@ from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.models.print_queue import PrintQueueItem
-from backend.app.services.queue_transitions import (
-    ACTIVE_STATUSES,
-    InvalidQueueTransition,
-    QueueTransitionConflict,
-    transition_queue_item,
-)
+from backend.app.models.print_queue import ACTIVE_STATUSES, PrintQueueItem
+from backend.app.services.lifecycle.engine import InvalidQueueTransition, QueueTransitionConflict, transition_queue_item
 
 logger = logging.getLogger(__name__)
 

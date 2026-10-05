@@ -20,17 +20,17 @@ from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
 from backend.app.models.printer import Printer
 from backend.app.models.settings import Settings
 from backend.app.services.archive import ArchiveService
+from backend.app.services.lifecycle.engine import QueueTransitionConflict, clear_job_plate, transition_queue_item
 from backend.app.services.queue_actions import cancel_job
 from backend.app.services.queue_archive import link_dispatch_archive, prepare_dispatch_archive
 from backend.app.services.queue_source_cleanup import remove_queue_only_source_if_unused
-from backend.app.services.queue_transitions import QueueTransitionConflict, clear_job_plate, transition_queue_item
 
 
 @pytest.fixture
 async def alignment(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "base_dir", tmp_path)
     monkeypatch.setattr(settings, "archive_dir", tmp_path / "archives")
-    from backend.app.services import queue_outcome_effects
+    from backend.app.services.lifecycle import effects as queue_outcome_effects
     from backend.app.services.printer_manager import printer_manager
 
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: None)

@@ -5,9 +5,12 @@ import json
 import logging
 import shutil
 from collections.abc import Sequence
+from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from sqlalchemy import inspect
+from sqlalchemy import inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.sql.elements import ColumnElement
@@ -15,14 +18,67 @@ from sqlalchemy.sql.elements import ColumnElement
 from backend.app.core.config import settings
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
-from backend.app.models.print_queue import PrintQueueItem
+from backend.app.models.print_queue import AWAITING_PLATE_CLEAR_STATUSES, FINAL_STATUSES, PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services.archive import ArchiveService
+from backend.app.services.lifecycle import effects
+from backend.app.services.lifecycle.engine import ARCHIVE_OUTCOMES, physical_failure_reason
 from backend.app.utils.filename import derive_queue_remote_filename
 from backend.app.utils.safe_path import safe_join_under
 from backend.app.utils.threemf_tools import inject_gcode_into_3mf
 
+if TYPE_CHECKING:
+    from backend.app.services.lifecycle.engine import Transition
+
 logger = logging.getLogger(__name__)
+
+
+async def align_attempt(change: "Transition") -> None:
+    """Mirror a written transition onto the job's own Archive attempt."""
+    db, table, item_id, status = change.db, PrintQueueItem.__table__, change.item_id, change.after
+    # Only the exact attempt, never the Archive used as a reprint source.
+    row = (await db.execute(select(table).where(table.c.id == item_id))).one()
+    query = select(PrintArchive).where(
+        PrintArchive.dispatched_queue_item_id == item_id, PrintArchive.printer_id == row.printer_id
+    )
+    if row.archive_id is not None:
+        query = query.where(PrintArchive.id == row.archive_id)
+    attempt = await db.scalar(query)
+    if attempt is None:
+        return
+    attaching = "archive_id" in change.values or row.archive_id is None
+    if row.archive_id is None:
+        # The unique attempt owner survives a failed Queue-link transaction.
+        # Restore that projection before applying the outcome, including
+        # Stop/Clear Plate during recovery.
+        await db.execute(table.update().where(table.c.id == item_id).values(archive_id=attempt.id))
+        if not isinstance(change.item, int):
+            set_committed_value(change.item, "archive_id", attempt.id)
+            set_committed_value(change.item, "archive", attempt)
+    if status == "dispatching" and "dispatch_subtask_id" in change.values:
+        attempt.subtask_id = change.values["dispatch_subtask_id"]
+    if (change.before == "dispatching" and status == "printing") or (attaching and status in ("printing", "paused")):
+        attempt.status = "printing"
+        attempt.started_at = row.started_at or datetime.now(timezone.utc)
+    recorded = status in AWAITING_PLATE_CLEAR_STATUSES and (
+        change.before != status or change.action == "printer_report"
+    )
+    if recorded or (attaching and status in (*AWAITING_PLATE_CLEAR_STATUSES, *FINAL_STATUSES)):
+        outcome = row.physical_outcome or ARCHIVE_OUTCOMES.get(status)
+        if outcome is None and status == "successful":
+            outcome = "completed"  # Unambiguous legacy final state.
+        if outcome is None and status == "unsuccessful" and row.stop_requested_at is not None:
+            outcome = "aborted"  # The attempt was stopped; printer confirmation remains unknown.
+        if outcome is not None:
+            attempt.status = outcome
+            attempt.completed_at = row.physical_completed_at or row.completed_at
+            attempt.failure_reason = (
+                row.physical_failure_reason
+                if row.physical_outcome is not None
+                else physical_failure_reason(outcome, row.error_message)
+            )
+            if attaching and row.started_at is not None:
+                attempt.started_at = row.started_at
 
 
 async def link_dispatch_archive(
@@ -33,7 +89,7 @@ async def link_dispatch_archive(
     conditions: Sequence[ColumnElement[bool]] = (),
 ) -> None:
     """Claim the held job before flushing its copy; caller commits both together."""
-    from backend.app.services.queue_transitions import (
+    from backend.app.services.lifecycle.engine import (
         InvalidQueueTransition,
         QueueTransitionConflict,
         transition_queue_item,
@@ -57,12 +113,15 @@ async def link_dispatch_archive(
         raise
     await db.flush([archive])
     await transition_queue_item(
-        db, item, "dispatching", "dispatching", values={"archive_id": archive.id}, conditions=conditions
+        db,
+        item,
+        "dispatching",
+        "dispatching",
+        values={"archive_id": archive.id},
+        conditions=conditions,
+        action="archive_link",
     )
     set_committed_value(item, "archive", archive)
-    db.sync_session.info.setdefault("queue_transition_log", []).append(
-        (item.id, "dispatching", "dispatching", item.printer_id, archive.id, "archive_link")
-    )
 
 
 class DispatchSourceUnavailable(RuntimeError):
@@ -98,8 +157,6 @@ def discard_prepared_archive(
         db.expunge(archive)
     for directory in directories:
         shutil.rmtree(directory, ignore_errors=True)
-    artifacts = db.sync_session.info.get("queue_archive_artifacts", [])
-    artifacts[:] = [directory for directory in artifacts if directory not in directories]
 
 
 async def prepare_dispatch_archive(db: AsyncSession, item: PrintQueueItem) -> PrintArchive:
@@ -165,7 +222,8 @@ async def prepare_dispatch_archive(db: AsyncSession, item: PrintQueueItem) -> Pr
                 "source_archive_id": item.archive_id,
             }
             inspect(archive).info["queue_prepared_dirs"] = created_dirs
-            db.sync_session.info.setdefault("queue_archive_artifacts", []).extend(created_dirs)
+            for directory in created_dirs:
+                effects.on_rollback(db, partial(shutil.rmtree, directory, ignore_errors=True))
             return archive
         except BaseException:
             discard_prepared_archive(db, archive, created_dirs)

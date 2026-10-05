@@ -14,8 +14,8 @@ from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services.job_identity import bind_observed_id, observe_print, sync_print_state
+from backend.app.services.lifecycle.engine import QueueTransitionConflict, transition_queue_item
 from backend.app.services.print_scheduler import PrintScheduler
-from backend.app.services.queue_transitions import QueueTransitionConflict, transition_queue_item
 
 
 @pytest.fixture

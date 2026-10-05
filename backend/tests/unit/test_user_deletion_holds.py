@@ -14,7 +14,7 @@ from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.models.user import User
-from backend.app.services.queue_transitions import HOLDING_STATUSES
+from backend.app.services.lifecycle.engine import HOLDING_STATUSES
 
 
 @pytest.fixture(params=[False, True], ids=["sqlite-default", "foreign-keys"])

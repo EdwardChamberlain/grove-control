@@ -21,10 +21,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core import database as _database
 from backend.app.models.archive import PrintArchive
-from backend.app.models.print_queue import PrintQueueItem
+from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem
 from backend.app.models.settings import Settings
 from backend.app.services.archive import ArchiveDeletionConflict, ArchiveService
-from backend.app.services.queue_transitions import HOLDING_STATUSES
 
 logger = logging.getLogger(__name__)
 
