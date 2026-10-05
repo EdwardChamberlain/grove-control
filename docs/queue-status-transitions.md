@@ -147,8 +147,10 @@ flush a second unconditional status update. Same-state writes still check
 persisted state. Reasons are display-only. A losing update raises
 `QueueTransitionConflict`; callers roll back before publishing effects. Invalid
 edges fail before writing. User cancellation, Clear Plate, printer deletion,
-hold transfer and printer reports have explicit action guards. After the write,
-the engine aligns the Archive attempt and runs the new state's entry steps.
+hold transfer and printer reports have explicit action guards. A state module's
+exit, given the new state and action, adds values to the same write; leaving
+`preheating` other than for `dispatching` releases the soak's claim. After the
+write, the engine aligns the Archive attempt and runs the new state's entry steps.
 
 The caller owns the transaction. Lifecycle work queues after-commit effects and
 rollback cleanup in one registry, `services/lifecycle/effects.py`. Effects run

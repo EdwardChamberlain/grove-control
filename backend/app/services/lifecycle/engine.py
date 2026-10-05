@@ -1,8 +1,8 @@
 """The print job lifecycle engine (#204): the transition table, its guards and the one conditional write.
 
 Callers own the transaction; queued effects run only after it commits. The
-holding index, not the printer view, is the reservation authority. Effects are
-imported on use because their services import this module.
+holding index, not the printer view, is the reservation authority. Effects and
+state modules are imported on use because they import this module.
 """
 
 from __future__ import annotations
@@ -13,9 +13,10 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
+from importlib import import_module
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.sql.elements import ColumnElement
@@ -75,6 +76,10 @@ class QueueTransitionConflict(RuntimeError):
 # Only these actions may move a job out of an awaiting-plate-clear state.
 _RELEASE_ACTIONS = ("clear_plate", "printer_deleted", "hold_transferred", "printer_report")
 
+# A state module's exit(after, action) returns the values written with the
+# status as a job leaves that state; ``after`` and ``action`` are the reason.
+_EXITS = {"preheating": "backend.app.services.lifecycle.preheating"}
+
 
 @dataclass(frozen=True)
 class Transition:
@@ -126,11 +131,12 @@ async def transition_queue_item(
 
     Same-status writes (heat-soak handoffs, heater cleanup, recovered
     completions) still check the stored status. ``conditions`` fence dispatch
-    claims; ``values`` change atomically with the status. Integer IDs let the
-    legacy upgrade use its own connection. On conflict nothing is written or
-    queued: the caller rolls back, or skips this item and continues. This never
-    commits or rolls back, and ORM sync never flushes a second status UPDATE.
-    Entry into dispatching reserves the printer before any file copy.
+    claims; ``values`` change atomically with the status, together with the
+    exit values of the state being left. Integer IDs let the legacy upgrade use
+    its own connection. On conflict nothing is written or queued: the caller
+    rolls back, or skips this item and continues. This never commits or rolls
+    back, and ORM sync never flushes a second status UPDATE. Entry into
+    dispatching reserves the printer before any file copy.
     """
     upgrading = migration and isinstance(db, AsyncConnection) and status in LEGACY_TRANSITIONS.get(expected_status, ())
     _check(expected_status, status, action, upgrading)
@@ -145,6 +151,8 @@ async def transition_queue_item(
         if metadata.get("printer_id", item.printer_id if not isinstance(item, int) else None) is None:
             raise InvalidQueueTransition("Dispatch requires a selected printer")
     session = isinstance(db, AsyncSession)
+    if session and expected_status != status and expected_status in _EXITS:
+        metadata = {**import_module(_EXITS[expected_status]).exit(status, action), **metadata}
     if session and (expected_status != status or confirmed):
         if status in AWAITING_PLATE_CLEAR_STATUSES and action != "cancel":
             await _record_physical_outcome(db, item_id, status, metadata, confirmed, archive_failure_reason)
@@ -219,17 +227,13 @@ async def _record_physical_outcome(
 
 
 async def _enter_failure(change: Transition, row) -> None:
-    from backend.app.models.printer import Printer
-    from backend.app.services.lifecycle import effects
+    from backend.app.services.lifecycle import effects, preheating
 
     # Keep shutdown retryable after disconnect, deletion of the job,
     # or a process exit before the after-commit effect gets to run.
     heating = row.preheat_requested_at is not None or row.chamber_heat_soak
     if heating and row.printer_id is not None:
-        printer = await change.db.get(Printer, row.printer_id)
-        if printer is not None:
-            printer.heat_soak_shutdown_pending = True
-            printer.heat_soak_shutdown_at = datetime.now(timezone.utc)
+        await preheating.request_heater_shutdown(change.db, row.printer_id)
     unconfirmed = change.action != "printer_report"
     effect = effects.QueueOutcomeEffect(
         job_id=change.item_id,
@@ -279,6 +283,20 @@ _ENTRY = {
     "successful": (_enter_final,),
     "unsuccessful": (_enter_final,),
 }
+
+
+async def lock_queue_item(db: AsyncSession, item_id: int) -> PrintQueueItem | None:
+    """Take a write lock on both SQLite and PostgreSQL, then discard stale ORM state."""
+    with db.no_autoflush:
+        result = await db.execute(
+            update(PrintQueueItem)
+            .where(PrintQueueItem.id == item_id)
+            .values(id=PrintQueueItem.id)
+            .execution_options(synchronize_session=False)
+        )
+        if not result.rowcount:
+            return None
+        return await db.get(PrintQueueItem, item_id, populate_existing=True)
 
 
 async def clear_job_plate(db: AsyncSession, item: PrintQueueItem | int, *, automatic: bool = False) -> None:

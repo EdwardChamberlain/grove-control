@@ -815,7 +815,7 @@ class TestPrintQueueAPI:
         from unittest.mock import patch
 
         with patch(
-            "backend.app.services.chamber_heat_soak.spawn_background_task",
+            "backend.app.services.lifecycle.preheating.spawn_background_task",
             side_effect=lambda coro, **kwargs: coro.close(),
         ):
             response = await async_client.post(f"/api/v1/queue/{item.id}/skip-heat-soak")

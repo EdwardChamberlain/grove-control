@@ -402,27 +402,17 @@ async def release_queue_references(db: AsyncSession, file_ids: list[int]) -> int
     """
     if not file_ids:
         return 0
-    rows = (
-        await db.execute(
-            select(
-                PrintQueueItem.id,
-                PrintQueueItem.library_file_id,
-                PrintQueueItem.status,
-                PrintQueueItem.chamber_heat_soak,
-                PrintQueueItem.dispatch_subtask_id,
-            )
+    # A live heat-soak must be aborted through its service so heater shutdown,
+    # reservation cleanup, and queue status are persisted together.
+    from backend.app.services.lifecycle.engine import lock_queue_item
+    from backend.app.services.lifecycle.preheating import SOAKING, abort_heat_soak, is_soaking
+
+    item_ids = (
+        await db.scalars(
+            select(PrintQueueItem.id)
             .where(PrintQueueItem.library_file_id.in_(file_ids))
             .where(PrintQueueItem.archive_id.is_(None))
-            .where(
-                or_(
-                    PrintQueueItem.status.in_(("queued", "preheating")),
-                    and_(
-                        PrintQueueItem.status == "dispatching",
-                        PrintQueueItem.chamber_heat_soak.is_(True),
-                        PrintQueueItem.dispatch_subtask_id.is_(None),
-                    ),
-                )
-            )
+            .where(or_(PrintQueueItem.status == "queued", SOAKING))
         )
     ).all()
     names = dict(
@@ -433,17 +423,11 @@ async def release_queue_references(db: AsyncSession, file_ids: list[int]) -> int
         file_id: f"'{names.get(file_id, 'The library file')}' was deleted from the library" for file_id in file_ids
     }
 
-    # A live heat-soak must be aborted through its service so heater shutdown,
-    # reservation cleanup, and queue status are persisted together.
-    from backend.app.services.chamber_heat_soak import abort_heat_soak, lock_queue_item
-
-    for item_id, _library_file_id, _status, _chamber_heat_soak, _dispatch_subtask_id in rows:
+    for item_id in item_ids:
         item = await lock_queue_item(db, item_id)
         if not item or item.library_file_id not in file_ids or item.archive_id is not None:
             continue
-        if item.status == "preheating" or (
-            item.status == "dispatching" and item.chamber_heat_soak and item.dispatch_subtask_id is None
-        ):
+        if is_soaking(item):
             await abort_heat_soak(
                 db,
                 item,

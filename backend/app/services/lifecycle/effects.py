@@ -109,7 +109,7 @@ def queue_outcome_effect(db: AsyncSession, effect: QueueOutcomeEffect) -> None:
 
 async def run_queue_outcome_effects(engine: AsyncEngine, effect: QueueOutcomeEffect) -> None:
     """Use committed data and let each best-effort effect fail independently."""
-    from backend.app.services.chamber_heat_soak import _show_preheating, cleanup_heat_soak_shutdown
+    from backend.app.services.lifecycle.preheating import _show_preheating, cleanup_heat_soak_shutdown
 
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     async with sessions() as db:
