@@ -15,8 +15,9 @@ from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services import chamber_heat_soak as heat, print_scheduler as scheduling
+from backend.app.services import print_scheduler as scheduling
 from backend.app.services.archive import ArchiveService
+from backend.app.services.lifecycle import preheating as heat
 from backend.app.services.lifecycle.engine import QueueTransitionConflict, transition_queue_item
 from backend.app.services.printer_manager import printer_manager
 from backend.app.services.queue_actions import cancel_job
@@ -175,7 +176,7 @@ async def test_stop_during_heat_soak_archive_copy_wins_without_rows_or_directori
             assert len(handoffs) == 1
             await handoffs.pop()
         else:
-            assert await handoff.service.check(db) == [handoff.job_id]
+            assert await handoff.service.wait(db) == [handoff.job_id]
             await handoff.scheduler._dispatch_after_heat_soak(handoff.job_id)
     async with handoff.sessions() as observer:
         job = await observer.get(PrintQueueItem, handoff.job_id)
@@ -437,7 +438,7 @@ async def test_unready_telemetry_keeps_heat_soak_alive_without_copying(handoff, 
         tick = now + timedelta(seconds=seconds)
         monkeypatch.setattr(heat, "utcnow", lambda tick=tick: tick)
         async with handoff.sessions() as db:
-            assert await handoff.service.check(db) == []
+            assert await handoff.service.wait(db) == []
         async with handoff.sessions() as observer:
             job = await observer.get(PrintQueueItem, handoff.job_id)
             assert job.status == "preheating" and job.preheat_checked_at == tick
@@ -500,7 +501,7 @@ async def test_guard_conflict_does_not_refresh_a_changed_soak(handoff, monkeypat
             job = await heat.lock_queue_item(db, handoff.job_id)
             assert await heat.skip_heat_soak(db, job) == heat.SkipHeatSoakResult.SOAK_CHANGED
         else:
-            assert await handoff.service.check(db) == []
+            assert await handoff.service.wait(db) == []
         assert changed
     async with handoff.sessions() as db:
         job = await db.get(PrintQueueItem, handoff.job_id)
@@ -532,7 +533,7 @@ async def test_deleted_heat_soak_source_fails_without_an_attempt(handoff, monkey
             source = await db.get(LibraryFile, handoff.source_id)
         source.deleted_at = heat.utcnow()
         await db.commit()
-        assert await handoff.service.check(db) == [job.id]
+        assert await handoff.service.wait(db) == [job.id]
         await handoff.scheduler._dispatch_after_heat_soak(job.id)
         await db.refresh(job)
         assert job.status == "failed" and job.physical_outcome == "failed"

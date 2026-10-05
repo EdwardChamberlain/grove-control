@@ -65,8 +65,10 @@ from backend.app.services.job_identity import find_job, telemetry_identity
 from backend.app.services.lifecycle.engine import (
     InvalidQueueTransition,
     clear_job_plate,
+    lock_queue_item,
     transition_queue_item,
 )
+from backend.app.services.lifecycle.preheating import is_soaking
 from backend.app.services.printer_diagnostic import run_connection_diagnostic
 from backend.app.services.printer_manager import (
     drying_screen_only,
@@ -438,11 +440,7 @@ async def delete_printer(
     # confirms zero targets, and that loop needs this printer row. While Grove
     # can reach the printer, stop the soak and let shutdown finish first. A
     # disconnected printer cannot be commanded either way, so it is not held.
-    soaking = printer.heat_soak_shutdown_pending or any(
-        item.chamber_heat_soak
-        and (item.status == "preheating" or (item.status == "dispatching" and not item.dispatch_subtask_id))
-        for item in holding
-    )
+    soaking = printer.heat_soak_shutdown_pending or any(is_soaking(item) for item in holding)
     if soaking and printer_manager.is_connected(printer_id):
         raise HTTPException(
             409, "Stop the heat soak and wait for heater shutdown to be confirmed before deleting this printer"
@@ -3058,7 +3056,6 @@ async def stop_print(
         .with_for_update()
     )
     if item is not None:
-        from backend.app.services.chamber_heat_soak import lock_queue_item
         from backend.app.services.queue_actions import cancel_job
 
         item = await lock_queue_item(db, item.id)
@@ -3105,8 +3102,6 @@ async def clear_plate(
     printer = result.scalar_one_or_none()
     if not printer:
         raise HTTPException(404, "Printer not found")
-
-    from backend.app.services.chamber_heat_soak import lock_queue_item
 
     item = await db.scalar(
         select(PrintQueueItem).where(

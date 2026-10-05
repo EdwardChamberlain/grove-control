@@ -432,7 +432,7 @@ async def test_heat_soak_dispatch_that_loses_a_race_still_turns_heaters_off(sess
     heat_soak_printers.get_status.return_value = None
     with (
         patch("backend.app.services.print_scheduler.async_session", sessions),
-        patch("backend.app.services.chamber_heat_soak.printer_manager", heat_soak_printers),
+        patch("backend.app.services.lifecycle.preheating.printer_manager", heat_soak_printers),
         patch.object(scheduler, "_start_print", start_print_after_user_cancel),
     ):
         await scheduler._dispatch_after_heat_soak(item_id)

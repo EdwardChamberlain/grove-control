@@ -1,8 +1,8 @@
 """The print job lifecycle engine (#204): the transition table, its guards and the one conditional write.
 
 Callers own the transaction; queued effects run only after it commits. The
-holding index, not the printer view, is the reservation authority. Effects are
-imported on use because their services import this module.
+holding index, not the printer view, is the reservation authority. Effects and
+state modules are imported on use because they import this module.
 """
 
 from __future__ import annotations
@@ -13,9 +13,10 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
+from importlib import import_module
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.sql.elements import ColumnElement
@@ -75,6 +76,11 @@ class QueueTransitionConflict(RuntimeError):
 # Only these actions may move a job out of an awaiting-plate-clear state.
 _RELEASE_ACTIONS = ("clear_plate", "printer_deleted", "hold_transferred", "printer_report")
 
+# A state's exit step, on_exit(change, row), runs like an entry step: in the
+# caller's transaction, after the conditional write and before the new state's
+# entry. State modules import this one, so they are named here and imported on use.
+_EXITS = {"preheating": "backend.app.services.lifecycle.preheating"}
+
 
 @dataclass(frozen=True)
 class Transition:
@@ -85,6 +91,14 @@ class Transition:
     after: str
     action: str | None
     values: Mapping[str, Any]
+
+    async def write(self, **values: Any) -> None:
+        """Write more of the job in this transaction; steps run after the conditional write."""
+        table = PrintQueueItem.__table__
+        with self.db.no_autoflush:  # As in the conditional write.
+            await self.db.execute(table.update().where(table.c.id == self.item_id).values(**values))
+        for key, value in values.items() if not isinstance(self.item, int) else ():
+            set_committed_value(self.item, key, value)
 
 
 def _check(before: str, after: str, action: str | None, upgrading: bool) -> None:
@@ -173,7 +187,7 @@ async def transition_queue_item(
 
 
 async def _written(change: Transition) -> None:
-    """Align the Archive attempt, queue the log and printer view, then enter the new state."""
+    """Align the Archive attempt, queue the log and printer view, then run the exit and entry steps."""
     from backend.app.services.lifecycle import effects
     from backend.app.services.queue_archive import align_attempt
 
@@ -192,6 +206,8 @@ async def _written(change: Transition) -> None:
         effects.after_commit(db, partial(logger.info, log, *args))
     if row.printer_id is not None and holding:
         effects.publish_printer_view(db, row.printer_id, change.after, row.archive_id)
+    if entered and change.before in _EXITS:
+        await import_module(_EXITS[change.before]).on_exit(change, row)
     for enter in _ENTRY.get(change.after, ()) if entered else ():
         await enter(change, row)
 
@@ -219,17 +235,15 @@ async def _record_physical_outcome(
 
 
 async def _enter_failure(change: Transition, row) -> None:
-    from backend.app.models.printer import Printer
-    from backend.app.services.lifecycle import effects
+    from backend.app.services.lifecycle import effects, preheating
 
-    # Keep shutdown retryable after disconnect, deletion of the job,
-    # or a process exit before the after-commit effect gets to run.
-    heating = row.preheat_requested_at is not None or row.chamber_heat_soak
+    # Keep shutdown retryable after disconnect, deletion of the job, or a
+    # process exit before the after-commit effect gets to run. Preheating's
+    # exit shuts its own heaters down; a heat-soaked job that fails later is
+    # shut down here until its state has an exit (stages 5 and 6).
+    heating = change.before != "preheating" and (row.preheat_requested_at is not None or row.chamber_heat_soak)
     if heating and row.printer_id is not None:
-        printer = await change.db.get(Printer, row.printer_id)
-        if printer is not None:
-            printer.heat_soak_shutdown_pending = True
-            printer.heat_soak_shutdown_at = datetime.now(timezone.utc)
+        await preheating.request_heater_shutdown(change.db, row.printer_id)
     unconfirmed = change.action != "printer_report"
     effect = effects.QueueOutcomeEffect(
         job_id=change.item_id,
@@ -279,6 +293,20 @@ _ENTRY = {
     "successful": (_enter_final,),
     "unsuccessful": (_enter_final,),
 }
+
+
+async def lock_queue_item(db: AsyncSession, item_id: int) -> PrintQueueItem | None:
+    """Take a write lock on both SQLite and PostgreSQL, then discard stale ORM state."""
+    with db.no_autoflush:
+        result = await db.execute(
+            update(PrintQueueItem)
+            .where(PrintQueueItem.id == item_id)
+            .values(id=PrintQueueItem.id)
+            .execution_options(synchronize_session=False)
+        )
+        if not result.rowcount:
+            return None
+        return await db.get(PrintQueueItem, item_id, populate_existing=True)
 
 
 async def clear_job_plate(db: AsyncSession, item: PrintQueueItem | int, *, automatic: bool = False) -> None:

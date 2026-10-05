@@ -37,13 +37,13 @@ from backend.app.services.bambu_ftp import (
     upload_file_async,
     with_ftp_retry,
 )
-from backend.app.services.chamber_heat_soak import ChamberHeatSoak, abort_heat_soak, lock_queue_item
 from backend.app.services.filament_deficit import compute_deficit_for_queue_item
 from backend.app.services.filament_requirements import canonical_filament_type
 from backend.app.services.ha_sensor_manager import ha_sensor_manager
 from backend.app.services.job_identity import sync_print_state, telemetry_identity
 from backend.app.services.lifecycle import effects
-from backend.app.services.lifecycle.engine import QueueTransitionConflict, transition_queue_item
+from backend.app.services.lifecycle.engine import QueueTransitionConflict, lock_queue_item, transition_queue_item
+from backend.app.services.lifecycle.preheating import ChamberHeatSoak, abort_heat_soak, request_heater_shutdown
 from backend.app.services.notification_service import notification_service
 from backend.app.services.printer_manager import (
     printer_manager,
@@ -771,7 +771,7 @@ class PrintScheduler:
             self._terminal_dispatch_recoveries.discard(queue_item_id)
 
     async def _check_heat_soaks(self, db: AsyncSession) -> set[int]:
-        ready = await self._heat_soak.check(db)
+        ready = await self._heat_soak.wait(db)
         for item_id in ready:
             spawn_background_task(self._dispatch_after_heat_soak(item_id), name=f"heat-soak-dispatch-{item_id}")
         return set((await db.scalars(select(Printer.id).where(Printer.heat_soak_shutdown_pending.is_(True)))).all())
@@ -3780,27 +3780,22 @@ class PrintScheduler:
                 await self._cleanup_unsent_dispatch_upload(db, item_id)
                 raise
             except QueueTransitionConflict:
-                # A cancel or delete won during file preparation. The cleanup
-                # below still turns the heaters off for whatever state it left.
+                # A cancel or delete won during file preparation. A cancel staged
+                # the heater shutdown on entry; the cleanup below only fails an
+                # unsent dispatch.
                 logger.info("Queue item %s changed during heat-soak dispatch", item_id)
             except Exception:
                 await db.rollback()
                 logger.exception("Heat-soak dispatch worker failed for job %s", item_id)
                 await self._recover_failed_worker(db, item_id)
             finally:
-                # Any failure/defer before project_file must turn the heaters off.
+                # A defer before project_file fails the soak, turning its heaters off.
+                # Failure and Stop have already done so on entry.
                 await db.rollback()
                 item = await lock_queue_item(db, item_id)
-                if (
-                    item
-                    and item.status not in ("printing", "paused", "finished", "successful", "unsuccessful")
-                    and (item.status != "dispatching" or (not item.dispatch_subtask_id and not item.archive_id))
-                ):
+                if item and item.status == "dispatching" and not item.dispatch_subtask_id and not item.archive_id:
                     await abort_heat_soak(
-                        db,
-                        item,
-                        item.error_message or "Heat-soak dispatch interrupted; retry required",
-                        status=item.status if item.status in ("cancelled", "failed") else "failed",
+                        db, item, item.error_message or "Heat-soak dispatch interrupted; retry required"
                     )
                 await self._clear_dispatch_claim(db, item_id)
 
@@ -3973,7 +3968,7 @@ class PrintScheduler:
                 return
 
         if getattr(item, "chamber_heat_soak", False) is True and not heat_soak_complete:
-            staged = await self._heat_soak.stage(
+            staged = await self._heat_soak.enter(
                 db,
                 item,
                 bind_values=binding.values() if binding is not None else None,
@@ -4062,10 +4057,7 @@ class PrintScheduler:
                         },
                     )  # This worker has not published a command.
                     if held.chamber_heat_soak:
-                        printer = await db.get(Printer, held_printer_id)
-                        if printer is not None:
-                            printer.heat_soak_shutdown_pending = True
-                            printer.heat_soak_shutdown_at = datetime.now(timezone.utc)
+                        await request_heater_shutdown(db, held_printer_id)
                     await db.commit()
             else:
                 await db.rollback()

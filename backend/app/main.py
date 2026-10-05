@@ -104,7 +104,7 @@ from backend.app.services.job_identity import (
     telemetry_identity,
 )
 from backend.app.services.library_trash import library_trash_service
-from backend.app.services.lifecycle.engine import QueueTransitionConflict, transition_queue_item
+from backend.app.services.lifecycle.engine import QueueTransitionConflict, lock_queue_item, transition_queue_item
 from backend.app.services.local_backup import local_backup_service
 from backend.app.services.location_ha_sensor_manager import location_ha_sensor_manager
 from backend.app.services.mqtt_relay import mqtt_relay
@@ -2476,7 +2476,6 @@ async def _link_observed_archive(printer_id: int, item_id: int, identity: str) -
     """Link the owned attempt, or a single unowned legacy Archive with this ID."""
     from backend.app.models.archive import PrintArchive
     from backend.app.models.print_queue import PrintQueueItem
-    from backend.app.services.chamber_heat_soak import lock_queue_item
 
     async with async_session() as db:
         item = await db.get(PrintQueueItem, item_id)

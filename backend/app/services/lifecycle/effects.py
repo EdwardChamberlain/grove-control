@@ -85,6 +85,29 @@ def publish_printer_view(db: AsyncSession, printer_id: int, status: str, archive
     after_commit(db, publish, key=("printer_view", printer_id))
 
 
+def shut_down_heaters(db: AsyncSession, printer_id: int) -> None:
+    """Retry the printer's recorded heater shutdown once this transaction commits."""
+    engine = db.bind
+
+    def spawn() -> None:
+        from backend.app.core.tasks import spawn_background_task
+
+        spawn_background_task(_shut_down_heaters(engine, printer_id), name=f"queue-heater-effects-{printer_id}")
+
+    after_commit(db, spawn, key=("heaters", printer_id))
+
+
+async def _shut_down_heaters(engine: AsyncEngine, printer_id: int) -> None:
+    from backend.app.services.lifecycle.preheating import _show_preheating, cleanup_heat_soak_shutdown
+
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+            if await cleanup_heat_soak_shutdown(db, printer_id):
+                _show_preheating(printer_id, False)
+    except Exception:
+        logger.exception("Printer %s: heater shutdown failed", printer_id)
+
+
 @dataclass(frozen=True)
 class QueueOutcomeEffect:
     job_id: int
@@ -109,8 +132,6 @@ def queue_outcome_effect(db: AsyncSession, effect: QueueOutcomeEffect) -> None:
 
 async def run_queue_outcome_effects(engine: AsyncEngine, effect: QueueOutcomeEffect) -> None:
     """Use committed data and let each best-effort effect fail independently."""
-    from backend.app.services.chamber_heat_soak import _show_preheating, cleanup_heat_soak_shutdown
-
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     async with sessions() as db:
         job = await db.get(PrintQueueItem, effect.job_id)
@@ -153,13 +174,8 @@ async def run_queue_outcome_effects(engine: AsyncEngine, effect: QueueOutcomeEff
         except Exception:
             logger.exception("Queue job %s: auto power-off scheduling failed", effect.job_id)
 
-    if effect.shut_down_heaters:
-        try:
-            async with sessions() as db:
-                if effect.printer_id is not None and await cleanup_heat_soak_shutdown(db, effect.printer_id):
-                    _show_preheating(effect.printer_id, False)
-        except Exception:
-            logger.exception("Queue job %s: heater shutdown failed", effect.job_id)
+    if effect.shut_down_heaters and effect.printer_id is not None:
+        await _shut_down_heaters(engine, effect.printer_id)
 
     if effect.clean_sd_copy and remote_filename and connection is not None:
         if effect.new_state == "unsuccessful" and job_identity.printer_active(effect.printer_id):

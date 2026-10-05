@@ -15,8 +15,9 @@ from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services import chamber_heat_soak as heat, print_scheduler as scheduling
+from backend.app.services import print_scheduler as scheduling
 from backend.app.services.archive import ArchiveService
+from backend.app.services.lifecycle import preheating as heat
 from backend.app.services.lifecycle.engine import InvalidQueueTransition, transition_queue_item
 from backend.app.services.queue_archive import link_dispatch_archive, prepare_dispatch_archive
 from backend.tests.unit.test_queue_archive_alignment import alignment  # noqa: F401
@@ -168,7 +169,7 @@ async def test_copy_failure_reports_safe_cause_after_a_committed_hold(
             job = await db.get(PrintQueueItem, handoff.job_id, populate_existing=True)
             await handoff.scheduler._start_print(db, job)
         elif path == "tick":
-            assert await handoff.service.check(db) == [handoff.job_id]
+            assert await handoff.service.wait(db) == [handoff.job_id]
             await handoff.scheduler._dispatch_after_heat_soak(handoff.job_id)
         else:
             assert await skip_queue_item_heat_soak(handoff.job_id, db=db, auth_result=(None, True)) == {
@@ -194,7 +195,7 @@ async def test_copy_failure_reports_safe_cause_after_a_committed_hold(
 async def test_skip_is_successful_when_the_same_soak_already_progressed(handoff, monkeypatch, phase, progressed):
     async def advance():
         async with handoff.sessions() as worker:
-            assert await handoff.service.check(worker) == [handoff.job_id]
+            assert await handoff.service.wait(worker) == [handoff.job_id]
             job = await worker.get(PrintQueueItem, handoff.job_id)
             if progressed != "dispatching":
                 prepared = await prepare_dispatch_archive(worker, job)
