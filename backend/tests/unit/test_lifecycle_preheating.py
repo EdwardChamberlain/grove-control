@@ -1,8 +1,8 @@
 """Specify preheating's entry and exit (#204 stage 2).
 
-Entry heats only a committed, still-current hold. Exit is what the engine
-writes as a job leaves preheating, in the same conditional write. A handoff to
-dispatching happens once, for the soak it was meant for.
+Entry heats only a committed, still-current hold. Exit is a step the engine
+runs in the transition's transaction: it releases the soak and shuts the
+heaters down. A handoff to dispatching happens once, for the soak it was meant for.
 """
 
 from datetime import datetime
@@ -34,8 +34,9 @@ REQUESTED = datetime(2026, 1, 1, 12, 0)
 
 @pytest.fixture
 async def sessions(tmp_path, monkeypatch):
-    # The failure entry's outcome effect is specified elsewhere; keep it out of this transaction's tail.
+    # After-commit effects are specified elsewhere; record them instead of running them.
     monkeypatch.setattr(effects, "queue_outcome_effect", MagicMock())
+    monkeypatch.setattr(effects, "shut_down_heaters", MagicMock())
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'preheating.db'}")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -64,7 +65,7 @@ async def preheating_job(sessions) -> int:
     "after,action",
     [("dispatching", None), ("failed", None), ("cancelled", "cancel"), ("unsuccessful", "printer_deleted")],
 )
-async def test_leaving_preheating_releases_the_claim_unless_dispatching_inherits_it(sessions, after, action):
+async def test_leaving_preheating_releases_the_soak_unless_dispatching_inherits_it(sessions, after, action):
     item_id = await preheating_job(sessions)
     async with sessions() as db:
         item = await db.get(PrintQueueItem, item_id)
@@ -76,12 +77,16 @@ async def test_leaving_preheating_releases_the_claim_unless_dispatching_inherits
         row = await db.get(PrintQueueItem, item_id)
         assert row.status == after
         assert all((getattr(row, field) is None) == released for field in CLAIM)
-        # The failure entry still knows this job heated, so it shuts the heaters down.
         assert row.preheat_requested_at == REQUESTED
-        assert (await db.get(Printer, 1)).heat_soak_shutdown_pending is (after in ("failed", "cancelled"))
+        # Exit shuts the heaters down; a deleted printer has none left to shut down.
+        shut_down = after in ("failed", "cancelled")
+        assert (await db.get(Printer, 1)).heat_soak_shutdown_pending is shut_down
+    assert effects.shut_down_heaters.called is shut_down
+    # The next state doesn't clean up after preheating.
+    assert not any(outcome.args[1].shut_down_heaters for outcome in effects.queue_outcome_effect.call_args_list)
 
 
-async def test_exit_values_are_part_of_the_conditional_write(sessions):
+async def test_exit_runs_only_after_the_conditional_write(sessions):
     item_id = await preheating_job(sessions)
     async with sessions() as db:
         item = await db.get(PrintQueueItem, item_id)
@@ -93,6 +98,8 @@ async def test_exit_values_are_part_of_the_conditional_write(sessions):
     async with sessions() as db:
         row = await db.get(PrintQueueItem, item_id)
         assert row.status == "preheating" and row.preheat_owner == "worker"
+        assert not (await db.get(Printer, 1)).heat_soak_shutdown_pending
+    effects.shut_down_heaters.assert_not_called()
 
 
 async def test_a_same_state_write_is_not_an_exit(sessions):
@@ -110,7 +117,7 @@ def test_every_exit_belongs_to_a_lifecycle_state_module():
     for state, module in lifecycle_engine._EXITS.items():
         assert state in ALLOWED_TRANSITIONS
         assert module.startswith("backend.app.services.lifecycle.")
-        assert callable(import_module(module).exit_values)
+        assert callable(import_module(module).on_exit)
 
 
 async def test_soaking_query_and_row_check_agree(sessions):
@@ -141,7 +148,7 @@ async def test_failed_reservation_commit_never_enters_heating(soak):
     event.listen(engine, "commit", fail_commit)
     try:
         with pytest.raises(OperationalError):
-            await soak.service.stage(soak.db, soak.item)
+            await soak.service.enter(soak.db, soak.item)
     finally:
         event.remove(engine, "commit", fail_commit)
     await soak.db.rollback()
@@ -163,7 +170,7 @@ async def test_stop_after_reservation_commit_prevents_heater_entry(soak, monkeyp
             await user.commit()
 
     monkeypatch.setattr(soak.db, "commit", stop_after_commit)
-    assert not await soak.service.stage(soak.db, soak.item)
+    assert not await soak.service.enter(soak.db, soak.item)
     await soak.wait_effects()
     await soak.db.refresh(soak.item)
     assert soak.item.status == "cancelled"
@@ -174,7 +181,7 @@ async def test_stop_after_reservation_commit_prevents_heater_entry(soak, monkeyp
 
 
 async def test_rolled_back_exit_preserves_the_timer_and_printer_view(soak):
-    assert await soak.service.stage(soak.db, soak.item)
+    assert await soak.service.enter(soak.db, soak.item)
     started = soak.item.preheat_started_at
     soak.client.reset_mock()
     await transition_queue_item(soak.db, soak.item, "preheating", "failed")
@@ -207,7 +214,7 @@ async def test_a_transition_outside_preheating_does_not_load_deferred_columns(so
 async def test_a_pass_that_selected_a_soak_before_skip_leaves_the_handoff_alone(soak, monkeypatch):
     from backend.app.services.print_scheduler import scheduler
 
-    assert await soak.service.stage(soak.db, soak.item)
+    assert await soak.service.enter(soak.db, soak.item)
     monkeypatch.setattr(scheduler, "_heat_soak", soak.service)
     monkeypatch.setattr(scheduler, "_dispatch_after_heat_soak", AsyncMock())
     lock = preheating.lock_queue_item
@@ -221,14 +228,14 @@ async def test_a_pass_that_selected_a_soak_before_skip_leaves_the_handoff_alone(
         return await lock(db, item_id)
 
     monkeypatch.setattr(preheating, "lock_queue_item", skip_then_lock)
-    assert await soak.service.check(soak.db) == []
+    assert await soak.service.wait(soak.db) == []
     await soak.db.refresh(soak.item)
     assert (soak.item.status, soak.item.error_message) == ("dispatching", None)
     scheduler._dispatch_after_heat_soak.assert_called_once_with(soak.item.id)
 
 
 async def test_a_handoff_for_another_printer_leaves_the_soak_alone(soak):
-    assert await soak.service.stage(soak.db, soak.item)
+    assert await soak.service.enter(soak.db, soak.item)
     values = {"dispatching_at": preheating.utcnow()}
     handoff = await preheating._hand_off(soak.db, soak.item.id, soak.service.owner, 2, values)
     assert handoff == (False, preheating.SkipHeatSoakResult.SOAK_CHANGED)

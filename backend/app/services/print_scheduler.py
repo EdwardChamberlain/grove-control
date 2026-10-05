@@ -771,7 +771,7 @@ class PrintScheduler:
             self._terminal_dispatch_recoveries.discard(queue_item_id)
 
     async def _check_heat_soaks(self, db: AsyncSession) -> set[int]:
-        ready = await self._heat_soak.check(db)
+        ready = await self._heat_soak.wait(db)
         for item_id in ready:
             spawn_background_task(self._dispatch_after_heat_soak(item_id), name=f"heat-soak-dispatch-{item_id}")
         return set((await db.scalars(select(Printer.id).where(Printer.heat_soak_shutdown_pending.is_(True)))).all())
@@ -3968,7 +3968,7 @@ class PrintScheduler:
                 return
 
         if getattr(item, "chamber_heat_soak", False) is True and not heat_soak_complete:
-            staged = await self._heat_soak.stage(
+            staged = await self._heat_soak.enter(
                 db,
                 item,
                 bind_values=binding.values() if binding is not None else None,

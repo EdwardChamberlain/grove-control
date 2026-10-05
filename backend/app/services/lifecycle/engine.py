@@ -76,9 +76,9 @@ class QueueTransitionConflict(RuntimeError):
 # Only these actions may move a job out of an awaiting-plate-clear state.
 _RELEASE_ACTIONS = ("clear_plate", "printer_deleted", "hold_transferred", "printer_report")
 
-# A state module's exit_values(after, action) returns the values written
-# with the status as a job leaves that state; ``after`` and ``action`` are
-# the reason.
+# A state's exit step, on_exit(change, row), runs like an entry step: in the
+# caller's transaction, after the conditional write and before the new state's
+# entry. State modules import this one, so they are named here and imported on use.
 _EXITS = {"preheating": "backend.app.services.lifecycle.preheating"}
 
 
@@ -91,6 +91,14 @@ class Transition:
     after: str
     action: str | None
     values: Mapping[str, Any]
+
+    async def write(self, **values: Any) -> None:
+        """Write more of the job in this transaction; steps run after the conditional write."""
+        table = PrintQueueItem.__table__
+        with self.db.no_autoflush:  # As in the conditional write.
+            await self.db.execute(table.update().where(table.c.id == self.item_id).values(**values))
+        for key, value in values.items() if not isinstance(self.item, int) else ():
+            set_committed_value(self.item, key, value)
 
 
 def _check(before: str, after: str, action: str | None, upgrading: bool) -> None:
@@ -132,12 +140,11 @@ async def transition_queue_item(
 
     Same-status writes (heat-soak handoffs, heater cleanup, recovered
     completions) still check the stored status. ``conditions`` fence dispatch
-    claims; ``values`` change atomically with the status, together with the
-    exit values of the state being left. Integer IDs let the legacy upgrade use
-    its own connection. On conflict nothing is written or queued: the caller
-    rolls back, or skips this item and continues. This never commits or rolls
-    back, and ORM sync never flushes a second status UPDATE. Entry into
-    dispatching reserves the printer before any file copy.
+    claims; ``values`` change atomically with the status. Integer IDs let the
+    legacy upgrade use its own connection. On conflict nothing is written or
+    queued: the caller rolls back, or skips this item and continues. This never
+    commits or rolls back, and ORM sync never flushes a second status UPDATE.
+    Entry into dispatching reserves the printer before any file copy.
     """
     upgrading = migration and isinstance(db, AsyncConnection) and status in LEGACY_TRANSITIONS.get(expected_status, ())
     _check(expected_status, status, action, upgrading)
@@ -152,8 +159,6 @@ async def transition_queue_item(
         if metadata.get("printer_id", item.printer_id if not isinstance(item, int) else None) is None:
             raise InvalidQueueTransition("Dispatch requires a selected printer")
     session = isinstance(db, AsyncSession)
-    if session and expected_status != status and expected_status in _EXITS:
-        metadata = {**import_module(_EXITS[expected_status]).exit_values(status, action), **metadata}
     if session and (expected_status != status or confirmed):
         if status in AWAITING_PLATE_CLEAR_STATUSES and action != "cancel":
             await _record_physical_outcome(db, item_id, status, metadata, confirmed, archive_failure_reason)
@@ -182,7 +187,7 @@ async def transition_queue_item(
 
 
 async def _written(change: Transition) -> None:
-    """Align the Archive attempt, queue the log and printer view, then enter the new state."""
+    """Align the Archive attempt, queue the log and printer view, then run the exit and entry steps."""
     from backend.app.services.lifecycle import effects
     from backend.app.services.queue_archive import align_attempt
 
@@ -201,6 +206,8 @@ async def _written(change: Transition) -> None:
         effects.after_commit(db, partial(logger.info, log, *args))
     if row.printer_id is not None and holding:
         effects.publish_printer_view(db, row.printer_id, change.after, row.archive_id)
+    if entered and change.before in _EXITS:
+        await import_module(_EXITS[change.before]).on_exit(change, row)
     for enter in _ENTRY.get(change.after, ()) if entered else ():
         await enter(change, row)
 
@@ -230,9 +237,11 @@ async def _record_physical_outcome(
 async def _enter_failure(change: Transition, row) -> None:
     from backend.app.services.lifecycle import effects, preheating
 
-    # Keep shutdown retryable after disconnect, deletion of the job,
-    # or a process exit before the after-commit effect gets to run.
-    heating = row.preheat_requested_at is not None or row.chamber_heat_soak
+    # Keep shutdown retryable after disconnect, deletion of the job, or a
+    # process exit before the after-commit effect gets to run. Preheating's
+    # exit shuts its own heaters down; a heat-soaked job that fails later is
+    # shut down here until its state has an exit (stages 5 and 6).
+    heating = change.before != "preheating" and (row.preheat_requested_at is not None or row.chamber_heat_soak)
     if heating and row.printer_id is not None:
         await preheating.request_heater_shutdown(change.db, row.printer_id)
     unconfirmed = change.action != "printer_report"

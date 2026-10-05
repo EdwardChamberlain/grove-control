@@ -169,7 +169,7 @@ async def test_copy_failure_reports_safe_cause_after_a_committed_hold(
             job = await db.get(PrintQueueItem, handoff.job_id, populate_existing=True)
             await handoff.scheduler._start_print(db, job)
         elif path == "tick":
-            assert await handoff.service.check(db) == [handoff.job_id]
+            assert await handoff.service.wait(db) == [handoff.job_id]
             await handoff.scheduler._dispatch_after_heat_soak(handoff.job_id)
         else:
             assert await skip_queue_item_heat_soak(handoff.job_id, db=db, auth_result=(None, True)) == {
@@ -195,7 +195,7 @@ async def test_copy_failure_reports_safe_cause_after_a_committed_hold(
 async def test_skip_is_successful_when_the_same_soak_already_progressed(handoff, monkeypatch, phase, progressed):
     async def advance():
         async with handoff.sessions() as worker:
-            assert await handoff.service.check(worker) == [handoff.job_id]
+            assert await handoff.service.wait(worker) == [handoff.job_id]
             job = await worker.get(PrintQueueItem, handoff.job_id)
             if progressed != "dispatching":
                 prepared = await prepare_dispatch_archive(worker, job)

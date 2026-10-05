@@ -1,13 +1,14 @@
 """Preheating (#204): hold the printer, heat it for a bounded soak, then hand off to dispatching.
 
-Enter: ``ChamberHeatSoak.stage`` commits the hold, then ``enter`` turns the
-heaters on. Wait: ``ChamberHeatSoak.check`` keeps the heartbeat, ends an
-interrupted soak, and hands off when the timer has run. Exit: the engine calls
-``exit_values`` with the reason. Recover: a soak whose owner missed its
-heartbeat keeps its hold until a person chooses Stop or Skip heat soak.
-Database write locks serialize controls with cancellation; no other process
-resumes a soak's timer or dispatches its job. There is no material or
-keep-warm policy.
+Enter: ``ChamberHeatSoak.enter`` commits the hold, then turns the heaters on.
+Wait: ``ChamberHeatSoak.wait`` keeps the heartbeat, ends an interrupted soak,
+and hands off when the timer has run. Exit: the engine runs ``on_exit``, which
+releases the claim and shuts the heaters down unless dispatching inherits them;
+``abort_heat_soak`` and ``skip_heat_soak`` request exits. Recover:
+``ChamberHeatSoak.recover`` keeps an expired soak's hold until a person chooses
+Stop or Skip heat soak. Database write locks serialize controls with
+cancellation; no other process resumes a soak's timer or dispatches its job.
+There is no material or keep-warm policy.
 """
 
 import logging
@@ -154,16 +155,22 @@ async def cleanup_heat_soak_shutdown(db: AsyncSession, printer_id: int) -> bool:
     return True
 
 
-def exit_values(after: str, action: str | None) -> dict[str, None]:
-    """The values written as a job leaves preheating for ``after``.
+async def on_exit(change, row) -> None:
+    """Exit: leave preheating for ``change.after``, for the reason ``change.action``.
 
     Dispatching inherits the soak: its heaters stay on, and its claim is the
-    worker's handoff token. Any other exit releases the claim, and the failure
-    entry shuts the heaters down.
+    worker's handoff token. Any other exit releases the claim and records a
+    heater shutdown that survives a disconnect or deletion of the job. A
+    deleted printer has nothing left to shut down.
     """
-    if after == "dispatching":
-        return {}
-    return dict.fromkeys(("preheat_owner", "preheat_started_at", "preheat_checked_at"))
+    from backend.app.services.lifecycle import effects
+
+    if change.after == "dispatching":
+        return
+    await change.write(preheat_owner=None, preheat_started_at=None, preheat_checked_at=None)
+    if row.printer_id is not None and change.action != "printer_deleted":
+        await request_heater_shutdown(change.db, row.printer_id)
+        effects.shut_down_heaters(change.db, row.printer_id)
 
 
 async def abort_heat_soak(db: AsyncSession, item: PrintQueueItem, reason: str, *, status: str = "failed") -> None:
@@ -264,7 +271,7 @@ class ChamberHeatSoak:
         self.owner = str(uuid4())
         self._visible_printers: set[int] = set()
 
-    async def stage(
+    async def enter(
         self,
         db: AsyncSession,
         item: PrintQueueItem,
@@ -272,7 +279,7 @@ class ChamberHeatSoak:
         bind_values: Mapping[str, Any] | None = None,
         unassigned: bool = False,
     ) -> bool:
-        """Hold the printer, commit, then ``enter`` preheating.
+        """Enter: hold the printer, commit, then turn the heaters on.
 
         ``bind_values`` records the scheduler's decision (printer and tray
         mapping) with the hold. With ``unassigned``, an "Any machine" job is
@@ -317,10 +324,10 @@ class ChamberHeatSoak:
         except (IntegrityError, QueueTransitionConflict):
             await db.rollback()
             return False
-        return await self.enter(db, item_id, printer_id)
+        return await self._heat(db, item_id, printer_id)
 
-    async def enter(self, db: AsyncSession, item_id: int, printer_id: int) -> bool:
-        """Enter: turn the heaters on for this worker's committed hold.
+    async def _heat(self, db: AsyncSession, item_id: int, printer_id: int) -> bool:
+        """Turn the heaters on for this worker's committed hold.
 
         The hold is durable before any heater command. Re-lock so that a Stop
         committed since then cannot be followed by heater-on commands.
@@ -359,7 +366,7 @@ class ChamberHeatSoak:
         self._visible_printers.add(printer_id)
         return True
 
-    async def check(self, db: AsyncSession) -> list[int]:
+    async def wait(self, db: AsyncSession) -> list[int]:
         """Wait: advance each soak once, without sleeping or blocking other printers' scheduling."""
         await self.cleanup(db)
         ids = list((await db.scalars(select(PrintQueueItem.id).where(SOAKING))).all())
@@ -377,7 +384,7 @@ class ChamberHeatSoak:
                     (now - item.preheat_checked_at).total_seconds() if item.preheat_checked_at else HEARTBEAT_TIMEOUT
                 )
                 if item.preheat_owner != self.owner:
-                    await self._recover(db, item, elapsed, visible)
+                    await self.recover(db, item, elapsed, visible)
                     continue
                 if elapsed < 0 or elapsed >= HEARTBEAT_TIMEOUT:
                     await abort_heat_soak(
@@ -431,8 +438,8 @@ class ChamberHeatSoak:
         self._visible_printers = visible
         return ready
 
-    async def _recover(self, db: AsyncSession, item: PrintQueueItem, elapsed: float, visible: set[int]) -> None:
-        """Recover a soak this worker does not own: leave a live one alone, and hold an expired one for a person."""
+    async def recover(self, db: AsyncSession, item: PrintQueueItem, elapsed: float, visible: set[int]) -> None:
+        """Recover: leave a live soak this worker doesn't own alone, and hold an expired one for a person."""
         if 0 <= elapsed < HEARTBEAT_TIMEOUT:
             await db.rollback()
             return

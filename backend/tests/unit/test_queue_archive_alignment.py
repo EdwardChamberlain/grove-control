@@ -448,7 +448,7 @@ async def test_committed_heat_soak_handoff_is_scheduled_without_copying(alignmen
         assert first.status == "dispatching" and first.archive_id is None
         assert await db.scalar(select(PrintArchive.id)) is None
         # A subsequent normal pass skips the already committed handoff.
-        assert await service.check(db) == []
+        assert await service.wait(db) == []
         await db.refresh(first)
         assert f"heat-soak-dispatch-{first.id}" in dispatched, (first.status, first.dispatch_subtask_id, dispatched)
 
@@ -527,7 +527,7 @@ async def test_heat_soak_dispatch_uses_current_telemetry_after_archive_copy(alig
             },
         )
         await db.commit()
-        ready = await service.check(db)
+        ready = await service.wait(db)
         for item_id in ready:
             await scheduler._dispatch_after_heat_soak(item_id)
         await db.refresh(job)
@@ -809,7 +809,7 @@ async def test_heat_soak_archive_copy_failure_commits_before_auto_off(alignment,
             assert len(handoffs) == 1
             await handoffs.pop()
         else:
-            assert await service.check(db) == [job.id]
+            assert await service.wait(db) == [job.id]
             await scheduler._dispatch_after_heat_soak(job.id)
         await db.refresh(job)
         assert job.status == "failed"

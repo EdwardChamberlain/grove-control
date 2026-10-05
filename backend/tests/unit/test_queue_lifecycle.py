@@ -414,6 +414,6 @@ async def test_heat_soak_does_not_restore_a_stale_printer_assignment(sessions):
         await db.execute(PrintQueueItem.__table__.update().where(PrintQueueItem.id == item.id).values(printer_id=None))
         await db.commit()
         assert item.printer_id == 1  # This worker still has its old snapshot.
-        assert not await ChamberHeatSoak().stage(db, item)
+        assert not await ChamberHeatSoak().enter(db, item)
         await db.refresh(item)
         assert item.status == "queued" and item.printer_id is None
