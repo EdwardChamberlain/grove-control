@@ -16,7 +16,8 @@ from backend.app.models.printer import Printer
 from backend.app.services import print_scheduler
 from backend.app.services.job_identity import observe_print
 from backend.app.services.lifecycle import effects as queue_outcome_effects, preheating as heat
-from backend.app.services.lifecycle.engine import clear_job_plate, transition_queue_item
+from backend.app.services.lifecycle.awaiting import clear_job_plate
+from backend.app.services.lifecycle.engine import transition_queue_item
 from backend.app.services.printer_manager import printer_manager
 from backend.app.services.queue_actions import cancel_job
 from backend.tests.unit.test_queue_archive_alignment import alignment, hold_and_link  # noqa: F401

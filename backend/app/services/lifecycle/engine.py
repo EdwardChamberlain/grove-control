@@ -76,10 +76,18 @@ class QueueTransitionConflict(RuntimeError):
 # Only these actions may move a job out of an awaiting-plate-clear state.
 _RELEASE_ACTIONS = ("clear_plate", "printer_deleted", "hold_transferred", "printer_report")
 
-# A state's exit step, on_exit(change, row), runs like an entry step: in the
-# caller's transaction, after the conditional write and before the new state's
-# entry. State modules import this one, so they are named here and imported on use.
-_EXITS = {"preheating": "backend.app.services.lifecycle.preheating"}
+# Each state's steps live in its module. In the caller's transaction, after the
+# conditional write: the old state's on_exit(change, row), then the new state's
+# on_enter(change, row). Once enter_state() has committed: the new state's
+# on_entered(change). State modules import this one, so they are named here
+# and imported on use.
+_LIFECYCLE = "backend.app.services.lifecycle"
+_EXITS = {"preheating": f"{_LIFECYCLE}.preheating"}
+_ENTRY = {
+    "preheating": f"{_LIFECYCLE}.preheating",
+    **dict.fromkeys(AWAITING_PLATE_CLEAR_STATUSES, f"{_LIFECYCLE}.awaiting"),
+    **dict.fromkeys(FINAL_STATUSES, f"{_LIFECYCLE}.final"),
+}
 
 
 @dataclass(frozen=True)
@@ -135,7 +143,7 @@ async def transition_queue_item(
     migration: bool = False,
     archive_failure_reason: str | None = None,
     dispatch_guard: Callable[[], bool] | None = None,
-) -> None:
+) -> Transition | None:
     """Conditionally change a persisted item, or raise without writing it.
 
     Same-status writes (heat-soak handoffs, heater cleanup, recovered
@@ -144,7 +152,8 @@ async def transition_queue_item(
     legacy upgrade use its own connection. On conflict nothing is written or
     queued: the caller rolls back, or skips this item and continues. This never
     commits or rolls back, and ORM sync never flushes a second status UPDATE.
-    Entry into dispatching reserves the printer before any file copy.
+    Entry into dispatching reserves the printer before any file copy. A session
+    gets back the written change.
     """
     upgrading = migration and isinstance(db, AsyncConnection) and status in LEGACY_TRANSITIONS.get(expected_status, ())
     _check(expected_status, status, action, upgrading)
@@ -182,8 +191,11 @@ async def transition_queue_item(
         set_committed_value(item, "status", status)
         for key, value in metadata.items():
             set_committed_value(item, key, value)
-    if session:
-        await _written(Transition(db, item, item_id, expected_status, status, action, metadata))
+    if not session:
+        return None
+    change = Transition(db, item, item_id, expected_status, status, action, metadata)
+    await _written(change)
+    return change
 
 
 async def _written(change: Transition) -> None:
@@ -208,12 +220,27 @@ async def _written(change: Transition) -> None:
         effects.publish_printer_view(db, row.printer_id, change.after, row.archive_id)
     if entered and change.before in _EXITS:
         await import_module(_EXITS[change.before]).on_exit(change, row)
-    for enter in _ENTRY.get(change.after, ()) if entered else ():
+    if entered and (enter := _step(change.after, "on_enter")):
         await enter(change, row)
 
 
-# State entry, in the caller's transaction. The physical outcome is written with
-# the status; the other steps run after the write.
+def _step(state: str, name: str) -> Callable | None:
+    return getattr(import_module(_ENTRY[state]), name, None) if state in _ENTRY else None
+
+
+async def enter_state(
+    db: AsyncSession, item: PrintQueueItem, expected_status: str, status: str, **transition: Any
+) -> bool:
+    """Make a transition and commit it, then run the new state's post-commit entry step.
+
+    on_entered(change) is entry work that must wait for the commit, such as
+    heater commands once a hold is durable. It re-checks the job under its own
+    lock, and says whether the job entered. A conflict or failed commit raises first.
+    """
+    change = await transition_queue_item(db, item, expected_status, status, **transition)
+    await db.commit()
+    entered = _step(status, "on_entered")
+    return await entered(change) if entered else True
 
 
 async def _record_physical_outcome(
@@ -234,67 +261,6 @@ async def _record_physical_outcome(
     )
 
 
-async def _enter_failure(change: Transition, row) -> None:
-    from backend.app.services.lifecycle import effects, preheating
-
-    # Keep shutdown retryable after disconnect, deletion of the job, or a
-    # process exit before the after-commit effect gets to run. Preheating's
-    # exit shuts its own heaters down; a heat-soaked job that fails later is
-    # shut down here until its state has an exit (stages 5 and 6).
-    heating = change.before != "preheating" and (row.preheat_requested_at is not None or row.chamber_heat_soak)
-    if heating and row.printer_id is not None:
-        await preheating.request_heater_shutdown(change.db, row.printer_id)
-    unconfirmed = change.action != "printer_report"
-    effect = effects.QueueOutcomeEffect(
-        job_id=change.item_id,
-        new_state=change.after,
-        printer_id=row.printer_id,
-        shut_down_heaters=heating,
-        notify_failure=change.after == "failed" and change.before in ("preheating", "dispatching") and unconfirmed,
-        clean_sd_copy=change.after == "failed" and change.before == "dispatching" and unconfirmed,
-    )
-    effects.queue_outcome_effect(change.db, effect)
-
-
-async def _enter_finished(change: Transition, row) -> None:
-    from backend.app.models.settings import Settings
-
-    confirmation = await change.db.scalar(select(Settings.value).where(Settings.key == "require_plate_clear"))
-    if confirmation is not None and confirmation.lower() in ("false", "0"):
-        await clear_job_plate(change.db, change.item, automatic=True)
-
-
-async def _enter_final(change: Transition, row) -> None:
-    from backend.app.models.print_queue import PrintQueueVariant
-    from backend.app.services.lifecycle import effects
-    from backend.app.services.queue_source_cleanup import remove_queue_only_source_if_unused
-
-    variants = select(PrintQueueVariant.library_file_id).where(PrintQueueVariant.queue_item_id == change.item_id)
-    source_ids = {*await change.db.scalars(variants), row.library_file_id}
-    for source_id in sorted(source_ids - {None}):
-        await remove_queue_only_source_if_unused(change.db, source_id)
-    if change.action == "clear_plate" and change.after == "unsuccessful":
-        # The failed attempt's sent upload is removed once its plate is clear.
-        effect = effects.QueueOutcomeEffect(
-            job_id=change.item_id,
-            new_state=change.after,
-            printer_id=row.printer_id,
-            shut_down_heaters=False,
-            notify_failure=False,
-            clean_sd_copy=True,
-        )
-        effects.queue_outcome_effect(change.db, effect)
-
-
-_ENTRY = {
-    "failed": (_enter_failure,),
-    "cancelled": (_enter_failure,),
-    "finished": (_enter_finished,),
-    "successful": (_enter_final,),
-    "unsuccessful": (_enter_final,),
-}
-
-
 async def lock_queue_item(db: AsyncSession, item_id: int) -> PrintQueueItem | None:
     """Take a write lock on both SQLite and PostgreSQL, then discard stale ORM state."""
     with db.no_autoflush:
@@ -307,19 +273,3 @@ async def lock_queue_item(db: AsyncSession, item_id: int) -> PrintQueueItem | No
         if not result.rowcount:
             return None
         return await db.get(PrintQueueItem, item_id, populate_existing=True)
-
-
-async def clear_job_plate(db: AsyncSession, item: PrintQueueItem | int, *, automatic: bool = False) -> None:
-    from backend.app.services.job_identity import printer_active
-
-    if isinstance(item, int):
-        item = await db.get(PrintQueueItem, item)
-    if item is None or item.status not in AWAITING_PLATE_CLEAR_STATUSES:
-        raise InvalidQueueTransition("This job is not awaiting plate clear")
-    if printer_active(item.printer_id):
-        if automatic:
-            return  # Keep the physical outcome and hold if another print is already active.
-        raise InvalidQueueTransition("The printer is still active. Stop or finish its print before clearing the plate")
-    await transition_queue_item(
-        db, item, item.status, "successful" if item.status == "finished" else "unsuccessful", action="clear_plate"
-    )

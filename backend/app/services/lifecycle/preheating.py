@@ -1,8 +1,9 @@
 """Preheating (#204): hold the printer, heat it for a bounded soak, then hand off to dispatching.
 
-Enter: ``ChamberHeatSoak.enter`` commits the hold, then turns the heaters on.
-Wait: ``ChamberHeatSoak.wait`` keeps the heartbeat, ends an interrupted soak,
-and hands off when the timer has run. Exit: the engine runs ``on_exit``, which
+Enter: ``ChamberHeatSoak.enter`` holds the printer, and once the hold has
+committed the engine runs ``on_entered``, which turns the heaters on. Wait:
+``ChamberHeatSoak.wait`` keeps the heartbeat, ends an interrupted soak, and
+hands off when the timer has run. Exit: the engine runs ``on_exit``, which
 releases the claim and shuts the heaters down unless dispatching inherits them;
 ``abort_heat_soak`` and ``skip_heat_soak`` request exits. Recover:
 ``ChamberHeatSoak.recover`` keeps an expired soak's hold until a person chooses
@@ -26,7 +27,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.core.tasks import spawn_background_task
 from backend.app.models.print_queue import ACTIVE_STATUSES, PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services.lifecycle.engine import QueueTransitionConflict, lock_queue_item, transition_queue_item
+from backend.app.services.lifecycle.engine import (
+    QueueTransitionConflict,
+    enter_state,
+    lock_queue_item,
+    transition_queue_item,
+)
 from backend.app.services.printer_manager import printer_manager, supports_chamber_heater
 
 logger = logging.getLogger(__name__)
@@ -155,6 +161,47 @@ async def cleanup_heat_soak_shutdown(db: AsyncSession, printer_id: int) -> bool:
     return True
 
 
+async def on_entered(change) -> bool:
+    """Enter, once the hold has committed: turn the heaters on, and say whether they came on.
+
+    Re-lock first, so that a Stop committed since then is never followed by
+    heater-on commands.
+    """
+    db, item_id, printer_id = change.db, change.item_id, change.values["printer_id"]
+    item = await lock_queue_item(db, item_id)
+    if not item or item.status != "preheating" or item.preheat_owner != change.values["preheat_owner"]:
+        await db.rollback()
+        return False
+    await db.execute(update(Printer).where(Printer.id == printer_id).values(id=Printer.id))
+    printer = await db.get(Printer, printer_id, populate_existing=True)
+    client = printer_manager.get_client(printer_id)
+    if not printer or printer.heat_soak_shutdown_pending or not client or not _dispatch_ready(printer_id):
+        await abort_heat_soak(db, item, "Heat soak could not start: printer unavailable or heater shutdown pending")
+        return False
+    # The soak duration is measured from the heater command, not from a
+    # later telemetry update. Target telemetry can lag or be omitted by
+    # firmware, and it should not make the wait unpredictable.
+    heating_started_at = utcnow()
+    try:
+        accepted = True
+        if supports_airduct(printer.model):
+            accepted = client.set_airduct_mode("heating") and accepted
+        accepted = client.set_bed_temperature(item.heat_soak_temperature) and accepted
+        if supports_chamber_heater(printer.model):
+            accepted = client.set_chamber_temperature(item.heat_soak_temperature) and accepted
+        client.request_status_update()
+        if not accepted:
+            raise RuntimeError("Heating command could not be sent")
+    except Exception:
+        logger.exception("Could not start heat soak for queue item %s", item_id)
+        await abort_heat_soak(db, item, "Heat-soak heating commands failed; retry required")
+        return False
+    item.preheat_started_at = heating_started_at
+    await db.commit()
+    _show_preheating(printer_id, True)
+    return True
+
+
 async def on_exit(change, row) -> None:
     """Exit: leave preheating for ``change.after``, for the reason ``change.action``.
 
@@ -279,7 +326,7 @@ class ChamberHeatSoak:
         bind_values: Mapping[str, Any] | None = None,
         unassigned: bool = False,
     ) -> bool:
-        """Enter: hold the printer, commit, then turn the heaters on.
+        """Enter: hold the printer; once that commits, ``on_entered`` turns the heaters on.
 
         ``bind_values`` records the scheduler's decision (printer and tray
         mapping) with the hold. With ``unassigned``, an "Any machine" job is
@@ -296,7 +343,7 @@ class ChamberHeatSoak:
         # Claim only a still-queued row. Concurrent workers cannot reassign a winner.
         now = utcnow()
         try:
-            await transition_queue_item(
+            entered = await enter_state(
                 db,
                 item,
                 "queued",
@@ -320,51 +367,12 @@ class ChamberHeatSoak:
                     "waiting_reason": None,
                 },
             )
-            await db.commit()
         except (IntegrityError, QueueTransitionConflict):
             await db.rollback()
             return False
-        return await self._heat(db, item_id, printer_id)
-
-    async def _heat(self, db: AsyncSession, item_id: int, printer_id: int) -> bool:
-        """Turn the heaters on for this worker's committed hold.
-
-        The hold is durable before any heater command. Re-lock so that a Stop
-        committed since then cannot be followed by heater-on commands.
-        """
-        item = await lock_queue_item(db, item_id)
-        if not item or item.status != "preheating" or item.preheat_owner != self.owner:
-            await db.rollback()
-            return False
-        await db.execute(update(Printer).where(Printer.id == printer_id).values(id=Printer.id))
-        printer = await db.get(Printer, printer_id, populate_existing=True)
-        client = printer_manager.get_client(printer_id)
-        if not printer or printer.heat_soak_shutdown_pending or not client or not _dispatch_ready(printer_id):
-            await abort_heat_soak(db, item, "Heat soak could not start: printer unavailable or heater shutdown pending")
-            return False
-        # The soak duration is measured from the heater command, not from a
-        # later telemetry update. Target telemetry can lag or be omitted by
-        # firmware, and it should not make the wait unpredictable.
-        heating_started_at = utcnow()
-        try:
-            accepted = True
-            if supports_airduct(printer.model):
-                accepted = client.set_airduct_mode("heating") and accepted
-            accepted = client.set_bed_temperature(item.heat_soak_temperature) and accepted
-            if supports_chamber_heater(printer.model):
-                accepted = client.set_chamber_temperature(item.heat_soak_temperature) and accepted
-            client.request_status_update()
-            if not accepted:
-                raise RuntimeError("Heating command could not be sent")
-        except Exception:
-            logger.exception("Could not start heat soak for queue item %s", item_id)
-            await abort_heat_soak(db, item, "Heat-soak heating commands failed; retry required")
-            return False
-        item.preheat_started_at = heating_started_at
-        await db.commit()
-        _show_preheating(printer_id, True)
-        self._visible_printers.add(printer_id)
-        return True
+        if entered:
+            self._visible_printers.add(printer_id)
+        return entered
 
     async def wait(self, db: AsyncSession) -> list[int]:
         """Wait: advance each soak once, without sleeping or blocking other printers' scheduling."""

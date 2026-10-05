@@ -10,13 +10,9 @@ from datetime import datetime, timezone
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.models.print_queue import (
-    ACTIVE_STATUSES,
-    AWAITING_PLATE_CLEAR_STATUSES,
-    HOLDING_STATUSES,
-    PrintQueueItem,
-)
+from backend.app.models.print_queue import ACTIVE_STATUSES, HOLDING_STATUSES, PrintQueueItem
 from backend.app.models.printer import Printer
+from backend.app.services.lifecycle.awaiting import transfer_hold
 from backend.app.services.lifecycle.engine import transition_queue_item
 
 
@@ -165,8 +161,7 @@ async def observe_print(
     The existing unique active-printer index also fences scheduler dispatch.
     Never displace a different or unidentifiable active reservation. Fresh
     telemetry can establish a new external run on a plate still held by an
-    ended job. In that case, transfer the hold in this transaction; the
-    printer never becomes free, and the previous physical outcome is retained.
+    ended job, which then transfers its hold in this transaction.
     """
     if not identity:
         return None, False
@@ -219,17 +214,8 @@ async def observe_print(
                 or (active_snapshot and observed_state.state in ("FINISH", "FAILED", "IDLE"))
             )
         )
-        if not replace_awaiting or held.status not in AWAITING_PLATE_CLEAR_STATUSES:
+        if not replace_awaiting or not await transfer_hold(db, held, identity):
             return None, False
-        reason = f"Printer hold transferred to externally started print {identity}"
-        await transition_queue_item(
-            db,
-            held,
-            held.status,
-            "successful" if held.status == "finished" else "unsuccessful",
-            action="hold_transferred",
-            values={"error_message": f"{held.error_message}; {reason}" if held.error_message else reason},
-        )
     item = PrintQueueItem(
         printer_id=printer_id, status="printing", dispatch_subtask_id=identity, started_at=datetime.now(timezone.utc)
     )

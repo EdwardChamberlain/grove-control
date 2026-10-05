@@ -20,7 +20,8 @@ from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
 from backend.app.models.printer import Printer
 from backend.app.models.settings import Settings
 from backend.app.services.archive import ArchiveService
-from backend.app.services.lifecycle.engine import QueueTransitionConflict, clear_job_plate, transition_queue_item
+from backend.app.services.lifecycle.awaiting import clear_job_plate
+from backend.app.services.lifecycle.engine import QueueTransitionConflict, transition_queue_item
 from backend.app.services.queue_actions import cancel_job
 from backend.app.services.queue_archive import link_dispatch_archive, prepare_dispatch_archive
 from backend.app.services.queue_source_cleanup import remove_queue_only_source_if_unused
