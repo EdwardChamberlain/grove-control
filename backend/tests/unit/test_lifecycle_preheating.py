@@ -1,12 +1,13 @@
 """Specify preheating's entry and exit (#204 stage 2).
 
 Entry heats only a committed, still-current hold. Exit is what the engine
-writes as a job leaves preheating, in the same conditional write.
+writes as a job leaves preheating, in the same conditional write. A handoff to
+dispatching happens once, for the soak it was meant for.
 """
 
 from datetime import datetime
 from importlib import import_module
-from unittest.mock import MagicMock, call
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 from sqlalchemy import event, inspect, select
@@ -18,7 +19,7 @@ import backend.app.models  # noqa: F401
 from backend.app.core.database import Base
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services.lifecycle import effects, engine as lifecycle_engine
+from backend.app.services.lifecycle import effects, engine as lifecycle_engine, preheating
 from backend.app.services.lifecycle.engine import (
     ALLOWED_TRANSITIONS,
     QueueTransitionConflict,
@@ -109,7 +110,7 @@ def test_every_exit_belongs_to_a_lifecycle_state_module():
     for state, module in lifecycle_engine._EXITS.items():
         assert state in ALLOWED_TRANSITIONS
         assert module.startswith("backend.app.services.lifecycle.")
-        assert callable(import_module(module).exit)
+        assert callable(import_module(module).exit_values)
 
 
 async def test_soaking_query_and_row_check_agree(sessions):
@@ -193,7 +194,7 @@ async def test_rolled_back_exit_preserves_the_timer_and_printer_view(soak):
     soak.client.set_chamber_temperature.assert_not_called()
 
 
-async def test_other_states_do_not_load_deferred_preheating_options(soak):
+async def test_a_transition_outside_preheating_does_not_load_deferred_columns(soak):
     soak.db.expunge(soak.item)
     item = await soak.db.scalar(select(PrintQueueItem).options(defer(PrintQueueItem.chamber_heat_soak)))
     assert "chamber_heat_soak" in inspect(item).unloaded
@@ -201,3 +202,35 @@ async def test_other_states_do_not_load_deferred_preheating_options(soak):
     await soak.db.commit()
     assert item.status == "dispatching"
     soak.client.set_bed_temperature.assert_not_called()
+
+
+async def test_a_pass_that_selected_a_soak_before_skip_leaves_the_handoff_alone(soak, monkeypatch):
+    from backend.app.services.print_scheduler import scheduler
+
+    assert await soak.service.stage(soak.db, soak.item)
+    monkeypatch.setattr(scheduler, "_heat_soak", soak.service)
+    monkeypatch.setattr(scheduler, "_dispatch_after_heat_soak", AsyncMock())
+    lock = preheating.lock_queue_item
+
+    async def skip_then_lock(db, item_id):
+        # Skip commits between this pass's select and its lock of the row.
+        monkeypatch.setattr(preheating, "lock_queue_item", lock)
+        async with AsyncSession(soak.engine, expire_on_commit=False) as user:
+            result = await preheating.skip_heat_soak(user, await lock(user, item_id))
+        assert result == preheating.SkipHeatSoakResult.SKIPPED
+        return await lock(db, item_id)
+
+    monkeypatch.setattr(preheating, "lock_queue_item", skip_then_lock)
+    assert await soak.service.check(soak.db) == []
+    await soak.db.refresh(soak.item)
+    assert (soak.item.status, soak.item.error_message) == ("dispatching", None)
+    scheduler._dispatch_after_heat_soak.assert_called_once_with(soak.item.id)
+
+
+async def test_a_handoff_for_another_printer_leaves_the_soak_alone(soak):
+    assert await soak.service.stage(soak.db, soak.item)
+    values = {"dispatching_at": preheating.utcnow()}
+    handoff = await preheating._hand_off(soak.db, soak.item.id, soak.service.owner, 2, values)
+    assert handoff == (False, preheating.SkipHeatSoakResult.SOAK_CHANGED)
+    await soak.db.refresh(soak.item)
+    assert (soak.item.status, soak.item.printer_id) == ("preheating", 1)

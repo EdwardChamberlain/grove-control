@@ -76,8 +76,9 @@ class QueueTransitionConflict(RuntimeError):
 # Only these actions may move a job out of an awaiting-plate-clear state.
 _RELEASE_ACTIONS = ("clear_plate", "printer_deleted", "hold_transferred", "printer_report")
 
-# A state module's exit(after, action) returns the values written with the
-# status as a job leaves that state; ``after`` and ``action`` are the reason.
+# A state module's exit_values(after, action) returns the values written
+# with the status as a job leaves that state; ``after`` and ``action`` are
+# the reason.
 _EXITS = {"preheating": "backend.app.services.lifecycle.preheating"}
 
 
@@ -152,7 +153,7 @@ async def transition_queue_item(
             raise InvalidQueueTransition("Dispatch requires a selected printer")
     session = isinstance(db, AsyncSession)
     if session and expected_status != status and expected_status in _EXITS:
-        metadata = {**import_module(_EXITS[expected_status]).exit(status, action), **metadata}
+        metadata = {**import_module(_EXITS[expected_status]).exit_values(status, action), **metadata}
     if session and (expected_status != status or confirmed):
         if status in AWAITING_PLATE_CLEAR_STATUSES and action != "cancel":
             await _record_physical_outcome(db, item_id, status, metadata, confirmed, archive_failure_reason)

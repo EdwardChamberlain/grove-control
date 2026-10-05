@@ -3,10 +3,11 @@
 Enter: ``ChamberHeatSoak.stage`` commits the hold, then ``enter`` turns the
 heaters on. Wait: ``ChamberHeatSoak.check`` keeps the heartbeat, ends an
 interrupted soak, and hands off when the timer has run. Exit: the engine calls
-``exit`` with the reason. Recover: a soak whose owner missed its heartbeat
-keeps its hold until a person chooses Stop or Skip heat soak. Database write
-locks serialize controls with cancellation; no other process resumes a soak's
-timer or dispatches its job. There is no material or keep-warm policy.
+``exit_values`` with the reason. Recover: a soak whose owner missed its
+heartbeat keeps its hold until a person chooses Stop or Skip heat soak.
+Database write locks serialize controls with cancellation; no other process
+resumes a soak's timer or dispatches its job. There is no material or
+keep-warm policy.
 """
 
 import logging
@@ -22,7 +23,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.tasks import spawn_background_task
-from backend.app.models.print_queue import PrintQueueItem
+from backend.app.models.print_queue import ACTIVE_STATUSES, PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services.lifecycle.engine import QueueTransitionConflict, lock_queue_item, transition_queue_item
 from backend.app.services.printer_manager import printer_manager, supports_chamber_heater
@@ -125,7 +126,7 @@ async def cleanup_heat_soak_shutdown(db: AsyncSession, printer_id: int) -> bool:
     active_job = await db.scalar(
         select(PrintQueueItem.id).where(
             PrintQueueItem.printer_id == printer_id,
-            PrintQueueItem.status.in_(("preheating", "dispatching", "printing", "paused")),
+            PrintQueueItem.status.in_(ACTIVE_STATUSES),
             # An unsent dispatch whose worker has stopped can cool while its
             # plate hold remains. An uploading or potentially sent job cannot.
             or_(
@@ -153,7 +154,7 @@ async def cleanup_heat_soak_shutdown(db: AsyncSession, printer_id: int) -> bool:
     return True
 
 
-def exit(after: str, action: str | None) -> dict[str, None]:
+def exit_values(after: str, action: str | None) -> dict[str, None]:
     """The values written as a job leaves preheating for ``after``.
 
     Dispatching inherits the soak: its heaters stay on, and its claim is the
@@ -194,11 +195,12 @@ def _changed(item: PrintQueueItem | None, owner: str | None, printer_id: int) ->
 
 async def _hand_off(
     db: AsyncSession, item_id: int, owner: str | None, printer_id: int, values: Mapping[str, Any]
-) -> SkipHeatSoakResult | None:
-    """Exit to dispatching under the soak's lock; None when this call handed off.
+) -> tuple[bool, SkipHeatSoakResult]:
+    """Exit to dispatching under the soak's lock, and say whether this call handed off.
 
-    Readiness was checked before the lock, and is checked again under it and by
-    the engine's guard. A changed soak is left untouched.
+    SKIPPED without a handoff means another control already handed this soak
+    off. Readiness was checked before the lock, and is checked again under it
+    and by the engine's guard. A changed soak is left untouched.
     """
     item = await lock_queue_item(db, item_id)
     if not (changed := _changed(item, owner, printer_id)) and _dispatch_ready(printer_id):
@@ -214,7 +216,7 @@ async def _hand_off(
             )
             await db.commit()
             _show_preheating(printer_id, False)
-            return None
+            return True, SkipHeatSoakResult.SKIPPED
         except QueueTransitionConflict:
             await db.rollback()
             logger.info("Queue item %s changed during heat-soak handoff", item_id)
@@ -222,12 +224,12 @@ async def _hand_off(
             changed = _changed(item, owner, printer_id)
     if changed:
         await db.rollback()
-        return changed
+        return False, changed
     # The printer is not ready, or the live guard refused at the last moment.
     # Either way the same soak keeps its liveness.
     item.preheat_checked_at = utcnow()
     await db.commit()
-    return SkipHeatSoakResult.PRINTER_NOT_READY
+    return False, SkipHeatSoakResult.PRINTER_NOT_READY
 
 
 async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> SkipHeatSoakResult:
@@ -251,11 +253,10 @@ async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> SkipHeatSoak
         "preheat_owner": scheduler._heat_soak.owner,
         "preheat_checked_at": None,
     }
-    result = await _hand_off(db, item_id, owner, printer_id, values)
-    if result is not None:
-        return result
-    spawn_background_task(scheduler._dispatch_after_heat_soak(item_id), name=f"skip-heat-soak-dispatch-{item_id}")
-    return SkipHeatSoakResult.SKIPPED
+    handed_off, result = await _hand_off(db, item_id, owner, printer_id, values)
+    if handed_off:
+        spawn_background_task(scheduler._dispatch_after_heat_soak(item_id), name=f"skip-heat-soak-dispatch-{item_id}")
+    return result
 
 
 class ChamberHeatSoak:
@@ -367,7 +368,8 @@ class ChamberHeatSoak:
         for item_id in ids:
             try:
                 item = await lock_queue_item(db, item_id)
-                if not item or item.status not in ("preheating", "dispatching") or item.dispatch_subtask_id:
+                # The select can be stale: Skip may have handed this soak off since.
+                if not item or not is_soaking(item):
                     await db.rollback()
                     continue
                 printer_id, now = item.printer_id, utcnow()
@@ -418,7 +420,8 @@ class ChamberHeatSoak:
                 if not _dispatch_ready(printer_id):
                     continue
                 values = {"dispatched_at": None, "dispatching_at": utcnow(), "preheat_checked_at": utcnow()}
-                if await _hand_off(db, item_id, self.owner, printer_id, values) is None:
+                handed_off, _ = await _hand_off(db, item_id, self.owner, printer_id, values)
+                if handed_off:
                     ready.append(item_id)
             except Exception:
                 await db.rollback()

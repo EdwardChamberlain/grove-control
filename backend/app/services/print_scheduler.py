@@ -3780,8 +3780,9 @@ class PrintScheduler:
                 await self._cleanup_unsent_dispatch_upload(db, item_id)
                 raise
             except QueueTransitionConflict:
-                # A cancel or delete won during file preparation. The cleanup
-                # below still turns the heaters off for whatever state it left.
+                # A cancel or delete won during file preparation. A cancel staged
+                # the heater shutdown on entry; the cleanup below only fails an
+                # unsent dispatch.
                 logger.info("Queue item %s changed during heat-soak dispatch", item_id)
             except Exception:
                 await db.rollback()
