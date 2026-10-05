@@ -19,10 +19,10 @@ from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.schemas.print_queue import PrintQueueItemCreate, PrintQueueItemUpdate
-from backend.app.services import chamber_heat_soak as heat
 from backend.app.services.bambu_mqtt import PrinterState
 from backend.app.services.heat_soak_telemetry import record_heat_soak_reports
 from backend.app.services.library_trash import release_queue_references
+from backend.app.services.lifecycle import preheating as heat
 
 
 @pytest.fixture

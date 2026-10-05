@@ -8,14 +8,14 @@ imported on use because their services import this module.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.sql.elements import ColumnElement
@@ -70,6 +70,52 @@ class InvalidQueueTransition(ValueError):
 
 class QueueTransitionConflict(RuntimeError):
     """The expected row/status/claim no longer exists; abort this transaction."""
+
+
+@dataclass(frozen=True)
+class Decision:
+    before: str
+    after: str
+    values: Mapping[str, Any]
+    effect: Callable[[], object] | None = None
+    conditions: Sequence[ColumnElement[bool]] = ()
+
+
+async def apply_decision(
+    db: AsyncSession,
+    item: PrintQueueItem,
+    decision: Decision,
+    *,
+    enter: Callable[[AsyncSession, PrintQueueItem], Awaitable[Decision | None]] | None = None,
+) -> bool:
+    """Commit a state's decision before entering it; entry returns its own next decision."""
+    from backend.app.services.lifecycle import effects
+
+    requested = decision.after
+    while decision is not None:
+        await transition_queue_item(
+            db, item, decision.before, decision.after, values=decision.values, conditions=decision.conditions
+        )
+        if decision.effect is not None:
+            effects.after_commit(db, decision.effect)
+        await db.commit()
+        if enter is None:
+            return decision.after == requested
+        decision, enter = await enter(db, item), None
+    await db.rollback()
+    return False
+
+
+async def lock_queue_item(db: AsyncSession, item_id: int) -> PrintQueueItem | None:
+    """Take a write lock on SQLite or PostgreSQL and discard stale ORM state."""
+    with db.no_autoflush:
+        result = await db.execute(
+            update(PrintQueueItem)
+            .where(PrintQueueItem.id == item_id)
+            .values(id=PrintQueueItem.id)
+            .execution_options(synchronize_session=False)
+        )
+        return await db.get(PrintQueueItem, item_id, populate_existing=True) if result.rowcount else None
 
 
 # Only these actions may move a job out of an awaiting-plate-clear state.
@@ -141,10 +187,14 @@ async def transition_queue_item(
     if any(key.startswith("physical_") for key in metadata):
         raise ValueError("Physical outcomes are recorded only on entry to an awaiting-plate-clear state")
     item_id = item if isinstance(item, int) else item.id
+    session = isinstance(db, AsyncSession)
+    if session and expected_status != status:
+        from backend.app.services.lifecycle.preheating import exit_values
+
+        metadata.update(exit_values(expected_status, status, action, item))
     if status == "dispatching" and expected_status != status and not upgrading:
         if metadata.get("printer_id", item.printer_id if not isinstance(item, int) else None) is None:
             raise InvalidQueueTransition("Dispatch requires a selected printer")
-    session = isinstance(db, AsyncSession)
     if session and (expected_status != status or confirmed):
         if status in AWAITING_PLATE_CLEAR_STATUSES and action != "cancel":
             await _record_physical_outcome(db, item_id, status, metadata, confirmed, archive_failure_reason)
@@ -192,6 +242,10 @@ async def _written(change: Transition) -> None:
         effects.after_commit(db, partial(logger.info, log, *args))
     if row.printer_id is not None and holding:
         effects.publish_printer_view(db, row.printer_id, change.after, row.archive_id)
+    if entered and change.before == "preheating" and row.printer_id is not None:
+        from backend.app.services.lifecycle.preheating import _show_preheating
+
+        effects.after_commit(db, partial(_show_preheating, row.printer_id, False))
     for enter in _ENTRY.get(change.after, ()) if entered else ():
         await enter(change, row)
 
@@ -219,17 +273,10 @@ async def _record_physical_outcome(
 
 
 async def _enter_failure(change: Transition, row) -> None:
-    from backend.app.models.printer import Printer
     from backend.app.services.lifecycle import effects
+    from backend.app.services.lifecycle.preheating import request_shutdown
 
-    # Keep shutdown retryable after disconnect, deletion of the job,
-    # or a process exit before the after-commit effect gets to run.
-    heating = row.preheat_requested_at is not None or row.chamber_heat_soak
-    if heating and row.printer_id is not None:
-        printer = await change.db.get(Printer, row.printer_id)
-        if printer is not None:
-            printer.heat_soak_shutdown_pending = True
-            printer.heat_soak_shutdown_at = datetime.now(timezone.utc)
+    heating = await request_shutdown(change.db, row)
     unconfirmed = change.action != "printer_report"
     effect = effects.QueueOutcomeEffect(
         job_id=change.item_id,

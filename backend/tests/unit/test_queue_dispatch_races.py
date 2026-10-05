@@ -15,8 +15,9 @@ from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services import chamber_heat_soak as heat, print_scheduler as scheduling
+from backend.app.services import print_scheduler as scheduling
 from backend.app.services.archive import ArchiveService
+from backend.app.services.lifecycle import preheating as heat
 from backend.app.services.lifecycle.engine import QueueTransitionConflict, transition_queue_item
 from backend.app.services.printer_manager import printer_manager
 from backend.app.services.queue_actions import cancel_job

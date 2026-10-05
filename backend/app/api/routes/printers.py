@@ -3058,7 +3058,7 @@ async def stop_print(
         .with_for_update()
     )
     if item is not None:
-        from backend.app.services.chamber_heat_soak import lock_queue_item
+        from backend.app.services.lifecycle.engine import lock_queue_item
         from backend.app.services.queue_actions import cancel_job
 
         item = await lock_queue_item(db, item.id)
@@ -3106,7 +3106,7 @@ async def clear_plate(
     if not printer:
         raise HTTPException(404, "Printer not found")
 
-    from backend.app.services.chamber_heat_soak import lock_queue_item
+    from backend.app.services.lifecycle.engine import lock_queue_item
 
     item = await db.scalar(
         select(PrintQueueItem).where(

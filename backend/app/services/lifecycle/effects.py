@@ -109,7 +109,7 @@ def queue_outcome_effect(db: AsyncSession, effect: QueueOutcomeEffect) -> None:
 
 async def run_queue_outcome_effects(engine: AsyncEngine, effect: QueueOutcomeEffect) -> None:
     """Use committed data and let each best-effort effect fail independently."""
-    from backend.app.services.chamber_heat_soak import _show_preheating, cleanup_heat_soak_shutdown
+    from backend.app.services.lifecycle.preheating import cleanup_heat_soak_shutdown
 
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     async with sessions() as db:
@@ -156,8 +156,8 @@ async def run_queue_outcome_effects(engine: AsyncEngine, effect: QueueOutcomeEff
     if effect.shut_down_heaters:
         try:
             async with sessions() as db:
-                if effect.printer_id is not None and await cleanup_heat_soak_shutdown(db, effect.printer_id):
-                    _show_preheating(effect.printer_id, False)
+                if effect.printer_id is not None:
+                    await cleanup_heat_soak_shutdown(db, effect.printer_id)
         except Exception:
             logger.exception("Queue job %s: heater shutdown failed", effect.job_id)
 

@@ -37,13 +37,13 @@ from backend.app.services.bambu_ftp import (
     upload_file_async,
     with_ftp_retry,
 )
-from backend.app.services.chamber_heat_soak import ChamberHeatSoak, abort_heat_soak, lock_queue_item
 from backend.app.services.filament_deficit import compute_deficit_for_queue_item
 from backend.app.services.filament_requirements import canonical_filament_type
 from backend.app.services.ha_sensor_manager import ha_sensor_manager
 from backend.app.services.job_identity import sync_print_state, telemetry_identity
-from backend.app.services.lifecycle import effects
-from backend.app.services.lifecycle.engine import QueueTransitionConflict, transition_queue_item
+from backend.app.services.lifecycle import effects, preheating
+from backend.app.services.lifecycle.engine import QueueTransitionConflict, lock_queue_item, transition_queue_item
+from backend.app.services.lifecycle.preheating import ChamberHeatSoak, abort_heat_soak
 from backend.app.services.notification_service import notification_service
 from backend.app.services.printer_manager import (
     printer_manager,
@@ -771,7 +771,7 @@ class PrintScheduler:
             self._terminal_dispatch_recoveries.discard(queue_item_id)
 
     async def _check_heat_soaks(self, db: AsyncSession) -> set[int]:
-        ready = await self._heat_soak.check(db)
+        ready = await self._heat_soak.on_timeout(db)
         for item_id in ready:
             spawn_background_task(self._dispatch_after_heat_soak(item_id), name=f"heat-soak-dispatch-{item_id}")
         return set((await db.scalars(select(Printer.id).where(Printer.heat_soak_shutdown_pending.is_(True)))).all())
@@ -4062,10 +4062,7 @@ class PrintScheduler:
                         },
                     )  # This worker has not published a command.
                     if held.chamber_heat_soak:
-                        printer = await db.get(Printer, held_printer_id)
-                        if printer is not None:
-                            printer.heat_soak_shutdown_pending = True
-                            printer.heat_soak_shutdown_at = datetime.now(timezone.utc)
+                        await preheating.request_shutdown(db, held)
                     await db.commit()
             else:
                 await db.rollback()

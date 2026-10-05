@@ -397,7 +397,8 @@ async def test_late_external_archive_association_uses_the_jobs_committed_state(a
 
 
 async def test_committed_heat_soak_handoff_is_scheduled_without_copying(alignment, monkeypatch):
-    from backend.app.services import chamber_heat_soak as heat, print_scheduler as sched
+    from backend.app.services import print_scheduler as sched
+    from backend.app.services.lifecycle import preheating as heat
 
     scheduler = sched.PrintScheduler()
     service = scheduler._heat_soak
@@ -455,7 +456,8 @@ async def test_committed_heat_soak_handoff_is_scheduled_without_copying(alignmen
 @pytest.mark.parametrize("current", ["busy", "reconnected_busy", "reconnected_idle", "missing", "unready", "offline"])
 async def test_heat_soak_dispatch_uses_current_telemetry_after_archive_copy(alignment, monkeypatch, current):
     import backend.app.main as main
-    from backend.app.services import chamber_heat_soak as heat, print_scheduler as sched
+    from backend.app.services import print_scheduler as sched
+    from backend.app.services.lifecycle import preheating as heat
 
     scheduler = sched.PrintScheduler()
     monkeypatch.setattr(sched, "DISPATCH_TELEMETRY_WAIT_SECONDS", 0.01)
@@ -748,7 +750,8 @@ async def test_late_archive_uses_immutable_outcome_after_restart_and_display_upd
 
 @pytest.mark.parametrize("skip", [False, True])
 async def test_heat_soak_archive_copy_failure_commits_before_auto_off(alignment, monkeypatch, skip):
-    from backend.app.services import chamber_heat_soak as heat, print_scheduler as sched
+    from backend.app.services import print_scheduler as sched
+    from backend.app.services.lifecycle import preheating as heat
     from backend.app.services.printer_manager import printer_manager
     from backend.app.services.smart_plug_manager import smart_plug_manager
 

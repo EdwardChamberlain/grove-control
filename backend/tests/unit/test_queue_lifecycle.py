@@ -405,7 +405,7 @@ async def test_migration_unbinds_waiting_any_machine_jobs_and_keeps_specific_req
 
 
 async def test_heat_soak_does_not_restore_a_stale_printer_assignment(sessions):
-    from backend.app.services.chamber_heat_soak import ChamberHeatSoak
+    from backend.app.services.lifecycle.preheating import ChamberHeatSoak
 
     async with sessions() as db:
         item = PrintQueueItem(printer_id=1, status="queued", chamber_heat_soak=True)

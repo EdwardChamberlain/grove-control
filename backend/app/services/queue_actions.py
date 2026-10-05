@@ -19,7 +19,6 @@ async def cancel_job(db: AsyncSession, item: PrintQueueItem) -> None:
     if not queued and item.status not in ACTIVE_STATUSES:
         raise InvalidQueueTransition(f"Cannot cancel a job in {item.status}")
     printer_id, item_id = item.printer_id, item.id
-    heating = not queued and item.chamber_heat_soak
     requested_at = datetime.now(timezone.utc)
     await transition_queue_item(
         db,
@@ -33,10 +32,6 @@ async def cancel_job(db: AsyncSession, item: PrintQueueItem) -> None:
             **({"stop_requested_at": requested_at} if not queued else {}),
         },
     )
-    if heating:
-        item.preheat_owner = None
-        item.preheat_started_at = None
-        item.preheat_checked_at = None
     # Ending a queued job releases its one-off source inside the transition;
     # the files are removed once this commit succeeds.
     await db.commit()

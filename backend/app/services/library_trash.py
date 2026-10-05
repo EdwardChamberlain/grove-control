@@ -402,15 +402,9 @@ async def release_queue_references(db: AsyncSession, file_ids: list[int]) -> int
     """
     if not file_ids:
         return 0
-    rows = (
-        await db.execute(
-            select(
-                PrintQueueItem.id,
-                PrintQueueItem.library_file_id,
-                PrintQueueItem.status,
-                PrintQueueItem.chamber_heat_soak,
-                PrintQueueItem.dispatch_subtask_id,
-            )
+    item_ids = (
+        await db.scalars(
+            select(PrintQueueItem.id)
             .where(PrintQueueItem.library_file_id.in_(file_ids))
             .where(PrintQueueItem.archive_id.is_(None))
             .where(
@@ -435,9 +429,10 @@ async def release_queue_references(db: AsyncSession, file_ids: list[int]) -> int
 
     # A live heat-soak must be aborted through its service so heater shutdown,
     # reservation cleanup, and queue status are persisted together.
-    from backend.app.services.chamber_heat_soak import abort_heat_soak, lock_queue_item
+    from backend.app.services.lifecycle.engine import lock_queue_item
+    from backend.app.services.lifecycle.preheating import abort_heat_soak
 
-    for item_id, _library_file_id, _status, _chamber_heat_soak, _dispatch_subtask_id in rows:
+    for item_id in item_ids:
         item = await lock_queue_item(db, item_id)
         if not item or item.library_file_id not in file_ids or item.archive_id is not None:
             continue
