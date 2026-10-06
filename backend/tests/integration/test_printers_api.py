@@ -582,6 +582,37 @@ class TestPrintersAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    async def test_get_printer_status_falls_back_to_archive_owner_without_a_queue_owner(
+        self, async_client: AsyncClient, printer_factory, archive_factory, db_session
+    ):
+        """An awaiting job with no creator, such as an external print, names the Archive's uploader."""
+        from backend.app.models.print_queue import PrintQueueItem
+        from backend.app.models.user import User
+        from backend.app.services.bambu_mqtt import PrinterState
+
+        printer = await printer_factory(awaiting_plate_clear=True)
+        archive_owner = User(username="archive_uploader", password_hash="test-hash")
+        db_session.add(archive_owner)
+        await db_session.flush()
+        target = await archive_factory(printer.id, print_name="External Widget", created_by_id=archive_owner.id)
+        db_session.add(PrintQueueItem(printer_id=printer.id, archive_id=target.id, status="finished"))
+        await db_session.commit()
+
+        state = PrinterState()
+        state.connected = True
+        state.state = "IDLE"
+        with patch("backend.app.api.routes.printers.printer_manager") as mock_pm:
+            mock_pm.get_status = MagicMock(return_value=state)
+            mock_pm.is_awaiting_plate_clear = MagicMock(return_value=True)
+            mock_pm.get_awaiting_plate_clear_archive_id = MagicMock(return_value=target.id)
+
+            response = await async_client.get(f"/api/v1/printers/{printer.id}/status")
+
+        assert response.status_code == 200
+        assert response.json()["awaiting_plate_clear_print"]["created_by_username"] == "archive_uploader"
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_get_printer_status_not_found(self, async_client: AsyncClient):
         """Verify 404 for status of non-existent printer."""
         response = await async_client.get("/api/v1/printers/9999/status")
