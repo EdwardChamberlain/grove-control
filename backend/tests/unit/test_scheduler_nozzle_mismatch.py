@@ -23,8 +23,8 @@ from backend.app.core.database import Base
 from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services.print_scheduler import (
-    PrintScheduler,
+from backend.app.services.print_scheduler import PrintScheduler
+from backend.app.services.printer_selection import (
     _installed_nozzle_diameters,
     _nozzle_mismatch_message,
     _rack_nozzle_diameters,

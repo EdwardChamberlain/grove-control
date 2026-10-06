@@ -153,7 +153,7 @@ class TestComputeAmsMappingFallback:
         )
 
     @pytest.mark.asyncio
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.ams_mapping.printer_manager")
     async def test_fallback_used_when_filament_reqs_empty(self, mock_pm, scheduler):
         """When _get_filament_requirements returns None but force-color overrides
         are set, the fallback builds a mapping directly from the overrides."""
@@ -171,7 +171,7 @@ class TestComputeAmsMappingFallback:
         assert result == [0]  # global_tray_id 0 (AMS 0, tray 0)
 
     @pytest.mark.asyncio
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.ams_mapping.printer_manager")
     async def test_unforced_fallback_keeps_material_and_allows_different_colour(self, mock_pm, scheduler):
         """Preference-only overrides still map within the required material."""
         mock_pm.get_status.return_value = self._make_status()
@@ -187,7 +187,7 @@ class TestComputeAmsMappingFallback:
         assert result == [0]
 
     @pytest.mark.asyncio
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.ams_mapping.printer_manager")
     async def test_fallback_not_used_when_no_overrides(self, mock_pm, scheduler):
         """When filament_overrides is None, the fallback is not triggered."""
         mock_pm.get_status.return_value = self._make_status()
@@ -201,7 +201,7 @@ class TestComputeAmsMappingFallback:
         assert result is None
 
     @pytest.mark.asyncio
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.ams_mapping.printer_manager")
     async def test_normal_path_used_when_filament_reqs_available(self, mock_pm, scheduler):
         """When filament requirements are available, the normal path is used
         (overrides applied to reqs, then matched)."""
@@ -225,7 +225,7 @@ class TestComputeAmsMappingFallback:
         assert result == [0]
 
     @pytest.mark.asyncio
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.ams_mapping.printer_manager")
     async def test_fallback_returns_none_when_printer_status_unavailable(self, mock_pm, scheduler):
         """When the printer has no status, the fallback also returns None gracefully."""
         mock_pm.get_status.return_value = None

@@ -14,7 +14,7 @@ class TestCountOverrideColorMatches:
     def scheduler(self):
         return PrintScheduler()
 
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.printer_selection.printer_manager")
     def test_no_status_returns_zero(self, mock_pm, scheduler):
         """When printer_manager.get_status() returns None, should return 0."""
         mock_pm.get_status.return_value = None
@@ -22,7 +22,7 @@ class TestCountOverrideColorMatches:
         result = scheduler._count_override_color_matches(1, [{"type": "PLA", "color": "#FF0000"}])
         assert result == 0
 
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.printer_selection.printer_manager")
     def test_exact_match(self, mock_pm, scheduler):
         """Override with matching type+color on printer returns 1."""
         mock_pm.get_status.return_value = MagicMock(
@@ -34,7 +34,7 @@ class TestCountOverrideColorMatches:
         result = scheduler._count_override_color_matches(1, [{"type": "PLA", "color": "#FF0000"}])
         assert result == 1
 
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.printer_selection.printer_manager")
     def test_no_match(self, mock_pm, scheduler):
         """Override with type+color not on printer returns 0."""
         mock_pm.get_status.return_value = MagicMock(
@@ -46,7 +46,7 @@ class TestCountOverrideColorMatches:
         result = scheduler._count_override_color_matches(1, [{"type": "PETG", "color": "#00FF00"}])
         assert result == 0
 
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.printer_selection.printer_manager")
     def test_multiple_overrides_partial_match(self, mock_pm, scheduler):
         """2 overrides, only 1 matching = returns 1."""
         mock_pm.get_status.return_value = MagicMock(
@@ -62,7 +62,7 @@ class TestCountOverrideColorMatches:
         result = scheduler._count_override_color_matches(1, overrides)
         assert result == 1
 
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.printer_selection.printer_manager")
     def test_color_normalization(self, mock_pm, scheduler):
         """Override color '#FF0000' matches printer tray_color 'FF0000FF' (with alpha)."""
         mock_pm.get_status.return_value = MagicMock(
@@ -75,7 +75,7 @@ class TestCountOverrideColorMatches:
         result = scheduler._count_override_color_matches(1, [{"type": "PLA", "color": "#FF0000"}])
         assert result == 1
 
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.printer_selection.printer_manager")
     def test_external_spool_match(self, mock_pm, scheduler):
         """Override matches filament in vt_tray."""
         mock_pm.get_status.return_value = MagicMock(
