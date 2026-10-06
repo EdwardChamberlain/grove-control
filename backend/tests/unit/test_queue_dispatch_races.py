@@ -22,6 +22,7 @@ from backend.app.services.lifecycle.engine import QueueTransitionConflict, trans
 from backend.app.services.printer_manager import printer_manager
 from backend.app.services.queue_actions import cancel_job
 from backend.app.services.queue_archive import link_dispatch_archive, prepare_dispatch_archive
+from backend.tests.unit.test_lifecycle_preheating import enter_preheating
 from backend.tests.unit.test_queue_archive_alignment import alignment, hold_and_link  # noqa: F401
 from backend.tests.unit.test_scheduler_cleanup_library import _dispatch_library_item, queue_factory  # noqa: F401
 
@@ -124,12 +125,10 @@ async def handoff(alignment, monkeypatch):
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
         now = heat.utcnow()
-        await transition_queue_item(
+        await enter_preheating(
             db,
             job,
-            "queued",
-            "preheating",
-            values={
+            {
                 "chamber_heat_soak": True,
                 "heat_soak_minutes": 1,
                 "preheat_owner": service.owner,
@@ -302,12 +301,10 @@ async def test_local_stop_drains_final_upload_ack_then_removes_only_its_unsent_c
     if heat_soak:
         async with alignment.sessions() as db:
             job = await db.get(PrintQueueItem, alignment.job_id)
-            await transition_queue_item(
+            await enter_preheating(
                 db,
                 job,
-                "queued",
-                "preheating",
-                values={
+                {
                     "chamber_heat_soak": True,
                     "preheat_requested_at": heat.utcnow(),
                     "preheat_owner": scheduler._heat_soak.owner,

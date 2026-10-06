@@ -253,7 +253,8 @@ async def _dispatch_library_item(
 
 
 async def _finish_and_clear(ctx):
-    from backend.app.services.lifecycle.engine import clear_job_plate, transition_queue_item
+    from backend.app.services.lifecycle.awaiting import clear_job_plate
+    from backend.app.services.lifecycle.engine import transition_queue_item
 
     with patch.object(scheduler_module.settings, "base_dir", ctx.base_dir):
         async with ctx.session_maker() as db:
@@ -722,7 +723,7 @@ async def test_oserror_during_unlink_logs_orphan_path_and_does_not_crash_dispatc
 @pytest.mark.asyncio
 async def test_failed_upload_holds_printer_until_clear_even_with_confirmation_off(queue_factory):
     from backend.app.models.settings import Settings
-    from backend.app.services.lifecycle.engine import clear_job_plate
+    from backend.app.services.lifecycle.awaiting import clear_job_plate
 
     ctx = await queue_factory(cleanup=True)
     failed_id = ctx.queue_item_id

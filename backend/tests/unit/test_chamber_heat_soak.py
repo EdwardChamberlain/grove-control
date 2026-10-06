@@ -358,7 +358,7 @@ async def test_delete_offline_preserves_cleanup_and_prevents_new_soak_until_off_
     await soak.service.cleanup(soak.db)
     await soak.db.refresh(soak.printer)
     assert not soak.printer.heat_soak_shutdown_pending
-    from backend.app.services.lifecycle.engine import clear_job_plate
+    from backend.app.services.lifecycle.awaiting import clear_job_plate
 
     await clear_job_plate(soak.db, new_item)
     await soak.db.commit()

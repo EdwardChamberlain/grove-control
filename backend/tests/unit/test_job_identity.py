@@ -242,7 +242,7 @@ async def test_external_start_is_one_job_and_cannot_take_a_dispatch(sessions):
         assert first.created_by_id is None
         assert await observe_print(db, 1, "different") == (None, False)
         await transition_queue_item(db, first, "printing", "finished")
-        from backend.app.services.lifecycle.engine import clear_job_plate
+        from backend.app.services.lifecycle.awaiting import clear_job_plate
 
         await clear_job_plate(db, first)
         await db.commit()

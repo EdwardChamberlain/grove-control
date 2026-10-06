@@ -2,7 +2,6 @@ import asyncio
 import logging
 import re
 import zipfile
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
@@ -62,13 +61,9 @@ from backend.app.services.bambu_ftp import (
     list_files_async,
 )
 from backend.app.services.job_identity import find_job, telemetry_identity
-from backend.app.services.lifecycle.engine import (
-    InvalidQueueTransition,
-    clear_job_plate,
-    lock_queue_item,
-    transition_queue_item,
-)
-from backend.app.services.lifecycle.preheating import is_soaking
+from backend.app.services.lifecycle.awaiting import clear_job_plate
+from backend.app.services.lifecycle.engine import InvalidQueueTransition, lock_queue_item
+from backend.app.services.lifecycle.final import release_printer
 from backend.app.services.printer_diagnostic import run_connection_diagnostic
 from backend.app.services.printer_manager import (
     drying_screen_only,
@@ -415,7 +410,7 @@ async def delete_printer(
         delete_archives: If True (default), delete all print archives for this printer.
                         If False, keep archives but remove their printer association.
     """
-    from sqlalchemy import delete as sql_delete
+    from sqlalchemy import delete as sql_delete, update
 
     from backend.app.models.archive import PrintArchive
     from backend.app.models.maintenance import MaintenanceHistory, MaintenanceLogEntry, PrinterMaintenance
@@ -427,34 +422,10 @@ async def delete_printer(
     if not printer:
         raise HTTPException(404, "Printer not found")
 
-    holding = list(
-        (
-            await db.scalars(
-                select(PrintQueueItem)
-                .where(PrintQueueItem.printer_id == printer_id, PrintQueueItem.status.in_(HOLDING_STATUSES))
-                .with_for_update()
-            )
-        ).all()
-    )
-    # Heat-soak heaters are shut down by a loop that retries until telemetry
-    # confirms zero targets, and that loop needs this printer row. While Grove
-    # can reach the printer, stop the soak and let shutdown finish first. A
-    # disconnected printer cannot be commanded either way, so it is not held.
-    soaking = printer.heat_soak_shutdown_pending or any(is_soaking(item) for item in holding)
-    if soaking and printer_manager.is_connected(printer_id):
-        raise HTTPException(
-            409, "Stop the heat soak and wait for heater shutdown to be confirmed before deleting this printer"
-        )
-    for item in holding:
-        released = "successful" if item.status == "finished" else "unsuccessful"
-        # A finished print keeps its outcome; only an unsuccessful end is
-        # explained by the deletion. Jobs that already ended keep their time.
-        values = {"error_message": "Printer deleted"} if released == "unsuccessful" else {}
-        if item.completed_at is None:
-            values["completed_at"] = datetime.now(timezone.utc)
-        await transition_queue_item(db, item, item.status, released, action="printer_deleted", values=values)
-    from sqlalchemy import update
-
+    try:
+        await release_printer(db, printer)
+    except InvalidQueueTransition as exc:
+        raise HTTPException(409, str(exc)) from exc
     await db.execute(update(PrintQueueItem).where(PrintQueueItem.printer_id == printer_id).values(printer_id=None))
     if delete_archives:
         # Preserve jobs when the Archive FK would otherwise cascade-delete them.
@@ -469,8 +440,6 @@ async def delete_printer(
         await db.execute(sql_delete(PrintArchive).where(PrintArchive.printer_id == printer_id))
     else:
         # Orphan the archives instead of deleting them
-        from sqlalchemy import update
-
         await db.execute(update(PrintArchive).where(PrintArchive.printer_id == printer_id).values(printer_id=None))
 
     # Delete slot assignments for this printer (SQLite doesn't enforce FK cascades)
@@ -873,19 +842,10 @@ async def get_printer_status(
         # older visible archive is worse than omitting the completion details.
         if archive is not None:
             # The archive owner is the uploader, not necessarily the user who
-            # queued this particular print. Prefer the terminal queue item so
+            # queued this particular print. Prefer the awaiting job's owner so
             # the kiosk identifies the owner of the print run (#163). The
             # archive owner remains a fallback for legacy/non-queue prints.
-            queue_owner_result = await db.execute(
-                select(User.username)
-                .join(PrintQueueItem, PrintQueueItem.created_by_id == User.id)
-                .where(PrintQueueItem.archive_id == archive.id)
-                .where(PrintQueueItem.printer_id == printer_id)
-                .where(PrintQueueItem.status.in_(AWAITING_PLATE_CLEAR_STATUSES))
-                .order_by(PrintQueueItem.completed_at.desc().nullslast(), PrintQueueItem.id.desc())
-                .limit(1)
-            )
-            queue_owner = queue_owner_result.scalar_one_or_none()
+            queue_owner = await db.scalar(select(User.username).where(User.id == awaiting_job.created_by_id))
             awaiting_plate_clear_print = PlateClearPrintSummary(
                 archive_id=archive.id,
                 print_name=archive.print_name,

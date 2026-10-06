@@ -113,9 +113,9 @@ class QueueOutcomeEffect:
     job_id: int
     new_state: str
     printer_id: int | None
-    shut_down_heaters: bool
-    notify_failure: bool
-    clean_sd_copy: bool
+    shut_down_heaters: bool = False
+    notify_failure: bool = False
+    clean_sd_copy: bool = False
 
 
 def queue_outcome_effect(db: AsyncSession, effect: QueueOutcomeEffect) -> None:

@@ -7,7 +7,7 @@ heaters down. A handoff to dispatching happens once, for the soak it was meant f
 
 from datetime import datetime
 from importlib import import_module
-from unittest.mock import AsyncMock, MagicMock, call
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 from sqlalchemy import event, inspect, select
@@ -23,6 +23,7 @@ from backend.app.services.lifecycle import effects, engine as lifecycle_engine, 
 from backend.app.services.lifecycle.engine import (
     ALLOWED_TRANSITIONS,
     QueueTransitionConflict,
+    enter_state,
     transition_queue_item,
 )
 from backend.app.services.lifecycle.preheating import SOAKING, is_soaking
@@ -30,6 +31,16 @@ from backend.tests.unit.test_chamber_heat_soak import soak  # noqa: F401
 
 CLAIM = ("preheat_owner", "preheat_started_at", "preheat_checked_at")
 REQUESTED = datetime(2026, 1, 1, 12, 0)
+
+
+async def enter_preheating(db, job, values=None) -> None:
+    """Hold a queued job in preheating through the engine, for tests that start from a soak.
+
+    The heater step is specified in test_chamber_heat_soak, so it is stubbed
+    here: the soak's heaters are already on, as ``values`` describes.
+    """
+    with patch.object(preheating, "on_entered", AsyncMock(return_value=True)):
+        assert await enter_state(db, job, "queued", "preheating", values=values)
 
 
 @pytest.fixture

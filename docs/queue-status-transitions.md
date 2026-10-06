@@ -149,12 +149,31 @@ persisted state. Reasons are display-only. A losing update raises
 edges fail before writing. User cancellation, Clear Plate, printer deletion,
 hold transfer and printer reports have explicit action guards. After the
 write, the engine aligns the Archive attempt, runs the old state's exit step and
-then the new state's entry steps, all in the same transaction. Leaving
-`preheating` other than for `dispatching` releases the soak's claim and shuts
-its heaters down.
+then the new state's entry step, all in the same transaction.
 
-The caller owns the transaction. Lifecycle work queues after-commit effects and
-rollback cleanup in one registry, `services/lifecycle/effects.py`. Effects run
+Each state's steps live in its module in `services/lifecycle/`: `preheating.py`,
+`awaiting.py` (`finished`, `failed`, `cancelled`) and `final.py` (`successful`,
+`unsuccessful`). Leaving `preheating` other than for `dispatching` releases the
+soak's claim and shuts its heaters down. Entry into an awaiting state writes the
+physical outcome with the status, then clears a finished plate when confirmation
+is off or queues a failed or stopped job's effects. Clear Plate, hold transfer
+and printer deletion end a job through `final.end`. Leaving `failed` or
+`cancelled` through Clear Plate removes the attempt's sent upload; a state
+cleans up on its own exit. Entry into a final state releases unused Queue
+sources.
+
+Some entry work may start only after the transition commits. `enter_state`
+makes the transition, commits it, then runs the new state's post-commit step,
+which re-checks the job under its own lock. Preheating uses it to turn the
+heaters on only once the hold is durable, so a Stop committed in between
+prevents any heater command. A transition the database refuses (a conflict, or
+the holding index) is rolled back and runs no step; errors from the step itself
+are raised. `transition_queue_item` refuses to enter a state with a post-commit
+step itself, so the step cannot be skipped.
+
+The caller owns the transaction, except in `enter_state`. Lifecycle work queues
+after-commit effects and rollback cleanup in one registry,
+`services/lifecycle/effects.py`. Effects run
 only after the outermost commit; savepoints neither run nor discard them, and a
 failing effect is logged without affecting the commit or later effects.
 Plate-clear flags and Archive IDs in printer views are projections, rehydrated

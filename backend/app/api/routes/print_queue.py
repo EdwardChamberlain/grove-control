@@ -43,12 +43,8 @@ from backend.app.services.filament_requirements import (
     overrides_for_plate,
 )
 from backend.app.services.job_identity import needs_dispatch_resolution, telemetry_identity
-from backend.app.services.lifecycle.engine import (
-    InvalidQueueTransition,
-    clear_job_plate,
-    lock_queue_item,
-    transition_queue_item,
-)
+from backend.app.services.lifecycle.awaiting import clear_job_plate
+from backend.app.services.lifecycle.engine import InvalidQueueTransition, lock_queue_item, transition_queue_item
 from backend.app.services.lifecycle.preheating import SkipHeatSoakResult, heat_soak_dispatch_started, skip_heat_soak
 from backend.app.services.notification_service import notification_service
 from backend.app.services.queue_source_cleanup import (
