@@ -5,8 +5,9 @@ outcome with the status, then ``on_enter`` clears a finished plate at once when
 confirmation is off, or queues a failed or stopped job's effects. Wait: for a
 person. Exit, given a reason: ``clear_job_plate``, ``transfer_hold`` for a new
 external print, printer deletion (``final.release_printer``), or the printer's
-report that a stopped print finished. Recover: the hold is durable, and the
-printer manager rebuilds its plate-clear view from it at startup.
+report that a stopped print finished. ``on_exit`` removes a failed or stopped
+attempt's sent upload once its plate is cleared. Recover: the hold is durable,
+and the printer manager rebuilds its plate-clear view from it at startup.
 """
 
 from sqlalchemy import select
@@ -44,6 +45,15 @@ async def on_enter(change, row) -> None:
         clean_sd_copy=change.after == "failed" and change.before == "dispatching" and unconfirmed,
     )
     effects.queue_outcome_effect(change.db, effect)
+
+
+async def on_exit(change, row) -> None:
+    """Exit: once a failed or stopped attempt's plate is cleared, remove its sent upload after commit."""
+    from backend.app.services.lifecycle import effects
+
+    if change.action == "clear_plate" and change.before in ("failed", "cancelled"):
+        effect = effects.QueueOutcomeEffect(change.item_id, change.after, row.printer_id, clean_sd_copy=True)
+        effects.queue_outcome_effect(change.db, effect)
 
 
 async def clear_job_plate(db: AsyncSession, item: PrintQueueItem | int, *, automatic: bool = False) -> None:

@@ -83,7 +83,10 @@ _RELEASE_ACTIONS = ("clear_plate", "printer_deleted", "hold_transferred", "print
 # on_entered(change). State modules import this one, so they are named here
 # and imported on use.
 _LIFECYCLE = "backend.app.services.lifecycle"
-_EXITS = {"preheating": f"{_LIFECYCLE}.preheating"}
+_EXITS = {
+    "preheating": f"{_LIFECYCLE}.preheating",
+    **dict.fromkeys(AWAITING_PLATE_CLEAR_STATUSES, f"{_LIFECYCLE}.awaiting"),
+}
 _ENTRY = {
     "preheating": f"{_LIFECYCLE}.preheating",
     **dict.fromkeys(AWAITING_PLATE_CLEAR_STATUSES, f"{_LIFECYCLE}.awaiting"),

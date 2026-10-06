@@ -3,8 +3,7 @@
 Covers successful and unsuccessful. Enter: ``end`` ends a holding job (only a
 finished print ends successful), and ``release_printer`` every job holding a
 deleted printer. The engine then runs ``on_enter``, which releases the job's
-Queue-only sources and, after Clear Plate on a failed attempt, its sent upload.
-There is no wait, exit or recovery: Retry makes a new job.
+Queue-only sources. There is no wait, exit or recovery: Retry makes a new job.
 """
 
 from datetime import datetime, timezone
@@ -51,15 +50,10 @@ async def release_printer(db: AsyncSession, printer: Printer) -> None:
 
 
 async def on_enter(change, row) -> None:
-    """Enter: release the job's Queue-only sources, and after a failed attempt's Clear Plate its sent upload."""
-    from backend.app.services.lifecycle import effects
+    """Enter: release the job's Queue-only sources once nothing else needs them."""
     from backend.app.services.queue_source_cleanup import remove_queue_only_source_if_unused
 
     variants = select(PrintQueueVariant.library_file_id).where(PrintQueueVariant.queue_item_id == change.item_id)
     source_ids = {*await change.db.scalars(variants), row.library_file_id}
     for source_id in sorted(source_ids - {None}):
         await remove_queue_only_source_if_unused(change.db, source_id)
-    if change.action == "clear_plate" and change.after == "unsuccessful":
-        # The failed attempt's sent upload is removed once its plate is clear.
-        effect = effects.QueueOutcomeEffect(change.item_id, change.after, row.printer_id, clean_sd_copy=True)
-        effects.queue_outcome_effect(change.db, effect)

@@ -157,8 +157,10 @@ Each state's steps live in its module in `services/lifecycle/`: `preheating.py`,
 soak's claim and shuts its heaters down. Entry into an awaiting state writes the
 physical outcome with the status, then clears a finished plate when confirmation
 is off or queues a failed or stopped job's effects. Clear Plate, hold transfer
-and printer deletion end a job through `final.end`. Entry into a final state
-releases unused Queue sources.
+and printer deletion end a job through `final.end`. Leaving `failed` or
+`cancelled` through Clear Plate removes the attempt's sent upload; a state
+cleans up on its own exit. Entry into a final state releases unused Queue
+sources.
 
 Some entry work may start only after the transition commits. `enter_state`
 makes the transition, commits it, then runs the new state's post-commit step,
