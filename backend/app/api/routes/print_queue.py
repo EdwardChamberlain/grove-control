@@ -135,26 +135,11 @@ def _variant_summaries(item: PrintQueueItem) -> list[QueueVariantSummary]:
 
 
 def _assert_can_queue_archive(archive: PrintArchive, current_user: User | None) -> None:
-    """Gate turning *archive* into a print. Raises rather than returning a verdict.
+    """Gate turning *archive* into a print, for every route that queues one.
 
-    Shared by every route that creates queue items from an archive, so a new
-    one can't quietly become a weaker door to the same action than
-    ``POST /queue/`` is.
-
-    Two separate checks:
-
-    * IDOR fix (maziggy/bambuddy-security #2): without this, a caller with
-      QUEUE_CREATE could queue any user's archive even without ARCHIVES_READ on
-      it — Landon's PoC enumerated this on admin's archives as operator1. Gate
-      on ARCHIVES_READ_ALL OR ownership. 404 (not 403) so we don't leak "this
-      id exists but you can't queue it" for enumeration.
-    * Reprint perm gate (#1625): the legacy ``/archives/{id}/reprint`` endpoint
-      required ARCHIVES_REPRINT_OWN/ALL, and every route that replaces it must
-      keep that gate or an operator with QUEUE_CREATE could reprint via a
-      direct API call even when explicitly denied reprint perm. Mirrors the
-      frontend ``canModify('archives', 'reprint', ...)`` helper: REPRINT_ALL
-      allows any archive, REPRINT_OWN allows own only, ownerless archives
-      require REPRINT_ALL (fail-closed).
+    Without ARCHIVES_READ_ALL, only the caller's own archive is found (404, so
+    IDs can't be probed). Reprinting needs REPRINT_ALL, or REPRINT_OWN for one's
+    own archive; an ownerless archive needs REPRINT_ALL (#1625).
     """
     if current_user is None:
         return

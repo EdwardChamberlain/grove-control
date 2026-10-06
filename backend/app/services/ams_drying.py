@@ -92,13 +92,7 @@ class AmsDrying:
         return self.DEFAULT_DRYING_PRESETS
 
     async def _get_humidity_thresholds(self, db: AsyncSession) -> dict[str, int]:
-        """Per-filament humidity thresholds (#1605).
-
-        Returns the user-configured overrides map keyed by normalized filament
-        type (uppercase base, e.g. ``PLA``, ``ASA``) plus a ``default`` key for
-        unknown / unmapped types. Empty / unset → empty dict, in which case
-        callers fall back to ``ams_humidity_fair``.
-        """
+        """Per-filament humidity thresholds (#1605), by upper-case base type plus ``default``; empty when unset."""
         result = await db.execute(select(Settings).where(Settings.key == "ams_humidity_thresholds"))
         setting = result.scalar_one_or_none()
         if not setting or not setting.value:
@@ -119,14 +113,9 @@ class AmsDrying:
 
     @staticmethod
     def resolve_humidity_threshold(trays: list[dict], thresholds: dict[str, int], fallback: int) -> int:
-        """Resolve the effective humidity threshold for an AMS unit (#1605).
+        """An AMS unit's humidity threshold (#1605): the lowest for its loaded filament types.
 
-        For mixed filament types loaded into one AMS, returns the most
-        restrictive (lowest) threshold across all loaded tray types — matches
-        the conservative-params strategy already used for drying temp/hours.
-        Empty / unloaded trays contribute no constraint. Unknown types use the
-        ``default`` key, falling through to ``fallback`` (= ``ams_humidity_fair``)
-        when no per-type map is configured at all.
+        Unknown types use the ``default`` entry; with no per-type map, ``fallback``.
         """
         default = thresholds.get("default", fallback)
         if not thresholds:
@@ -145,10 +134,7 @@ class AmsDrying:
     def _get_conservative_drying_params(
         self, trays: list[dict], module_type: str, presets: dict[str, dict[str, int]]
     ) -> tuple[int, int, str] | None:
-        """Get the most conservative drying params for mixed filament types in an AMS unit.
-
-        Returns (temp, duration_hours, filament_type) or None if no drying-eligible filaments.
-        """
+        """(temp, hours, filament type) for one AMS unit's mixed filaments: lowest temperature, longest time."""
         temp_key = module_type if module_type in ("n3f", "n3s") else "n3f"
         hours_key = f"{temp_key}_hours"
 
@@ -189,15 +175,10 @@ class AmsDrying:
         *,
         require_plate_clear: bool = True,
     ):
-        """Start drying on idle printers based on humidity.
+        """Start drying idle printers' AMS units above their humidity threshold, and stop unwanted drying.
 
-        Three modes (can all be enabled independently):
-        - queue_drying_enabled: Dry between scheduled queue prints
-        - ambient_drying_enabled: Dry any idle printer when humidity is high, regardless of queue
-        - print_drying_enabled: Also evaluate printers that are currently printing,
-          when model+firmware supports "Print While Drying" (gated by
-          supports_drying_while_printing). Drying temperature is capped at
-          max(40, preset_temp - 5) to protect spools mid-print.
+        Queue, ambient and print-time drying are enabled separately. Print-time drying
+        needs Print While Drying support, and runs 5°C cooler, at 40°C or more.
         """
         queue_drying_enabled = await self._get_bool_setting(db, "queue_drying_enabled")
         ambient_drying_enabled = await self._get_bool_setting(db, "ambient_drying_enabled")
@@ -423,11 +404,7 @@ class AmsDrying:
                     self._drying_in_progress[pid] = time.monotonic()
 
     def _sync_drying_state(self):
-        """Sync in-memory drying state with actual printer status.
-
-        Handles backend restart — if a printer is drying but we don't know about it,
-        update our state. If we think it's drying but it's not, clear it.
-        """
+        """Forget auto-drying that printers no longer report."""
         to_remove = []
         for pid in self._drying_in_progress:
             state = printer_manager.get_status(pid)

@@ -5,7 +5,6 @@ Mixed into the print scheduler, which maps a job when it selects a printer for i
 
 import json
 import logging
-from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,7 +16,7 @@ from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.spool_assignment import SpoolAssignment
 from backend.app.models.spoolman_slot_assignment import SpoolmanSlotAssignment
-from backend.app.services.filament_requirements import canonical_filament_type
+from backend.app.services.filament_requirements import canonical_filament_type, extract_filament_requirements
 from backend.app.services.printer_manager import printer_manager
 
 logger = logging.getLogger(__name__)
@@ -109,19 +108,7 @@ class AmsMapping:
     async def _compute_ams_mapping_for_printer(
         self, db: AsyncSession, printer_id: int, item: PrintQueueItem
     ) -> list[int] | None:
-        """Compute AMS mapping for a printer based on filament requirements.
-
-        Called when a queue item has no ams_mapping set — either for model-based
-        items after printer assignment, or printer-specific items (e.g. from VP).
-
-        Args:
-            db: Database session
-            printer_id: The assigned printer ID
-            item: The queue item (contains archive_id or library_file_id)
-
-        Returns:
-            AMS mapping array or None if no mapping needed/possible
-        """
+        """A tray mapping for ``item`` on ``printer_id``, from its sliced filaments and the printer's trays, or None."""
         # Get printer status
         status = printer_manager.get_status(printer_id)
         if not status:
@@ -224,16 +211,7 @@ class AmsMapping:
         )
 
     def _build_override_direct_mapping(self, overrides: list[dict], status) -> list[int] | None:
-        """Build an AMS mapping directly from persisted overrides without a 3MF.
-
-        Used when ``_get_filament_requirements`` returns nothing (e.g. the 3MF's
-        slice_info is missing or unreadable) but overrides are present. Each
-        override's ``slot_id``, ``type``, and ``color`` is treated as the
-        filament requirement for that slot.
-
-        Returns the same format as ``_match_filaments_to_slots``, or None when
-        the AMS has no loaded filaments.
-        """
+        """A mapping from the job's stored overrides alone, for when its 3MF can't be read; None with no trays."""
         loaded = self._build_loaded_filaments(status)
         if not loaded:
             return None
@@ -258,42 +236,22 @@ class AmsMapping:
         )
 
     async def _get_filament_requirements(self, db: AsyncSession, item: PrintQueueItem) -> list[dict] | None:
-        """Resolve the queue item's source 3MF and parse the per-slot
-        filament requirements out of it. Thin DB-resolver wrapper around
-        ``filament_requirements.extract_filament_requirements`` so the VP
-        queue-mode write path (#1188) can reuse the same parser at upload
-        time.
-        """
-        from backend.app.services.filament_requirements import extract_filament_requirements
-
-        file_path: Path | None = None
+        """The per-slot filament requirements of ``item``'s source 3MF, or None."""
+        source = None
         if item.archive_id:
-            result = await db.execute(select(PrintArchive).where(PrintArchive.id == item.archive_id))
-            archive = result.scalar_one_or_none()
-            if archive:
-                file_path = settings.base_dir / archive.file_path
+            source = (
+                await db.execute(select(PrintArchive).where(PrintArchive.id == item.archive_id))
+            ).scalar_one_or_none()
         elif item.library_file_id:
-            result = await db.execute(LibraryFile.active().where(LibraryFile.id == item.library_file_id))
-            library_file = result.scalar_one_or_none()
-            if library_file:
-                lib_path = Path(library_file.file_path)
-                file_path = lib_path if lib_path.is_absolute() else settings.base_dir / library_file.file_path
-
-        if not file_path or not file_path.exists():
+            query = LibraryFile.active().where(LibraryFile.id == item.library_file_id)
+            source = (await db.execute(query)).scalar_one_or_none()
+        if source is None:
             return None
-
-        filaments = extract_filament_requirements(file_path, plate_id=item.plate_id)
-        return filaments if filaments else None
+        # An absolute (external library) path replaces the base directory.
+        return extract_filament_requirements(settings.base_dir / source.file_path, plate_id=item.plate_id) or None
 
     def _build_loaded_filaments(self, status) -> list[dict]:
-        """Build list of loaded filaments from printer status.
-
-        Args:
-            status: PrinterState from printer_manager
-
-        Returns:
-            List of loaded filament dicts with type, color, ams_id, tray_id, global_tray_id
-        """
+        """The printer's loaded AMS trays and external spools, with their global tray ids."""
         filaments = []
 
         # Get ams_extruder_map for dual-nozzle printers (H2D, H2D Pro)
@@ -390,32 +348,10 @@ class AmsMapping:
     async def _build_inventory_remain_overrides(
         self, db: AsyncSession, printer_id: int, loaded: list[dict]
     ) -> dict[int, float]:
-        """Return ``{global_tray_id: remaining_grams}`` for AMS slots the user
-        has bound to an inventory spool — Grove Control-side or Spoolman-side.
+        """Remaining grams for AMS slots bound to an inventory spool, Grove's or Spoolman's (#1508).
 
-        The MQTT ``remain`` field on a tray is the printer firmware's
-        RFID-decremented value, which has two limitations the "Prefer Lowest
-        Remaining Filament" feature has been ignoring (#1508):
-
-        - it's only meaningful for Bambu RFID spools; everything else reports
-          ``-1`` (then clamped to a sentinel), so multiple non-RFID trays
-          compare equal and the sort collapses to AMS-slot order — the user
-          who's curating inventory weights gets the lower-slot pick instead
-          of the lower-remaining pick;
-        - even when set, it's the *printer's* counter, not Grove Control's
-          ``label_weight - weight_used`` (internal mode) or Spoolman's
-          ``remaining_weight`` (Spoolman mode) — the two diverge any time the
-          user re-spools, swaps cardboard, or runs a print outside Grove Control.
-
-        When the user has bound a spool to a slot, their own inventory
-        tracking is authoritative; this helper surfaces that value so the
-        sort can prefer it. Slots without a binding are absent from the
-        returned map — the caller then falls back to MQTT ``remain`` for
-        those, preserving the pre-#1508 behaviour for un-tracked spools.
-
-        Returns an empty map on any failure (no inventory bindings, DB
-        error, Spoolman unreachable). A best-effort lookup; "Prefer Lowest"
-        is a preference, not a guarantee.
+        The user's inventory beats the firmware's ``remain``, which only RFID spools
+        report. Unbound slots and external spools are absent, and fall back to ``remain``.
         """
         if not loaded:
             return {}
@@ -469,9 +405,7 @@ class AmsMapping:
 
     @staticmethod
     async def _is_spoolman_mode(db: AsyncSession) -> bool:
-        """Mirror of ``filament_deficit._is_spoolman_mode`` — kept private
-        here to avoid making this module import-dependent on that private
-        helper's signature."""
+        """Whether Spoolman tracks inventory; like ``filament_deficit``'s, false on any error."""
         try:
             from backend.app.api.routes.settings import get_setting
 
@@ -482,20 +416,7 @@ class AmsMapping:
 
     @staticmethod
     def _slot_priority(ams_id: int | None, tray_id: int | None) -> int:
-        """Deterministic slot-position tie-breaker for the prefer-lowest sort.
-
-        Three bands, matched to the emission order in ``_build_loaded_filaments``
-        so a tied sort produces the same physical-position order the pre-#1508
-        stable sort did (preserves the regression-free baseline):
-
-        - Regular AMS (``ams_id`` 0..7): ``ams_id * 4 + tray_id`` → 0..31
-        - AMS-HT (``ams_id`` >= 128, single tray): ``1000 + (ams_id - 128) * 4``
-        - External / VT (``ams_id`` < 0, or ``None``): ``10_000``
-
-        Banding ensures regular AMS < AMS-HT < external on ties, regardless of
-        what the raw ``ams_id`` happens to be (in particular, ``ams_id = -1``
-        for VT must NOT sort to a negative number or it would beat AMS slot 0).
-        """
+        """Tie-breaker for the prefer-lowest sort: regular AMS, then AMS-HT, then external, in emission order."""
         if ams_id is None or ams_id < 0:
             return 10_000
         if ams_id >= 128:
@@ -504,25 +425,10 @@ class AmsMapping:
 
     @staticmethod
     def _prefer_lowest_sort_key(f: dict, overrides: dict[int, float] | None) -> tuple[int, float, int]:
-        """Sort key for the "Prefer Lowest Remaining Filament" preference.
+        """Sort key for Prefer Lowest Remaining Filament: inventory-tracked spools first, then lowest remaining.
 
-        Two-tier ordering: inventory-tracked spools always sort BEFORE
-        non-tracked spools (the user has told us they care about these
-        specifically), then ascending by remaining within each tier, then
-        ascending by AMS slot position as the deterministic tie-breaker.
-
-        Tiers are flagged by the first tuple element (0 = inventory-tracked,
-        1 = MQTT-only / unknown). Cross-tier value comparisons never run
-        because the tier flag dominates — which is what lets us mix grams
-        (inventory) and percent (MQTT) without a unit conversion.
-
-        Within the MQTT tier ``remain = -1`` (unknown) is mapped to 101 so
-        spools the printer DOES know something about sort ahead of those
-        it knows nothing about — preserves pre-#1508 behaviour for the
-        no-inventory-binding case.
-
-        Slot tie-breaker via ``_slot_priority`` so regular AMS < AMS-HT <
-        external on ties, matching the legacy emission-order stable sort.
+        Grams (tracked) and firmware percent (the rest, unknown last) are never
+        compared across tiers. Slot position breaks ties.
         """
         gtid = f.get("global_tray_id")
         slot_order = AmsMapping._slot_priority(f.get("ams_id"), f.get("tray_id"))
@@ -540,22 +446,11 @@ class AmsMapping:
         strict_color_slot_ids: set[int] | None = None,
         fts_installed: bool = False,
     ) -> list[int] | None:
-        """Match required filaments to loaded filaments and build AMS mapping.
+        """An AMS mapping (index slot_id - 1, value global tray id or -1) for the required filaments.
 
-        Priority: unique tray_info_idx match > exact color match > similar color match > type-only match
-
-        The tray_info_idx is a filament type identifier stored in the 3MF file when the user
-        slices (e.g., "GFA00" for generic PLA, "P4d64437" for custom presets). If the same
-        tray_info_idx appears in only ONE available tray, we use that tray. If multiple trays
-        have the same tray_info_idx (e.g., two spools of generic PLA), we fall back to color
-        matching among those trays.
-
-        Args:
-            required: List of required filaments with slot_id, type, color, tray_info_idx
-            loaded: List of loaded filaments with type, color, tray_info_idx, global_tray_id
-
-        Returns:
-            AMS mapping array (position = slot_id - 1, value = global_tray_id or -1)
+        A tray is chosen by unique ``tray_info_idx``, then exact, similar and type-only colour.
+        Another material family, or the wrong nozzle without an FTS, is never used;
+        forced slots take only an exact colour.
         """
         if not required:
             return None

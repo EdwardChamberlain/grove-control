@@ -47,18 +47,9 @@ def _parse_nozzle_diameter(raw) -> float | None:
 
 @dataclass(slots=True)
 class _ModelCandidate:
-    """One (file, printer model) pair the model-based matcher may try.
+    """One (file, printer model) pair the model-based matcher may try (#671).
 
-    Model-based assignment used to have exactly one of these per item, held
-    directly in the item's own columns. Cross-model queue items (#671) have
-    several, held in ``print_queue_variants``. Both shapes are normalised into
-    this so the matching, the cross-model gate and the waiting-reason handling
-    are written once and an item without variants provably takes the same path
-    it took before variants existed.
-
-    ``variant`` is None for the item's own columns and set for a real variant
-    row, which is what :meth:`PrinterSelection._resolve_variant` writes onto the
-    item once that candidate wins.
+    ``variant`` is None for the job's own columns, or the variant row that wins.
     """
 
     target_model: str | None
@@ -96,19 +87,10 @@ def _source_nozzle_mismatch(archive, library_file, printer_id: int) -> str | Non
 
 
 def _candidates_for(item: PrintQueueItem) -> list[_ModelCandidate]:
-    """Candidate files for ``item``, best first.
+    """Candidate files for ``item``, best first; a job without variants has one, its own columns.
 
-    An item with no variant rows yields exactly one candidate built from its own
-    columns — the pre-#671 behaviour, unchanged.
-
-    Variants come back least-attempted first, ties broken by the user's
-    ``position``. On the first pass every count is zero, so this is purely the
-    user's priority order. After a start-watchdog bounce the printer that failed
-    drops behind, so the next lap tries the other machine rather than spending the
-    item's whole retry budget on the one that is wedged. Once every candidate has
-    been tried equally often they cycle again, which keeps the item-level
-    ``DISPATCH_MAX_ATTEMPTS`` bound from #2555 intact — a job with alternatives
-    still gives up, it just does not give up without trying them.
+    Least-attempted first, so after a failed start the other machine is tried
+    next (#2555); ties keep the user's order.
     """
     variants = getattr(item, "variants", None) or []
     if not variants:
@@ -147,22 +129,10 @@ def _candidates_for(item: PrintQueueItem) -> list[_ModelCandidate]:
 
 
 def _collapse_waiting_reasons(per_model: list[tuple[str | None, str]]) -> str | None:
-    """Fold one waiting reason per candidate into a single line for the item.
+    """One waiting line for a job from its candidates' reasons, each labelled with its model.
 
-    A cross-model item produces a reason per candidate, and pasting them
-    together unlabelled reads as gibberish ("No idle printer; PETG not loaded"
-    — on which machine?). Each reason is prefixed with its model, except in the
-    single-candidate case where the item already displays its target model and
-    the prefix would be noise.
-
-    Identical reasons collapse rather than repeat, so three idle-less models
-    read as one clause.
-
-    When *every* candidate is merely busy the parts are joined with the ``" | "``
-    separator :meth:`PrinterSelection._is_busy_only` already parses, and left
-    unprefixed. That case must keep testing busy-only: a fleet that is simply
-    printing needs no user action, and labelling the clauses would turn each pass
-    over a two-model item into a "job waiting" notification.
+    A lone or repeated reason needs no label. All-busy reasons stay unlabelled
+    and " | "-joined, so ``_is_busy_only`` still sees nothing to notify.
     """
     reasons = [(model, reason) for model, reason in per_model if reason]
     if not reasons:
@@ -181,12 +151,7 @@ def _collapse_waiting_reasons(per_model: list[tuple[str | None, str]]) -> str | 
 
 
 def _candidate_model_label(candidates: list[_ModelCandidate]) -> str | None:
-    """Human label for the models an item is waiting on ("H2S or H2C").
-
-    Notifications take a single target model. For a cross-model item the item's
-    own ``target_model`` is whichever variant happens to be first, which reads as
-    a lie once it is the H2C that actually runs — so name all of them.
-    """
+    """The models a job waits on, for notifications ("H2S or H2C")."""
     models = list(dict.fromkeys(c.target_model for c in candidates if c.target_model))
     if not models:
         return None
@@ -207,12 +172,7 @@ def _nozzle_info_by_id(status) -> dict[int, dict]:
 
 
 def _nozzle_is_mounted(entry: dict | None) -> bool:
-    """Conservatively determine whether an H2 hotend entry has a nozzle.
-
-    H2 firmware can retain the previous diameter after a hotend has parked its
-    nozzle.  Only the explicit ``serial_number=N/A`` plus a zero temperature
-    rating identifies that state; incomplete telemetry must remain fail-safe.
-    """
+    """Whether an H2 hotend has a nozzle: only serial N/A and no temperature rating say it hasn't."""
     if entry is None:
         return True
     serial = str(entry.get("serial_number") or "").strip().upper()
@@ -226,14 +186,7 @@ def _nozzle_is_mounted(entry: dict | None) -> bool:
 
 
 def _installed_nozzle_diameters(status) -> list[float]:
-    """Parse the mounted hotend diameters from a PrinterState (#1899).
-
-    Returns the diameters the printer actually reports (e.g. [0.4] single-nozzle,
-    [0.4, 0.6] dual-nozzle), skipping the empty-string defaults that populate a
-    NozzleInfo before MQTT fills it in. An empty list means "the printer hasn't
-    told us its nozzle hardware" — callers must treat that as unknown, not as a
-    mismatch, so we never block a print on missing data.
-    """
+    """Mounted hotend diameters (#1899); an empty list means unknown, never a mismatch."""
     info = _nozzle_info_by_id(status)
     diameters: list[float] = []
     for index, nozzle in enumerate(getattr(status, "nozzles", None) or []):
@@ -266,15 +219,10 @@ def _nozzle_mismatch_message(
     installed: list[float],
     rack: list[float] | None = None,
 ) -> str | None:
-    """Return an actionable error message when the sliced nozzle can't be
-    printed on any installed nozzle, else None (#1899).
+    """An actionable message when no reachable nozzle fits the slice (#1899), else None.
 
-    Fail-safe: returns None whenever we lack the data to judge — no sliced
-    diameter, or the printer reported no nozzles — so a print is only ever
-    blocked on a POSITIVE mismatch. On dual-nozzle printers a match against
-    EITHER installed nozzle passes (a 0.6 slice is fine if one hotend is 0.6).
-    The 0.05 tolerance absorbs float noise while staying well inside the 0.2
-    gap between adjacent nozzle sizes (0.2/0.4/0.6/0.8).
+    Only a positive mismatch blocks: missing data never does. The 0.05 tolerance
+    absorbs float noise, well inside the 0.2 steps between nozzle sizes.
     """
     reachable = [*installed, *(rack or [])]
     if not sliced_nozzle or not reachable:
@@ -298,6 +246,17 @@ class Selection:
     printers: dict[int, int] = field(default_factory=dict)
     mappings: dict[int, str | None] = field(default_factory=dict)
     changed: bool = False  # Resolved candidates or waiting reasons to commit.
+
+
+def _loaded(status) -> list[tuple[str, str]]:
+    """Type and colour (six lowercase hex digits) of each loaded AMS tray and external spool."""
+    trays = [tray for unit in status.raw_data.get("ams", []) for tray in unit.get("tray", [])]
+    trays += status.raw_data.get("vt_tray") or []
+    return [
+        (tray["tray_type"], (tray.get("tray_color") or "").replace("#", "").lower()[:6])
+        for tray in trays
+        if tray.get("tray_type")
+    ]
 
 
 async def _wait(db: AsyncSession, item: PrintQueueItem, reason: str) -> None:
@@ -790,24 +749,9 @@ class PrinterSelection:
         filament_overrides: list[dict] | None = None,
         require_plate_clear: bool = True,
     ) -> tuple[int | None, str | None]:
-        """Find an idle, connected printer matching the model with compatible filaments.
+        """An idle printer of ``model`` with the job's materials loaded, as ``(printer_id, None)``, or ``(None, why)``.
 
-        Args:
-            db: Database session
-            model: Printer model to match (e.g., "X1C", "P1S")
-            exclude_ids: Printer IDs to exclude (already busy)
-            required_filament_types: Optional list of filament types needed (e.g., ["PLA", "PETG"])
-                                     If provided, only printers with all required types loaded will match.
-            target_location: Optional location filter. If provided, only printers in this location are considered.
-            filament_overrides: Optional list of override dicts. Each entry may include
-                                 ``force_color_match: true`` to require an exact type+color match
-                                 on the printer for that slot. Without the flag the existing
-                                 colour-preference logic applies.
-
-        Returns:
-            Tuple of (printer_id, waiting_reason):
-            - (printer_id, None) if a matching printer was found
-            - (None, reason) if no printer is available, with explanation
+        Forced colours must all be loaded; preferred colours rank the printers that qualify.
         """
         # Normalize model name and use case-insensitive matching
         normalized_model = normalize_printer_model(model) or model
@@ -959,44 +903,16 @@ class PrinterSelection:
 
     @staticmethod
     def _is_busy_only(waiting_reason: str) -> bool:
-        """Check if the waiting reason only contains 'Busy' entries.
-
-        When all matching printers are simply busy printing, the queued job
-        will start automatically once a printer finishes — no user action
-        is required, so we skip the notification.
-        """
+        """Whether every printer is merely busy: the job will start by itself, so nobody is notified."""
         parts = [p.strip() for p in waiting_reason.split(" | ")]
         return all(p.startswith("Busy:") for p in parts)
 
     def _get_missing_force_color_slots(self, printer_id: int, force_overrides: list[dict]) -> list[str]:
-        """Return descriptive strings for force_color_match slots not satisfied by the printer.
-
-        Each entry in ``force_overrides`` must have ``type`` and ``color`` fields and is expected
-        to carry ``force_color_match: True``.  The printer must have **every** such slot loaded
-        with an exact type+color match.
-
-        Returns:
-            List of ``"TYPE (color)"`` strings for unmatched slots (empty list means all match).
-        """
+        """Each forced slot the printer has no tray of exactly that type and colour for, as "TYPE (colour)"."""
         status = printer_manager.get_status(printer_id)
         if not status:
             return [f"{o.get('type', '?')} ({o.get('color_name') or o.get('color', '?')})" for o in force_overrides]
-
-        # Build set of loaded type+colour pairs from AMS and external spool
-        loaded: set[tuple[str, str]] = set()
-        for ams_unit in status.raw_data.get("ams", []):
-            for tray in ams_unit.get("tray", []):
-                tray_type = tray.get("tray_type")
-                tray_color = tray.get("tray_color", "")
-                if tray_type:
-                    color_norm = tray_color.replace("#", "").lower()[:6]
-                    loaded.add((tray_type.strip().upper(), color_norm))
-        for vt in status.raw_data.get("vt_tray") or []:
-            vt_type = vt.get("tray_type")
-            if vt_type:
-                color_norm = (vt.get("tray_color", "") or "").replace("#", "").lower()[:6]
-                loaded.add((vt_type.strip().upper(), color_norm))
-
+        loaded = {(tray_type.strip().upper(), color) for tray_type, color in _loaded(status)}
         missing = []
         for o in force_overrides:
             o_type = (o.get("type") or "").strip().upper()
@@ -1032,92 +948,30 @@ class PrinterSelection:
         return f"No matching material/colour. Waiting on {', '.join(sorted(set(missing_colors)))}"
 
     def _get_missing_filament_types(self, printer_id: int, required_types: list[str]) -> list[str]:
-        """Get the list of required filament types that are not loaded on the printer.
-
-        Args:
-            printer_id: The printer ID
-            required_types: List of filament types needed (e.g., ["PLA", "PETG"])
-
-        Returns:
-            List of missing filament types (empty if all are loaded)
-        """
+        """The required types the printer has no tray of the same material family for."""
         status = printer_manager.get_status(printer_id)
         if not status:
             return required_types  # Can't determine, assume all missing
-
-        # Collect all filament types loaded on this printer (AMS units + external spool)
-        # Use canonical types so equivalence groups (e.g. PA-CF/PA12-CF/PAHT-CF) match.
-        loaded_types: set[str] = set()
-
-        # Check AMS units (stored in raw_data["ams"])
-        ams_data = status.raw_data.get("ams", [])
-        if ams_data:
-            for ams_unit in ams_data:
-                for tray in ams_unit.get("tray", []):
-                    tray_type = tray.get("tray_type")
-                    if tray_type:
-                        loaded_types.add(canonical_filament_type(tray_type))
-
-        # Check external spool(s) (virtual tray, stored in raw_data["vt_tray"] as list)
-        for vt in status.raw_data.get("vt_tray") or []:
-            vt_type = vt.get("tray_type")
-            if vt_type:
-                loaded_types.add(canonical_filament_type(vt_type))
-
-        # Find which required types are missing (using canonical type for equivalence)
-        missing = []
-        for req_type in required_types:
-            if canonical_filament_type(req_type) not in loaded_types:
-                missing.append(req_type)
-
-        return missing
+        # Canonical types, so equivalent materials (e.g. PA-CF/PA12-CF/PAHT-CF) match.
+        loaded = {canonical_filament_type(tray_type) for tray_type, _color in _loaded(status)}
+        return [required for required in required_types if canonical_filament_type(required) not in loaded]
 
     def _count_override_color_matches(self, printer_id: int, overrides: list[dict]) -> int:
-        """Count how many filament overrides have an exact color match on the printer.
-
-        Used to prefer printers that already have the desired override colors loaded.
-        """
+        """How many overrides a loaded tray matches exactly, to prefer printers with those colours."""
         status = printer_manager.get_status(printer_id)
         if not status:
             return 0
-
-        # Collect loaded filaments' type+color pairs
-        loaded: set[tuple[str, str]] = set()
-        for ams_unit in status.raw_data.get("ams", []):
-            for tray in ams_unit.get("tray", []):
-                tray_type = tray.get("tray_type")
-                tray_color = tray.get("tray_color", "")
-                if tray_type:
-                    color_norm = tray_color.replace("#", "").lower()[:6]
-                    loaded.add((tray_type.upper(), color_norm))
-        for vt in status.raw_data.get("vt_tray") or []:
-            vt_type = vt.get("tray_type")
-            if vt_type:
-                color_norm = (vt.get("tray_color", "") or "").replace("#", "").lower()[:6]
-                loaded.add((vt_type.upper(), color_norm))
-
-        matches = 0
-        for o in overrides:
-            o_type = (o.get("type") or "").upper()
-            o_color = (o.get("color") or "").replace("#", "").lower()[:6]
-            if (o_type, o_color) in loaded:
-                matches += 1
-        return matches
+        loaded = {(tray_type.upper(), color) for tray_type, color in _loaded(status)}
+        return sum(
+            ((o.get("type") or "").upper(), (o.get("color") or "").replace("#", "").lower()[:6]) in loaded
+            for o in overrides
+        )
 
     def _resolve_variant(self, item: PrintQueueItem, candidate: _ModelCandidate) -> None:
-        """Fold the winning candidate's file and settings onto the queue row (#671).
+        """Fold the winning variant's file and settings onto the job (#671), so dispatch needs no variants.
 
-        This is the whole trick that keeps cross-model items cheap: the many-to-many
-        never escapes the selection loop. By the time the pass commits, the row
-        looks exactly like an ordinary single-file model-based item, so the upload,
-        archive creation, expected-print registration, print history and reprint
-        paths need no knowledge that variants exist.
-
-        No-ops for a non-variant candidate, which is already the item's own columns.
-
-        Safe to run and re-run: the item's file columns are only ever *read* when it
-        has no variants, so an item that gets resolved and then skipped (library-row
-        conflict, previous-print gate) is simply resolved again on the next pass.
+        A job's own candidate is a no-op. Safe to re-run: a job's file columns are
+        read only when it has no variants.
         """
         variant = candidate.variant
         if variant is None:
@@ -1159,10 +1013,7 @@ class PrinterSelection:
         return auto_on_plugs[0]
 
     async def _power_on_and_wait(self, plug: SmartPlug, printer_id: int, db: AsyncSession) -> bool:
-        """Turn on smart plug and wait for printer to connect.
-
-        Returns True if printer connected successfully within timeout.
-        """
+        """Turn on the printer's smart plug, and say whether the printer connected in time."""
         # Get the appropriate service for the plug type (Tasmota or Home Assistant)
         service = await smart_plug_manager.get_service_for_plug(plug, db)
 
