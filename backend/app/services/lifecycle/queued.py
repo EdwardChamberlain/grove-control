@@ -51,12 +51,14 @@ async def create_job(
     for, or ``"top"``: ahead of every waiting job that could take the same
     printer. Each job gets its own copy of ``variants``.
     """
+    if not jobs:
+        return []
     values = {}
     if variants:
         # The scheduler orders a job before its printer is known, by its shortest candidate.
         estimates = [variant["print_time_seconds"] for variant in variants if variant.get("print_time_seconds")]
         values["print_time_seconds"] = min(estimates) if estimates else None
-    models = {jobs[0].get("target_model"), *(variant["target_model"] for variant in variants)} - {None}
+    models = {model for model in (jobs[0].get("target_model"), *(v["target_model"] for v in variants)) if model}
     first = await _place(db, jobs[0].get("printer_id"), models, len(jobs), at)
     created = []
     for offset, job in enumerate(jobs):
@@ -67,7 +69,9 @@ async def create_job(
     return created
 
 
-async def _place(db: AsyncSession, printer_id: int | None, models: set[str], quantity: int, at) -> int:
+async def _place(
+    db: AsyncSession, printer_id: int | None, models: set[str], quantity: int, at: int | str | None
+) -> int:
     """The first position for new jobs, taken under a lock on their queue."""
     if db.get_bind().dialect.name == "postgresql":
         # SQLite serializes writes; an empty queue has no rows for PostgreSQL to lock.

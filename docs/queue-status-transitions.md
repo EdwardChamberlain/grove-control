@@ -57,10 +57,18 @@ a previously ended identity cannot establish this transfer.
 
 ## Dispatch
 
+Every new job enters `queued` through `create_job` in
+`services/lifecycle/queued.py`, whether from the Queue, Files, a webhook, a
+virtual printer or Retry. It places jobs in their queue under one lock: at the
+end, at a position later jobs make room for, or (Retry) ahead of every waiting
+job that could take the same printer.
+
 `queued` jobs form a pool. A populated `printer_id` is a **Specific machine**
 requirement; an **Any machine** job remains unassigned until its hold commits.
-The scheduler selects the printer and its tray mapping in memory. Eligibility
-checks cover model, nozzle, material, drying and fresh idle telemetry. A missing
+Each pass, printer selection (`services/printer_selection.py`) chooses the
+printer and its tray mapping (`services/ams_mapping.py`) in memory. Eligibility
+checks cover model, nozzle, material, drying (`services/ams_drying.py`) and
+fresh idle telemetry. A missing
 printer leaves the job queued. Missing sources park it with Manual start and a
 reason; the system never ends a queued job. Files purging likewise detaches
 missing sources without cancelling waiting jobs.
@@ -151,9 +159,9 @@ hold transfer and printer reports have explicit action guards. After the
 write, the engine aligns the Archive attempt, runs the old state's exit step and
 then the new state's entry step, all in the same transaction.
 
-Each state's steps live in its module in `services/lifecycle/`: `preheating.py`,
-`awaiting.py` (`finished`, `failed`, `cancelled`) and `final.py` (`successful`,
-`unsuccessful`). Leaving `preheating` other than for `dispatching` releases the
+Each state's steps live in its module in `services/lifecycle/`: `queued.py`,
+`preheating.py`, `awaiting.py` (`finished`, `failed`, `cancelled`) and
+`final.py` (`successful`, `unsuccessful`). Leaving `preheating` other than for `dispatching` releases the
 soak's claim and shuts its heaters down. Entry into an awaiting state writes the
 physical outcome with the status, then clears a finished plate when confirmation
 is off or queues a failed or stopped job's effects. Clear Plate, hold transfer

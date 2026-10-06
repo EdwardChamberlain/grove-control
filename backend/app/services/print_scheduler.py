@@ -609,6 +609,7 @@ class PrintScheduler(PrinterSelection, AmsMapping, AmsDrying):
                 # stop the entire queue when HA itself is unavailable.
                 logger.warning("Home Assistant interlock check failed: %s", e)
                 interlocked = {}
+
             selection = await self._select_printers(
                 db,
                 items,
