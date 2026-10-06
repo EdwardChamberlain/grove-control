@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import nullcontext
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
@@ -92,6 +93,9 @@ _ENTRY = {
     **dict.fromkeys(AWAITING_PLATE_CLEAR_STATUSES, f"{_LIFECYCLE}.awaiting"),
     **dict.fromkeys(FINAL_STATUSES, f"{_LIFECYCLE}.final"),
 }
+# The (job, state) that enter_state() is entering; only it may enter a state
+# with a post-commit step, so that step cannot be skipped.
+_entering: ContextVar[tuple[int, str] | None] = ContextVar("lifecycle_entering", default=None)
 
 
 @dataclass(frozen=True)
@@ -156,7 +160,8 @@ async def transition_queue_item(
     legacy upgrade use its own connection. On conflict nothing is written or
     queued: the caller rolls back, or skips this item and continues. This never
     commits or rolls back, and ORM sync never flushes a second status UPDATE.
-    Entry into dispatching reserves the printer before any file copy. A session
+    Entry into dispatching reserves the printer before any file copy. A state
+    with a post-commit step is entered only through enter_state(). A session
     gets back the written change.
     """
     upgrading = migration and isinstance(db, AsyncConnection) and status in LEGACY_TRANSITIONS.get(expected_status, ())
@@ -172,6 +177,8 @@ async def transition_queue_item(
         if metadata.get("printer_id", item.printer_id if not isinstance(item, int) else None) is None:
             raise InvalidQueueTransition("Dispatch requires a selected printer")
     session = isinstance(db, AsyncSession)
+    if session and expected_status != status and _step(status, "on_entered") and _entering.get() != (item_id, status):
+        raise InvalidQueueTransition(f"Enter {status} with enter_state(), which runs its post-commit step")
     if session and (expected_status != status or confirmed):
         if status in AWAITING_PLATE_CLEAR_STATUSES and action != "cancel":
             await _record_physical_outcome(db, item_id, status, metadata, confirmed, archive_failure_reason)
@@ -242,14 +249,17 @@ async def enter_state(
     lock, and says whether the job entered. A transition the database refuses
     (a conflict, or the holding index) is rolled back and returns False before
     the step runs. Anything else, including the step's own errors, is raised.
-    A state with this step is entered only here (see the architecture test).
+    The writer refuses to enter a state with this step any other way.
     """
+    entering = _entering.set((item.id, status))
     try:
         change = await transition_queue_item(db, item, expected_status, status, **transition)
         await db.commit()
     except (IntegrityError, QueueTransitionConflict):
         await db.rollback()
         return False
+    finally:
+        _entering.reset(entering)
     entered = _step(status, "on_entered")
     return await entered(change) if entered else True
 

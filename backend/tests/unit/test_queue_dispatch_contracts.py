@@ -20,6 +20,7 @@ from backend.app.services.archive import ArchiveService
 from backend.app.services.lifecycle import preheating as heat
 from backend.app.services.lifecycle.engine import InvalidQueueTransition, transition_queue_item
 from backend.app.services.queue_archive import link_dispatch_archive, prepare_dispatch_archive
+from backend.tests.unit.test_lifecycle_preheating import enter_preheating
 from backend.tests.unit.test_queue_archive_alignment import alignment  # noqa: F401
 from backend.tests.unit.test_queue_dispatch_races import handoff  # noqa: F401
 
@@ -249,8 +250,7 @@ async def test_dispatch_entry_holds_the_printer_before_creating_an_attempt(align
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
         if before == "preheating":
-            await transition_queue_item(db, job, "queued", "preheating")
-            await db.commit()
+            await enter_preheating(db, job)
         await transition_queue_item(db, job, before, "dispatching")
         await db.commit()
         await db.refresh(job)

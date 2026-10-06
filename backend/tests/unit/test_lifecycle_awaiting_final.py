@@ -1,16 +1,14 @@
 """Specify post-commit entry, and the awaiting and final states (#204 stage 3).
 
 The engine runs a state's post-commit entry step only once its transition has
-committed, and production enters such a state only through enter_state. A
+committed, and the writer refuses to enter such a state any other way. A
 refused transition runs no step; the step's own errors are raised. Awaiting
 and final own their entry and exit steps, which run in the transition's
 transaction after the conditional write; a state cleans up on its own exit.
 Only an ended job can pass its hold to a new external print.
 """
 
-import ast
 from importlib import import_module
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -28,13 +26,12 @@ from backend.app.services import queue_source_cleanup
 from backend.app.services.lifecycle import awaiting, effects, engine as lifecycle_engine, preheating
 from backend.app.services.lifecycle.engine import (
     ALLOWED_TRANSITIONS,
+    InvalidQueueTransition,
     QueueTransitionConflict,
     enter_state,
     transition_queue_item,
 )
 from backend.tests.unit.test_chamber_heat_soak import soak  # noqa: F401
-
-APP_DIR = Path(__file__).parents[2] / "app"
 
 
 @pytest.fixture
@@ -75,46 +72,38 @@ def test_every_step_belongs_to_its_state_module():
         assert any(callable(getattr(import_module(module), step, None)) for step in ("on_enter", "on_entered"))
 
 
-def _post_commit_states() -> set[str]:
-    return {state for state, module in lifecycle_engine._ENTRY.items() if hasattr(import_module(module), "on_entered")}
+async def test_the_writer_refuses_to_skip_a_post_commit_step(sessions):
+    item_id = await job(sessions, "queued")
+    async with sessions() as db:
+        item = await db.get(PrintQueueItem, item_id)
+        with pytest.raises(InvalidQueueTransition, match="enter_state"):
+            await transition_queue_item(db, item, "queued", "preheating", values={"preheat_owner": "worker"})
+        await db.rollback()
+    async with sessions() as db:
+        assert (await db.get(PrintQueueItem, item_id)).status == "queued"  # Refused before writing.
 
 
-def _plain_entries(source: str, states: set[str]) -> list[int]:
-    """Lines that enter one of ``states`` with the writer itself, which skips its post-commit step."""
-    lines = []
-    for node in ast.walk(ast.parse(source)):
-        if not isinstance(node, ast.Call):
-            continue
-        name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", None)
-        # The writer takes the target fourth; the scheduler's skip-on-conflict wrapper takes it third.
-        position = {"transition_queue_item": 3, "_transition_or_skip": 2}.get(name)
-        if position is None:
-            continue
-        target = node.args[position] if len(node.args) > position else None
-        target = next((keyword.value for keyword in node.keywords if keyword.arg == "status"), target)
-        if isinstance(target, ast.Constant) and target.value in states:
-            lines.append(node.lineno)
-    return lines
+async def test_enter_states_permission_covers_only_its_own_transition(sessions, monkeypatch):
+    item_id = await job(sessions, "queued")
+    async with sessions() as db:
+        other = PrintQueueItem(status="queued")  # No printer, so the holding index allows a second hold.
+        db.add(other)
+        await db.commit()
+        other_id = other.id
+    refused = []
 
+    async def on_entered(change):
+        # The step runs after enter_state's own transition, so it cannot skip another job's step.
+        other = await change.db.get(PrintQueueItem, other_id)
+        with pytest.raises(InvalidQueueTransition):
+            await transition_queue_item(change.db, other, "queued", "preheating")
+        refused.append(other_id)
+        return True
 
-def test_production_enters_a_state_with_a_post_commit_step_only_through_enter_state():
-    states = _post_commit_states()
-    assert "preheating" in states
-    offenders = [
-        f"{path.relative_to(APP_DIR)}:{line}"
-        for path in APP_DIR.rglob("*.py")
-        for line in _plain_entries(path.read_text(), states)
-    ]
-    assert offenders == [], "Enter these states with enter_state(): " + ", ".join(offenders)
-
-
-def test_the_entry_check_recognizes_a_plain_entry():
-    # Otherwise the production check could pass by matching nothing.
-    source = (
-        'await transition_queue_item(db, item, "queued", "preheating")\n'
-        'await transition_queue_item(db, item, "queued", status="preheating")\n'
-    )
-    assert _plain_entries(source, {"preheating"}) == [1, 2]
+    monkeypatch.setattr(preheating, "on_entered", on_entered)
+    async with sessions() as db:
+        assert await enter_state(db, await db.get(PrintQueueItem, item_id), "queued", "preheating")
+    assert refused == [other_id]
 
 
 async def test_post_commit_entry_runs_once_the_transition_has_committed(sessions, monkeypatch):

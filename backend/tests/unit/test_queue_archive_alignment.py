@@ -25,6 +25,7 @@ from backend.app.services.lifecycle.engine import QueueTransitionConflict, trans
 from backend.app.services.queue_actions import cancel_job
 from backend.app.services.queue_archive import link_dispatch_archive, prepare_dispatch_archive
 from backend.app.services.queue_source_cleanup import remove_queue_only_source_if_unused
+from backend.tests.unit.test_lifecycle_preheating import enter_preheating
 
 
 @pytest.fixture
@@ -140,8 +141,7 @@ async def test_hold_commits_before_archive_link_and_same_state_never_copies_agai
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
         if before == "preheating":
-            await transition_queue_item(db, job, "queued", "preheating")
-            await db.commit()
+            await enter_preheating(db, job)
             assert await db.scalar(select(PrintArchive.id)) is None
         await transition_queue_item(db, job, before, "dispatching")
         await db.commit()
@@ -345,7 +345,7 @@ async def test_final_variant_releases_all_its_sources_after_commit(alignment):
 async def test_preheat_failure_creates_no_archive_or_early_source_cleanup(alignment):
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
-        await transition_queue_item(db, job, "queued", "preheating")
+        await enter_preheating(db, job)
         await transition_queue_item(db, job, "preheating", "failed", values={"error_message": "Heater failed"})
         await db.commit()
         assert await db.scalar(select(PrintArchive.id)) is None
@@ -429,12 +429,10 @@ async def test_committed_heat_soak_handoff_is_scheduled_without_copying(alignmen
         await db.commit()
         now = heat.utcnow()
         for job in (first, second):
-            await transition_queue_item(
+            await enter_preheating(
                 db,
                 job,
-                "queued",
-                "preheating",
-                values={
+                {
                     "chamber_heat_soak": True,
                     "heat_soak_minutes": 1,
                     "preheat_owner": service.owner,
@@ -513,12 +511,10 @@ async def test_heat_soak_dispatch_uses_current_telemetry_after_archive_copy(alig
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
         now = heat.utcnow()
-        await transition_queue_item(
+        await enter_preheating(
             db,
             job,
-            "queued",
-            "preheating",
-            values={
+            {
                 "chamber_heat_soak": True,
                 "heat_soak_minutes": 1,
                 "preheat_owner": service.owner,
@@ -789,12 +785,10 @@ async def test_heat_soak_archive_copy_failure_commits_before_auto_off(alignment,
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
         now = heat.utcnow()
-        await transition_queue_item(
+        await enter_preheating(
             db,
             job,
-            "queued",
-            "preheating",
-            values={
+            {
                 "auto_off_after": True,
                 "chamber_heat_soak": True,
                 "heat_soak_minutes": 1,

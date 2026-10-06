@@ -168,12 +168,12 @@ which re-checks the job under its own lock. Preheating uses it to turn the
 heaters on only once the hold is durable, so a Stop committed in between
 prevents any heater command. A transition the database refuses (a conflict, or
 the holding index) is rolled back and runs no step; errors from the step itself
-are raised. A plain `transition_queue_item` skips the step, so production code
-enters such a state only through `enter_state`. An architecture test enforces
-this for literal target states.
+are raised. `transition_queue_item` refuses to enter a state with a post-commit
+step itself, so the step cannot be skipped.
 
-The caller owns the transaction, except in `enter_state`. Lifecycle work queues after-commit effects and
-rollback cleanup in one registry, `services/lifecycle/effects.py`. Effects run
+The caller owns the transaction, except in `enter_state`. Lifecycle work queues
+after-commit effects and rollback cleanup in one registry,
+`services/lifecycle/effects.py`. Effects run
 only after the outermost commit; savepoints neither run nor discard them, and a
 failing effect is logged without affecting the commit or later effects.
 Plate-clear flags and Archive IDs in printer views are projections, rehydrated

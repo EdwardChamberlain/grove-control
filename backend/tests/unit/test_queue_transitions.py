@@ -21,6 +21,7 @@ from backend.app.services.lifecycle.engine import (
     transition_queue_item,
 )
 from backend.app.services.print_scheduler import PrintScheduler
+from backend.tests.unit.test_lifecycle_preheating import enter_preheating
 
 
 @pytest.fixture
@@ -74,18 +75,21 @@ async def test_existing_workflows_keep_their_status_paths(sessions, path):
     async with sessions() as db:
         item = await db.get(PrintQueueItem, item_id)
         for before, after in zip(path, path[1:], strict=False):
-            await transition_queue_item(
-                db,
-                item,
-                before,
-                after,
-                action="cancel"
-                if before == "queued" and after == "unsuccessful"
-                else "clear_plate"
-                if before in ("finished", "failed", "cancelled")
-                else None,
-            )
-            await db.commit()
+            if after == "preheating":
+                await enter_preheating(db, item)
+            else:
+                await transition_queue_item(
+                    db,
+                    item,
+                    before,
+                    after,
+                    action="cancel"
+                    if before == "queued" and after == "unsuccessful"
+                    else "clear_plate"
+                    if before in ("finished", "failed", "cancelled")
+                    else None,
+                )
+                await db.commit()
             assert item.status == after
             await db.refresh(item)
             assert item.status == after
