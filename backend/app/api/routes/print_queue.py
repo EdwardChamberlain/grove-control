@@ -2,13 +2,11 @@
 
 import json
 import logging
-import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-import defusedxml.ElementTree as ET
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
-from sqlalchemy import and_, func, inspect, or_, select, update
+from sqlalchemy import and_, func, inspect, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -46,6 +44,7 @@ from backend.app.services.job_identity import needs_dispatch_resolution, telemet
 from backend.app.services.lifecycle.awaiting import clear_job_plate
 from backend.app.services.lifecycle.engine import InvalidQueueTransition, lock_queue_item, transition_queue_item
 from backend.app.services.lifecycle.preheating import SkipHeatSoakResult, heat_soak_dispatch_started, skip_heat_soak
+from backend.app.services.lifecycle.queued import create_job, filament_contract
 from backend.app.services.notification_service import notification_service
 from backend.app.services.queue_source_cleanup import (
     remove_queue_only_source_if_unused,
@@ -135,73 +134,6 @@ def _variant_summaries(item: PrintQueueItem) -> list[QueueVariantSummary]:
     ]
 
 
-def _extract_filament_types_from_3mf(file_path: Path, plate_id: int | None = None) -> list[str]:
-    """Extract unique filament types from a 3MF file.
-
-    Args:
-        file_path: Path to the 3MF file
-        plate_id: Optional plate index to filter for (for multi-plate files)
-
-    Returns:
-        List of unique filament types (e.g., ["PLA", "PETG"])
-    """
-    types: set[str] = set()
-
-    try:
-        with zipfile.ZipFile(file_path, "r") as zf:
-            if "Metadata/slice_info.config" not in zf.namelist():
-                return []
-
-            content = zf.read("Metadata/slice_info.config").decode()
-            root = ET.fromstring(content)
-
-            if plate_id is not None:
-                # Find the plate element with matching index
-                for plate_elem in root.findall(".//plate"):
-                    plate_index = None
-                    for meta in plate_elem.findall("metadata"):
-                        if meta.get("key") == "index":
-                            try:
-                                plate_index = int(meta.get("value", "0"))
-                            except ValueError:
-                                pass  # Skip plate with unparseable index
-                            break
-
-                    if plate_index == plate_id:
-                        for filament_elem in plate_elem.findall("filament"):
-                            filament_type = filament_elem.get("type", "")
-                            used_g = filament_elem.get("used_g", "0")
-                            try:
-                                used_grams = float(used_g)
-                            except (ValueError, TypeError):
-                                used_grams = 0
-                            if used_grams > 0 and filament_type:
-                                types.add(filament_type)
-                        break
-            else:
-                # No plate_id specified - extract all filaments with used_g > 0
-                for filament_elem in root.findall(".//filament"):
-                    filament_type = filament_elem.get("type", "")
-                    used_g = filament_elem.get("used_g", "0")
-                    try:
-                        used_grams = float(used_g)
-                    except (ValueError, TypeError):
-                        used_grams = 0
-                    if used_grams > 0 and filament_type:
-                        types.add(filament_type)
-
-    except Exception as e:
-        logger.warning("Failed to extract filament types from %s: %s", file_path, e)
-
-    return sorted(types)
-
-
-# Local alias kept so existing call sites stay compact; the implementation lives
-# in utils/threemf_tools.py so the notification path (main.py) can reuse it
-# without importing from a routes module (#1785).
-_extract_print_time_from_3mf = extract_print_time_from_3mf
-
-
 def _assert_can_queue_archive(archive: PrintArchive, current_user: User | None) -> None:
     """Gate turning *archive* into a print. Raises rather than returning a verdict.
 
@@ -248,22 +180,6 @@ def _assert_can_queue_library_file(library_file: LibraryFile, current_user: User
         and library_file.created_by_id != current_user.id
     ):
         raise HTTPException(404, "Library file not found")
-
-
-async def _resolve_source_path(db: AsyncSession, item: PrintQueueItem) -> Path | None:
-    """Resolve an existing queue item's source 3MF on disk, or None."""
-    if item.archive_id:
-        result = await db.execute(select(PrintArchive).where(PrintArchive.id == item.archive_id))
-        archive = result.scalar_one_or_none()
-        if archive:
-            return settings.base_dir / archive.file_path
-    elif item.library_file_id:
-        result = await db.execute(LibraryFile.active().where(LibraryFile.id == item.library_file_id))
-        library_file = result.scalar_one_or_none()
-        if library_file:
-            lib_path = Path(library_file.file_path)
-            return lib_path if lib_path.is_absolute() else settings.base_dir / library_file.file_path
-    return None
 
 
 def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
@@ -391,7 +307,7 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
             if item.plate_id:
                 archive_path = settings.base_dir / item.archive.file_path
                 if archive_path.exists():
-                    plate_time = _extract_print_time_from_3mf(archive_path, item.plate_id)
+                    plate_time = extract_print_time_from_3mf(archive_path, item.plate_id)
                     plate_weight = sum(
                         f["used_g"] for f in extract_filament_usage_from_3mf(archive_path, item.plate_id)
                     )
@@ -423,7 +339,7 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
             lib_path = Path(item.library_file.file_path)
             library_file_path = lib_path if lib_path.is_absolute() else settings.base_dir / item.library_file.file_path
             if library_file_path.exists():
-                plate_time = _extract_print_time_from_3mf(library_file_path, item.plate_id)
+                plate_time = extract_print_time_from_3mf(library_file_path, item.plate_id)
                 plate_weight = sum(
                     f["used_g"] for f in extract_filament_usage_from_3mf(library_file_path, item.plate_id)
                 )
@@ -608,38 +524,20 @@ def _variant_values(
     model: str,
     position: int,
 ) -> dict:
-    """Column values for one candidate, extracted from its own 3MF.
-
-    Each candidate is a different slice, so its filament requirements and print
-    time come from its own file rather than being inherited from the item.
-
-    Returns values rather than a row so a quantity submission can build one row
-    per copy without re-opening the 3MF for each.
-    """
-    lib_path = Path(library_file.file_path)
-    file_path = lib_path if lib_path.is_absolute() else settings.base_dir / library_file.file_path
-
-    required_types = None
-    filament_overrides_json = None
+    """Column values for one candidate, from its own 3MF: each candidate is a different slice."""
+    file_path = (
+        settings.base_dir / library_file.file_path
+    )  # SEC-PATH-OK: DB-stored; external-library rows may be absolute
     print_time = (library_file.file_metadata or {}).get("print_time_seconds")
-
+    types, overrides = set(), None
     if file_path.exists():
-        types = _extract_filament_types_from_3mf(file_path, spec.plate_id)
-        if types:
-            required_types = json.dumps(types)
-        if spec.plate_id:
-            plate_time = _extract_print_time_from_3mf(file_path, spec.plate_id)
-            if plate_time is not None:
-                print_time = plate_time
+        requirements = extract_filament_requirements(file_path, spec.plate_id)
+        types = {requirement["type"] for requirement in requirements if requirement["type"]}
+        plate_time = extract_print_time_from_3mf(file_path, spec.plate_id) if spec.plate_id else None
+        print_time = print_time if plate_time is None else plate_time
         if spec.filament_overrides:
-            plate_overrides = overrides_for_plate(spec.filament_overrides, file_path, spec.plate_id)
-            if plate_overrides:
-                filament_overrides_json = json.dumps(plate_overrides)
-                override_types = sorted({o["type"] for o in plate_overrides if "type" in o})
-                if override_types:
-                    existing = set(json.loads(required_types)) if required_types else set()
-                    required_types = json.dumps(sorted(existing | set(override_types)))
-
+            overrides = overrides_for_plate(spec.filament_overrides, file_path, spec.plate_id)
+            types |= {override["type"] for override in overrides if "type" in override}
     return {
         "position": position,
         "library_file_id": library_file.id,
@@ -647,8 +545,8 @@ def _variant_values(
         "plate_id": spec.plate_id,
         "ams_mapping": json.dumps(spec.ams_mapping) if spec.ams_mapping else None,
         "nozzle_mapping": json.dumps(spec.nozzle_mapping) if spec.nozzle_mapping else None,
-        "filament_overrides": filament_overrides_json,
-        "required_filament_types": required_types,
+        "filament_overrides": json.dumps(overrides) if overrides else None,
+        "required_filament_types": json.dumps(sorted(types)) if types else None,
         "print_time_seconds": print_time,
     }
 
@@ -736,35 +634,7 @@ async def add_to_queue(
         archive = result.scalar_one_or_none()
         if not archive:
             raise HTTPException(400, "Archive not found")
-        # IDOR fix: without this check, a
-        # caller with QUEUE_CREATE could queue any user's archive even
-        # without ARCHIVES_READ on it — Landon's PoC enumerated this on
-        # admin's archives as operator1. Gate on ARCHIVES_READ_ALL OR
-        # ownership of the archive. 404 (not 403) so we don't leak
-        # "this id exists but you can't queue it" for enumeration.
-        if (
-            actor is not None
-            and not actor.has_permission(Permission.ARCHIVES_READ_ALL.value)
-            and archive.created_by_id != actor.id
-        ):
-            raise HTTPException(404, "Archive not found")
-        # Reprint perm gate (#1625): the legacy /archives/{id}/reprint endpoint
-        # required ARCHIVES_REPRINT_OWN/ALL; the unified queue route must keep
-        # that gate or an operator with QUEUE_CREATE could reprint via direct
-        # API call even if explicitly denied reprint perm. Mirrors the
-        # frontend `canModify('archives', 'reprint', ...)` helper:
-        # REPRINT_ALL allows any archive, REPRINT_OWN allows own only,
-        # ownerless archives require REPRINT_ALL (fail-closed).
-        if actor is not None:
-            owns_archive = archive.created_by_id is not None and archive.created_by_id == actor.id
-            has_reprint = actor.has_permission(Permission.ARCHIVES_REPRINT_ALL.value) or (
-                owns_archive and actor.has_permission(Permission.ARCHIVES_REPRINT_OWN.value)
-            )
-            if not has_reprint:
-                raise HTTPException(
-                    status_code=403,
-                    detail="Permission archives:reprint_own or archives:reprint_all required",
-                )
+        _assert_can_queue_archive(archive, actor)
 
     # Validate library file exists (if provided) and get it for filament extraction
     library_file = None
@@ -826,131 +696,25 @@ async def add_to_queue(
                 f"File was sliced for {sliced_for_model} and cannot be dispatched to {target_printer.model} printers",
             )
 
-    # Resolve the source once for both default force-colour overrides and
-    # model-based material validation.
-    file_path = None
-    if archive:
-        archive_path = Path(archive.file_path)
-        file_path = (
-            archive_path if archive_path.is_absolute() else settings.base_dir / archive_path
-        )  # SEC-PATH-OK: archive.file_path is DB-stored and internally generated; legacy rows may be absolute
-    elif library_file:
-        library_path = Path(library_file.file_path)
-        file_path = (
-            library_path if library_path.is_absolute() else settings.base_dir / library_path
-        )  # SEC-PATH-OK: library_file.file_path is DB-stored and internally generated; external-library rows may be absolute
-
-    requirements = extract_filament_requirements(file_path, data.plate_id) if file_path and file_path.exists() else []
-
-    # Extract filament types for model-based assignment (used by scheduler for validation)
-    required_filament_types = None
-    if target_model_norm:
-        filament_types = sorted({requirement["type"] for requirement in requirements if requirement.get("type")})
-        if filament_types:
-            required_filament_types = json.dumps(filament_types)
-            logger.info("Extracted filament types for model-based queue: %s", filament_types)
-
+    # Model-based assignment checks the sliced materials while selecting a printer.
+    source = archive or library_file
+    file_path = settings.base_dir / source.file_path if source else None  # SEC-PATH-OK: DB-stored paths
+    provided = [override.model_dump(exclude_unset=True) for override in data.filament_overrides or ()]
     try:
-        resolved_overrides = build_queue_filament_overrides(
-            requirements,
-            [override.model_dump(exclude_unset=True) for override in data.filament_overrides]
-            if data.filament_overrides
-            else None,
-            force_color_match=data.force_color_match,
+        required_types, filament_overrides = filament_contract(
+            file_path, data.plate_id, provided or None, force_color_match=data.force_color_match
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    filament_overrides_json = json.dumps(resolved_overrides) if resolved_overrides else None
 
-    # Model-based assignment additionally uses override types while selecting
-    # a compatible printer.
-    if resolved_overrides and target_model_norm:
-        # Update required_filament_types from overrides so scheduler validates against overridden types
-        override_types = sorted({o["type"] for o in resolved_overrides if "type" in o})
-        if override_types:
-            # Merge with existing types (overrides may only cover some slots)
-            existing_types = set(json.loads(required_filament_types)) if required_filament_types else set()
-            # Replace types for overridden slots, keep others
-            all_types = existing_types | set(override_types)
-            required_filament_types = json.dumps(sorted(all_types))
-
-    # Validate quantity
-    quantity = max(1, data.quantity)
-
-    # Get queue scope for this printer (or for unassigned/model-based items).
-    if data.printer_id is not None:
-        queue_scope = (
-            PrintQueueItem.printer_id == data.printer_id,
-            PrintQueueItem.status == "queued",
-        )
-    else:
-        # For unassigned/model-based items, scope across all unassigned.
-        queue_scope = (
-            PrintQueueItem.printer_id.is_(None),
-            PrintQueueItem.status == "queued",
-        )
-
-    # Serialize concurrent queue inserts to the same scope (#1625-followup).
-    # The race: two concurrent ASAP inserts both compute MAX(position) before
-    # either commits; in an empty scope, both INSERT at position 1 (duplicate).
-    # In a non-empty scope, Postgres's row-level locks on the UPDATE shift
-    # serialize naturally, but the empty-scope path has no rows to lock.
-    # A transaction-scoped advisory lock keyed on the printer_id closes that
-    # window; the lock is released automatically at commit/rollback. Different
-    # printers don't contend. SQLite serializes writes implicitly so this is a
-    # no-op there.
-    #
-    # Dialect is checked against the actual session binding, NOT the
-    # `is_sqlite()` helper, because the test fixture overrides `get_db` with a
-    # SQLite engine while `settings.database_url` still points at Postgres
-    # (the helper reads settings). Inspecting the connection directly is the
-    # right shape for any code that mutates SQL based on the live dialect.
-    from sqlalchemy import text
-
-    bind = db.get_bind()
-    if bind.dialect.name == "postgresql":
-        scope_key = data.printer_id if data.printer_id is not None else 0
-        # 1625 namespaces the lock so it can't collide with other advisory
-        # locks elsewhere in the codebase.
-        await db.execute(text("SELECT pg_advisory_xact_lock(1625, :k)"), {"k": scope_key})
-
-    insert_position = max(1, data.insert_position or 1)
-    if data.insert_at_top or data.insert_position is not None:
-        result = await db.execute(select(func.max(PrintQueueItem.position)).where(*queue_scope))
-        max_pos = result.scalar() or 0
-        insert_position = min(insert_position, max_pos + 1)
-        await db.execute(
-            update(PrintQueueItem)
-            .where(*queue_scope)
-            .where(PrintQueueItem.position >= insert_position)
-            .values(position=PrintQueueItem.position + quantity)
-        )
-        start_position = insert_position
-    else:
-        result = await db.execute(select(func.max(PrintQueueItem.position)).where(*queue_scope))
-        max_pos = result.scalar() or 0
-        start_position = max_pos + 1
-
-    # Resolve print_time_seconds for SJF scheduling (cache on item at creation)
-    cached_print_time = None
+    # Cached for shortest-job-first ordering.
     if archive:
-        cached_print_time = archive.print_time_seconds
-        if data.plate_id:
-            archive_path = settings.base_dir / archive.file_path
-            if archive_path.exists():
-                plate_time = _extract_print_time_from_3mf(archive_path, data.plate_id)
-                if plate_time is not None:
-                    cached_print_time = plate_time
-    elif library_file:
-        if library_file.file_metadata:
-            cached_print_time = library_file.file_metadata.get("print_time_seconds")
-        if data.plate_id:
-            lib_path = Path(library_file.file_path)
-            library_file_path = lib_path if lib_path.is_absolute() else settings.base_dir / library_file.file_path
-            if library_file_path.exists():
-                plate_time = _extract_print_time_from_3mf(library_file_path, data.plate_id)
-                if plate_time is not None:
-                    cached_print_time = plate_time
+        print_time = archive.print_time_seconds
+    else:
+        print_time = (library_file.file_metadata or {}).get("print_time_seconds") if library_file else None
+    if data.plate_id and file_path and file_path.exists():
+        plate_time = extract_print_time_from_3mf(file_path, data.plate_id)
+        print_time = print_time if plate_time is None else plate_time
 
     # Validate project exists before insert so a bogus ID yields 404, not an FK-constraint 500
     if data.project_id is not None:
@@ -958,65 +722,52 @@ async def add_to_queue(
         if not project_result.scalar_one_or_none():
             raise HTTPException(status_code=404, detail="Project not found")
 
-    ams_mapping_json = json.dumps(data.ams_mapping) if data.ams_mapping else None
-    items = []
-    for i in range(quantity):
-        item = PrintQueueItem(
-            printer_id=data.printer_id,
-            target_model=target_model_norm,
-            target_location=data.target_location,
-            required_filament_types=required_filament_types,
-            filament_overrides=filament_overrides_json,
-            force_color_match=data.force_color_match,
-            archive_id=data.archive_id,
-            library_file_id=data.library_file_id,
-            scheduled_time=data.scheduled_time,
-            auto_off_after=data.auto_off_after,
-            manual_start=data.manual_start,
-            wait_for_drying_complete=data.wait_for_drying_complete,
-            chamber_heat_soak=data.chamber_heat_soak,
-            heat_soak_temperature=data.heat_soak_temperature,
-            heat_soak_minutes=data.heat_soak_minutes,
-            skip_filament_check=data.skip_filament_check,
-            ams_mapping=ams_mapping_json,
-            plate_id=data.plate_id,
-            bed_levelling=data.bed_levelling,
-            flow_cali=data.flow_cali,
-            vibration_cali=data.vibration_cali,
-            layer_inspect=data.layer_inspect,
-            timelapse=data.timelapse,
-            use_ams=data.use_ams,
-            nozzle_offset_cali=data.nozzle_offset_cali,
-            gcode_injection=data.gcode_injection,
-            # Queue-only uploads are removed once all queued jobs have made
-            # Archive copies. Never let a caller mark a user-managed File for
-            # automatic deletion.
-            cleanup_library_after_dispatch=bool(library_file and library_file.queue_only),
-            project_id=data.project_id,
-            position=start_position + i,
-            status="queued",
-            created_by_id=actor.id if actor else None,
-            print_time_seconds=cached_print_time,
-        )
-        db.add(item)
-        items.append(item)
-
-    if variant_specs:
-        variant_values = [
-            _variant_values(spec, library_file, model, position)
-            for position, (spec, library_file, model) in enumerate(variant_specs)
-        ]
-        # SJF orders pending items before any printer is known, so the row carries
-        # the shortest candidate's estimate. Resolution replaces it with the one
-        # that actually runs.
-        estimates = [v["print_time_seconds"] for v in variant_values if v["print_time_seconds"]]
-        for item in items:
-            # Each copy gets its own candidate rows — attempt counts are
-            # per-item, and copies must be free to land on different printers.
-            item.variants.extend(PrintQueueVariant(**values) for values in variant_values)
-            item.print_time_seconds = min(estimates) if estimates else None
-
+    quantity = max(1, data.quantity)
+    values = {
+        "printer_id": data.printer_id,
+        "target_model": target_model_norm,
+        "target_location": data.target_location,
+        "required_filament_types": required_types if target_model_norm else None,
+        "filament_overrides": filament_overrides,
+        "force_color_match": data.force_color_match,
+        "archive_id": data.archive_id,
+        "library_file_id": data.library_file_id,
+        "scheduled_time": data.scheduled_time,
+        "auto_off_after": data.auto_off_after,
+        "manual_start": data.manual_start,
+        "wait_for_drying_complete": data.wait_for_drying_complete,
+        "chamber_heat_soak": data.chamber_heat_soak,
+        "heat_soak_temperature": data.heat_soak_temperature,
+        "heat_soak_minutes": data.heat_soak_minutes,
+        "skip_filament_check": data.skip_filament_check,
+        "ams_mapping": json.dumps(data.ams_mapping) if data.ams_mapping else None,
+        "plate_id": data.plate_id,
+        "bed_levelling": data.bed_levelling,
+        "flow_cali": data.flow_cali,
+        "vibration_cali": data.vibration_cali,
+        "layer_inspect": data.layer_inspect,
+        "timelapse": data.timelapse,
+        "use_ams": data.use_ams,
+        "nozzle_offset_cali": data.nozzle_offset_cali,
+        "gcode_injection": data.gcode_injection,
+        # Queue-only uploads are removed once all queued jobs have made
+        # Archive copies. Never let a caller mark a user-managed File for
+        # automatic deletion.
+        "cleanup_library_after_dispatch": bool(library_file and library_file.queue_only),
+        "project_id": data.project_id,
+        "created_by_id": actor.id if actor else None,
+        "print_time_seconds": print_time,
+    }
     try:
+        items = await create_job(
+            db,
+            [values] * quantity,
+            at=(data.insert_position or 1) if data.insert_at_top or data.insert_position is not None else None,
+            variants=[
+                _variant_values(spec, file, model, position)
+                for position, (spec, file, model) in enumerate(variant_specs)
+            ],
+        )
         await db.commit()
     except SQLAlchemyError:
         # Keep a compact queue-specific breadcrumb alongside the traceback
@@ -1554,8 +1305,6 @@ async def retry_queue_item(
     ),
     _: User | None = RequirePermissionIfAuthEnabled(Permission.QUEUE_CREATE),
 ):
-    from sqlalchemy import text
-
     user, can_modify_all = auth_result
     if user is not None and not user.has_permission(Permission.QUEUE_INSERT_TOP.value):
         raise HTTPException(403, "Retry requires permission to insert at the top of the queue")
@@ -1626,8 +1375,6 @@ async def retry_queue_item(
         )
         for field in ("plate_id", "ams_mapping", "nozzle_mapping", "filament_overrides", "required_filament_types"):
             values[field] = getattr(candidates[0], field)
-        estimates = [candidate.print_time_seconds for candidate in candidates if candidate.print_time_seconds]
-        values["print_time_seconds"] = min(estimates) if estimates else None
     else:
         library = await db.get(LibraryFile, old.library_file_id) if old.library_file_id is not None else None
         if source_available(library):
@@ -1644,31 +1391,15 @@ async def retry_queue_item(
             values["printer_id"] = None
             values["ams_mapping"] = None
 
-    if values["target_model"]:
-        models = {candidate.target_model for candidate in candidates} or {values["target_model"]}
-        scope = PrintQueueItem.printer_id.is_(None) & (
-            PrintQueueItem.target_model.in_(models)
-            | PrintQueueItem.variants.any(PrintQueueVariant.target_model.in_(models))
-        )
-    else:
-        scope = PrintQueueItem.printer_id == values["printer_id"]
-    # Use the same insertion lock as ordinary queue creation, including an
-    # empty scope where there are no existing rows to lock on PostgreSQL.
-    if db.get_bind().dialect.name == "postgresql":
-        await db.execute(text("SELECT pg_advisory_xact_lock(1625, :k)"), {"k": values["printer_id"] or 0})
-    first = await db.scalar(select(func.min(PrintQueueItem.position)).where(scope, PrintQueueItem.status == "queued"))
-    new = PrintQueueItem(**values, status="queued", position=(first or 0) - 1)
-    for candidate in candidates:
-        new.variants.append(
-            PrintQueueVariant(
-                **{
-                    column.name: getattr(candidate, column.name)
-                    for column in PrintQueueVariant.__table__.columns
-                    if column.name not in {"id", "queue_item_id", "created_at", "attempt_count"}
-                }
-            )
-        )
-    db.add(new)
+    variants = [
+        {
+            column.name: getattr(candidate, column.name)
+            for column in PrintQueueVariant.__table__.columns
+            if column.name not in {"id", "queue_item_id", "created_at", "attempt_count"}
+        }
+        for candidate in candidates
+    ]
+    [new] = await create_job(db, [values], at="top", variants=variants)
     await db.commit()
     return await get_queue_item(new.id, db, (user, can_modify_all))
 

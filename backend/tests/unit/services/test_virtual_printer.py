@@ -25,6 +25,17 @@ def mock_virtual_printer_library_upload(monkeypatch):
     monkeypatch.setattr("backend.app.api.routes.library.upload_file", upload_file)
 
 
+@pytest.fixture(autouse=True)
+def mock_queue_placement(monkeypatch):
+    """These tests mock the session, so place queue jobs after the last position it reports."""
+
+    async def place(db, *_args):
+        last = (await db.execute(None)).scalar()
+        return (last if isinstance(last, int) else 0) + 1
+
+    monkeypatch.setattr("backend.app.services.lifecycle.queued._place", place)
+
+
 def _write_3mf_with_filaments(file_path: Path, filaments: list[dict], plate_index: int = 1) -> None:
     """Build a minimal 3MF zip with `Metadata/slice_info.config` carrying the
     given per-slot filament entries. Each `filaments` dict needs `id`, `type`,

@@ -699,11 +699,7 @@ class VirtualPrinterInstance:
 
             from backend.app.api.routes.library import upload_file
             from backend.app.api.routes.settings import get_setting
-            from backend.app.models.print_queue import PrintQueueItem
-            from backend.app.services.filament_requirements import (
-                build_queue_filament_overrides,
-                extract_filament_requirements,
-            )
+            from backend.app.services.lifecycle.queued import create_job, filament_contract
 
             async with self._session_factory() as db:
                 # Read workflow defaults from settings. Without this the
@@ -811,87 +807,47 @@ class VirtualPrinterInstance:
                     plate_ids = self._extract_plate_ids(file_path)
                     library_file_ids_to_cleanup.append(uploaded_file.id)
 
-                    # Pick a base position the same way the manual /print-queue/
-                    # POST does, then hand consecutive positions to each plate
-                    # so a Send All keeps plate-order execution inside the
-                    # queue (#1733). Previously hardcoded to 1, which created
-                    # duplicate position=1 rows on every VP upload and made
-                    # queue execution order non-deterministic for any non-
-                    # empty queue.
-                    from sqlalchemy import func, select as _sql_select
-
-                    queue_scope = _sql_select(func.max(PrintQueueItem.position)).where(
-                        PrintQueueItem.status == "queued"
-                    )
-                    if self.target_printer_id is not None:
-                        queue_scope = queue_scope.where(PrintQueueItem.printer_id == self.target_printer_id)
-                    else:
-                        queue_scope = queue_scope.where(PrintQueueItem.printer_id.is_(None))
-                    try:
-                        max_pos_raw = (await db.execute(queue_scope)).scalar()
-                        max_pos = int(max_pos_raw) if max_pos_raw is not None else 0
-                    except (TypeError, ValueError):
-                        max_pos = 0
-
-                    # Parse per-plate filament requirements (#1188). Each plate
-                    # has its own filament set in `slice_info.config`, so the
-                    # `required_filament_types` / `filament_overrides` columns
-                    # on each queue item reflect THAT plate, not the file's
-                    # first plate. Scoping was already plate-aware via #1697 —
-                    # the `extract_filament_requirements(path, plate_id)` filter
-                    # returns just the plate's filaments. required_filament_types
-                    # is populated unconditionally — it's cheap, lets the
-                    # scheduler reject material mismatches even when exact
-                    # colour matching is disabled. filament_overrides always
-                    # carries requirements; its per-slot flag controls whether
-                    # colour is mandatory or only preferred.
-                    queue_item_ids: list[int] = []
-                    for offset, plate_id in enumerate(plate_ids, start=1):
-                        required_filament_types_json: str | None = None
-                        filament_overrides_json: str | None = None
-                        requirements = extract_filament_requirements(file_path, plate_id)
-                        if requirements:
-                            types = sorted({r["type"] for r in requirements if r.get("type")})
-                            if types:
-                                required_filament_types_json = json.dumps(types)
-                            overrides = build_queue_filament_overrides(
-                                requirements,
-                                force_color_match=self.queue_force_color_match,
-                            )
-                            if overrides:
-                                filament_overrides_json = json.dumps(overrides)
-
-                        queue_item = PrintQueueItem(
-                            printer_id=self.target_printer_id,
-                            target_model=target_model,
-                            library_file_id=uploaded_file.id,
-                            plate_id=plate_id,
-                            position=max_pos + offset,
-                            status="queued",
-                            manual_start=not self.auto_dispatch,
-                            required_filament_types=required_filament_types_json,
-                            filament_overrides=filament_overrides_json,
-                            force_color_match=self.queue_force_color_match,
-                            bed_levelling=bed_levelling,
-                            flow_cali=flow_cali,
-                            vibration_cali=vibration_cali,
-                            layer_inspect=layer_inspect,
-                            timelapse=timelapse,
-                            # Per-VP opt-in for auto-print G-code injection (#1516).
-                            # Default off; when on, the scheduler still no-ops unless
-                            # gcode_snippets are configured for the target model, so it's
-                            # effectively "inject when enabled AND snippets exist".
-                            gcode_injection=self.gcode_injection,
-                            # H2C rack-swap slicer pick (#1780). Captured above;
-                            # stamped on every plate so a multi-plate Send All keeps
-                            # the same nozzle pick across plates rather than only the
-                            # first one (mirrors the #1697 / #1188 per-plate loop fix).
-                            nozzle_mapping=nozzle_mapping_json,
-                            cleanup_library_after_dispatch=True,
+                    # Per-plate filament requirements (#1188): each plate has
+                    # its own filament set in `slice_info.config`, so each job
+                    # records that plate's materials and overrides. The
+                    # scheduler rejects material mismatches even when exact
+                    # colour matching is off; each override's flag says whether
+                    # its colour is required or preferred.
+                    jobs = []
+                    for plate_id in plate_ids:
+                        required_types, overrides = filament_contract(
+                            file_path, plate_id, force_color_match=self.queue_force_color_match
                         )
-                        db.add(queue_item)
-                        await db.flush()  # populate queue_item.id before logging
-                        queue_item_ids.append(queue_item.id)
+                        jobs.append(
+                            {
+                                "printer_id": self.target_printer_id,
+                                "target_model": target_model,
+                                "library_file_id": uploaded_file.id,
+                                "plate_id": plate_id,
+                                "manual_start": not self.auto_dispatch,
+                                "required_filament_types": required_types,
+                                "filament_overrides": overrides,
+                                "force_color_match": self.queue_force_color_match,
+                                "bed_levelling": bed_levelling,
+                                "flow_cali": flow_cali,
+                                "vibration_cali": vibration_cali,
+                                "layer_inspect": layer_inspect,
+                                "timelapse": timelapse,
+                                # Per-VP opt-in for auto-print G-code injection (#1516).
+                                # Default off; when on, the scheduler still no-ops unless
+                                # gcode_snippets are configured for the target model, so it's
+                                # effectively "inject when enabled AND snippets exist".
+                                "gcode_injection": self.gcode_injection,
+                                # H2C rack-swap slicer pick (#1780). Captured above;
+                                # stamped on every plate so a multi-plate Send All keeps
+                                # the same nozzle pick across plates rather than only the
+                                # first one (mirrors the #1697 / #1188 per-plate loop fix).
+                                "nozzle_mapping": nozzle_mapping_json,
+                                "cleanup_library_after_dispatch": True,
+                            }
+                        )
+                    # A Send All's plates join the queue together, in plate order (#1733).
+                    queue_item_ids = [job.id for job in await create_job(db, jobs)]
                     await db.commit()
                     queue_file_committed = True
                     # Track the freshly-committed queue items so
