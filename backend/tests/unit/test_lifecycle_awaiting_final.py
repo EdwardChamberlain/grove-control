@@ -1,12 +1,16 @@
 """Specify post-commit entry, and the awaiting and final states (#204 stage 3).
 
 The engine runs a state's post-commit entry step only once its transition has
-committed. Awaiting and final own their entry steps, which run in the
-transition's transaction after the conditional write. Only an ended job can
-pass its hold to a new external print.
+committed, and production enters such a state only through enter_state. A
+refused transition runs no step; the step's own errors are raised. Awaiting
+and final own their entry steps, which run in the transition's transaction
+after the conditional write. Only an ended job can pass its hold to a new
+external print.
 """
 
+import ast
 from importlib import import_module
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -28,6 +32,9 @@ from backend.app.services.lifecycle.engine import (
     enter_state,
     transition_queue_item,
 )
+from backend.tests.unit.test_chamber_heat_soak import soak  # noqa: F401
+
+APP_DIR = Path(__file__).parents[2] / "app"
 
 
 @pytest.fixture
@@ -65,6 +72,48 @@ def test_every_entry_belongs_to_its_state_module():
         assert any(callable(getattr(import_module(module), step, None)) for step in ("on_enter", "on_entered"))
 
 
+def _post_commit_states() -> set[str]:
+    return {state for state, module in lifecycle_engine._ENTRY.items() if hasattr(import_module(module), "on_entered")}
+
+
+def _plain_entries(source: str, states: set[str]) -> list[int]:
+    """Lines that enter one of ``states`` with the writer itself, which skips its post-commit step."""
+    lines = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Call):
+            continue
+        name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", None)
+        # The writer takes the target fourth; the scheduler's skip-on-conflict wrapper takes it third.
+        position = {"transition_queue_item": 3, "_transition_or_skip": 2}.get(name)
+        if position is None:
+            continue
+        target = node.args[position] if len(node.args) > position else None
+        target = next((keyword.value for keyword in node.keywords if keyword.arg == "status"), target)
+        if isinstance(target, ast.Constant) and target.value in states:
+            lines.append(node.lineno)
+    return lines
+
+
+def test_production_enters_a_state_with_a_post_commit_step_only_through_enter_state():
+    states = _post_commit_states()
+    assert "preheating" in states
+    offenders = [
+        f"{path.relative_to(APP_DIR)}:{line}"
+        for path in APP_DIR.rglob("*.py")
+        for line in _plain_entries(path.read_text(), states)
+    ]
+    assert offenders == [], "Enter these states with enter_state(): " + ", ".join(offenders)
+
+
+def test_the_entry_check_recognizes_a_plain_entry():
+    # Otherwise the production check could pass by matching nothing.
+    source = (
+        'await transition_queue_item(db, item, "queued", "preheating")\n'
+        'await transition_queue_item(db, item, "queued", status="preheating")\n'
+    )
+    assert _plain_entries(source, {"preheating"}) == [1, 2]
+
+
 async def test_post_commit_entry_runs_once_the_transition_has_committed(sessions, monkeypatch):
     item_id = await job(sessions, "queued")
     seen = []
@@ -83,8 +132,23 @@ async def test_post_commit_entry_runs_once_the_transition_has_committed(sessions
     assert entered is False  # The step says whether the job entered.
 
 
-@pytest.mark.parametrize("failure", ["conflict", "commit"])
-async def test_no_post_commit_entry_runs_without_a_commit(sessions, monkeypatch, failure):
+@pytest.mark.parametrize("refusal", ["conflict", "printer held"])
+async def test_a_refused_transition_returns_false_without_its_post_commit_step(sessions, monkeypatch, refusal):
+    item_id = await job(sessions, "queued")
+    if refusal == "printer held":
+        await job(sessions, "printing")  # The holding index refuses a second hold.
+    on_entered = AsyncMock(return_value=True)
+    monkeypatch.setattr(preheating, "on_entered", on_entered)
+    conditions = (PrintQueueItem.printer_id == 2,) if refusal == "conflict" else ()
+    async with sessions() as db:
+        item = await db.get(PrintQueueItem, item_id)
+        assert await enter_state(db, item, "queued", "preheating", conditions=conditions) is False
+    on_entered.assert_not_awaited()
+    async with sessions() as db:
+        assert (await db.get(PrintQueueItem, item_id)).status == "queued"
+
+
+async def test_a_failed_commit_raises_without_the_post_commit_step(sessions, monkeypatch):
     item_id = await job(sessions, "queued")
     on_entered = AsyncMock(return_value=True)
     monkeypatch.setattr(preheating, "on_entered", on_entered)
@@ -93,21 +157,50 @@ async def test_no_post_commit_entry_runs_without_a_commit(sessions, monkeypatch,
         raise OperationalError("COMMIT", {}, RuntimeError("disk unavailable"))
 
     engine = sessions.kw["bind"].sync_engine
-    if failure == "commit":
-        event.listen(engine, "commit", fail_commit)
+    event.listen(engine, "commit", fail_commit)
     try:
         async with sessions() as db:
             item = await db.get(PrintQueueItem, item_id)
-            conditions = (PrintQueueItem.printer_id == 2,) if failure == "conflict" else ()
-            with pytest.raises(QueueTransitionConflict if failure == "conflict" else OperationalError):
-                await enter_state(db, item, "queued", "preheating", conditions=conditions)
+            with pytest.raises(OperationalError):
+                await enter_state(db, item, "queued", "preheating")
             await db.rollback()
     finally:
-        if failure == "commit":
-            event.remove(engine, "commit", fail_commit)
+        event.remove(engine, "commit", fail_commit)
     on_entered.assert_not_awaited()
     async with sessions() as db:
         assert (await db.get(PrintQueueItem, item_id)).status == "queued"
+
+
+async def test_errors_in_the_post_commit_step_are_raised_not_reported_as_refusals(sessions, monkeypatch):
+    item_id = await job(sessions, "queued")
+    monkeypatch.setattr(preheating, "on_entered", AsyncMock(side_effect=QueueTransitionConflict("in the step")))
+    async with sessions() as db:
+        item = await db.get(PrintQueueItem, item_id)
+        with pytest.raises(QueueTransitionConflict, match="in the step"):
+            await enter_state(db, item, "queued", "preheating")
+    async with sessions() as db:
+        assert (await db.get(PrintQueueItem, item_id)).status == "preheating"  # The hold had committed.
+
+
+async def test_a_heat_soak_entry_raises_its_heater_steps_errors(soak, monkeypatch):
+    # The hold has committed by then, so the error is not a refused hold.
+    monkeypatch.setattr(preheating, "on_entered", AsyncMock(side_effect=QueueTransitionConflict("in the step")))
+    with pytest.raises(QueueTransitionConflict, match="in the step"):
+        await soak.service.enter(soak.db, soak.item)
+    await soak.db.refresh(soak.item)
+    assert soak.item.status == "preheating"
+
+
+@pytest.mark.parametrize("owner", ["worker", None])
+async def test_heater_entry_heats_the_held_printer_only_for_a_workers_hold(soak, owner):
+    # Neither value names the printer: the step heats the one the row holds.
+    values = {"preheat_owner": owner} if owner else {}
+    entered = await enter_state(soak.db, soak.item, "queued", "preheating", values=values)
+    await soak.db.refresh(soak.item)
+    assert soak.item.status == "preheating"
+    assert entered is (owner is not None)
+    assert (soak.item.preheat_started_at is not None) is entered
+    assert soak.client.set_bed_temperature.called is entered
 
 
 async def test_a_state_without_post_commit_entry_has_entered_once_committed(sessions):

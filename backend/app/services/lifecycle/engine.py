@@ -17,6 +17,7 @@ from importlib import import_module
 from typing import Any
 
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.sql.elements import ColumnElement
@@ -235,10 +236,17 @@ async def enter_state(
 
     on_entered(change) is entry work that must wait for the commit, such as
     heater commands once a hold is durable. It re-checks the job under its own
-    lock, and says whether the job entered. A conflict or failed commit raises first.
+    lock, and says whether the job entered. A transition the database refuses
+    (a conflict, or the holding index) is rolled back and returns False before
+    the step runs. Anything else, including the step's own errors, is raised.
+    A state with this step is entered only here (see the architecture test).
     """
-    change = await transition_queue_item(db, item, expected_status, status, **transition)
-    await db.commit()
+    try:
+        change = await transition_queue_item(db, item, expected_status, status, **transition)
+        await db.commit()
+    except (IntegrityError, QueueTransitionConflict):
+        await db.rollback()
+        return False
     entered = _step(status, "on_entered")
     return await entered(change) if entered else True
 

@@ -21,7 +21,6 @@ from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import and_, or_, select, update
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.tasks import spawn_background_task
@@ -165,13 +164,15 @@ async def on_entered(change) -> bool:
     """Enter, once the hold has committed: turn the heaters on, and say whether they came on.
 
     Re-lock first, so that a Stop committed since then is never followed by
-    heater-on commands.
+    heater-on commands. Only a worker's hold is heated: the transition must
+    have written ``preheat_owner``, and the row must still carry it.
     """
-    db, item_id, printer_id = change.db, change.item_id, change.values["printer_id"]
+    db, item_id, owner = change.db, change.item_id, change.values.get("preheat_owner")
     item = await lock_queue_item(db, item_id)
-    if not item or item.status != "preheating" or item.preheat_owner != change.values["preheat_owner"]:
+    if not item or item.status != "preheating" or owner is None or item.preheat_owner != owner:
         await db.rollback()
         return False
+    printer_id = item.printer_id
     await db.execute(update(Printer).where(Printer.id == printer_id).values(id=Printer.id))
     printer = await db.get(Printer, printer_id, populate_existing=True)
     client = printer_manager.get_client(printer_id)
@@ -342,34 +343,30 @@ class ChamberHeatSoak:
             return False
         # Claim only a still-queued row. Concurrent workers cannot reassign a winner.
         now = utcnow()
-        try:
-            entered = await enter_state(
-                db,
-                item,
-                "queued",
-                "preheating",
-                conditions=(
-                    PrintQueueItem.dispatching_at == claim,
-                    PrintQueueItem.printer_id.is_(None)
-                    if required_printer_id is None
-                    else PrintQueueItem.printer_id == required_printer_id,
-                ),
-                values={
-                    **(bind_values or {}),
-                    "printer_id": printer_id,
-                    "preheat_owner": self.owner,
-                    "preheat_requested_at": now,
-                    "preheat_checked_at": now,
-                    "preheat_started_at": None,
-                    "dispatched_at": None,
-                    "dispatch_subtask_id": None,
-                    "error_message": None,
-                    "waiting_reason": None,
-                },
-            )
-        except (IntegrityError, QueueTransitionConflict):
-            await db.rollback()
-            return False
+        entered = await enter_state(
+            db,
+            item,
+            "queued",
+            "preheating",
+            conditions=(
+                PrintQueueItem.dispatching_at == claim,
+                PrintQueueItem.printer_id.is_(None)
+                if required_printer_id is None
+                else PrintQueueItem.printer_id == required_printer_id,
+            ),
+            values={
+                **(bind_values or {}),
+                "printer_id": printer_id,
+                "preheat_owner": self.owner,
+                "preheat_requested_at": now,
+                "preheat_checked_at": now,
+                "preheat_started_at": None,
+                "dispatched_at": None,
+                "dispatch_subtask_id": None,
+                "error_message": None,
+                "waiting_reason": None,
+            },
+        )
         if entered:
             self._visible_printers.add(printer_id)
         return entered
