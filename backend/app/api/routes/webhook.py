@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.core.auth import check_permission, check_printer_access, get_api_key
 from backend.app.core.config import settings
 from backend.app.core.database import get_db
+from backend.app.core.websocket import ws_manager
 from backend.app.models.api_key import APIKey
 from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import PrintQueueItem
@@ -117,6 +118,7 @@ async def webhook_add_to_queue(
     }
     [queue_item] = await create_job(db, [job])
     await db.commit()
+    await ws_manager.send_queue_work_changed()
     await db.refresh(queue_item)
 
     return QueueAddResponse(

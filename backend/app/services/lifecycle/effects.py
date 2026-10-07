@@ -92,7 +92,8 @@ def publish_queue_work_changed(db: AsyncSession) -> None:
         from backend.app.core.tasks import spawn_background_task
         from backend.app.core.websocket import ws_manager
 
-        spawn_background_task(ws_manager.broadcast({"type": "queue_work_changed"}), name="queue-work-changed")
+        if ws_manager.active_connections:
+            spawn_background_task(ws_manager.send_queue_work_changed(), name="queue-work-changed")
 
     after_commit(db, spawn, key="queue_work_changed")
 

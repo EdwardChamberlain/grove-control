@@ -19,6 +19,7 @@ from backend.app.core.config import settings
 from backend.app.core.database import get_db
 from backend.app.core.permissions import Permission
 from backend.app.core.tasks import spawn_background_task
+from backend.app.core.websocket import ws_manager
 from backend.app.models.ams_label import AmsLabel
 from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import (
@@ -60,7 +61,6 @@ from backend.app.services.bambu_ftp import (
     list_files_async,
 )
 from backend.app.services.job_identity import find_job, telemetry_identity
-from backend.app.services.lifecycle import effects
 from backend.app.services.lifecycle.awaiting import clear_job_plate
 from backend.app.services.lifecycle.engine import InvalidQueueTransition, lock_queue_item
 from backend.app.services.lifecycle.final import release_printer
@@ -176,8 +176,8 @@ async def create_printer(
 
     printer = Printer(**printer_data.model_dump())
     db.add(printer)
-    effects.publish_queue_work_changed(db)
     await db.commit()
+    await ws_manager.send_queue_work_changed()
     await db.refresh(printer)
 
     # Connect to the printer
@@ -396,9 +396,9 @@ async def update_printer(
     for field, value in update_data.items():
         setattr(printer, field, value)
 
-    if update_data.keys() & {"model", "location"}:
-        effects.publish_queue_work_changed(db)
     await db.commit()
+    if update_data.keys() & {"model", "location"}:
+        await ws_manager.send_queue_work_changed()
     await db.refresh(printer)
 
     # Reconnect if connection settings changed
@@ -479,8 +479,8 @@ async def delete_printer(
         await db.execute(sql_delete(PrinterMaintenance).where(PrinterMaintenance.printer_id == printer_id))
 
     await db.delete(printer)
-    effects.publish_queue_work_changed(db)
     await db.commit()
+    await ws_manager.send_queue_work_changed()
 
     printer_manager.disconnect_printer(printer_id)
     return {"status": "deleted", "archives_deleted": delete_archives}

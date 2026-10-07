@@ -66,9 +66,6 @@ async def create_job(
         created[-1].variants.extend(PrintQueueVariant(**variant) for variant in variants)
         db.add(created[-1])
     await db.flush()
-    from backend.app.services.lifecycle import effects
-
-    effects.publish_queue_work_changed(db)
     return created
 
 

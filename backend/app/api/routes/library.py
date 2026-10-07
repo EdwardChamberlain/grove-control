@@ -33,6 +33,7 @@ from backend.app.core.config import settings as app_settings
 from backend.app.core.database import get_db
 from backend.app.core.permissions import Permission
 from backend.app.core.tasks import spawn_background_task
+from backend.app.core.websocket import ws_manager
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile, LibraryFileTag, LibraryFolder
 from backend.app.models.project import Project
@@ -2694,6 +2695,9 @@ async def add_files_to_queue(
             errors.append(AddToQueueError(file_id=file_id, filename=lib_file.filename, error=str(e)))
 
     await db.commit()
+
+    if added:
+        await ws_manager.send_queue_work_changed()
 
     return AddToQueueResponse(added=added, errors=errors)
 
