@@ -266,7 +266,7 @@ async def test_late_scheduler_failure_cannot_overwrite_cancel_or_power_off(sessi
         await transition_queue_item(user, current, "queued", "unsuccessful", action="cancel")
         await user.commit()
         with (
-            patch("backend.app.services.print_scheduler.printer_manager.is_connected", return_value=False),
+            patch("backend.app.services.lifecycle.dispatching.printer_manager.is_connected", return_value=False),
             pytest.raises(QueueTransitionConflict),
         ):
             await scheduler._start_print(worker, stale)
@@ -398,8 +398,8 @@ async def test_restart_recovery_skips_an_item_changed_mid_pass(sessions):
     async with sessions() as db:
         with (
             _cancel_after_first_select(sessions, db, raced),
-            patch("backend.app.services.print_scheduler.printer_manager.get_status", telemetry.get),
-            patch("backend.app.services.print_scheduler.spawn_background_task", lambda coro, **_: coro.close()),
+            patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", telemetry.get),
+            patch("backend.app.services.lifecycle.dispatching.spawn_background_task", lambda coro, **_: coro.close()),
         ):
             await scheduler._recover_stale_dispatches(db)
 
@@ -435,7 +435,7 @@ async def test_heat_soak_dispatch_that_loses_a_race_still_turns_heaters_off(sess
     heat_soak_printers.get_client.return_value = None
     heat_soak_printers.get_status.return_value = None
     with (
-        patch("backend.app.services.print_scheduler.async_session", sessions),
+        patch("backend.app.services.lifecycle.dispatching.async_session", sessions),
         patch("backend.app.services.lifecycle.preheating.printer_manager", heat_soak_printers),
         patch.object(scheduler, "_start_print", start_print_after_user_cancel),
     ):

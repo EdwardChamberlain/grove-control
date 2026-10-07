@@ -13,11 +13,15 @@ from backend.app.models.archive import PrintArchive
 from backend.app.models.notification import NotificationLog, NotificationProvider
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services import print_scheduler
 from backend.app.services.job_identity import observe_print
-from backend.app.services.lifecycle import effects as queue_outcome_effects, preheating as heat
+from backend.app.services.lifecycle import (
+    dispatching as print_scheduler,
+    effects as queue_outcome_effects,
+    preheating as heat,
+)
 from backend.app.services.lifecycle.awaiting import clear_job_plate
 from backend.app.services.lifecycle.engine import transition_queue_item
+from backend.app.services.print_scheduler import scheduler
 from backend.app.services.printer_manager import printer_manager
 from backend.app.services.queue_actions import cancel_job
 from backend.tests.unit.test_queue_archive_alignment import alignment, hold_and_link  # noqa: F401
@@ -34,7 +38,7 @@ async def test_clear_plate_cleans_sent_upload_after_offline_stop(alignment, monk
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
     monkeypatch.setattr(printer_manager, "stop_print", lambda _id: False)
     monkeypatch.setattr("backend.app.main._user_stopped_printers", set())
-    monkeypatch.setattr(print_scheduler.scheduler, "cancel_inflight", lambda _id: False)
+    monkeypatch.setattr(scheduler, "cancel_inflight", lambda _id: False)
     notified, powered_off = AsyncMock(), AsyncMock()
     deleted = AsyncMock(side_effect=OSError("offline") if outcome == "ftp_failure" else None, return_value=True)
     monkeypatch.setattr(queue_outcome_effects.notification_service, "on_queue_job_failed", notified)

@@ -162,7 +162,7 @@ async def test_model_unforced_job_recomputes_cross_material_mapping(mock_pm, sch
     printer = SimpleNamespace(id=3, name="P1S")
 
     with (
-        patch("backend.app.services.print_scheduler.async_session") as session_ctx,
+        patch("backend.app.services.lifecycle.dispatching.async_session") as session_ctx,
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
         patch.object(scheduler, "_find_idle_printer_for_model", new=AsyncMock(return_value=(3, None))),
         patch.object(scheduler, "_get_job_name", new=AsyncMock(return_value="Benchy")),
@@ -179,7 +179,7 @@ async def test_model_unforced_job_recomputes_cross_material_mapping(mock_pm, sch
         patch.object(scheduler, "_start_print", new=AsyncMock()) as start_print,
         patch.object(scheduler, "_check_auto_drying", new=AsyncMock()),
         patch(
-            "backend.app.services.print_scheduler.notification_service.on_queue_job_assigned",
+            "backend.app.services.lifecycle.dispatching.notification_service.on_queue_job_assigned",
             new=AsyncMock(),
         ),
     ):
@@ -220,7 +220,7 @@ async def test_forced_job_waits_when_material_metadata_is_missing(mock_pm, sched
     mock_pm.is_connected.return_value = True
 
     with (
-        patch("backend.app.services.print_scheduler.async_session") as session_ctx,
+        patch("backend.app.services.lifecycle.dispatching.async_session") as session_ctx,
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
         patch.object(scheduler, "_start_print", new=AsyncMock()) as start_print,
         patch.object(scheduler, "_check_auto_drying", new=AsyncMock()),
@@ -245,7 +245,7 @@ async def test_unforced_job_waits_when_material_metadata_is_missing(mock_pm, sch
     mock_pm.is_connected.return_value = True
 
     with (
-        patch("backend.app.services.print_scheduler.async_session") as session_ctx,
+        patch("backend.app.services.lifecycle.dispatching.async_session") as session_ctx,
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
         patch.object(scheduler, "_start_print", new=AsyncMock()) as start_print,
         patch.object(scheduler, "_check_auto_drying", new=AsyncMock()),
@@ -269,7 +269,7 @@ async def test_forced_job_waits_when_material_metadata_is_malformed(mock_pm, sch
     mock_pm.is_connected.return_value = True
 
     with (
-        patch("backend.app.services.print_scheduler.async_session") as session_ctx,
+        patch("backend.app.services.lifecycle.dispatching.async_session") as session_ctx,
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
         patch.object(scheduler, "_start_print", new=AsyncMock()) as start_print,
         patch.object(scheduler, "_check_auto_drying", new=AsyncMock()),
@@ -292,7 +292,7 @@ async def test_assigned_job_waits_when_forced_colour_is_missing(mock_pm, schedul
     mock_pm.is_connected.return_value = True
 
     with (
-        patch("backend.app.services.print_scheduler.async_session") as session_ctx,
+        patch("backend.app.services.lifecycle.dispatching.async_session") as session_ctx,
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
         patch.object(scheduler, "_is_printer_idle", return_value=True),
         patch.object(scheduler, "_get_missing_filament_types", return_value=[]),
@@ -322,7 +322,7 @@ async def test_assigned_job_recomputes_mapping_and_starts_on_exact_colour(mock_p
     mock_pm.is_connected.return_value = True
 
     with (
-        patch("backend.app.services.print_scheduler.async_session") as session_ctx,
+        patch("backend.app.services.lifecycle.dispatching.async_session") as session_ctx,
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
         patch.object(scheduler, "_is_printer_idle", return_value=True),
         patch.object(scheduler, "_get_missing_filament_types", return_value=[]),
@@ -356,7 +356,7 @@ async def test_assigned_job_allows_different_colour_when_force_is_disabled(mock_
     mock_pm.is_connected.return_value = True
 
     with (
-        patch("backend.app.services.print_scheduler.async_session") as session_ctx,
+        patch("backend.app.services.lifecycle.dispatching.async_session") as session_ctx,
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
         patch.object(scheduler, "_is_printer_idle", return_value=True),
         patch.object(scheduler, "_get_missing_filament_types", return_value=[]),
@@ -386,7 +386,7 @@ async def test_assigned_unforced_job_waits_when_material_is_missing(mock_pm, sch
     mock_pm.is_connected.return_value = True
 
     with (
-        patch("backend.app.services.print_scheduler.async_session") as session_ctx,
+        patch("backend.app.services.lifecycle.dispatching.async_session") as session_ctx,
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
         patch.object(scheduler, "_is_printer_idle", return_value=True),
         patch.object(scheduler, "_get_missing_filament_types", return_value=["PLA"]),

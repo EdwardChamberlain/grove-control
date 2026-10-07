@@ -398,10 +398,10 @@ async def test_late_external_archive_association_uses_the_jobs_committed_state(a
 
 
 async def test_committed_heat_soak_handoff_is_scheduled_without_copying(alignment, monkeypatch):
-    from backend.app.services import print_scheduler as sched
-    from backend.app.services.lifecycle import preheating as heat
+    from backend.app.services.lifecycle import dispatching as sched, preheating as heat
+    from backend.app.services.print_scheduler import PrintScheduler
 
-    scheduler = sched.PrintScheduler()
+    scheduler = PrintScheduler()
     service = scheduler._heat_soak
     states = {i: SimpleNamespace(state="IDLE", connected=True, heat_soak_disconnected_at=0) for i in (1, 2)}
     manager = MagicMock()
@@ -455,10 +455,10 @@ async def test_committed_heat_soak_handoff_is_scheduled_without_copying(alignmen
 @pytest.mark.parametrize("current", ["busy", "reconnected_busy", "reconnected_idle", "missing", "unready", "offline"])
 async def test_heat_soak_dispatch_uses_current_telemetry_after_archive_copy(alignment, monkeypatch, current):
     import backend.app.main as main
-    from backend.app.services import print_scheduler as sched
-    from backend.app.services.lifecycle import preheating as heat
+    from backend.app.services.lifecycle import dispatching as sched, preheating as heat
+    from backend.app.services.print_scheduler import PrintScheduler
 
-    scheduler = sched.PrintScheduler()
+    scheduler = PrintScheduler()
     monkeypatch.setattr(sched, "DISPATCH_TELEMETRY_WAIT_SECONDS", 0.01)
     service = scheduler._heat_soak
     states = {
@@ -599,7 +599,8 @@ async def test_late_external_archive_preserves_failure_after_user_clears_plate(
     alignment, monkeypatch, clear_plate, outcome, archived
 ):
     import backend.app.main as main
-    from backend.app.services import print_scheduler as sched
+    from backend.app.services.lifecycle import dispatching as sched
+    from backend.app.services.print_scheduler import PrintScheduler
     from backend.app.services.printer_manager import printer_manager
 
     identity = "external-42"
@@ -632,7 +633,7 @@ async def test_late_external_archive_preserves_failure_after_user_clears_plate(
         # start callback owns the per-printer event lock.
         async with alignment.sessions() as db:
             if outcome == "failed":
-                await sched.PrintScheduler()._recover_stale_dispatches(db)
+                await PrintScheduler()._recover_stale_dispatches(db)
             else:
                 job = await db.scalar(select(PrintQueueItem).where(PrintQueueItem.dispatch_subtask_id == identity))
                 await cancel_job(db, job)
@@ -667,7 +668,8 @@ async def test_late_external_archive_preserves_failure_after_user_clears_plate(
 
 
 async def test_archive_copy_failure_still_runs_configured_auto_off(alignment, monkeypatch):
-    from backend.app.services import print_scheduler as sched
+    from backend.app.services.lifecycle import dispatching as sched
+    from backend.app.services.print_scheduler import PrintScheduler
     from backend.app.services.printer_manager import printer_manager
     from backend.app.services.smart_plug_manager import smart_plug_manager
 
@@ -676,7 +678,7 @@ async def test_archive_copy_failure_still_runs_configured_auto_off(alignment, mo
     monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
     monkeypatch.setattr(printer_manager, "is_awaiting_plate_clear", lambda _id: False)
     monkeypatch.setattr(ArchiveService, "archive_print", AsyncMock(side_effect=OSError("Disk full")))
-    scheduler = sched.PrintScheduler()
+    scheduler = PrintScheduler()
     done = asyncio.Event()
 
     async def power_off_after_commit(_printer_id, _db):
@@ -747,15 +749,15 @@ async def test_late_archive_uses_immutable_outcome_after_restart_and_display_upd
 
 @pytest.mark.parametrize("skip", [False, True])
 async def test_heat_soak_archive_copy_failure_commits_before_auto_off(alignment, monkeypatch, skip):
-    from backend.app.services import print_scheduler as sched
-    from backend.app.services.lifecycle import preheating as heat
+    from backend.app.services.lifecycle import dispatching as sched, preheating as heat
+    from backend.app.services.print_scheduler import PrintScheduler
     from backend.app.services.printer_manager import printer_manager
     from backend.app.services.smart_plug_manager import smart_plug_manager
 
-    scheduler = sched.PrintScheduler()
+    scheduler = PrintScheduler()
     service = scheduler._heat_soak
     monkeypatch.setattr(sched, "async_session", alignment.sessions)
-    monkeypatch.setattr(sched, "scheduler", scheduler)
+    monkeypatch.setattr("backend.app.services.print_scheduler.scheduler", scheduler)
     monkeypatch.setattr(service, "cleanup", AsyncMock())
     state = SimpleNamespace(state="IDLE", connected=True, job_telemetry_ready=True, heat_soak_disconnected_at=0)
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: state)

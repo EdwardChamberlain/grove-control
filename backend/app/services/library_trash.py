@@ -404,8 +404,9 @@ async def release_queue_references(db: AsyncSession, file_ids: list[int]) -> int
         return 0
     # A live heat-soak must be aborted through its service so heater shutdown,
     # reservation cleanup, and queue status are persisted together.
+    from backend.app.services.lifecycle.dispatching import SOAKING, is_soaking
     from backend.app.services.lifecycle.engine import lock_queue_item
-    from backend.app.services.lifecycle.preheating import SOAKING, abort_heat_soak, is_soaking
+    from backend.app.services.lifecycle.preheating import abort_heat_soak
 
     item_ids = (
         await db.scalars(

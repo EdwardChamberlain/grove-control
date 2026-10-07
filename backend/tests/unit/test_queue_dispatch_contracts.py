@@ -15,10 +15,10 @@ from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services import print_scheduler as scheduling
 from backend.app.services.archive import ArchiveService
-from backend.app.services.lifecycle import preheating as heat
+from backend.app.services.lifecycle import dispatching as scheduling, preheating as heat
 from backend.app.services.lifecycle.engine import InvalidQueueTransition, transition_queue_item
+from backend.app.services.print_scheduler import PrintScheduler, scheduler
 from backend.app.services.queue_archive import link_dispatch_archive, prepare_dispatch_archive
 from backend.tests.unit.test_lifecycle_preheating import enter_preheating
 from backend.tests.unit.test_queue_archive_alignment import alignment  # noqa: F401
@@ -141,7 +141,7 @@ async def test_copy_failure_reports_safe_cause_after_a_committed_hold(
     copy = AsyncMock(side_effect=error)
     monkeypatch.setattr(ArchiveService, "archive_print", copy)
     monkeypatch.setattr(scheduling, "async_session", handoff.sessions)
-    monkeypatch.setattr(scheduling, "scheduler", handoff.scheduler)
+    monkeypatch.setattr("backend.app.services.print_scheduler.scheduler", handoff.scheduler)
     notified = asyncio.Event()
     notification = AsyncMock()
 

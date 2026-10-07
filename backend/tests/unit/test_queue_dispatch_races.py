@@ -15,10 +15,10 @@ from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services import print_scheduler as scheduling
 from backend.app.services.archive import ArchiveService
-from backend.app.services.lifecycle import preheating as heat
+from backend.app.services.lifecycle import dispatching as scheduling, preheating as heat
 from backend.app.services.lifecycle.engine import QueueTransitionConflict, transition_queue_item
+from backend.app.services.print_scheduler import PrintScheduler, scheduler
 from backend.app.services.printer_manager import printer_manager
 from backend.app.services.queue_actions import cancel_job
 from backend.app.services.queue_archive import link_dispatch_archive, prepare_dispatch_archive
@@ -52,7 +52,7 @@ async def test_reconnect_during_dispatch_waits_for_evidence(queue_factory, monke
             live.submission_id = "another-print"
 
     waits = []
-    original_wait = scheduling.PrintScheduler._wait_for_dispatch_telemetry
+    original_wait = PrintScheduler._wait_for_dispatch_telemetry
 
     async def wait(self, *args, **kwargs):
         if not live.job_telemetry_ready:
@@ -71,7 +71,7 @@ async def test_reconnect_during_dispatch_waits_for_evidence(queue_factory, monke
                     await task
         return await original_wait(self, *args, **kwargs)
 
-    monkeypatch.setattr(scheduling.PrintScheduler, "_wait_for_dispatch_telemetry", wait)
+    monkeypatch.setattr(PrintScheduler, "_wait_for_dispatch_telemetry", wait)
     if phase == "upload":
 
         async def upload(*args, **kwargs):
@@ -101,7 +101,7 @@ async def test_reconnect_during_dispatch_waits_for_evidence(queue_factory, monke
                 assert job.dispatched_at is None and job.dispatch_subtask_id is None
                 assert "telemetry unavailable" in job.error_message
                 # The ordinary scheduler must not turn this live timeout into failure.
-                await scheduling.PrintScheduler()._recover_stale_dispatches(db)
+                await PrintScheduler()._recover_stale_dispatches(db)
                 await db.refresh(job)
                 assert job.status == "dispatching"
     assert ctx.start_print.call_count == int(reconnect == "idle")
@@ -109,7 +109,7 @@ async def test_reconnect_during_dispatch_waits_for_evidence(queue_factory, monke
 
 @pytest.fixture
 async def handoff(alignment, monkeypatch):
-    scheduler = scheduling.PrintScheduler()
+    scheduler = PrintScheduler()
     service = scheduler._heat_soak
     states = {
         1: SimpleNamespace(
@@ -158,7 +158,7 @@ async def test_stop_during_heat_soak_archive_copy_wins_without_rows_or_directori
 
     monkeypatch.setattr(ArchiveService, "archive_print", stop_during_copy)
     monkeypatch.setattr(scheduling, "async_session", handoff.sessions)
-    monkeypatch.setattr(scheduling, "scheduler", handoff.scheduler)
+    monkeypatch.setattr("backend.app.services.print_scheduler.scheduler", handoff.scheduler)
     handoffs = []
 
     def capture(coroutine, *, name):
@@ -190,13 +190,13 @@ async def test_stop_during_heat_soak_archive_copy_wins_without_rows_or_directori
 async def test_losing_dispatch_update_cleans_its_upload_and_retains_the_cancelled_archive(
     alignment, monkeypatch, boundary, cleanup_fails
 ):
-    scheduler = scheduling.PrintScheduler()
+    scheduler = PrintScheduler()
     live = SimpleNamespace(state="IDLE", connected=True, job_telemetry_ready=True)
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
     monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
     monkeypatch.setattr("backend.app.main._user_stopped_printers", set())
     # A control from another worker cannot cancel this process's local task.
-    monkeypatch.setattr(scheduling.scheduler, "cancel_inflight", lambda _id: False)
+    monkeypatch.setattr(scheduler, "cancel_inflight", lambda _id: False)
     monkeypatch.setattr(scheduling, "async_session", alignment.sessions)
     monkeypatch.setattr(scheduling, "get_ftp_retry_settings", AsyncMock(return_value=(False, 1, 0, 30)))
     monkeypatch.setattr(scheduler, "_prepare_drying_for_dispatch", AsyncMock(return_value=True))
@@ -287,12 +287,12 @@ async def test_losing_dispatch_update_cleans_its_upload_and_retains_the_cancelle
 
 @pytest.mark.parametrize("heat_soak", [False, True])
 async def test_local_stop_drains_final_upload_ack_then_removes_only_its_unsent_copy(alignment, monkeypatch, heat_soak):
-    scheduler = scheduling.PrintScheduler()
+    scheduler = PrintScheduler()
     live = SimpleNamespace(state="IDLE", connected=True, job_telemetry_ready=True, raw_data={})
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
     monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
     monkeypatch.setattr(printer_manager, "get_client", lambda _id: None)
-    monkeypatch.setattr(scheduling, "scheduler", scheduler)
+    monkeypatch.setattr("backend.app.services.print_scheduler.scheduler", scheduler)
     monkeypatch.setattr(scheduling, "async_session", alignment.sessions)
     monkeypatch.setattr(scheduling, "get_ftp_retry_settings", AsyncMock(return_value=(False, 1, 0, 30)))
     monkeypatch.setattr(scheduler, "_prepare_drying_for_dispatch", AsyncMock(return_value=True))
@@ -378,7 +378,7 @@ async def test_cancellation_cleanup_keeps_a_copy_after_the_persisted_send_bounda
             .values(status=status, dispatched_at=datetime.now(timezone.utc))
         )
         await db.commit()
-        await scheduling.PrintScheduler()._cleanup_unsent_dispatch_upload(db, job.id)
+        await PrintScheduler()._cleanup_unsent_dispatch_upload(db, job.id)
     deleted.assert_not_awaited()
 
 
@@ -547,7 +547,7 @@ async def test_skip_route_holds_job_then_copy_failure_is_recorded(handoff, monke
 
     monkeypatch.setattr(ArchiveService, "archive_print", AsyncMock(side_effect=OSError("Disk full")))
     monkeypatch.setattr(scheduling, "async_session", handoff.sessions)
-    monkeypatch.setattr(scheduling, "scheduler", handoff.scheduler)
+    monkeypatch.setattr("backend.app.services.print_scheduler.scheduler", handoff.scheduler)
     handoffs = []
 
     def capture(coroutine, *, name):
@@ -576,7 +576,7 @@ async def test_pool_copy_failure_notifies_failure_without_assignment(alignment, 
     monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
     monkeypatch.setattr(printer_manager, "is_awaiting_plate_clear", lambda _id: False)
     monkeypatch.setattr(ArchiveService, "archive_print", AsyncMock(side_effect=OSError("Disk full")))
-    scheduler = scheduling.PrintScheduler()
+    scheduler = PrintScheduler()
     assigned, failed, upload = AsyncMock(), AsyncMock(), AsyncMock()
     monkeypatch.setattr(scheduler, "_notify_pool_assignment", assigned)
     notified = asyncio.Event()

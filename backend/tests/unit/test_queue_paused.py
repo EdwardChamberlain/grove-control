@@ -123,8 +123,8 @@ async def test_restart_recovery_applies_pause_resume_without_restarting_the_job(
         tasks.append(coro)
 
     with (
-        patch("backend.app.services.print_scheduler.printer_manager.get_status", return_value=telemetry(state)),
-        patch("backend.app.services.print_scheduler.spawn_background_task", side_effect=spawn),
+        patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", return_value=telemetry(state)),
+        patch("backend.app.services.lifecycle.dispatching.spawn_background_task", side_effect=spawn),
         patch.object(scheduler, "_publish_queue_job_started", publish),
     ):
         async with sessions() as db:
@@ -148,9 +148,9 @@ async def test_restart_recovers_a_terminal_print_from_paused(sessions, outcome):
     tasks = []
     scheduler = PrintScheduler()
     with (
-        patch("backend.app.services.print_scheduler.printer_manager.get_status", return_value=telemetry(outcome)),
+        patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", return_value=telemetry(outcome)),
         patch(
-            "backend.app.services.print_scheduler.spawn_background_task",
+            "backend.app.services.lifecycle.dispatching.spawn_background_task",
             side_effect=lambda coro, **kw: tasks.append(coro),
         ),
         patch.object(scheduler, "_complete_recovered_dispatch", AsyncMock()),
@@ -296,7 +296,7 @@ async def test_dispatch_confirmation_can_first_observe_pause(sessions):
     publish = AsyncMock()
     with (
         patch.object(scheduler, "_wait_for_print_start_ack", AsyncMock(return_value=("printing", telemetry()))),
-        patch("backend.app.services.print_scheduler.printer_manager.get_status", return_value=telemetry()),
+        patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", return_value=telemetry()),
         patch("backend.app.core.database.async_session", sessions),
         patch.object(scheduler, "_publish_queue_job_started", publish),
     ):

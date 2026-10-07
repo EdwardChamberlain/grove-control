@@ -78,6 +78,11 @@ editable field with the selection snapshot; an intervening edit releases the
 claim and causes a fresh selection. Printer and tray mapping are persisted
 only by the conditional transition to `preheating` or `dispatching`.
 
+`services/lifecycle/dispatching.py` owns dispatch. Its `Dispatcher` runs one
+entry path for queued jobs and heat-soak handoffs, with one session per worker.
+The scheduler still exposes these methods and runs selection and recovery on
+its existing cadence until printing/intake removes that tick in stage 6.
+
 Dispatch follows this order:
 
 1. Commit the printer hold: `queued` or `preheating` → `dispatching`.
@@ -104,7 +109,18 @@ an attempt that might have sent a command stays held for telemetry or review.
 
 The unconfirmed-dispatch prompt requires an ID, a send timestamp, an expired
 270-second acknowledgement window, and no live worker claim. **It's printing**
-confirms `printing`; **It didn't start** records `failed`. See
+confirms `printing`; **It didn't start** records `failed`. Live confirmation,
+manual resolution and restart recovery register their queue-start notification
+and relay publication with the effects registry. Confirmation and manual
+resolution await the committed publication before returning; restart recovery
+keeps its background delivery. Rollback or a failed commit emits no start.
+
+Unsent heat-soak handoffs belong to dispatching rather than preheating's wait.
+Dispatching keeps their existing heartbeat abort, inspection message and view
+recovery policy. The separate long-upload and interrupted-soak behavior fixes
+listed in #204 remain follow-up work.
+
+See
 [job identity](queue-job-identity.md) for matching and recovery details and
 [concurrency](queue-dispatch-concurrency.md) for upload pool settings.
 
@@ -160,12 +176,15 @@ write, the engine aligns the Archive attempt, runs the old state's exit step and
 then the new state's entry step, all in the same transaction.
 
 Each state's steps live in its module in `services/lifecycle/`: `queued.py`,
-`preheating.py`, `awaiting.py` (`finished`, `failed`, `cancelled`) and
+`preheating.py`, `dispatching.py`, `awaiting.py` (`finished`, `failed`, `cancelled`) and
 `final.py` (`successful`, `unsuccessful`). Leaving `preheating` other than for `dispatching` releases the
 soak's claim and shuts its heaters down. Entry into an awaiting state writes the
 physical outcome with the status, then clears a finished plate when confirmation
 is off or queues a failed or stopped job's effects. Clear Plate, hold transfer
-and printer deletion end a job through `final.end`. Leaving `failed` or
+and printer deletion end a job through `final.end`. Machine-level hold
+transfer and printer deletion live in the engine, including deletion's
+heat-soak shutdown guard. A failed or stopped dispatch stages its own outcome
+and heater shutdown on exit; awaiting handles the other failures. Leaving `failed` or
 `cancelled` through Clear Plate removes the attempt's sent upload; a state
 cleans up on its own exit. Entry into a final state releases unused Queue
 sources.

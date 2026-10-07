@@ -35,7 +35,7 @@ async def test_different_printers_dispatch_concurrently():
         entered.remove(item_id)
 
     with patch(
-        "backend.app.services.print_scheduler.spawn_background_task",
+        "backend.app.services.lifecycle.dispatching.spawn_background_task",
         side_effect=lambda coro, *, name=None: asyncio.create_task(coro, name=name),
     ):
         scheduler._dispatch_one = dispatch  # type: ignore[method-assign]
@@ -60,7 +60,7 @@ async def test_pool_cap_refills_after_a_slot_is_freed():
         await release.wait()
 
     with patch(
-        "backend.app.services.print_scheduler.spawn_background_task",
+        "backend.app.services.lifecycle.dispatching.spawn_background_task",
         side_effect=lambda coro, *, name=None: asyncio.create_task(coro, name=name),
     ):
         scheduler._dispatch_one = dispatch  # type: ignore[method-assign]
@@ -90,7 +90,7 @@ async def test_cancellation_releases_pool_slot():
         await release.wait()
 
     with patch(
-        "backend.app.services.print_scheduler.spawn_background_task",
+        "backend.app.services.lifecycle.dispatching.spawn_background_task",
         side_effect=lambda coro, *, name=None: asyncio.create_task(coro, name=name),
     ):
         scheduler._dispatch_one = dispatch  # type: ignore[method-assign]
@@ -115,7 +115,7 @@ async def test_same_printer_is_reserved_once_even_if_selection_repeats():
         await release.wait()
 
     with patch(
-        "backend.app.services.print_scheduler.spawn_background_task",
+        "backend.app.services.lifecycle.dispatching.spawn_background_task",
         side_effect=lambda coro, *, name=None: asyncio.create_task(coro, name=name),
     ):
         scheduler._dispatch_one = dispatch  # type: ignore[method-assign]

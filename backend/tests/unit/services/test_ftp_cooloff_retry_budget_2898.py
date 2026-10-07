@@ -329,8 +329,8 @@ async def _failed_dispatch_message(dispatch_case, *, handshake_fails: bool) -> s
     real one does when the printer answers port 990 with something other than
     TLS -- which is the only thing that separates the two messages.
     """
-    import backend.app.services.print_scheduler as scheduler_module
     from backend.app.models.print_queue import PrintQueueItem
+    from backend.app.services.lifecycle import dispatching as scheduler_module
     from backend.app.services.print_scheduler import PrintScheduler
 
     async def _upload(*_args, **_kwargs):
@@ -343,21 +343,25 @@ async def _failed_dispatch_message(dispatch_case, *, handshake_fails: bool) -> s
         item = await db.get(PrintQueueItem, dispatch_case.item_id)
         patches = [
             patch.object(scheduler_module.settings, "base_dir", dispatch_case.base_dir),
-            patch("backend.app.services.print_scheduler.printer_manager.is_connected", MagicMock(return_value=True)),
             patch(
-                "backend.app.services.print_scheduler.printer_manager.get_status",
+                "backend.app.services.lifecycle.dispatching.printer_manager.is_connected", MagicMock(return_value=True)
+            ),
+            patch(
+                "backend.app.services.lifecycle.dispatching.printer_manager.get_status",
                 MagicMock(
                     return_value=SimpleNamespace(state="IDLE", connected=True, job_telemetry_ready=True, raw_data={})
                 ),
             ),
-            patch("backend.app.services.print_scheduler.printer_manager.is_awaiting_plate_clear", return_value=False),
             patch(
-                "backend.app.services.print_scheduler.get_ftp_retry_settings",
+                "backend.app.services.lifecycle.dispatching.printer_manager.is_awaiting_plate_clear", return_value=False
+            ),
+            patch(
+                "backend.app.services.lifecycle.dispatching.get_ftp_retry_settings",
                 AsyncMock(return_value=(False, 0, 0, 1.0)),
             ),
-            patch("backend.app.services.print_scheduler.delete_file_async", AsyncMock(return_value=True)),
-            patch("backend.app.services.print_scheduler.upload_file_async", _upload),
-            patch("backend.app.services.print_scheduler.notification_service.on_queue_job_failed", AsyncMock()),
+            patch("backend.app.services.lifecycle.dispatching.delete_file_async", AsyncMock(return_value=True)),
+            patch("backend.app.services.lifecycle.dispatching.upload_file_async", _upload),
+            patch("backend.app.services.lifecycle.dispatching.notification_service.on_queue_job_failed", AsyncMock()),
             patch.object(scheduler, "_propagate_owner_to_printer_manager", AsyncMock()),
         ]
         with ExitStack() as stack:

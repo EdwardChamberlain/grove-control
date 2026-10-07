@@ -77,7 +77,7 @@ class TestDurableDispatchingState:
                 "_wait_for_print_start_ack",
                 new=AsyncMock(return_value=("printing", _status("PREPARE", "12345"))),
             ),
-            patch("backend.app.services.print_scheduler.async_session", db_session),
+            patch("backend.app.services.lifecycle.dispatching.async_session", db_session),
             patch("backend.app.core.database.async_session", db_session),
             patch.object(scheduler, "_publish_queue_job_started", new=publish),
         ):
@@ -122,9 +122,9 @@ class TestDurableDispatchingState:
                 "_wait_for_print_start_ack",
                 new=AsyncMock(return_value=(telemetry_status, last_status)),
             ),
-            patch("backend.app.services.print_scheduler.async_session", db_session),
+            patch("backend.app.services.lifecycle.dispatching.async_session", db_session),
             patch("backend.app.core.database.async_session", db_session),
-            patch("backend.app.services.print_scheduler.printer_manager.get_client", return_value=client),
+            patch("backend.app.services.lifecycle.dispatching.printer_manager.get_client", return_value=client),
         ):
             await scheduler._confirm_dispatch(
                 queue_item_id=1,
@@ -160,9 +160,9 @@ class TestDurableDispatchingState:
                 "_wait_for_print_start_ack",
                 new=AsyncMock(return_value=(None, _status("IDLE", "OLD_SUBTASK"))),
             ),
-            patch("backend.app.services.print_scheduler.async_session", db_session),
+            patch("backend.app.services.lifecycle.dispatching.async_session", db_session),
             patch("backend.app.core.database.async_session", db_session),
-            patch("backend.app.services.print_scheduler.printer_manager.get_client", return_value=None),
+            patch("backend.app.services.lifecycle.dispatching.printer_manager.get_client", return_value=None),
         ):
             await scheduler._confirm_dispatch(
                 queue_item_id=1,
@@ -193,7 +193,7 @@ class TestDurableDispatchingState:
                 "_wait_for_print_start_ack",
                 new=AsyncMock(return_value=("failed", _status("FAILED", "12345"))),
             ),
-            patch("backend.app.services.print_scheduler.async_session", db_session),
+            patch("backend.app.services.lifecycle.dispatching.async_session", db_session),
             patch("backend.app.core.database.async_session", db_session),
         ):
             await scheduler._confirm_dispatch(
@@ -227,10 +227,10 @@ class TestDurableDispatchingState:
 
             with (
                 patch(
-                    "backend.app.services.print_scheduler.printer_manager.get_status",
+                    "backend.app.services.lifecycle.dispatching.printer_manager.get_status",
                     return_value=_status("RUNNING", "12345"),
                 ),
-                patch("backend.app.services.print_scheduler.spawn_background_task", side_effect=spawn),
+                patch("backend.app.services.lifecycle.dispatching.spawn_background_task", side_effect=spawn),
                 patch.object(scheduler, "_publish_queue_job_started", new=publish),
             ):
                 await scheduler._recover_stale_dispatches(db)
@@ -265,10 +265,10 @@ class TestDurableDispatchingState:
             try:
                 with (
                     patch(
-                        "backend.app.services.print_scheduler.printer_manager.get_status",
+                        "backend.app.services.lifecycle.dispatching.printer_manager.get_status",
                         return_value=_status("RUNNING", "12345"),
                     ),
-                    patch("backend.app.services.print_scheduler.spawn_background_task", spawn),
+                    patch("backend.app.services.lifecycle.dispatching.spawn_background_task", spawn),
                     patch.object(scheduler, "_publish_queue_job_started", new=publish),
                     pytest.raises(OperationalError),
                 ):
@@ -293,7 +293,7 @@ class TestDurableDispatchingState:
             await db.commit()
 
             with patch(
-                "backend.app.services.print_scheduler.printer_manager.get_status",
+                "backend.app.services.lifecycle.dispatching.printer_manager.get_status",
                 return_value=_status("RUNNING", "other-job"),
             ):
                 await PrintScheduler()._recover_stale_dispatches(db)
@@ -313,7 +313,7 @@ class TestDurableDispatchingState:
             await db.commit()
 
             with patch(
-                "backend.app.services.print_scheduler.printer_manager.get_status",
+                "backend.app.services.lifecycle.dispatching.printer_manager.get_status",
                 return_value=_status("RUNNING"),
             ):
                 await PrintScheduler()._recover_stale_dispatches(db)
@@ -338,11 +338,11 @@ class TestDurableDispatchingState:
 
             with (
                 patch(
-                    "backend.app.services.print_scheduler.printer_manager.get_status",
+                    "backend.app.services.lifecycle.dispatching.printer_manager.get_status",
                     return_value=_status("RUNNING", "unrelated-job"),
                 ),
                 patch("backend.app.services.printer_manager.printer_manager.start_print") as start,
-                patch("backend.app.services.print_scheduler.async_session", db_session),
+                patch("backend.app.services.lifecycle.dispatching.async_session", db_session),
                 patch("backend.app.services.lifecycle.effects.run_queue_outcome_effects", new=AsyncMock()),
             ):
                 await PrintScheduler()._clear_stale_dispatch_claims()
@@ -372,7 +372,7 @@ class TestDurableDispatchingState:
             await db.commit()
 
             with patch(
-                "backend.app.services.print_scheduler.printer_manager.get_status",
+                "backend.app.services.lifecycle.dispatching.printer_manager.get_status",
                 return_value=_status("RUNNING", printer_subtask_id),
             ):
                 await PrintScheduler()._recover_stale_dispatches(db)
@@ -393,7 +393,7 @@ class TestDurableDispatchingState:
             await db.commit()
 
             with patch(
-                "backend.app.services.print_scheduler.printer_manager.get_status",
+                "backend.app.services.lifecycle.dispatching.printer_manager.get_status",
                 return_value=printer_status,
             ):
                 await PrintScheduler()._recover_stale_dispatches(db)
@@ -417,7 +417,7 @@ class TestDurableDispatchingState:
             # carries subtask_id=0 after a restart.
             status = _status("FINISH", "0", "completed-while-down.3mf")
             status.raw_data = {"subtask_id": "0"}
-            with patch("backend.app.services.print_scheduler.printer_manager.get_status", return_value=status):
+            with patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", return_value=status):
                 await PrintScheduler()._recover_stale_dispatches(db)
 
             item = await db.get(PrintQueueItem, 1)
@@ -458,9 +458,9 @@ class TestDurableDispatchingState:
                 return task
 
             with (
-                patch("backend.app.services.print_scheduler.printer_manager.get_status", return_value=status),
+                patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", return_value=status),
                 patch("backend.app.main.on_print_complete", new=complete),
-                patch("backend.app.services.print_scheduler.spawn_background_task", side_effect=spawn),
+                patch("backend.app.services.lifecycle.dispatching.spawn_background_task", side_effect=spawn),
             ):
                 await PrintScheduler()._recover_stale_dispatches(db)
                 await asyncio.gather(*tasks)
@@ -501,7 +501,7 @@ class TestDurableDispatchingState:
             scheduler = PrintScheduler()
             scheduler._recovery_started_at = dispatched_at - timedelta(seconds=1)
             status = _status("FINISH", "NEW_SUBTASK", "old-job.gcode.3mf")
-            with patch("backend.app.services.print_scheduler.printer_manager.get_status", return_value=status):
+            with patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", return_value=status):
                 await scheduler._recover_stale_dispatches(db)
 
             item = await db.get(PrintQueueItem, 1)
@@ -566,14 +566,14 @@ class TestDispatchConfirmationScheduling:
 
         with (
             patch.object(scheduler, "_confirm_dispatch", new=slow_confirmation),
-            patch("backend.app.services.print_scheduler.spawn_background_task", side_effect=spawn),
-            patch("backend.app.services.print_scheduler.async_session") as session_factory,
+            patch("backend.app.services.lifecycle.dispatching.spawn_background_task", side_effect=spawn),
+            patch("backend.app.services.lifecycle.dispatching.async_session") as session_factory,
             patch.object(scheduler, "_recover_stale_dispatches", new=AsyncMock()),
             patch.object(scheduler, "_check_heat_soaks", new=AsyncMock(return_value=set())),
             patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
             patch.object(scheduler, "_get_int_setting", new=AsyncMock(return_value=2)),
             patch.object(scheduler, "_is_printer_idle", return_value=True),
-            patch("backend.app.services.print_scheduler.printer_manager.is_connected", return_value=True),
+            patch("backend.app.services.lifecycle.dispatching.printer_manager.is_connected", return_value=True),
             patch.object(scheduler, "_ams_mapping_uses_compatible_materials", return_value=True),
             patch.object(scheduler, "_block_on_filament_deficit", new=AsyncMock(return_value=False)),
             patch.object(scheduler, "_claim_for_dispatch", new=AsyncMock(return_value=True)),
@@ -607,7 +607,7 @@ class TestActivePrinterReservation:
     @pytest.mark.asyncio
     async def test_terminal_telemetry_does_not_confirm_dispatch(self):
         get_status = MagicMock(return_value=_status("FINISH", "NEW_SUBTASK"))
-        with patch("backend.app.services.print_scheduler.printer_manager.get_status", get_status):
+        with patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", get_status):
             telemetry_status, _ = await PrintScheduler()._wait_for_print_start_ack(
                 printer_id=42,
                 dispatch_subtask_id="NEW_SUBTASK",
@@ -627,7 +627,7 @@ class TestActivePrinterReservation:
                 _status("RUNNING", "NEW_SUBTASK"),
             ]
         )
-        with patch("backend.app.services.print_scheduler.printer_manager.get_status", get_status):
+        with patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", get_status):
             telemetry_status, status = await PrintScheduler()._wait_for_print_start_ack(
                 printer_id=42,
                 dispatch_subtask_id="NEW_SUBTASK",
@@ -643,7 +643,7 @@ class TestActivePrinterReservation:
     @pytest.mark.asyncio
     async def test_active_telemetry_requires_this_dispatch_submission_id(self):
         get_status = MagicMock(return_value=_status("RUNNING", "other-job"))
-        with patch("backend.app.services.print_scheduler.printer_manager.get_status", get_status):
+        with patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", get_status):
             telemetry_status, _ = await PrintScheduler()._wait_for_print_start_ack(
                 printer_id=42,
                 dispatch_subtask_id="12345",
@@ -657,7 +657,7 @@ class TestActivePrinterReservation:
     @pytest.mark.asyncio
     async def test_matching_active_telemetry_confirms_this_dispatch(self):
         get_status = MagicMock(return_value=_status("PREPARE", "12345"))
-        with patch("backend.app.services.print_scheduler.printer_manager.get_status", get_status):
+        with patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", get_status):
             telemetry_status, _ = await PrintScheduler()._wait_for_print_start_ack(
                 printer_id=42,
                 dispatch_subtask_id="12345",

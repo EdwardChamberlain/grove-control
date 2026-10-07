@@ -95,10 +95,10 @@ async def _add_item(ctx, *, printer_id=None, target_model=None):
 
 async def _run(ctx, scheduler, blocked, launched, finder=None, idle=True, drying=None):
     patches = [
-        patch("backend.app.services.print_scheduler.async_session", ctx.session_maker),
+        patch("backend.app.services.lifecycle.dispatching.async_session", ctx.session_maker),
         patch("backend.app.core.database.async_session", ctx.session_maker),
-        patch("backend.app.services.print_scheduler.printer_manager.is_connected", MagicMock(return_value=True)),
-        patch("backend.app.services.print_scheduler.printer_manager.get_status", MagicMock(return_value=None)),
+        patch("backend.app.services.lifecycle.dispatching.printer_manager.is_connected", MagicMock(return_value=True)),
+        patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", MagicMock(return_value=None)),
         patch(
             "backend.app.services.notification_service.notification_service.on_queue_job_waiting",
             AsyncMock(),

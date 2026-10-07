@@ -23,6 +23,7 @@ from backend.app.services.bambu_mqtt import PrinterState
 from backend.app.services.heat_soak_telemetry import record_heat_soak_reports
 from backend.app.services.library_trash import release_queue_references
 from backend.app.services.lifecycle import preheating as heat
+from backend.app.services.print_scheduler import PrintScheduler, scheduler
 
 
 @pytest.fixture
@@ -126,7 +127,7 @@ async def test_supported_controls_and_durable_reservation(soak, model, chamber, 
 
 
 async def test_any_machine_job_is_bound_to_its_printer_only_by_the_soak_hold(soak):
-    from backend.app.services.print_scheduler import _bind_in_memory
+    from backend.app.services.lifecycle.dispatching import _bind_in_memory
 
     # An "Any machine" job waits unassigned; the worker carries its choice.
     await soak.db.execute(
@@ -145,7 +146,7 @@ async def test_any_machine_job_is_bound_to_its_printer_only_by_the_soak_hold(soa
 
 
 async def test_any_machine_soak_refuses_a_job_that_gained_a_printer_requirement(soak):
-    from backend.app.services.print_scheduler import _bind_in_memory
+    from backend.app.services.lifecycle.dispatching import _bind_in_memory
 
     await soak.db.execute(
         PrintQueueItem.__table__.update().where(PrintQueueItem.id == 1).values(printer_id=None, target_model="H2D")
@@ -563,8 +564,8 @@ async def test_no_upload_or_print_until_soak_then_normal_correlated_dispatch(soa
     from unittest.mock import AsyncMock
 
     from backend.app.models.archive import PrintArchive
-    from backend.app.services import print_scheduler as scheduling
     from backend.app.services.archive import ArchiveService
+    from backend.app.services.lifecycle import dispatching as scheduling
 
     source = tmp_path / "test.3mf"
     source.write_bytes(b"test print")
@@ -575,7 +576,7 @@ async def test_no_upload_or_print_until_soak_then_normal_correlated_dispatch(soa
     await soak.db.flush()
     soak.item.archive_id = archive.id
     await soak.db.commit()
-    scheduler = scheduling.PrintScheduler()
+    scheduler = PrintScheduler()
     scheduler._heat_soak = soak.service
     scheduler._prepare_drying_for_dispatch = AsyncMock(return_value=True)
     scheduler._active_drying_ams_ids = MagicMock(return_value=[])
@@ -631,7 +632,7 @@ async def test_no_upload_or_print_until_soak_then_normal_correlated_dispatch(soa
 async def test_cancel_after_soak_before_dispatch_task_does_not_upload(soak, monkeypatch):
     from unittest.mock import AsyncMock
 
-    from backend.app.services import print_scheduler as scheduling
+    from backend.app.services.lifecycle import dispatching as scheduling
 
     await soak.service.enter(soak.db, soak.item)
     await soak.service.wait(soak.db)
@@ -640,7 +641,7 @@ async def test_cancel_after_soak_before_dispatch_task_does_not_upload(soak, monk
     assert await soak.service.wait(soak.db) == [1]
     item = await heat.lock_queue_item(soak.db, 1)
     await heat.abort_heat_soak(soak.db, item, "Stopped", status="cancelled")
-    scheduler = scheduling.PrintScheduler()
+    scheduler = PrintScheduler()
     scheduler._heat_soak = soak.service
     scheduler._start_print = AsyncMock()
     monkeypatch.setattr(scheduling, "async_session", lambda: AsyncSession(soak.engine, expire_on_commit=False))

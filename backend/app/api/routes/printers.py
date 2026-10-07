@@ -62,8 +62,7 @@ from backend.app.services.bambu_ftp import (
 )
 from backend.app.services.job_identity import find_job, telemetry_identity
 from backend.app.services.lifecycle.awaiting import clear_job_plate
-from backend.app.services.lifecycle.engine import InvalidQueueTransition, lock_queue_item
-from backend.app.services.lifecycle.final import release_printer
+from backend.app.services.lifecycle.engine import InvalidQueueTransition, lock_queue_item, release_printer
 from backend.app.services.printer_diagnostic import run_connection_diagnostic
 from backend.app.services.printer_manager import (
     drying_screen_only,

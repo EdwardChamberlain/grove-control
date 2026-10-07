@@ -25,7 +25,7 @@ def _patch_status(backup):
     """Patch ``printer_manager.get_status`` to return a stub PrinterState whose
     ``ams_filament_backup`` is the requested tri-state value."""
     return patch(
-        "backend.app.services.print_scheduler.printer_manager.get_status",
+        "backend.app.services.lifecycle.dispatching.printer_manager.get_status",
         return_value=SimpleNamespace(ams_filament_backup=backup, raw_data={}),
     )
 

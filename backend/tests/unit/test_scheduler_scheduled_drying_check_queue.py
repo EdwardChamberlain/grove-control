@@ -114,12 +114,12 @@ async def _run(ctx, scheduler, *, state):
     """One real check_queue pass with only the print-side collaborators mocked."""
     started = AsyncMock()
     patches = [
-        patch("backend.app.services.print_scheduler.async_session", ctx.session_maker),
+        patch("backend.app.services.lifecycle.dispatching.async_session", ctx.session_maker),
         patch("backend.app.core.database.async_session", ctx.session_maker),
-        patch("backend.app.services.print_scheduler.printer_manager.is_connected", MagicMock(return_value=True)),
-        patch("backend.app.services.print_scheduler.printer_manager.get_status", MagicMock(return_value=state)),
+        patch("backend.app.services.lifecycle.dispatching.printer_manager.is_connected", MagicMock(return_value=True)),
+        patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", MagicMock(return_value=state)),
         patch(
-            "backend.app.services.print_scheduler.printer_manager.send_drying_command",
+            "backend.app.services.lifecycle.dispatching.printer_manager.send_drying_command",
             MagicMock(return_value=True),
         ),
         patch.object(scheduler, "_is_printer_idle", MagicMock(return_value=True)),

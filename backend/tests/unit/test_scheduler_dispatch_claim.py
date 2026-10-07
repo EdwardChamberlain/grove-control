@@ -6,10 +6,10 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import backend.app.models  # noqa: F401 - populate Base.metadata
-import backend.app.services.print_scheduler as scheduler_module
 from backend.app.core.database import Base
 from backend.app.models.print_queue import PrintQueueItem
-from backend.app.services.print_scheduler import PrintScheduler
+from backend.app.services.lifecycle import dispatching as scheduler_module
+from backend.app.services.print_scheduler import PrintScheduler, scheduler
 
 
 @pytest.fixture

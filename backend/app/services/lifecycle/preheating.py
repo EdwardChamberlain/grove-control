@@ -1,16 +1,4 @@
-"""Preheating (#204): hold the printer, heat it for a bounded soak, then hand off to dispatching.
-
-Enter: ``ChamberHeatSoak.enter`` holds the printer, and once the hold has
-committed the engine runs ``on_entered``, which turns the heaters on. Wait:
-``ChamberHeatSoak.wait`` keeps the heartbeat, ends an interrupted soak, and
-hands off when the timer has run. Exit: the engine runs ``on_exit``, which
-releases the claim and shuts the heaters down unless dispatching inherits them;
-``abort_heat_soak`` and ``skip_heat_soak`` request exits. Recover:
-``ChamberHeatSoak.recover`` keeps an expired soak's hold until a person chooses
-Stop or Skip heat soak. Database write locks serialize controls with
-cancellation; no other process resumes a soak's timer or dispatches its job.
-There is no material or keep-warm policy.
-"""
+"""Preheating (#204): reserve and heat for a bounded soak, then hand off; recover interrupted soaks for inspection."""
 
 import logging
 import time
@@ -20,7 +8,7 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.tasks import spawn_background_task
@@ -37,22 +25,6 @@ from backend.app.services.printer_manager import printer_manager, supports_chamb
 logger = logging.getLogger(__name__)
 HEARTBEAT_TIMEOUT = 90
 TELEMETRY_TIMEOUT = 60
-
-# A soak owns the heaters while preheating, and until its dispatch is sent.
-SOAKING = or_(
-    PrintQueueItem.status == "preheating",
-    and_(
-        PrintQueueItem.status == "dispatching",
-        PrintQueueItem.chamber_heat_soak.is_(True),
-        PrintQueueItem.dispatch_subtask_id.is_(None),
-    ),
-)
-
-
-def is_soaking(item: PrintQueueItem) -> bool:
-    return item.status == "preheating" or (
-        item.status == "dispatching" and bool(item.chamber_heat_soak) and item.dispatch_subtask_id is None
-    )
 
 
 def utcnow() -> datetime:
@@ -374,14 +346,14 @@ class ChamberHeatSoak:
     async def wait(self, db: AsyncSession) -> list[int]:
         """Wait: advance each soak once, without sleeping or blocking other printers' scheduling."""
         await self.cleanup(db)
-        ids = list((await db.scalars(select(PrintQueueItem.id).where(SOAKING))).all())
+        ids = list((await db.scalars(select(PrintQueueItem.id).where(PrintQueueItem.status == "preheating"))).all())
         ready = []
         visible: set[int] = set()
         for item_id in ids:
             try:
                 item = await lock_queue_item(db, item_id)
                 # The select can be stale: Skip may have handed this soak off since.
-                if not item or not is_soaking(item):
+                if not item or item.status != "preheating":
                     await db.rollback()
                     continue
                 printer_id, now = item.printer_id, utcnow()
@@ -395,9 +367,6 @@ class ChamberHeatSoak:
                     await abort_heat_soak(
                         db, item, "Heat soak interrupted by restart or scheduler timeout; retry required"
                     )
-                    continue
-                if item.status == "dispatching":
-                    await db.rollback()
                     continue
                 visible.add(printer_id)
                 _show_preheating(printer_id, True)

@@ -14,10 +14,11 @@ import logging
 from collections.abc import Callable, Hashable
 from dataclasses import dataclass
 
-from sqlalchemy import event
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
+from backend.app.core.database import async_session
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import AWAITING_PLATE_CLEAR_STATUSES, PrintQueueItem
@@ -190,3 +191,89 @@ async def run_queue_outcome_effects(engine: AsyncEngine, effect: QueueOutcomeEff
             )
         except Exception:
             logger.exception("Queue job %s: failed to remove SD dispatch copy", effect.job_id)
+
+
+def queue_job_started(db: AsyncSession, job_id: int, *, publish=None, spawn=None, background: bool = False) -> list:
+    """Register a start after commit; foreground callers await its task before returning."""
+    from backend.app.core.tasks import spawn_background_task
+
+    tasks = []
+    publish = publish or publish_queue_job_started
+    spawn = spawn or spawn_background_task
+
+    def start() -> None:
+        task = spawn(
+            publish(job_id), name=f"publish-recovered-queue-start-{job_id}" if background else f"queue-start-{job_id}"
+        )
+        if not background:
+            tasks.append(task)
+
+    after_commit(db, start, key=("queue_start", job_id))
+    return tasks
+
+
+async def wait_for(tasks: list) -> None:
+    for task in tasks:
+        await task
+
+
+async def publish_queue_job_started(queue_item_id: int) -> None:
+    """Publish the normal queue-start side effects for a confirmed job."""
+    try:
+        async with async_session() as db:
+            result = await db.execute(
+                select(PrintQueueItem)
+                .options(
+                    selectinload(PrintQueueItem.archive),
+                    selectinload(PrintQueueItem.library_file),
+                    selectinload(PrintQueueItem.printer),
+                )
+                .where(PrintQueueItem.id == queue_item_id)
+            )
+            item = result.scalar_one_or_none()
+            if not item or item.status not in ("printing", "paused") or not item.printer:
+                return
+
+            source = item.archive or item.library_file
+            filename = source.filename if source else f"Job #{item.id}"
+            estimated_time = item.print_time_seconds or getattr(source, "print_time_seconds", None)
+            printer = item.printer
+            await notification_service.on_queue_job_started(
+                job_name=filename.replace(".gcode.3mf", "").replace(".3mf", ""),
+                printer_id=printer.id,
+                printer_name=printer.name,
+                db=db,
+                estimated_time=estimated_time,
+            )
+
+        from backend.app.services.mqtt_relay import mqtt_relay
+
+        await mqtt_relay.on_queue_job_started(
+            job_id=queue_item_id,
+            filename=filename,
+            printer_id=printer.id,
+            printer_name=printer.name,
+            printer_serial=printer.serial_number,
+        )
+    except Exception:
+        logger.exception("Queue item %s: confirmed but failed to publish start side effects", queue_item_id)
+
+
+async def awaiting_outcome(change, row) -> None:
+    """Stage the awaiting outcome and a durable shutdown for a heat-soaked attempt."""
+    from backend.app.services.lifecycle import preheating
+
+    # Keep shutdown durable; preheating stages its own shutdown on exit.
+    heating = change.before != "preheating" and (row.preheat_requested_at is not None or row.chamber_heat_soak)
+    if heating and row.printer_id is not None:
+        await preheating.request_heater_shutdown(change.db, row.printer_id)
+    unconfirmed = change.action != "printer_report"
+    effect = QueueOutcomeEffect(
+        job_id=change.item_id,
+        new_state=change.after,
+        printer_id=row.printer_id,
+        shut_down_heaters=heating,
+        notify_failure=change.after == "failed" and change.before in ("preheating", "dispatching") and unconfirmed,
+        clean_sd_copy=change.after == "failed" and change.before == "dispatching" and unconfirmed,
+    )
+    queue_outcome_effect(change.db, effect)

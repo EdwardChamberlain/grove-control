@@ -12,8 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models.print_queue import ACTIVE_STATUSES, HOLDING_STATUSES, PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services.lifecycle.awaiting import transfer_hold
-from backend.app.services.lifecycle.engine import transition_queue_item
+from backend.app.services.lifecycle.engine import transfer_hold, transition_queue_item
 
 
 def normalize_id(value) -> str | None:

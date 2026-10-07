@@ -287,11 +287,11 @@ async def _add_variant_item(ctx, specs):
 async def _run_check_queue(ctx, scheduler, finder, waiting_notification=None, printer_states=None):
     scheduler.launch_uploads = MagicMock()
     patches = [
-        patch("backend.app.services.print_scheduler.async_session", ctx.session_maker),
+        patch("backend.app.services.lifecycle.dispatching.async_session", ctx.session_maker),
         patch("backend.app.core.database.async_session", ctx.session_maker),
-        patch("backend.app.services.print_scheduler.printer_manager.is_connected", MagicMock(return_value=True)),
+        patch("backend.app.services.lifecycle.dispatching.printer_manager.is_connected", MagicMock(return_value=True)),
         patch(
-            "backend.app.services.print_scheduler.printer_manager.get_status",
+            "backend.app.services.lifecycle.dispatching.printer_manager.get_status",
             MagicMock(side_effect=lambda printer_id: (printer_states or {}).get(printer_id)),
         ),
         patch(

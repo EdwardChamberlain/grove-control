@@ -20,13 +20,13 @@ from backend.app.core.database import Base
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services.lifecycle import effects, engine as lifecycle_engine, preheating
+from backend.app.services.lifecycle.dispatching import SOAKING, is_soaking
 from backend.app.services.lifecycle.engine import (
     ALLOWED_TRANSITIONS,
     QueueTransitionConflict,
     enter_state,
     transition_queue_item,
 )
-from backend.app.services.lifecycle.preheating import SOAKING, is_soaking
 from backend.tests.unit.test_chamber_heat_soak import soak  # noqa: F401
 
 CLAIM = ("preheat_owner", "preheat_started_at", "preheat_checked_at")

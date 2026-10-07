@@ -26,6 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.app.models.print_queue import PrintQueueItem
+from backend.app.services.print_scheduler import PrintScheduler, scheduler
 
 
 async def _read_item(test_engine, item_id: int) -> PrintQueueItem:
@@ -174,7 +175,7 @@ class TestSchedulerPropagatesOwnerToPrinterManager:
     @pytest.mark.integration
     async def test_propagates_when_created_by_id_resolves_to_user(self, db_session, queue_item, monkeypatch):
         from backend.app.models.user import User
-        from backend.app.services import print_scheduler as scheduler_module
+        from backend.app.services.lifecycle import dispatching as scheduler_module
         from backend.app.services.print_scheduler import PrintScheduler
 
         user = User(username="clickeruser", password_hash="x", is_active=True)
@@ -204,7 +205,7 @@ class TestSchedulerPropagatesOwnerToPrinterManager:
         """VP-uploaded queue items that never got manual-started (e.g.
         auto-dispatch) carry no owner — the helper must stay silent rather
         than synthesise a placeholder user."""
-        from backend.app.services import print_scheduler as scheduler_module
+        from backend.app.services.lifecycle import dispatching as scheduler_module
         from backend.app.services.print_scheduler import PrintScheduler
 
         assert queue_item.created_by_id is None
@@ -225,7 +226,7 @@ class TestSchedulerPropagatesOwnerToPrinterManager:
         """`created_by_id` points at a user that's since been deleted —
         helper must not crash the dispatch. The print log row will just be
         un-credited for this run, same as auth-disabled."""
-        from backend.app.services import print_scheduler as scheduler_module
+        from backend.app.services.lifecycle import dispatching as scheduler_module
         from backend.app.services.print_scheduler import PrintScheduler
 
         queue_item.created_by_id = 999_999  # no such user row

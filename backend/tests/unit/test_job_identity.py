@@ -99,7 +99,7 @@ async def test_stop_unmatched_run_keeps_plate_gate_before_release_and_after_rest
         patch.object(main, "async_session", sessions),
         patch.object(main, "printer_manager", manager),
         patch("backend.app.services.printer_manager.printer_manager", manager),
-        patch("backend.app.services.print_scheduler.printer_manager", manager),
+        patch("backend.app.services.lifecycle.dispatching.printer_manager", manager),
         patch.object(manager, "get_status", return_value=live),
         patch.object(manager, "is_connected", return_value=True),
         patch.object(
@@ -199,7 +199,7 @@ async def test_mqtt_id_loss_cannot_complete_or_recover_the_previous_job(sessions
         patch.object(main, "async_session", sessions),
         patch.object(main, "_archive_print_start", AsyncMock()),
         patch.object(main, "printer_manager", MagicMock()) as manager,
-        patch("backend.app.services.print_scheduler.printer_manager", manager),
+        patch("backend.app.services.lifecycle.dispatching.printer_manager", manager),
         patch.object(main, "ws_manager", AsyncMock()) as websocket,
     ):
         manager.get_status.return_value = client.state
@@ -288,8 +288,8 @@ async def test_startup_checks_already_printing_jobs_by_id(sessions, state, ident
         coro.close()
 
     with (
-        patch("backend.app.services.print_scheduler.printer_manager.get_status", return_value=status),
-        patch("backend.app.services.print_scheduler.spawn_background_task", capture),
+        patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", return_value=status),
+        patch("backend.app.services.lifecycle.dispatching.spawn_background_task", capture),
     ):
         async with sessions() as db:
             await scheduler._recover_stale_dispatches(db)
