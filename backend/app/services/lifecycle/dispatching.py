@@ -369,13 +369,13 @@ class Dispatcher:
         active = self._printers._active_drying_ams_ids(a.printer_id)
         if (active and not await self._dry(db, item, active)) or not await self._ready(a):
             return
+        owner = await owner_of(db, item)  # Read now, so the send-time commit ends this read.
         try:
             values = {"dispatched_at": datetime.now(timezone.utc)}
             await transition_queue_item(db, item, "dispatching", "dispatching", conditions=conditions, values=values)
             await db.commit()
         except QueueTransitionConflict:
             return await self._lost(a)
-        owner = await owner_of(db, item)
         # The row lock is held only across the synchronous publish: a concurrent
         # Stop either wins first, preventing the send, or follows it with Stop.
         deadline = asyncio.get_running_loop().time() + DISPATCH_TELEMETRY_WAIT_SECONDS
