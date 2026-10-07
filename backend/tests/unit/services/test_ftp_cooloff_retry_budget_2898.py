@@ -363,7 +363,6 @@ async def _failed_dispatch_message(dispatch_case, *, handshake_fails: bool) -> s
             patch("backend.app.services.lifecycle.dispatching.delete_file_async", AsyncMock(return_value=True)),
             patch("backend.app.services.lifecycle.dispatching.upload_file_async", _upload),
             patch("backend.app.services.notification_service.notification_service.on_queue_job_failed", AsyncMock()),
-            patch.object(lifecycle_dispatching, "credit_owner", AsyncMock()),
         ]
         with ExitStack() as stack:
             for p in patches:

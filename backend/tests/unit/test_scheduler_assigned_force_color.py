@@ -120,6 +120,7 @@ def _assert_sent_with(launch, item, *, printer_id, ams_mapping, unassigned):
     bindings = launch.call_args.args[0]
     assert list(bindings) == [item.id]
     binding = bindings[item.id]
+    assert binding.selected and not binding.edited_fields(item)  # The worker compares this item's snapshot.
     assert (binding.printer_id, binding.ams_mapping, binding.unassigned) == (printer_id, ams_mapping, unassigned)
 
 

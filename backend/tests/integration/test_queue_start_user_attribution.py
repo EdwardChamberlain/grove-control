@@ -166,10 +166,10 @@ class TestStartCreditsTheClicker:
 
 
 class TestSchedulerPropagatesOwnerToPrinterManager:
-    """`dispatching.credit_owner` looks up the
-    user row by `created_by_id` and forwards it into
-    `printer_manager.set_current_print_user` so the print-complete callback
-    can write the username into PrintLogEntry."""
+    """`dispatching.owner_of` looks up the user row by `created_by_id`; the
+    dispatcher forwards it into `printer_manager.set_current_print_user` with
+    the print command, so the print-complete callback can write the username
+    into PrintLogEntry."""
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -187,16 +187,7 @@ class TestSchedulerPropagatesOwnerToPrinterManager:
         await db_session.commit()
         await db_session.refresh(queue_item)
 
-        captured: list[tuple[int, int, str]] = []
-        monkeypatch.setattr(
-            scheduler_module.printer_manager,
-            "set_current_print_user",
-            lambda printer_id, uid, username: captured.append((printer_id, uid, username)),
-        )
-
-        await scheduler_module.credit_owner(db_session, queue_item)
-
-        assert captured == [(queue_item.printer_id, user.id, "clickeruser")]
+        assert await scheduler_module.owner_of(db_session, queue_item) == (user.id, "clickeruser")
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -208,15 +199,7 @@ class TestSchedulerPropagatesOwnerToPrinterManager:
 
         assert queue_item.created_by_id is None
 
-        captured: list = []
-        monkeypatch.setattr(
-            scheduler_module.printer_manager,
-            "set_current_print_user",
-            lambda *args: captured.append(args),
-        )
-
-        await scheduler_module.credit_owner(db_session, queue_item)
-        assert captured == []
+        assert await scheduler_module.owner_of(db_session, queue_item) is None
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -231,15 +214,7 @@ class TestSchedulerPropagatesOwnerToPrinterManager:
         await db_session.commit()
         await db_session.refresh(queue_item)
 
-        captured: list = []
-        monkeypatch.setattr(
-            scheduler_module.printer_manager,
-            "set_current_print_user",
-            lambda *args: captured.append(args),
-        )
-
         # Must not raise — the dispatch loop would otherwise lose the whole
         # queue item to an exception trace for what's effectively a missing
         # foreign key.
-        await scheduler_module.credit_owner(db_session, queue_item)
-        assert captured == []
+        assert await scheduler_module.owner_of(db_session, queue_item) is None

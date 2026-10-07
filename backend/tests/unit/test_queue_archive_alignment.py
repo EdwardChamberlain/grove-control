@@ -484,7 +484,6 @@ async def test_heat_soak_dispatch_uses_current_telemetry_after_archive_copy(alig
     monkeypatch.setattr(sched, "get_ftp_retry_settings", AsyncMock(return_value=(False, 0, 0, 1)))
     monkeypatch.setattr(sched, "cache_3mf_download", MagicMock())
     monkeypatch.setattr(scheduler.dispatcher, "_confirm_later", MagicMock())
-    monkeypatch.setattr(lifecycle_dispatching, "credit_owner", AsyncMock())
     monkeypatch.setattr(sched, "async_session", alignment.sessions)
     original = ArchiveService.archive_print
 

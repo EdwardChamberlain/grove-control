@@ -263,7 +263,6 @@ async def _run_start_print(ctx, *, installed_nozzles, nozzle_rack=None):
         patch("backend.app.services.notification_service.notification_service.on_queue_job_started", AsyncMock()),
         patch("backend.app.services.notification_service.notification_service.on_queue_job_failed", AsyncMock()),
         patch("backend.app.services.mqtt_relay.mqtt_relay.on_queue_job_started", AsyncMock()),
-        patch.object(lifecycle_dispatching, "credit_owner", AsyncMock()),
     ]
     with ExitStack() as stack:
         for p in patches:

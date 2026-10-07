@@ -153,7 +153,7 @@ async def test_printer_targeted_route_applies_drying_gate_before_dispatch():
         patch.object(scheduler, "_ams_mapping_uses_compatible_materials", return_value=True),
         patch.object(scheduler, "_block_on_filament_deficit", new=AsyncMock(return_value=False)),
         patch.object(scheduler, "_prepare_drying_for_dispatch", new=AsyncMock(return_value=False)) as prepare,
-        patch.object(scheduler.workers, "leave", new=AsyncMock()) as start_print,
+        patch.object(scheduler.workers, "launch") as launch,
         patch.object(scheduler, "_check_auto_drying", new=AsyncMock()),
         patch(
             "backend.app.services.lifecycle.dispatching.printer_manager.is_connected",
@@ -165,7 +165,7 @@ async def test_printer_targeted_route_applies_drying_gate_before_dispatch():
         await scheduler.check_queue()
 
     prepare.assert_awaited_once_with(db, item, 1)
-    start_print.assert_not_awaited()
+    launch.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -188,7 +188,7 @@ async def test_model_selected_route_applies_drying_gate_after_assignment_before_
         patch.object(scheduler, "_ams_mapping_uses_compatible_materials", return_value=True),
         patch.object(scheduler, "_block_on_filament_deficit", new=AsyncMock(return_value=False)),
         patch.object(scheduler, "_prepare_drying_for_dispatch", new=AsyncMock(return_value=False)) as prepare,
-        patch.object(scheduler.workers, "leave", new=AsyncMock()) as start_print,
+        patch.object(scheduler.workers, "launch") as launch,
         patch.object(scheduler, "_check_auto_drying", new=AsyncMock()),
         patch(
             "backend.app.services.notification_service.notification_service.on_queue_job_assigned",
@@ -200,6 +200,6 @@ async def test_model_selected_route_applies_drying_gate_after_assignment_before_
         await scheduler.check_queue()
 
     prepare.assert_awaited_once_with(db, item, 2)
-    start_print.assert_not_awaited()
+    launch.assert_not_called()
     # Deferred for drying, the "Any machine" job stays unbound in the pool.
     assert item.printer_id is None

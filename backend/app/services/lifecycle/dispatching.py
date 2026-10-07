@@ -99,15 +99,14 @@ async def _transition_or_skip(db: AsyncSession, item: PrintQueueItem, status: st
     return True
 
 
-async def credit_owner(db: AsyncSession, item: PrintQueueItem) -> None:
-    """Credit the job's owner when the print-complete callback logs the print."""
+async def owner_of(db: AsyncSession, item: PrintQueueItem) -> tuple[int, str] | None:
+    """The job's owner, whom the print-complete callback credits; None for an ownerless job."""
     if not item.created_by_id:
-        return
+        return None
     from backend.app.models.user import User
 
     owner = await db.get(User, item.created_by_id)
-    if owner:
-        printer_manager.set_current_print_user(item.printer_id, owner.id, owner.username)
+    return (owner.id, owner.username) if owner else None
 
 
 @dataclass
@@ -366,11 +365,9 @@ class Dispatcher:
             return
         except QueueTransitionConflict:
             return await self._lost(a)
-        await credit_owner(db, item)
         # This drying check closes the window opened by the send-boundary commit.
         active = self._printers._active_drying_ams_ids(a.printer_id)
         if (active and not await self._dry(db, item, active)) or not await self._ready(a):
-            printer_manager.clear_current_print_user(a.printer_id)
             return
         try:
             values = {"dispatched_at": datetime.now(timezone.utc)}
@@ -378,12 +375,12 @@ class Dispatcher:
             await db.commit()
         except QueueTransitionConflict:
             return await self._lost(a)
+        owner = await owner_of(db, item)
         # The row lock is held only across the synchronous publish: a concurrent
         # Stop either wins first, preventing the send, or follows it with Stop.
         deadline = asyncio.get_running_loop().time() + DISPATCH_TELEMETRY_WAIT_SECONDS
         while True:
             if not await self._ready(a, deadline=deadline):
-                printer_manager.clear_current_print_user(a.printer_id)
                 return
             item = await lock_queue_item(db, a.item_id)
             expected = ("dispatching", subtask_id, a.printer_id, a.archive_id)
@@ -392,6 +389,8 @@ class Dispatcher:
             if self._telemetry(a.printer_id, a.identity) is True:
                 break
             await db.rollback()  # Never wait for reconnect while holding the Stop lock.
+        if owner:  # Credited only with a command, so a print the attempt never sent isn't.
+            printer_manager.set_current_print_user(a.printer_id, *owner)
         try:
             started = printer_manager.start_print(
                 a.printer_id,
@@ -416,6 +415,7 @@ class Dispatcher:
             self._confirm_later(a.item_id, a.printer_id, subtask_id)
             return
         if not started:
+            printer_manager.clear_current_print_user(a.printer_id)
             values = {"dispatched_at": None, "dispatch_subtask_id": None, "started_at": None}
             await fail(db, item, "Failed to send print command to printer", **values)
             logger.error(

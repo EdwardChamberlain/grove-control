@@ -301,7 +301,7 @@ class TestBusyPrinterSeedingFromPrintingItems:
         has another queue item in 'printing' status. The scheduler must NOT dispatch the
         pending item even if the live MQTT state reports IDLE.
         """
-        from unittest.mock import AsyncMock, patch
+        from unittest.mock import AsyncMock, MagicMock, patch
 
         from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -325,14 +325,14 @@ class TestBusyPrinterSeedingFromPrintingItems:
             await db.commit()
 
         scheduler = PrintScheduler()
-        start_print_mock = AsyncMock()
+        start_print_mock = MagicMock()
 
         with (
             patch("backend.app.services.print_scheduler.async_session", session_maker),
             patch.object(scheduler, "_get_bool_setting", AsyncMock(return_value=False)),
             patch.object(scheduler, "_is_printer_idle", return_value=True),
             patch.object(scheduler, "_check_auto_drying", AsyncMock()),
-            patch.object(scheduler.workers, "leave", start_print_mock),
+            patch.object(scheduler.workers, "launch", start_print_mock),
             patch("backend.app.services.printer_selection.printer_manager") as mock_pm,
         ):
             mock_pm.is_connected.return_value = True
