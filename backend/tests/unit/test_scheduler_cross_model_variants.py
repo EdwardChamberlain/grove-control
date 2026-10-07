@@ -287,7 +287,7 @@ async def _add_variant_item(ctx, specs):
 async def _run_check_queue(ctx, scheduler, finder, waiting_notification=None, printer_states=None):
     scheduler.launch_uploads = MagicMock()
     patches = [
-        patch("backend.app.services.lifecycle.dispatching.async_session", ctx.session_maker),
+        patch("backend.app.services.print_scheduler.async_session", ctx.session_maker),
         patch("backend.app.core.database.async_session", ctx.session_maker),
         patch("backend.app.services.lifecycle.dispatching.printer_manager.is_connected", MagicMock(return_value=True)),
         patch(
@@ -307,7 +307,7 @@ async def _run_check_queue(ctx, scheduler, finder, waiting_notification=None, pr
         # Selection is what's under test — keep the filament-deficit probe
         # out of the way, and never actually dispatch.
         patch.object(scheduler, "_block_on_filament_deficit", AsyncMock(return_value=False)),
-        patch.object(scheduler, "_launch_uploads", scheduler.launch_uploads),
+        patch.object(scheduler.workers, "launch", scheduler.launch_uploads),
     ]
     with ExitStack() as stack:
         for p in patches:
@@ -323,7 +323,7 @@ def _selected_printer(scheduler, item_id):
     """
     if not scheduler.launch_uploads.called:
         return None
-    _ids, _printers, _limit, bindings = scheduler.launch_uploads.call_args.args
+    bindings, _limit = scheduler.launch_uploads.call_args.args
     return bindings[item_id].printer_id if item_id in bindings else None
 
 

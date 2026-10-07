@@ -22,7 +22,7 @@ from backend.app.core.database import Base
 from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services.lifecycle import dispatching as scheduler_module
+from backend.app.services.lifecycle import dispatching as lifecycle_dispatching, dispatching as scheduler_module
 from backend.app.services.print_scheduler import PrintScheduler, scheduler
 from backend.app.services.printer_selection import (
     _installed_nozzle_diameters,
@@ -161,7 +161,7 @@ def test_nozzle_rack_ignores_non_rack_and_unparseable_entries():
 
 
 # ---------------------------------------------------------------------------
-# End-to-end: the guard fires inside _start_print BEFORE upload
+# End-to-end: the guard fires in the queued exit BEFORE upload
 # ---------------------------------------------------------------------------
 
 
@@ -263,14 +263,14 @@ async def _run_start_print(ctx, *, installed_nozzles, nozzle_rack=None):
         patch("backend.app.services.notification_service.notification_service.on_queue_job_started", AsyncMock()),
         patch("backend.app.services.notification_service.notification_service.on_queue_job_failed", AsyncMock()),
         patch("backend.app.services.mqtt_relay.mqtt_relay.on_queue_job_started", AsyncMock()),
-        patch.object(scheduler, "_propagate_owner_to_printer_manager", AsyncMock()),
+        patch.object(lifecycle_dispatching, "credit_owner", AsyncMock()),
     ]
     with ExitStack() as stack:
         for p in patches:
             stack.enter_context(p)
         async with ctx.session_maker() as db:
             item = await db.get(PrintQueueItem, ctx.queue_item_id)
-            await scheduler._start_print(db, item)
+            await scheduler.workers.leave(db, item)
 
 
 @pytest.mark.asyncio

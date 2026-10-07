@@ -17,7 +17,7 @@ from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.models.settings import Settings
-from backend.app.services.lifecycle import dispatching as scheduler_module
+from backend.app.services.lifecycle import dispatching as lifecycle_dispatching, dispatching as scheduler_module
 from backend.app.services.print_scheduler import PrintScheduler, scheduler
 
 
@@ -230,13 +230,13 @@ async def _dispatch_library_item(
             assigned_notification or AsyncMock(),
         ),
         patch("backend.app.services.mqtt_relay.mqtt_relay.on_queue_job_started", AsyncMock()),
-        patch.object(scheduler, "_propagate_owner_to_printer_manager", AsyncMock()),
-        patch.object(scheduler, "_schedule_dispatch_confirmation", MagicMock()),
+        patch.object(lifecycle_dispatching, "credit_owner", AsyncMock()),
+        patch.object(scheduler.dispatcher, "_confirm_later", MagicMock()),
     ]
     if unlink_side_effect:
         patches.append(patch.object(type(ctx.source_path), "unlink", unlink_side_effect))
     if binding is not None:
-        patches.append(patch.object(scheduler_module, "async_session", ctx.session_maker))
+        patches.append(patch("backend.app.services.lifecycle.queued.async_session", ctx.session_maker))
     if drying_checks is not None:
         patches.append(patch.object(scheduler, "_active_drying_ams_ids", side_effect=drying_checks))
 
@@ -246,13 +246,13 @@ async def _dispatch_library_item(
 
         if binding is not None:
             # The real worker path: claim, then bind only at the hold.
-            await scheduler._dispatch_one(ctx.queue_item_id, binding.printer_id, binding=binding)
+            await scheduler.workers._work(ctx.queue_item_id, binding)
             return
         async with ctx.session_maker() as db:
             item = await db.get(PrintQueueItem, ctx.queue_item_id)
             if before_reservation:
                 await before_reservation(db, item)
-            await scheduler._start_print(db, item)
+            await scheduler.workers.leave(db, item)
 
 
 async def _finish_and_clear(ctx):
@@ -303,7 +303,7 @@ async def test_live_upload_is_not_a_dispatch_confirmation_prompt(queue_factory):
                 )
             assert conflict.value.status_code == 409
             await db.rollback()
-            await PrintScheduler()._recover_stale_dispatches(db)
+            await PrintScheduler().dispatcher.recover(db)
             assert (await db.get(PrintQueueItem, ctx.queue_item_id)).error_message is None
         return True
 
@@ -805,7 +805,7 @@ async def _row(ctx):
 
 @pytest.mark.asyncio
 async def test_any_machine_job_gets_its_printer_only_from_the_hold_transition(queue_factory):
-    from backend.app.services.lifecycle.dispatching import _DispatchBinding
+    from backend.app.services.lifecycle.queued import _DispatchBinding
 
     ctx = await queue_factory(cleanup=False)
     await _make_any_machine_job(ctx)
@@ -835,7 +835,7 @@ async def test_any_machine_job_gets_its_printer_only_from_the_hold_transition(qu
 @pytest.mark.parametrize("pool", [True, False], ids=["any-machine", "specific-machine"])
 @pytest.mark.asyncio
 async def test_disconnected_printer_leaves_the_job_queued_and_unheld(queue_factory, pool):
-    from backend.app.services.lifecycle.dispatching import _DispatchBinding
+    from backend.app.services.lifecycle.queued import _DispatchBinding
 
     ctx = await queue_factory(cleanup=False)
     if pool:
@@ -863,7 +863,7 @@ async def test_disconnected_printer_leaves_the_job_queued_and_unheld(queue_facto
 @pytest.mark.parametrize("pool", [True, False], ids=["any-machine", "specific-machine"])
 @pytest.mark.asyncio
 async def test_missing_source_parks_the_job_in_the_queue(queue_factory, pool):
-    from backend.app.services.lifecycle.dispatching import _DispatchBinding
+    from backend.app.services.lifecycle.queued import _DispatchBinding
 
     ctx = await queue_factory(cleanup=False)
     if pool:
@@ -884,7 +884,7 @@ async def test_missing_source_parks_the_job_in_the_queue(queue_factory, pool):
 
 async def _selection_binding(ctx, printer_id, ams_mapping, *, unassigned):
     """The decision a selection pass hands its worker, from the row it read."""
-    from backend.app.services.lifecycle.dispatching import _DispatchBinding
+    from backend.app.services.lifecycle.queued import _DispatchBinding
 
     async with ctx.session_maker() as db:
         item = await db.get(PrintQueueItem, ctx.queue_item_id)

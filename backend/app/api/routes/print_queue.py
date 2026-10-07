@@ -1151,7 +1151,7 @@ async def delete_queue_item(
 
     from backend.app.services.print_scheduler import scheduler
 
-    scheduler.cancel_inflight(item_id)
+    scheduler.workers.cancel(item_id)
 
     logger.info("Deleted queue item %s", item_id)
     return {"message": "Queue item deleted", "deleted": True}
@@ -1409,7 +1409,7 @@ async def resolve_queue_dispatch(
     if not needs_dispatch_resolution(item):
         raise HTTPException(409, "This job is no longer awaiting dispatch confirmation. Refresh and retry.")
     try:
-        await scheduler.resolve(db, item, data.outcome)
+        await scheduler.dispatcher.resolve(db, item, data.outcome)
     except InvalidQueueTransition as error:
         raise HTTPException(409, str(error))
     return {"message": "Dispatch resolved"}

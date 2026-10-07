@@ -212,7 +212,7 @@ async def test_legacy_link_and_outcome_commit_through_independent_lifecycle_path
             )
             monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
             monkeypatch.setattr(scheduling, "spawn_background_task", lambda coroutine, **_kwargs: coroutine.close())
-            await PrintScheduler()._recover_stale_dispatches(db)
+            await PrintScheduler().dispatcher.recover(db)
         elif path == "pause":
             await transition_queue_item(db, job, "printing", "paused")
             await transition_queue_item(db, job, "paused", "finished")

@@ -10,7 +10,11 @@ from backend.app.services.lifecycle.final import end
 
 
 async def on_enter(change, row) -> None:
-    """Enter: clear a finished plate at once when confirmation is off, or queue a failed or stopped job's effects."""
+    """Enter: clear a finished plate at once when confirmation is off, or queue a failed or stopped job's effects.
+
+    Those are Auto Off, and a failure notification unless the printer reported
+    the failure, whose completion notifies instead.
+    """
     from backend.app.services.lifecycle import effects
 
     if change.after == "finished":
@@ -18,8 +22,10 @@ async def on_enter(change, row) -> None:
         if confirmation is not None and confirmation.lower() in ("false", "0"):
             await clear_job_plate(change.db, change.item, automatic=True)
         return
-    if change.before != "dispatching":
-        await effects.awaiting_outcome(change, row)
+    notify = change.after == "failed" and change.action != "printer_report"
+    effects.queue_outcome_effect(
+        change.db, effects.QueueOutcomeEffect(change.item_id, change.after, row.printer_id, notify_failure=notify)
+    )
 
 
 async def on_exit(change, row) -> None:

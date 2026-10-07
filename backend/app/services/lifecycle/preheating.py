@@ -93,6 +93,20 @@ async def request_heater_shutdown(db: AsyncSession, printer_id: int) -> None:
         printer.heat_soak_shutdown_at = datetime.now(timezone.utc)
 
 
+async def shut_down_inherited(change, row) -> None:
+    """A later state's exit: a failed or stopped attempt shuts down the heaters its soak left on.
+
+    The shutdown is durable, and runs with the outcome's other effects.
+    """
+    from backend.app.services.lifecycle import effects
+
+    soaked = row.preheat_requested_at is not None or row.chamber_heat_soak
+    if change.after in ("failed", "cancelled") and soaked and row.printer_id is not None:
+        await request_heater_shutdown(change.db, row.printer_id)
+        effect = effects.QueueOutcomeEffect(change.item_id, change.after, row.printer_id, shut_down_heaters=True)
+        effects.queue_outcome_effect(change.db, effect)
+
+
 async def cleanup_heat_soak_shutdown(db: AsyncSession, printer_id: int) -> bool:
     """Retry a committed shutdown only while no new job is using the printer."""
     # Staging takes this same lock before checking pending shutdown and heating.
@@ -282,7 +296,7 @@ async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> SkipHeatSoak
     }
     handed_off, result = await _hand_off(db, item_id, owner, printer_id, values)
     if handed_off:
-        spawn_background_task(scheduler._dispatch_after_heat_soak(item_id), name=f"skip-heat-soak-dispatch-{item_id}")
+        spawn_background_task(scheduler.dispatcher.take_over(item_id), name=f"skip-heat-soak-dispatch-{item_id}")
     return result
 
 

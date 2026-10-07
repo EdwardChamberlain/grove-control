@@ -21,7 +21,7 @@ from backend.app.services.lifecycle import (
 )
 from backend.app.services.lifecycle.awaiting import clear_job_plate
 from backend.app.services.lifecycle.engine import transition_queue_item
-from backend.app.services.print_scheduler import scheduler
+from backend.app.services.print_scheduler import PrintScheduler, scheduler
 from backend.app.services.printer_manager import printer_manager
 from backend.app.services.queue_actions import cancel_job
 from backend.tests.unit.test_queue_archive_alignment import alignment, hold_and_link  # noqa: F401
@@ -38,7 +38,7 @@ async def test_clear_plate_cleans_sent_upload_after_offline_stop(alignment, monk
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
     monkeypatch.setattr(printer_manager, "stop_print", lambda _id: False)
     monkeypatch.setattr("backend.app.main._user_stopped_printers", set())
-    monkeypatch.setattr(scheduler, "cancel_inflight", lambda _id: False)
+    monkeypatch.setattr(scheduler.workers, "cancel", lambda _id: False)
     notified, powered_off = AsyncMock(), AsyncMock()
     deleted = AsyncMock(side_effect=OSError("offline") if outcome == "ftp_failure" else None, return_value=True)
     monkeypatch.setattr(queue_outcome_effects.notification_service, "on_queue_job_failed", notified)
@@ -318,7 +318,9 @@ async def test_incompatible_uploaded_dispatch_uses_only_committed_cleanup(alignm
         printer = await db.get(Printer, job.printer_id)
         archive = await db.get(PrintArchive, job.archive_id)
         remote_path = f"/{archive.extra_data['remote_filename']}"
-        assert await print_scheduler._defer_incompatible_dispatch(db, job, printer, "A1", remote_path=remote_path)
+        attempt = print_scheduler._Attempt(db, job, printer, None, None)
+        attempt.sliced_for, attempt.remote_filename = "A1", archive.extra_data["remote_filename"]
+        assert not await PrintScheduler().dispatcher._still_fits(attempt)
         assert job.status == "failed"
     await asyncio.wait_for(done.wait(), 2)
     deleted.assert_awaited_once()

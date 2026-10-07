@@ -328,12 +328,12 @@ class TestBusyPrinterSeedingFromPrintingItems:
         start_print_mock = AsyncMock()
 
         with (
-            patch("backend.app.services.lifecycle.dispatching.async_session", session_maker),
+            patch("backend.app.services.print_scheduler.async_session", session_maker),
             patch.object(scheduler, "_get_bool_setting", AsyncMock(return_value=False)),
             patch.object(scheduler, "_is_printer_idle", return_value=True),
             patch.object(scheduler, "_check_auto_drying", AsyncMock()),
-            patch.object(scheduler, "_start_print", start_print_mock),
-            patch("backend.app.services.lifecycle.dispatching.printer_manager") as mock_pm,
+            patch.object(scheduler.workers, "leave", start_print_mock),
+            patch("backend.app.services.printer_selection.printer_manager") as mock_pm,
         ):
             mock_pm.is_connected.return_value = True
             await scheduler.check_queue()

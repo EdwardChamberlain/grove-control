@@ -2,22 +2,47 @@
 
 Enter: ``create_job`` adds every new job, from the Queue, Files, a webhook, a
 virtual printer or Retry. Wait: each scheduler pass, printer selection picks a
-printer and tray mapping in memory; nothing is written to the job. Exit: a
-dispatch worker holds the selected printer (preheating or dispatching), or a
+printer and tray mapping in memory; nothing is written to the job. Exit: an
+exit worker claims the job, rechecks the printer and source under that claim,
+and starts preheating or dispatching, whose entry holds the printer; or a
 person cancels the job (unsuccessful). Recover: the job is durable, and startup
 releases the previous process's worker claims.
 """
 
+import asyncio
 import json
+import logging
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
 
-from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
+from backend.app.core.config import settings
+from backend.app.core.database import async_session
+from backend.app.core.tasks import spawn_background_task
+from backend.app.models.archive import PrintArchive
+from backend.app.models.library import LibraryFile
+from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem, PrintQueueVariant
+from backend.app.models.printer import Printer
+from backend.app.schemas.print_queue import PrintQueueItemUpdate
 from backend.app.services.filament_requirements import build_queue_filament_overrides, extract_filament_requirements
+from backend.app.services.lifecycle.engine import QueueTransitionConflict, lock_queue_item, transition_queue_item
+from backend.app.services.lifecycle.preheating import abort_heat_soak
+from backend.app.services.notification_service import notification_service
+from backend.app.services.printer_manager import printer_manager
+from backend.app.services.printer_selection import (
+    _incompatible_sliced_model_reason,
+    _sliced_for_model,
+    _source_nozzle_mismatch,
+)
+
+logger = logging.getLogger(__name__)
+_EDITABLE_FIELDS = tuple(name for name in PrintQueueItemUpdate.model_fields if name in PrintQueueItem.__table__.columns)
 
 
 def filament_contract(
@@ -93,3 +118,213 @@ async def _place(
         .values(position=PrintQueueItem.position + quantity)
     )
     return at
+
+
+@dataclass(frozen=True, slots=True)
+class _DispatchBinding:
+    """A selection decision handed to its exit worker."""
+
+    printer_id: int
+    ams_mapping: str | None
+    unassigned: bool
+    selected: tuple[tuple[str, object], ...] = ()
+
+    @classmethod
+    def for_item(cls, item: PrintQueueItem, printer_id: int, ams_mapping: str | None, *, unassigned: bool):
+        selected = tuple((name, getattr(item, name)) for name in _EDITABLE_FIELDS if hasattr(item, name))
+        return cls(printer_id, ams_mapping, unassigned, selected)
+
+    def values(self) -> dict[str, int | str | None]:
+        return {"printer_id": self.printer_id, "ams_mapping": self.ams_mapping}
+
+    def edited_fields(self, item: PrintQueueItem) -> list[str]:
+        return [name for name, value in self.selected if getattr(item, name) != value]
+
+
+def _bind_in_memory(item: PrintQueueItem, printer_id: int | None, ams_mapping: str | None) -> None:
+    """Evaluate a pool job against one printer without persisting the choice."""
+    set_committed_value(item, "printer_id", printer_id)
+    set_committed_value(item, "ams_mapping", ams_mapping)
+
+
+async def blocker(db: AsyncSession, item: PrintQueueItem, printer: Printer | None) -> tuple[str, bool] | None:
+    """Why ``printer`` can't print the job's source now, and whether a person must act; None if it can."""
+    if printer is None:
+        return "Printer not found", False
+    archive = library_file = None
+    if item.archive_id:
+        query = select(PrintArchive).where(PrintArchive.id == item.archive_id)
+        archive = await db.scalar(query.execution_options(populate_existing=True))
+        if not archive or archive.deleted_at is not None:
+            return ("Archive source was deleted" if archive else "Archive not found"), True
+    elif item.library_file_id:
+        library_file = await db.scalar(LibraryFile.active().where(LibraryFile.id == item.library_file_id))
+        if not library_file:
+            return "Library file not found", True
+    else:
+        return "No source file specified", True
+    if reason := _incompatible_sliced_model_reason(_sliced_for_model(archive, library_file), printer):
+        return reason, False
+    if not (settings.base_dir / (archive or library_file).file_path).exists():
+        return "Source file not found on disk", True
+    # Only a positive nozzle mismatch blocks (#1899).
+    reason = _source_nozzle_mismatch(archive, library_file, item.printer_id)
+    return (reason, False) if reason else None
+
+
+async def stay(db: AsyncSession, item: PrintQueueItem, reason: str, *, park: bool = False) -> None:
+    """Keep a job in the pool with a display-only reason, parked for Manual start if a person must act."""
+    values: dict[str, str | bool] = {"waiting_reason": reason, **({"manual_start": True} if park else {})}
+    conditions = () if item.dispatching_at is None else (PrintQueueItem.dispatching_at == item.dispatching_at,)
+    await transition_queue_item(db, item, "queued", "queued", values=values, conditions=conditions)
+    await db.commit()
+    logger.info("Queue item %s stays queued: %s", item.id, reason)
+
+
+async def job_name(db: AsyncSession, item: PrintQueueItem) -> str:
+    """A human-readable name for a job: its source file, or its first candidate's (#671)."""
+    filename = None
+    if item.archive_id:
+        filename = await db.scalar(select(PrintArchive.filename).where(PrintArchive.id == item.archive_id))
+    if not filename and item.library_file_id:
+        active = (LibraryFile.id == item.library_file_id, LibraryFile.deleted_at.is_(None))
+        filename = await db.scalar(select(LibraryFile.filename).where(*active))
+    if not filename:
+        filename = await db.scalar(
+            select(LibraryFile.filename)
+            .join(PrintQueueVariant, PrintQueueVariant.library_file_id == LibraryFile.id)
+            .where(PrintQueueVariant.queue_item_id == item.id)
+            .order_by(PrintQueueVariant.position, PrintQueueVariant.id)
+            .limit(1)
+        )
+    return filename.replace(".gcode.3mf", "").replace(".3mf", "") if filename else f"Job #{item.id}"
+
+
+async def notify_assignment(db: AsyncSession, item: PrintQueueItem) -> None:
+    """Announce the printer an "Any machine" job was bound to on leaving the queue."""
+    try:
+        printer = await db.get(Printer, item.printer_id)
+        await notification_service.on_queue_job_assigned(
+            job_name=await job_name(db, item),
+            printer_id=item.printer_id,
+            printer_name=printer.name if printer else "Unknown",
+            target_model=item.target_model,
+            db=db,
+        )
+    except Exception:
+        # The hold is committed; a notification failure must not fail it.
+        logger.warning("Could not send assignment notification for queue item %s", item.id, exc_info=True)
+
+
+async def _claim(db: AsyncSession, item_id: int, binding: _DispatchBinding) -> bool:
+    """Claim a waiting job for its selected printer, unless another worker or an edit got there first."""
+    printer = PrintQueueItem.printer_id
+    claim = await db.execute(
+        update(PrintQueueItem)
+        .where(PrintQueueItem.id == item_id, PrintQueueItem.status == "queued")
+        .where(PrintQueueItem.dispatching_at.is_(None))
+        .where(printer.is_(None) if binding.unassigned else printer == binding.printer_id)
+        .values(dispatching_at=datetime.now(timezone.utc))
+    )
+    await db.commit()
+    return bool(claim.rowcount)
+
+
+async def release_claim(db: AsyncSession, item_id: int) -> None:
+    """Release a worker claim without changing the job's state."""
+    try:
+        await db.execute(update(PrintQueueItem).where(PrintQueueItem.id == item_id).values(dispatching_at=None))
+        await db.commit()
+    except Exception:
+        logger.exception("Failed to clear dispatch claim for queue item %s", item_id)
+
+
+class Workers:
+    """Exit workers: a bounded pool that takes selected jobs out of the queue, one session each."""
+
+    def __init__(self, heat_soak, dispatcher):
+        """``heat_soak`` and ``dispatcher`` are the next states' entries: preheating and dispatching."""
+        self._heat_soak, self._dispatcher = heat_soak, dispatcher
+        self.inflight: dict[int, tuple[asyncio.Task, int]] = {}
+
+    def launch(self, bindings: Mapping[int, _DispatchBinding], limit: int) -> None:
+        """Start a worker per selected job while slots are free, at most one per printer."""
+        reserved = {printer_id for _task, printer_id in self.inflight.values()}
+        for item_id, binding in bindings.items():
+            if len(self.inflight) >= limit:
+                return
+            if item_id in self.inflight or binding.printer_id in reserved:
+                continue
+            reserved.add(binding.printer_id)
+            task = spawn_background_task(self._work(item_id, binding), name=f"queue-upload-{item_id}")
+            self.inflight[item_id] = (task, binding.printer_id)
+            task.add_done_callback(lambda _task, item_id=item_id: self.inflight.pop(item_id, None))
+
+    def cancel(self, item_id: int) -> bool:
+        """Cancel a worker after its job has been cancelled or deleted."""
+        task = self.inflight.get(item_id, (None,))[0]
+        return bool(task and not task.done() and task.cancel())
+
+    async def _work(self, item_id: int, binding: _DispatchBinding) -> None:
+        """Leave the queue in its own session under a claim that blocks edits, released on every outcome."""
+        async with async_session() as db:
+            if not await _claim(db, item_id, binding):
+                return
+            try:
+                item = await db.get(PrintQueueItem, item_id)
+                if item and not binding.edited_fields(item):
+                    await self.leave(db, item, binding)
+            except QueueTransitionConflict:
+                await db.rollback()
+                logger.info("Queue item %s changed while leaving the queue", item_id)
+            except Exception:
+                await db.rollback()
+                logger.exception("Exit worker failed for job %s", item_id)
+                await _settle(db, item_id)
+            finally:
+                await release_claim(db, item_id)
+
+    async def leave(self, db: AsyncSession, item: PrintQueueItem, binding: _DispatchBinding | None = None) -> None:
+        """Exit to the selected printer: preheating for a heat soak, otherwise dispatching.
+
+        Checks read the selected printer and mapping in memory; only the next
+        state's hold writes them. A disconnected or held printer is simply not
+        available yet.
+        """
+        if binding is not None:
+            _bind_in_memory(item, binding.printer_id, binding.ams_mapping)
+        printer = await db.get(Printer, item.printer_id)
+        if printer and not printer_manager.is_connected(item.printer_id):
+            problem = "Printer not connected", False
+        elif printer and await db.scalar(
+            select(PrintQueueItem.id)
+            .where(PrintQueueItem.printer_id == item.printer_id, PrintQueueItem.status.in_(HOLDING_STATUSES))
+            .where(PrintQueueItem.id != item.id)
+            .limit(1)
+        ):
+            return
+        else:
+            problem = await blocker(db, item, printer)
+        if problem:
+            await stay(db, item, problem[0], park=problem[1])
+        elif getattr(item, "chamber_heat_soak", False) is not True:
+            await self._dispatcher.enter(db, item, "queued", binding)
+        else:
+            unassigned, values = bool(binding and binding.unassigned), binding.values() if binding else None
+            if await self._heat_soak.enter(db, item, bind_values=values, unassigned=unassigned) and unassigned:
+                await notify_assignment(db, item)
+
+
+async def _settle(db: AsyncSession, item_id: int) -> None:
+    """After an unexpected worker error, park a job still queued, or end a soak whose start failed."""
+    try:
+        item = await lock_queue_item(db, item_id)
+        if item and item.status == "queued":
+            await stay(db, item, "Dispatch preparation failed; check the logs, then start it again", park=True)
+        elif item and item.status == "preheating":
+            await abort_heat_soak(db, item, "Heat soak failed to start; inspect the printer before retrying")
+        else:
+            await db.rollback()
+    except Exception:
+        await db.rollback()
+        logger.exception("Could not settle queue item %s after an exit worker failure", item_id)

@@ -145,15 +145,15 @@ async def test_printer_targeted_route_applies_drying_gate_before_dispatch():
     db.execute = AsyncMock(side_effect=_queue_results([item]))
 
     with (
-        patch("backend.app.services.lifecycle.dispatching.async_session") as session_ctx,
-        patch.object(scheduler, "_recover_stale_dispatches", new=AsyncMock()),
+        patch("backend.app.services.print_scheduler.async_session") as session_ctx,
+        patch.object(scheduler.dispatcher, "recover", new=AsyncMock()),
         patch.object(scheduler, "_check_heat_soaks", new=AsyncMock(return_value=set())),
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
         patch.object(scheduler, "_is_printer_idle", return_value=True),
         patch.object(scheduler, "_ams_mapping_uses_compatible_materials", return_value=True),
         patch.object(scheduler, "_block_on_filament_deficit", new=AsyncMock(return_value=False)),
         patch.object(scheduler, "_prepare_drying_for_dispatch", new=AsyncMock(return_value=False)) as prepare,
-        patch.object(scheduler, "_start_print", new=AsyncMock()) as start_print,
+        patch.object(scheduler.workers, "leave", new=AsyncMock()) as start_print,
         patch.object(scheduler, "_check_auto_drying", new=AsyncMock()),
         patch(
             "backend.app.services.lifecycle.dispatching.printer_manager.is_connected",
@@ -176,8 +176,8 @@ async def test_model_selected_route_applies_drying_gate_after_assignment_before_
     db.execute = AsyncMock(side_effect=_queue_results([item]))
 
     with (
-        patch("backend.app.services.lifecycle.dispatching.async_session") as session_ctx,
-        patch.object(scheduler, "_recover_stale_dispatches", new=AsyncMock()),
+        patch("backend.app.services.print_scheduler.async_session") as session_ctx,
+        patch.object(scheduler.dispatcher, "recover", new=AsyncMock()),
         patch.object(scheduler, "_check_heat_soaks", new=AsyncMock(return_value=set())),
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
         patch.object(
@@ -185,19 +185,13 @@ async def test_model_selected_route_applies_drying_gate_after_assignment_before_
             "_find_idle_printer_for_model",
             new=AsyncMock(return_value=(2, None)),
         ),
-        patch.object(scheduler, "_get_job_name", new=AsyncMock(return_value="Test print")),
-        patch.object(
-            scheduler,
-            "_get_printer",
-            new=AsyncMock(return_value=SimpleNamespace(name="Printer 2")),
-        ),
         patch.object(scheduler, "_ams_mapping_uses_compatible_materials", return_value=True),
         patch.object(scheduler, "_block_on_filament_deficit", new=AsyncMock(return_value=False)),
         patch.object(scheduler, "_prepare_drying_for_dispatch", new=AsyncMock(return_value=False)) as prepare,
-        patch.object(scheduler, "_start_print", new=AsyncMock()) as start_print,
+        patch.object(scheduler.workers, "leave", new=AsyncMock()) as start_print,
         patch.object(scheduler, "_check_auto_drying", new=AsyncMock()),
         patch(
-            "backend.app.services.lifecycle.dispatching.notification_service.on_queue_job_assigned",
+            "backend.app.services.notification_service.notification_service.on_queue_job_assigned",
             new=AsyncMock(),
         ),
     ):

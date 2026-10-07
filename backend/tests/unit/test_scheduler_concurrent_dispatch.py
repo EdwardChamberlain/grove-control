@@ -6,11 +6,16 @@ from unittest.mock import patch
 import pytest
 
 from backend.app.schemas.settings import AppSettings
+from backend.app.services.lifecycle.queued import _DispatchBinding
 from backend.app.services.print_scheduler import PrintScheduler
 
 
+def _bindings(printers: dict[int, int]) -> dict[int, _DispatchBinding]:
+    return {item_id: _DispatchBinding(printer_id, None, unassigned=False) for item_id, printer_id in printers.items()}
+
+
 async def _drain(scheduler: PrintScheduler) -> None:
-    tasks = [task for task, _printer_id in scheduler._inflight.values()]
+    tasks = [task for task, _printer_id in scheduler.workers.inflight.values()]
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
     # Done callbacks remove completed tasks on the next event-loop turn.
@@ -25,7 +30,7 @@ async def test_different_printers_dispatch_concurrently():
     release = asyncio.Event()
     peak = 0
 
-    async def dispatch(item_id: int, _selected_printer_id: int | None = None, **_kwargs) -> None:
+    async def dispatch(item_id: int, _binding: _DispatchBinding) -> None:
         nonlocal peak
         entered.append(item_id)
         peak = max(peak, len(entered))
@@ -35,18 +40,18 @@ async def test_different_printers_dispatch_concurrently():
         entered.remove(item_id)
 
     with patch(
-        "backend.app.services.lifecycle.dispatching.spawn_background_task",
+        "backend.app.services.lifecycle.queued.spawn_background_task",
         side_effect=lambda coro, *, name=None: asyncio.create_task(coro, name=name),
     ):
-        scheduler._dispatch_one = dispatch  # type: ignore[method-assign]
-        scheduler._launch_uploads([1, 2], {1: 101, 2: 102}, limit=2)
+        scheduler.workers._work = dispatch  # type: ignore[method-assign]
+        scheduler.workers.launch(_bindings({1: 101, 2: 102}), 2)
         await asyncio.wait_for(ready.wait(), timeout=1)
         assert peak == 2
-        assert set(scheduler._inflight) == {1, 2}
+        assert set(scheduler.workers.inflight) == {1, 2}
         release.set()
         await _drain(scheduler)
 
-    assert not scheduler._inflight
+    assert not scheduler.workers.inflight
 
 
 @pytest.mark.asyncio
@@ -55,27 +60,27 @@ async def test_pool_cap_refills_after_a_slot_is_freed():
     release = asyncio.Event()
     started: list[int] = []
 
-    async def dispatch(item_id: int, _selected_printer_id: int | None = None, **_kwargs) -> None:
+    async def dispatch(item_id: int, _binding: _DispatchBinding) -> None:
         started.append(item_id)
         await release.wait()
 
     with patch(
-        "backend.app.services.lifecycle.dispatching.spawn_background_task",
+        "backend.app.services.lifecycle.queued.spawn_background_task",
         side_effect=lambda coro, *, name=None: asyncio.create_task(coro, name=name),
     ):
-        scheduler._dispatch_one = dispatch  # type: ignore[method-assign]
-        scheduler._launch_uploads([1, 2, 3], {1: 101, 2: 102, 3: 103}, limit=2)
+        scheduler.workers._work = dispatch  # type: ignore[method-assign]
+        scheduler.workers.launch(_bindings({1: 101, 2: 102, 3: 103}), 2)
         await asyncio.sleep(0)
-        assert set(scheduler._inflight) == {1, 2}
+        assert set(scheduler.workers.inflight) == {1, 2}
         assert started == [1, 2]
 
         release.set()
         await _drain(scheduler)
         release = asyncio.Event()
 
-        scheduler._launch_uploads([3], {3: 103}, limit=2)
+        scheduler.workers.launch(_bindings({3: 103}), 2)
         await asyncio.sleep(0)
-        assert set(scheduler._inflight) == {3}
+        assert set(scheduler.workers.inflight) == {3}
         assert started == [1, 2, 3]
         release.set()
         await _drain(scheduler)
@@ -86,23 +91,23 @@ async def test_cancellation_releases_pool_slot():
     scheduler = PrintScheduler()
     release = asyncio.Event()
 
-    async def dispatch(_item_id: int, _selected_printer_id: int | None = None, **_kwargs) -> None:
+    async def dispatch(_item_id: int, _binding: _DispatchBinding) -> None:
         await release.wait()
 
     with patch(
-        "backend.app.services.lifecycle.dispatching.spawn_background_task",
+        "backend.app.services.lifecycle.queued.spawn_background_task",
         side_effect=lambda coro, *, name=None: asyncio.create_task(coro, name=name),
     ):
-        scheduler._dispatch_one = dispatch  # type: ignore[method-assign]
-        scheduler._launch_uploads([1], {1: 101}, limit=1)
-        task = scheduler._inflight[1][0]
+        scheduler.workers._work = dispatch  # type: ignore[method-assign]
+        scheduler.workers.launch(_bindings({1: 101}), 1)
+        task = scheduler.workers.inflight[1][0]
         task.cancel()
         await _drain(scheduler)
-        assert not scheduler._inflight
+        assert not scheduler.workers.inflight
 
-        scheduler._launch_uploads([2], {2: 102}, limit=1)
-        assert set(scheduler._inflight) == {2}
-        scheduler._inflight[2][0].cancel()
+        scheduler.workers.launch(_bindings({2: 102}), 1)
+        assert set(scheduler.workers.inflight) == {2}
+        scheduler.workers.inflight[2][0].cancel()
         await _drain(scheduler)
 
 
@@ -111,17 +116,17 @@ async def test_same_printer_is_reserved_once_even_if_selection_repeats():
     scheduler = PrintScheduler()
     release = asyncio.Event()
 
-    async def dispatch(_item_id: int, _selected_printer_id: int | None = None, **_kwargs) -> None:
+    async def dispatch(_item_id: int, _binding: _DispatchBinding) -> None:
         await release.wait()
 
     with patch(
-        "backend.app.services.lifecycle.dispatching.spawn_background_task",
+        "backend.app.services.lifecycle.queued.spawn_background_task",
         side_effect=lambda coro, *, name=None: asyncio.create_task(coro, name=name),
     ):
-        scheduler._dispatch_one = dispatch  # type: ignore[method-assign]
-        scheduler._launch_uploads([1, 2], {1: 101, 2: 101}, limit=2)
+        scheduler.workers._work = dispatch  # type: ignore[method-assign]
+        scheduler.workers.launch(_bindings({1: 101, 2: 101}), 2)
         await asyncio.sleep(0)
-        assert set(scheduler._inflight) == {1}
+        assert set(scheduler.workers.inflight) == {1}
         release.set()
         await _drain(scheduler)
 

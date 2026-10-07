@@ -210,7 +210,7 @@ async def test_mqtt_id_loss_cannot_complete_or_recover_the_previous_job(sessions
         client._process_message({"print": {"gcode_state": "FINISH", "subtask_id": "0"}})
         assert await main.on_print_complete(1, finishes[-1]) is False
         async with sessions() as db:
-            await PrintScheduler()._recover_stale_dispatches(db)
+            await PrintScheduler().dispatcher.recover(db)
         manager.set_awaiting_plate_clear.assert_not_called()
         websocket.send_print_complete.assert_not_awaited()
     async with sessions() as db:
@@ -292,7 +292,7 @@ async def test_startup_checks_already_printing_jobs_by_id(sessions, state, ident
         patch("backend.app.services.lifecycle.dispatching.spawn_background_task", capture),
     ):
         async with sessions() as db:
-            await scheduler._recover_stale_dispatches(db)
+            await scheduler.dispatcher.recover(db)
         async with sessions() as db:
             assert (await db.get(PrintQueueItem, item_id)).status == expected
     assert bool(spawned) == (expected in ("finished", "failed"))
@@ -305,7 +305,7 @@ async def test_user_resolution_commits_and_keeps_failed_plate_gate(sessions, out
     manager.get_status.return_value = None
     with (
         patch("backend.app.services.printer_manager.printer_manager", manager),
-        patch("backend.app.services.print_scheduler.scheduler._publish_queue_job_started", AsyncMock()) as publish,
+        patch("backend.app.services.lifecycle.effects.publish_queue_job_started", AsyncMock()) as publish,
     ):
         async with sessions() as db:
             await resolve_queue_dispatch(item_id, DispatchResolution(outcome=outcome), db, (None, True))

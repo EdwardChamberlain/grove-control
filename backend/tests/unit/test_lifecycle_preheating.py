@@ -227,7 +227,7 @@ async def test_a_pass_that_selected_a_soak_before_skip_leaves_the_handoff_alone(
 
     assert await soak.service.enter(soak.db, soak.item)
     monkeypatch.setattr(scheduler, "_heat_soak", soak.service)
-    monkeypatch.setattr(scheduler, "_dispatch_after_heat_soak", AsyncMock())
+    monkeypatch.setattr(scheduler.dispatcher, "take_over", AsyncMock())
     lock = preheating.lock_queue_item
 
     async def skip_then_lock(db, item_id):
@@ -242,7 +242,7 @@ async def test_a_pass_that_selected_a_soak_before_skip_leaves_the_handoff_alone(
     assert await soak.service.wait(soak.db) == []
     await soak.db.refresh(soak.item)
     assert (soak.item.status, soak.item.error_message) == ("dispatching", None)
-    scheduler._dispatch_after_heat_soak.assert_called_once_with(soak.item.id)
+    scheduler.dispatcher.take_over.assert_called_once_with(soak.item.id)
 
 
 async def test_a_handoff_for_another_printer_leaves_the_soak_alone(soak):

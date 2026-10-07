@@ -272,6 +272,19 @@ class PrinterSelection:
     _power_on_wait_time = 180  # seconds to wait for printer after power on (3 min)
     _power_on_check_interval = 10  # seconds between connection checks
 
+    def _is_printer_idle(self, printer_id: int, require_plate_clear: bool = True) -> bool:
+        """A fresh, connected idle report and the plate-clear gate permit dispatch."""
+        if not printer_manager.is_connected(printer_id):
+            return False
+        state = printer_manager.get_status(printer_id)
+        return bool(
+            state
+            and state.connected
+            and getattr(state, "job_telemetry_ready", False)
+            and not (require_plate_clear and printer_manager.is_awaiting_plate_clear(printer_id))
+            and state.state in ("IDLE", "FINISH", "FAILED")
+        )
+
     async def _select_printers(
         self,
         db: AsyncSession,
@@ -643,9 +656,10 @@ class PrinterSelection:
                     # Send waiting notification only when transitioning to waiting state
                     # and the reason requires user action (not just "all printers busy")
                     if waiting_reason and not was_waiting and not self._is_busy_only(waiting_reason):
-                        job_name = await self._get_job_name(db, item)
+                        from backend.app.services.lifecycle import queued
+
                         await notification_service.on_queue_job_waiting(
-                            job_name=job_name,
+                            job_name=await queued.job_name(db, item),
                             target_model=_candidate_model_label(candidates) or item.target_model,
                             waiting_reason=waiting_reason,
                             db=db,

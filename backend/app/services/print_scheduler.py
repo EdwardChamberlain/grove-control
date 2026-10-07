@@ -2,15 +2,13 @@
 
 import asyncio
 import logging
-from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from backend.app.core.database import async_session
 from backend.app.core.tasks import spawn_background_task
-from backend.app.models.archive import PrintArchive
-from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem, PrintQueueVariant
 from backend.app.models.printer import Printer
 from backend.app.models.settings import Settings
@@ -18,8 +16,8 @@ from backend.app.services.ams_drying import AmsDrying
 from backend.app.services.ams_mapping import AmsMapping
 from backend.app.services.filament_deficit import compute_deficit_for_queue_item
 from backend.app.services.ha_sensor_manager import ha_sensor_manager
-from backend.app.services.lifecycle import dispatching
-from backend.app.services.lifecycle.dispatching import Dispatcher, _DispatchBinding
+from backend.app.services.lifecycle import queued
+from backend.app.services.lifecycle.dispatching import Dispatcher
 from backend.app.services.lifecycle.preheating import ChamberHeatSoak
 from backend.app.services.notification_service import notification_service
 from backend.app.services.printer_manager import printer_manager
@@ -35,23 +33,24 @@ MAX_QUEUE_CONCURRENT_UPLOADS = 16
 ARCHIVE_RECONCILE_INTERVAL_SECONDS = 60
 
 
-class PrintScheduler(Dispatcher, PrinterSelection, AmsMapping, AmsDrying):
+class PrintScheduler(PrinterSelection, AmsMapping, AmsDrying):
     """Background scheduler that processes the print queue."""
 
     def __init__(self):
         super().__init__()
         self._running = False
         self._heat_soak = ChamberHeatSoak()
+        self.dispatcher = Dispatcher(self._heat_soak, self)
+        self.workers = queued.Workers(self._heat_soak, self.dispatcher)
         self._check_interval = 30  # seconds
         self._fast_check_interval = 3  # seconds while dispatch work is draining
 
     async def run(self):
         """Main loop - check queue every interval."""
         self._running = True
-        self._recovery_started_at = datetime.now(timezone.utc)
         logger.info("Print scheduler started")
 
-        await self._clear_stale_dispatch_claims()
+        await self.dispatcher.start()
         next_archive_check = 0.0
         archive_check: asyncio.Task | None = None
 
@@ -76,25 +75,22 @@ class PrintScheduler(Dispatcher, PrinterSelection, AmsMapping, AmsDrying):
         self._running = False
         # App shutdown also cancels the global task registry. Cancelling here
         # prevents a same-process restart from retaining upload reservations.
-        for task, _printer_id in tuple(self._inflight.values()):
-            if not task.done():
-                task.cancel()
+        for item_id in tuple(self.workers.inflight):
+            self.workers.cancel(item_id)
         logger.info("Print scheduler stopped")
 
     async def _check_heat_soaks(self, db: AsyncSession) -> set[int]:
         ready = await self._heat_soak.wait(db)
-        await self.wait_unsent(db)
+        await self.dispatcher.wait_unsent(db)
         for item_id in ready:
-            dispatching.spawn_background_task(
-                self._dispatch_after_heat_soak(item_id), name=f"heat-soak-dispatch-{item_id}"
-            )
+            spawn_background_task(self.dispatcher.take_over(item_id), name=f"heat-soak-dispatch-{item_id}")
         return set((await db.scalars(select(Printer.id).where(Printer.heat_soak_shutdown_pending.is_(True)))).all())
 
     async def check_queue(self) -> bool:
         """Check for prints ready to start and report whether to tick quickly."""
-        async with dispatching.async_session() as db:
+        async with async_session() as db:
             shutdown_printers = await self._check_heat_soaks(db)
-            await self._recover_stale_dispatches(db)
+            await self.dispatcher.recover(db)
 
             # Check if shortest-job-first scheduling is enabled
             sjf_enabled = await self._get_bool_setting(db, "queue_shortest_first")
@@ -124,8 +120,8 @@ class PrintScheduler(Dispatcher, PrinterSelection, AmsMapping, AmsDrying):
             # Upload workers leave rows pending until they establish the
             # durable dispatch reservation. Exclude those rows so a fast tick
             # cannot send the same file twice.
-            if self._inflight:
-                items = [item for item in items if item.id not in self._inflight]
+            inflight = self.workers.inflight
+            items = [item for item in items if item.id not in inflight]
 
             # Read plate-clear setting once per queue check
             require_plate_clear = await self._get_bool_setting(db, "require_plate_clear", default=True)
@@ -141,7 +137,7 @@ class PrintScheduler(Dispatcher, PrinterSelection, AmsMapping, AmsDrying):
 
             # The durable status does not change until the upload completes;
             # reserve each worker's printer in memory for the same interval.
-            busy_printers.update(pid for _task, pid in self._inflight.values() if pid is not None)
+            busy_printers.update(pid for _task, pid in inflight.values())
 
             try:
                 await self._check_scheduled_dryings(db)
@@ -152,7 +148,7 @@ class PrintScheduler(Dispatcher, PrinterSelection, AmsMapping, AmsDrying):
                 # No dispatchable items — still check auto-drying, but do not
                 # dry a printer whose upload is about to start printing.
                 await self._check_auto_drying(db, [], busy_printers, require_plate_clear=require_plate_clear)
-                return bool(self._inflight)
+                return bool(inflight)
 
             logger.info(
                 "Queue check: found %d pending items: %s",
@@ -171,8 +167,8 @@ class PrintScheduler(Dispatcher, PrinterSelection, AmsMapping, AmsDrying):
                     ),
                 ),
             )
-            available_slots = max(0, upload_limit - len(self._inflight))
-            pool_waiting_reason = f"{_UPLOAD_POOL_WAITING_PREFIX} ({len(self._inflight)} of {upload_limit} in use)"
+            available_slots = max(0, upload_limit - len(inflight))
+            pool_waiting_reason = f"{_UPLOAD_POOL_WAITING_PREFIX} ({len(inflight)} of {upload_limit} in use)"
 
             # Active or unconfirmed dispatches remain reserved until telemetry settles them.
 
@@ -221,7 +217,7 @@ class PrintScheduler(Dispatcher, PrinterSelection, AmsMapping, AmsDrying):
                 # so the worker compares against the committed row.
                 items_by_id = {item.id: item for item in items}
                 bindings = {
-                    item_id: _DispatchBinding.for_item(
+                    item_id: queued._DispatchBinding.for_item(
                         items_by_id[item_id],
                         printer_id,
                         selection.mappings.get(item_id),
@@ -229,7 +225,7 @@ class PrintScheduler(Dispatcher, PrinterSelection, AmsMapping, AmsDrying):
                     )
                     for item_id, printer_id in selection.printers.items()
                 }
-                self._launch_uploads(dispatch_ids, selection.printers, upload_limit, bindings)
+                self.workers.launch(bindings, upload_limit)
                 # Give newly-created workers one turn to acquire their own
                 # sessions and reach the first I/O await. The scheduler still
                 # returns without waiting for uploads to finish.
@@ -240,7 +236,7 @@ class PrintScheduler(Dispatcher, PrinterSelection, AmsMapping, AmsDrying):
 
             # Keep checking quickly while workers are active or work was selected
             # but deferred by a full pool.
-            return bool(dispatch_ids) or bool(self._inflight)
+            return bool(dispatch_ids) or bool(inflight)
 
     async def _get_setting(self, db: AsyncSession, key: str) -> str | None:
         """Read a setting value from the database."""
@@ -270,37 +266,6 @@ class PrintScheduler(Dispatcher, PrinterSelection, AmsMapping, AmsDrying):
         except (TypeError, ValueError):
             logger.warning("Invalid integer setting %s=%r; using %s", key, value, default)
             return default
-
-    async def _get_job_name(self, db: AsyncSession, item: PrintQueueItem) -> str:
-        """Get a human-readable name for a queue item."""
-        if item.archive_id:
-            result = await db.execute(select(PrintArchive).where(PrintArchive.id == item.archive_id))
-            archive = result.scalar_one_or_none()
-            if archive:
-                return archive.filename.replace(".gcode.3mf", "").replace(".3mf", "")
-        if item.library_file_id:
-            result = await db.execute(LibraryFile.active().where(LibraryFile.id == item.library_file_id))
-            library_file = result.scalar_one_or_none()
-            if library_file:
-                return library_file.filename.replace(".gcode.3mf", "").replace(".3mf", "")
-        # Name an unbound cross-model job after its first candidate (#671).
-        first_variant_name = (
-            await db.execute(
-                select(LibraryFile.filename)
-                .join(PrintQueueVariant, PrintQueueVariant.library_file_id == LibraryFile.id)
-                .where(PrintQueueVariant.queue_item_id == item.id)
-                .order_by(PrintQueueVariant.position, PrintQueueVariant.id)
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        if first_variant_name:
-            return first_variant_name.replace(".gcode.3mf", "").replace(".3mf", "")
-        return f"Job #{item.id}"
-
-    async def _get_printer(self, db: AsyncSession, printer_id: int) -> Printer | None:
-        """Get printer by ID."""
-        result = await db.execute(select(Printer).where(Printer.id == printer_id))
-        return result.scalar_one_or_none()
 
     async def _block_on_filament_deficit(
         self,
@@ -340,8 +305,8 @@ class PrintScheduler(Dispatcher, PrinterSelection, AmsMapping, AmsDrying):
             item.filament_short = True
             item.manual_start = True
             await db.commit()
-            job_name = await self._get_job_name(db, item)
-            printer = await self._get_printer(db, item.printer_id) if item.printer_id else None
+            job_name = await queued.job_name(db, item)
+            printer = await db.get(Printer, item.printer_id) if item.printer_id else None
             logger.info(
                 "Queue item %s blocked on filament deficit (%d slot(s)) — promoted to manual_start",
                 item.id,

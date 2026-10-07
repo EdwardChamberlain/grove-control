@@ -88,6 +88,7 @@ _LIFECYCLE = "backend.app.services.lifecycle"
 _EXITS = {
     "preheating": f"{_LIFECYCLE}.preheating",
     "dispatching": f"{_LIFECYCLE}.dispatching",
+    **dict.fromkeys(("printing", "paused"), f"{_LIFECYCLE}.printing"),
     **dict.fromkeys(AWAITING_PLATE_CLEAR_STATUSES, f"{_LIFECYCLE}.awaiting"),
 }
 _ENTRY = {

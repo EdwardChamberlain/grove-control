@@ -95,7 +95,7 @@ async def _add_item(ctx, *, printer_id=None, target_model=None):
 
 async def _run(ctx, scheduler, blocked, launched, finder=None, idle=True, drying=None):
     patches = [
-        patch("backend.app.services.lifecycle.dispatching.async_session", ctx.session_maker),
+        patch("backend.app.services.print_scheduler.async_session", ctx.session_maker),
         patch("backend.app.core.database.async_session", ctx.session_maker),
         patch("backend.app.services.lifecycle.dispatching.printer_manager.is_connected", MagicMock(return_value=True)),
         patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", MagicMock(return_value=None)),
@@ -112,7 +112,7 @@ async def _run(ctx, scheduler, blocked, launched, finder=None, idle=True, drying
         patch.object(scheduler, "_compute_ams_mapping_for_printer", AsyncMock(return_value=None)),
         patch.object(scheduler, "_block_on_filament_deficit", AsyncMock(return_value=False)),
         patch.object(scheduler, "_prepare_drying_for_dispatch", AsyncMock(return_value=True)),
-        patch.object(scheduler, "_launch_uploads", launched),
+        patch.object(scheduler.workers, "launch", launched),
     ]
     if blocked is not None:
         patches.append(
@@ -170,7 +170,7 @@ class TestFixedPrinter:
         await _run(queue_db, scheduler, {}, launched)
 
         launched.assert_called_once()
-        assert launched.call_args[0][0] == [item_id]
+        assert list(launched.call_args[0][0]) == [item_id]
 
     @pytest.mark.asyncio
     async def test_the_stale_reason_is_cleared_on_dispatch(self, queue_db):
@@ -210,7 +210,7 @@ class TestFixedPrinter:
         await _run(queue_db, PrintScheduler(), {2: "Enclosure Door"}, launched)
 
         launched.assert_called_once()
-        assert launched.call_args[0][0] == [item_id]
+        assert list(launched.call_args[0][0]) == [item_id]
 
     @pytest.mark.asyncio
     async def test_nothing_blocked_dispatches_as_before(self, queue_db):
@@ -220,7 +220,7 @@ class TestFixedPrinter:
         await _run(queue_db, PrintScheduler(), {}, launched)
 
         launched.assert_called_once()
-        assert launched.call_args[0][0] == [item_id]
+        assert list(launched.call_args[0][0]) == [item_id]
 
     @pytest.mark.asyncio
     async def test_a_held_printer_is_not_reported_as_busy(self, queue_db):
@@ -256,7 +256,7 @@ class TestFixedPrinter:
             await _run(queue_db, PrintScheduler(), None, launched)
 
         launched.assert_called_once()
-        assert launched.call_args[0][0] == [item_id]
+        assert list(launched.call_args[0][0]) == [item_id]
 
 
 class TestModelBased:
@@ -291,9 +291,9 @@ class TestModelBased:
         )
 
         launched.assert_called_once()
-        assert launched.call_args[0][0] == [item_id]
+        assert list(launched.call_args[0][0]) == [item_id]
         # The printer travels with the worker; the waiting job stays unbound.
-        assert launched.call_args[0][3][item_id].printer_id == 2
+        assert launched.call_args[0][0][item_id].printer_id == 2
         assert (await _get_item(queue_db, item_id)).printer_id is None
 
     @pytest.mark.asyncio

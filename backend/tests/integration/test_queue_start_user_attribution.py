@@ -10,7 +10,7 @@ The fix is two-sided:
   - `POST /queue/{id}/start` credits the clicker as `created_by_id` when
     no prior owner is set (does NOT overwrite an existing owner — a
     UI-added queue item's original uploader keeps attribution).
-  - `PrintScheduler._start_print` propagates `item.created_by_id` into
+  - `Dispatcher._send` propagates `item.created_by_id` into
     `printer_manager.set_current_print_user` so the print-complete callback
     can write the username into the PrintLogEntry row.
 
@@ -166,7 +166,7 @@ class TestStartCreditsTheClicker:
 
 
 class TestSchedulerPropagatesOwnerToPrinterManager:
-    """`PrintScheduler._propagate_owner_to_printer_manager` looks up the
+    """`dispatching.credit_owner` looks up the
     user row by `created_by_id` and forwards it into
     `printer_manager.set_current_print_user` so the print-complete callback
     can write the username into PrintLogEntry."""
@@ -176,7 +176,6 @@ class TestSchedulerPropagatesOwnerToPrinterManager:
     async def test_propagates_when_created_by_id_resolves_to_user(self, db_session, queue_item, monkeypatch):
         from backend.app.models.user import User
         from backend.app.services.lifecycle import dispatching as scheduler_module
-        from backend.app.services.print_scheduler import PrintScheduler
 
         user = User(username="clickeruser", password_hash="x", is_active=True)
         db_session.add(user)
@@ -195,7 +194,7 @@ class TestSchedulerPropagatesOwnerToPrinterManager:
             lambda printer_id, uid, username: captured.append((printer_id, uid, username)),
         )
 
-        await PrintScheduler()._propagate_owner_to_printer_manager(db_session, queue_item)
+        await scheduler_module.credit_owner(db_session, queue_item)
 
         assert captured == [(queue_item.printer_id, user.id, "clickeruser")]
 
@@ -206,7 +205,6 @@ class TestSchedulerPropagatesOwnerToPrinterManager:
         auto-dispatch) carry no owner — the helper must stay silent rather
         than synthesise a placeholder user."""
         from backend.app.services.lifecycle import dispatching as scheduler_module
-        from backend.app.services.print_scheduler import PrintScheduler
 
         assert queue_item.created_by_id is None
 
@@ -217,7 +215,7 @@ class TestSchedulerPropagatesOwnerToPrinterManager:
             lambda *args: captured.append(args),
         )
 
-        await PrintScheduler()._propagate_owner_to_printer_manager(db_session, queue_item)
+        await scheduler_module.credit_owner(db_session, queue_item)
         assert captured == []
 
     @pytest.mark.asyncio
@@ -227,7 +225,6 @@ class TestSchedulerPropagatesOwnerToPrinterManager:
         helper must not crash the dispatch. The print log row will just be
         un-credited for this run, same as auth-disabled."""
         from backend.app.services.lifecycle import dispatching as scheduler_module
-        from backend.app.services.print_scheduler import PrintScheduler
 
         queue_item.created_by_id = 999_999  # no such user row
         db_session.add(queue_item)
@@ -244,5 +241,5 @@ class TestSchedulerPropagatesOwnerToPrinterManager:
         # Must not raise — the dispatch loop would otherwise lose the whole
         # queue item to an exception trace for what's effectively a missing
         # foreign key.
-        await PrintScheduler()._propagate_owner_to_printer_manager(db_session, queue_item)
+        await scheduler_module.credit_owner(db_session, queue_item)
         assert captured == []

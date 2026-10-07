@@ -12,7 +12,8 @@ Effects must not queue further effects; those would be dropped unrun.
 
 import logging
 from collections.abc import Callable, Hashable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from functools import partial
 
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -120,15 +121,22 @@ class QueueOutcomeEffect:
 
 
 def queue_outcome_effect(db: AsyncSession, effect: QueueOutcomeEffect) -> None:
-    engine = db.bind
+    """Run an outcome's effects after commit; an exit's and an entry's effects for one outcome combine."""
+    key = ("outcome", effect.job_id, effect.new_state)
+    if queued := _outermost(db).info.get(_COMMIT, {}).get(key):
+        earlier = queued.args[1]
+        effect = replace(effect, **{name: getattr(earlier, name) or getattr(effect, name) for name in _FLAGS})
+    after_commit(db, partial(_spawn_outcome, db.bind, effect), key=key)
 
-    def spawn() -> None:
-        from backend.app.core.tasks import spawn_background_task
 
-        name = f"queue-{effect.new_state}-effects-{effect.job_id}"
-        spawn_background_task(run_queue_outcome_effects(engine, effect), name=name)
+_FLAGS = ("shut_down_heaters", "notify_failure", "clean_sd_copy")
 
-    after_commit(db, spawn, key=("outcome", effect.job_id, effect.new_state))
+
+def _spawn_outcome(engine: AsyncEngine, effect: QueueOutcomeEffect) -> None:
+    from backend.app.core.tasks import spawn_background_task
+
+    name = f"queue-{effect.new_state}-effects-{effect.job_id}"
+    spawn_background_task(run_queue_outcome_effects(engine, effect), name=name)
 
 
 async def run_queue_outcome_effects(engine: AsyncEngine, effect: QueueOutcomeEffect) -> None:
@@ -257,23 +265,3 @@ async def publish_queue_job_started(queue_item_id: int) -> None:
         )
     except Exception:
         logger.exception("Queue item %s: confirmed but failed to publish start side effects", queue_item_id)
-
-
-async def awaiting_outcome(change, row) -> None:
-    """Stage the awaiting outcome and a durable shutdown for a heat-soaked attempt."""
-    from backend.app.services.lifecycle import preheating
-
-    # Keep shutdown durable; preheating stages its own shutdown on exit.
-    heating = change.before != "preheating" and (row.preheat_requested_at is not None or row.chamber_heat_soak)
-    if heating and row.printer_id is not None:
-        await preheating.request_heater_shutdown(change.db, row.printer_id)
-    unconfirmed = change.action != "printer_report"
-    effect = QueueOutcomeEffect(
-        job_id=change.item_id,
-        new_state=change.after,
-        printer_id=row.printer_id,
-        shut_down_heaters=heating,
-        notify_failure=change.after == "failed" and change.before in ("preheating", "dispatching") and unconfirmed,
-        clean_sd_copy=change.after == "failed" and change.before == "dispatching" and unconfirmed,
-    )
-    queue_outcome_effect(change.db, effect)
