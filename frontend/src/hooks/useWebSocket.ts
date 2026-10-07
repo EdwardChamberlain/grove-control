@@ -262,6 +262,12 @@ export function useWebSocket() {
         }
         break;
 
+      case 'queue_work_changed':
+        // Queue jobs can be created by another browser, the API, or the scheduler.
+        // The shared summary is one request for all cards, independent of ownership.
+        queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
+        break;
+
       case 'missing_spool_assignment': {
         if (message.printer_id === undefined || !Array.isArray(message.missing_slots)) {
           break;

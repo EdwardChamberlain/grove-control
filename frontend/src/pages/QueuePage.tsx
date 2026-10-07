@@ -1005,12 +1005,10 @@ export function QueuePage() {
     },
   });
 
-  // Printer cards read has_queued_work from printerStatus, separately from
-  // this queue list. Keep that cache in sync after queue membership/state
-  // changes so their Print/Queue action doesn't wait for its polling interval.
+  // Keep the shared printer action summary current after local queue changes.
   const invalidateQueueState = () => {
     queryClient.invalidateQueries({ queryKey: ['queue'] });
-    queryClient.invalidateQueries({ queryKey: ['printerStatus'] });
+    queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
   };
 
   const cancelMutation = useMutation({

@@ -1399,6 +1399,7 @@ function useCurrentPrintOwner(
 
 function SinglePrinterCockpit({
   printer,
+  queueWork,
   maintenanceInfo,
   smartPlugPoweredOff = false,
   requirePlateClear,
@@ -1422,6 +1423,7 @@ function SinglePrinterCockpit({
   onUnassignSpoolmanSpool,
 }: {
   printer: Printer;
+  queueWork?: Record<number, boolean>;
   maintenanceInfo?: PrinterMaintenanceInfo;
   smartPlugPoweredOff?: boolean;
   requirePlateClear?: boolean;
@@ -1823,7 +1825,7 @@ function SinglePrinterCockpit({
 
   const knownHmsErrors = status?.hms_errors ? filterKnownHMSErrors(status.hms_errors) : [];
   const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
-  const hasQueuedWork = isPrintingOrPaused || !!status?.has_queued_work;
+  const hasQueuedWork = isPrintingOrPaused || !!(queueWork?.[printer.id] ?? status?.has_queued_work);
   const printActionLabel = hasQueuedWork ? t('printers.queueJob', 'Queue Job') : t('common.print');
   const isPaused = status?.state === 'PAUSE';
   const progress = Math.max(0, Math.min(100, status?.progress ?? 0));
@@ -3068,6 +3070,7 @@ function ScheduledDryingBanner({
 
 function PrinterCard({
   printer,
+  queueWork,
   hideIfDisconnected,
   maintenanceInfo,
   smartPlugPoweredOff = false,
@@ -3101,6 +3104,7 @@ function PrinterCard({
   aiLastError = null,
 }: {
   printer: Printer;
+  queueWork?: Record<number, boolean>;
   hideIfDisconnected?: boolean;
   maintenanceInfo?: PrinterMaintenanceInfo;
   smartPlugPoweredOff?: boolean;
@@ -3378,7 +3382,7 @@ function PrinterCard({
   });
   const lastPrint = lastPrints?.[0];
   const isPrintingOrPaused = status?.state === 'RUNNING' || status?.state === 'PAUSE';
-  const hasQueuedWork = isPrintingOrPaused || !!status?.has_queued_work;
+  const hasQueuedWork = isPrintingOrPaused || !!(queueWork?.[printer.id] ?? status?.has_queued_work);
   const printActionLabel = hasQueuedWork ? t('printers.queueJob', 'Queue Job') : t('common.print');
   const needsPlateClear = status?.awaiting_plate_clear === true && !isPrintingOrPaused;
   const showClearPlateButton = status?.connected && needsPlateClear && !isPrintingOrPaused;
@@ -6617,6 +6621,11 @@ function PowerDropdownItem({
 
 export function PrintersPage() {
   const { t } = useTranslation();
+  const { data: queueWork } = useQuery({
+    queryKey: ['printerQueueWork'],
+    queryFn: api.getPrinterQueueWork,
+    refetchInterval: 30000,
+  });
   const { resolvedMode, darkAccent, lightAccent } = useTheme();
   const activeAccent = resolvedMode === 'dark' ? darkAccent : lightAccent;
   const accentButtonClass = {
@@ -7718,6 +7727,7 @@ export function PrintersPage() {
 
           <div className="min-h-0 min-w-0">
             <SinglePrinterCockpit
+              queueWork={queueWork}
               printer={selectedSinglePrinter}
               maintenanceInfo={maintenanceByPrinter[selectedSinglePrinter.id]}
               smartPlugPoweredOff={isSmartPlugPoweredOff(selectedSinglePrinter.id)}
@@ -7830,6 +7840,7 @@ export function PrintersPage() {
                 <div className={`grid gap-4 ${getGridClasses()}`}>
                   {groupPrinters.map((printer) => (
                     <PrinterCard
+                      queueWork={queueWork}
                       key={printer.id}
                       printer={printer}
                       hideIfDisconnected={hideDisconnected}
@@ -7881,6 +7892,7 @@ export function PrintersPage() {
         <div className={`grid gap-4 ${getGridClasses()}`}>
           {sortedPrinters.map((printer) => (
             <PrinterCard
+              queueWork={queueWork}
               key={printer.id}
               printer={printer}
               hideIfDisconnected={hideDisconnected}

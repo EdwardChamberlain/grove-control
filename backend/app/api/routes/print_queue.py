@@ -41,6 +41,7 @@ from backend.app.services.filament_requirements import (
     overrides_for_plate,
 )
 from backend.app.services.job_identity import needs_dispatch_resolution, telemetry_identity
+from backend.app.services.lifecycle import effects
 from backend.app.services.lifecycle.awaiting import clear_job_plate
 from backend.app.services.lifecycle.engine import InvalidQueueTransition, lock_queue_item, transition_queue_item
 from backend.app.services.lifecycle.preheating import SkipHeatSoakResult, heat_soak_dispatch_started, skip_heat_soak
@@ -874,6 +875,8 @@ async def bulk_update_queue_items(
             setattr(item, field, value)
         updated_count += 1
 
+    if updated_count:
+        effects.publish_queue_work_changed(db)
     await db.commit()
 
     logger.info("Bulk updated %s queue items, skipped %s", updated_count, skipped_count)
@@ -1106,6 +1109,7 @@ async def update_queue_item(
     for field, value in update_data.items():
         setattr(item, field, value)
 
+    effects.publish_queue_work_changed(db)
     await db.commit()
     await db.refresh(item, ["archive", "printer", "library_file", "created_by"])
 
@@ -1145,6 +1149,7 @@ async def delete_queue_item(
 
     await detach_dispatch_archive_links(db, [item.id])
     await db.delete(item)
+    effects.publish_queue_work_changed(db)
     if library_file_id is not None:
         # Remove an auto-uploaded Queue source once no queue item needs it.
         await remove_queue_only_source_if_unused(db, library_file_id, exclude_item_id=item_id)

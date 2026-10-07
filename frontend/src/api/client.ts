@@ -3872,6 +3872,8 @@ export const api = {
   },
   getPrinterStatus: (id: number) =>
     request<PrinterStatus>(`/printers/${id}/status`),
+  getPrinterQueueWork: () =>
+    request<Record<number, boolean>>('/printers/queue-work'),
   refreshPrinterStatus: (id: number) =>
     request<{ status: string }>(`/printers/${id}/refresh-status`, {
       method: 'POST',

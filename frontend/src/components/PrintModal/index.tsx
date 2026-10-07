@@ -649,12 +649,11 @@ export function PrintModal({
     return [t('printModal.insufficientFilamentMessage'), ...lines].join('\n');
   }, [filamentWarningItems, t]);
 
-  // The printer card's Print/Queue label comes from printerStatus.has_queued_work,
-  // which is computed from the queue on the server. Refresh both caches after
-  // changing queue items so that label follows the mutation immediately.
+  // Refresh the shared queue-work summary after local mutations. The server
+  // also broadcasts committed changes from API clients and the scheduler.
   const invalidateQueueState = () => {
     queryClient.invalidateQueries({ queryKey: ['queue'] });
-    queryClient.invalidateQueries({ queryKey: ['printerStatus'] });
+    queryClient.invalidateQueries({ queryKey: ['printerQueueWork'] });
   };
 
   // Add to queue mutation (single printer)
