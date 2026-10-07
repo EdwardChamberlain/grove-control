@@ -122,7 +122,7 @@ def _assert_sent_with(start_print, db, item, *, printer_id, ams_mapping, unassig
 
 
 @pytest.mark.asyncio
-@patch("backend.app.services.print_scheduler.printer_manager")
+@patch("backend.app.services.printer_selection.printer_manager")
 async def test_model_unforced_job_accepts_same_material_without_exact_colour(mock_pm, scheduler):
     printer = SimpleNamespace(id=3, name="P1S")
     result = MagicMock()
@@ -149,7 +149,7 @@ async def test_model_unforced_job_accepts_same_material_without_exact_colour(moc
 
 
 @pytest.mark.asyncio
-@patch("backend.app.services.print_scheduler.printer_manager")
+@patch("backend.app.services.printer_selection.printer_manager")
 async def test_model_unforced_job_recomputes_cross_material_mapping(mock_pm, scheduler):
     item = _queue_item(force_color_match=False)
     item.printer_id = None
@@ -209,7 +209,7 @@ async def test_model_unforced_job_recomputes_cross_material_mapping(mock_pm, sch
 
 
 @pytest.mark.asyncio
-@patch("backend.app.services.print_scheduler.printer_manager")
+@patch("backend.app.services.printer_selection.printer_manager")
 async def test_forced_job_waits_when_material_metadata_is_missing(mock_pm, scheduler):
     item = _queue_item()
     item.filament_overrides = None
@@ -235,7 +235,7 @@ async def test_forced_job_waits_when_material_metadata_is_missing(mock_pm, sched
 
 
 @pytest.mark.asyncio
-@patch("backend.app.services.print_scheduler.printer_manager")
+@patch("backend.app.services.printer_selection.printer_manager")
 async def test_unforced_job_waits_when_material_metadata_is_missing(mock_pm, scheduler):
     item = _queue_item(force_color_match=False)
     item.filament_overrides = None
@@ -259,7 +259,7 @@ async def test_unforced_job_waits_when_material_metadata_is_missing(mock_pm, sch
 
 
 @pytest.mark.asyncio
-@patch("backend.app.services.print_scheduler.printer_manager")
+@patch("backend.app.services.printer_selection.printer_manager")
 async def test_forced_job_waits_when_material_metadata_is_malformed(mock_pm, scheduler):
     item = _queue_item()
     item.filament_overrides = "not-json"
@@ -283,7 +283,7 @@ async def test_forced_job_waits_when_material_metadata_is_malformed(mock_pm, sch
 
 
 @pytest.mark.asyncio
-@patch("backend.app.services.print_scheduler.printer_manager")
+@patch("backend.app.services.printer_selection.printer_manager")
 async def test_assigned_job_waits_when_forced_colour_is_missing(mock_pm, scheduler):
     item = _queue_item()
     items_result, busy_result = _queue_results(item)
@@ -311,7 +311,7 @@ async def test_assigned_job_waits_when_forced_colour_is_missing(mock_pm, schedul
 
 
 @pytest.mark.asyncio
-@patch("backend.app.services.print_scheduler.printer_manager")
+@patch("backend.app.services.printer_selection.printer_manager")
 async def test_assigned_job_recomputes_mapping_and_starts_on_exact_colour(mock_pm, scheduler):
     item = _queue_item()
     item.ams_mapping = "[0]"  # stale mapping to a different-colour tray
@@ -345,7 +345,7 @@ async def test_assigned_job_recomputes_mapping_and_starts_on_exact_colour(mock_p
 
 
 @pytest.mark.asyncio
-@patch("backend.app.services.print_scheduler.printer_manager")
+@patch("backend.app.services.printer_selection.printer_manager")
 async def test_assigned_job_allows_different_colour_when_force_is_disabled(mock_pm, scheduler):
     item = _queue_item(force_color_match=False)
     item.ams_mapping = "[0]"
@@ -377,7 +377,7 @@ async def test_assigned_job_allows_different_colour_when_force_is_disabled(mock_
 
 
 @pytest.mark.asyncio
-@patch("backend.app.services.print_scheduler.printer_manager")
+@patch("backend.app.services.printer_selection.printer_manager")
 async def test_assigned_unforced_job_waits_when_material_is_missing(mock_pm, scheduler):
     item = _queue_item(force_color_match=False)
     items_result, busy_result = _queue_results(item)

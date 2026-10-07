@@ -25,8 +25,8 @@ from backend.app.core.database import Base
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
 from backend.app.models.printer import Printer
-from backend.app.services.print_scheduler import (
-    PrintScheduler,
+from backend.app.services.print_scheduler import PrintScheduler
+from backend.app.services.printer_selection import (
     _candidate_model_label,
     _candidates_for,
     _collapse_waiting_reasons,
@@ -304,9 +304,8 @@ async def _run_check_queue(ctx, scheduler, finder, waiting_notification=None, pr
         ),
         patch.object(scheduler, "_find_idle_printer_for_model", finder),
         patch.object(scheduler, "_check_auto_drying", AsyncMock()),
-        # Selection is what's under test — keep AMS recomputation and the
-        # filament-deficit probe out of the way, and never actually dispatch.
-        patch.object(scheduler, "_ensure_ams_mapping", AsyncMock()),
+        # Selection is what's under test — keep the filament-deficit probe
+        # out of the way, and never actually dispatch.
         patch.object(scheduler, "_block_on_filament_deficit", AsyncMock(return_value=False)),
         patch.object(scheduler, "_launch_uploads", scheduler.launch_uploads),
     ]

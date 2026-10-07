@@ -35,7 +35,6 @@ from backend.app.core.permissions import Permission
 from backend.app.core.tasks import spawn_background_task
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile, LibraryFileTag, LibraryFolder
-from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.project import Project
 from backend.app.models.user import User
 from backend.app.schemas.library import (
@@ -67,10 +66,7 @@ from backend.app.schemas.library import (
 )
 from backend.app.schemas.slicer import SliceRequest, SliceResponse
 from backend.app.services.archive import ThreeMFParser
-from backend.app.services.filament_requirements import (
-    build_queue_filament_overrides,
-    extract_filament_requirements,
-)
+from backend.app.services.lifecycle.queued import create_job, filament_contract
 from backend.app.services.plate_thumbnail import inject_plate_thumbnails_if_missing
 from backend.app.services.stl_thumbnail import MIN_USABLE_STL_BYTES, generate_stl_thumbnail
 from backend.app.utils.filename import InvalidFilenameError, validate_print_filename
@@ -2644,10 +2640,6 @@ async def add_files_to_queue(
     result = await db.execute(LibraryFile.active().where(LibraryFile.id.in_(request.file_ids)))
     files = {f.id: f for f in result.scalars().all()}
 
-    # Get max position for queue ordering
-    pos_result = await db.execute(select(func.coalesce(func.max(PrintQueueItem.position), 0)))
-    max_position = pos_result.scalar() or 0
-
     for file_id in request.file_ids:
         lib_file = files.get(file_id)
 
@@ -2676,24 +2668,18 @@ async def add_files_to_queue(
                 )
                 continue
 
-            # Create queue item referencing library file (archive created at print start)
-            requirements = extract_filament_requirements(file_path)
-            overrides = build_queue_filament_overrides(
-                requirements,
-                force_color_match=request.force_color_match,
+            # An unassigned job; its Archive is created at print start.
+            _types, overrides = filament_contract(file_path, force_color_match=request.force_color_match)
+            [queue_item] = await create_job(
+                db,
+                [
+                    {
+                        "library_file_id": file_id,
+                        "filament_overrides": overrides,
+                        "force_color_match": request.force_color_match,
+                    }
+                ],
             )
-            max_position += 1
-            queue_item = PrintQueueItem(
-                printer_id=None,  # Unassigned
-                library_file_id=file_id,
-                position=max_position,
-                status="queued",
-                filament_overrides=json.dumps(overrides) if overrides else None,
-                force_color_match=request.force_color_match,
-            )
-            db.add(queue_item)
-
-            await db.flush()  # Get queue_item.id
 
             added.append(
                 AddToQueueResult(
