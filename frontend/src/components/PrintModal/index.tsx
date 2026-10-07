@@ -649,6 +649,14 @@ export function PrintModal({
     return [t('printModal.insufficientFilamentMessage'), ...lines].join('\n');
   }, [filamentWarningItems, t]);
 
+  // The printer card's Print/Queue label comes from printerStatus.has_queued_work,
+  // which is computed from the queue on the server. Refresh both caches after
+  // changing queue items so that label follows the mutation immediately.
+  const invalidateQueueState = () => {
+    queryClient.invalidateQueries({ queryKey: ['queue'] });
+    queryClient.invalidateQueries({ queryKey: ['printerStatus'] });
+  };
+
   // Add to queue mutation (single printer)
   const addToQueueMutation = useMutation({
     mutationFn: (data: PrintQueueItemCreate) => api.addToQueue(data),
@@ -870,7 +878,7 @@ export function PrintModal({
           project_id: projectId ?? undefined,
         });
         showToast(t('printModal.variants.queued', { count: candidates.length }), 'success');
-        queryClient.invalidateQueries({ queryKey: ['queue'] });
+        invalidateQueueState();
         onSuccess?.();
         onClose();
       } catch (error) {
@@ -912,7 +920,7 @@ export function PrintModal({
       try {
         await updateQueueMutation.mutateAsync(updateData);
         showToast(t('printModal.queueItemUpdated'));
-        queryClient.invalidateQueries({ queryKey: ['queue'] });
+        invalidateQueueState();
         onSuccess?.();
         onClose();
       } catch (error) {
@@ -1039,14 +1047,14 @@ export function PrintModal({
           t('queue.itemsQueued', { count: results.success }),
         );
       }
-      queryClient.invalidateQueries({ queryKey: ['queue'] });
+      invalidateQueueState();
       onSuccess?.();
       onClose();
     } else if (results.success === 0) {
       showToast(`Failed: ${results.errors[0]}`, 'error');
     } else {
       showToast(`${results.success} succeeded, ${results.failed} failed`, 'error');
-      queryClient.invalidateQueries({ queryKey: ['queue'] });
+      invalidateQueueState();
     }
   };
 

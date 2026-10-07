@@ -1005,10 +1005,18 @@ export function QueuePage() {
     },
   });
 
+  // Printer cards read has_queued_work from printerStatus, separately from
+  // this queue list. Keep that cache in sync after queue membership/state
+  // changes so their Print/Queue action doesn't wait for its polling interval.
+  const invalidateQueueState = () => {
+    queryClient.invalidateQueries({ queryKey: ['queue'] });
+    queryClient.invalidateQueries({ queryKey: ['printerStatus'] });
+  };
+
   const cancelMutation = useMutation({
     mutationFn: (id: number) => api.cancelQueueItem(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['queue'] });
+      invalidateQueueState();
       showToast(t('queue.toast.cancelled'));
     },
     onError: () => showToast(t('queue.toast.cancelFailed'), 'error'),
@@ -1017,7 +1025,7 @@ export function QueuePage() {
   const removeMutation = useMutation({
     mutationFn: (id: number) => api.removeFromQueue(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['queue'] });
+      invalidateQueueState();
       showToast(t('queue.toast.removed'));
     },
     onError: () => showToast(t('queue.toast.removeFailed'), 'error'),
@@ -1026,7 +1034,7 @@ export function QueuePage() {
   const resolveDispatchMutation = useMutation({
     mutationFn: ({ id, outcome }: { id: number; outcome: 'printing' | 'failed' }) => api.resolveQueueDispatch(id, outcome),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['queue'] });
+      invalidateQueueState();
       queryClient.invalidateQueries({ queryKey: ['printers'] });
     },
     onError: (error: Error) => showToast(error.message, 'error'),
@@ -1035,7 +1043,7 @@ export function QueuePage() {
   const stopMutation = useMutation({
     mutationFn: (id: number) => api.stopQueueItem(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['queue'] });
+      invalidateQueueState();
       showToast(t('queue.toast.stopped'));
     },
     onError: () => showToast(t('queue.toast.stopFailed'), 'error'),
@@ -1044,7 +1052,7 @@ export function QueuePage() {
   const skipHeatSoakMutation = useMutation({
     mutationFn: (id: number) => api.skipQueueHeatSoak(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['queue'] });
+      invalidateQueueState();
       showToast(t('heatSoak.skipped'));
     },
     onError: (error: Error) => {
@@ -1071,7 +1079,7 @@ export function QueuePage() {
     mutationFn: ({ id, skipFilamentCheck }: { id: number; skipFilamentCheck?: boolean }) =>
       api.startQueueItem(id, { skipFilamentCheck }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['queue'] });
+      invalidateQueueState();
       showToast(t('queue.toast.released'));
       setFilamentShortConfirm(null);
     },
@@ -1101,7 +1109,7 @@ export function QueuePage() {
   const bulkUpdateMutation = useMutation({
     mutationFn: (data: PrintQueueBulkUpdate) => api.bulkUpdateQueue(data),
     onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ['queue'] });
+      invalidateQueueState();
       setSelectedItems([]);
       setShowBulkEditModal(false);
       showToast(result.message);
@@ -1117,7 +1125,7 @@ export function QueuePage() {
       return ids.length;
     },
     onSuccess: (count) => {
-      queryClient.invalidateQueries({ queryKey: ['queue'] });
+      invalidateQueueState();
       setSelectedItems([]);
       showToast(t('queue.toast.bulkCancelled', { count }));
     },
@@ -1270,8 +1278,7 @@ export function QueuePage() {
     ['finished', 'failed', 'cancelled'].includes(item.status) && matchesLocationFilter(item)
   ), [queue, matchesLocationFilter]);
   const refreshLifecycle = () => {
-    queryClient.invalidateQueries({ queryKey: ['queue'] });
-    queryClient.invalidateQueries({ queryKey: ['printerStatus'] });
+    invalidateQueueState();
   };
   const clearPlateMutation = useMutation({
     mutationFn: (id: number) => api.clearQueuePlate(id),
