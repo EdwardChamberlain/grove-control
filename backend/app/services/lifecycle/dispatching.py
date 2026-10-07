@@ -259,7 +259,13 @@ class Dispatcher:
                 await db.rollback()
                 logger.exception("Queue item %s: unsent dispatch recovery failed", item_id)
         for printer_id in self._visible_unsent - visible:
-            _show_preheating(printer_id, False)
+            still_preheating = await db.scalar(
+                select(PrintQueueItem.id)
+                .where(PrintQueueItem.printer_id == printer_id, PrintQueueItem.status == "preheating")
+                .limit(1)
+            )
+            if still_preheating is None:
+                _show_preheating(printer_id, False)
         self._visible_unsent = visible
 
     async def _clear_stale_dispatch_claims(self) -> None:
