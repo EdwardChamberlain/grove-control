@@ -133,10 +133,12 @@ the transaction that confirmed it announces only its end.
 Unsent heat-soak handoffs belong to dispatching rather than preheating's wait.
 Dispatching keeps their existing heartbeat abort, inspection message and view
 recovery policy, shared with preheating's. Dispatching runs this watch and its
-telemetry recovery on its own 30-second timer, with an immediate first pass.
-Committed entry and intake's reconnect/disconnect events wake it sooner.
-Queue selection does not drive either state's timer; shutdown cancels both. The separate long-upload and interrupted-soak behavior
-fixes listed in #204 remain follow-up work.
+telemetry recovery on its own 30-second timer, with an immediate first pass;
+a printer connecting or disconnecting wakes it sooner. The timer is deliberate:
+recovery checks every active job against live telemetry, which a fixed cadence
+does simply. A locked SQLite database retries the pass. Queue selection drives
+neither state's timer, and shutdown cancels both. The separate long-upload and
+interrupted-soak behavior fixes listed in #204 remain follow-up work.
 
 See
 [job identity](queue-job-identity.md) for matching and recovery details and

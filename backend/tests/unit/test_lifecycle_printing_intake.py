@@ -294,17 +294,28 @@ async def test_bed_cooldown_adapter_consumes_only_its_printers_intake_memory(ali
     assert intake.PrintMemory().bed_cool_waiters == {}  # Independent contexts never share dictionaries.
 
 
-@pytest.mark.parametrize("commit", [True, False])
-async def test_dispatch_entry_wakes_recovery_only_after_commit(alignment, monkeypatch, commit):
-    from backend.app.services.lifecycle import dispatching
+async def test_dispatch_recovery_retries_a_locked_database_within_the_pass(alignment, monkeypatch):
+    from sqlalchemy.exc import OperationalError
 
-    monkeypatch.setattr(dispatching, "_wake", asyncio.Event())
-    async with alignment.sessions() as db:
-        job = await db.get(PrintQueueItem, alignment.job_id)
-        await transition_queue_item(db, job, "queued", "dispatching")
-        assert not dispatching._wake.is_set()
-        await (db.commit() if commit else db.rollback())
-    assert dispatching._wake.is_set() is commit
+    from backend.app.services.lifecycle import dispatching
+    from backend.app.services.print_scheduler import PrintScheduler
+
+    service = PrintScheduler().dispatcher
+    monkeypatch.setattr(dispatching, "async_session", alignment.sessions)
+    monkeypatch.setattr("backend.app.core.database.is_sqlite", lambda: True)
+    monkeypatch.setattr("backend.app.core.database.asyncio.sleep", AsyncMock())
+    locked = OperationalError("UPDATE print_queue", {}, Exception("database is locked"))
+    service.wait_unsent = AsyncMock(side_effect=[locked, None])
+    recovered = asyncio.Event()
+    service.recover = AsyncMock(side_effect=lambda _: recovered.set())
+    timer = asyncio.create_task(service.run())
+    try:
+        await asyncio.wait_for(recovered.wait(), 2)  # The same pass, not the next timer.
+        assert service.wait_unsent.await_count == 2
+    finally:
+        timer.cancel()
+        await asyncio.gather(timer, return_exceptions=True)
+        monkeypatch.setattr(dispatching, "_wake", None)
 
 
 async def test_intake_wakes_dispatch_recovery_on_each_known_connection_edge(monkeypatch):

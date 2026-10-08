@@ -675,15 +675,23 @@ class Dispatcher:
             logger.exception("Failed to clear stale queue dispatch claims")
 
     async def run(self) -> None:
-        """Recover and watch unsent handoffs on dispatching's own timer, waking on reconnects and entry."""
+        """Recover and watch unsent handoffs every 30 s, and at once after a printer connects or disconnects.
+
+        A plain timer by design: recovery reads every active job against live
+        telemetry, so a fixed cadence is simpler than tracking each job's events.
+        A locked SQLite database retries the pass rather than skipping it.
+        """
         global _wake
         _wake = asyncio.Event()
+
+        async def recover(db: AsyncSession) -> None:
+            await self.wait_unsent(db)
+            await self.recover(db)
+
         while True:
             _wake.clear()
             try:
-                async with async_session() as db:
-                    await self.wait_unsent(db)
-                    await self.recover(db)
+                await run_with_retry(recover, label="dispatch recovery", session_factory=async_session)
             except Exception:
                 logger.exception("Dispatch recovery failed")
             with suppress(TimeoutError):
@@ -796,7 +804,6 @@ async def on_enter(change, row) -> None:
     """Enter from preheating: this process's worker takes the soak over once the handoff commits."""
     from backend.app.services.print_scheduler import scheduler
 
-    effects.after_commit(change.db, wake, key="dispatch_wake")
     if change.before == "preheating" and row.preheat_owner == scheduler._heat_soak.owner:
         item_id = change.item_id
         effects.after_commit(
