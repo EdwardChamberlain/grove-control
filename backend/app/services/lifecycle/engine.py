@@ -93,6 +93,7 @@ _EXITS = {
 }
 _ENTRY = {
     "preheating": f"{_LIFECYCLE}.preheating",
+    "dispatching": f"{_LIFECYCLE}.dispatching",
     "printing": f"{_LIFECYCLE}.printing",
     **dict.fromkeys(AWAITING_PLATE_CLEAR_STATUSES, f"{_LIFECYCLE}.awaiting"),
     **dict.fromkeys(FINAL_STATUSES, f"{_LIFECYCLE}.final"),
@@ -225,7 +226,14 @@ async def _written(change: Transition) -> None:
     holding = change.before in HOLDING_STATUSES or change.after in HOLDING_STATUSES
     if not (entered or holding or change.action):
         return  # No log, printer view or entry step applies (e.g. a waiting reason).
-    names = ("printer_id", "archive_id", "library_file_id", "preheat_requested_at", "chamber_heat_soak")
+    names = (
+        "printer_id",
+        "archive_id",
+        "library_file_id",
+        "preheat_requested_at",
+        "preheat_owner",
+        "chamber_heat_soak",
+    )
     row = (await db.execute(select(*(table.c[name] for name in names)).where(table.c.id == change.item_id))).one()
     if entered or change.action is not None:
         log = "Queue job %s: %s -> %s (printer=%s, archive=%s, action=%s)"

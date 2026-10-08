@@ -411,13 +411,6 @@ async def test_committed_heat_soak_handoff_is_scheduled_without_copying(alignmen
     manager.get_status.side_effect = states.get
     monkeypatch.setattr(heat, "printer_manager", manager)
     monkeypatch.setattr(service, "cleanup", AsyncMock())
-    dispatched = []
-
-    def collect_dispatch(coroutine, *, name):
-        dispatched.append(name)
-        coroutine.close()
-
-    monkeypatch.setattr("backend.app.services.print_scheduler.spawn_background_task", collect_dispatch)
     async with alignment.sessions() as db:
         first = await db.get(PrintQueueItem, alignment.job_id)
         second_printer = Printer(
@@ -443,14 +436,14 @@ async def test_committed_heat_soak_handoff_is_scheduled_without_copying(alignmen
                 },
             )
         await db.commit()
-        await scheduler._check_heat_soaks(db)
+        ready = await service.wait(db)  # Preheating's pass, on its own timer since stage 6.
         await db.refresh(first)
         assert first.status == "dispatching" and first.archive_id is None
         assert await db.scalar(select(PrintArchive.id)) is None
         # A subsequent normal pass skips the already committed handoff.
         assert await service.wait(db) == []
         await db.refresh(first)
-        assert f"heat-soak-dispatch-{first.id}" in dispatched, (first.status, first.dispatch_subtask_id, dispatched)
+        assert first.id in ready  # Dispatching's entry takes it over after commit.
 
 
 @pytest.mark.parametrize("current", ["busy", "reconnected_busy", "reconnected_idle", "missing", "unready", "offline"])
@@ -782,12 +775,14 @@ async def test_heat_soak_archive_copy_failure_commits_before_auto_off(alignment,
     handoffs = []
 
     def capture_handoff(coroutine, *, name):
-        if name.startswith("skip-heat-soak-dispatch"):
+        if name.startswith("heat-soak-dispatch"):
             handoffs.append(coroutine)
         else:
             coroutine.close()
 
     monkeypatch.setattr(heat, "spawn_background_task", capture_handoff)
+
+    monkeypatch.setattr("backend.app.services.lifecycle.dispatching.spawn_background_task", capture_handoff)
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
         now = heat.utcnow()

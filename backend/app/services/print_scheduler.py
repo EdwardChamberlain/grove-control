@@ -41,6 +41,7 @@ class PrintScheduler:
         self._heat_soak = ChamberHeatSoak()
         self.dispatcher = Dispatcher(self._heat_soak, self.selection, self.drying)
         self.workers = queued.Workers(self._heat_soak, self.dispatcher)
+        self._heat_soak_timer: asyncio.Task | None = None
         self._check_interval = 30  # seconds
         self._fast_check_interval = 3  # seconds while dispatch work is draining
 
@@ -50,6 +51,7 @@ class PrintScheduler:
         logger.info("Print scheduler started")
 
         await self.dispatcher.start()
+        self._heat_soak_timer = spawn_background_task(self._heat_soak.run(), name="heat-soak-timer")
         next_archive_check = 0.0
         archive_check: asyncio.Task | None = None
 
@@ -72,6 +74,8 @@ class PrintScheduler:
     def stop(self):
         """Stop the scheduler."""
         self._running = False
+        if self._heat_soak_timer is not None:
+            self._heat_soak_timer.cancel()
         # App shutdown also cancels the global task registry. Cancelling here
         # prevents a same-process restart from retaining upload reservations.
         for item_id in tuple(self.workers.inflight):
@@ -79,10 +83,8 @@ class PrintScheduler:
         logger.info("Print scheduler stopped")
 
     async def _check_heat_soaks(self, db: AsyncSession) -> set[int]:
-        ready = await self._heat_soak.wait(db)
+        """Dispatching's watch over unsent soak handoffs; the printers whose heaters are still shutting down."""
         await self.dispatcher.wait_unsent(db)
-        for item_id in ready:
-            spawn_background_task(self.dispatcher.take_over(item_id), name=f"heat-soak-dispatch-{item_id}")
         return set((await db.scalars(select(Printer.id).where(Printer.heat_soak_shutdown_pending.is_(True)))).all())
 
     async def check_queue(self) -> bool:

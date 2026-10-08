@@ -158,12 +158,14 @@ async def test_copy_failure_reports_safe_cause_after_a_committed_hold(
     handoffs = []
 
     def capture(coroutine, *, name):
-        if name.startswith("skip-heat-soak-dispatch"):
+        if name.startswith("heat-soak-dispatch"):
             handoffs.append(coroutine)
         else:
             coroutine.close()
 
     monkeypatch.setattr(heat, "spawn_background_task", capture)
+
+    monkeypatch.setattr("backend.app.services.lifecycle.dispatching.spawn_background_task", capture)
     async with handoff.sessions() as db:
         if path == "ordinary":
             await db.execute(
@@ -235,6 +237,8 @@ async def test_skip_is_successful_when_the_same_soak_already_progressed(handoff,
         coroutine.close()
 
     monkeypatch.setattr(heat, "spawn_background_task", collect)
+
+    monkeypatch.setattr("backend.app.services.lifecycle.dispatching.spawn_background_task", collect)
     async with handoff.sessions() as db:
         response = await skip_queue_item_heat_soak(handoff.job_id, db=db, auth_result=(None, True))
         assert response == {"message": "Heat soak skipped"}
@@ -247,7 +251,7 @@ async def test_skip_is_successful_when_the_same_soak_already_progressed(handoff,
         else:
             assert len(attempts) == 1 and attempts[0].dispatched_queue_item_id == job.id
             assert (settings.base_dir / attempts[0].file_path).exists()
-    assert not any(call["name"].startswith("skip-heat-soak-dispatch-") for call in spawned)
+    assert not any(call["name"].startswith("heat-soak-dispatch-") for call in spawned)
 
 
 @pytest.mark.parametrize("before", ["queued", "preheating"])
@@ -334,6 +338,7 @@ async def test_skip_preserves_soak_when_telemetry_cannot_dispatch(handoff, monke
     monkeypatch.setattr(ArchiveService, "archive_print", copied)
     monkeypatch.setattr(heat, "_dispatch_ready", ready)
     monkeypatch.setattr(heat, "spawn_background_task", collect)
+    monkeypatch.setattr("backend.app.services.lifecycle.dispatching.spawn_background_task", collect)
     async with handoff.sessions() as db:
         with pytest.raises(HTTPException) as failure:
             await skip_queue_item_heat_soak(handoff.job_id, db=db, auth_result=(None, True))
@@ -346,7 +351,7 @@ async def test_skip_preserves_soak_when_telemetry_cannot_dispatch(handoff, monke
         assert job.archive_id is None and job.physical_outcome is None
         assert await db.scalar(select(PrintArchive.id)) is None
     copied.assert_not_awaited()
-    assert not any(name.startswith("skip-heat-soak-dispatch-") for name in spawned)
+    assert not any(name.startswith("heat-soak-dispatch-") for name in spawned)
     assert not list(settings.archive_dir.rglob("*.3mf"))
     assert not list((settings.archive_dir / "1").glob("*"))
     assert handoff.source_path.exists()

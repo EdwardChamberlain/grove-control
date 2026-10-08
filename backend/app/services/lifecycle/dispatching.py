@@ -777,6 +777,21 @@ _UPLOAD_FAILED = (
 _TELEMETRY_UNAVAILABLE = "Printer telemetry unavailable; Stop and Retry to send this job"
 
 
+async def on_enter(change, row) -> None:
+    """Enter from preheating: this process's worker takes the soak over once the handoff commits."""
+    from backend.app.services.print_scheduler import scheduler
+
+    if change.before == "preheating" and row.preheat_owner == scheduler._heat_soak.owner:
+        item_id = change.item_id
+        effects.after_commit(
+            change.db,
+            lambda: spawn_background_task(
+                scheduler.dispatcher.take_over(item_id), name=f"heat-soak-dispatch-{item_id}"
+            ),
+            key=("take_over", item_id),
+        )
+
+
 async def on_exit(change, row) -> None:
     """Exit: a failed or stopped attempt shuts down an inherited soak; a failed one removes its unsent upload."""
     await preheating.shut_down_inherited(change, row)

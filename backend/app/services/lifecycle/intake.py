@@ -20,7 +20,7 @@ from backend.app.models.print_queue import AWAITING_PLATE_CLEAR_STATUSES, FINAL_
 from backend.app.models.printer import Printer
 from backend.app.services import print_effects
 from backend.app.services.job_identity import event_identity, find_job, telemetry_identity
-from backend.app.services.lifecycle import effects, printing
+from backend.app.services.lifecycle import effects, preheating, printing
 from backend.app.services.lifecycle.engine import QueueTransitionConflict
 from backend.app.services.printer_manager import printer_manager
 
@@ -224,13 +224,14 @@ async def _adopt_legacy_archive(db, printer_id: int, identity: str) -> PrintQueu
 
 
 async def printer_status(printer_id: int, state) -> None:
-    """Telemetry: reconcile missed completions on each reconnect.
+    """Telemetry: let preheating watch its soaks, and reconcile missed completions on each reconnect.
 
     MQTT's connect broadcast still carries construction defaults (state
     "unknown"), so reconciliation waits for the first real push_status (#1679).
     If that first state is active, it is deferred until the real terminal
     completion, which it would otherwise race (#1542).
     """
+    preheating.observe(printer_id, state)
     known = bool(state.state) and state.state.upper() not in ("", "UNKNOWN")
     if state.connected and known and not _printer_reconciled_since_connect.get(printer_id, False):
         _printer_reconciled_since_connect[printer_id] = True

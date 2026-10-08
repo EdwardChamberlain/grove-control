@@ -1413,27 +1413,6 @@ class ArchiveService:
         )
         return result.scalar_one_or_none()
 
-    async def update_archive_status(
-        self,
-        archive_id: int,
-        status: str,
-        completed_at: datetime | None = None,
-        failure_reason: str | None = None,
-    ) -> bool:
-        """Update the status of an archive."""
-        archive = await self.get_archive(archive_id)
-        if not archive:
-            return False
-
-        archive.status = status
-        if completed_at:
-            archive.completed_at = completed_at
-        if failure_reason:
-            archive.failure_reason = failure_reason
-
-        await self.db.commit()
-        return True
-
     async def list_archives(
         self,
         printer_id: int | None = None,

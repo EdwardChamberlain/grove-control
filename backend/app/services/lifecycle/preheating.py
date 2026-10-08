@@ -1,8 +1,15 @@
-"""Preheating (#204): reserve and heat for a bounded soak, then hand off; recover interrupted soaks for inspection."""
+"""Preheating (#204): reserve and heat for a bounded soak, then hand off; recover interrupted soaks for inspection.
 
+The wait runs on preheating's own timer, every heartbeat while a soak or a
+heater shutdown is in progress, and sooner when a soak starts, a shutdown is
+requested, or a watched printer's telemetry changes.
+"""
+
+import asyncio
 import logging
 import time
 from collections.abc import Mapping
+from contextlib import suppress
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
@@ -11,6 +18,7 @@ from uuid import uuid4
 from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.core.database import async_session
 from backend.app.core.tasks import spawn_background_task
 from backend.app.models.print_queue import ACTIVE_STATUSES, PrintQueueItem
 from backend.app.models.printer import Printer
@@ -25,6 +33,23 @@ from backend.app.services.printer_manager import printer_manager, supports_chamb
 logger = logging.getLogger(__name__)
 HEARTBEAT_TIMEOUT = 90
 TELEMETRY_TIMEOUT = 60
+CHECK_INTERVAL = HEARTBEAT_TIMEOUT / 3
+_wake: asyncio.Event | None = None  # Preheating's timer, while it runs.
+_watched: dict[int, tuple | None] = {}  # Soaking or shutting-down printers, and their last telemetry.
+
+
+def wake() -> None:
+    """Run preheating's wait now, rather than at its next timer."""
+    if _wake is not None:
+        _wake.set()
+
+
+def observe(printer_id: int, state) -> None:
+    """Telemetry: wake the wait when a watched printer connects, disconnects or changes state."""
+    seen = (state.connected, state.state, getattr(state, "job_telemetry_ready", True))
+    if printer_id in _watched and _watched[printer_id] != seen:
+        _watched[printer_id] = seen
+        wake()
 
 
 def utcnow() -> datetime:
@@ -86,11 +111,14 @@ def _heaters_off(printer: Printer) -> bool:
 
 
 async def request_heater_shutdown(db: AsyncSession, printer_id: int) -> None:
-    """Record a durable heater shutdown; cleanup retries it until telemetry confirms it."""
+    """Record a durable heater shutdown; the wait retries it until telemetry confirms it."""
+    from backend.app.services.lifecycle import effects
+
     printer = await db.get(Printer, printer_id)
     if printer is not None:
         printer.heat_soak_shutdown_pending = True
         printer.heat_soak_shutdown_at = datetime.now(timezone.utc)
+        effects.after_commit(db, wake, key="heat_soak_wake")
 
 
 async def shut_down_inherited(change, row) -> None:
@@ -274,7 +302,7 @@ async def _hand_off(
 
 
 async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> SkipHeatSoakResult:
-    """Exit to dispatching now, for Skip heat soak; the worker copies after commit."""
+    """Exit to dispatching now, for Skip heat soak; dispatching's worker copies after commit."""
     item_id, owner, printer_id = item.id, item.preheat_owner, item.printer_id
     item.preheat_checked_at = utcnow()
     await db.commit()
@@ -294,9 +322,7 @@ async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> SkipHeatSoak
         "preheat_owner": scheduler._heat_soak.owner,
         "preheat_checked_at": None,
     }
-    handed_off, result = await _hand_off(db, item_id, owner, printer_id, values)
-    if handed_off:
-        spawn_background_task(scheduler.dispatcher.take_over(item_id), name=f"skip-heat-soak-dispatch-{item_id}")
+    _, result = await _hand_off(db, item_id, owner, printer_id, values)
     return result
 
 
@@ -355,7 +381,28 @@ class ChamberHeatSoak:
         )
         if entered:
             self._visible_printers.add(printer_id)
+            wake()
         return entered
+
+    async def run(self) -> None:
+        """Wait on preheating's own timer, until nothing soaks or shuts down, then until woken."""
+        global _wake, _watched
+        _wake = asyncio.Event()
+        while True:
+            _wake.clear()
+            timeout = CHECK_INTERVAL
+            try:
+                async with async_session() as db:
+                    await self.wait(db)
+                    soaking = select(PrintQueueItem.printer_id).where(PrintQueueItem.status == "preheating")
+                    shutting_down = select(Printer.id).where(Printer.heat_soak_shutdown_pending.is_(True))
+                    watched = {*await db.scalars(soaking), *await db.scalars(shutting_down)} - {None}
+                _watched = {printer_id: _watched.get(printer_id) for printer_id in watched}
+                timeout = CHECK_INTERVAL if watched else None
+            except Exception:
+                logger.exception("Heat-soak wait failed")
+            with suppress(TimeoutError):
+                await asyncio.wait_for(_wake.wait(), timeout)
 
     async def wait(self, db: AsyncSession) -> list[int]:
         """Wait: advance each soak once, without sleeping or blocking other printers' scheduling."""

@@ -56,7 +56,6 @@ from backend.app.utils.safe_path import PathTraversalError, safe_join_under
 
 logger = logging.getLogger(__name__)
 
-
 # #1721: stage-22 pre-captured finish photo bytes per printer. on_finish_photo_moment
 # fires when stg_cur enters 22 ("Filament unloading") at end-of-print — toolhead
 # parked, bed not yet dropped — and grabs a single camera frame into this cache.
@@ -436,7 +435,7 @@ def _maybe_start_layer_timelapse(printer, printer_id: int, archive_id: int) -> b
         printer.external_camera_type or "mjpeg",
         snapshot_url=printer.external_camera_snapshot_url,
     )
-    logging.getLogger(__name__).info("Started layer timelapse for printer %s, archive %s", printer_id, archive_id)
+    logger.info("Started layer timelapse for printer %s, archive %s", printer_id, archive_id)
     return True
 
 
@@ -547,12 +546,9 @@ async def _send_print_start_notification(
     printer_id: int,
     data: dict,
     archive_data: dict | None = None,
-    logger=None,
+    logger=logger,
 ):
     """Helper to send print start notification with optional archive data."""
-    if logger is None:
-        logger = logging.getLogger(__name__)
-
     try:
         async with async_session() as db:
             result = await db.execute(select(Printer).where(Printer.id == printer_id))
@@ -709,7 +705,6 @@ async def _link_observed_archive(printer_id: int, item_id: int, identity: str) -
 
 async def _begin_new_print(printer_id: int, data: dict) -> None:
     """Run new-print actions once, independently of Archive recovery."""
-    logger = logging.getLogger(__name__)
     client = printer_manager.get_client(printer_id)
     if client:
         client.state.skipped_objects = []
@@ -722,7 +717,7 @@ async def _begin_new_print(printer_id: int, data: dict) -> None:
     clear_cover_cache(printer_id)
     await ws_manager.send_print_start(printer_id, data)
     await notify_missing_spool_assignments_on_print_start(printer_id, data, logger)
-    try:
+    with suppress(Exception):
         printer_info = printer_manager.get_printer(printer_id)
         if printer_info:
             await mqtt_relay.on_print_start(
@@ -732,8 +727,6 @@ async def _begin_new_print(printer_id: int, data: dict) -> None:
                 data.get("filename", ""),
                 data.get("subtask_name", ""),
             )
-    except Exception:
-        pass
     try:
         async with async_session() as db:
             from backend.app.api.routes.settings import get_setting
@@ -762,21 +755,8 @@ async def _begin_new_print(printer_id: int, data: dict) -> None:
             try:
                 from backend.app.services.plate_detection import check_plate_empty
 
-                roi = None
-                if all(
-                    [
-                        printer.plate_detection_roi_x is not None,
-                        printer.plate_detection_roi_y is not None,
-                        printer.plate_detection_roi_w is not None,
-                        printer.plate_detection_roi_h is not None,
-                    ]
-                ):
-                    roi = (
-                        printer.plate_detection_roi_x,
-                        printer.plate_detection_roi_y,
-                        printer.plate_detection_roi_w,
-                        printer.plate_detection_roi_h,
-                    )
+                roi = tuple(getattr(printer, f"plate_detection_roi_{edge}") for edge in "xywh")
+                roi = roi if None not in roi else None
                 light_was_off = False
                 client = printer_manager.get_client(printer_id)
                 if client and client.state:
@@ -834,7 +814,6 @@ async def _begin_new_print(printer_id: int, data: dict) -> None:
 
 async def _finish_new_print(printer_id: int, data: dict, archive_id: int | None) -> None:
     """Initialize Archive tracking and notify once for a new print."""
-    logger = logging.getLogger(__name__)
     archive_data = None
     async with async_session() as db:
         archive = await db.get(PrintArchive, archive_id) if archive_id is not None else None
@@ -878,7 +857,6 @@ async def _archive_print_start(
     FTP names locate files; job IDs identify attempts. Cached downloads are reused,
     and this path never repeats new-print notifications, plate checks or usage resets.
     """
-    logger = logging.getLogger(__name__)
     async with async_session() as db:
         result = await db.execute(select(Printer).where(Printer.id == printer_id))
         printer = result.scalar_one_or_none()
@@ -1148,12 +1126,10 @@ async def _announce_archive(printer, archive) -> None:
     """Tell the UI and the MQTT relay about a new Archive."""
     fields = ("id", "printer_id", "filename", "print_name", "status")
     await ws_manager.send_archive_created({field: getattr(archive, field) for field in fields})
-    try:
+    with suppress(Exception):
         await mqtt_relay.on_archive_created(
             archive_id=archive.id, print_name=archive.print_name, printer_name=printer.name, status=archive.status
         )
-    except Exception:
-        pass
 
 
 async def _restore_archive_print_context(db, printer, archive, data: dict) -> None:
@@ -1182,7 +1158,6 @@ async def _restore_archive_print_context(db, printer, archive, data: dict) -> No
     await update_persisted_session_context(
         db, printer.id, ams_mapping=data.get("ams_mapping"), plate_id=data.get("plate_id")
     )
-    logger = logging.getLogger(__name__)
     _maybe_start_layer_timelapse(printer, printer.id, archive.id)
     _load_objects_from_archive(archive, printer.id, logger, reset_skipped=False)
     if printer.id not in _timelapse_baselines:
@@ -1200,8 +1175,6 @@ async def _list_timelapse_videos(printer) -> tuple[list[dict], str | None]:
     and found_path is the directory where they were found, or ([], None).
     """
     from backend.app.services.bambu_ftp import list_files_async
-
-    logger = logging.getLogger(__name__)
 
     for timelapse_path in ["/timelapse", "/timelapse/video", "/record", "/recording"]:
         try:
@@ -1250,188 +1223,80 @@ async def _capture_timelapse_baseline_at_start(printer, printer_id: int, logger:
 
 
 async def _scan_for_timelapse_with_retries(archive_id: int, baseline_names: set[str] | None = None):
+    """Attach the print's timelapse: the video that appears after the print-start baseline (#1485).
+
+    The printer clock is unreliable in LAN-only mode, so a new video is found
+    by difference, not by time. Without a start baseline (a restart mid-print)
+    one is taken now. If no new video appears, one named after the print is used.
     """
-    Scan for timelapse with retries using a snapshot-diff approach.
-
-    Instead of picking the "most recent by mtime" (unreliable when the printer
-    clock is wrong in LAN-only mode), we snapshot existing MP4 filenames BEFORE
-    waiting, then look for any NEW filename that appears after each delay.
-
-    If baseline_names is provided (captured at print start), it is used directly.
-    Otherwise falls back to taking a baseline at completion time (best-effort
-    for prints started before app restart).
-
-    Falls back to name-matching (print name contained in MP4 filename) if no
-    new file appears after all retries.
-    """
-    logger = logging.getLogger(__name__)
-
-    # --- Phase 1: Take baseline snapshot of existing timelapse files ---
     try:
         async with async_session() as db:
-            service = ArchiveService(db)
-            archive = await service.get_archive(archive_id)
-
-            if not archive:
-                logger.warning("[TIMELAPSE] Archive %s not found, aborting", archive_id)
-                return
-            if archive.timelapse_path:
-                logger.info("[TIMELAPSE] Archive %s already has timelapse attached", archive_id)
-                return
-            if not archive.printer_id:
-                logger.warning("[TIMELAPSE] Archive %s has no printer, aborting", archive_id)
-                return
-
-            if baseline_names is not None:
-                # Use pre-captured baseline from print start (no race condition)
+            archive = await ArchiveService(db).get_archive(archive_id)
+            if not archive or archive.timelapse_path or not archive.printer_id:
                 logger.info(
-                    "[TIMELAPSE] Using print-start baseline: %s existing video files for archive %s",
-                    len(baseline_names),
-                    archive_id,
+                    "[TIMELAPSE] Archive %s is missing, has a timelapse or no printer; not scanning", archive_id
                 )
-            else:
-                # Fallback: take baseline now (e.g. app restarted mid-print)
+                return
+            if baseline_names is None:
                 result = await db.execute(select(Printer).where(Printer.id == archive.printer_id))
                 printer = result.scalar_one_or_none()
                 if not printer:
                     logger.warning("[TIMELAPSE] Printer not found for archive %s, aborting", archive_id)
                     return
-
                 baseline_files, _ = await _list_timelapse_videos(printer)
                 baseline_names = {f.get("name", "") for f in baseline_files}
-                logger.info(
-                    "[TIMELAPSE] Baseline snapshot (fallback): %s existing video files for archive %s",
-                    len(baseline_names),
-                    archive_id,
-                )
-
-            # Derive base_name for name-matching fallback
-            base_name = Path(archive.filename).stem if archive.filename else ""
-            if base_name.endswith(".gcode"):
-                base_name = base_name[:-6]
-
+            logger.info("[TIMELAPSE] Baseline: %s existing video files for archive %s", len(baseline_names), archive_id)
+            base_name = Path(archive.filename).stem.removesuffix(".gcode") if archive.filename else ""
     except Exception as e:
         logger.warning("[TIMELAPSE] Failed to take baseline snapshot for archive %s: %s", archive_id, e)
         return
-
-    # --- Phase 2: Retry loop — look for NEW files that weren't in baseline ---
-    retry_delays = [5, 10, 20, 30]
-
-    for attempt, delay in enumerate(retry_delays, 1):
-        logger.info(
-            "[TIMELAPSE] Attempt %s/%s: waiting %ss before scanning for archive %s",
-            attempt,
-            len(retry_delays),
-            delay,
-            archive_id,
-        )
+    for attempt, delay in enumerate((5, 10, 20, 30), 1):
+        logger.info("[TIMELAPSE] Attempt %s/4: waiting %ss before scanning for archive %s", attempt, delay, archive_id)
         await asyncio.sleep(delay)
-
         try:
-            async with async_session() as db:
-                from backend.app.services.bambu_ftp import download_file_bytes_async
-
-                service = ArchiveService(db)
-                archive = await service.get_archive(archive_id)
-
-                if not archive:
-                    logger.warning("[TIMELAPSE] Archive %s not found, stopping retries", archive_id)
-                    return
-                if archive.timelapse_path:
-                    logger.info("[TIMELAPSE] Archive %s already has timelapse attached, stopping retries", archive_id)
-                    return
-
-                result = await db.execute(select(Printer).where(Printer.id == archive.printer_id))
-                printer = result.scalar_one_or_none()
-                if not printer:
-                    logger.warning("[TIMELAPSE] Printer not found for archive %s, stopping retries", archive_id)
-                    return
-
-                video_files, found_path = await _list_timelapse_videos(printer)
-
-                if not video_files:
-                    logger.info("[TIMELAPSE] Attempt %s: No video files found, will retry", attempt)
-                    continue
-
-                logger.info("[TIMELAPSE] Attempt %s: Found %s video files in %s", attempt, len(video_files), found_path)
-                for f in video_files[:5]:
-                    logger.info("[TIMELAPSE]   - %s", f.get("name"))
-
-                # Find files that are NEW (not in baseline snapshot)
-                new_files = [f for f in video_files if f.get("name", "") not in baseline_names]
-
-                if new_files:
-                    # Pick the first new file (there should typically be exactly one)
-                    target = new_files[0]
-                    file_name = target.get("name")
-                    remote_path = target.get("path") or f"/timelapse/{file_name}"
-                    logger.info(
-                        "[TIMELAPSE] Attempt %s: New file detected: %s (downloading for archive %s)",
-                        attempt,
-                        file_name,
-                        archive_id,
-                    )
-
-                    timelapse_data = await download_file_bytes_async(
-                        printer.ip_address, printer.access_code, remote_path, printer_model=printer.model
-                    )
-                    if timelapse_data:
-                        success = await service.attach_timelapse(archive_id, timelapse_data, file_name)
-                        if success:
-                            logger.info("[TIMELAPSE] Successfully attached timelapse to archive %s", archive_id)
-                            await ws_manager.send_archive_updated({"id": archive_id, "timelapse_attached": True})
-                            return
-                        else:
-                            logger.warning("[TIMELAPSE] Failed to attach timelapse to archive %s", archive_id)
-                    else:
-                        logger.warning("[TIMELAPSE] Attempt %s: Failed to download new file, will retry", attempt)
-                else:
-                    logger.info("[TIMELAPSE] Attempt %s: No new files since baseline, will retry", attempt)
-
+            if await _attach_found_timelapse(archive_id, lambda name: name not in baseline_names):
+                return
         except Exception as e:
             logger.warning("[TIMELAPSE] Attempt %s failed with error: %s", attempt, e)
-
-    # --- Phase 3: Fallback — try name matching against all files ---
     if base_name:
         logger.info("[TIMELAPSE] Retries exhausted, trying name-match fallback for '%s'", base_name)
         try:
-            async with async_session() as db:
-                from backend.app.services.bambu_ftp import download_file_bytes_async
-
-                service = ArchiveService(db)
-                archive = await service.get_archive(archive_id)
-                if not archive or archive.timelapse_path:
-                    return
-
-                result = await db.execute(select(Printer).where(Printer.id == archive.printer_id))
-                printer = result.scalar_one_or_none()
-                if not printer:
-                    return
-
-                video_files, found_path = await _list_timelapse_videos(printer)
-                for f in video_files:
-                    fname = f.get("name", "")
-                    if base_name.lower() in fname.lower():
-                        remote_path = f.get("path") or f"/timelapse/{fname}"
-                        logger.info("[TIMELAPSE] Name-match fallback: '%s' matches '%s'", base_name, fname)
-
-                        timelapse_data = await download_file_bytes_async(
-                            printer.ip_address, printer.access_code, remote_path, printer_model=printer.model
-                        )
-                        if timelapse_data:
-                            success = await service.attach_timelapse(archive_id, timelapse_data, fname)
-                            if success:
-                                logger.info(
-                                    "[TIMELAPSE] Name-match fallback attached timelapse to archive %s", archive_id
-                                )
-                                await ws_manager.send_archive_updated({"id": archive_id, "timelapse_attached": True})
-                                return
-                        break  # Only try the first name match
-
+            if await _attach_found_timelapse(archive_id, lambda name: base_name.lower() in name.lower()):
+                return
         except Exception as e:
             logger.warning("[TIMELAPSE] Name-match fallback failed: %s", e)
-
     logger.warning("[TIMELAPSE] All attempts exhausted for archive %s, giving up", archive_id)
+
+
+async def _attach_found_timelapse(archive_id: int, pick) -> bool:
+    """Attach the first listed video ``pick`` accepts; True once nothing is left to try."""
+    from backend.app.services.bambu_ftp import download_file_bytes_async
+
+    async with async_session() as db:
+        service = ArchiveService(db)
+        archive = await service.get_archive(archive_id)
+        if not archive or archive.timelapse_path:
+            logger.info("[TIMELAPSE] Archive %s is gone or has a timelapse, stopping", archive_id)
+            return True
+        result = await db.execute(select(Printer).where(Printer.id == archive.printer_id))
+        if not (printer := result.scalar_one_or_none()):
+            logger.warning("[TIMELAPSE] Printer not found for archive %s, stopping", archive_id)
+            return True
+        video_files, found_path = await _list_timelapse_videos(printer)
+        logger.info("[TIMELAPSE] Found %s video files in %s", len(video_files), found_path)
+        if not (target := next((f for f in video_files if pick(f.get("name", ""))), None)):
+            return False
+        name = target.get("name")
+        remote_path = target.get("path") or f"/timelapse/{name}"
+        data = await download_file_bytes_async(
+            printer.ip_address, printer.access_code, remote_path, printer_model=printer.model
+        )
+        if data and await service.attach_timelapse(archive_id, data, name):
+            logger.info("[TIMELAPSE] Attached %s to archive %s", name, archive_id)
+            await ws_manager.send_archive_updated({"id": archive_id, "timelapse_attached": True})
+            return True
+        logger.warning("[TIMELAPSE] Could not download or attach %s for archive %s", name, archive_id)
+        return False
 
 
 # Defaults for the finish-photo-from-timelapse polling loop (#1397). These are
@@ -1462,8 +1327,6 @@ async def _capture_finish_photo_from_timelapse(
     existing live-camera capture chain.
     """
     from backend.app.services.camera import extract_video_last_frame
-
-    logger = logging.getLogger(__name__)
 
     deadline = asyncio.get_event_loop().time() + _FINISH_PHOTO_TIMELAPSE_POLL_TIMEOUT_SECONDS
     poll_interval = _FINISH_PHOTO_TIMELAPSE_POLL_INTERVAL_SECONDS
@@ -1570,7 +1433,6 @@ async def on_finish_photo_moment(printer_id: int, data: dict):
     set to Smooth (#1721). No force-on now means the user's explicit
     timelapse=off in the slicer send dialog is respected.
     """
-    logger = logging.getLogger(__name__)
     trigger = data.get("trigger", "unknown")
     timelapse_was_active = bool(data.get("timelapse_was_active"))
     logger.info(
@@ -1721,7 +1583,7 @@ async def print_completed(c) -> None:
         await ws_manager.send_print_complete(printer_id, ws_data)
     except Exception as e:
         logger.warning("[CALLBACK] WebSocket send_print_complete failed: %s", e)
-    try:
+    with suppress(Exception):
         if info := printer_manager.get_printer(printer_id):
             await mqtt_relay.on_print_complete(
                 printer_id,
@@ -1731,8 +1593,6 @@ async def print_completed(c) -> None:
                 data.get("subtask_name", ""),
                 status,
             )
-    except Exception:
-        pass  # Don't fail print complete callback if MQTT fails
     logger.info(
         "Print complete - filename: %s, subtask: %s, status: %s",
         data.get("filename", ""),
@@ -1839,7 +1699,7 @@ async def _queue_completed(c, name: str) -> None:
     state. The smart-plug manager honours each plug's strategy, is cancelled
     by a new print, and never cuts power on a loaded print (#1890).
     """
-    try:
+    with suppress(Exception):
         info = printer_manager.get_printer(c.printer_id)
         await mqtt_relay.on_queue_job_completed(
             job_id=c.job_id,
@@ -1848,9 +1708,7 @@ async def _queue_completed(c, name: str) -> None:
             printer_name=info.name if info else "Unknown",
             status=c.queue_status,
         )
-    except Exception:
-        pass  # Don't fail if MQTT fails
-    try:
+    with suppress(Exception):
         async with async_session() as db:
             pending = await db.execute(select(func.count(PrintQueueItem.id)).where(PrintQueueItem.status == "queued"))
             if not (pending.scalar() or 0):
@@ -1862,8 +1720,6 @@ async def _queue_completed(c, name: str) -> None:
                     )
                 )
                 await notification_service.on_queue_completed(completed_count=completed.scalar() or 1, db=db)
-    except Exception:
-        pass  # Don't fail if notification fails
     if c.auto_off and c.queue_status == "completed":
         try:
             async with async_session() as db:
@@ -2001,10 +1857,8 @@ async def _publish_archive_outcome(archive_id: int, status: str, data: dict, nam
                 failure_reason = derive_failure_reason(status, hms_errors)
             logger.info("[ARCHIVE] Archive %s status %s, failure_reason=%s", archive_id, archive_status, failure_reason)
             await ws_manager.send_archive_updated({"id": archive_id, "status": archive_status})
-            try:
+            with suppress(Exception):
                 await mqtt_relay.on_archive_updated(archive_id=archive_id, print_name=name, status=archive_status)
-            except Exception:
-                pass  # Don't fail if MQTT fails
     except Exception as e:
         logger.error("[ARCHIVE] Failed to update archive %s status: %s", archive_id, e, exc_info=True)
 
@@ -2272,7 +2126,7 @@ async def _check_maintenance(printer_id: int, status: str) -> None:
             await notification_service.on_maintenance_due(printer_id, printer_name, due, db)
             logger.info("[MAINT-BG] Sent notification: %s items need attention", len(due))
             for item in due:
-                try:
+                with suppress(Exception):
                     await mqtt_relay.on_maintenance_alert(
                         printer_id=printer_id,
                         printer_name=printer_name,
@@ -2280,8 +2134,6 @@ async def _check_maintenance(printer_id: int, status: str) -> None:
                         current_value=0,  # Not easily available here
                         threshold=0,  # Not easily available here
                     )
-                except Exception:
-                    pass  # Don't fail if MQTT fails
     except Exception as e:
         logger.warning("[MAINT-BG] Failed: %s", e)
 
@@ -2415,7 +2267,5 @@ async def _finish_layer_timelapse(printer_id: int, archive_id: int, status: str)
             await asyncio.to_thread(timelapse_path.unlink, missing_ok=True)
     except Exception as e:
         logger.warning("[LAYER-TL] Failed: %s", e)
-        try:
+        with suppress(Exception):
             cancel_session(printer_id)
-        except Exception:
-            pass  # Best-effort timelapse session cancellation on error
