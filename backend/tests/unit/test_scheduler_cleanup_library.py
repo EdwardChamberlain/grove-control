@@ -11,14 +11,14 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import backend.app.models  # noqa: F401 - populate Base.metadata
 import backend.app.models.print_log  # noqa: F401
-import backend.app.services.print_scheduler as scheduler_module
 from backend.app.core.database import Base
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.models.settings import Settings
-from backend.app.services.print_scheduler import PrintScheduler
+from backend.app.services.lifecycle import dispatching as lifecycle_dispatching, dispatching as scheduler_module
+from backend.app.services.print_scheduler import PrintScheduler, scheduler
 
 
 @pytest.fixture
@@ -202,24 +202,27 @@ async def _dispatch_library_item(
     patches = [
         patch.object(scheduler_module.settings, "base_dir", ctx.base_dir),
         patch("backend.app.services.archive.ArchiveService.archive_print", new=archive_print),
-        patch("backend.app.services.print_scheduler.printer_manager.is_connected", MagicMock(return_value=connected)),
         patch(
-            "backend.app.services.print_scheduler.printer_manager.get_status",
+            "backend.app.services.lifecycle.dispatching.printer_manager.is_connected", MagicMock(return_value=connected)
+        ),
+        patch(
+            "backend.app.services.lifecycle.dispatching.printer_manager.get_status",
             status_mock,
         ),
         patch(
-            "backend.app.services.print_scheduler.printer_manager.send_drying_command",
+            "backend.app.services.lifecycle.dispatching.printer_manager.send_drying_command",
             ctx.stop_drying,
         ),
-        patch("backend.app.services.print_scheduler.printer_manager.is_awaiting_plate_clear", return_value=False),
-        patch("backend.app.services.print_scheduler.printer_manager.start_print", ctx.start_print),
-        patch("backend.app.services.print_scheduler.printer_manager.set_awaiting_plate_clear", MagicMock()),
+        patch("backend.app.services.lifecycle.dispatching.printer_manager.is_awaiting_plate_clear", return_value=False),
+        patch("backend.app.services.lifecycle.dispatching.printer_manager.start_print", ctx.start_print),
+        patch("backend.app.services.lifecycle.dispatching.printer_manager.set_awaiting_plate_clear", MagicMock()),
         patch(
-            "backend.app.services.print_scheduler.get_ftp_retry_settings", AsyncMock(return_value=(False, 0, 0, 1.0))
+            "backend.app.services.lifecycle.dispatching.get_ftp_retry_settings",
+            AsyncMock(return_value=(False, 0, 0, 1.0)),
         ),
-        patch("backend.app.services.print_scheduler.delete_file_async", AsyncMock(return_value=True)),
-        patch("backend.app.services.print_scheduler.upload_file_async", ctx.upload),
-        patch("backend.app.services.print_scheduler.cache_3mf_download", MagicMock()),
+        patch("backend.app.services.lifecycle.dispatching.delete_file_async", AsyncMock(return_value=True)),
+        patch("backend.app.services.lifecycle.dispatching.upload_file_async", ctx.upload),
+        patch("backend.app.services.lifecycle.dispatching.cache_3mf_download", MagicMock()),
         patch("backend.app.services.notification_service.notification_service.on_queue_job_started", AsyncMock()),
         patch("backend.app.services.notification_service.notification_service.on_queue_job_failed", AsyncMock()),
         patch(
@@ -227,13 +230,12 @@ async def _dispatch_library_item(
             assigned_notification or AsyncMock(),
         ),
         patch("backend.app.services.mqtt_relay.mqtt_relay.on_queue_job_started", AsyncMock()),
-        patch.object(scheduler, "_propagate_owner_to_printer_manager", AsyncMock()),
-        patch.object(scheduler, "_schedule_dispatch_confirmation", MagicMock()),
+        patch.object(scheduler.dispatcher, "_confirm_later", MagicMock()),
     ]
     if unlink_side_effect:
         patches.append(patch.object(type(ctx.source_path), "unlink", unlink_side_effect))
     if binding is not None:
-        patches.append(patch.object(scheduler_module, "async_session", ctx.session_maker))
+        patches.append(patch("backend.app.services.lifecycle.queued.async_session", ctx.session_maker))
     if drying_checks is not None:
         patches.append(patch.object(scheduler, "_active_drying_ams_ids", side_effect=drying_checks))
 
@@ -243,13 +245,13 @@ async def _dispatch_library_item(
 
         if binding is not None:
             # The real worker path: claim, then bind only at the hold.
-            await scheduler._dispatch_one(ctx.queue_item_id, binding.printer_id, binding=binding)
+            await scheduler.workers._work(ctx.queue_item_id, binding)
             return
         async with ctx.session_maker() as db:
             item = await db.get(PrintQueueItem, ctx.queue_item_id)
             if before_reservation:
                 await before_reservation(db, item)
-            await scheduler._start_print(db, item)
+            await scheduler.workers.leave(db, item)
 
 
 async def _finish_and_clear(ctx):
@@ -300,7 +302,7 @@ async def test_live_upload_is_not_a_dispatch_confirmation_prompt(queue_factory):
                 )
             assert conflict.value.status_code == 409
             await db.rollback()
-            await PrintScheduler()._recover_stale_dispatches(db)
+            await PrintScheduler().dispatcher.recover(db)
             assert (await db.get(PrintQueueItem, ctx.queue_item_id)).error_message is None
         return True
 
@@ -659,19 +661,23 @@ async def test_command_boundary_retains_reservation_if_drying_starts_after_final
         wait_for_drying_complete=wait_for_drying_complete,
     )
     clear = SimpleNamespace(raw_data={"ams": [{"id": 0, "dry_time": 0}]})
+    from backend.app.models.user import User
+    from backend.app.services.printer_manager import printer_manager
 
-    with (
-        patch(
-            "backend.app.services.print_scheduler.printer_manager.clear_current_print_user"
-        ) as clear_current_print_user,
-    ):
-        await _dispatch_library_item(
-            ctx,
-            printer_status=clear,
-            # First drying check: clear after upload. Second: drying at the
-            # command boundary. The third lets _stop_drying confirm it.
-            drying_checks=[(), (0,), (0,)],
-        )
+    async with ctx.session_maker() as db:
+        owner = User(username="owner", password_hash="x", is_active=True)
+        db.add(owner)
+        await db.flush()
+        (await db.get(PrintQueueItem, ctx.queue_item_id)).created_by_id = owner.id
+        await db.commit()
+    printer_manager.clear_current_print_user(ctx.printer_id)
+    await _dispatch_library_item(
+        ctx,
+        printer_status=clear,
+        # First drying check: clear after upload. Second: drying at the
+        # command boundary. The third lets _stop_drying confirm it.
+        drying_checks=[(), (0,), (0,)],
+    )
 
     item, library_file, archive = await _queue_snapshot(ctx)
     assert item.status == "failed"
@@ -684,7 +690,8 @@ async def test_command_boundary_retains_reservation_if_drying_starts_after_final
     assert archive.status == "failed"
     assert ctx.source_path.exists()
     assert ctx.archive_path.exists()
-    clear_current_print_user.assert_called_once_with(ctx.printer_id)
+    # No command was sent, so nobody is credited for the printer's next print.
+    assert printer_manager.get_current_print_user(ctx.printer_id) is None
     if wait_for_drying_complete:
         ctx.stop_drying.assert_not_called()
     else:
@@ -802,7 +809,7 @@ async def _row(ctx):
 
 @pytest.mark.asyncio
 async def test_any_machine_job_gets_its_printer_only_from_the_hold_transition(queue_factory):
-    from backend.app.services.print_scheduler import _DispatchBinding
+    from backend.app.services.lifecycle.queued import _DispatchBinding
 
     ctx = await queue_factory(cleanup=False)
     await _make_any_machine_job(ctx)
@@ -832,7 +839,7 @@ async def test_any_machine_job_gets_its_printer_only_from_the_hold_transition(qu
 @pytest.mark.parametrize("pool", [True, False], ids=["any-machine", "specific-machine"])
 @pytest.mark.asyncio
 async def test_disconnected_printer_leaves_the_job_queued_and_unheld(queue_factory, pool):
-    from backend.app.services.print_scheduler import _DispatchBinding
+    from backend.app.services.lifecycle.queued import _DispatchBinding
 
     ctx = await queue_factory(cleanup=False)
     if pool:
@@ -860,7 +867,7 @@ async def test_disconnected_printer_leaves_the_job_queued_and_unheld(queue_facto
 @pytest.mark.parametrize("pool", [True, False], ids=["any-machine", "specific-machine"])
 @pytest.mark.asyncio
 async def test_missing_source_parks_the_job_in_the_queue(queue_factory, pool):
-    from backend.app.services.print_scheduler import _DispatchBinding
+    from backend.app.services.lifecycle.queued import _DispatchBinding
 
     ctx = await queue_factory(cleanup=False)
     if pool:
@@ -881,7 +888,7 @@ async def test_missing_source_parks_the_job_in_the_queue(queue_factory, pool):
 
 async def _selection_binding(ctx, printer_id, ams_mapping, *, unassigned):
     """The decision a selection pass hands its worker, from the row it read."""
-    from backend.app.services.print_scheduler import _DispatchBinding
+    from backend.app.services.lifecycle.queued import _DispatchBinding
 
     async with ctx.session_maker() as db:
         item = await db.get(PrintQueueItem, ctx.queue_item_id)
@@ -972,3 +979,34 @@ async def test_printer_becoming_busy_during_archive_copy_fails_the_hold_before_f
     assert ctx.archive_path.exists()
     ctx.upload.assert_not_awaited()
     ctx.start_print.assert_not_called()
+
+
+@pytest.mark.parametrize("accepted", [True, False])
+@pytest.mark.asyncio
+async def test_the_owner_is_credited_with_the_print_command(queue_factory, accepted):
+    from backend.app.models.user import User
+    from backend.app.services.printer_manager import printer_manager
+
+    ctx = await queue_factory(cleanup=False)
+    async with ctx.session_maker() as db:
+        user = User(username="owner", password_hash="x", is_active=True)
+        db.add(user)
+        await db.flush()
+        (await db.get(PrintQueueItem, ctx.queue_item_id)).created_by_id = user.id
+        await db.commit()
+    credited = []
+
+    def start_print(printer_id, *_args, **_kwargs):
+        credited.append(printer_manager.get_current_print_user(printer_id))
+        return accepted
+
+    ctx.start_print.side_effect = start_print
+    printer_manager.clear_current_print_user(ctx.printer_id)
+    try:
+        await _dispatch_library_item(ctx)
+        # The completion callback credits whoever is set when the command goes out;
+        # a refused command leaves nobody to credit.
+        assert credited == [{"user_id": user.id, "username": "owner"}]
+        assert (printer_manager.get_current_print_user(ctx.printer_id) is not None) is accepted
+    finally:
+        printer_manager.clear_current_print_user(ctx.printer_id)

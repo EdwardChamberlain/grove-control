@@ -22,6 +22,12 @@ from backend.app.utils.local_time import utcnow_naive
 logger = logging.getLogger(__name__)
 
 SCHEDULED_DRYING_RETENTION_DAYS = 7
+_WAITING_FOR_DRYING_MESSAGE = "Waiting for AMS drying to complete"
+_STOPPING_DRYING_MESSAGE = "Stopping AMS drying before dispatch"
+_DRYING_STOP_FAILED_MESSAGE = "Unable to stop AMS drying; waiting to retry"
+_DRYING_WAITING_MESSAGES = frozenset(
+    {_WAITING_FOR_DRYING_MESSAGE, _STOPPING_DRYING_MESSAGE, _DRYING_STOP_FAILED_MESSAGE}
+)
 SCHEDULED_DRYING_PRUNE_INTERVAL_SECONDS = 60 * 60
 
 
@@ -442,6 +448,39 @@ class AmsDrying:
                 )
         self._drying_in_progress.pop(printer_id, None)
         return all_sent
+
+    async def _drying_reason(
+        self, item: PrintQueueItem, printer_id: int, active_ams_ids: tuple[int, ...] | None = None
+    ) -> str | None:
+        """Why a job can't start while its printer's AMS dries, stopping the cycle unless the job waits for it."""
+        if active_ams_ids is None:
+            active_ams_ids = self._active_drying_ams_ids(printer_id)
+        if not active_ams_ids:
+            return None
+        waits = bool(getattr(item, "wait_for_drying_complete", False))
+        if waits:
+            reason = _WAITING_FOR_DRYING_MESSAGE
+        else:
+            reason = _STOPPING_DRYING_MESSAGE if await self._stop_drying(printer_id) else _DRYING_STOP_FAILED_MESSAGE
+        logger.info(
+            "Queue item %s waiting on printer %s AMS drying (%s; active AMS ids=%s)",
+            item.id,
+            printer_id,
+            "natural completion" if waits else "stop requested",
+            active_ams_ids,
+        )
+        return reason
+
+    async def _prepare_drying_for_dispatch(self, db: AsyncSession, item: PrintQueueItem, printer_id: int) -> bool:
+        """Keep a selected job waiting while its printer's AMS dries; clear that reason once it stops."""
+        reason = await self._drying_reason(item, printer_id)
+        if reason is None and item.waiting_reason in _DRYING_WAITING_MESSAGES:
+            item.waiting_reason = None
+            await db.commit()
+        elif reason is not None and item.waiting_reason != reason:
+            item.waiting_reason = reason
+            await db.commit()
+        return reason is None
 
     # Scheduled manual drying (#71) -------------------------------------
 

@@ -167,7 +167,7 @@ async def test_scheduler_paces_archive_reconciliation_without_overlapping_passes
     from backend.app.services.print_scheduler import PrintScheduler
 
     scheduler = PrintScheduler()
-    monkeypatch.setattr(scheduler, "_clear_stale_dispatch_claims", AsyncMock())
+    monkeypatch.setattr(scheduler.dispatcher, "start", AsyncMock())
     monkeypatch.setattr(scheduler, "check_queue", AsyncMock(return_value=False))
     scheduler._check_interval = 0.001
     monkeypatch.setattr("backend.app.services.print_scheduler.ARCHIVE_RECONCILE_INTERVAL_SECONDS", 0.01)

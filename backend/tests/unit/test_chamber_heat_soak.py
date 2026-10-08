@@ -23,6 +23,7 @@ from backend.app.services.bambu_mqtt import PrinterState
 from backend.app.services.heat_soak_telemetry import record_heat_soak_reports
 from backend.app.services.library_trash import release_queue_references
 from backend.app.services.lifecycle import preheating as heat
+from backend.app.services.print_scheduler import PrintScheduler, scheduler
 
 
 @pytest.fixture
@@ -126,7 +127,7 @@ async def test_supported_controls_and_durable_reservation(soak, model, chamber, 
 
 
 async def test_any_machine_job_is_bound_to_its_printer_only_by_the_soak_hold(soak):
-    from backend.app.services.print_scheduler import _bind_in_memory
+    from backend.app.services.lifecycle.queued import _bind_in_memory
 
     # An "Any machine" job waits unassigned; the worker carries its choice.
     await soak.db.execute(
@@ -145,7 +146,7 @@ async def test_any_machine_job_is_bound_to_its_printer_only_by_the_soak_hold(soa
 
 
 async def test_any_machine_soak_refuses_a_job_that_gained_a_printer_requirement(soak):
-    from backend.app.services.print_scheduler import _bind_in_memory
+    from backend.app.services.lifecycle.queued import _bind_in_memory
 
     await soak.db.execute(
         PrintQueueItem.__table__.update().where(PrintQueueItem.id == 1).values(printer_id=None, target_model="H2D")
@@ -419,7 +420,9 @@ async def test_failed_dispatch_after_soak_preserves_offline_heater_shutdown_retr
     await soak.db.commit()
     assert await soak.service.wait(soak.db) == [soak.item.id]
     soak.manager.is_connected.return_value = False
-    await PrintScheduler()._fail_queue_item(soak.db, soak.item, "Archive copy interrupted")
+    from backend.app.services.lifecycle.dispatching import fail
+
+    await fail(soak.db, soak.item, "Archive copy interrupted")
     await soak.wait_effects()
     await soak.db.refresh(soak.printer)
     assert soak.printer.heat_soak_shutdown_pending
@@ -563,8 +566,9 @@ async def test_no_upload_or_print_until_soak_then_normal_correlated_dispatch(soa
     from unittest.mock import AsyncMock
 
     from backend.app.models.archive import PrintArchive
-    from backend.app.services import print_scheduler as scheduling
+    from backend.app.services import printer_selection
     from backend.app.services.archive import ArchiveService
+    from backend.app.services.lifecycle import dispatching as scheduling, queued
 
     source = tmp_path / "test.3mf"
     source.write_bytes(b"test print")
@@ -575,12 +579,10 @@ async def test_no_upload_or_print_until_soak_then_normal_correlated_dispatch(soa
     await soak.db.flush()
     soak.item.archive_id = archive.id
     await soak.db.commit()
-    scheduler = scheduling.PrintScheduler()
-    scheduler._heat_soak = soak.service
-    scheduler._prepare_drying_for_dispatch = AsyncMock(return_value=True)
+    scheduler = PrintScheduler()
+    scheduler._heat_soak = scheduler.dispatcher._heat_soak = scheduler.workers._heat_soak = soak.service
     scheduler._active_drying_ams_ids = MagicMock(return_value=[])
-    scheduler._propagate_owner_to_printer_manager = AsyncMock()
-    scheduler._schedule_dispatch_confirmation = MagicMock()
+    scheduler.dispatcher._confirm_later = MagicMock()
     upload = AsyncMock(return_value=True)
 
     async def copy_attempt(_self, **kwargs):
@@ -601,7 +603,8 @@ async def test_no_upload_or_print_until_soak_then_normal_correlated_dispatch(soa
         await archiving(**kwargs)
         return await copy_attempt(service, **kwargs)
 
-    monkeypatch.setattr(scheduling, "printer_manager", soak.manager)
+    for module in (scheduling, queued, printer_selection):
+        monkeypatch.setattr(module, "printer_manager", soak.manager)
     monkeypatch.setattr(scheduling, "upload_file_async", upload)
     monkeypatch.setattr(scheduling, "delete_file_async", AsyncMock())
     monkeypatch.setattr(scheduling, "get_ftp_retry_settings", AsyncMock(return_value=(False, 0, 0, 1)))
@@ -610,7 +613,7 @@ async def test_no_upload_or_print_until_soak_then_normal_correlated_dispatch(soa
     monkeypatch.setattr(scheduling, "async_session", lambda: AsyncSession(soak.engine, expire_on_commit=False))
     soak.manager.start_print.return_value = True
 
-    await scheduler._start_print(soak.db, soak.item)
+    await scheduler.workers.leave(soak.db, soak.item)
     upload.assert_not_awaited()
     archiving.assert_not_awaited()
     soak.manager.start_print.assert_not_called()
@@ -618,20 +621,20 @@ async def test_no_upload_or_print_until_soak_then_normal_correlated_dispatch(soa
     soak.item.preheat_started_at = heat.utcnow() - timedelta(seconds=61)
     await soak.db.commit()
     assert await soak.service.wait(soak.db) == [1]
-    await scheduler._dispatch_after_heat_soak(1)
+    await scheduler.dispatcher.take_over(1)
     upload.assert_awaited_once()
     soak.manager.start_print.assert_called_once()
     await soak.db.refresh(soak.item)
     assert soak.item.status == "dispatching"
     assert soak.item.dispatch_subtask_id
     assert soak.manager.start_print.call_args.kwargs["submission_id"] == soak.item.dispatch_subtask_id
-    scheduler._schedule_dispatch_confirmation.assert_called_once()
+    scheduler.dispatcher._confirm_later.assert_called_once()
 
 
 async def test_cancel_after_soak_before_dispatch_task_does_not_upload(soak, monkeypatch):
     from unittest.mock import AsyncMock
 
-    from backend.app.services import print_scheduler as scheduling
+    from backend.app.services.lifecycle import dispatching as scheduling
 
     await soak.service.enter(soak.db, soak.item)
     await soak.service.wait(soak.db)
@@ -640,12 +643,12 @@ async def test_cancel_after_soak_before_dispatch_task_does_not_upload(soak, monk
     assert await soak.service.wait(soak.db) == [1]
     item = await heat.lock_queue_item(soak.db, 1)
     await heat.abort_heat_soak(soak.db, item, "Stopped", status="cancelled")
-    scheduler = scheduling.PrintScheduler()
-    scheduler._heat_soak = soak.service
-    scheduler._start_print = AsyncMock()
+    scheduler = PrintScheduler()
+    scheduler._heat_soak = scheduler.dispatcher._heat_soak = soak.service
+    scheduler.dispatcher.enter = AsyncMock()
     monkeypatch.setattr(scheduling, "async_session", lambda: AsyncSession(soak.engine, expire_on_commit=False))
-    await scheduler._dispatch_after_heat_soak(1)
-    scheduler._start_print.assert_not_awaited()
+    await scheduler.dispatcher.take_over(1)
+    scheduler.dispatcher.enter.assert_not_awaited()
 
 
 async def test_upgrade_defaults_existing_rows_to_off(tmp_path):

@@ -139,7 +139,7 @@ class TestSchedulerIdleCheckWithPlateCleared:
     def scheduler(self):
         return PrintScheduler()
 
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.printer_selection.printer_manager")
     def test_idle_state_is_idle(self, mock_pm, scheduler):
         """IDLE state with no awaiting flag → idle."""
         mock_pm.is_connected.return_value = True
@@ -147,7 +147,7 @@ class TestSchedulerIdleCheckWithPlateCleared:
         mock_pm.is_awaiting_plate_clear.return_value = False
         assert scheduler._is_printer_idle(1) is True
 
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.printer_selection.printer_manager")
     def test_reconnected_cached_idle_waits_for_fresh_job_telemetry(self, mock_pm, scheduler):
         mock_pm.is_connected.return_value = True
         mock_pm.is_awaiting_plate_clear.return_value = False
@@ -157,7 +157,7 @@ class TestSchedulerIdleCheckWithPlateCleared:
         state.job_telemetry_ready = True
         assert scheduler._is_printer_idle(1) is True
 
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.printer_selection.printer_manager")
     def test_running_state_not_idle(self, mock_pm, scheduler):
         """RUNNING state is never idle."""
         mock_pm.is_connected.return_value = True
@@ -165,7 +165,7 @@ class TestSchedulerIdleCheckWithPlateCleared:
         mock_pm.is_awaiting_plate_clear.return_value = False
         assert scheduler._is_printer_idle(1) is False
 
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.printer_selection.printer_manager")
     def test_finish_state_not_idle_when_awaiting(self, mock_pm, scheduler):
         """FINISH + awaiting plate-clear ack → NOT idle."""
         mock_pm.is_connected.return_value = True
@@ -173,7 +173,7 @@ class TestSchedulerIdleCheckWithPlateCleared:
         mock_pm.is_awaiting_plate_clear.return_value = True
         assert scheduler._is_printer_idle(1) is False
 
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.printer_selection.printer_manager")
     def test_finish_state_idle_when_acknowledged(self, mock_pm, scheduler):
         """FINISH with flag cleared → idle."""
         mock_pm.is_connected.return_value = True
@@ -181,7 +181,7 @@ class TestSchedulerIdleCheckWithPlateCleared:
         mock_pm.is_awaiting_plate_clear.return_value = False
         assert scheduler._is_printer_idle(1) is True
 
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.printer_selection.printer_manager")
     def test_failed_state_not_idle_when_awaiting(self, mock_pm, scheduler):
         """FAILED + awaiting → NOT idle."""
         mock_pm.is_connected.return_value = True
@@ -189,7 +189,7 @@ class TestSchedulerIdleCheckWithPlateCleared:
         mock_pm.is_awaiting_plate_clear.return_value = True
         assert scheduler._is_printer_idle(1) is False
 
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.printer_selection.printer_manager")
     def test_failed_state_idle_when_acknowledged(self, mock_pm, scheduler):
         """FAILED with flag cleared → idle."""
         mock_pm.is_connected.return_value = True
@@ -197,7 +197,7 @@ class TestSchedulerIdleCheckWithPlateCleared:
         mock_pm.is_awaiting_plate_clear.return_value = False
         assert scheduler._is_printer_idle(1) is True
 
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.printer_selection.printer_manager")
     def test_idle_state_not_idle_when_awaiting_survives_power_cycle(self, mock_pm, scheduler):
         """Regression for #961: after Auto Off power-cycles the printer it boots into IDLE
         with no memory of the previous finish. The persisted awaiting flag must still gate
@@ -208,18 +208,18 @@ class TestSchedulerIdleCheckWithPlateCleared:
         mock_pm.is_awaiting_plate_clear.return_value = True
         assert scheduler._is_printer_idle(1) is False
 
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.printer_selection.printer_manager")
     def test_disconnected_printer_not_idle(self, mock_pm, scheduler):
         mock_pm.is_connected.return_value = False
         assert scheduler._is_printer_idle(1) is False
 
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.printer_selection.printer_manager")
     def test_no_status_not_idle(self, mock_pm, scheduler):
         mock_pm.is_connected.return_value = True
         mock_pm.get_status.return_value = None
         assert scheduler._is_printer_idle(1) is False
 
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.printer_selection.printer_manager")
     def test_finish_state_idle_when_require_plate_clear_disabled(self, mock_pm, scheduler):
         """FINISH is idle when require_plate_clear=False, regardless of awaiting flag."""
         mock_pm.is_connected.return_value = True
@@ -227,21 +227,21 @@ class TestSchedulerIdleCheckWithPlateCleared:
         mock_pm.is_awaiting_plate_clear.return_value = True
         assert scheduler._is_printer_idle(1, require_plate_clear=False) is True
 
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.printer_selection.printer_manager")
     def test_failed_state_idle_when_require_plate_clear_disabled(self, mock_pm, scheduler):
         mock_pm.is_connected.return_value = True
         mock_pm.get_status.return_value = MagicMock(state="FAILED")
         mock_pm.is_awaiting_plate_clear.return_value = True
         assert scheduler._is_printer_idle(1, require_plate_clear=False) is True
 
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.printer_selection.printer_manager")
     def test_running_state_not_idle_even_when_require_plate_clear_disabled(self, mock_pm, scheduler):
         mock_pm.is_connected.return_value = True
         mock_pm.get_status.return_value = MagicMock(state="RUNNING")
         mock_pm.is_awaiting_plate_clear.return_value = False
         assert scheduler._is_printer_idle(1, require_plate_clear=False) is False
 
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.printer_selection.printer_manager")
     def test_idle_state_unaffected_by_require_plate_clear(self, mock_pm, scheduler):
         mock_pm.is_connected.return_value = True
         mock_pm.get_status.return_value = MagicMock(state="IDLE")
@@ -257,7 +257,7 @@ class TestSchedulerQueueCheckLogging:
         return PrintScheduler()
 
     @pytest.mark.asyncio
-    @patch("backend.app.services.print_scheduler.printer_manager")
+    @patch("backend.app.services.printer_selection.printer_manager")
     async def test_check_queue_logs_pending_items(self, mock_pm, scheduler, caplog):
         """Verify pending items are logged when found in check_queue."""
         mock_item = MagicMock()
@@ -288,7 +288,7 @@ class TestSchedulerQueueCheckLogging:
 
         with (
             patch("backend.app.services.print_scheduler.async_session") as mock_session_ctx,
-            patch.object(scheduler, "_recover_stale_dispatches", new=AsyncMock()),
+            patch.object(scheduler.dispatcher, "recover", new=AsyncMock()),
             patch.object(scheduler, "_check_heat_soaks", new=AsyncMock(return_value=set())),
             caplog.at_level(logging.INFO, logger="backend.app.services.print_scheduler"),
         ):
@@ -312,7 +312,7 @@ class TestSchedulerQueueCheckLogging:
 
         with (
             patch("backend.app.services.print_scheduler.async_session") as mock_session_ctx,
-            patch.object(scheduler, "_recover_stale_dispatches", new=AsyncMock()),
+            patch.object(scheduler.dispatcher, "recover", new=AsyncMock()),
             patch.object(scheduler, "_check_heat_soaks", new=AsyncMock(return_value=set())),
             caplog.at_level(logging.INFO, logger="backend.app.services.print_scheduler"),
         ):

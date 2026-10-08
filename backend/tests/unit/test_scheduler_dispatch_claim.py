@@ -6,10 +6,13 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import backend.app.models  # noqa: F401 - populate Base.metadata
-import backend.app.services.print_scheduler as scheduler_module
 from backend.app.core.database import Base
 from backend.app.models.print_queue import PrintQueueItem
-from backend.app.services.print_scheduler import PrintScheduler
+from backend.app.services.lifecycle import dispatching as scheduler_module, queued
+from backend.app.services.lifecycle.queued import _DispatchBinding
+from backend.app.services.print_scheduler import PrintScheduler, scheduler
+
+ANY_MACHINE = _DispatchBinding(101, None, unassigned=True)
 
 
 @pytest.fixture
@@ -40,12 +43,12 @@ async def _queue_item(maker, *, status="queued", claimed=False):
 async def test_dispatch_claim_is_released_after_worker_finishes(session_maker):
     item_id = await _queue_item(session_maker)
     scheduler = PrintScheduler()
-    scheduler._start_print = AsyncMock()  # type: ignore[method-assign]
+    scheduler.workers.leave = AsyncMock()  # type: ignore[method-assign]
 
-    with patch.object(scheduler_module, "async_session", session_maker):
-        await scheduler._dispatch_one(item_id)
+    with patch.object(queued, "async_session", session_maker):
+        await scheduler.workers._work(item_id, ANY_MACHINE)
 
-    scheduler._start_print.assert_awaited_once()
+    scheduler.workers.leave.assert_awaited_once()
     async with session_maker() as db:
         item = await db.get(PrintQueueItem, item_id)
         assert item.dispatching_at is None
@@ -61,13 +64,13 @@ async def test_dispatch_claim_skips_cancelled_or_removed_rows(session_maker):
         await db.commit()
 
     scheduler = PrintScheduler()
-    scheduler._start_print = AsyncMock()  # type: ignore[method-assign]
+    scheduler.workers.leave = AsyncMock()  # type: ignore[method-assign]
 
-    with patch.object(scheduler_module, "async_session", session_maker):
-        await scheduler._dispatch_one(cancelled_id)
-        await scheduler._dispatch_one(removed_id)
+    with patch.object(queued, "async_session", session_maker):
+        await scheduler.workers._work(cancelled_id, ANY_MACHINE)
+        await scheduler.workers._work(removed_id, ANY_MACHINE)
 
-    scheduler._start_print.assert_not_awaited()
+    scheduler.workers.leave.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -79,12 +82,12 @@ async def test_dispatch_claim_rejects_reassigned_printer(session_maker):
         await db.commit()
 
     scheduler = PrintScheduler()
-    scheduler._start_print = AsyncMock()  # type: ignore[method-assign]
+    scheduler.workers.leave = AsyncMock()  # type: ignore[method-assign]
 
-    with patch.object(scheduler_module, "async_session", session_maker):
-        await scheduler._dispatch_one(item_id, selected_printer_id=101)
+    with patch.object(queued, "async_session", session_maker):
+        await scheduler.workers._work(item_id, _DispatchBinding(101, None, unassigned=False))
 
-    scheduler._start_print.assert_not_awaited()
+    scheduler.workers.leave.assert_not_awaited()
     async with session_maker() as db:
         item = await db.get(PrintQueueItem, item_id)
         assert item.status == "queued"
@@ -98,7 +101,7 @@ async def test_stale_dispatch_claims_are_cleared_on_startup(session_maker):
     scheduler = PrintScheduler()
 
     with patch.object(scheduler_module, "async_session", session_maker):
-        await scheduler._clear_stale_dispatch_claims()
+        await scheduler.dispatcher.start()
 
     async with session_maker() as db:
         item = await db.get(PrintQueueItem, item_id)

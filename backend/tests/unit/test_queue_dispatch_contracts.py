@@ -15,10 +15,15 @@ from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services import print_scheduler as scheduling
 from backend.app.services.archive import ArchiveService
-from backend.app.services.lifecycle import preheating as heat
+from backend.app.services.lifecycle import (
+    dispatching as scheduling,
+    effects as lifecycle_effects,
+    preheating as heat,
+    queued as lifecycle_queued,
+)
 from backend.app.services.lifecycle.engine import InvalidQueueTransition, transition_queue_item
+from backend.app.services.print_scheduler import PrintScheduler, scheduler
 from backend.app.services.queue_archive import link_dispatch_archive, prepare_dispatch_archive
 from backend.tests.unit.test_lifecycle_preheating import enter_preheating
 from backend.tests.unit.test_queue_archive_alignment import alignment  # noqa: F401
@@ -30,8 +35,8 @@ from backend.tests.unit.test_queue_dispatch_races import handoff  # noqa: F401
 async def test_trashed_reprint_stays_parked_without_a_printer_hold(handoff, monkeypatch, heat_soak, cached_source):
     scheduler = handoff.scheduler
     assigned, failed = AsyncMock(), AsyncMock()
-    monkeypatch.setattr(scheduler, "_notify_pool_assignment", assigned)
-    monkeypatch.setattr(scheduling.notification_service, "on_queue_job_failed", failed)
+    monkeypatch.setattr(lifecycle_queued, "notify_assignment", assigned)
+    monkeypatch.setattr(lifecycle_effects.notification_service, "on_queue_job_failed", failed)
     async with handoff.sessions() as db:
         source = await ArchiveService(db).archive_print(None, handoff.source_path)
         if not cached_source:
@@ -55,8 +60,8 @@ async def test_trashed_reprint_stays_parked_without_a_printer_hold(handoff, monk
                 await trash.commit()
             assert source.deleted_at is None  # Retained identity-map snapshot.
         job = await db.get(PrintQueueItem, handoff.job_id, populate_existing=True)
-        binding = scheduling._DispatchBinding.for_item(job, 1, None, unassigned=True)
-        await scheduler._start_print(db, job, binding=binding)
+        binding = lifecycle_queued._DispatchBinding.for_item(job, 1, None, unassigned=True)
+        await scheduler.workers.leave(db, job, binding=binding)
         await db.refresh(job)
         assert job.status == "queued" and job.printer_id is None and job.manual_start
         assert "deleted" in job.waiting_reason.lower()
@@ -76,7 +81,7 @@ async def test_source_removed_after_eligibility_read_fails_the_committed_hold(
 
     model = PrintArchive if source_kind == "archive" else LibraryFile
     assigned = AsyncMock()
-    monkeypatch.setattr(handoff.scheduler, "_notify_pool_assignment", assigned)
+    monkeypatch.setattr(lifecycle_queued, "notify_assignment", assigned)
     async with handoff.sessions() as db:
         source_id = handoff.source_id
         if source_kind == "archive":
@@ -108,8 +113,8 @@ async def test_source_removed_after_eligibility_read_fails_the_committed_hold(
 
         monkeypatch.setattr(queue_archive, "prepare_dispatch_archive", remove_before_preparation)
         job = await db.get(PrintQueueItem, handoff.job_id, populate_existing=True)
-        binding = scheduling._DispatchBinding.for_item(job, 1, None, unassigned=True)
-        await handoff.scheduler._start_print(db, job, binding=binding)
+        binding = lifecycle_queued._DispatchBinding.for_item(job, 1, None, unassigned=True)
+        await handoff.scheduler.workers.leave(db, job, binding=binding)
         await db.refresh(job)
         assert job.status == "failed" and job.printer_id == 1
         cause = "Dispatch source was deleted" if remove == "trash" else "Dispatch source no longer exists"
@@ -141,7 +146,7 @@ async def test_copy_failure_reports_safe_cause_after_a_committed_hold(
     copy = AsyncMock(side_effect=error)
     monkeypatch.setattr(ArchiveService, "archive_print", copy)
     monkeypatch.setattr(scheduling, "async_session", handoff.sessions)
-    monkeypatch.setattr(scheduling, "scheduler", handoff.scheduler)
+    monkeypatch.setattr("backend.app.services.print_scheduler.scheduler", handoff.scheduler)
     notified = asyncio.Event()
     notification = AsyncMock()
 
@@ -149,7 +154,7 @@ async def test_copy_failure_reports_safe_cause_after_a_committed_hold(
         await notification(**kwargs)
         notified.set()
 
-    monkeypatch.setattr(scheduling.notification_service, "on_queue_job_failed", record_failure)
+    monkeypatch.setattr(lifecycle_effects.notification_service, "on_queue_job_failed", record_failure)
     handoffs = []
 
     def capture(coroutine, *, name):
@@ -168,10 +173,10 @@ async def test_copy_failure_reports_safe_cause_after_a_committed_hold(
             )
             await db.commit()
             job = await db.get(PrintQueueItem, handoff.job_id, populate_existing=True)
-            await handoff.scheduler._start_print(db, job)
+            await handoff.scheduler.workers.leave(db, job)
         elif path == "tick":
             assert await handoff.service.wait(db) == [handoff.job_id]
-            await handoff.scheduler._dispatch_after_heat_soak(handoff.job_id)
+            await handoff.scheduler.dispatcher.take_over(handoff.job_id)
         else:
             assert await skip_queue_item_heat_soak(handoff.job_id, db=db, auth_result=(None, True)) == {
                 "message": "Heat soak skipped"

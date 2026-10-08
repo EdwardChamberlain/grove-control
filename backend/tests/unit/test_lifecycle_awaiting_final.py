@@ -293,7 +293,7 @@ async def test_only_an_ended_job_passes_its_hold_to_a_new_external_print(session
             await transition_queue_item(db, held, "printing", status, values=values)
             await db.commit()
         outcome = held.physical_outcome
-        assert await awaiting.transfer_hold(db, held, "new-run") is ended
+        assert await lifecycle_engine.transfer_hold(db, held, "new-run") is ended
         await db.commit()
     async with sessions() as db:
         row = await db.get(PrintQueueItem, item_id)

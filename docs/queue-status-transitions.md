@@ -78,6 +78,14 @@ editable field with the selection snapshot; an intervening edit releases the
 claim and causes a fresh selection. Printer and tray mapping are persisted
 only by the conditional transition to `preheating` or `dispatching`.
 
+Leaving the queue is queued's exit. Its bounded pool of exit workers, one
+session each, claims a selected job, rechecks its printer and source, and starts
+preheating for a heat soak or dispatching otherwise. A blocked job stays queued
+with its reason. `services/lifecycle/dispatching.py` owns the attempt:
+`Dispatcher.enter` holds the printer when entered from `queued`, or inherits the
+soak's hold from `preheating`, then copies, links, uploads and sends, one step
+each. The scheduler composes both and keeps its cadence until stage 6.
+
 Dispatch follows this order:
 
 1. Commit the printer hold: `queued` or `preheating` → `dispatching`.
@@ -104,7 +112,18 @@ an attempt that might have sent a command stays held for telemetry or review.
 
 The unconfirmed-dispatch prompt requires an ID, a send timestamp, an expired
 270-second acknowledgement window, and no live worker claim. **It's printing**
-confirms `printing`; **It didn't start** records `failed`. See
+confirms `printing`; **It didn't start** records `failed`. Live confirmation,
+manual resolution and restart recovery register their queue-start notification
+and relay publication with the effects registry. Confirmation and manual
+resolution await the committed publication before returning; restart recovery
+keeps its background delivery. Rollback or a failed commit emits no start.
+
+Unsent heat-soak handoffs belong to dispatching rather than preheating's wait.
+Dispatching keeps their existing heartbeat abort, inspection message and view
+recovery policy. The separate long-upload and interrupted-soak behavior fixes
+listed in #204 remain follow-up work.
+
+See
 [job identity](queue-job-identity.md) for matching and recovery details and
 [concurrency](queue-dispatch-concurrency.md) for upload pool settings.
 
@@ -160,15 +179,21 @@ write, the engine aligns the Archive attempt, runs the old state's exit step and
 then the new state's entry step, all in the same transaction.
 
 Each state's steps live in its module in `services/lifecycle/`: `queued.py`,
-`preheating.py`, `awaiting.py` (`finished`, `failed`, `cancelled`) and
-`final.py` (`successful`, `unsuccessful`). Leaving `preheating` other than for `dispatching` releases the
-soak's claim and shuts its heaters down. Entry into an awaiting state writes the
-physical outcome with the status, then clears a finished plate when confirmation
-is off or queues a failed or stopped job's effects. Clear Plate, hold transfer
-and printer deletion end a job through `final.end`. Leaving `failed` or
-`cancelled` through Clear Plate removes the attempt's sent upload; a state
-cleans up on its own exit. Entry into a final state releases unused Queue
-sources.
+`preheating.py`, `dispatching.py`, `printing.py` (`printing`, `paused`),
+`awaiting.py` (`finished`, `failed`, `cancelled`) and `final.py` (`successful`,
+`unsuccessful`). Leaving `preheating` other than for `dispatching` releases the
+soak's claim and shuts its heaters down. Leaving `dispatching`, `printing` or
+`paused` for `failed` or `cancelled` shuts down the heaters an inherited soak
+left on; a dispatch that fails, unless the printer reported it, also removes its
+unsent upload. Entry into an awaiting state writes the physical outcome with the
+status, then clears a finished plate when confirmation is off, or queues Auto
+Off and, unless the printer reported the failure, a failure notification. The
+effects an exit and an entry queue for one outcome run together after commit.
+Clear Plate, hold transfer and printer deletion end a job through `final.end`.
+Machine-level hold transfer and printer deletion live in the engine, including
+deletion's heat-soak shutdown guard. Leaving `failed` or `cancelled` through
+Clear Plate removes the attempt's sent upload; a state cleans up on its own
+exit. Entry into a final state releases unused Queue sources.
 
 Some entry work may start only after the transition commits. `enter_state`
 makes the transition, commits it, then runs the new state's post-commit step,

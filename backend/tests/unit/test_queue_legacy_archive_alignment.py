@@ -21,6 +21,7 @@ from backend.app.services.archive import ArchiveService
 from backend.app.services.job_identity import bind_observed_id
 from backend.app.services.lifecycle.awaiting import clear_job_plate
 from backend.app.services.lifecycle.engine import QueueTransitionConflict, transition_queue_item
+from backend.app.services.print_scheduler import PrintScheduler, scheduler
 from backend.app.services.queue_actions import cancel_job
 from backend.app.services.queue_archive import prepare_dispatch_archive
 from backend.tests.unit.test_queue_archive_alignment import alignment, hold_and_link  # noqa: F401
@@ -198,7 +199,7 @@ async def test_restored_active_archive_follows_real_completion_callback(legacy, 
 
 @pytest.mark.parametrize("path", ["stop", "recovery", "pause", "clear_plate"])
 async def test_legacy_link_and_outcome_commit_through_independent_lifecycle_paths(legacy, monkeypatch, path):
-    from backend.app.services import print_scheduler as scheduling
+    from backend.app.services.lifecycle import dispatching as scheduling
     from backend.app.services.printer_manager import printer_manager
 
     async with legacy.sessions() as db:
@@ -211,7 +212,7 @@ async def test_legacy_link_and_outcome_commit_through_independent_lifecycle_path
             )
             monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
             monkeypatch.setattr(scheduling, "spawn_background_task", lambda coroutine, **_kwargs: coroutine.close())
-            await scheduling.PrintScheduler()._recover_stale_dispatches(db)
+            await PrintScheduler().dispatcher.recover(db)
         elif path == "pause":
             await transition_queue_item(db, job, "printing", "paused")
             await transition_queue_item(db, job, "paused", "finished")

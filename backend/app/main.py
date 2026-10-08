@@ -104,6 +104,7 @@ from backend.app.services.job_identity import (
     telemetry_identity,
 )
 from backend.app.services.library_trash import library_trash_service
+from backend.app.services.lifecycle import effects as lifecycle_effects
 from backend.app.services.lifecycle.engine import QueueTransitionConflict, lock_queue_item, transition_queue_item
 from backend.app.services.local_backup import local_backup_service
 from backend.app.services.location_ha_sensor_manager import location_ha_sensor_manager
@@ -2455,7 +2456,7 @@ async def _observe_print_start(printer_id: int, data: dict, *, recovering: bool 
         }
         await db.commit()
     if was_dispatching:
-        await print_scheduler._publish_queue_job_started(item_id)
+        await lifecycle_effects.publish_queue_job_started(item_id)
     new_start = not recovering and _started_job_effects.get(printer_id) != item_id
     _started_job_effects[printer_id] = item_id
     archive_id = queue_archive_id
