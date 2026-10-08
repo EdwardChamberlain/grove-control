@@ -34,7 +34,7 @@ from backend.app.services.bambu_ftp import (
     upload_file_async,
     with_ftp_retry,
 )
-from backend.app.services.job_identity import sync_print_state, telemetry_identity
+from backend.app.services.job_identity import telemetry_identity
 from backend.app.services.lifecycle import effects, preheating, queued
 from backend.app.services.lifecycle.engine import (
     InvalidQueueTransition,
@@ -43,6 +43,7 @@ from backend.app.services.lifecycle.engine import (
     transition_queue_item,
 )
 from backend.app.services.lifecycle.preheating import abort_heat_soak, request_heater_shutdown
+from backend.app.services.lifecycle.printing import sync_print_state
 from backend.app.services.printer_manager import printer_manager
 from backend.app.services.printer_selection import _incompatible_sliced_model_reason
 
@@ -529,9 +530,8 @@ class Dispatcher:
                 except QueueTransitionConflict:
                     return await db.rollback()
                 item.started_at, item.error_message = datetime.now(timezone.utc), None
-                started = effects.queue_job_started(db, item_id)
                 await db.commit()
-                await effects.wait_for(started)
+                await effects.wait_for(effects.spawned(db))
 
             return await run_with_retry(promote, label=f"confirm queue dispatch {item_id}")
         if status in ("completed", "failed"):
@@ -596,7 +596,7 @@ class Dispatcher:
         return "dispatching", last_status
 
     async def resolve(self, db: AsyncSession, item: PrintQueueItem, outcome: str) -> None:
-        """Exit for a person's resolution of an unconfirmed attempt, awaiting its committed start effects."""
+        """Exit for a person's resolution of an unconfirmed attempt, awaiting printing's committed start effects."""
         state = printer_manager.get_status(item.printer_id)
         if state and state.connected:
             observed = telemetry_identity(state)
@@ -611,9 +611,8 @@ class Dispatcher:
         values = {"error_message": "Confirmed printing by user" if printing else "Printer didn't start the job"}
         values["started_at" if printing else "completed_at"] = datetime.now(timezone.utc)
         await transition_queue_item(db, item, "dispatching", outcome, values=values)
-        started = effects.queue_job_started(db, item.id) if printing else []
         await db.commit()
-        await effects.wait_for(started)
+        await effects.wait_for(effects.spawned(db))
 
     async def wait_unsent(self, db: AsyncSession) -> None:
         """Wait: keep the heartbeat of unsent soak handoffs, holding an expired one for inspection."""
@@ -716,7 +715,6 @@ class Dispatcher:
                     if not await _transition_or_skip(db, item, "printing", started_at=now, error_message=None):
                         continue
                     changed = True
-                    effects.queue_job_started(db, item.id, background=True)
                     logger.info("Recovered dispatched queue item %s as printer-confirmed printing", item.id)
                 try:
                     changed = await sync_print_state(db, item, state) or changed
@@ -761,9 +759,9 @@ class Dispatcher:
 
     async def _complete_recovered_dispatch(self, item_id: int, printer_id: int, completion_data: dict) -> None:
         try:
-            from backend.app.main import on_print_complete
+            from backend.app.services.lifecycle.intake import print_completed
 
-            await on_print_complete(printer_id, completion_data)
+            await print_completed(printer_id, completion_data)
         finally:
             self._recovering.discard(item_id)
 

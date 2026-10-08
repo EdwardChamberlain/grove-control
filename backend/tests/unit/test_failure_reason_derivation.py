@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from backend.app.main import derive_failure_reason
+from backend.app.services.print_effects import derive_failure_reason
 
 # ---------------------------------------------------------------------------
 # Status-based reasons (no HMS lookup needed)

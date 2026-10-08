@@ -21,8 +21,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from backend.app import main as main_module
-from backend.app.main import _capture_finish_photo_from_timelapse
+from backend.app.services import print_effects
+from backend.app.services.print_effects import _capture_finish_photo_from_timelapse
 
 
 @asynccontextmanager
@@ -48,14 +48,14 @@ def fake_archive():
 @pytest.fixture(autouse=True)
 def _fast_poll(monkeypatch):
     """Shrink poll interval + timeout so tests don't sleep for real."""
-    monkeypatch.setattr(main_module, "_FINISH_PHOTO_TIMELAPSE_POLL_INTERVAL_SECONDS", 0.01)
-    monkeypatch.setattr(main_module, "_FINISH_PHOTO_TIMELAPSE_POLL_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(print_effects, "_FINISH_PHOTO_TIMELAPSE_POLL_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(print_effects, "_FINISH_PHOTO_TIMELAPSE_POLL_TIMEOUT_SECONDS", 0.2)
 
 
 @pytest.fixture
 def patched_session(fake_archive, monkeypatch):
-    """Patch main.async_session so the helper reads our fake archive."""
-    monkeypatch.setattr(main_module, "async_session", lambda: _fake_session(fake_archive))
+    """Patch print_effects.async_session so the helper reads our fake archive."""
+    monkeypatch.setattr(print_effects, "async_session", lambda: _fake_session(fake_archive))
     return fake_archive
 
 
@@ -74,7 +74,7 @@ async def test_extracts_frame_when_timelapse_lands(tmp_path: Path, patched_sessi
     succeeding — should return a filename matching the finish_*.jpg pattern."""
     # Lay down a stub timelapse file relative to base_dir so the path
     # join works the way the helper expects.
-    monkeypatch.setattr(main_module.app_settings, "base_dir", tmp_path)
+    monkeypatch.setattr(print_effects.app_settings, "base_dir", tmp_path)
     video_relpath = Path("archive/1/print/timelapse.mp4")
     video_abspath = tmp_path / video_relpath
     video_abspath.parent.mkdir(parents=True, exist_ok=True)
@@ -86,7 +86,7 @@ async def test_extracts_frame_when_timelapse_lands(tmp_path: Path, patched_sessi
         dst.write_bytes(b"\xff\xd8" + b"\x00" * 50)  # JPEG SOI
         return True
 
-    monkeypatch.setattr(main_module, "_FINISH_PHOTO_TIMELAPSE_POLL_INTERVAL_SECONDS", 0.0)
+    monkeypatch.setattr(print_effects, "_FINISH_PHOTO_TIMELAPSE_POLL_INTERVAL_SECONDS", 0.0)
 
     # Flip the archive into the "timelapse landed" state before the first
     # poll — the helper picks it up on its initial read.
@@ -110,7 +110,7 @@ async def test_extracts_frame_when_timelapse_lands(tmp_path: Path, patched_sessi
 async def test_returns_none_when_extraction_fails(tmp_path: Path, patched_session, monkeypatch):
     """Timelapse landed but ffmpeg said no — we don't keep retrying on the
     same broken file; return None so the caller falls back."""
-    monkeypatch.setattr(main_module.app_settings, "base_dir", tmp_path)
+    monkeypatch.setattr(print_effects.app_settings, "base_dir", tmp_path)
     video_relpath = Path("archive/1/print/timelapse.mp4")
     video_abspath = tmp_path / video_relpath
     video_abspath.parent.mkdir(parents=True, exist_ok=True)
@@ -137,9 +137,9 @@ async def test_polls_until_file_appears(tmp_path: Path, patched_session, monkeyp
     """timelapse_path is set, but the file isn't on disk yet (the attach
     background task hasn't finished writing). Should keep polling — and
     succeed once the file materialises."""
-    monkeypatch.setattr(main_module.app_settings, "base_dir", tmp_path)
-    monkeypatch.setattr(main_module, "_FINISH_PHOTO_TIMELAPSE_POLL_INTERVAL_SECONDS", 0.05)
-    monkeypatch.setattr(main_module, "_FINISH_PHOTO_TIMELAPSE_POLL_TIMEOUT_SECONDS", 1.0)
+    monkeypatch.setattr(print_effects.app_settings, "base_dir", tmp_path)
+    monkeypatch.setattr(print_effects, "_FINISH_PHOTO_TIMELAPSE_POLL_INTERVAL_SECONDS", 0.05)
+    monkeypatch.setattr(print_effects, "_FINISH_PHOTO_TIMELAPSE_POLL_TIMEOUT_SECONDS", 1.0)
 
     video_relpath = Path("archive/1/print/timelapse.mp4")
     patched_session.timelapse_path = str(video_relpath)

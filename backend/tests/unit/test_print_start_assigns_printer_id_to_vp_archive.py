@@ -16,9 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.app.main import (
-    _timelapse_baselines,
-)
+from backend.app.services.print_effects import _timelapse_baselines
 
 
 @pytest.fixture(autouse=True)
@@ -79,16 +77,16 @@ async def test_expected_archive_path_assigns_printer_id_when_unset():
     mock_session.commit = AsyncMock()
 
     with (
-        patch("backend.app.main.async_session") as mock_session_maker,
-        patch("backend.app.main.notification_service") as mock_notif,
-        patch("backend.app.main.smart_plug_manager") as mock_plug,
-        patch("backend.app.main.ws_manager") as mock_ws,
-        patch("backend.app.main.printer_manager") as mock_pm,
-        patch("backend.app.main.mqtt_relay") as mock_relay,
-        patch("backend.app.main._record_energy_start", new_callable=AsyncMock),
-        patch("backend.app.main._load_objects_from_archive"),
-        patch("backend.app.main._store_spoolman_print_data", new_callable=AsyncMock),
-        patch("backend.app.main._send_print_start_notification", new_callable=AsyncMock),
+        patch("backend.app.services.print_effects.async_session") as mock_session_maker,
+        patch("backend.app.services.print_effects.notification_service") as mock_notif,
+        patch("backend.app.services.print_effects.smart_plug_manager") as mock_plug,
+        patch("backend.app.services.print_effects.ws_manager") as mock_ws,
+        patch("backend.app.services.print_effects.printer_manager") as mock_pm,
+        patch("backend.app.services.print_effects.mqtt_relay") as mock_relay,
+        patch("backend.app.services.print_effects._record_energy_start", new_callable=AsyncMock),
+        patch("backend.app.services.print_effects._load_objects_from_archive"),
+        patch("backend.app.services.print_effects._store_spoolman_print_data", new_callable=AsyncMock),
+        patch("backend.app.services.print_effects._send_print_start_notification", new_callable=AsyncMock),
     ):
         mock_session_maker.return_value = mock_session
         mock_notif.on_print_start = AsyncMock()
@@ -98,7 +96,7 @@ async def test_expected_archive_path_assigns_printer_id_when_unset():
         mock_relay.on_print_start = AsyncMock()
         mock_pm.get_printer = MagicMock(return_value=MagicMock(name="Test", serial_number="TEST123"))
 
-        from backend.app.main import _archive_print_start as on_print_start
+        from backend.app.services.print_effects import _archive_print_start as on_print_start
 
         await on_print_start(
             1,
@@ -166,16 +164,16 @@ async def test_expected_archive_path_preserves_existing_printer_id():
     mock_session.commit = AsyncMock()
 
     with (
-        patch("backend.app.main.async_session") as mock_session_maker,
-        patch("backend.app.main.notification_service") as mock_notif,
-        patch("backend.app.main.smart_plug_manager") as mock_plug,
-        patch("backend.app.main.ws_manager") as mock_ws,
-        patch("backend.app.main.printer_manager") as mock_pm,
-        patch("backend.app.main.mqtt_relay") as mock_relay,
-        patch("backend.app.main._record_energy_start", new_callable=AsyncMock),
-        patch("backend.app.main._load_objects_from_archive"),
-        patch("backend.app.main._store_spoolman_print_data", new_callable=AsyncMock),
-        patch("backend.app.main._send_print_start_notification", new_callable=AsyncMock),
+        patch("backend.app.services.print_effects.async_session") as mock_session_maker,
+        patch("backend.app.services.print_effects.notification_service") as mock_notif,
+        patch("backend.app.services.print_effects.smart_plug_manager") as mock_plug,
+        patch("backend.app.services.print_effects.ws_manager") as mock_ws,
+        patch("backend.app.services.print_effects.printer_manager") as mock_pm,
+        patch("backend.app.services.print_effects.mqtt_relay") as mock_relay,
+        patch("backend.app.services.print_effects._record_energy_start", new_callable=AsyncMock),
+        patch("backend.app.services.print_effects._load_objects_from_archive"),
+        patch("backend.app.services.print_effects._store_spoolman_print_data", new_callable=AsyncMock),
+        patch("backend.app.services.print_effects._send_print_start_notification", new_callable=AsyncMock),
     ):
         mock_session_maker.return_value = mock_session
         mock_notif.on_print_start = AsyncMock()
@@ -185,7 +183,7 @@ async def test_expected_archive_path_preserves_existing_printer_id():
         mock_relay.on_print_start = AsyncMock()
         mock_pm.get_printer = MagicMock(return_value=MagicMock(name="Test", serial_number="TEST123"))
 
-        from backend.app.main import _archive_print_start as on_print_start
+        from backend.app.services.print_effects import _archive_print_start as on_print_start
 
         await on_print_start(
             7, {"filename": "MyModel.3mf", "subtask_name": "MyModel"}, queue_archive_id=mock_archive.id
@@ -259,18 +257,18 @@ async def test_expected_archive_path_captures_timelapse_baseline():
     mock_session.commit = AsyncMock()
 
     with (
-        patch("backend.app.main.async_session") as mock_session_maker,
-        patch("backend.app.main.notification_service") as mock_notif,
-        patch("backend.app.main.smart_plug_manager") as mock_plug,
-        patch("backend.app.main.ws_manager") as mock_ws,
-        patch("backend.app.main.printer_manager") as mock_pm,
-        patch("backend.app.main.mqtt_relay") as mock_relay,
-        patch("backend.app.main._record_energy_start", new_callable=AsyncMock),
-        patch("backend.app.main._load_objects_from_archive"),
-        patch("backend.app.main._store_spoolman_print_data", new_callable=AsyncMock),
-        patch("backend.app.main._send_print_start_notification", new_callable=AsyncMock),
+        patch("backend.app.services.print_effects.async_session") as mock_session_maker,
+        patch("backend.app.services.print_effects.notification_service") as mock_notif,
+        patch("backend.app.services.print_effects.smart_plug_manager") as mock_plug,
+        patch("backend.app.services.print_effects.ws_manager") as mock_ws,
+        patch("backend.app.services.print_effects.printer_manager") as mock_pm,
+        patch("backend.app.services.print_effects.mqtt_relay") as mock_relay,
+        patch("backend.app.services.print_effects._record_energy_start", new_callable=AsyncMock),
+        patch("backend.app.services.print_effects._load_objects_from_archive"),
+        patch("backend.app.services.print_effects._store_spoolman_print_data", new_callable=AsyncMock),
+        patch("backend.app.services.print_effects._send_print_start_notification", new_callable=AsyncMock),
         patch(
-            "backend.app.main._list_timelapse_videos",
+            "backend.app.services.print_effects._list_timelapse_videos",
             new=AsyncMock(return_value=(existing_videos, "/timelapse")),
         ),
     ):
@@ -288,7 +286,7 @@ async def test_expected_archive_path_captures_timelapse_baseline():
             connected=True, job_telemetry_ready=True, state="RUNNING", submission_id="run"
         )
 
-        from backend.app.main import _archive_print_start as on_print_start
+        from backend.app.services.print_effects import _archive_print_start as on_print_start
 
         await on_print_start(
             1,

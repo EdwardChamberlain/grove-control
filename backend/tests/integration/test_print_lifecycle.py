@@ -25,10 +25,11 @@ class TestPrintStartLogic:
     async def test_print_start_calls_notification_service(self, capture_logs):
         """Verify on_print_start triggers notification service."""
         with (
-            patch("backend.app.main.async_session") as mock_session_maker,
-            patch("backend.app.main.notification_service") as mock_notif,
-            patch("backend.app.main.smart_plug_manager") as mock_plug,
-            patch("backend.app.main.ws_manager") as mock_ws,
+            patch("backend.app.services.lifecycle.intake.async_session") as mock_session_maker,
+            patch("backend.app.services.print_effects.async_session", mock_session_maker),
+            patch("backend.app.services.print_effects.notification_service") as mock_notif,
+            patch("backend.app.services.print_effects.smart_plug_manager") as mock_plug,
+            patch("backend.app.services.print_effects.ws_manager") as mock_ws,
         ):
             mock_notif.on_print_start = AsyncMock()
             mock_plug.on_print_start = AsyncMock()
@@ -41,7 +42,7 @@ class TestPrintStartLogic:
             mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
             mock_session_maker.return_value = mock_session
 
-            from backend.app.main import _begin_new_print
+            from backend.app.services.print_effects import _begin_new_print
 
             await _begin_new_print(
                 1,
@@ -70,14 +71,16 @@ class TestPlateClearGate:
 
         from backend.app import main
         from backend.app.models.print_queue import PrintQueueItem
+        from backend.app.services import print_effects
+        from backend.app.services.lifecycle import intake
 
         printer = await printer_factory()
         item = PrintQueueItem(printer_id=printer.id, status="printing", dispatch_subtask_id="123")
         db_session.add(item)
         await db_session.commit()
         sessions = async_sessionmaker(test_engine, expire_on_commit=False)
-        main._completed_job_events.clear()
-        main._user_stopped_printers.clear()
+        intake._completed_job_events.clear()
+        intake._user_stopped_printers.clear()
         manager = MagicMock()
         manager.get_status.return_value = None
         manager.get_printer.return_value = None
@@ -86,13 +89,16 @@ class TestPlateClearGate:
             coro.close()  # These tests verify the committed transition and plate gate.
 
         with (
-            patch.object(main, "async_session", sessions),
+            patch.object(intake, "async_session", sessions),
+            patch.object(print_effects, "async_session", sessions),
             patch("backend.app.core.database.async_session", sessions),
-            patch.object(main, "printer_manager", manager),
+            patch.object(intake, "printer_manager", manager),
+            patch.object(print_effects, "printer_manager", manager),
             patch("backend.app.services.printer_manager.printer_manager", manager),
-            patch.object(main, "ws_manager", AsyncMock()),
-            patch.object(main, "mqtt_relay", AsyncMock()),
-            patch.object(main, "spawn_background_task", discard_background),
+            patch.object(print_effects, "ws_manager", AsyncMock()),
+            patch.object(print_effects, "mqtt_relay", AsyncMock()),
+            patch.object(intake, "spawn_background_task", discard_background),
+            patch.object(print_effects, "spawn_background_task", discard_background),
             patch("backend.app.services.lifecycle.effects.run_queue_outcome_effects", new=AsyncMock()),
             patch("backend.app.services.usage_tracker.on_print_complete", AsyncMock(return_value=[])),
             patch("backend.app.services.usage_tracker.discard_session", AsyncMock()),
@@ -187,6 +193,8 @@ class TestPlateClearGate:
 
         from backend.app import main
         from backend.app.models.archive import PrintArchive
+        from backend.app.services import print_effects
+        from backend.app.services.lifecycle import intake
         from backend.app.services.queue_actions import cancel_job
 
         archive = PrintArchive(
@@ -206,7 +214,7 @@ class TestPlateClearGate:
             # cancel_job commits `cancelled` before the printer reports the stop,
             # so this also holds after a restart loses the in-memory stop flag.
             await cancel_job(db_session, completion.item)
-            main._user_stopped_printers.clear()
+            intake._user_stopped_printers.clear()
         await completion.complete(completion.printer.id, {"subtask_id": "123", "status": printer_outcome})
         await db_session.refresh(completion.item)
         assert completion.item.status == job_status
@@ -218,8 +226,8 @@ class TestPlateClearGate:
             assert archive.failure_reason == "User cancelled"
         # The relay and notifications describe the physical outcome; a
         # touchscreen abort is not renamed to a Grove cancellation.
-        assert main.mqtt_relay.on_print_complete.await_args.args[-1] == reported
-        assert main.mqtt_relay.on_queue_job_completed.await_args.kwargs["status"] == job_status
+        assert print_effects.mqtt_relay.on_print_complete.await_args.args[-1] == reported
+        assert print_effects.mqtt_relay.on_queue_job_completed.await_args.kwargs["status"] == job_status
 
     async def test_locked_database_retries_the_whole_completion_transaction(self, completion, db_session):
         from types import SimpleNamespace
@@ -227,12 +235,14 @@ class TestPlateClearGate:
         from sqlalchemy.exc import OperationalError
 
         from backend.app import main
+        from backend.app.services import print_effects
+        from backend.app.services.lifecycle import intake, printing as lifecycle_printing
 
         completion.manager.get_printer.return_value = SimpleNamespace(name="P1", serial_number="SERIAL")
         locked = OperationalError("UPDATE print_queue", {}, Exception("database is locked"))
         bump = AsyncMock(side_effect=[locked, None])
         with (
-            patch.object(main, "_bump_library_file_usage_if_completed", bump),
+            patch.object(lifecycle_printing, "_bump_library_file_usage_if_completed", bump),
             patch("backend.app.core.database.is_sqlite", return_value=True),
             patch("backend.app.core.database.asyncio.sleep", AsyncMock()),
         ):
@@ -243,7 +253,7 @@ class TestPlateClearGate:
         # and the completion effects still ran (#897).
         assert completion.item.status == "finished"
         assert bump.await_count == 2
-        main.mqtt_relay.on_queue_job_completed.assert_awaited_once()
+        print_effects.mqtt_relay.on_queue_job_completed.assert_awaited_once()
 
     async def test_plate_clear_gate_not_raised_for_unknown_status(self, completion, db_session):
         await completion.complete(completion.printer.id, {"subtask_id": "123", "status": "unknown_future_status"})
@@ -270,8 +280,10 @@ class TestPlateClearGate:
     async def test_touchscreen_print_on_a_held_printer_completes_as_its_own_job(self, completion, db_session):
         from backend.app import main
         from backend.app.api.routes.print_queue import clear_queue_plate
+        from backend.app.services import print_effects
         from backend.app.services.bambu_mqtt import BambuMQTTClient
         from backend.app.services.job_identity import find_job
+        from backend.app.services.lifecycle import intake
         from backend.app.services.lifecycle.engine import transition_queue_item
 
         await transition_queue_item(db_session, completion.item, "printing", "failed")
@@ -283,7 +295,7 @@ class TestPlateClearGate:
         client.on_print_running_observed = starts.append
         client.on_print_complete = finishes.append
         completion.manager.get_status.return_value = client.state
-        with patch.object(main, "_archive_print_start", AsyncMock()):
+        with patch.object(print_effects, "_archive_print_start", AsyncMock()):
             client._process_message({"print": {"gcode_state": "RUNNING", "subtask_id": "0", "gcode_file": "sd.3mf"}})
             await main.on_print_start(completion.printer.id, starts[-1])
         identity = starts[-1]["submission_id"]
@@ -336,12 +348,14 @@ class TestPrintCompleteLogic:
         tasks_before = set(asyncio.all_tasks())
 
         with (
-            patch("backend.app.main.async_session") as mock_session_maker,
-            patch("backend.app.main.notification_service") as mock_notif,
-            patch("backend.app.main.smart_plug_manager") as mock_plug,
-            patch("backend.app.main.ws_manager") as mock_ws,
-            patch("backend.app.main.mqtt_relay") as mock_relay,
-            patch("backend.app.main.printer_manager") as mock_pm,
+            patch("backend.app.services.lifecycle.intake.async_session") as mock_session_maker,
+            patch("backend.app.services.print_effects.async_session", mock_session_maker),
+            patch("backend.app.services.print_effects.notification_service") as mock_notif,
+            patch("backend.app.services.print_effects.smart_plug_manager") as mock_plug,
+            patch("backend.app.services.print_effects.ws_manager") as mock_ws,
+            patch("backend.app.services.print_effects.mqtt_relay") as mock_relay,
+            patch("backend.app.services.lifecycle.intake.printer_manager") as mock_pm,
+            patch("backend.app.services.print_effects.printer_manager", mock_pm),
         ):
             mock_notif.on_print_complete = AsyncMock()
             mock_plug.on_print_complete = AsyncMock()
@@ -655,9 +669,11 @@ class TestNoImportShadowing:
         """Verify on_print_complete doesn't have import shadowing issues."""
         # Import the module to check for syntax/import errors
         from backend.app import main
+        from backend.app.services import print_effects
 
         # The ArchiveService should be accessible
         from backend.app.services.archive import ArchiveService
+        from backend.app.services.lifecycle import intake
 
         # Verify we can instantiate it (would fail with shadowing bug)
         assert ArchiveService is not None

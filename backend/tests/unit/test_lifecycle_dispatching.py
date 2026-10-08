@@ -46,10 +46,13 @@ async def test_start_delivery_sees_committed_state_and_is_awaited(alignment):
 
 
 @pytest.mark.parametrize("ending", ["rollback", "close", "failed_commit"])
-async def test_uncommitted_dispatch_start_never_allocates_a_task(alignment, ending):
+async def test_uncommitted_dispatch_start_never_allocates_a_task(alignment, monkeypatch, ending):
+    from backend.app.core import tasks
+
     publish, spawn = AsyncMock(), MagicMock()
+    monkeypatch.setattr(tasks, "spawn_background_task", spawn)
     async with alignment.sessions() as db:
-        started = effects.queue_job_started(db, alignment.job_id, publish=publish, spawn=spawn)
+        started = effects.queue_job_started(db, alignment.job_id, publish=publish)
         if ending == "failed_commit":
             db.add(Printer(name="Duplicate", serial_number="TEST", ip_address="127.0.0.1", access_code="code"))
             with pytest.raises(IntegrityError):
@@ -61,6 +64,7 @@ async def test_uncommitted_dispatch_start_never_allocates_a_task(alignment, endi
             await db.rollback()
         await db.commit()
         await effects.wait_for(started)
+    assert started == []
     publish.assert_not_called()
     spawn.assert_not_called()
 

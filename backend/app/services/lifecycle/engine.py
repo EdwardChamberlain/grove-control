@@ -93,6 +93,7 @@ _EXITS = {
 }
 _ENTRY = {
     "preheating": f"{_LIFECYCLE}.preheating",
+    "printing": f"{_LIFECYCLE}.printing",
     **dict.fromkeys(AWAITING_PLATE_CLEAR_STATUSES, f"{_LIFECYCLE}.awaiting"),
     **dict.fromkeys(FINAL_STATUSES, f"{_LIFECYCLE}.final"),
 }

@@ -62,7 +62,7 @@ class PrintScheduler:
 
             now = asyncio.get_running_loop().time()
             if now >= next_archive_check and (archive_check is None or archive_check.done()):
-                from backend.app.main import reconcile_print_archives
+                from backend.app.services.lifecycle.intake import reconcile_print_archives
 
                 archive_check = spawn_background_task(reconcile_print_archives(), name="archive-reconciliation")
                 next_archive_check = now + ARCHIVE_RECONCILE_INTERVAL_SECONDS

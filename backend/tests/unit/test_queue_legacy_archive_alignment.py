@@ -18,9 +18,9 @@ from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.models.settings import Settings
 from backend.app.services.archive import ArchiveService
-from backend.app.services.job_identity import bind_observed_id
 from backend.app.services.lifecycle.awaiting import clear_job_plate
 from backend.app.services.lifecycle.engine import QueueTransitionConflict, transition_queue_item
+from backend.app.services.lifecycle.printing import bind_observed_id
 from backend.app.services.print_scheduler import PrintScheduler, scheduler
 from backend.app.services.queue_actions import cancel_job
 from backend.app.services.queue_archive import prepare_dispatch_archive
@@ -145,6 +145,8 @@ async def test_full_startup_repairs_terminal_legacy_archives(
 async def test_restored_active_archive_follows_real_completion_callback(legacy, monkeypatch, outcome, linked):
     import backend.app.main as main
     import backend.app.services.usage_tracker as usage
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import intake
     from backend.app.services.printer_manager import printer_manager
 
     if linked:
@@ -161,11 +163,12 @@ async def test_restored_active_archive_follows_real_completion_callback(legacy, 
     )
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
     monkeypatch.setattr(printer_manager, "get_printer", lambda _id: None)
-    monkeypatch.setattr(main, "async_session", legacy.sessions)
-    monkeypatch.setattr(main, "_completed_job_events", {})
-    monkeypatch.setattr(main, "_user_stopped_printers", set())
-    monkeypatch.setattr(main, "_report_spoolman_usage", AsyncMock())
-    monkeypatch.setattr(main, "_cleanup_spoolman_tracking", AsyncMock())
+    monkeypatch.setattr(intake, "async_session", legacy.sessions)
+    monkeypatch.setattr(print_effects, "async_session", legacy.sessions)
+    monkeypatch.setattr(intake, "_completed_job_events", {})
+    monkeypatch.setattr(intake, "_user_stopped_printers", set())
+    monkeypatch.setattr(print_effects, "_report_spoolman_usage", AsyncMock())
+    monkeypatch.setattr(print_effects, "_cleanup_spoolman_tracking", AsyncMock())
     monkeypatch.setattr(usage, "on_print_complete", AsyncMock(return_value=[]))
     monkeypatch.setattr(usage, "discard_session", AsyncMock())
     monkeypatch.setattr(main.notification_service, "on_queue_completed", AsyncMock())
@@ -175,8 +178,9 @@ async def test_restored_active_archive_follows_real_completion_callback(legacy, 
     monkeypatch.setattr(main.ws_manager, "send_archive_updated", published)
     monkeypatch.setattr(main.mqtt_relay, "on_queue_job_completed", AsyncMock())
     monkeypatch.setattr(main.mqtt_relay, "on_archive_updated", AsyncMock())
-    monkeypatch.setattr(main, "_schedule_pending_stale_reconciliation", MagicMock())
-    monkeypatch.setattr(main, "spawn_background_task", lambda coroutine, **_kwargs: coroutine.close())
+    monkeypatch.setattr(intake, "_schedule_pending_stale_reconciliation", MagicMock())
+    monkeypatch.setattr(intake, "spawn_background_task", lambda coroutine, **_kwargs: coroutine.close())
+    monkeypatch.setattr(print_effects, "spawn_background_task", lambda coroutine, **_kwargs: coroutine.close())
 
     # No filename/subtask name: there is no remote file to delete in this test.
     await main.on_print_complete(1, {"submission_id": "123", "status": outcome})
@@ -361,6 +365,8 @@ async def test_upgrade_repairs_terminal_legacy_archive_without_replaying_complet
 ):
     legacy = legacy_unmigrated
     import backend.app.main as main
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import intake, printing as lifecycle_printing
     from backend.app.services.printer_manager import printer_manager
 
     completed = datetime(2026, 10, 1, 12)
@@ -374,17 +380,19 @@ async def test_upgrade_repairs_terminal_legacy_archive_without_replaying_complet
         raw_data={},
     )
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
-    monkeypatch.setattr(main, "async_session", legacy.sessions)
+    monkeypatch.setattr(intake, "async_session", legacy.sessions)
+    monkeypatch.setattr(print_effects, "async_session", legacy.sessions)
     cache = {1: legacy.job_id} if cached else {}
-    monkeypatch.setattr(main, "_completed_job_events", cache)
-    monkeypatch.setattr(main, "_user_stopped_printers", set())
+    monkeypatch.setattr(intake, "_completed_job_events", cache)
+    monkeypatch.setattr(intake, "_user_stopped_printers", set())
     notified, completed_event, relayed = AsyncMock(), AsyncMock(), AsyncMock()
     usage = AsyncMock()
     monkeypatch.setattr(main.notification_service, "on_queue_completed", notified)
     monkeypatch.setattr(main.ws_manager, "send_print_complete", completed_event)
     monkeypatch.setattr(main.mqtt_relay, "on_queue_job_completed", relayed)
-    monkeypatch.setattr(main, "_bump_library_file_usage_if_completed", usage)
-    monkeypatch.setattr(main, "spawn_background_task", lambda coroutine, **_kwargs: coroutine.close())
+    monkeypatch.setattr(lifecycle_printing, "_bump_library_file_usage_if_completed", usage)
+    monkeypatch.setattr(intake, "spawn_background_task", lambda coroutine, **_kwargs: coroutine.close())
+    monkeypatch.setattr(print_effects, "spawn_background_task", lambda coroutine, **_kwargs: coroutine.close())
     async with legacy.sessions() as db:
         job = await db.get(PrintQueueItem, legacy.job_id)
         await db.execute(
@@ -411,7 +419,7 @@ async def test_upgrade_repairs_terminal_legacy_archive_without_replaying_complet
         )
     async with legacy.sessions.kw["bind"].begin() as conn:
         await _migrate_queue_legacy_archive_links(conn)
-    await main.reconcile_stale_active_prints(1)
+    await intake.reconcile_stale_active_prints(1)
     # A conflicting late report must neither rewrite facts nor replay effects.
     await main.on_print_complete(
         1, {"submission_id": "123", "status": "failed" if outcome == "completed" else "completed"}
@@ -440,6 +448,8 @@ async def test_upgrade_repairs_terminal_legacy_archive_without_replaying_complet
 async def test_upgrade_rejects_ambiguous_terminal_legacy_identity(legacy_unmigrated, monkeypatch, duplicate):
     legacy = legacy_unmigrated
     import backend.app.main as main
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import intake
     from backend.app.services.printer_manager import printer_manager
 
     monkeypatch.setattr(
@@ -449,8 +459,9 @@ async def test_upgrade_rejects_ambiguous_terminal_legacy_identity(legacy_unmigra
             connected=True, job_telemetry_ready=True, state="FAILED", submission_id="123", raw_data={}
         ),
     )
-    monkeypatch.setattr(main, "async_session", legacy.sessions)
-    monkeypatch.setattr(main, "_completed_job_events", {})
+    monkeypatch.setattr(intake, "async_session", legacy.sessions)
+    monkeypatch.setattr(print_effects, "async_session", legacy.sessions)
+    monkeypatch.setattr(intake, "_completed_job_events", {})
     completed = datetime(2026, 10, 1, 12)
     async with legacy.sessions() as db:
         await db.execute(
@@ -469,7 +480,7 @@ async def test_upgrade_rejects_ambiguous_terminal_legacy_identity(legacy_unmigra
         await db.commit()
     async with legacy.sessions.kw["bind"].begin() as conn:
         await _migrate_queue_legacy_archive_links(conn)
-    await main.reconcile_stale_active_prints(1)
+    await intake.reconcile_stale_active_prints(1)
     async with legacy.sessions() as db:
         archive = await db.get(PrintArchive, legacy.archive_id)
         job = await db.get(PrintQueueItem, legacy.job_id)
@@ -481,6 +492,8 @@ async def test_upgrade_rejects_ambiguous_terminal_legacy_identity(legacy_unmigra
 @pytest.mark.parametrize("status", ["finished", "failed", "successful", "unsuccessful"])
 async def test_duplicate_modern_completion_needs_no_write_transaction(alignment, monkeypatch, cached, status):
     import backend.app.main as main
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import intake, printing as lifecycle_printing
     from backend.app.services.printer_manager import printer_manager
 
     async with alignment.sessions() as db:
@@ -510,14 +523,15 @@ async def test_duplicate_modern_completion_needs_no_write_transaction(alignment,
             attempt.failure_reason,
         )
 
-    monkeypatch.setattr(main, "async_session", alignment.sessions)
-    monkeypatch.setattr(main, "_completed_job_events", {1: alignment.job_id} if cached else {})
-    monkeypatch.setattr(main, "_user_stopped_printers", set())
+    monkeypatch.setattr(intake, "async_session", alignment.sessions)
+    monkeypatch.setattr(print_effects, "async_session", alignment.sessions)
+    monkeypatch.setattr(intake, "_completed_job_events", {1: alignment.job_id} if cached else {})
+    monkeypatch.setattr(intake, "_user_stopped_printers", set())
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: None)
     notified, published, usage = AsyncMock(), AsyncMock(), AsyncMock()
     monkeypatch.setattr(main.notification_service, "on_queue_completed", notified)
     monkeypatch.setattr(main.ws_manager, "send_print_complete", published)
-    monkeypatch.setattr(main, "_bump_library_file_usage_if_completed", usage)
+    monkeypatch.setattr(lifecycle_printing, "_bump_library_file_usage_if_completed", usage)
     statements = []
 
     def capture(_conn, _cursor, statement, _parameters, _context, _executemany):

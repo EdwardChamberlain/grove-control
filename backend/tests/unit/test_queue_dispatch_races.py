@@ -200,7 +200,7 @@ async def test_losing_dispatch_update_cleans_its_upload_and_retains_the_cancelle
     live = SimpleNamespace(state="IDLE", connected=True, job_telemetry_ready=True)
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
     monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
-    monkeypatch.setattr("backend.app.main._user_stopped_printers", set())
+    monkeypatch.setattr("backend.app.services.lifecycle.intake._user_stopped_printers", set())
     # A control from another worker cannot cancel this process's local task.
     monkeypatch.setattr(scheduler.workers, "cancel", lambda _id: False)
     monkeypatch.setattr(scheduling, "async_session", alignment.sessions)
@@ -714,6 +714,8 @@ async def test_requested_snippets_use_settings_helper_and_warn_on_no_result(alig
 @pytest.mark.parametrize("linked", [False, True])
 async def test_print_start_does_not_take_association_lock_without_a_candidate(alignment, monkeypatch, linked):
     import backend.app.main as main
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import intake
 
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
@@ -728,11 +730,12 @@ async def test_print_start_does_not_take_association_lock_without_a_candidate(al
         await db.commit()
     live = SimpleNamespace(state="RUNNING", connected=True, job_telemetry_ready=True, submission_id="123")
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
-    monkeypatch.setattr(main, "async_session", alignment.sessions)
-    monkeypatch.setattr(main, "_started_job_effects", {})
-    monkeypatch.setattr(main, "_archive_print_start", AsyncMock())
+    monkeypatch.setattr(intake, "async_session", alignment.sessions)
+    monkeypatch.setattr(print_effects, "async_session", alignment.sessions)
+    monkeypatch.setattr(intake, "_started_job_effects", {})
+    monkeypatch.setattr(print_effects, "_archive_print_start", AsyncMock())
     monkeypatch.setattr(lifecycle_effects, "publish_queue_job_started", AsyncMock())
     lock = AsyncMock(side_effect=AssertionError("No association needs a write lock"))
     monkeypatch.setattr(heat, "lock_queue_item", lock)
-    await main._observe_print_start(1, {"submission_id": "123", "filename": "source.3mf"})
+    await intake._observe_print_start(1, {"submission_id": "123", "filename": "source.3mf"})
     lock.assert_not_awaited()

@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.app.main import _timelapse_baselines
+from backend.app.services.print_effects import _timelapse_baselines
 
 
 @pytest.fixture(autouse=True)
@@ -31,6 +31,7 @@ def _clear_baselines():
 @pytest.mark.asyncio
 async def test_recovery_archive_work_does_not_replay_plate_check_or_start_notifications():
     import backend.app.main as main
+    from backend.app.services import print_effects
 
     printer = MagicMock(plate_detection_enabled=True, auto_archive=False)
     printer.id = 1
@@ -40,12 +41,12 @@ async def test_recovery_archive_work_does_not_replay_plate_check_or_start_notifi
     db.__aexit__ = AsyncMock()
     db.execute = AsyncMock(return_value=result)
     with (
-        patch.object(main, "async_session", return_value=db),
+        patch.object(print_effects, "async_session", return_value=db),
         patch.object(main.ws_manager, "send_print_start", new_callable=AsyncMock) as websocket_start,
-        patch.object(main, "_send_print_start_notification", new_callable=AsyncMock) as notify_start,
+        patch.object(print_effects, "_send_print_start_notification", new_callable=AsyncMock) as notify_start,
         patch("backend.app.services.plate_detection.check_plate_empty", new_callable=AsyncMock) as plate_check,
     ):
-        await main._archive_print_start(1, {"submission_id": "existing", "filename": "same.3mf"})
+        await print_effects._archive_print_start(1, {"submission_id": "existing", "filename": "same.3mf"})
     websocket_start.assert_not_awaited()
     notify_start.assert_not_awaited()
     plate_check.assert_not_awaited()
@@ -80,9 +81,10 @@ async def test_running_observed_captures_baseline_on_restart_recovery():
     mock_session.execute = AsyncMock(side_effect=execute_router)
 
     with (
-        patch("backend.app.main.async_session") as mock_session_maker,
+        patch("backend.app.services.lifecycle.intake.async_session") as mock_session_maker,
+        patch("backend.app.services.print_effects.async_session", mock_session_maker),
         patch(
-            "backend.app.main._list_timelapse_videos",
+            "backend.app.services.print_effects._list_timelapse_videos",
             new=AsyncMock(return_value=(existing_videos, "/timelapse")),
         ),
     ):
@@ -125,8 +127,9 @@ async def test_running_observed_skips_when_baseline_already_present():
     _timelapse_baselines[1] = {"pre_existing_a.mp4", "pre_existing_b.mp4"}
 
     with (
-        patch("backend.app.main.async_session") as mock_session_maker,
-        patch("backend.app.main._list_timelapse_videos", new=AsyncMock()) as mock_list,
+        patch("backend.app.services.lifecycle.intake.async_session") as mock_session_maker,
+        patch("backend.app.services.print_effects.async_session", mock_session_maker),
+        patch("backend.app.services.print_effects._list_timelapse_videos", new=AsyncMock()) as mock_list,
     ):
         from backend.app.main import on_print_running_observed
 
@@ -159,8 +162,9 @@ async def test_running_observed_skips_when_printer_row_missing():
     mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
 
     with (
-        patch("backend.app.main.async_session") as mock_session_maker,
-        patch("backend.app.main._list_timelapse_videos", new=AsyncMock()) as mock_list,
+        patch("backend.app.services.lifecycle.intake.async_session") as mock_session_maker,
+        patch("backend.app.services.print_effects.async_session", mock_session_maker),
+        patch("backend.app.services.print_effects._list_timelapse_videos", new=AsyncMock()) as mock_list,
     ):
         mock_session_maker.return_value = mock_session
 

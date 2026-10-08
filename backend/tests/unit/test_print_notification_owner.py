@@ -1,6 +1,6 @@
 """Regression coverage for restart-safe print webhook ownership."""
 
-from backend.app.main import _resolve_print_notification_owner_id
+from backend.app.services.print_effects import _resolve_print_notification_owner_id
 
 
 def test_queued_print_notification_uses_persisted_job_owner():

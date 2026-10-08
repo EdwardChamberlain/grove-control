@@ -2953,8 +2953,8 @@ async def debug_simulate_print_complete(
     This triggers the same code path as a real print completion,
     without needing to wait for an actual print to finish.
     """
-    from backend.app.main import on_print_complete
     from backend.app.models.archive import PrintArchive
+    from backend.app.services.lifecycle.intake import print_completed
 
     # Simulate the identified active attempt, never unrelated historical work.
     result = await db.execute(
@@ -2987,8 +2987,8 @@ async def debug_simulate_print_complete(
 
     logger.info("Simulating print complete for printer %s, archive %s", printer_id, archive.id)
 
-    # Call the actual on_print_complete handler
-    await on_print_complete(printer_id, data)
+    # Call the actual print-complete handler
+    await print_completed(printer_id, data)
 
     return {"success": True, "archive_id": archive.id, "message": "Print completion simulated"}
 
@@ -3037,7 +3037,7 @@ async def stop_print(
     # the HMS heuristic in _dispatch_archive_update mislabels user-cancels
     # (e.g. the H2D's cancel-sequence module-0x0C HMS) as "Layer shift".
     try:
-        from backend.app.main import mark_printer_stopped_by_user
+        from backend.app.services.lifecycle.intake import mark_printer_stopped_by_user
 
         mark_printer_stopped_by_user(printer_id)
     except Exception as _mark_err:

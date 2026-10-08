@@ -21,8 +21,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from backend.app import main as main_module
 from backend.app.main import on_finish_photo_moment
+from backend.app.services import print_effects
 
 
 @asynccontextmanager
@@ -50,16 +50,16 @@ def fake_printer():
 @pytest.fixture(autouse=True)
 def _clean_state():
     """Don't leak event/cache dict entries across tests."""
-    main_module._stage22_finish_in_flight.clear()
-    main_module._stage22_finish_frames.clear()
+    print_effects._stage22_finish_in_flight.clear()
+    print_effects._stage22_finish_frames.clear()
     yield
-    main_module._stage22_finish_in_flight.clear()
-    main_module._stage22_finish_frames.clear()
+    print_effects._stage22_finish_in_flight.clear()
+    print_effects._stage22_finish_frames.clear()
 
 
 @pytest.fixture
 def patched_env(fake_printer, monkeypatch):
-    monkeypatch.setattr(main_module, "async_session", lambda: _fake_session(fake_printer))
+    monkeypatch.setattr(print_effects, "async_session", lambda: _fake_session(fake_printer))
 
     async def _get_setting(_db, key):
         if key == "capture_finish_photo":
@@ -86,7 +86,7 @@ async def test_event_registered_before_first_await(patched_env, monkeypatch):
     seen_during_capture = {}
 
     async def _slow_capture(**_kwargs):
-        seen_during_capture["registered"] = patched_env.id in main_module._stage22_finish_in_flight
+        seen_during_capture["registered"] = patched_env.id in print_effects._stage22_finish_in_flight
         await asyncio.sleep(0)
         return b"\xff\xd8frame"
 
@@ -111,9 +111,9 @@ async def test_event_set_after_successful_capture(patched_env, monkeypatch):
 
     await on_finish_photo_moment(patched_env.id, {"trigger": "finish_state"})
 
-    event = main_module._stage22_finish_in_flight[patched_env.id]
+    event = print_effects._stage22_finish_in_flight[patched_env.id]
     assert event.is_set()
-    assert main_module._stage22_finish_frames[patched_env.id] == b"\xff\xd8frame"
+    assert print_effects._stage22_finish_frames[patched_env.id] == b"\xff\xd8frame"
 
 
 async def test_event_set_when_capture_returns_no_frame(patched_env, monkeypatch):
@@ -130,9 +130,9 @@ async def test_event_set_when_capture_returns_no_frame(patched_env, monkeypatch)
 
     await on_finish_photo_moment(patched_env.id, {"trigger": "finish_state"})
 
-    event = main_module._stage22_finish_in_flight[patched_env.id]
+    event = print_effects._stage22_finish_in_flight[patched_env.id]
     assert event.is_set()
-    assert patched_env.id not in main_module._stage22_finish_frames
+    assert patched_env.id not in print_effects._stage22_finish_frames
 
 
 async def test_event_set_even_when_capture_raises(patched_env, monkeypatch):
@@ -149,7 +149,7 @@ async def test_event_set_even_when_capture_raises(patched_env, monkeypatch):
 
     await on_finish_photo_moment(patched_env.id, {"trigger": "finish_state"})
 
-    event = main_module._stage22_finish_in_flight[patched_env.id]
+    event = print_effects._stage22_finish_in_flight[patched_env.id]
     assert event.is_set()
 
 
@@ -163,7 +163,7 @@ async def test_no_event_when_timelapse_was_active(patched_env):
         {"trigger": "stage_22", "timelapse_was_active": True},
     )
 
-    assert patched_env.id not in main_module._stage22_finish_in_flight
+    assert patched_env.id not in print_effects._stage22_finish_in_flight
 
 
 async def test_event_set_when_capture_setting_disabled(patched_env, monkeypatch):
@@ -180,7 +180,7 @@ async def test_event_set_when_capture_setting_disabled(patched_env, monkeypatch)
 
     await on_finish_photo_moment(patched_env.id, {"trigger": "finish_state"})
 
-    event = main_module._stage22_finish_in_flight[patched_env.id]
+    event = print_effects._stage22_finish_in_flight[patched_env.id]
     assert event.is_set()
 
 
@@ -201,8 +201,8 @@ async def test_consumer_wait_unblocked_when_producer_completes(patched_env, monk
 
     await asyncio.sleep(0)  # let the producer register
 
-    event = main_module._stage22_finish_in_flight[patched_env.id]
+    event = print_effects._stage22_finish_in_flight[patched_env.id]
     await asyncio.wait_for(event.wait(), timeout=1.0)
 
-    assert main_module._stage22_finish_frames[patched_env.id] == b"\xff\xd8frame"
+    assert print_effects._stage22_finish_frames[patched_env.id] == b"\xff\xd8frame"
     await producer

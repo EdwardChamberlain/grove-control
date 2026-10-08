@@ -227,6 +227,8 @@ async def async_client(test_engine, db_session) -> AsyncGenerator[AsyncClient, N
         patch("backend.app.core.database.async_session", test_async_session),
         patch("backend.app.core.auth.async_session", test_async_session),
         patch("backend.app.main.async_session", test_async_session),
+        patch("backend.app.services.lifecycle.intake.async_session", test_async_session),
+        patch("backend.app.services.print_effects.async_session", test_async_session),
         patch("backend.app.main.init_printer_connections", mock_init_printer_connections),
     ):
         # Seed default groups for tests that need them
@@ -720,13 +722,16 @@ def capture_logs():
     handler = LogCapture()
     handler.setLevel(logging.DEBUG)
 
-    # Attach to root logger to capture all logs
+    # Attach to root logger to capture all logs, at INFO even before the app configures logging.
     root_logger = logging.getLogger()
+    level = root_logger.level
+    root_logger.setLevel(min(level, logging.INFO) if level else logging.INFO)
     root_logger.addHandler(handler)
 
     yield handler
 
     root_logger.removeHandler(handler)
+    root_logger.setLevel(level)
 
 
 @pytest.fixture

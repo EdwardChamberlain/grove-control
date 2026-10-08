@@ -456,7 +456,8 @@ async def test_committed_heat_soak_handoff_is_scheduled_without_copying(alignmen
 @pytest.mark.parametrize("current", ["busy", "reconnected_busy", "reconnected_idle", "missing", "unready", "offline"])
 async def test_heat_soak_dispatch_uses_current_telemetry_after_archive_copy(alignment, monkeypatch, current):
     import backend.app.main as main
-    from backend.app.services.lifecycle import dispatching as sched, preheating as heat
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import dispatching as sched, intake, preheating as heat
     from backend.app.services.print_scheduler import PrintScheduler
 
     scheduler = PrintScheduler()
@@ -600,7 +601,8 @@ async def test_late_external_archive_preserves_failure_after_user_clears_plate(
     alignment, monkeypatch, clear_plate, outcome, archived
 ):
     import backend.app.main as main
-    from backend.app.services.lifecycle import dispatching as sched
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import dispatching as sched, intake
     from backend.app.services.print_scheduler import PrintScheduler
     from backend.app.services.printer_manager import printer_manager
 
@@ -615,10 +617,11 @@ async def test_late_external_archive_preserves_failure_after_user_clears_plate(
         raw_data={"subtask_id": identity},
     )
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
-    monkeypatch.setattr(main, "async_session", alignment.sessions)
-    monkeypatch.setattr(main, "_started_job_effects", {})
-    monkeypatch.setattr(main, "_completed_job_events", {})
-    monkeypatch.setattr(main, "_user_stopped_printers", set())
+    monkeypatch.setattr(intake, "async_session", alignment.sessions)
+    monkeypatch.setattr(print_effects, "async_session", alignment.sessions)
+    monkeypatch.setattr(intake, "_started_job_effects", {})
+    monkeypatch.setattr(intake, "_completed_job_events", {})
+    monkeypatch.setattr(intake, "_user_stopped_printers", set())
     recovered_callbacks = []
 
     def wait_behind_start(coroutine, *, name):
@@ -650,7 +653,7 @@ async def test_late_external_archive_preserves_failure_after_user_clears_plate(
             )
         return True
 
-    monkeypatch.setattr(main, "_archive_print_start", delayed_download)
+    monkeypatch.setattr(print_effects, "_archive_print_start", delayed_download)
     await main.on_print_start(
         1, {"submission_id": identity, "filename": "source.3mf", "raw_data": {"gcode_state": "RUNNING"}}
     )

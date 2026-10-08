@@ -460,7 +460,7 @@ class TestDurableDispatchingState:
 
             with (
                 patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", return_value=status),
-                patch("backend.app.main.on_print_complete", new=complete),
+                patch("backend.app.services.lifecycle.intake.print_completed", new=complete),
                 patch("backend.app.services.lifecycle.dispatching.spawn_background_task", side_effect=spawn),
             ):
                 await PrintScheduler().dispatcher.recover(db)

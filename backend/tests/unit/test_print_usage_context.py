@@ -16,6 +16,8 @@ async def test_start_context_comes_from_identified_job_without_filename_registra
     alignment, monkeypatch, recovering, mapping
 ):
     import backend.app.main as main
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import intake
 
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
@@ -28,11 +30,12 @@ async def test_start_context_comes_from_identified_job_without_filename_registra
         archive_id = job.archive_id
     observed = AsyncMock(return_value=True)
     live = SimpleNamespace(state="RUNNING", connected=True, job_telemetry_ready=True, submission_id="123")
-    monkeypatch.setattr(main, "async_session", alignment.sessions)
+    monkeypatch.setattr(intake, "async_session", alignment.sessions)
+    monkeypatch.setattr(print_effects, "async_session", alignment.sessions)
     monkeypatch.setattr(main.printer_manager, "get_status", lambda _id: live)
-    monkeypatch.setattr(main, "_started_job_effects", {})
-    monkeypatch.setattr(main, "_archive_print_start", observed)
-    await main._observe_print_start(
+    monkeypatch.setattr(intake, "_started_job_effects", {})
+    monkeypatch.setattr(print_effects, "_archive_print_start", observed)
+    await intake._observe_print_start(
         1,
         {"submission_id": "123", "filename": "repeated.3mf", "ams_mapping": [99], "plate_id": 9},
         recovering=recovering,

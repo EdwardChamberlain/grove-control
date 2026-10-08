@@ -18,9 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from backend.app.core.config import settings as app_settings
-from backend.app.main import (
-    _timelapse_baselines,
-)
+from backend.app.services.print_effects import _timelapse_baselines
 
 
 @pytest.fixture(autouse=True)
@@ -33,18 +31,18 @@ def _clear_dicts():
 def _patches():
     """Common patches for driving on_print_start without side effects."""
     return (
-        patch("backend.app.main.async_session"),
-        patch("backend.app.main.notification_service"),
-        patch("backend.app.main.smart_plug_manager"),
-        patch("backend.app.main.ws_manager"),
-        patch("backend.app.main.printer_manager"),
-        patch("backend.app.main.mqtt_relay"),
-        patch("backend.app.main._record_energy_start", new_callable=AsyncMock),
-        patch("backend.app.main._load_objects_from_archive"),
-        patch("backend.app.main._store_spoolman_print_data", new_callable=AsyncMock),
-        patch("backend.app.main._send_print_start_notification", new_callable=AsyncMock),
+        patch("backend.app.services.print_effects.async_session"),
+        patch("backend.app.services.print_effects.notification_service"),
+        patch("backend.app.services.print_effects.smart_plug_manager"),
+        patch("backend.app.services.print_effects.ws_manager"),
+        patch("backend.app.services.print_effects.printer_manager"),
+        patch("backend.app.services.print_effects.mqtt_relay"),
+        patch("backend.app.services.print_effects._record_energy_start", new_callable=AsyncMock),
+        patch("backend.app.services.print_effects._load_objects_from_archive"),
+        patch("backend.app.services.print_effects._store_spoolman_print_data", new_callable=AsyncMock),
+        patch("backend.app.services.print_effects._send_print_start_notification", new_callable=AsyncMock),
         patch(
-            "backend.app.main._list_timelapse_videos",
+            "backend.app.services.print_effects._list_timelapse_videos",
             new=AsyncMock(return_value=([], "/timelapse")),
         ),
     )
@@ -149,7 +147,7 @@ async def test_reprint_clears_timelapse_path_and_unlinks_stale_file(tmp_path):
         mock_relay.on_print_start = AsyncMock()
         mock_pm.get_printer = MagicMock(return_value=MagicMock(name="Test", serial_number="TEST123"))
 
-        from backend.app.main import _archive_print_start as on_print_start, _finish_new_print
+        from backend.app.services.print_effects import _archive_print_start as on_print_start, _finish_new_print
 
         await on_print_start(
             1, {"filename": "MyModel.3mf", "subtask_name": "MyModel"}, queue_archive_id=mock_archive.id
@@ -230,7 +228,7 @@ async def test_reprint_with_no_timelapse_path_is_noop(tmp_path):
         mock_relay.on_print_start = AsyncMock()
         mock_pm.get_printer = MagicMock(return_value=MagicMock(name="Test", serial_number="TEST123"))
 
-        from backend.app.main import _archive_print_start as on_print_start, _finish_new_print
+        from backend.app.services.print_effects import _archive_print_start as on_print_start, _finish_new_print
 
         await on_print_start(
             1, {"filename": "FreshFile.3mf", "subtask_name": "FreshFile"}, queue_archive_id=mock_archive.id
@@ -306,7 +304,7 @@ async def test_reprint_with_missing_stale_file_does_not_raise(tmp_path):
         mock_relay.on_print_start = AsyncMock()
         mock_pm.get_printer = MagicMock(return_value=MagicMock(name="Test", serial_number="TEST123"))
 
-        from backend.app.main import _archive_print_start as on_print_start, _finish_new_print
+        from backend.app.services.print_effects import _archive_print_start as on_print_start, _finish_new_print
 
         await on_print_start(1, {"filename": "Ghost.3mf", "subtask_name": "Ghost"}, queue_archive_id=mock_archive.id)
         await _finish_new_print(1, {}, mock_archive.id)

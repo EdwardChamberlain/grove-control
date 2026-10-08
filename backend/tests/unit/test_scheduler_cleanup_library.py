@@ -350,8 +350,10 @@ async def test_archive_preparation_is_unsent_and_cancellation_still_fences_mqtt(
 async def test_old_completion_cannot_delete_a_later_upload(queue_factory, recorded_path, subtask_name):
     """Overlap real completion and dispatch; only the completed upload may go."""
     import backend.app.main as main
+    from backend.app.services import print_effects
     from backend.app.services.archive import ArchiveService
     from backend.app.services.bambu_ftp import DeleteResult
+    from backend.app.services.lifecycle import intake
 
     ctx = await queue_factory(cleanup=False)
     old_remote = "/same__grove_previous.3mf" if recorded_path else "/same.3mf"
@@ -403,8 +405,9 @@ async def test_old_completion_cannot_delete_a_later_upload(queue_factory, record
     ctx.upload.side_effect = upload_new
     state = SimpleNamespace(state="FINISH", connected=True, submission_id="123", subtask_id="123", raw_data={})
     with (
-        patch.object(main, "async_session", ctx.session_maker),
-        patch.object(main, "_completed_job_events", {}),
+        patch.object(intake, "async_session", ctx.session_maker),
+        patch.object(print_effects, "async_session", ctx.session_maker),
+        patch.object(intake, "_completed_job_events", {}),
         patch.object(main.printer_manager, "get_status", return_value=state),
         patch.object(main.printer_manager, "is_connected", return_value=True),
         patch.object(scheduler_module.settings, "base_dir", ctx.base_dir),
@@ -414,7 +417,7 @@ async def test_old_completion_cannot_delete_a_later_upload(queue_factory, record
         patch("backend.app.services.usage_tracker.on_print_complete", AsyncMock(side_effect=asyncio.CancelledError)),
     ):
         completion = asyncio.create_task(
-            main._complete_identified_print(
+            intake._complete_identified_print(
                 ctx.printer_id,
                 {
                     "status": "completed",
