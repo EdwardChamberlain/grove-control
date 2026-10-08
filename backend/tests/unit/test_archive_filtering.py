@@ -51,13 +51,14 @@ class TestCalibrationPrintFiltering:
             with patch(
                 "backend.app.services.print_effects._send_print_start_notification", new_callable=AsyncMock
             ) as mock_notif_send:
+                from backend.app.services.lifecycle.intake import print_memory
                 from backend.app.services.print_effects import _archive_print_start, _finish_new_print
 
                 data = {
                     "filename": "/usr/etc/print/auto_cali_for_user.gcode",
                     "subtask_name": "auto_cali_for_user",
                 }
-                await _archive_print_start(1, data)
+                await _archive_print_start(1, data, memory=print_memory)
                 mock_notif_send.assert_not_awaited()
                 await _finish_new_print(1, data, None)
 
@@ -106,9 +107,10 @@ class TestCalibrationPrintFiltering:
                 )
                 mock_session_maker.return_value = mock_session
 
+                from backend.app.services.lifecycle.intake import print_memory
                 from backend.app.services.print_effects import _archive_print_start as on_print_start
 
-                await on_print_start(1, {"filename": path, "subtask_name": "test"})
+                await on_print_start(1, {"filename": path, "subtask_name": "test"}, memory=print_memory)
 
             skip_msgs = [r for r in capture_logs.records if "internal printer file" in str(r.message)]
             assert skip_msgs, f"Path {path} should be skipped"
@@ -143,6 +145,7 @@ class TestCalibrationPrintFiltering:
             )
             mock_session_maker.return_value = mock_session
 
+            from backend.app.services.lifecycle.intake import print_memory
             from backend.app.services.print_effects import _archive_print_start as on_print_start
 
             await on_print_start(
@@ -151,6 +154,7 @@ class TestCalibrationPrintFiltering:
                     "filename": "/data/Metadata/benchy.gcode.3mf",
                     "subtask_name": "benchy",
                 },
+                memory=print_memory,
             )
 
         # Should NOT see "internal printer file" skip message

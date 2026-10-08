@@ -42,6 +42,7 @@ class PrintScheduler:
         self.dispatcher = Dispatcher(self._heat_soak, self.selection, self.drying)
         self.workers = queued.Workers(self._heat_soak, self.dispatcher)
         self._heat_soak_timer: asyncio.Task | None = None
+        self._dispatch_timer: asyncio.Task | None = None
         self._check_interval = 30  # seconds
         self._fast_check_interval = 3  # seconds while dispatch work is draining
 
@@ -51,6 +52,7 @@ class PrintScheduler:
         logger.info("Print scheduler started")
 
         await self.dispatcher.start()
+        self._dispatch_timer = spawn_background_task(self.dispatcher.run(), name="dispatch-recovery-timer")
         self._heat_soak_timer = spawn_background_task(self._heat_soak.run(), name="heat-soak-timer")
         next_archive_check = 0.0
         archive_check: asyncio.Task | None = None
@@ -74,24 +76,23 @@ class PrintScheduler:
     def stop(self):
         """Stop the scheduler."""
         self._running = False
-        if self._heat_soak_timer is not None:
-            self._heat_soak_timer.cancel()
+        for timer in (self._heat_soak_timer, self._dispatch_timer):
+            if timer is not None:
+                timer.cancel()
         # App shutdown also cancels the global task registry. Cancelling here
         # prevents a same-process restart from retaining upload reservations.
         for item_id in tuple(self.workers.inflight):
             self.workers.cancel(item_id)
         logger.info("Print scheduler stopped")
 
-    async def _check_heat_soaks(self, db: AsyncSession) -> set[int]:
-        """Dispatching's watch over unsent soak handoffs; the printers whose heaters are still shutting down."""
-        await self.dispatcher.wait_unsent(db)
+    async def _shutdown_printers(self, db: AsyncSession) -> set[int]:
+        """Printers unavailable for selection while their heaters are shutting down."""
         return set((await db.scalars(select(Printer.id).where(Printer.heat_soak_shutdown_pending.is_(True)))).all())
 
     async def check_queue(self) -> bool:
         """Check for prints ready to start and report whether to tick quickly."""
         async with async_session() as db:
-            shutdown_printers = await self._check_heat_soaks(db)
-            await self.dispatcher.recover(db)
+            shutdown_printers = await self._shutdown_printers(db)
 
             # Check if shortest-job-first scheduling is enabled
             sjf_enabled = await self._get_bool_setting(db, "queue_shortest_first")

@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import time
+from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -52,6 +53,10 @@ logger = logging.getLogger(__name__)
 # Bambu firmware states that mean the project_file has actually been accepted
 _ACTIVE_PRINT_STATES: frozenset[str] = frozenset({"PREPARE", "SLICING", "RUNNING", "PAUSE"})
 DISPATCH_TELEMETRY_WAIT_SECONDS = 30
+RECOVERY_INTERVAL = 30
+_wake: asyncio.Event | None = None
+
+
 _DISPATCH_REVIEW_MESSAGE = (
     "Printer did not provide a correlated active-state confirmation; "
     "dispatch held for manual review to avoid a duplicate print."
@@ -66,6 +71,11 @@ SOAKING = or_(
         PrintQueueItem.dispatch_subtask_id.is_(None),
     ),
 )
+
+
+def wake() -> None:
+    if _wake is not None:
+        _wake.set()
 
 
 def is_soaking(item: PrintQueueItem) -> bool:
@@ -664,6 +674,21 @@ class Dispatcher:
         except Exception:
             logger.exception("Failed to clear stale queue dispatch claims")
 
+    async def run(self) -> None:
+        """Recover and watch unsent handoffs on dispatching's own timer, waking on reconnects and entry."""
+        global _wake
+        _wake = asyncio.Event()
+        while True:
+            _wake.clear()
+            try:
+                async with async_session() as db:
+                    await self.wait_unsent(db)
+                    await self.recover(db)
+            except Exception:
+                logger.exception("Dispatch recovery failed")
+            with suppress(TimeoutError):
+                await asyncio.wait_for(_wake.wait(), RECOVERY_INTERVAL)
+
     async def recover(self, db: AsyncSession) -> None:
         """Recover, each pass: settle attempts that no worker or live confirmation owns, from telemetry."""
         active = PrintQueueItem.status.in_(("dispatching", "printing", "paused"))
@@ -771,6 +796,7 @@ async def on_enter(change, row) -> None:
     """Enter from preheating: this process's worker takes the soak over once the handoff commits."""
     from backend.app.services.print_scheduler import scheduler
 
+    effects.after_commit(change.db, wake, key="dispatch_wake")
     if change.before == "preheating" and row.preheat_owner == scheduler._heat_soak.owner:
         item_id = change.item_id
         effects.after_commit(

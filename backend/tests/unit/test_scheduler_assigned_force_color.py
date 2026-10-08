@@ -54,7 +54,7 @@ def skip_dispatch_recovery():
     """These queue-selection tests provide only pending-item query fixtures."""
     with (
         patch.object(Dispatcher, "recover", new=AsyncMock()),
-        patch.object(PrintScheduler, "_check_heat_soaks", new=AsyncMock(return_value=set())),
+        patch.object(PrintScheduler, "_shutdown_printers", new=AsyncMock(return_value=set())),
     ):
         yield
 

@@ -9,6 +9,7 @@ commits; intake waits for them before the printer's next event.
 
 import asyncio
 import logging
+from dataclasses import dataclass, field
 from functools import partial
 
 from sqlalchemy import or_, select
@@ -20,7 +21,7 @@ from backend.app.models.print_queue import AWAITING_PLATE_CLEAR_STATUSES, FINAL_
 from backend.app.models.printer import Printer
 from backend.app.services import print_effects
 from backend.app.services.job_identity import event_identity, find_job, telemetry_identity
-from backend.app.services.lifecycle import effects, preheating, printing
+from backend.app.services.lifecycle import dispatching, effects, preheating, printing
 from backend.app.services.lifecycle.engine import QueueTransitionConflict
 from backend.app.services.printer_manager import printer_manager
 
@@ -38,6 +39,27 @@ _user_stopped_printers: set[int] = set()
 # while the first real state after reconnect is active.
 _printer_reconciled_since_connect: dict[int, bool] = {}
 _pending_stale_reconciliation: set[int] = set()
+
+
+@dataclass
+class PrintMemory:
+    """Intake's per-print context, passed explicitly to the heavy services."""
+
+    finish_frames: dict[int, bytes] = field(default_factory=dict)
+    finish_in_flight: dict[int, asyncio.Event] = field(default_factory=dict)
+    timelapse_baselines: dict[int, set[str]] = field(default_factory=dict)
+    bed_cool_waiters: dict[int, dict] = field(default_factory=dict)
+
+
+print_memory = PrintMemory()
+
+
+async def finish_photo_moment(printer_id: int, data: dict) -> None:
+    await print_effects.on_finish_photo_moment(printer_id, data, memory=print_memory)
+
+
+async def bed_cooled(printer_id: int, bed_temp: float) -> None:
+    await print_effects.bed_cooled(printer_id, bed_temp, memory=print_memory)
 
 
 def _lock(printer_id: int) -> asyncio.Lock:
@@ -58,7 +80,7 @@ async def print_started(printer_id: int, data: dict, *, recovering: bool = False
 async def print_running_observed(printer_id: int, data: dict) -> None:
     """After a restart, restore the running print's job, then its usage tracking and timelapse baseline."""
     await print_started(printer_id, data, recovering=True)
-    await print_effects.print_resumed(printer_id)
+    await print_effects.print_resumed(printer_id, memory=print_memory)
 
 
 async def _observe_print_start(printer_id: int, data: dict, *, recovering: bool = False) -> None:
@@ -92,7 +114,9 @@ async def _observe_print_start(printer_id: int, data: dict, *, recovering: bool 
             "owner_id": item.created_by_id,
         }
         new = not recovering and _started_job_effects.get(printer_id) != item.id
-        work = partial(print_effects.print_started, printer_id, start, item.id, item.archive_id, new=new)
+        work = partial(
+            print_effects.print_started, printer_id, start, item.id, item.archive_id, new=new, memory=print_memory
+        )
         effects.after_commit_task(db, work, key=("print_start", item.id))
         item_id = item.id
         await db.commit()
@@ -191,7 +215,7 @@ async def _end(printer_id: int, identity: str | None, data: dict, stopped: bool,
     if job is None or done == job.id:
         return None
     job_id = job.id
-    await printing.end(db, job, data, stopped=stopped)
+    await printing.end(db, job, data, stopped=stopped, memory=print_memory)
     await db.commit()
     return job_id, effects.spawned(db)
 
@@ -235,6 +259,7 @@ async def printer_status(printer_id: int, state) -> None:
     known = bool(state.state) and state.state.upper() not in ("", "UNKNOWN")
     if state.connected and known and not _printer_reconciled_since_connect.get(printer_id, False):
         _printer_reconciled_since_connect[printer_id] = True
+        dispatching.wake()
         if _is_printer_actively_printing(state):
             _pending_stale_reconciliation.add(printer_id)
         elif printer_id in _pending_stale_reconciliation:
@@ -248,6 +273,7 @@ async def printer_status(printer_id: int, state) -> None:
             )
     elif not state.connected and _printer_reconciled_since_connect.get(printer_id, False):
         _printer_reconciled_since_connect[printer_id] = False  # Re-arm for the next reconnect.
+        dispatching.wake()
 
 
 def _is_printer_actively_printing(state) -> bool:
@@ -397,7 +423,9 @@ async def reconcile_print_archives() -> None:
             }
             try:
                 if data["filename"] or data["subtask_name"]:
-                    await print_effects._archive_print_start(job.printer_id, data, queue_job_id=job.id)
+                    await print_effects._archive_print_start(
+                        job.printer_id, data, queue_job_id=job.id, memory=print_memory
+                    )
                     await print_effects._link_observed_archive(job.printer_id, job.id, job.dispatch_subtask_id)
             except Exception:
                 logger.exception("Archive reconciliation failed for Queue job %s", job.id)

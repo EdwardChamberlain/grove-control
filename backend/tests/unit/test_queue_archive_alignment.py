@@ -623,7 +623,7 @@ async def test_late_external_archive_preserves_failure_after_user_clears_plate(
 
     monkeypatch.setattr(sched, "spawn_background_task", wait_behind_start)
 
-    async def delayed_download(printer_id, data, *, queue_archive_id=None, queue_job_id=None):
+    async def delayed_download(printer_id, data, *, queue_archive_id=None, queue_job_id=None, memory):
         assert queue_archive_id is None
         live.state = "FAILED"
         # Reconciliation can commit the terminal observation while the slow

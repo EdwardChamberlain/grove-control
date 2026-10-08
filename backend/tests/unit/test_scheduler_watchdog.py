@@ -572,7 +572,7 @@ class TestDispatchConfirmationScheduling:
             patch("backend.app.services.print_scheduler.async_session") as session_factory,
             patch("backend.app.services.lifecycle.queued.async_session", session_factory),
             patch.object(scheduler.dispatcher, "recover", new=AsyncMock()),
-            patch.object(scheduler, "_check_heat_soaks", new=AsyncMock(return_value=set())),
+            patch.object(scheduler, "_shutdown_printers", new=AsyncMock(return_value=set())),
             patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
             patch.object(scheduler.mapping, "_get_bool_setting", new=AsyncMock(return_value=False)),
             patch.object(scheduler.drying, "_get_bool_setting", new=AsyncMock(return_value=False)),

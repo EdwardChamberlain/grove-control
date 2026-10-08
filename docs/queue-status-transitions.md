@@ -132,8 +132,10 @@ the transaction that confirmed it announces only its end.
 
 Unsent heat-soak handoffs belong to dispatching rather than preheating's wait.
 Dispatching keeps their existing heartbeat abort, inspection message and view
-recovery policy, shared with preheating's, and checks them with its recovery
-on the scheduler's pass. The separate long-upload and interrupted-soak behavior
+recovery policy, shared with preheating's. Dispatching runs this watch and its
+telemetry recovery on its own 30-second timer, with an immediate first pass.
+Committed entry and intake's reconnect/disconnect events wake it sooner.
+Queue selection does not drive either state's timer; shutdown cancels both. The separate long-upload and interrupted-soak behavior
 fixes listed in #204 remain follow-up work.
 
 See
@@ -146,8 +148,11 @@ MQTT print events reach the lifecycle through intake
 (`services/lifecycle/intake.py`); the `main.py` callbacks only hand them on.
 Intake runs each printer's start, pause/resume, completion and reconnect events
 one at a time, matches each to its job, and keeps the per-print memory events
-need: whose start and completion already ran, and a Stop sent from the printer
-controls. Each reconnect also reconciles missed completions of unlinked legacy
+need: whose start and completion already ran, a Stop sent from the printer
+controls, finish-photo frames and producer events, timelapse baselines, and
+bed-cooldown waiters. The photo-moment and bed-temperature adapters also enter
+through intake. Heavy services receive its `PrintMemory` explicitly and keep
+no global per-print context. Each reconnect also reconciles missed completions of unlinked legacy
 Archives, deferring while the first real state is active.
 
 Start, pause and completion match printer plus persisted submission ID, never

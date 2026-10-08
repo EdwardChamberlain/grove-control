@@ -42,6 +42,7 @@ class TestPrintStartLogic:
             mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
             mock_session_maker.return_value = mock_session
 
+            from backend.app.services.lifecycle.intake import print_memory
             from backend.app.services.print_effects import _begin_new_print
 
             await _begin_new_print(
@@ -50,6 +51,7 @@ class TestPrintStartLogic:
                     "filename": "/data/Metadata/test.gcode",
                     "subtask_name": "Test",
                 },
+                memory=print_memory,
             )
 
             # Verify WebSocket notification was sent

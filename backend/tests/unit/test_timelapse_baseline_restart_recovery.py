@@ -18,14 +18,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.app.services.print_effects import _timelapse_baselines
+from backend.app.services.lifecycle.intake import print_memory
 
 
 @pytest.fixture(autouse=True)
 def _clear_baselines():
-    _timelapse_baselines.clear()
+    print_memory.timelapse_baselines.clear()
     yield
-    _timelapse_baselines.clear()
+    print_memory.timelapse_baselines.clear()
 
 
 @pytest.mark.asyncio
@@ -46,7 +46,9 @@ async def test_recovery_archive_work_does_not_replay_plate_check_or_start_notifi
         patch.object(print_effects, "_send_print_start_notification", new_callable=AsyncMock) as notify_start,
         patch("backend.app.services.plate_detection.check_plate_empty", new_callable=AsyncMock) as plate_check,
     ):
-        await print_effects._archive_print_start(1, {"submission_id": "existing", "filename": "same.3mf"})
+        await print_effects._archive_print_start(
+            1, {"submission_id": "existing", "filename": "same.3mf"}, memory=print_memory
+        )
     websocket_start.assert_not_awaited()
     notify_start.assert_not_awaited()
     plate_check.assert_not_awaited()
@@ -104,13 +106,13 @@ async def test_running_observed_captures_baseline_on_restart_recovery():
         )
 
         # Snapshot the dict state immediately after the handler returns —
-        # don't rely on _timelapse_baselines surviving outside the patches.
+        # don't rely on print_memory.timelapse_baselines surviving outside the patches.
         # CI intermittently saw the dict empty by the time a later top-level
         # assert ran (likely an xdist-parallel teardown race on the session-
         # scoped event_loop fixture in conftest.py). Capturing the value here
         # is what the test actually wants to verify anyway: the handler set
         # the baseline at the moment it returned.
-        captured = _timelapse_baselines.get(1)
+        captured = print_memory.timelapse_baselines.get(1)
 
     assert captured == {"earlier_a.mp4", "earlier_b.mp4", "earlier_c.mp4"}, (
         "restart-recovery handler must capture the printer's existing-videos "
@@ -124,7 +126,7 @@ async def test_running_observed_skips_when_baseline_already_present():
     printer (the realistic same-session race), a second capture would
     overwrite the correct pre-print baseline with one taken later — which
     could include the in-flight MP4. Skip when a baseline exists."""
-    _timelapse_baselines[1] = {"pre_existing_a.mp4", "pre_existing_b.mp4"}
+    print_memory.timelapse_baselines[1] = {"pre_existing_a.mp4", "pre_existing_b.mp4"}
 
     with (
         patch("backend.app.services.lifecycle.intake.async_session") as mock_session_maker,
@@ -149,7 +151,7 @@ async def test_running_observed_skips_when_baseline_already_present():
         mock_list.assert_not_called()
 
     # Original baseline preserved.
-    assert _timelapse_baselines[1] == {"pre_existing_a.mp4", "pre_existing_b.mp4"}
+    assert print_memory.timelapse_baselines[1] == {"pre_existing_a.mp4", "pre_existing_b.mp4"}
 
 
 @pytest.mark.asyncio
@@ -185,4 +187,4 @@ async def test_running_observed_skips_when_printer_row_missing():
         # FTP scan must not run if the printer row didn't resolve.
         mock_list.assert_not_called()
 
-    assert 999 not in _timelapse_baselines
+    assert 999 not in print_memory.timelapse_baselines

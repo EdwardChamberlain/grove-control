@@ -473,6 +473,7 @@ async def test_running_recovery_observes_job_without_new_start_effects(sessions)
     assert archive_start.await_args.kwargs == {
         "queue_archive_id": archive_id,
         "queue_job_id": job_id,
+        "memory": intake.print_memory,
     }
     async with sessions() as db:
         assert (await db.get(PrintQueueItem, job_id)).status == "printing"

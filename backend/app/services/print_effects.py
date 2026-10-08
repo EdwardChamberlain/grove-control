@@ -56,37 +56,6 @@ from backend.app.utils.safe_path import PathTraversalError, safe_join_under
 
 logger = logging.getLogger(__name__)
 
-# #1721: stage-22 pre-captured finish photo bytes per printer. on_finish_photo_moment
-# fires when stg_cur enters 22 ("Filament unloading") at end-of-print — toolhead
-# parked, bed not yet dropped — and grabs a single camera frame into this cache.
-# `_background_finish_photo` (inside on_print_complete) consumes the cached bytes
-# instead of running its own grab-now chain when present, so the finish photo
-# captures the better-framed pre-bed-drop moment without us having to force
-# timelapse on at dispatch (the #1397 mechanism that caused #1721's per-layer
-# nozzle parking on slicer profiles with Timelapse Type = Smooth).
-_stage22_finish_frames: dict[int, bytes] = {}
-
-
-# #1790: per-printer producer-done event. Set by `on_finish_photo_moment` in its
-# `finally` block (whether it captured a frame or not). The consumer in
-# `_background_finish_photo` waits on it before reading `_stage22_finish_frames`
-# so the FINISH-state fallback path — where moment and completion are dispatched
-# back-to-back — doesn't race past the producer with an empty pop, and the
-# consumer's RTSP fallback can't collide with the producer's still-in-flight RTSP
-# grab (Bambu printers allow only one RTSP client at a time).
-_stage22_finish_in_flight: dict[int, asyncio.Event] = {}
-
-
-# Track timelapse file baselines at print start: {printer_id: set of video filenames}
-# Used for snapshot-diff detection at print completion
-_timelapse_baselines: dict[int, set[str]] = {}
-
-
-# Track printers waiting for bed to cool after print completion.
-# Event-driven: fires when bed_temper arrives via MQTT below threshold.
-# {printer_id: {"threshold": float, "filename": str, "registered_at": float}}
-_bed_cool_waiters: dict[int, dict] = {}
-
 
 # HMS short-code → human-readable failure reason. Used by _dispatch_archive_update
 # when status="failed" to label the print's failure_reason in archives.
@@ -128,6 +97,11 @@ _HMS_FAILURE_REASONS: dict[str, str] = {
     "0701_8013": "Clogged nozzle",
     "0702_8003": "Clogged nozzle",
 }
+
+
+async def _one(db, query):
+    """Read one optional row for a print effect."""
+    return (await db.execute(query)).scalar_one_or_none()
 
 
 def _hms_short_code(attr: int, code: int | str) -> str:
@@ -200,8 +174,7 @@ async def _record_energy_start(archive, printer_id: int, db, *, context: str = "
     """
     _logger = logging.getLogger(__name__)
     try:
-        plug_result = await db.execute(select(SmartPlug).where(SmartPlug.printer_id == printer_id))
-        plug = plug_result.scalar_one_or_none()
+        plug = await _one(db, select(SmartPlug).where(SmartPlug.printer_id == printer_id))
         if not plug:
             _logger.info("[ENERGY] No smart plug for printer %s (archive %s)", printer_id, archive.id)
             return False
@@ -551,8 +524,7 @@ async def _send_print_start_notification(
     """Helper to send print start notification with optional archive data."""
     try:
         async with async_session() as db:
-            result = await db.execute(select(Printer).where(Printer.id == printer_id))
-            printer = result.scalar_one_or_none()
+            printer = await _one(db, select(Printer).where(Printer.id == printer_id))
             printer_name = printer.name if printer else f"Printer {printer_id}"
 
             # Capture camera snapshot for notification image attachment
@@ -673,14 +645,14 @@ async def _link_observed_archive(printer_id: int, item_id: int, identity: str) -
         return archive.id
 
 
-async def _begin_new_print(printer_id: int, data: dict) -> None:
+async def _begin_new_print(printer_id: int, data: dict, *, memory) -> None:
     """Run new-print actions once, independently of Archive recovery."""
     client = printer_manager.get_client(printer_id)
     if client:
         client.state.skipped_objects = []
-    _stage22_finish_frames.pop(printer_id, None)
-    _timelapse_baselines.pop(printer_id, None)
-    if _bed_cool_waiters.pop(printer_id, None):
+    memory.finish_frames.pop(printer_id, None)
+    memory.timelapse_baselines.pop(printer_id, None)
+    if memory.bed_cool_waiters.pop(printer_id, None):
         logger.info("[BED-COOL] Cancelled bed cooldown waiter for printer %s (new print started)", printer_id)
     from backend.app.api.routes.printers import clear_cover_cache
 
@@ -711,8 +683,7 @@ async def _begin_new_print(printer_id: int, data: dict) -> None:
     except Exception as e:
         logger.warning("Smart plug on_print_start failed: %s", e)
     async with async_session() as db:
-        result = await db.execute(select(Printer).where(Printer.id == printer_id))
-        printer = result.scalar_one_or_none()
+        printer = await _one(db, select(Printer).where(Printer.id == printer_id))
         if printer and printer.plate_detection_enabled:
             logger.info("[PLATE CHECK] ENTERING plate detection code for printer %s", printer_id)
             try:
@@ -813,7 +784,7 @@ async def _finish_new_print(printer_id: int, data: dict, archive_id: int | None)
 
 
 async def _archive_print_start(
-    printer_id: int, data: dict, *, queue_archive_id: int | None = None, queue_job_id: int | None = None
+    printer_id: int, data: dict, *, memory, queue_archive_id: int | None = None, queue_job_id: int | None = None
 ) -> bool:
     """Associate the exact job Archive and restore its metadata.
 
@@ -821,8 +792,7 @@ async def _archive_print_start(
     and this path never repeats new-print notifications, plate checks or usage resets.
     """
     async with async_session() as db:
-        result = await db.execute(select(Printer).where(Printer.id == printer_id))
-        printer = result.scalar_one_or_none()
+        printer = await _one(db, select(Printer).where(Printer.id == printer_id))
         if queue_archive_id is None and queue_job_id is not None:
             owned_archive = await db.scalar(
                 select(PrintArchive).where(
@@ -850,8 +820,7 @@ async def _archive_print_start(
         expected_archive_id = queue_archive_id
         if expected_archive_id:
             logger.info("Using expected archive %s for print (skipping duplicate)", expected_archive_id)
-            result = await db.execute(select(PrintArchive).where(PrintArchive.id == expected_archive_id))
-            archive = result.scalar_one_or_none()
+            archive = await _one(db, select(PrintArchive).where(PrintArchive.id == expected_archive_id))
             if archive:
                 if archive.dispatched_queue_item_id is None:
                     archive.status = "printing"
@@ -864,7 +833,7 @@ async def _archive_print_start(
                     archive.printer_id = printer_id
                 await db.commit()
                 await ws_manager.send_archive_updated({"id": archive.id, "status": archive.status})
-                await _restore_archive_print_context(db, printer, archive, data)
+                await _restore_archive_print_context(db, printer, archive, data, memory=memory)
             return True
         existing_archive: PrintArchive | None = None
         if subtask_id:
@@ -879,7 +848,7 @@ async def _archive_print_start(
                 existing_archive = candidates[0]
         if existing_archive:
             logger.info("Resuming archive %s on subtask_id match (%s)", existing_archive.id, subtask_id)
-            await _restore_archive_print_context(db, printer, existing_archive, data)
+            await _restore_archive_print_context(db, printer, existing_archive, data, memory=memory)
             return True
         retry = await get_ftp_retry_settings()
         temp_path, downloaded_filename = await _fetch_print_3mf(printer, filename, subtask_name, retry)
@@ -957,7 +926,7 @@ async def _archive_print_start(
                 await db.commit()
                 await db.refresh(fallback_archive)
                 logger.info("Created fallback archive %s for %s (no 3MF available)", fallback_archive.id, print_name)
-                await _restore_archive_print_context(db, printer, fallback_archive, data)
+                await _restore_archive_print_context(db, printer, fallback_archive, data, memory=memory)
                 await _announce_archive(printer, fallback_archive)
                 return True
             except Exception as e:
@@ -974,7 +943,7 @@ async def _archive_print_start(
             )
             if archive:
                 logger.info("Created archive %s for %s", archive.id, downloaded_filename)
-                await _restore_archive_print_context(db, printer, archive, data)
+                await _restore_archive_print_context(db, printer, archive, data, memory=memory)
                 await _announce_archive(printer, archive)
             return archive is not None
         finally:
@@ -1093,7 +1062,7 @@ async def _announce_archive(printer, archive) -> None:
         )
 
 
-async def _restore_archive_print_context(db, printer, archive, data: dict) -> None:
+async def _restore_archive_print_context(db, printer, archive, data: dict, *, memory) -> None:
     """Restore runtime context only while this exact print is still active."""
     if archive.dispatched_queue_item_id is not None:
         job = await db.get(PrintQueueItem, archive.dispatched_queue_item_id)
@@ -1121,8 +1090,7 @@ async def _restore_archive_print_context(db, printer, archive, data: dict) -> No
     )
     _maybe_start_layer_timelapse(printer, printer.id, archive.id)
     _load_objects_from_archive(archive, printer.id, logger, reset_skipped=False)
-    if printer.id not in _timelapse_baselines:
-        await _capture_timelapse_baseline_at_start(printer, printer.id, logger)
+    await _capture_timelapse_baseline_at_start(printer, printer.id, logger, memory=memory)
 
 
 _TIMELAPSE_VIDEO_EXTENSIONS = (".mp4", ".avi")
@@ -1157,7 +1125,7 @@ async def _list_timelapse_videos(printer) -> tuple[list[dict], str | None]:
     return [], None
 
 
-async def _capture_timelapse_baseline_at_start(printer, printer_id: int, logger: logging.Logger) -> None:
+async def _capture_timelapse_baseline_at_start(printer, printer_id: int, logger: logging.Logger, *, memory) -> None:
     """Snapshot the printer's timelapse directory at print start so the
     completion-time scan can pick the new file by set-difference.
 
@@ -1171,13 +1139,13 @@ async def _capture_timelapse_baseline_at_start(printer, printer_id: int, logger:
     Bambu printers in LAN-only mode don't sync NTP, so mtime ordering is
     unreliable — the snapshot-diff approach sidesteps that entirely.
     """
+    if printer_id in memory.timelapse_baselines:
+        return
     try:
         baseline_files, _ = await _list_timelapse_videos(printer)
-        _timelapse_baselines[printer_id] = {f.get("name", "") for f in baseline_files}
+        memory.timelapse_baselines[printer_id] = {f.get("name", "") for f in baseline_files}
         logger.info(
-            "[TIMELAPSE] Baseline at print start: %s video files for printer %s",
-            len(_timelapse_baselines[printer_id]),
-            printer_id,
+            "Printer %s: timelapse baseline has %s files", printer_id, len(memory.timelapse_baselines[printer_id])
         )
     except Exception as e:
         logger.warning("[TIMELAPSE] Failed to capture baseline at print start: %s", e)
@@ -1199,8 +1167,7 @@ async def _scan_for_timelapse_with_retries(archive_id: int, baseline_names: set[
                 )
                 return
             if baseline_names is None:
-                result = await db.execute(select(Printer).where(Printer.id == archive.printer_id))
-                printer = result.scalar_one_or_none()
+                printer = await _one(db, select(Printer).where(Printer.id == archive.printer_id))
                 if not printer:
                     logger.warning("[TIMELAPSE] Printer not found for archive %s, aborting", archive_id)
                     return
@@ -1239,8 +1206,7 @@ async def _attach_found_timelapse(archive_id: int, pick) -> bool:
         if not archive or archive.timelapse_path:
             logger.info("[TIMELAPSE] Archive %s is gone or has a timelapse, stopping", archive_id)
             return True
-        result = await db.execute(select(Printer).where(Printer.id == archive.printer_id))
-        if not (printer := result.scalar_one_or_none()):
+        if not (printer := await _one(db, select(Printer).where(Printer.id == archive.printer_id))):
             logger.warning("[TIMELAPSE] Printer not found for archive %s, stopping", archive_id)
             return True
         video_files, found_path = await _list_timelapse_videos(printer)
@@ -1293,8 +1259,7 @@ async def _capture_finish_photo_from_timelapse(
     deadline = loop.time() + _FINISH_PHOTO_TIMELAPSE_POLL_TIMEOUT_SECONDS
     while True:
         async with async_session() as db:
-            result = await db.execute(select(PrintArchive).where(PrintArchive.id == archive_id))
-            archive = result.scalar_one_or_none()
+            archive = await _one(db, select(PrintArchive).where(PrintArchive.id == archive_id))
         # SEC-PATH-OK: timelapse_path is written by attach_timelapse.
         video_path = app_settings.base_dir / archive.timelapse_path if archive and archive.timelapse_path else None
         if video_path and video_path.exists() and video_path.stat().st_size > 0:
@@ -1374,7 +1339,7 @@ async def _restore_usage_tracking_session(printer_id: int, state, db, logger) ->
         logger.exception("[RESTART] Failed to restore usage-tracking session for printer %s", printer_id)
 
 
-async def on_finish_photo_moment(printer_id: int, data: dict):
+async def on_finish_photo_moment(printer_id: int, data: dict, *, memory):
     """Pre-capture a finish photo when the printer enters stage 22 / FINISH (#1721).
 
     Fires either at the stage-22 ("Filament unloading") edge — toolhead
@@ -1382,7 +1347,7 @@ async def on_finish_photo_moment(printer_id: int, data: dict):
     fallback for prints that skip stage 22 (cancel, external-spool-only,
     HMS halt, firmware variants). Grabs one frame via the same
     external-camera / RTSP path the post-completion fallback uses, stores
-    the JPEG bytes in ``_stage22_finish_frames[printer_id]``, and lets
+    the JPEG bytes in ``memory.finish_frames[printer_id]``, and lets
     ``_background_finish_photo`` consume the cached bytes when it runs.
 
     Replaces the #1397 "force timelapse on at dispatch" mechanism, which
@@ -1413,7 +1378,7 @@ async def on_finish_photo_moment(printer_id: int, data: dict):
     # The `finally` below guarantees `set()` runs on every exit, including
     # early returns and exceptions, so the consumer's bounded wait can't hang.
     producer_done = asyncio.Event()
-    _stage22_finish_in_flight[printer_id] = producer_done
+    memory.finish_in_flight[printer_id] = producer_done
 
     try:
         async with async_session() as db:
@@ -1424,8 +1389,7 @@ async def on_finish_photo_moment(printer_id: int, data: dict):
                 logger.info("[FINISH-PHOTO-MOMENT] capture_finish_photo disabled — skipping pre-capture")
                 return
 
-            result = await db.execute(select(Printer).where(Printer.id == printer_id))
-            printer = result.scalar_one_or_none()
+            printer = await _one(db, select(Printer).where(Printer.id == printer_id))
             if printer is None:
                 logger.warning("[FINISH-PHOTO-MOMENT] printer %s not found in DB", printer_id)
                 return
@@ -1446,7 +1410,7 @@ async def on_finish_photo_moment(printer_id: int, data: dict):
             )
         if frame_bytes:
             logger.info("[FINISH-PHOTO-MOMENT] captured %s frame (%d bytes)", source, len(frame_bytes))
-            _stage22_finish_frames[printer_id] = frame_bytes
+            memory.finish_frames[printer_id] = frame_bytes
         else:
             logger.warning(
                 "[FINISH-PHOTO-MOMENT] no frame captured for printer %s — post-completion fallback will retry",
@@ -1461,21 +1425,23 @@ async def on_finish_photo_moment(printer_id: int, data: dict):
         producer_done.set()
 
 
-async def print_started(printer_id: int, data: dict, job_id: int, archive_id: int | None, *, new: bool) -> None:
+async def print_started(printer_id: int, data: dict, job_id: int, archive_id: int | None, *, new: bool, memory) -> None:
     """A print's start effects: new-print actions once per print, its Archive, then the start notification."""
     linked = archive_id
     try:
         if new:
-            await _begin_new_print(printer_id, data)
+            await _begin_new_print(printer_id, data, memory=memory)
         if data.get("filename") or data.get("subtask_name"):
-            await _archive_print_start(printer_id, data, queue_archive_id=archive_id, queue_job_id=job_id)
+            await _archive_print_start(
+                printer_id, data, queue_archive_id=archive_id, queue_job_id=job_id, memory=memory
+            )
         linked = await _link_observed_archive(printer_id, job_id, data["submission_id"])
     finally:
         if new:
             await _finish_new_print(printer_id, data, linked)
 
 
-async def print_resumed(printer_id: int) -> None:
+async def print_resumed(printer_id: int, *, memory) -> None:
     """After a restart mid-print, restore usage tracking and capture the timelapse baseline.
 
     The first RUNNING push after startup reports no print start (#1304), so
@@ -1483,22 +1449,20 @@ async def print_resumed(printer_id: int) -> None:
     printer uploaded the new video, and never find it (#1485). The printer
     uploads only after completion, so any baseline taken mid-print is safe.
     """
-    if printer_id in _timelapse_baselines:
-        logger.debug("[TIMELAPSE] on_print_running_observed: baseline already present for printer %s", printer_id)
+    if printer_id in memory.timelapse_baselines:
         return
     async with async_session() as db:
         state = printer_manager.get_status(printer_id)
         if state is not None:
             await _restore_usage_tracking_session(printer_id, state, db, logger)
-        result = await db.execute(select(Printer).where(Printer.id == printer_id))
-        printer = result.scalar_one_or_none()
+        printer = await _one(db, select(Printer).where(Printer.id == printer_id))
         if not printer:
             logger.warning("[TIMELAPSE] on_print_running_observed: printer %s not found in DB", printer_id)
             return
-    await _capture_timelapse_baseline_at_start(printer, printer_id, logger)
+    await _capture_timelapse_baseline_at_start(printer, printer_id, logger, memory=memory)
 
 
-async def print_completed(c) -> None:
+async def print_completed(c, *, memory) -> None:
     """A print's completion effects, once its job's awaiting state has committed (``c`` is a printing.Completion)."""
     printer_id, data, archive_id = c.printer_id, c.data, c.archive_id
     status = data.get("status", "completed")
@@ -1521,16 +1485,11 @@ async def print_completed(c) -> None:
                 data.get("subtask_name", ""),
                 status,
             )
-    logger.info(
-        "Print complete - filename: %s, subtask: %s, status: %s",
-        data.get("filename", ""),
-        data.get("subtask_name", ""),
-        status,
-    )
+    logger.info("Printer %s: print %s ended as %s", printer_id, name, status)
     await _clean_sd_card(c)
     await _queue_completed(c, name)
     if status == "completed":
-        await _await_bed_cooldown(printer_id, name)
+        await _await_bed_cooldown(printer_id, name, memory=memory)
     usage_results = await _track_usage(c)
     if not archive_id:
         logger.warning(
@@ -1544,7 +1503,9 @@ async def print_completed(c) -> None:
     await _write_print_log(c, usage_results)
     # Slow work runs in the background, so the next event is not held up.
     spawn_background_task(_record_print_energy(printer_id, archive_id), name="background-energy-calc")
-    photo = spawn_background_task(_capture_finish_photo(printer_id, archive_id, data), name="background-finish-photo")
+    photo = spawn_background_task(
+        _capture_finish_photo(printer_id, archive_id, data, memory=memory), name="background-finish-photo"
+    )
     spawn_background_task(_smart_plug_completed(printer_id, status), name="background-smart-plug")
     spawn_background_task(_check_maintenance(printer_id, status), name="background-maintenance-check")
     spawn_background_task(_notify_after_photo(c, usage_results, photo), name="photo-then-notify")
@@ -1552,10 +1513,8 @@ async def print_completed(c) -> None:
     if data.get("timelapse_was_active") and status == "completed":
         # The printer needs time to encode the video after completion.
         logger.info("[TIMELAPSE] Timelapse was active during print, scheduling auto-scan for archive %s", archive_id)
-        baseline = _timelapse_baselines.pop(printer_id, None)
-        spawn_background_task(
-            _scan_for_timelapse_with_retries(archive_id, baseline), name=f"scan-timelapse-{archive_id}"
-        )
+        scan = _scan_for_timelapse_with_retries(archive_id, memory.timelapse_baselines.pop(printer_id, None))
+        spawn_background_task(scan, name=f"scan-timelapse-{archive_id}")
     logger.info("[CALLBACK] on_print_complete finished for printer %s, archive %s", printer_id, archive_id)
 
 
@@ -1573,8 +1532,7 @@ async def _clean_sd_card(c) -> None:
         return
     try:
         async with async_session() as db:
-            result = await db.execute(select(Printer).where(Printer.id == c.printer_id))
-            printer = result.scalar_one_or_none()
+            printer = await _one(db, select(Printer).where(Printer.id == c.printer_id))
         if not printer:
             return
         from backend.app.services.bambu_ftp import DeleteResult, delete_file_async
@@ -1656,7 +1614,7 @@ async def _queue_completed(c, name: str) -> None:
             logger.warning("Failed to schedule queue auto-off for printer %s: %s", c.printer_id, e)
 
 
-async def _await_bed_cooldown(printer_id: int, name: str) -> None:
+async def _await_bed_cooldown(printer_id: int, name: str, *, memory) -> None:
     """Register a bed-cooled waiter, fired by bed temperature updates, when a provider wants the event."""
     try:
         from backend.app.api.routes.settings import get_setting
@@ -1668,16 +1626,16 @@ async def _await_bed_cooldown(printer_id: int, name: str) -> None:
         if not providers:
             logger.debug("[BED-COOL] No providers enabled for bed_cooled on printer %s", printer_id)
             return
-        _bed_cool_waiters[printer_id] = {"threshold": threshold, "filename": name, "registered_at": time.time()}
+        memory.bed_cool_waiters[printer_id] = {"threshold": threshold, "filename": name, "registered_at": time.time()}
         logger.info("[BED-COOL] Registered waiter for printer %s (threshold: %.0f°C)", printer_id, threshold)
     except Exception as e:
         logger.warning("[BED-COOL] Failed to register waiter: %s", e)
 
 
-async def bed_cooled(printer_id: int, bed_temp: float) -> None:
+async def bed_cooled(printer_id: int, bed_temp: float, *, memory) -> None:
     """Bed temperature: notify once a completed print's bed has cooled to its waiter's threshold."""
-    waiter = _bed_cool_waiters.get(printer_id)
-    if not waiter or bed_temp > waiter["threshold"] or not _bed_cool_waiters.pop(printer_id, None):
+    waiter = memory.bed_cool_waiters.get(printer_id)
+    if not waiter or bed_temp > waiter["threshold"] or not memory.bed_cool_waiters.pop(printer_id, None):
         return  # Not waiting, still warm, or another update already notified.
     threshold = waiter["threshold"]
     logger.info("[BED-COOL] Bed cooled to %.1f°C on printer %s (threshold: %.0f°C)", bed_temp, printer_id, threshold)
@@ -1757,8 +1715,7 @@ async def _job_notification_data(c, usage_results: list[dict], db) -> dict:
         if job := await db.get(PrintQueueItem, c.job_id):
             data["created_by_id"] = job.created_by_id
             if job.library_file_id:
-                result = await db.execute(select(LibraryFile).where(LibraryFile.id == job.library_file_id))
-                source = result.scalar_one_or_none()
+                source = await _one(db, select(LibraryFile).where(LibraryFile.id == job.library_file_id))
                 if source and source.print_time_seconds:
                     data["print_time_seconds"] = source.print_time_seconds
     except Exception as lookup_err:
@@ -1854,8 +1811,7 @@ async def _record_print_energy(printer_id: int, archive_id: int) -> None:
             if starting_kwh is None:
                 logger.info("[ENERGY-BG] No start kWh recorded for archive %s", archive_id)
                 return
-            plug_result = await db.execute(select(SmartPlug).where(SmartPlug.printer_id == printer_id))
-            plug = plug_result.scalar_one_or_none()
+            plug = await _one(db, select(SmartPlug).where(SmartPlug.printer_id == printer_id))
             if plug is None:
                 logger.info("[ENERGY-BG] No smart plug for printer %s", printer_id)
                 return
@@ -1942,7 +1898,7 @@ def _stream_frame(printer_id: int) -> bytes | None:
     return get_buffered_frame(printer_id) if streaming else None
 
 
-async def _capture_finish_photo(printer_id: int, archive_id: int, data: dict) -> str | None:
+async def _capture_finish_photo(printer_id: int, archive_id: int, data: dict, *, memory) -> str | None:
     """Capture the finish photo into the Archive; returns its filename for the notification.
 
     Sources, best framing first: the timelapse's last frame (#1397), the frame
@@ -1957,11 +1913,9 @@ async def _capture_finish_photo(printer_id: int, archive_id: int, data: dict) ->
             capture_enabled = await get_setting(db, "capture_finish_photo")
             if capture_enabled is not None and capture_enabled.lower() != "true":
                 return None
-            result = await db.execute(select(Printer).where(Printer.id == printer_id))
-            if not (printer := result.scalar_one_or_none()):
+            if not (printer := await _one(db, select(Printer).where(Printer.id == printer_id))):
                 return None
-            result = await db.execute(select(PrintArchive).where(PrintArchive.id == archive_id))
-            if not (archive := result.scalar_one_or_none()):
+            if not (archive := await _one(db, select(PrintArchive).where(PrintArchive.id == archive_id))):
                 return None
             if archive.file_path:
                 archive_dir = app_settings.base_dir / Path(archive.file_path).parent
@@ -1980,7 +1934,7 @@ async def _capture_finish_photo(printer_id: int, archive_id: int, data: dict) ->
             if not photo_filename:
                 # #1790: the stage-22 producer may still be grabbing over the
                 # camera's single RTSP client; wait for it before any fallback.
-                in_flight = _stage22_finish_in_flight.pop(printer_id, None)
+                in_flight = memory.finish_in_flight.pop(printer_id, None)
                 if in_flight is not None:
                     try:
                         await asyncio.wait_for(in_flight.wait(), timeout=20.0)
@@ -1989,7 +1943,7 @@ async def _capture_finish_photo(printer_id: int, archive_id: int, data: dict) ->
                             "[PHOTO-BG] timed out waiting for stage-22 producer for printer %s — proceeding to fallback",
                             printer_id,
                         )
-                if cached_frame := _stage22_finish_frames.pop(printer_id, None):
+                if cached_frame := memory.finish_frames.pop(printer_id, None):
                     photo_filename = await _save_photo(archive_dir, cached_frame)
                     logger.info(
                         "[PHOTO-BG] Saved stage-22 pre-captured frame: %s (%d bytes)", photo_filename, len(cached_frame)
@@ -2040,8 +1994,7 @@ async def _check_maintenance(printer_id: int, status: str) -> None:
     try:
         logger.info("[MAINT-BG] Starting maintenance check for printer %s", printer_id)
         async with async_session() as db:
-            result = await db.execute(select(Printer).where(Printer.id == printer_id))
-            printer = result.scalar_one_or_none()
+            printer = await _one(db, select(Printer).where(Printer.id == printer_id))
             printer_name = printer.name if printer else f"Printer {printer_id}"
             await ensure_default_types(db)
             overview = await _get_printer_maintenance_internal(printer_id, db, commit=True)
@@ -2095,12 +2048,10 @@ async def _notify_completion(c, usage_results: list[dict], finish_photo: str | N
     try:
         logger.info("[NOTIFY-BG] Starting notifications for printer %s, photo=%s", printer_id, finish_photo)
         async with async_session() as db:
-            result = await db.execute(select(Printer).where(Printer.id == printer_id))
-            printer = result.scalar_one_or_none()
+            printer = await _one(db, select(Printer).where(Printer.id == printer_id))
             printer_name = printer.name if printer else f"Printer {printer_id}"
             if archive_id:
-                result = await db.execute(select(PrintArchive).where(PrintArchive.id == archive_id))
-                archive = result.scalar_one_or_none()
+                archive = await _one(db, select(PrintArchive).where(PrintArchive.id == archive_id))
                 archive_data = archive and await _archive_notification_data(c, archive, usage_results, finish_photo, db)
             else:
                 archive_data = await _job_notification_data(c, usage_results, db)

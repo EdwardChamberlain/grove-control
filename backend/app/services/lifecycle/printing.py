@@ -208,7 +208,7 @@ async def observe_print(
     return item, False
 
 
-async def end(db: AsyncSession, job: PrintQueueItem, data: dict, *, stopped: bool) -> None:
+async def end(db: AsyncSession, job: PrintQueueItem, data: dict, *, stopped: bool, memory) -> None:
     """Exit for the printer's report that the print ended, into the awaiting state for its outcome.
 
     ``stopped`` is a Grove Stop from the printer controls. The completion
@@ -279,7 +279,7 @@ async def end(db: AsyncSession, job: PrintQueueItem, data: dict, *, stopped: boo
             "plate_id": job.plate_id if job.plate_id is not None else data.get("plate_id"),
         },
     )
-    effects.after_commit_task(db, partial(print_completed, completion), key=("print_complete", job.id))
+    effects.after_commit_task(db, partial(print_completed, completion, memory=memory), key=("print_complete", job.id))
 
 
 async def _bump_library_file_usage_if_completed(db, item, queue_status: str) -> None:

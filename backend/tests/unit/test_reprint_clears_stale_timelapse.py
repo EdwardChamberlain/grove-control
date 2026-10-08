@@ -18,14 +18,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from backend.app.core.config import settings as app_settings
-from backend.app.services.print_effects import _timelapse_baselines
+from backend.app.services.lifecycle.intake import print_memory
 
 
 @pytest.fixture(autouse=True)
 def _clear_dicts():
-    _timelapse_baselines.clear()
+    print_memory.timelapse_baselines.clear()
     yield
-    _timelapse_baselines.clear()
+    print_memory.timelapse_baselines.clear()
 
 
 def _patches():
@@ -150,7 +150,10 @@ async def test_reprint_clears_timelapse_path_and_unlinks_stale_file(tmp_path):
         from backend.app.services.print_effects import _archive_print_start as on_print_start, _finish_new_print
 
         await on_print_start(
-            1, {"filename": "MyModel.3mf", "subtask_name": "MyModel"}, queue_archive_id=mock_archive.id
+            1,
+            {"filename": "MyModel.3mf", "subtask_name": "MyModel"},
+            queue_archive_id=mock_archive.id,
+            memory=print_memory,
         )
         await _finish_new_print(1, {}, mock_archive.id)
 
@@ -231,7 +234,10 @@ async def test_reprint_with_no_timelapse_path_is_noop(tmp_path):
         from backend.app.services.print_effects import _archive_print_start as on_print_start, _finish_new_print
 
         await on_print_start(
-            1, {"filename": "FreshFile.3mf", "subtask_name": "FreshFile"}, queue_archive_id=mock_archive.id
+            1,
+            {"filename": "FreshFile.3mf", "subtask_name": "FreshFile"},
+            queue_archive_id=mock_archive.id,
+            memory=print_memory,
         )
         await _finish_new_print(1, {}, mock_archive.id)
 
@@ -306,7 +312,9 @@ async def test_reprint_with_missing_stale_file_does_not_raise(tmp_path):
 
         from backend.app.services.print_effects import _archive_print_start as on_print_start, _finish_new_print
 
-        await on_print_start(1, {"filename": "Ghost.3mf", "subtask_name": "Ghost"}, queue_archive_id=mock_archive.id)
+        await on_print_start(
+            1, {"filename": "Ghost.3mf", "subtask_name": "Ghost"}, queue_archive_id=mock_archive.id, memory=print_memory
+        )
         await _finish_new_print(1, {}, mock_archive.id)
 
     assert mock_archive.timelapse_path is None

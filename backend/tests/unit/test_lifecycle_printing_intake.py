@@ -29,7 +29,7 @@ def test_mqtt_callbacks_are_thin_intake_adapters():
         "on_print_running_observed": "intake",
         "on_print_state_change": "intake",
         "on_print_complete": "intake",
-        "on_finish_photo_moment": "print_effects",
+        "on_finish_photo_moment": "intake",
     }
     found = {node.name: node for node in tree.body if isinstance(node, ast.AsyncFunctionDef)}
     for name, module in callbacks.items():
@@ -181,3 +181,148 @@ async def test_preheating_runs_its_wait_on_its_own_timer(alignment, monkeypatch)
         await asyncio.gather(timer, return_exceptions=True)
         preheating._wake = None
         preheating._watched = None
+
+
+async def test_dispatch_recovery_timer_confirms_a_job_without_a_scheduler_pass(alignment, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    from backend.app.services.lifecycle import dispatching
+    from backend.app.services.print_scheduler import PrintScheduler
+
+    service = PrintScheduler().dispatcher
+    monkeypatch.setattr(dispatching, "async_session", alignment.sessions)
+    live = SimpleNamespace(connected=True, job_telemetry_ready=True, state="RUNNING", submission_id="123")
+    monkeypatch.setattr(dispatching.printer_manager, "get_status", lambda _: live)
+    published = asyncio.Event()
+    monkeypatch.setattr(effects, "publish_queue_job_started", AsyncMock(side_effect=lambda _: published.set()))
+    async with alignment.sessions() as db:
+        job = await db.get(PrintQueueItem, alignment.job_id)
+        await transition_queue_item(
+            db,
+            job,
+            "queued",
+            "dispatching",
+            values={"dispatch_subtask_id": "123", "dispatched_at": datetime.now(timezone.utc) - timedelta(minutes=5)},
+        )
+        await db.commit()
+    await service.start()
+    timer = asyncio.create_task(service.run())
+    try:
+        await asyncio.wait_for(published.wait(), 2)
+        async with alignment.sessions() as db:
+            assert (await db.get(PrintQueueItem, alignment.job_id)).status == "printing"
+    finally:
+        timer.cancel()
+        await asyncio.gather(timer, return_exceptions=True)
+        monkeypatch.setattr(dispatching, "_wake", None)
+
+
+async def test_dispatch_timer_watches_an_expired_unsent_handoff(alignment, monkeypatch):
+    from datetime import timedelta
+
+    from backend.app.services.lifecycle import dispatching
+    from backend.app.services.print_scheduler import PrintScheduler
+
+    service = PrintScheduler().dispatcher
+    monkeypatch.setattr(dispatching, "async_session", alignment.sessions)
+    async with alignment.sessions() as db:
+        job = await db.get(PrintQueueItem, alignment.job_id)
+        await enter_preheating(
+            db,
+            job,
+            {"chamber_heat_soak": True, "preheat_owner": "previous-process", "preheat_checked_at": preheating.utcnow()},
+        )
+        await transition_queue_item(db, job, "preheating", "dispatching")
+        job.preheat_checked_at = preheating.utcnow() - timedelta(seconds=100)
+        await db.commit()
+    recovered = asyncio.Event()
+    monkeypatch.setattr(service, "recover", AsyncMock(side_effect=lambda _: recovered.set()))
+    timer = asyncio.create_task(service.run())
+    try:
+        await asyncio.wait_for(recovered.wait(), 2)
+        async with alignment.sessions() as db:
+            job = await db.get(PrintQueueItem, alignment.job_id)
+            assert job.status == "dispatching"
+            assert job.error_message == "Heat soak interrupted; inspect the printer, then stop or skip heat soak"
+    finally:
+        timer.cancel()
+        await asyncio.gather(timer, return_exceptions=True)
+        monkeypatch.setattr(dispatching, "_wake", None)
+
+
+async def test_dispatch_timer_retries_failures_and_wakes_before_its_timeout(alignment, monkeypatch):
+    from backend.app.services.lifecycle import dispatching
+    from backend.app.services.print_scheduler import PrintScheduler
+
+    service = PrintScheduler().dispatcher
+    monkeypatch.setattr(dispatching, "async_session", alignment.sessions)
+    monkeypatch.setattr(dispatching, "RECOVERY_INTERVAL", 0.01)
+    service.wait_unsent = AsyncMock(side_effect=[RuntimeError("database busy"), None, None])
+    recovered = asyncio.Event()
+    service.recover = AsyncMock(side_effect=lambda _: recovered.set())
+    timer = asyncio.create_task(service.run())
+    try:
+        await asyncio.wait_for(recovered.wait(), 2)  # A failed pass must not kill recovery.
+        assert service.wait_unsent.await_count == 2
+        monkeypatch.setattr(dispatching, "RECOVERY_INTERVAL", 60)
+        recovered.clear()
+        dispatching.wake()
+        await asyncio.wait_for(recovered.wait(), 2)
+        assert service.wait_unsent.await_count == 3
+    finally:
+        timer.cancel()
+        await asyncio.gather(timer, return_exceptions=True)
+        monkeypatch.setattr(dispatching, "_wake", None)
+
+
+async def test_bed_cooldown_adapter_consumes_only_its_printers_intake_memory(alignment, monkeypatch):
+    monkeypatch.setattr(intake, "print_memory", intake.PrintMemory())
+    monkeypatch.setattr(print_effects, "async_session", alignment.sessions)
+    notify = AsyncMock()
+    monkeypatch.setattr(print_effects.notification_service, "on_bed_cooled", notify)
+    monkeypatch.setattr(print_effects.printer_manager, "get_printer", lambda _: None)
+    intake.print_memory.bed_cool_waiters.update(
+        {1: {"threshold": 35, "filename": "first"}, 2: {"threshold": 30, "filename": "second"}}
+    )
+    await intake.bed_cooled(1, 40)
+    notify.assert_not_awaited()
+    await intake.bed_cooled(1, 35)
+    await intake.bed_cooled(1, 20)
+    assert notify.await_count == 1
+    assert notify.await_args.kwargs["filename"] == "first"
+    assert intake.print_memory.bed_cool_waiters == {2: {"threshold": 30, "filename": "second"}}
+    assert intake.PrintMemory().bed_cool_waiters == {}  # Independent contexts never share dictionaries.
+
+
+@pytest.mark.parametrize("commit", [True, False])
+async def test_dispatch_entry_wakes_recovery_only_after_commit(alignment, monkeypatch, commit):
+    from backend.app.services.lifecycle import dispatching
+
+    monkeypatch.setattr(dispatching, "_wake", asyncio.Event())
+    async with alignment.sessions() as db:
+        job = await db.get(PrintQueueItem, alignment.job_id)
+        await transition_queue_item(db, job, "queued", "dispatching")
+        assert not dispatching._wake.is_set()
+        await (db.commit() if commit else db.rollback())
+    assert dispatching._wake.is_set() is commit
+
+
+async def test_intake_wakes_dispatch_recovery_on_each_known_connection_edge(monkeypatch):
+    from backend.app.services.lifecycle import dispatching
+
+    monkeypatch.setattr(dispatching, "_wake", asyncio.Event())
+    monkeypatch.setattr(intake, "_printer_reconciled_since_connect", {})
+    monkeypatch.setattr(intake, "_pending_stale_reconciliation", set())
+    monkeypatch.setattr(preheating, "observe", lambda *_: None)
+    await intake.printer_status(1, _telemetry("UNKNOWN"))
+    assert not dispatching._wake.is_set()  # Construction defaults cannot settle a job.
+    await intake.printer_status(1, _telemetry("RUNNING"))
+    assert dispatching._wake.is_set()
+    dispatching._wake.clear()
+    await intake.printer_status(1, _telemetry("RUNNING"))
+    assert not dispatching._wake.is_set()
+    await intake.printer_status(1, _telemetry("RUNNING", connected=False))
+    assert dispatching._wake.is_set()
+    dispatching._wake.clear()
+    await intake.printer_status(1, _telemetry("RUNNING"))
+    assert dispatching._wake.is_set()

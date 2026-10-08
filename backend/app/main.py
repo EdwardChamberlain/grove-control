@@ -75,7 +75,6 @@ from backend.app.core.config import APP_VERSION, settings as app_settings
 from backend.app.core.database import async_session, engine, init_db
 from backend.app.core.tasks import cancel_background_tasks, spawn_background_task
 from backend.app.core.websocket import ws_manager
-from backend.app.services import print_effects
 from backend.app.services.archive_purge import archive_purge_service
 from backend.app.services.bambu_mqtt import PrinterState
 from backend.app.services.github_backup import github_backup_service
@@ -798,7 +797,7 @@ async def on_print_complete(printer_id: int, data: dict):
 
 
 async def on_finish_photo_moment(printer_id: int, data: dict):
-    await print_effects.on_finish_photo_moment(printer_id, data)
+    await intake.finish_photo_moment(printer_id, data)
 
 
 def _is_bambu_uuid(tray_uuid: str) -> bool:
@@ -2543,7 +2542,7 @@ async def lifespan(app: FastAPI):
 
     printer_manager.set_layer_change_callback(on_layer_change)
 
-    printer_manager.set_bed_temp_update_callback(print_effects.bed_cooled)
+    printer_manager.set_bed_temp_update_callback(intake.bed_cooled)
 
     async def on_drying_complete(printer_id: int, ams_id: int):
         """Smart-plug auto-off-after-drying trigger (#1349).

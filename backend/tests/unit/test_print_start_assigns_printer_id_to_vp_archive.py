@@ -16,14 +16,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.app.services.print_effects import _timelapse_baselines
+from backend.app.services.lifecycle.intake import print_memory
 
 
 @pytest.fixture(autouse=True)
 def _clear_dicts():
-    _timelapse_baselines.clear()
+    print_memory.timelapse_baselines.clear()
     yield
-    _timelapse_baselines.clear()
+    print_memory.timelapse_baselines.clear()
 
 
 @pytest.mark.asyncio
@@ -105,6 +105,7 @@ async def test_expected_archive_path_assigns_printer_id_when_unset():
                 "subtask_name": "bambu_lab_a1_tool_plate_3",
             },
             queue_archive_id=mock_archive.id,
+            memory=print_memory,
         )
 
         assert mock_archive.printer_id == 1, (
@@ -186,7 +187,10 @@ async def test_expected_archive_path_preserves_existing_printer_id():
         from backend.app.services.print_effects import _archive_print_start as on_print_start
 
         await on_print_start(
-            7, {"filename": "MyModel.3mf", "subtask_name": "MyModel"}, queue_archive_id=mock_archive.id
+            7,
+            {"filename": "MyModel.3mf", "subtask_name": "MyModel"},
+            queue_archive_id=mock_archive.id,
+            memory=print_memory,
         )
 
         assert mock_archive.printer_id == 7
@@ -202,7 +206,7 @@ async def test_expected_archive_path_captures_timelapse_baseline():
     the new file ends up in the baseline set and no diff ever matches, so
     auto-attach never picks the right file.
 
-    Regression: at print start the global _timelapse_baselines dict must
+    Regression: at print start the global print_memory.timelapse_baselines dict must
     contain the snapshot of existing video filenames for this printer_id,
     so the completion-time scan can set-diff against it.
     """
@@ -296,9 +300,10 @@ async def test_expected_archive_path_captures_timelapse_baseline():
                 "subtask_name": "bambu_lab_a1_tool_plate_3",
             },
             queue_archive_id=mock_archive.id,
+            memory=print_memory,
         )
 
-        assert _timelapse_baselines.get(1) == {"earlier_print_a.mp4", "earlier_print_b.mp4"}, (
+        assert print_memory.timelapse_baselines.get(1) == {"earlier_print_a.mp4", "earlier_print_b.mp4"}, (
             "expected-archive branch must capture the printer's existing-videos "
             "baseline so completion-time scan can set-diff to find the new file"
         )

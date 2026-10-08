@@ -21,14 +21,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from backend.app.core.config import settings as app_settings
-from backend.app.services.print_effects import _timelapse_baselines
+from backend.app.services.lifecycle.intake import print_memory
 
 
 @pytest.fixture(autouse=True)
 def _clear_dicts():
-    _timelapse_baselines.clear()
+    print_memory.timelapse_baselines.clear()
     yield
-    _timelapse_baselines.clear()
+    print_memory.timelapse_baselines.clear()
 
 
 def _patches():
@@ -156,6 +156,7 @@ async def _drive(tmp_path, mock_archive, mqtt_subtask_id: str | None):
                 "raw_data": {"subtask_id": mqtt_subtask_id} if mqtt_subtask_id is not None else {},
             },
             queue_archive_id=mock_archive.id,
+            memory=print_memory,
         )
 
 
