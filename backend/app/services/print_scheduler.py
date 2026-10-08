@@ -194,20 +194,15 @@ class PrintScheduler:
                 pool_reason=pool_waiting_reason,
             )
             dispatch_ids = list(selection.printers)
-            if busy_printers:
-                # Log why each printer was busy (first time it was checked)
-                for pid in busy_printers:
-                    state = printer_manager.get_status(pid)
-                    connected = printer_manager.is_connected(pid)
-                    awaiting = printer_manager.is_awaiting_plate_clear(pid)
-                    state_name = state.state if state else "NO_STATUS"
-                    logger.info(
-                        "Queue: printer %d not available — connected=%s, state=%s, awaiting_plate_clear=%s",
-                        pid,
-                        connected,
-                        state_name,
-                        awaiting,
-                    )
+            for pid in busy_printers:  # Why each printer is unavailable this pass.
+                state = printer_manager.get_status(pid)
+                logger.info(
+                    "Queue: printer %d not available — connected=%s, state=%s, awaiting_plate_clear=%s",
+                    pid,
+                    printer_manager.is_connected(pid),
+                    state.state if state else "NO_STATUS",
+                    printer_manager.is_awaiting_plate_clear(pid),
+                )
 
             # Commit selection metadata before workers open their independent sessions.
             if dispatch_ids or selection.changed:
@@ -239,16 +234,11 @@ class PrintScheduler:
             # but deferred by a full pool.
             return bool(dispatch_ids) or bool(inflight)
 
-    async def _get_setting(self, db: AsyncSession, key: str) -> str | None:
-        """Read a setting value from the database."""
-        result = await db.execute(select(Settings).where(Settings.key == key))
-        setting = result.scalar_one_or_none()
-        return setting.value if setting else None
-
     async def _get_int_setting(self, db: AsyncSession, key: str, default: int) -> int:
         """Read an integer setting, falling back safely for legacy rows."""
         try:
-            value = await self._get_setting(db, key)
+            setting = (await db.execute(select(Settings).where(Settings.key == key))).scalar_one_or_none()
+            value = setting.value if setting else None
         except StopAsyncIteration:
             # A few lightweight scheduler tests provide a finite mocked query
             # sequence from before this optional setting existed. A missing

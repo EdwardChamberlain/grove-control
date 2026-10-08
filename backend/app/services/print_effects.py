@@ -564,17 +564,19 @@ async def _send_print_start_notification(
 
             await notification_service.on_print_start(printer_id, printer_name, data, db, archive_data=archive_data)
 
-            # Send user-specific email notification for print start
-            if archive_data and archive_data.get("created_by_id"):
-                await notification_service.send_user_print_email(
-                    event_type="user_print_start",
-                    created_by_id=archive_data["created_by_id"],
-                    printer_name=printer_name,
-                    filename=data.get("subtask_name") or data.get("filename", "Unknown"),
-                    db=db,
-                )
+            filename = data.get("subtask_name") or data.get("filename", "Unknown")
+            owner = archive_data.get("created_by_id") if archive_data else None
+            await _dispatch_user_print_email("started", owner, printer_name, filename, db)
     except Exception as e:
         logger.warning("Notification on_print_start failed: %s", e)
+
+
+_USER_PRINT_EMAILS = {
+    "started": "user_print_start",
+    "completed": "user_print_complete",
+    "failed": "user_print_failed",
+    **dict.fromkeys(("stopped", "aborted", "cancelled"), "user_print_stopped"),
+}
 
 
 async def _dispatch_user_print_email(
@@ -584,24 +586,9 @@ async def _dispatch_user_print_email(
     filename: str,
     db,
 ) -> None:
-    """Send a user-specific print-completion email based on print status.
-
-    Maps the normalised print status to the correct event type and delegates
-    to :meth:`NotificationService.send_user_print_email`.  A single helper
-    avoids duplicating the ``if status == "completed" / elif "failed" / elif
-    "stopped"`` dispatch block at every call site.
-
-    Does nothing if *created_by_id* is ``None``.
-    """
-    if created_by_id is None:
-        return
-    if status == "completed":
-        event_type = "user_print_complete"
-    elif status == "failed":
-        event_type = "user_print_failed"
-    elif status in ("stopped", "aborted", "cancelled"):
-        event_type = "user_print_stopped"
-    else:
+    """Email the print's owner the event for ``status``; nobody for an ownerless print."""
+    event_type = _USER_PRINT_EMAILS.get(status)
+    if created_by_id is None or event_type is None:
         return
     await notification_service.send_user_print_email(
         event_type=event_type,
@@ -610,23 +597,6 @@ async def _dispatch_user_print_email(
         filename=filename,
         db=db,
     )
-
-
-def _resolve_print_notification_owner_id(
-    completed_queue_item_id: int | None,
-    completed_queue_item_owner_id: int | None,
-    archive_created_by_id: int | None,
-) -> int | None:
-    """Return the persisted queue-job owner for a print notification.
-
-    Queue ownership belongs to the print run, while ``archive_created_by_id``
-    identifies the file uploader. The queue-status transition supplies both
-    queue values from the database, so this remains correct after a service
-    restart has cleared printer-manager's in-memory user cache.
-    """
-    if completed_queue_item_id is not None:
-        return completed_queue_item_owner_id
-    return archive_created_by_id
 
 
 def _load_objects_from_archive(archive, printer_id: int, logger, *, reset_skipped: bool = True) -> None:
@@ -729,17 +699,10 @@ async def _begin_new_print(printer_id: int, data: dict) -> None:
             )
     try:
         async with async_session() as db:
-            from backend.app.api.routes.settings import get_setting
             from backend.app.services.usage_tracker import on_print_start as usage_on_print_start
 
-            _spoolman_on = await get_setting(db, "spoolman_enabled")
-            await usage_on_print_start(
-                printer_id,
-                data,
-                printer_manager,
-                db=db,
-                spoolman_owns_usage=bool(_spoolman_on) and _spoolman_on.lower() == "true",
-            )
+            owned = await _spoolman_owns_usage(db)
+            await usage_on_print_start(printer_id, data, printer_manager, db=db, spoolman_owns_usage=owned)
     except Exception as e:
         logger.warning("Usage tracker on_print_start failed: %s", e)
     try:
@@ -962,20 +925,18 @@ async def _archive_print_start(
         if not downloaded_filename or not temp_path:
             logger.warning("Could not find 3MF file for print: %s", filename or subtask_name)
             try:
-                print_name = subtask_name or filename
-                if print_name:
-                    print_name = print_name.split("/")[-1]
-                    print_name = print_name.replace(".gcode.3mf", "").replace(".gcode", "").replace(".3mf", "")
-                else:
-                    print_name = "Unknown Print"
+                print_name = (subtask_name or filename).split("/")[-1]
+                for suffix in (".gcode.3mf", ".gcode", ".3mf"):
+                    print_name = print_name.replace(suffix, "")
+                print_name = print_name if (subtask_name or filename) else "Unknown Print"
+                # The remaining time at start: seconds, or the printer's minutes.
+                remaining = data.get("remaining_time")
+                minutes = (data.get("raw_data") or {}).get("mc_remaining_time")
                 fallback_print_time = None
-                mqtt_remaining = data.get("remaining_time")
-                if mqtt_remaining and isinstance(mqtt_remaining, (int, float)) and (mqtt_remaining > 0):
-                    fallback_print_time = int(mqtt_remaining)
-                if fallback_print_time is None:
-                    mc_remaining = (data.get("raw_data") or {}).get("mc_remaining_time")
-                    if mc_remaining and isinstance(mc_remaining, (int, float)) and (mc_remaining > 0):
-                        fallback_print_time = int(mc_remaining * 60)
+                if isinstance(remaining, (int, float)) and remaining > 0:
+                    fallback_print_time = int(remaining)
+                elif isinstance(minutes, (int, float)) and minutes > 0:
+                    fallback_print_time = int(minutes * 60)
                 mqtt_filament_meta = _extract_filament_data_from_mqtt(data, data.get("ams_mapping"))
                 fallback_archive = PrintArchive(
                     printer_id=printer_id,
@@ -1328,48 +1289,48 @@ async def _capture_finish_photo_from_timelapse(
     """
     from backend.app.services.camera import extract_video_last_frame
 
-    deadline = asyncio.get_event_loop().time() + _FINISH_PHOTO_TIMELAPSE_POLL_TIMEOUT_SECONDS
-    poll_interval = _FINISH_PHOTO_TIMELAPSE_POLL_INTERVAL_SECONDS
-
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + _FINISH_PHOTO_TIMELAPSE_POLL_TIMEOUT_SECONDS
     while True:
         async with async_session() as db:
             result = await db.execute(select(PrintArchive).where(PrintArchive.id == archive_id))
             archive = result.scalar_one_or_none()
-            timelapse_relpath = archive.timelapse_path if archive else None
-
-        if timelapse_relpath:
-            video_path = app_settings.base_dir / timelapse_relpath  # SEC-PATH-OK: written by attach_timelapse
-            if video_path.exists() and video_path.stat().st_size > 0:
-                filename, output_path = _new_photo(archive_dir)
-                if await extract_video_last_frame(video_path, output_path):
-                    logger.info(
-                        "[PHOTO-BG] Extracted finish photo from timelapse %s for archive %s",
-                        video_path.name,
-                        archive_id,
-                    )
-                    return filename
-                logger.warning(
-                    "[PHOTO-BG] Timelapse %s landed but last-frame extraction failed for archive %s; falling back",
-                    video_path.name,
-                    archive_id,
+        # SEC-PATH-OK: timelapse_path is written by attach_timelapse.
+        video_path = app_settings.base_dir / archive.timelapse_path if archive and archive.timelapse_path else None
+        if video_path and video_path.exists() and video_path.stat().st_size > 0:
+            filename, output_path = _new_photo(archive_dir)
+            if await extract_video_last_frame(video_path, output_path):
+                logger.info(
+                    "[PHOTO-BG] Extracted finish photo from timelapse %s for archive %s", video_path.name, archive_id
                 )
-                return None
-
-        if asyncio.get_event_loop().time() >= deadline:
+                return filename
+            logger.warning(
+                "[PHOTO-BG] Timelapse %s landed but last-frame extraction failed for archive %s; falling back",
+                video_path.name,
+                archive_id,
+            )
+            return None
+        if loop.time() >= deadline:
             logger.info(
                 "[PHOTO-BG] Timelapse for archive %s didn't land within %.0fs; falling back to live camera",
                 archive_id,
                 _FINISH_PHOTO_TIMELAPSE_POLL_TIMEOUT_SECONDS,
             )
             return None
+        await asyncio.sleep(_FINISH_PHOTO_TIMELAPSE_POLL_INTERVAL_SECONDS)
 
-        await asyncio.sleep(poll_interval)
+
+async def _spoolman_owns_usage(db) -> bool:
+    """Whether Spoolman tracks filament usage, rather than the AMS remain% tracker."""
+    from backend.app.api.routes.settings import get_setting
+
+    value = await get_setting(db, "spoolman_enabled")
+    return bool(value) and value.lower() == "true"
 
 
 async def _restore_usage_tracking_session(printer_id: int, state, db, logger) -> None:
     """Restore filament-attribution context after a restart mid-print."""
     try:
-        from backend.app.api.routes.settings import get_setting
         from backend.app.services.usage_tracker import (
             clear_persisted_session,
             get_persisted_print_name,
@@ -1388,12 +1349,8 @@ async def _restore_usage_tracking_session(printer_id: int, state, db, logger) ->
             await clear_persisted_session(db, printer_id)
             persisted_log = None
         else:
-            spoolman_on = await get_setting(db, "spoolman_enabled")
-            persisted_log = await restore_session(
-                db,
-                printer_id,
-                register_active=not (bool(spoolman_on) and spoolman_on.lower() == "true"),
-            )
+            owned = await _spoolman_owns_usage(db)
+            persisted_log = await restore_session(db, printer_id, register_active=not owned)
 
         if persisted_log:
             restored = [tuple(entry) for entry in persisted_log if isinstance(entry, (list, tuple)) and len(entry) == 2]
@@ -1436,10 +1393,7 @@ async def on_finish_photo_moment(printer_id: int, data: dict):
     trigger = data.get("trigger", "unknown")
     timelapse_was_active = bool(data.get("timelapse_was_active"))
     logger.info(
-        "[FINISH-PHOTO-MOMENT] printer=%s trigger=%s timelapse_active=%s",
-        printer_id,
-        trigger,
-        timelapse_was_active,
+        "[FINISH-PHOTO-MOMENT] printer=%s trigger=%s timelapse_active=%s", printer_id, trigger, timelapse_was_active
     )
 
     # If a timelapse is actively recording, skip the pre-capture — the
@@ -1473,47 +1427,25 @@ async def on_finish_photo_moment(printer_id: int, data: dict):
             result = await db.execute(select(Printer).where(Printer.id == printer_id))
             printer = result.scalar_one_or_none()
             if printer is None:
-                logger.warning(
-                    "[FINISH-PHOTO-MOMENT] printer %s not found in DB",
-                    printer_id,
-                )
+                logger.warning("[FINISH-PHOTO-MOMENT] printer %s not found in DB", printer_id)
                 return
 
-        frame_bytes: bytes | None = None
+        from backend.app.api.routes.camera import get_buffered_frame
+        from backend.app.services.camera import capture_camera_frame_bytes
 
         if printer.external_camera_enabled and printer.external_camera_url:
-            frame_bytes = await _external_frame(printer_id, printer)
-            if frame_bytes:
-                logger.info(
-                    "[FINISH-PHOTO-MOMENT] captured external-camera frame (%d bytes)",
-                    len(frame_bytes),
-                )
+            source, frame_bytes = "external-camera", await _external_frame(printer_id, printer)
+        elif buffered := get_buffered_frame(printer_id):
+            source, frame_bytes = "buffered RTSP", buffered
         else:
-            from backend.app.api.routes.camera import get_buffered_frame
-
-            buffered = get_buffered_frame(printer_id)
-            if buffered:
-                frame_bytes = buffered
-                logger.info(
-                    "[FINISH-PHOTO-MOMENT] used buffered RTSP frame (%d bytes)",
-                    len(frame_bytes),
-                )
-            else:
-                from backend.app.services.camera import capture_camera_frame_bytes
-
-                frame_bytes = await capture_camera_frame_bytes(
-                    ip_address=printer.ip_address,
-                    access_code=printer.access_code,
-                    model=printer.model,
-                    timeout=15,
-                )
-                if frame_bytes:
-                    logger.info(
-                        "[FINISH-PHOTO-MOMENT] captured RTSP frame (%d bytes)",
-                        len(frame_bytes),
-                    )
-
+            source, frame_bytes = (
+                "RTSP",
+                await capture_camera_frame_bytes(
+                    ip_address=printer.ip_address, access_code=printer.access_code, model=printer.model, timeout=15
+                ),
+            )
         if frame_bytes:
+            logger.info("[FINISH-PHOTO-MOMENT] captured %s frame (%d bytes)", source, len(frame_bytes))
             _stage22_finish_frames[printer_id] = frame_bytes
         else:
             logger.warning(
@@ -1521,11 +1453,7 @@ async def on_finish_photo_moment(printer_id: int, data: dict):
                 printer_id,
             )
     except Exception as e:
-        logger.warning(
-            "[FINISH-PHOTO-MOMENT] pre-capture failed for printer %s: %s",
-            printer_id,
-            e,
-        )
+        logger.warning("[FINISH-PHOTO-MOMENT] pre-capture failed for printer %s: %s", printer_id, e)
     finally:
         # #1790: always unblock the consumer's bounded wait — whether we stored
         # a frame, gave up, or hit an exception. Local ref means cleanup of the
@@ -1610,7 +1538,7 @@ async def print_completed(c) -> None:
             data.get("filename", ""),
             data.get("subtask_name", ""),
         )
-        spawn_background_task(_notify_without_archive(c, usage_results), name="notify-no-archive")
+        spawn_background_task(_notify_completion(c, usage_results), name="notify-no-archive")
         return
     await _publish_archive_outcome(archive_id, status, data, name)
     await _write_print_log(c, usage_results)
@@ -1735,9 +1663,8 @@ async def _await_bed_cooldown(printer_id: int, name: str) -> None:
 
         async with async_session() as db:
             threshold_str = await get_setting(db, "bed_cooled_threshold")
-        threshold = float(threshold_str) if threshold_str else 35.0
-        async with async_session() as db:
             providers = await notification_service._get_providers_for_event(db, "on_bed_cooled", printer_id)
+        threshold = float(threshold_str) if threshold_str else 35.0
         if not providers:
             logger.debug("[BED-COOL] No providers enabled for bed_cooled on printer %s", printer_id)
             return
@@ -1745,6 +1672,28 @@ async def _await_bed_cooldown(printer_id: int, name: str) -> None:
         logger.info("[BED-COOL] Registered waiter for printer %s (threshold: %.0f°C)", printer_id, threshold)
     except Exception as e:
         logger.warning("[BED-COOL] Failed to register waiter: %s", e)
+
+
+async def bed_cooled(printer_id: int, bed_temp: float) -> None:
+    """Bed temperature: notify once a completed print's bed has cooled to its waiter's threshold."""
+    waiter = _bed_cool_waiters.get(printer_id)
+    if not waiter or bed_temp > waiter["threshold"] or not _bed_cool_waiters.pop(printer_id, None):
+        return  # Not waiting, still warm, or another update already notified.
+    threshold = waiter["threshold"]
+    logger.info("[BED-COOL] Bed cooled to %.1f°C on printer %s (threshold: %.0f°C)", bed_temp, printer_id, threshold)
+    try:
+        info = printer_manager.get_printer(printer_id)
+        async with async_session() as db:
+            await notification_service.on_bed_cooled(
+                printer_id=printer_id,
+                printer_name=info.name if info else "Unknown",
+                bed_temp=bed_temp,
+                threshold=threshold,
+                filename=waiter["filename"],
+                db=db,
+            )
+    except Exception as e:
+        logger.warning("[BED-COOL] Failed to send notification: %s", e)
 
 
 async def _track_usage(c) -> list[dict]:
@@ -1756,11 +1705,9 @@ async def _track_usage(c) -> list[dict]:
     printer_id, data, archive_id = c.printer_id, c.data, c.archive_id
     usage_results: list[dict] = []
     try:
-        from backend.app.api.routes.settings import get_setting
-
         async with async_session() as db:
-            spoolman_on = await get_setting(db, "spoolman_enabled")
-        if not spoolman_on or spoolman_on.lower() != "true":
+            owned = await _spoolman_owns_usage(db)
+        if not owned:
             from backend.app.services.usage_tracker import on_print_complete as usage_on_print_complete
 
             async with async_session() as db:
@@ -1803,45 +1750,28 @@ async def _track_usage(c) -> list[dict]:
     return usage_results
 
 
-async def _notify_without_archive(c, usage_results: list[dict]) -> None:
-    """Notify a completion that has no Archive, enriched from the job so its owner can still be emailed."""
-    printer_id, data = c.printer_id, c.data
+async def _job_notification_data(c, usage_results: list[dict], db) -> dict:
+    """Notification data for a print with no Archive, from its job, so its owner can still be emailed."""
+    data = {"owner_id": c.owner_id}  # The persisted job owns this run, also after a restart.
     try:
-        async with async_session() as db:
-            result = await db.execute(select(Printer).where(Printer.id == printer_id))
-            printer = result.scalar_one_or_none()
-            printer_name = printer.name if printer else f"Printer {printer_id}"
-            # The persisted job owns this run, also after a restart.
-            archive_data = {"owner_id": _resolve_print_notification_owner_id(c.job_id, c.owner_id, None)}
-            try:
-                if job := await db.get(PrintQueueItem, c.job_id):
-                    archive_data["created_by_id"] = job.created_by_id
-                    if job.library_file_id:
-                        result = await db.execute(select(LibraryFile).where(LibraryFile.id == job.library_file_id))
-                        source = result.scalar_one_or_none()
-                        if source and source.print_time_seconds:
-                            archive_data["print_time_seconds"] = source.print_time_seconds
-            except Exception as lookup_err:
-                logger.debug("[NOTIFY-BG] Could not look up queue item for no-archive notification: %s", lookup_err)
-            if usage_results:
-                grams = sum(r.get("weight_used", 0) for r in usage_results)
-                if grams > 0:
-                    archive_data["actual_filament_grams"] = round(grams, 1)
-                archive_data["usage_results"] = usage_results
-            remaining = data.get("remaining_time")
-            if not archive_data.get("print_time_seconds") and isinstance(remaining, (int, float)) and remaining > 0:
-                archive_data["print_time_seconds"] = int(remaining)
-            status = data.get("status", "completed")
-            logger.info("[NOTIFY-BG] Sending notification without archive: printer=%s, status=%s", printer_id, status)
-            await notification_service.on_print_complete(
-                printer_id, printer_name, status, data, db, archive_data=archive_data
-            )
-            if archive_data.get("created_by_id"):
-                filename = data.get("subtask_name") or data.get("filename", "Unknown")
-                await _dispatch_user_print_email(status, archive_data["created_by_id"], printer_name, filename, db)
-            logger.info("[NOTIFY-BG] Completed (no-archive path)")
-    except Exception as e:
-        logger.warning("[NOTIFY-BG] Failed to send notification without archive: %s", e, exc_info=True)
+        if job := await db.get(PrintQueueItem, c.job_id):
+            data["created_by_id"] = job.created_by_id
+            if job.library_file_id:
+                result = await db.execute(select(LibraryFile).where(LibraryFile.id == job.library_file_id))
+                source = result.scalar_one_or_none()
+                if source and source.print_time_seconds:
+                    data["print_time_seconds"] = source.print_time_seconds
+    except Exception as lookup_err:
+        logger.debug("[NOTIFY-BG] Could not look up queue item for no-archive notification: %s", lookup_err)
+    if usage_results:
+        grams = sum(r.get("weight_used", 0) for r in usage_results)
+        if grams > 0:
+            data["actual_filament_grams"] = round(grams, 1)
+        data["usage_results"] = usage_results
+    remaining = c.data.get("remaining_time")
+    if not data.get("print_time_seconds") and isinstance(remaining, (int, float)) and remaining > 0:
+        data["print_time_seconds"] = int(remaining)
+    return data
 
 
 async def _publish_archive_outcome(archive_id: int, status: str, data: dict, name: str) -> None:
@@ -2158,8 +2088,8 @@ async def _notify_after_photo(c, usage_results: list[dict], photo: asyncio.Task)
         logger.error("[PHOTO-NOTIFY] Notification sending failed: %s", e, exc_info=True)
 
 
-async def _notify_completion(c, usage_results: list[dict], finish_photo: str | None) -> None:
-    """Notify an archived completion with its actual time, filament and finish photo, and email the uploader."""
+async def _notify_completion(c, usage_results: list[dict], finish_photo: str | None = None) -> None:
+    """Notify the completion with its actual time, filament and finish photo, and email its owner."""
     printer_id, data, archive_id = c.printer_id, c.data, c.archive_id
     status = data.get("status", "completed")
     try:
@@ -2168,11 +2098,12 @@ async def _notify_completion(c, usage_results: list[dict], finish_photo: str | N
             result = await db.execute(select(Printer).where(Printer.id == printer_id))
             printer = result.scalar_one_or_none()
             printer_name = printer.name if printer else f"Printer {printer_id}"
-            result = await db.execute(select(PrintArchive).where(PrintArchive.id == archive_id))
-            archive = result.scalar_one_or_none()
-            archive_data = (
-                await _archive_notification_data(c, archive, usage_results, finish_photo, db) if archive else None
-            )
+            if archive_id:
+                result = await db.execute(select(PrintArchive).where(PrintArchive.id == archive_id))
+                archive = result.scalar_one_or_none()
+                archive_data = archive and await _archive_notification_data(c, archive, usage_results, finish_photo, db)
+            else:
+                archive_data = await _job_notification_data(c, usage_results, db)
             await notification_service.on_print_complete(
                 printer_id, printer_name, status, data, db, archive_data=archive_data
             )
@@ -2200,7 +2131,7 @@ async def _archive_notification_data(c, archive, usage_results: list[dict], fini
         "failure_reason": archive.failure_reason,
         "created_by_id": archive.created_by_id,
         # The persisted job owns this run, also after a restart.
-        "owner_id": _resolve_print_notification_owner_id(c.job_id, c.owner_id, archive.created_by_id),
+        "owner_id": c.owner_id,
     }
     if status != "completed" and archive.filament_used_grams:
         progress = data.get("progress") or 0

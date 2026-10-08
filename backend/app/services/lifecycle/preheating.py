@@ -35,7 +35,7 @@ HEARTBEAT_TIMEOUT = 90
 TELEMETRY_TIMEOUT = 60
 CHECK_INTERVAL = HEARTBEAT_TIMEOUT / 3
 _wake: asyncio.Event | None = None  # Preheating's timer, while it runs.
-_watched: dict[int, tuple | None] = {}  # Soaking or shutting-down printers, and their last telemetry.
+_watched: dict[int, tuple | None] | None = None  # Soaking or shutting-down printers; None before the first pass.
 
 
 def wake() -> None:
@@ -45,10 +45,11 @@ def wake() -> None:
 
 
 def observe(printer_id: int, state) -> None:
-    """Telemetry: wake the wait when a watched printer connects, disconnects or changes state."""
+    """Telemetry: wake the wait when a watched printer changes state, and on any printer's first report."""
     seen = (state.connected, state.state, getattr(state, "job_telemetry_ready", True))
-    if printer_id in _watched and _watched[printer_id] != seen:
-        _watched[printer_id] = seen
+    if _watched is None or _watched.get(printer_id, seen) != seen:
+        if _watched is not None:
+            _watched[printer_id] = seen
         wake()
 
 
@@ -243,6 +244,25 @@ async def abort_heat_soak(db: AsyncSession, item: PrintQueueItem, reason: str, *
     await db.commit()
 
 
+async def lapsed(db: AsyncSession, item: PrintQueueItem, owner: str, visible: set[int]) -> bool:
+    """Whether the soak's heartbeat lapsed; settles it under the caller's lock if so.
+
+    This worker's soak ends. Another's is held for a person: before dispatch
+    there is no submission ID, so telemetry cannot prove what happened to it.
+    """
+    checked = item.preheat_checked_at
+    if checked and 0 <= (utcnow() - checked).total_seconds() < HEARTBEAT_TIMEOUT:
+        return False
+    if item.preheat_owner == owner:
+        await abort_heat_soak(db, item, "Heat soak interrupted by restart or scheduler timeout; retry required")
+        return True
+    item.error_message = "Heat soak interrupted; inspect the printer, then stop or skip heat soak"
+    _show_preheating(item.printer_id, True)
+    visible.add(item.printer_id)
+    await db.commit()
+    return True
+
+
 def heat_soak_dispatch_started(item: PrintQueueItem) -> bool:
     """The durable hold itself proves that this soak has handed off."""
     return item.status in ("dispatching", "printing", "paused", "finished", "successful")
@@ -385,10 +405,12 @@ class ChamberHeatSoak:
         return entered
 
     async def run(self) -> None:
-        """Wait on preheating's own timer, until nothing soaks or shuts down, then until woken."""
+        """Wait on preheating's own timer, from the printers' first telemetry, idle while nothing soaks or shuts down."""
         global _wake, _watched
-        _wake = asyncio.Event()
+        _wake, _watched, timeout = asyncio.Event(), None, CHECK_INTERVAL
         while True:
+            with suppress(TimeoutError):
+                await asyncio.wait_for(_wake.wait(), timeout)
             _wake.clear()
             timeout = CHECK_INTERVAL
             try:
@@ -397,12 +419,10 @@ class ChamberHeatSoak:
                     soaking = select(PrintQueueItem.printer_id).where(PrintQueueItem.status == "preheating")
                     shutting_down = select(Printer.id).where(Printer.heat_soak_shutdown_pending.is_(True))
                     watched = {*await db.scalars(soaking), *await db.scalars(shutting_down)} - {None}
-                _watched = {printer_id: _watched.get(printer_id) for printer_id in watched}
+                _watched = {printer_id: (_watched or {}).get(printer_id) for printer_id in watched}
                 timeout = CHECK_INTERVAL if watched else None
             except Exception:
                 logger.exception("Heat-soak wait failed")
-            with suppress(TimeoutError):
-                await asyncio.wait_for(_wake.wait(), timeout)
 
     async def wait(self, db: AsyncSession) -> list[int]:
         """Wait: advance each soak once, without sleeping or blocking other printers' scheduling."""
@@ -418,16 +438,10 @@ class ChamberHeatSoak:
                     await db.rollback()
                     continue
                 printer_id, now = item.printer_id, utcnow()
-                elapsed = (
-                    (now - item.preheat_checked_at).total_seconds() if item.preheat_checked_at else HEARTBEAT_TIMEOUT
-                )
-                if item.preheat_owner != self.owner:
-                    await self.recover(db, item, elapsed, visible)
+                if await lapsed(db, item, self.owner, visible):
                     continue
-                if elapsed < 0 or elapsed >= HEARTBEAT_TIMEOUT:
-                    await abort_heat_soak(
-                        db, item, "Heat soak interrupted by restart or scheduler timeout; retry required"
-                    )
+                if item.preheat_owner != self.owner:
+                    await db.rollback()  # Recover: a live soak this worker doesn't own is left alone.
                     continue
                 visible.add(printer_id)
                 _show_preheating(printer_id, True)
@@ -472,18 +486,6 @@ class ChamberHeatSoak:
             _show_preheating(printer_id, False)
         self._visible_printers = visible
         return ready
-
-    async def recover(self, db: AsyncSession, item: PrintQueueItem, elapsed: float, visible: set[int]) -> None:
-        """Recover: leave a live soak this worker doesn't own alone, and hold an expired one for a person."""
-        if 0 <= elapsed < HEARTBEAT_TIMEOUT:
-            await db.rollback()
-            return
-        # There is no submission ID before dispatch, so telemetry cannot prove this
-        # interrupted soak. Keep the hold until the user chooses Stop or Skip heat soak.
-        item.error_message = "Heat soak interrupted; inspect the printer, then stop or skip heat soak"
-        _show_preheating(item.printer_id, True)
-        visible.add(item.printer_id)
-        await db.commit()
 
     async def cleanup(self, db: AsyncSession) -> None:
         printer_ids = list(

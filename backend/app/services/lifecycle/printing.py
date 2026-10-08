@@ -222,11 +222,8 @@ async def end(db: AsyncSession, job: PrintQueueItem, data: dict, *, stopped: boo
 
     printer_id, reported = job.printer_id, data.get("status", "completed")
     grove_stop = job.status == "cancelled" or stopped
-    queue_status = reported
-    if reported == "aborted" or (
-        reported != "completed" and (job.status == "cancelled" or (stopped and reported == "failed"))
-    ):
-        queue_status = "cancelled"
+    cancelled = job.status == "cancelled" or (stopped and reported == "failed")
+    queue_status = "cancelled" if reported == "aborted" or (reported != "completed" and cancelled) else reported
     # A stop from Grove is reported as "cancelled", now also after a restart.
     # Every other outcome, including a touchscreen "aborted", keeps the
     # printer's own name for notifications and integrations.

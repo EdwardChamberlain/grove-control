@@ -625,22 +625,12 @@ class Dispatcher:
         for item_id in list(await db.scalars(unsent)):
             try:
                 item = await lock_queue_item(db, item_id)
-                if not item or item.status != "dispatching" or not is_soaking(item):
-                    await db.rollback()
-                    continue
-                checked = item.preheat_checked_at
-                elapsed = (preheating.utcnow() - checked).total_seconds() if checked else preheating.HEARTBEAT_TIMEOUT
-                live = 0 <= elapsed < preheating.HEARTBEAT_TIMEOUT
-                if item.preheat_owner != self._heat_soak.owner and not live:
-                    item.error_message = "Heat soak interrupted; inspect the printer, then stop or skip heat soak"
-                    preheating._show_preheating(item.printer_id, True)
-                    visible.add(item.printer_id)
-                    await db.commit()
-                elif item.preheat_owner == self._heat_soak.owner and not live:
-                    await abort_heat_soak(
-                        db, item, "Heat soak interrupted by restart or scheduler timeout; retry required"
-                    )
-                else:
+                if (
+                    not item
+                    or item.status != "dispatching"
+                    or not is_soaking(item)
+                    or not await preheating.lapsed(db, item, self._heat_soak.owner, visible)
+                ):
                     await db.rollback()
             except Exception:
                 await db.rollback()

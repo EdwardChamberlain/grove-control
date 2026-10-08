@@ -2543,41 +2543,7 @@ async def lifespan(app: FastAPI):
 
     printer_manager.set_layer_change_callback(on_layer_change)
 
-    # Event-driven bed cooldown: fires whenever bed_temper arrives via MQTT
-    async def on_bed_temp_update(printer_id: int, bed_temp: float):
-        waiter = print_effects._bed_cool_waiters.get(printer_id)
-        if not waiter:
-            return
-        threshold = waiter["threshold"]
-        if bed_temp > threshold:
-            return
-        # Bed is at or below threshold — fire notification and remove waiter
-        waiter_info = print_effects._bed_cool_waiters.pop(printer_id, None)
-        if not waiter_info:
-            return  # Another callback already handled it
-        bed_cool_logger = logging.getLogger(__name__)
-        bed_cool_logger.info(
-            "[BED-COOL] Bed cooled to %.1f°C on printer %s (threshold: %.0f°C)",
-            bed_temp,
-            printer_id,
-            threshold,
-        )
-        try:
-            printer_info = printer_manager.get_printer(printer_id)
-            p_name = printer_info.name if printer_info else "Unknown"
-            async with async_session() as db:
-                await notification_service.on_bed_cooled(
-                    printer_id=printer_id,
-                    printer_name=p_name,
-                    bed_temp=bed_temp,
-                    threshold=threshold,
-                    filename=waiter_info["filename"],
-                    db=db,
-                )
-        except Exception as e:
-            bed_cool_logger.warning("[BED-COOL] Failed to send notification: %s", e)
-
-    printer_manager.set_bed_temp_update_callback(on_bed_temp_update)
+    printer_manager.set_bed_temp_update_callback(print_effects.bed_cooled)
 
     async def on_drying_complete(printer_id: int, ams_id: int):
         """Smart-plug auto-off-after-drying trigger (#1349).

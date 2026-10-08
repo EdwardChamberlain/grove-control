@@ -500,27 +500,10 @@ class PrinterSelection:
                         item.waiting_reason = None
                         await db.commit()
 
-                mapped, bound_mapping = await self._bind_mapping(
-                    db, item, item.printer_id, filament_overrides, force_overrides
+                passed, bound_mapping = await self._gate(
+                    db, item, item.printer_id, filament_overrides, force_overrides, busy_printers
                 )
-                if not mapped:
-                    continue
-
-                # Filament-deficit pre-dispatch check (#1496). If the
-                # assigned spool can't satisfy any required slot grams,
-                # promote the item to manual_start so the user must
-                # acknowledge via the ▶ button (which re-checks live).
-                if await self._block_on_filament_deficit(
-                    db, item, printer_id=item.printer_id, ams_mapping=bound_mapping
-                ):
-                    continue
-
-                # Apply drying policy only after every other dispatch gate
-                # has passed. Drying is orthogonal to gcode state (often
-                # still IDLE), so this uses canonical AMS telemetry rather
-                # than scheduler-owned auto-drying bookkeeping.
-                if not await self._drying._prepare_drying_for_dispatch(db, item, item.printer_id):
-                    busy_printers.add(item.printer_id)
+                if not passed:
                     continue
 
                 if pool_full(item):
@@ -694,21 +677,10 @@ class PrinterSelection:
                     # selected printer just as we do for printer-targeted jobs: opting
                     # out of exact colour matching must never permit a different
                     # material family.
-                    mapped, bound_mapping = await self._bind_mapping(
-                        db, item, printer_id, filament_overrides, force_overrides
+                    passed, bound_mapping = await self._gate(
+                        db, item, printer_id, filament_overrides, force_overrides, busy_printers
                     )
-                    if not mapped:
-                        continue
-
-                    # Filament-deficit pre-dispatch check (#1496), against the
-                    # selected printer's trays.
-                    if await self._block_on_filament_deficit(
-                        db, item, printer_id=printer_id, ams_mapping=bound_mapping
-                    ):
-                        continue
-
-                    if not await self._drying._prepare_drying_for_dispatch(db, item, printer_id):
-                        busy_printers.add(printer_id)
+                    if not passed:
                         continue
 
                     if library_row_conflict(item):
@@ -794,6 +766,29 @@ class PrinterSelection:
             item.filament_short = False
             await db.commit()
         return False
+
+    async def _gate(
+        self,
+        db: AsyncSession,
+        item: PrintQueueItem,
+        printer_id: int,
+        overrides: list[dict],
+        force_overrides: list[dict],
+        busy_printers: set[int],
+    ) -> tuple[bool, str | None]:
+        """Whether ``item`` can go to ``printer_id`` now, and the tray mapping it goes with.
+
+        The mapping must hold the forced colours, and the spools enough
+        filament (#1496): a short job waits for Manual start. Drying is checked
+        last, from the AMS's own telemetry; while it blocks, the printer is busy.
+        """
+        mapped, mapping = await self._bind_mapping(db, item, printer_id, overrides, force_overrides)
+        if not mapped or await self._block_on_filament_deficit(db, item, printer_id=printer_id, ams_mapping=mapping):
+            return False, None
+        if not await self._drying._prepare_drying_for_dispatch(db, item, printer_id):
+            busy_printers.add(printer_id)
+            return False, None
+        return True, mapping
 
     async def _bind_mapping(
         self,
