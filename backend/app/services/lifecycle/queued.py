@@ -274,6 +274,11 @@ class Workers:
                 item = await db.get(PrintQueueItem, item_id)
                 if item and not binding.edited_fields(item):
                     await self.leave(db, item, binding)
+            except asyncio.CancelledError:
+                # Stop can land mid-write, such as the hold before its commit. Releasing the
+                # claim commits, so discard the unfinished work first.
+                await db.rollback()
+                raise
             except QueueTransitionConflict:
                 await db.rollback()
                 logger.info("Queue item %s changed while leaving the queue", item_id)

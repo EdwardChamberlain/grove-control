@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import time
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -710,6 +711,9 @@ class Dispatcher:
             subtask_id = str(item.dispatch_subtask_id).strip() if item.dispatch_subtask_id else None
             observed = telemetry_status(state, subtask_id)
             if observed in ("completed", "failed"):
+                # Snapshot the matched telemetry now: MQTT can move the live state on to the
+                # next print while this pass awaits the database.
+                report = (state.state, getattr(state, "gcode_file", None), deepcopy(getattr(state, "raw_data", None)))
                 # Commit the printer's terminal outcome before completion effects run, so a
                 # restart never turns a printer-confirmed outcome back into a retry.
                 if observed == "completed" and dispatching:
@@ -719,8 +723,8 @@ class Dispatcher:
                 if not await _transition_or_skip(db, item, outcome, action="printer_report", completed_at=now):
                     continue
                 changed = True
-                completions.append((item, state, subtask_id, observed))
-                logger.info("Recovered terminal queue dispatch %s from %s telemetry", item.id, state.state)
+                completions.append((item, report, subtask_id, observed))
+                logger.info("Recovered terminal queue dispatch %s from %s telemetry", item.id, report[0])
             elif observed == "printing":
                 if dispatching:
                     if not await _transition_or_skip(db, item, "printing", started_at=now, error_message=None):
@@ -743,19 +747,19 @@ class Dispatcher:
                     )
         if changed:
             await db.commit()
-        for item, state, subtask_id, observed in completions:
-            await self._complete_later(db, item, state, subtask_id, observed)
+        for item, report, subtask_id, observed in completions:
+            await self._complete_later(db, item, report, subtask_id, observed)
 
-    async def _complete_later(self, db: AsyncSession, item, state, subtask_id: str, observed: str) -> None:
-        """Run the normal completion for a recovered terminal print, without delaying the pass."""
+    async def _complete_later(self, db: AsyncSession, item, report: tuple, subtask_id: str, observed: str) -> None:
+        """Run the normal completion for a recovered terminal print, from its matched telemetry snapshot."""
         if item.id in self._recovering:
             return
-        filename = getattr(state, "gcode_file", None)
+        _state, filename, raw_data = report
         if not filename and item.archive_id is not None:
             archive = await db.get(PrintArchive, item.archive_id)
             filename = archive.filename if archive else None
         # Some firmware sends subtask_id=0 at FINISH/FAILED; use the matched ID.
-        raw_data = {**(getattr(state, "raw_data", None) or {}), "subtask_id": subtask_id}
+        raw_data = {**(raw_data or {}), "subtask_id": subtask_id}
         data = {
             "status": observed,
             "filename": filename or f"queue-dispatch-{item.id}",

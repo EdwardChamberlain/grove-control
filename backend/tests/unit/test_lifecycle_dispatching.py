@@ -200,3 +200,74 @@ async def test_an_outcome_runs_its_exit_and_entry_effects_together(alignment, mo
     assert [(e.shut_down_heaters, e.notify_failure, e.clean_sd_copy) for e in spawned] == [
         (True, unreported, unreported and before == "dispatching")
     ]
+
+
+async def test_stop_during_the_hold_commits_nothing_but_the_claim_release(alignment, monkeypatch):
+    from backend.app.services.lifecycle import queued
+    from backend.app.services.printer_manager import printer_manager
+
+    scheduler = PrintScheduler()
+    monkeypatch.setattr(queued, "async_session", alignment.sessions)
+    monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
+    monkeypatch.setattr(scheduler, "_is_printer_idle", lambda *_args: True)
+    original = dispatching.transition_queue_item
+
+    async def cancelled_before_commit(db, item, before, after, **kwargs):
+        change = await original(db, item, before, after, **kwargs)
+        if (before, after) == ("queued", "dispatching"):
+            raise asyncio.CancelledError  # Stop cancels the worker between the hold's write and its commit.
+        return change
+
+    monkeypatch.setattr(dispatching, "transition_queue_item", cancelled_before_commit)
+    async with alignment.sessions() as db:
+        item = await db.get(PrintQueueItem, alignment.job_id)
+        binding = queued._DispatchBinding.for_item(item, item.printer_id, None, unassigned=False)
+    with pytest.raises(asyncio.CancelledError):
+        await scheduler.workers._work(alignment.job_id, binding)
+    async with alignment.sessions() as db:
+        item = await db.get(PrintQueueItem, alignment.job_id)
+        assert (item.status, item.dispatching_at, item.archive_id) == ("queued", None, None)
+
+
+async def test_recovery_completes_with_the_telemetry_that_matched(alignment, monkeypatch):
+    from types import SimpleNamespace
+
+    from backend.app.services.printer_manager import printer_manager
+
+    state = SimpleNamespace(
+        connected=True,
+        job_telemetry_ready=True,
+        state="FINISH",
+        subtask_id="123",
+        gcode_file="old.3mf",
+        raw_data={"gcode_state": "FINISH", "ams": [{"id": 0}]},
+    )
+    monkeypatch.setattr(printer_manager, "get_status", lambda _id: state)
+    original = dispatching.transition_queue_item
+
+    async def next_print_arrives(*args, **kwargs):
+        change = await original(*args, **kwargs)
+        # MQTT moves the live state on to the next print while recovery awaits.
+        state.subtask_id, state.gcode_file, state.state = "456", "next.3mf", "RUNNING"
+        state.raw_data["gcode_state"] = "RUNNING"
+        state.raw_data["ams"][0]["id"] = 1
+        return change
+
+    async with alignment.sessions() as db:
+        item = await db.get(PrintQueueItem, alignment.job_id)
+        values = {"dispatch_subtask_id": "123", "dispatched_at": preheating.utcnow() - timedelta(hours=1)}
+        await transition_queue_item(db, item, "queued", "dispatching", values=values)
+        await db.commit()
+    scheduler = PrintScheduler()
+    completed, spawned = AsyncMock(), []
+    monkeypatch.setattr(scheduler.dispatcher, "_complete_recovered_dispatch", completed)
+    monkeypatch.setattr(dispatching, "spawn_background_task", lambda coro, **_: spawned.append(coro))
+    monkeypatch.setattr(dispatching, "transition_queue_item", next_print_arrives)
+    async with alignment.sessions() as db:
+        await scheduler.dispatcher.recover(db)
+    await asyncio.gather(*spawned)
+    (_item_id, _printer_id, data), _ = completed.await_args
+    assert (data["status"], data["filename"], data["subtask_id"]) == ("completed", "old.3mf", "123")
+    assert data["raw_data"] == {"gcode_state": "FINISH", "ams": [{"id": 0}], "subtask_id": "123"}
+    async with alignment.sessions() as db:
+        assert (await db.get(PrintQueueItem, alignment.job_id)).status == "finished"
