@@ -66,7 +66,7 @@ def test_strict_colour_mapping_never_falls_back_across_nozzles(scheduler):
         {"global_tray_id": 4, "type": "PLA", "color": "#0000FF", "tray_info_idx": "", "extruder_id": 1},
     ]
 
-    mapping = scheduler._match_filaments_to_slots(required, loaded, strict_color_slot_ids={1})
+    mapping = scheduler.mapping._match_filaments_to_slots(required, loaded, strict_color_slot_ids={1})
 
     assert mapping == [-1]
 
@@ -77,7 +77,7 @@ def test_strict_colour_mapping_rejects_different_material_variant(scheduler):
         {"global_tray_id": 0, "type": "PA12-CF", "color": "#000000", "tray_info_idx": ""},
     ]
 
-    mapping = scheduler._match_filaments_to_slots(required, loaded, strict_color_slot_ids={1})
+    mapping = scheduler.mapping._match_filaments_to_slots(required, loaded, strict_color_slot_ids={1})
 
     assert mapping == [-1]
 
@@ -88,7 +88,7 @@ def test_unforced_mapping_never_crosses_material_family(scheduler):
         {"global_tray_id": 0, "type": "ABS", "color": "#FF0000", "tray_info_idx": "shared"},
     ]
 
-    mapping = scheduler._match_filaments_to_slots(required, loaded)
+    mapping = scheduler.mapping._match_filaments_to_slots(required, loaded)
 
     assert mapping == [-1]
 
@@ -97,7 +97,7 @@ def test_missing_per_slot_flag_inherits_safe_queue_default(scheduler):
     item = _queue_item()
     item.filament_overrides = '[{"slot_id": 1, "type": "PLA", "color": "#FF0000"}]'
 
-    assert scheduler._get_force_color_overrides(item) == [
+    assert scheduler.mapping._get_force_color_overrides(item) == [
         {"slot_id": 1, "type": "PLA", "color": "#FF0000", "force_color_match": True}
     ]
 
@@ -109,7 +109,7 @@ def test_malformed_persisted_slot_flag_inherits_safe_queue_default(scheduler, in
         f'[{{"slot_id": 1, "type": "PLA", "color": "#FF0000", "force_color_match": {json.dumps(invalid_value)}}}]'
     )
 
-    assert scheduler._get_force_color_overrides(item) == [
+    assert scheduler.mapping._get_force_color_overrides(item) == [
         {"slot_id": 1, "type": "PLA", "color": "#FF0000", "force_color_match": True}
     ]
 
@@ -135,11 +135,11 @@ async def test_model_unforced_job_accepts_same_material_without_exact_colour(moc
     mock_pm.is_connected.return_value = True
 
     with (
-        patch.object(scheduler, "_is_printer_idle", return_value=True),
-        patch.object(scheduler, "_get_missing_filament_types", return_value=[]),
-        patch.object(scheduler, "_count_override_color_matches", return_value=0),
+        patch.object(scheduler.selection, "_is_printer_idle", return_value=True),
+        patch.object(scheduler.selection, "_get_missing_filament_types", return_value=[]),
+        patch.object(scheduler.selection, "_count_override_color_matches", return_value=0),
     ):
-        printer_id, waiting_reason = await scheduler._find_idle_printer_for_model(
+        printer_id, waiting_reason = await scheduler.selection._find_idle_printer_for_model(
             db,
             "P1S",
             set(),
@@ -166,16 +166,18 @@ async def test_model_unforced_job_recomputes_cross_material_mapping(mock_pm, sch
     with (
         patch("backend.app.services.print_scheduler.async_session") as session_ctx,
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
-        patch.object(scheduler, "_find_idle_printer_for_model", new=AsyncMock(return_value=(3, None))),
+        patch.object(scheduler.mapping, "_get_bool_setting", new=AsyncMock(return_value=False)),
+        patch.object(scheduler.drying, "_get_bool_setting", new=AsyncMock(return_value=False)),
+        patch.object(scheduler.selection, "_find_idle_printer_for_model", new=AsyncMock(return_value=(3, None))),
         patch.object(
-            scheduler,
+            scheduler.mapping,
             "_ams_mapping_uses_compatible_materials",
             return_value=False,
         ) as mapping_is_safe,
-        patch.object(scheduler, "_compute_ams_mapping_for_printer", new=AsyncMock(return_value=[0])) as compute,
-        patch.object(scheduler, "_block_on_filament_deficit", new=AsyncMock(return_value=False)),
+        patch.object(scheduler.mapping, "_compute_ams_mapping_for_printer", new=AsyncMock(return_value=[0])) as compute,
+        patch.object(scheduler.selection, "_block_on_filament_deficit", new=AsyncMock(return_value=False)),
         patch.object(scheduler.workers, "launch") as launch,
-        patch.object(scheduler, "_check_auto_drying", new=AsyncMock()),
+        patch.object(scheduler.drying, "_check_auto_drying", new=AsyncMock()),
     ):
         session_ctx.return_value.__aenter__ = AsyncMock(return_value=db)
         session_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -216,8 +218,10 @@ async def test_forced_job_waits_when_material_metadata_is_missing(mock_pm, sched
     with (
         patch("backend.app.services.print_scheduler.async_session") as session_ctx,
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
+        patch.object(scheduler.mapping, "_get_bool_setting", new=AsyncMock(return_value=False)),
+        patch.object(scheduler.drying, "_get_bool_setting", new=AsyncMock(return_value=False)),
         patch.object(scheduler.workers, "launch") as launch,
-        patch.object(scheduler, "_check_auto_drying", new=AsyncMock()),
+        patch.object(scheduler.drying, "_check_auto_drying", new=AsyncMock()),
     ):
         session_ctx.return_value.__aenter__ = AsyncMock(return_value=db)
         session_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -241,8 +245,10 @@ async def test_unforced_job_waits_when_material_metadata_is_missing(mock_pm, sch
     with (
         patch("backend.app.services.print_scheduler.async_session") as session_ctx,
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
+        patch.object(scheduler.mapping, "_get_bool_setting", new=AsyncMock(return_value=False)),
+        patch.object(scheduler.drying, "_get_bool_setting", new=AsyncMock(return_value=False)),
         patch.object(scheduler.workers, "launch") as launch,
-        patch.object(scheduler, "_check_auto_drying", new=AsyncMock()),
+        patch.object(scheduler.drying, "_check_auto_drying", new=AsyncMock()),
     ):
         session_ctx.return_value.__aenter__ = AsyncMock(return_value=db)
         session_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -265,8 +271,10 @@ async def test_forced_job_waits_when_material_metadata_is_malformed(mock_pm, sch
     with (
         patch("backend.app.services.print_scheduler.async_session") as session_ctx,
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
+        patch.object(scheduler.mapping, "_get_bool_setting", new=AsyncMock(return_value=False)),
+        patch.object(scheduler.drying, "_get_bool_setting", new=AsyncMock(return_value=False)),
         patch.object(scheduler.workers, "launch") as launch,
-        patch.object(scheduler, "_check_auto_drying", new=AsyncMock()),
+        patch.object(scheduler.drying, "_check_auto_drying", new=AsyncMock()),
     ):
         session_ctx.return_value.__aenter__ = AsyncMock(return_value=db)
         session_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -288,12 +296,14 @@ async def test_assigned_job_waits_when_forced_colour_is_missing(mock_pm, schedul
     with (
         patch("backend.app.services.print_scheduler.async_session") as session_ctx,
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
-        patch.object(scheduler, "_is_printer_idle", return_value=True),
-        patch.object(scheduler, "_get_missing_filament_types", return_value=[]),
-        patch.object(scheduler, "_get_missing_force_color_slots", return_value=["PLA (Red)"]),
-        patch.object(scheduler, "_compute_ams_mapping_for_printer", new=AsyncMock()) as compute_mapping,
+        patch.object(scheduler.mapping, "_get_bool_setting", new=AsyncMock(return_value=False)),
+        patch.object(scheduler.drying, "_get_bool_setting", new=AsyncMock(return_value=False)),
+        patch.object(scheduler.selection, "_is_printer_idle", return_value=True),
+        patch.object(scheduler.selection, "_get_missing_filament_types", return_value=[]),
+        patch.object(scheduler.selection, "_get_missing_force_color_slots", return_value=["PLA (Red)"]),
+        patch.object(scheduler.mapping, "_compute_ams_mapping_for_printer", new=AsyncMock()) as compute_mapping,
         patch.object(scheduler.workers, "launch") as launch,
-        patch.object(scheduler, "_check_auto_drying", new=AsyncMock()),
+        patch.object(scheduler.drying, "_check_auto_drying", new=AsyncMock()),
     ):
         session_ctx.return_value.__aenter__ = AsyncMock(return_value=db)
         session_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -318,13 +328,15 @@ async def test_assigned_job_recomputes_mapping_and_starts_on_exact_colour(mock_p
     with (
         patch("backend.app.services.print_scheduler.async_session") as session_ctx,
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
-        patch.object(scheduler, "_is_printer_idle", return_value=True),
-        patch.object(scheduler, "_get_missing_filament_types", return_value=[]),
-        patch.object(scheduler, "_get_missing_force_color_slots", return_value=[]),
-        patch.object(scheduler, "_compute_ams_mapping_for_printer", new=AsyncMock(return_value=[2])),
-        patch.object(scheduler, "_block_on_filament_deficit", new=AsyncMock(return_value=False)),
+        patch.object(scheduler.mapping, "_get_bool_setting", new=AsyncMock(return_value=False)),
+        patch.object(scheduler.drying, "_get_bool_setting", new=AsyncMock(return_value=False)),
+        patch.object(scheduler.selection, "_is_printer_idle", return_value=True),
+        patch.object(scheduler.selection, "_get_missing_filament_types", return_value=[]),
+        patch.object(scheduler.selection, "_get_missing_force_color_slots", return_value=[]),
+        patch.object(scheduler.mapping, "_compute_ams_mapping_for_printer", new=AsyncMock(return_value=[2])),
+        patch.object(scheduler.selection, "_block_on_filament_deficit", new=AsyncMock(return_value=False)),
         patch.object(scheduler.workers, "launch") as launch,
-        patch.object(scheduler, "_check_auto_drying", new=AsyncMock()),
+        patch.object(scheduler.drying, "_check_auto_drying", new=AsyncMock()),
     ):
         session_ctx.return_value.__aenter__ = AsyncMock(return_value=db)
         session_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -350,13 +362,15 @@ async def test_assigned_job_allows_different_colour_when_force_is_disabled(mock_
     with (
         patch("backend.app.services.print_scheduler.async_session") as session_ctx,
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
-        patch.object(scheduler, "_is_printer_idle", return_value=True),
-        patch.object(scheduler, "_get_missing_filament_types", return_value=[]),
-        patch.object(scheduler, "_ams_mapping_uses_compatible_materials", return_value=True),
-        patch.object(scheduler, "_get_missing_force_color_slots") as missing_colors,
-        patch.object(scheduler, "_block_on_filament_deficit", new=AsyncMock(return_value=False)),
+        patch.object(scheduler.mapping, "_get_bool_setting", new=AsyncMock(return_value=False)),
+        patch.object(scheduler.drying, "_get_bool_setting", new=AsyncMock(return_value=False)),
+        patch.object(scheduler.selection, "_is_printer_idle", return_value=True),
+        patch.object(scheduler.selection, "_get_missing_filament_types", return_value=[]),
+        patch.object(scheduler.mapping, "_ams_mapping_uses_compatible_materials", return_value=True),
+        patch.object(scheduler.selection, "_get_missing_force_color_slots") as missing_colors,
+        patch.object(scheduler.selection, "_block_on_filament_deficit", new=AsyncMock(return_value=False)),
         patch.object(scheduler.workers, "launch") as launch,
-        patch.object(scheduler, "_check_auto_drying", new=AsyncMock()),
+        patch.object(scheduler.drying, "_check_auto_drying", new=AsyncMock()),
     ):
         session_ctx.return_value.__aenter__ = AsyncMock(return_value=db)
         session_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -378,10 +392,12 @@ async def test_assigned_unforced_job_waits_when_material_is_missing(mock_pm, sch
     with (
         patch("backend.app.services.print_scheduler.async_session") as session_ctx,
         patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
-        patch.object(scheduler, "_is_printer_idle", return_value=True),
-        patch.object(scheduler, "_get_missing_filament_types", return_value=["PLA"]),
+        patch.object(scheduler.mapping, "_get_bool_setting", new=AsyncMock(return_value=False)),
+        patch.object(scheduler.drying, "_get_bool_setting", new=AsyncMock(return_value=False)),
+        patch.object(scheduler.selection, "_is_printer_idle", return_value=True),
+        patch.object(scheduler.selection, "_get_missing_filament_types", return_value=["PLA"]),
         patch.object(scheduler.workers, "launch") as launch,
-        patch.object(scheduler, "_check_auto_drying", new=AsyncMock()),
+        patch.object(scheduler.drying, "_check_auto_drying", new=AsyncMock()),
     ):
         session_ctx.return_value.__aenter__ = AsyncMock(return_value=db)
         session_ctx.return_value.__aexit__ = AsyncMock(return_value=False)

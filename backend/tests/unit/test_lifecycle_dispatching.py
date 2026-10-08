@@ -151,8 +151,16 @@ def test_dispatching_is_a_standalone_worker():
     scheduler = PrintScheduler()
     assert Dispatcher not in type(scheduler).__mro__ and not hasattr(Dispatcher, "_start_print")
     assert isinstance(scheduler.dispatcher, Dispatcher) and isinstance(scheduler.workers, queued.Workers)
-    # Its collaborators are explicit: the soak that hands over, and printer availability and drying.
-    assert (scheduler.dispatcher._heat_soak, scheduler.dispatcher._printers) == (scheduler._heat_soak, scheduler)
+    # Its collaborators are explicit: the soak that hands over, printer availability and drying.
+    dispatcher = scheduler.dispatcher
+    assert (dispatcher._heat_soak, dispatcher._selection, dispatcher._drying) == (
+        scheduler._heat_soak,
+        scheduler.selection,
+        scheduler.drying,
+    )
+    # Stage 6: none of them is the scheduler, and the scheduler mixes nothing in (#211).
+    assert type(scheduler).__mro__ == (PrintScheduler, object)
+    assert scheduler not in (dispatcher._selection, dispatcher._drying)
 
 
 @pytest.mark.parametrize("heat_soak", [False, True])
@@ -209,7 +217,7 @@ async def test_stop_during_the_hold_commits_nothing_but_the_claim_release(alignm
     scheduler = PrintScheduler()
     monkeypatch.setattr(queued, "async_session", alignment.sessions)
     monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
-    monkeypatch.setattr(scheduler, "_is_printer_idle", lambda *_args: True)
+    monkeypatch.setattr(scheduler.selection, "_is_printer_idle", lambda *_args: True)
     original = dispatching.transition_queue_item
 
     async def cancelled_before_commit(db, item, before, after, **kwargs):

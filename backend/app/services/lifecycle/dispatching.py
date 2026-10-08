@@ -141,9 +141,9 @@ class _Attempt:
 class Dispatcher:
     """Dispatching's worker: each attempt from its hold to the printer's confirmation, and their recovery."""
 
-    def __init__(self, heat_soak: preheating.ChamberHeatSoak, printers):
-        """``heat_soak`` hands soaks over; ``printers`` reports idle printers and AMS drying (the scheduler)."""
-        self._heat_soak, self._printers = heat_soak, printers
+    def __init__(self, heat_soak: preheating.ChamberHeatSoak, selection, drying):
+        """``heat_soak`` hands soaks over; ``selection`` reports idle printers, and ``drying`` AMS drying."""
+        self._heat_soak, self._selection, self._drying = heat_soak, selection, drying
         self._started_at: datetime | None = None
         self._recovering: set[int] = set()
         self._visible_unsent: set[int] = set()
@@ -207,7 +207,7 @@ class Dispatcher:
     async def _hold(self, db: AsyncSession, item: PrintQueueItem, binding: queued._DispatchBinding | None) -> bool:
         """From queued: commit the printer hold, with the selected printer and mapping, before any copy."""
         item_id, printer_id, unassigned = item.id, item.printer_id, bool(binding and binding.unassigned)
-        if not self._printers._is_printer_idle(printer_id):
+        if not self._selection._is_printer_idle(printer_id):
             return False
         printer = PrintQueueItem.printer_id.is_(None) if unassigned else PrintQueueItem.printer_id == printer_id
         try:
@@ -218,7 +218,7 @@ class Dispatcher:
                 "dispatching",
                 conditions=(printer, PrintQueueItem.dispatching_at == item.dispatching_at),
                 values={"waiting_reason": None, **(binding.values() if binding else {})},
-                dispatch_guard=lambda: self._printers._is_printer_idle(printer_id),
+                dispatch_guard=lambda: self._selection._is_printer_idle(printer_id),
             )
             await db.commit()
         except IntegrityError:
@@ -367,7 +367,7 @@ class Dispatcher:
         except QueueTransitionConflict:
             return await self._lost(a)
         # This drying check closes the window opened by the send-boundary commit.
-        active = self._printers._active_drying_ams_ids(a.printer_id)
+        active = self._drying._active_drying_ams_ids(a.printer_id)
         if (active and not await self._dry(db, item, active)) or not await self._ready(a):
             return
         owner = await owner_of(db, item)  # Read now, so the send-time commit ends this read.
@@ -458,7 +458,7 @@ class Dispatcher:
 
     async def _dry(self, db: AsyncSession, item: PrintQueueItem, active: tuple[int, ...] | None = None) -> bool:
         """Whether no AMS drying blocks the print command; otherwise the attempt fails for its reason."""
-        if not (reason := await self._printers._drying_reason(item, item.printer_id, active)):
+        if not (reason := await self._drying._drying_reason(item, item.printer_id, active)):
             return True
         values = {"dispatched_at": None, "dispatch_subtask_id": None, "started_at": None, "waiting_reason": reason}
         await fail(db, item, reason, **values)
@@ -509,7 +509,7 @@ class Dispatcher:
         current_id = telemetry_identity(state)
         if state.state in _ACTIVE_PRINT_STATES or (previous_id and current_id and current_id != previous_id):
             return False
-        return True if self._printers._is_printer_idle(printer_id) else None
+        return True if self._selection._is_printer_idle(printer_id) else None
 
     async def _wait_for_telemetry(
         self, printer_id: int, previous_id: str | None, *, deadline: float | None = None

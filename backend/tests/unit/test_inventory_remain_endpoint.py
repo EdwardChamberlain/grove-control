@@ -45,14 +45,14 @@ class TestGetInventoryRemain:
                 return_value=state,
             ),
             patch(
-                "backend.app.services.print_scheduler.PrintScheduler._build_loaded_filaments",
+                "backend.app.services.ams_mapping.AmsMapping._build_loaded_filaments",
                 return_value=[
                     {"ams_id": 0, "tray_id": 0, "global_tray_id": 0, "is_external": False},
                     {"ams_id": 0, "tray_id": 3, "global_tray_id": 3, "is_external": False},
                 ],
             ),
             patch(
-                "backend.app.services.print_scheduler.PrintScheduler._build_inventory_remain_overrides",
+                "backend.app.services.ams_mapping.AmsMapping._build_inventory_remain_overrides",
                 new=AsyncMock(return_value={0: 950.0, 3: 50.0}),
             ),
         ):
@@ -71,13 +71,13 @@ class TestGetInventoryRemain:
                 return_value=state,
             ),
             patch(
-                "backend.app.services.print_scheduler.PrintScheduler._build_loaded_filaments",
+                "backend.app.services.ams_mapping.AmsMapping._build_loaded_filaments",
                 return_value=[
                     {"ams_id": 0, "tray_id": 0, "global_tray_id": 0, "is_external": False},
                 ],
             ),
             patch(
-                "backend.app.services.print_scheduler.PrintScheduler._build_inventory_remain_overrides",
+                "backend.app.services.ams_mapping.AmsMapping._build_inventory_remain_overrides",
                 new=AsyncMock(return_value={}),
             ),
         ):

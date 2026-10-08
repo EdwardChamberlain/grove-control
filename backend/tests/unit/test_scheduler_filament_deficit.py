@@ -1,6 +1,6 @@
 """Scheduler pre-dispatch filament-deficit guard tests (#1496).
 
-``PrintScheduler._block_on_filament_deficit`` is the gate that keeps an
+``PrinterSelection._block_on_filament_deficit`` is the gate that keeps an
 auto_dispatch=True VP intake (or any other scheduler-driven dispatch) from
 sending a print onto a spool that can't satisfy it. On a deficit it
 promotes the item to manual_start; when a previously-flagged item's spool
@@ -16,6 +16,7 @@ import pytest
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.services.filament_deficit import FilamentDeficit
 from backend.app.services.print_scheduler import PrintScheduler
+from backend.app.services.printer_selection import PrinterSelection
 
 
 @pytest.fixture
@@ -50,7 +51,7 @@ def queue_item(db_session, printer_factory):
 async def test_blocks_on_deficit_promotes_to_manual_start(scheduler, db_session, queue_item):
     item = await queue_item()
     with patch(
-        "backend.app.services.print_scheduler.compute_deficit_for_queue_item",
+        "backend.app.services.printer_selection.compute_deficit_for_queue_item",
         AsyncMock(
             return_value=[
                 FilamentDeficit(
@@ -64,7 +65,7 @@ async def test_blocks_on_deficit_promotes_to_manual_start(scheduler, db_session,
             ]
         ),
     ):
-        blocked = await scheduler._block_on_filament_deficit(db_session, item)
+        blocked = await scheduler.selection._block_on_filament_deficit(db_session, item)
 
     assert blocked is True
     await db_session.refresh(item)
@@ -77,10 +78,10 @@ async def test_clears_stale_flag_when_deficit_resolves(scheduler, db_session, qu
     """Previously-flagged item whose spool was swapped is unblocked."""
     item = await queue_item(filament_short=True, manual_start=False)
     with patch(
-        "backend.app.services.print_scheduler.compute_deficit_for_queue_item",
+        "backend.app.services.printer_selection.compute_deficit_for_queue_item",
         AsyncMock(return_value=[]),
     ):
-        blocked = await scheduler._block_on_filament_deficit(db_session, item)
+        blocked = await scheduler.selection._block_on_filament_deficit(db_session, item)
 
     assert blocked is False
     await db_session.refresh(item)
@@ -93,10 +94,10 @@ async def test_no_deficit_no_op(scheduler, db_session, queue_item):
     """Happy path — no deficit, no flag changes, dispatch proceeds."""
     item = await queue_item()
     with patch(
-        "backend.app.services.print_scheduler.compute_deficit_for_queue_item",
+        "backend.app.services.printer_selection.compute_deficit_for_queue_item",
         AsyncMock(return_value=[]),
     ):
-        blocked = await scheduler._block_on_filament_deficit(db_session, item)
+        blocked = await scheduler.selection._block_on_filament_deficit(db_session, item)
 
     assert blocked is False
     await db_session.refresh(item)
@@ -109,10 +110,10 @@ async def test_helper_exception_does_not_wedge_dispatch(scheduler, db_session, q
     """A flaky deficit check (e.g. Spoolman timeout) must not block dispatch."""
     item = await queue_item()
     with patch(
-        "backend.app.services.print_scheduler.compute_deficit_for_queue_item",
+        "backend.app.services.printer_selection.compute_deficit_for_queue_item",
         AsyncMock(side_effect=RuntimeError("network down")),
     ):
-        blocked = await scheduler._block_on_filament_deficit(db_session, item)
+        blocked = await scheduler.selection._block_on_filament_deficit(db_session, item)
 
     assert blocked is False
     await db_session.refresh(item)
@@ -143,10 +144,10 @@ async def test_skip_filament_check_short_circuits_without_compute(scheduler, db_
         ]
     )
     with patch(
-        "backend.app.services.print_scheduler.compute_deficit_for_queue_item",
+        "backend.app.services.printer_selection.compute_deficit_for_queue_item",
         compute_mock,
     ):
-        blocked = await scheduler._block_on_filament_deficit(db_session, item)
+        blocked = await scheduler.selection._block_on_filament_deficit(db_session, item)
 
     assert blocked is False
     compute_mock.assert_not_awaited()

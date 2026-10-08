@@ -121,7 +121,7 @@ async def test_stop_unmatched_run_keeps_plate_gate_before_release_and_after_rest
                 await stop_queue_item(item_id, db, (None, True))
 
         live.state = "IDLE"
-        assert not PrintScheduler()._is_printer_idle(1, require_plate_clear=True)
+        assert not PrintScheduler().selection._is_printer_idle(1, require_plate_clear=True)
         # The reconnect identity cannot match the old job. Its rejected
         # completion must not be needed to protect the physical plate.
         assert await main.on_print_complete(1, {"submission_id": "new-session", "status": "aborted"}) is False

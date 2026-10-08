@@ -581,7 +581,7 @@ async def test_no_upload_or_print_until_soak_then_normal_correlated_dispatch(soa
     await soak.db.commit()
     scheduler = PrintScheduler()
     scheduler._heat_soak = scheduler.dispatcher._heat_soak = scheduler.workers._heat_soak = soak.service
-    scheduler._active_drying_ams_ids = MagicMock(return_value=[])
+    scheduler.drying._active_drying_ams_ids = MagicMock(return_value=[])
     scheduler.dispatcher._confirm_later = MagicMock()
     upload = AsyncMock(return_value=True)
 

@@ -2074,15 +2074,15 @@ async def get_inventory_remain(
     Spoolman; unbound slots are absent from the map (client falls back to the
     printer's MQTT `remain` for those).
     """
-    from backend.app.services.print_scheduler import PrintScheduler
+    from backend.app.services.ams_mapping import AmsMapping
 
     state = printer_manager.get_status(printer_id)
     if not state:
         return {"inventory_remain_g": {}}
 
-    scheduler = PrintScheduler()
-    loaded = scheduler._build_loaded_filaments(state)
-    overrides = await scheduler._build_inventory_remain_overrides(db, printer_id, loaded)
+    mapping = AmsMapping()
+    loaded = mapping._build_loaded_filaments(state)
+    overrides = await mapping._build_inventory_remain_overrides(db, printer_id, loaded)
     return {"inventory_remain_g": {str(k): v for k, v in overrides.items()}}
 
 

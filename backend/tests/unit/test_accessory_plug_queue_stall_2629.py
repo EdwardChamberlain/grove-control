@@ -49,19 +49,19 @@ def _partial_push(client: BambuMQTTClient) -> None:
 
 def test_printer_recovers_and_queue_can_dispatch_again(registered_client):
     scheduler = PrintScheduler()
-    assert scheduler._is_printer_idle(PRINTER_ID, require_plate_clear=False) is True
+    assert scheduler.selection._is_printer_idle(PRINTER_ID, require_plate_clear=False) is True
 
     # An accessory plug (filter fan) switches off; Bambuddy presumes power loss.
     printer_manager.mark_printer_offline(PRINTER_ID)
     assert printer_manager.get_status(PRINTER_ID).state == "unknown"
-    assert scheduler._is_printer_idle(PRINTER_ID, require_plate_clear=False) is False
+    assert scheduler.selection._is_printer_idle(PRINTER_ID, require_plate_clear=False) is False
 
     # The printer never stopped talking.
     _partial_push(registered_client)
 
     assert printer_manager.get_status(PRINTER_ID).state == "FINISH"
     assert printer_manager.is_connected(PRINTER_ID) is True
-    assert scheduler._is_printer_idle(PRINTER_ID, require_plate_clear=False) is True
+    assert scheduler.selection._is_printer_idle(PRINTER_ID, require_plate_clear=False) is True
 
 
 def test_real_power_cut_still_leaves_printer_unavailable(registered_client):
@@ -74,4 +74,4 @@ def test_real_power_cut_still_leaves_printer_unavailable(registered_client):
     # No messages arrive at all.
     assert printer_manager.get_status(PRINTER_ID).state == "unknown"
     assert printer_manager.is_connected(PRINTER_ID) is False
-    assert scheduler._is_printer_idle(PRINTER_ID, require_plate_clear=False) is False
+    assert scheduler.selection._is_printer_idle(PRINTER_ID, require_plate_clear=False) is False

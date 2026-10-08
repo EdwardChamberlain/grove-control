@@ -1,7 +1,7 @@
 """Printer selection (#204): the printer and tray mapping each waiting job takes, and why others wait.
 
-This is the queued state's wait. It is mixed into the print scheduler, which
-runs it every pass and dispatches what it selects.
+This is the queued state's wait. The print scheduler runs it every pass and
+dispatches what it selects; tray mapping and drying are its collaborators.
 """
 
 import asyncio
@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
 from backend.app.models.printer import Printer
 from backend.app.models.smart_plug import SmartPlug
+from backend.app.services.filament_deficit import compute_deficit_for_queue_item
 from backend.app.services.filament_requirements import canonical_filament_type
 from backend.app.services.lifecycle.engine import lock_queue_item
 from backend.app.services.notification_service import notification_service
@@ -266,24 +267,29 @@ async def _wait(db: AsyncSession, item: PrintQueueItem, reason: str) -> None:
         await db.commit()
 
 
+def is_printer_idle(printer_id: int, require_plate_clear: bool = True) -> bool:
+    """A fresh, connected idle report and the plate-clear gate permit dispatch."""
+    if not printer_manager.is_connected(printer_id):
+        return False
+    state = printer_manager.get_status(printer_id)
+    return bool(
+        state
+        and state.connected
+        and getattr(state, "job_telemetry_ready", False)
+        and not (require_plate_clear and printer_manager.is_awaiting_plate_clear(printer_id))
+        and state.state in ("IDLE", "FINISH", "FAILED")
+    )
+
+
 class PrinterSelection:
-    """Selects printers for queued jobs; mixed into ``PrintScheduler``."""
+    """Selects printers for queued jobs, mapping their trays with ``mapping`` and waiting out ``drying``."""
 
     _power_on_wait_time = 180  # seconds to wait for printer after power on (3 min)
     _power_on_check_interval = 10  # seconds between connection checks
+    _is_printer_idle = staticmethod(is_printer_idle)
 
-    def _is_printer_idle(self, printer_id: int, require_plate_clear: bool = True) -> bool:
-        """A fresh, connected idle report and the plate-clear gate permit dispatch."""
-        if not printer_manager.is_connected(printer_id):
-            return False
-        state = printer_manager.get_status(printer_id)
-        return bool(
-            state
-            and state.connected
-            and getattr(state, "job_telemetry_ready", False)
-            and not (require_plate_clear and printer_manager.is_awaiting_plate_clear(printer_id))
-            and state.state in ("IDLE", "FINISH", "FAILED")
-        )
+    def __init__(self, mapping, drying):
+        self._mapping, self._drying = mapping, drying
 
     async def _select_printers(
         self,
@@ -468,7 +474,7 @@ class PrinterSelection:
                 # contract as model-assigned jobs. Without this gate the
                 # normal AMS mapper can fall back to a same-material,
                 # different-colour tray and silently print the wrong colour.
-                filament_overrides = self._get_filament_overrides(item)
+                filament_overrides = self._mapping._get_filament_overrides(item)
                 required_materials = sorted(
                     {override["type"] for override in filament_overrides if override.get("type")}
                 )
@@ -513,7 +519,7 @@ class PrinterSelection:
                 # has passed. Drying is orthogonal to gcode state (often
                 # still IDLE), so this uses canonical AMS telemetry rather
                 # than scheduler-owned auto-drying bookkeeping.
-                if not await self._prepare_drying_for_dispatch(db, item, item.printer_id):
+                if not await self._drying._prepare_drying_for_dispatch(db, item, item.printer_id):
                     busy_printers.add(item.printer_id)
                     continue
 
@@ -644,7 +650,7 @@ class PrinterSelection:
                 # The selected variant carries its own filament contract.
                 # Re-read it after resolving so the dispatch gates below
                 # cannot accidentally use the last candidate inspected.
-                filament_overrides = self._get_filament_overrides(item)
+                filament_overrides = self._mapping._get_filament_overrides(item)
                 force_overrides = [override for override in filament_overrides if override.get("force_color_match")]
 
                 # Update waiting_reason if changed and send notification when first waiting
@@ -701,7 +707,7 @@ class PrinterSelection:
                     ):
                         continue
 
-                    if not await self._prepare_drying_for_dispatch(db, item, printer_id):
+                    if not await self._drying._prepare_drying_for_dispatch(db, item, printer_id):
                         busy_printers.add(printer_id)
                         continue
 
@@ -725,6 +731,70 @@ class PrinterSelection:
             logger.info("Queue skip summary: %s", dict(skipped))
         return selection
 
+    async def _block_on_filament_deficit(
+        self,
+        db: AsyncSession,
+        item: PrintQueueItem,
+        *,
+        printer_id: int | None = None,
+        ams_mapping: str | None = None,
+    ) -> bool:
+        """Promote the item to manual_start when the assigned spool is short (#1496).
+
+        Returns True when this dispatch attempt was blocked, False when the
+        item is clear to start. A previously-flagged item whose spool has
+        since been swapped to one with enough material clears the flag here
+        so the next scheduler tick dispatches it. ``printer_id`` and
+        ``ams_mapping`` are the selected printer for an "Any machine" job.
+        """
+        # An explicit Print Anyway acknowledgement bypasses the deficit check.
+        if item.skip_filament_check:
+            # Keep the acknowledgement visible in support logs (#1762).
+            logger.info(
+                "Queue item %s honouring user's Print Anyway acknowledgement — skipping deficit check",
+                item.id,
+            )
+            return False
+
+        try:
+            deficit = await compute_deficit_for_queue_item(db, item, printer_id=printer_id, ams_mapping=ams_mapping)
+        except Exception as e:
+            # Never let a flaky deficit check wedge the queue — log and let
+            # dispatch proceed. The PrintModal-side check still runs on the
+            # manual paths.
+            logger.warning("Filament deficit check failed for item %s: %s", item.id, e)
+            return False
+
+        if deficit:
+            item.filament_short = True
+            item.manual_start = True
+            await db.commit()
+            from backend.app.services.lifecycle.queued import job_name
+
+            name = await job_name(db, item)
+            printer = await db.get(Printer, item.printer_id) if item.printer_id else None
+            logger.info(
+                "Queue item %s blocked on filament deficit (%d slot(s)) — promoted to manual_start",
+                item.id,
+                len(deficit),
+            )
+            try:
+                await notification_service.on_queue_job_waiting(
+                    job_name=name,
+                    target_model=(printer.model if printer else "") or "",
+                    waiting_reason="filament_short",
+                    db=db,
+                )
+            except Exception as e:
+                logger.debug("filament_short notification failed for item %s: %s", item.id, e)
+            return True
+
+        # No deficit — clear any stale flag from a previous tick.
+        if item.filament_short:
+            item.filament_short = False
+            await db.commit()
+        return False
+
     async def _bind_mapping(
         self,
         db: AsyncSession,
@@ -739,11 +809,11 @@ class PrinterSelection:
         made meanwhile is not lost; the worker writes this one with the hold.
         """
         mapping = item.ams_mapping
-        material_safe = self._ams_mapping_uses_compatible_materials(printer_id, item.ams_mapping, overrides)
+        material_safe = self._mapping._ams_mapping_uses_compatible_materials(printer_id, item.ams_mapping, overrides)
         # Recompute forced jobs even with a stored mapping, so the tray also has the required colour.
         if force_overrides or not item.ams_mapping or not material_safe:
-            computed = await self._compute_ams_mapping_for_printer(db, printer_id, item)
-            missing = self._get_missing_force_mapping_slots(computed, force_overrides)
+            computed = await self._mapping._compute_ams_mapping_for_printer(db, printer_id, item)
+            missing = self._mapping._get_missing_force_mapping_slots(computed, force_overrides)
             if missing:
                 item.waiting_reason = self._force_color_waiting_reason(missing)
                 await db.commit()

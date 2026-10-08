@@ -237,7 +237,7 @@ async def _dispatch_library_item(
     if binding is not None:
         patches.append(patch("backend.app.services.lifecycle.queued.async_session", ctx.session_maker))
     if drying_checks is not None:
-        patches.append(patch.object(scheduler, "_active_drying_ams_ids", side_effect=drying_checks))
+        patches.append(patch.object(scheduler.drying, "_active_drying_ams_ids", side_effect=drying_checks))
 
     with ExitStack() as stack:
         for patcher in patches:

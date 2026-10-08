@@ -5273,7 +5273,7 @@ async def record_ams_history():
                 # per-AMS below from the loaded tray types. Reuses the same
                 # resolver as the auto-drying scheduler so behavior stays in
                 # lockstep across both consumers.
-                from backend.app.services.print_scheduler import PrintScheduler
+                from backend.app.services.ams_drying import AmsDrying
 
                 per_type_humidity_thresholds: dict[str, int] = {}
                 result = await db.execute(select(Settings).where(Settings.key == "ams_humidity_thresholds"))
@@ -5368,7 +5368,7 @@ async def record_ams_history():
                         # when no per-type overrides are configured.
                         trays = ams_data.get("tray", []) or []
                         effective_humidity_threshold = float(
-                            PrintScheduler.resolve_humidity_threshold(
+                            AmsDrying.resolve_humidity_threshold(
                                 trays, per_type_humidity_thresholds, int(humidity_threshold)
                             )
                         )
