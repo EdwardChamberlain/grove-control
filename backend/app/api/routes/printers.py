@@ -937,19 +937,20 @@ async def get_current_print_user(
     _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get the user who started the current print (for reprint tracking).
-
-    Returns user info if available, empty object otherwise.
-    This tracks users for reprints (which bypass the queue).
-    For queue-based prints, use the queue item's created_by field instead.
-    """
+    """The owner of the printer's active job, or an empty object for an ownerless or idle printer."""
     result = await db.execute(select(Printer).where(Printer.id == printer_id))
     printer = result.scalar_one_or_none()
     if not printer:
         raise HTTPException(404, "Printer not found")
 
-    user_info = printer_manager.get_current_print_user(printer_id)
-    return user_info or {}
+    owner = await db.execute(
+        select(User.id, User.username)
+        .join(PrintQueueItem, PrintQueueItem.created_by_id == User.id)
+        .where(PrintQueueItem.printer_id == printer_id, PrintQueueItem.status.in_(ACTIVE_STATUSES))
+        .limit(1)
+    )
+    row = owner.first()
+    return {"user_id": row.id, "username": row.username} if row else {}
 
 
 @router.post("/{printer_id}/refresh-status")

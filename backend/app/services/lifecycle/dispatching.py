@@ -100,16 +100,6 @@ async def _transition_or_skip(db: AsyncSession, item: PrintQueueItem, status: st
     return True
 
 
-async def owner_of(db: AsyncSession, item: PrintQueueItem) -> tuple[int, str] | None:
-    """The job's owner, whom the print-complete callback credits; None for an ownerless job."""
-    if not item.created_by_id:
-        return None
-    from backend.app.models.user import User
-
-    owner = await db.get(User, item.created_by_id)
-    return (owner.id, owner.username) if owner else None
-
-
 @dataclass
 class _Attempt:
     """One held attempt, passed from step to step. Scalars survive a rollback's expiry."""
@@ -370,7 +360,6 @@ class Dispatcher:
         active = self._drying._active_drying_ams_ids(a.printer_id)
         if (active and not await self._dry(db, item, active)) or not await self._ready(a):
             return
-        owner = await owner_of(db, item)  # Read now, so the send-time commit ends this read.
         try:
             values = {"dispatched_at": datetime.now(timezone.utc)}
             await transition_queue_item(db, item, "dispatching", "dispatching", conditions=conditions, values=values)
@@ -390,8 +379,6 @@ class Dispatcher:
             if self._telemetry(a.printer_id, a.identity) is True:
                 break
             await db.rollback()  # Never wait for reconnect while holding the Stop lock.
-        if owner:  # Credited only with a command, so a print the attempt never sent isn't.
-            printer_manager.set_current_print_user(a.printer_id, *owner)
         try:
             started = printer_manager.start_print(
                 a.printer_id,
@@ -416,7 +403,6 @@ class Dispatcher:
             self._confirm_later(a.item_id, a.printer_id, subtask_id)
             return
         if not started:
-            printer_manager.clear_current_print_user(a.printer_id)
             values = {"dispatched_at": None, "dispatch_subtask_id": None, "started_at": None}
             await fail(db, item, "Failed to send print command to printer", **values)
             logger.error(

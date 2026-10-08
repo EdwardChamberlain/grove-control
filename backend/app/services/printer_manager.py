@@ -295,8 +295,6 @@ class PrinterManager:
         self._on_drying_complete: Callable[[int, int], None] | None = None
         self._on_tray_change: Callable[[int, int, int], None] | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
-        # Track who started the current print (Issue #206)
-        self._current_print_user: dict[int, dict] = {}  # {printer_id: {"user_id": int, "username": str}}
         # Track printers awaiting plate-clear acknowledgment after a finished/failed print.
         # Read-only view of holding jobs, rehydrated at startup and refreshed
         # after lifecycle commits. The queue index is the reservation authority.
@@ -308,18 +306,6 @@ class PrinterManager:
     def get_printer(self, printer_id: int) -> PrinterInfo | None:
         """Get printer info by ID."""
         return self._printer_info.get(printer_id)
-
-    def set_current_print_user(self, printer_id: int, user_id: int, username: str):
-        """Track who started the current print (Issue #206)."""
-        self._current_print_user[printer_id] = {"user_id": user_id, "username": username}
-
-    def get_current_print_user(self, printer_id: int) -> dict | None:
-        """Get the user who started the current print (Issue #206)."""
-        return self._current_print_user.get(printer_id)
-
-    def clear_current_print_user(self, printer_id: int):
-        """Clear the current print user when print completes (Issue #206)."""
-        self._current_print_user.pop(printer_id, None)
 
     def is_awaiting_plate_clear(self, printer_id: int) -> bool:
         """Return True when the printer finished/failed a print and is waiting for the

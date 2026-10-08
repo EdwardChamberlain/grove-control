@@ -2041,7 +2041,6 @@ class TestAbortedStatusNormalisation:
         ):
             manager.get_printer.return_value = None
             manager.get_status.return_value = None
-            manager.get_current_print_user.return_value = None
             try:
                 yield SimpleNamespace(complete=on_print_complete, ftp=ftp, relay=relay)
             finally:

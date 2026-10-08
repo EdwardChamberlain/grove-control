@@ -104,7 +104,7 @@ from backend.app.services.job_identity import (
     telemetry_identity,
 )
 from backend.app.services.library_trash import library_trash_service
-from backend.app.services.lifecycle import effects as lifecycle_effects
+from backend.app.services.lifecycle import effects as lifecycle_effects, printing as lifecycle_printing
 from backend.app.services.lifecycle.engine import QueueTransitionConflict, lock_queue_item, transition_queue_item
 from backend.app.services.local_backup import local_backup_service
 from backend.app.services.location_ha_sensor_manager import location_ha_sensor_manager
@@ -3927,6 +3927,7 @@ class _CompletionRecord(NamedTuple):
 
     job_id: int
     owner_id: int | None
+    owner: tuple[int, str] | None
     queue_status: str
     auto_off: bool
     archive_id: int | None
@@ -4073,6 +4074,7 @@ async def _complete_identified_print(printer_id: int, data: dict):
         return _CompletionRecord(
             job_id=matched_job.id,
             owner_id=matched_job.created_by_id,
+            owner=await lifecycle_printing.owner_of(db, matched_job),
             queue_status=queue_status,
             auto_off=bool(matched_job.auto_off_after),
             archive_id=matched_job.archive_id,
@@ -4121,12 +4123,6 @@ async def _complete_identified_print(printer_id: int, data: dict):
         log_timing("WebSocket send_print_complete")
     except Exception as e:
         logger.warning("[CALLBACK] WebSocket send_print_complete failed: %s", e)
-
-    # Capture user info before clearing (needed for print log entry)
-    _print_user_info = printer_manager.get_current_print_user(printer_id)
-
-    # Clear current print user tracking (Issue #206)
-    printer_manager.clear_current_print_user(printer_id)
 
     # If the user explicitly stopped this print from the queue UI the printer will
     # report "failed" or "aborted" via MQTT.  Override that to "cancelled" so the
@@ -4594,13 +4590,11 @@ async def _complete_identified_print(printer_id: int, data: dict):
                 # source archive row rather than creating a new one, so an
                 # archive that was auto-created from a printer-initiated
                 # print (created_by_id=NULL) would otherwise stay unattributed
-                # forever. When we have a print-session user AND the archive
-                # has no attribution yet, credit the current user. Never
-                # overwrite an existing attribution — the original uploader
-                # keeps ownership.
-                _print_user_id = _print_user_info.get("user_id") if _print_user_info else None
-                if archive.created_by_id is None and _print_user_id is not None:
-                    archive.created_by_id = _print_user_id
+                # forever. When the job has an owner AND the archive has no
+                # attribution yet, credit the owner. Never overwrite an
+                # existing attribution — the original uploader keeps ownership.
+                if archive.created_by_id is None and record.owner is not None:
+                    archive.created_by_id = record.owner[0]
                 p_info = printer_manager.get_printer(printer_id)
                 # Per-run actuals — written to PrintLogEntry so stats reflect
                 # what THIS print actually used, not the source archive's
@@ -4645,7 +4639,7 @@ async def _complete_identified_print(printer_id: int, data: dict):
                     failure_reason=archive.failure_reason,
                     thumbnail_path=archive.thumbnail_path,
                     created_by_id=archive.created_by_id,
-                    created_by_username=_print_user_info.get("username") if _print_user_info else None,
+                    created_by_username=record.owner[1] if record.owner else None,
                 )
                 await db.commit()
                 logger.info("[PRINT_LOG] Log entry written for archive %s", archive_id)
