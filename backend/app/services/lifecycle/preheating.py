@@ -222,12 +222,20 @@ async def on_exit(change, row) -> None:
         effects.shut_down_heaters(change.db, row.printer_id)
 
 
-async def abort_heat_soak(db: AsyncSession, item: PrintQueueItem, reason: str, *, status: str = "failed") -> None:
+async def abort_heat_soak(
+    db: AsyncSession,
+    item: PrintQueueItem,
+    reason: str,
+    *,
+    status: str = "failed",
+    commit: bool = True,
+) -> None:
     """Exit with a reason. Caller holds the job's printer; heater shutdown survives deletion of the job."""
     await transition_queue_item(
         db, item, item.status, status, values={"error_message": reason, "completed_at": utcnow()}
     )
-    await db.commit()
+    if commit:
+        await db.commit()
 
 
 def heat_soak_dispatch_started(item: PrintQueueItem) -> bool:
@@ -310,9 +318,7 @@ async def watch(db: AsyncSession) -> None:
 
 async def interrupt(db: AsyncSession) -> None:
     """At startup: soaks the previous process was running are interrupted. Turn their heaters off, keep the hold."""
-    live = select(PrintQueueItem.id).where(
-        PrintQueueItem.status == "preheating", PrintQueueItem.deadline_at.is_not(None)
-    )
+    live = select(PrintQueueItem.id).where(PrintQueueItem.status == "preheating").order_by(PrintQueueItem.id)
     for item_id in list(await db.scalars(live)):
         item = await lock_queue_item(db, item_id)
         if not item or item.status != "preheating":

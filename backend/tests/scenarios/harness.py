@@ -19,8 +19,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import event, select
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy import select
 
 from backend.tests.scenarios.fake_printer import FakePaho, FakePrinter
 
@@ -154,9 +153,10 @@ class SdCards:
 class Harness:
     """One isolated app: database, scheduler, printers, HTTP client and clock."""
 
-    def __init__(self, tmp_path: Path, monkeypatch):
+    def __init__(self, tmp_path: Path, monkeypatch, database_url: str | None = None):
         self.tmp_path = tmp_path
         self.monkeypatch = monkeypatch
+        self.database_url = database_url
         self.clock = FakeClock()
         self.printers: dict[str, FakePrinter] = {}
         self.notices: list[Notice] = []
@@ -178,10 +178,11 @@ class Harness:
 
         self.monkeypatch.setattr(settings, "base_dir", self.tmp_path)
         self.monkeypatch.setattr(settings, "archive_dir", self.tmp_path / "archives")
+        database_url = self.database_url or f"sqlite+aiosqlite:///{self.tmp_path / 'grove.db'}"
+        self.monkeypatch.setattr(settings, "database_url", database_url)
         self._previous_clock = clock.use(self.clock)
 
-        self.engine = create_async_engine(f"sqlite+aiosqlite:///{self.tmp_path / 'grove.db'}")
-        event.listen(self.engine.sync_engine, "connect", database._set_sqlite_pragmas)
+        self.engine = database._create_engine()
         self._previous_engine = database.engine
         database.engine = self.engine
         database.async_session.configure(bind=self.engine)

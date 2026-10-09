@@ -2,6 +2,9 @@
 
 import asyncio
 
+from sqlalchemy import update
+
+from backend.app.models.print_queue import PrintQueueItem
 from backend.tests.scenarios.fake_printer import sliced_3mf
 
 SOAK = {"chamber_heat_soak": True, "heat_soak_temperature": 45, "heat_soak_minutes": 10}
@@ -71,6 +74,75 @@ async def test_soak_interrupted_by_restart_turns_heaters_off_and_keeps_the_hold(
     await app.action(job_id, "stop")
     await app.run()
     assert (await app.job(job_id)).status == "cancelled"
+
+
+async def _persist_unstarted_soak(app):
+    printer = await app.add_printer(model="H2D")
+    job_id = await app.queue(printer, await app.add_file(), **SOAK)
+    async with app.session() as db:
+        await db.execute(
+            update(PrintQueueItem)
+            .where(PrintQueueItem.id == job_id)
+            .values(status="preheating", preheat_requested_at=app.clock.now())
+        )
+        await db.commit()
+    return printer, job_id
+
+
+async def test_restart_after_the_preheating_hold_but_before_heating_keeps_the_job_parked(app):
+    printer, job_id = await _persist_unstarted_soak(app)
+
+    await app.restart(abrupt=True)
+    await app.run()
+
+    job = await app.job(job_id)
+    assert job.status == "preheating"
+    assert job.deadline_at is None
+    assert job.error_message
+    assert "M140 S0" in gcode(printer)
+    assert printer.sent("project_file") == []
+
+
+async def test_restart_after_heater_commands_before_deadline_commit_requests_shutdown(app, monkeypatch):
+    printer, job_id = await _persist_unstarted_soak(app)
+
+    from backend.app.services.lifecycle import preheating
+
+    original_transition = preheating.transition_queue_item
+
+    class PowerLoss(BaseException):
+        pass
+
+    async def lose_power_after_transition(*args, **kwargs):
+        await original_transition(*args, **kwargs)
+        raise PowerLoss
+
+    with monkeypatch.context() as crash:
+        crash.setattr(preheating, "transition_queue_item", lose_power_after_transition)
+        try:
+            async with app.session() as db:
+                await preheating.start_heating(db, job_id)
+        except PowerLoss:
+            pass
+        else:
+            raise AssertionError("the simulated power loss did not interrupt the heater transaction")
+
+    interrupted = await app.job(job_id)
+    assert interrupted.status == "preheating"
+    assert interrupted.deadline_at is None
+    assert "M140 S45" in gcode(printer)
+
+    await app.restart(abrupt=True)
+    await app.run()
+    await app.restart(abrupt=True)
+    await app.run()
+
+    job = await app.job(job_id)
+    assert job.status == "preheating"
+    assert job.deadline_at is None
+    assert job.error_message
+    assert "M140 S0" in gcode(printer)
+    assert printer.sent("project_file") == []
 
 
 async def test_printer_lost_during_soak_ends_the_soak(app):

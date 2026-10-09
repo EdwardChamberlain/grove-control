@@ -55,9 +55,23 @@ async def hold_printer(db: AsyncSession, printer_id: int | None) -> None:
     if printer_id is None or _holders.get(printer_id) is session:
         return
     if session.info.get("wrote"):
-        _violation(f"printer {printer_id}'s lock taken after this transaction wrote")
+        message = f"printer {printer_id}'s lock taken after this transaction wrote"
+        _violation(message)
+        raise RuntimeError(f"lifecycle lock-order invariant violated: {message}")
+    held = session.info.setdefault("held_printer_ids", set())
+    if held and printer_id < max(held):
+        message = f"printer {printer_id}'s lock taken after higher printer lock {max(held)}"
+        _violation(message)
+        raise RuntimeError(f"lifecycle lock-order invariant violated: {message}")
     await _printer_locks.setdefault(printer_id, asyncio.Lock()).acquire()
     _holders[printer_id] = session
+    held.add(printer_id)
+
+
+async def hold_printers(db: AsyncSession, printer_ids: Sequence[int | None]) -> None:
+    """Acquire a transaction's printer locks in the shared ascending order."""
+    for printer_id in sorted({printer_id for printer_id in printer_ids if printer_id is not None}):
+        await hold_printer(db, printer_id)
 
 
 def printer_busy(printer_id: int) -> bool:
@@ -70,6 +84,7 @@ def _release(session: Session, transaction) -> None:
     if transaction.parent is not None:
         return
     session.info.pop("wrote", None)
+    session.info.pop("held_printer_ids", None)
     for printer_id, holder in list(_holders.items()):
         if holder is session:
             del _holders[printer_id]
@@ -337,20 +352,60 @@ async def _record_physical_outcome(
     )
 
 
+async def lock_queue_items(
+    db: AsyncSession,
+    expected_printers: Mapping[int, int | None],
+) -> dict[int, PrintQueueItem | None]:
+    """Lock and refresh jobs in ID order after their printer locks have been acquired.
+
+    The conditional no-op UPDATE is a row lock on PostgreSQL and SQLite's write
+    lock. Its printer predicate makes a changed assignment a conflict instead
+    of allowing the transaction to acquire a printer lock after writing.
+    Missing rows remain missing, matching the single-job helper's behavior.
+    """
+    held_printers = db.sync_session.info.get("held_printer_ids", set())
+    missing_locks = set(expected_printers.values()) - {None} - held_printers
+    if missing_locks:
+        raise RuntimeError(f"lifecycle job rows locked before printer locks: {sorted(missing_locks)}")
+    locked: dict[int, PrintQueueItem | None] = {}
+    with db.no_autoflush:  # Pending work, such as an unlinked copy, stays unflushed until the caller's write.
+        for item_id in sorted(expected_printers):
+            expected_printer_id = expected_printers[item_id]
+            assigned = (
+                PrintQueueItem.printer_id.is_(None)
+                if expected_printer_id is None
+                else PrintQueueItem.printer_id == expected_printer_id
+            )
+            result = await db.execute(
+                update(PrintQueueItem)
+                .where(PrintQueueItem.id == item_id, assigned)
+                .values(id=PrintQueueItem.id)
+                .execution_options(synchronize_session=False)
+            )
+            if result.rowcount != 1:
+                current = await db.execute(
+                    select(PrintQueueItem.id, PrintQueueItem.printer_id).where(PrintQueueItem.id == item_id)
+                )
+                row = current.first()
+                if row is not None:
+                    raise QueueTransitionConflict(f"Queue item {item_id} changed printers while it was being locked")
+                locked[item_id] = None
+                continue
+            locked[item_id] = await db.get(PrintQueueItem, item_id, populate_existing=True)
+    return locked
+
+
 async def lock_queue_item(db: AsyncSession, item_id: int) -> PrintQueueItem | None:
     """Take the job's printer lock and a row write lock on both SQLite and PostgreSQL, then discard stale ORM state."""
-    with db.no_autoflush:  # Pending work, such as an unlinked copy, stays unflushed until the caller's write.
-        printer_id = await db.scalar(select(PrintQueueItem.printer_id).where(PrintQueueItem.id == item_id))
-        await hold_printer(db, printer_id)
-        result = await db.execute(
-            update(PrintQueueItem)
-            .where(PrintQueueItem.id == item_id)
-            .values(id=PrintQueueItem.id)
-            .execution_options(synchronize_session=False)
+    with db.no_autoflush:
+        snapshot = await db.execute(
+            select(PrintQueueItem.id, PrintQueueItem.printer_id).where(PrintQueueItem.id == item_id)
         )
-        if not result.rowcount:
+        row = snapshot.first()
+        if row is None:
             return None
-        return await db.get(PrintQueueItem, item_id, populate_existing=True)
+        await hold_printer(db, row.printer_id)
+        return (await lock_queue_items(db, {item_id: row.printer_id}))[item_id]
 
 
 async def transfer_hold(db: AsyncSession, held: PrintQueueItem, identity: str) -> bool:
@@ -371,8 +426,11 @@ async def release_printer(db: AsyncSession, printer: Printer) -> None:
     from backend.app.services.lifecycle.final import end
     from backend.app.services.printer_manager import printer_manager
 
+    await hold_printer(db, printer.id)
     held = (PrintQueueItem.printer_id == printer.id, PrintQueueItem.status.in_(HOLDING_STATUSES))
-    holding = list((await db.scalars(select(PrintQueueItem).where(*held).with_for_update())).all())
+    holding = list(
+        (await db.scalars(select(PrintQueueItem).where(*held).order_by(PrintQueueItem.id).with_for_update())).all()
+    )
     soaking = printer.heat_soak_shutdown_pending or any(is_soaking(item) for item in holding)
     if soaking and printer_manager.is_connected(printer.id):
         raise InvalidQueueTransition(
