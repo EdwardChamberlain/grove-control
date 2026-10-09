@@ -283,9 +283,9 @@ async def test_live_upload_is_not_a_dispatch_confirmation_prompt(queue_factory):
 
     from backend.app.api.routes.print_queue import get_queue_item, resolve_queue_dispatch
     from backend.app.schemas.print_queue import DispatchResolution
-    from backend.app.services.lifecycle import queued
 
     ctx = await queue_factory(cleanup=False)
+    dispatch_scheduler = PrintScheduler()
 
     async def uploading(*_args, **_kwargs):
         ctx.start_print.assert_not_called()
@@ -298,17 +298,17 @@ async def test_live_upload_is_not_a_dispatch_confirmation_prompt(queue_factory):
                 )
             assert conflict.value.status_code == 409
             await db.rollback()
-            await PrintScheduler().dispatcher.recover(db)
+            await dispatch_scheduler.dispatcher.recover(db)
             assert (await db.get(PrintQueueItem, ctx.queue_item_id)).error_message is None
         return True
 
     ctx.upload.side_effect = uploading
     binding = await _selection_binding(ctx, ctx.printer_id, None, unassigned=False)
-    queued.inflight[ctx.queue_item_id] = (asyncio.current_task(), ctx.printer_id)
+    dispatch_scheduler.workers.inflight[ctx.queue_item_id] = (asyncio.current_task(), ctx.printer_id)
     try:
         await _dispatch_library_item(ctx, binding=binding)
     finally:
-        queued.inflight.pop(ctx.queue_item_id, None)
+        dispatch_scheduler.workers.inflight.pop(ctx.queue_item_id, None)
     ctx.start_print.assert_called_once()
     item, _, _ = await _queue_snapshot(ctx)
     assert item.status == "dispatching" and item.started_at is None
