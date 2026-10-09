@@ -170,6 +170,40 @@ async def test_proven_unsent_failure_creates_one_fresh_top_retry(alignment, monk
         assert retry.status == "failed" and retry.physical_outcome is None
 
 
+async def test_unassigned_automatic_retry_drops_printer_specific_ams_mappings(alignment):
+    from backend.app.services.lifecycle.queued import create_retry_job
+
+    async with alignment.sessions() as db:
+        assigned = await db.get(PrintQueueItem, alignment.job_id)
+        original = PrintQueueItem(
+            printer_id=assigned.assigned_printer_id,
+            library_file_id=alignment.source_id,
+            target_model="X1C",
+            status="failed",
+            ams_mapping="[0]",
+            variants=[
+                PrintQueueVariant(
+                    library_file_id=alignment.source_id,
+                    target_model="X1C",
+                    position=0,
+                    ams_mapping="[0]",
+                )
+            ],
+        )
+        db.add(original)
+        await db.commit()
+
+        retry = await create_retry_job(db, original)
+        await db.commit()
+        variants = list(
+            (await db.scalars(select(PrintQueueVariant).where(PrintQueueVariant.queue_item_id == retry.id))).all()
+        )
+
+        assert retry.status == "queued" and retry.assigned_printer_id is None and retry.printer_id is None
+        assert retry.ams_mapping is None
+        assert len(variants) == 1 and variants[0].ams_mapping is None
+
+
 async def test_send_intent_failure_keeps_hold_and_does_not_create_retry(alignment, monkeypatch):
     from sqlalchemy import func
 

@@ -185,6 +185,13 @@ async def create_retry_job(db: AsyncSession, item: PrintQueueItem) -> PrintQueue
         )
         for field in ("plate_id", "ams_mapping", "nozzle_mapping", "filament_overrides", "required_filament_types"):
             values[field] = variant_values[0].get(field)
+    if item.assigned_printer_id is None:
+        # This job will be matched to a printer again. Tray indices belong to
+        # that printer, so don't carry the previous dispatch's mapping into
+        # the fresh job (or let a candidate variant restore it).
+        values["ams_mapping"] = None
+        for variant in variant_values:
+            variant["ams_mapping"] = None
     created = await create_job(db, [values], at="top", variants=variant_values)
     return created[0]
 
