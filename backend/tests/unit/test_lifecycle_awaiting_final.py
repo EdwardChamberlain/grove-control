@@ -28,7 +28,6 @@ from backend.app.services.lifecycle.engine import (
     ALLOWED_TRANSITIONS,
     InvalidQueueTransition,
     QueueTransitionConflict,
-    enter_state,
     transition_queue_item,
 )
 from backend.tests.unit.test_chamber_heat_soak import soak  # noqa: F401
@@ -69,138 +68,7 @@ def test_every_step_belongs_to_its_state_module():
     for state, module in lifecycle_engine._ENTRY.items():
         assert state in ALLOWED_TRANSITIONS
         assert module.startswith("backend.app.services.lifecycle.")
-        assert any(callable(getattr(import_module(module), step, None)) for step in ("on_enter", "on_entered"))
-
-
-async def test_the_writer_refuses_to_skip_a_post_commit_step(sessions):
-    item_id = await job(sessions, "queued")
-    async with sessions() as db:
-        item = await db.get(PrintQueueItem, item_id)
-        with pytest.raises(InvalidQueueTransition, match="enter_state"):
-            await transition_queue_item(db, item, "queued", "preheating", values={"preheat_owner": "worker"})
-        await db.rollback()
-    async with sessions() as db:
-        assert (await db.get(PrintQueueItem, item_id)).status == "queued"  # Refused before writing.
-
-
-async def test_enter_states_permission_covers_only_its_own_transition(sessions, monkeypatch):
-    item_id = await job(sessions, "queued")
-    async with sessions() as db:
-        other = PrintQueueItem(status="queued")  # No printer, so the holding index allows a second hold.
-        db.add(other)
-        await db.commit()
-        other_id = other.id
-    refused = []
-
-    async def on_entered(change):
-        # The step runs after enter_state's own transition, so it cannot skip another job's step.
-        other = await change.db.get(PrintQueueItem, other_id)
-        with pytest.raises(InvalidQueueTransition):
-            await transition_queue_item(change.db, other, "queued", "preheating")
-        refused.append(other_id)
-        return True
-
-    monkeypatch.setattr(preheating, "on_entered", on_entered)
-    async with sessions() as db:
-        assert await enter_state(db, await db.get(PrintQueueItem, item_id), "queued", "preheating")
-    assert refused == [other_id]
-
-
-async def test_post_commit_entry_runs_once_the_transition_has_committed(sessions, monkeypatch):
-    item_id = await job(sessions, "queued")
-    seen = []
-
-    async def on_entered(change):
-        async with sessions() as other:  # Another connection sees only committed data.
-            seen.append((await other.get(PrintQueueItem, item_id)).status)
-        seen.append((change.before, change.after, change.values["preheat_owner"]))
-        return False
-
-    monkeypatch.setattr(preheating, "on_entered", on_entered)
-    async with sessions() as db:
-        item = await db.get(PrintQueueItem, item_id)
-        entered = await enter_state(db, item, "queued", "preheating", values={"preheat_owner": "worker"})
-    assert seen == ["preheating", ("queued", "preheating", "worker")]
-    assert entered is False  # The step says whether the job entered.
-
-
-@pytest.mark.parametrize("refusal", ["conflict", "printer held"])
-async def test_a_refused_transition_returns_false_without_its_post_commit_step(sessions, monkeypatch, refusal):
-    item_id = await job(sessions, "queued")
-    if refusal == "printer held":
-        await job(sessions, "printing")  # The holding index refuses a second hold.
-    on_entered = AsyncMock(return_value=True)
-    monkeypatch.setattr(preheating, "on_entered", on_entered)
-    conditions = (PrintQueueItem.printer_id == 2,) if refusal == "conflict" else ()
-    async with sessions() as db:
-        item = await db.get(PrintQueueItem, item_id)
-        assert await enter_state(db, item, "queued", "preheating", conditions=conditions) is False
-    on_entered.assert_not_awaited()
-    async with sessions() as db:
-        assert (await db.get(PrintQueueItem, item_id)).status == "queued"
-
-
-async def test_a_failed_commit_raises_without_the_post_commit_step(sessions, monkeypatch):
-    item_id = await job(sessions, "queued")
-    on_entered = AsyncMock(return_value=True)
-    monkeypatch.setattr(preheating, "on_entered", on_entered)
-
-    def fail_commit(_connection):
-        raise OperationalError("COMMIT", {}, RuntimeError("disk unavailable"))
-
-    engine = sessions.kw["bind"].sync_engine
-    event.listen(engine, "commit", fail_commit)
-    try:
-        async with sessions() as db:
-            item = await db.get(PrintQueueItem, item_id)
-            with pytest.raises(OperationalError):
-                await enter_state(db, item, "queued", "preheating")
-            await db.rollback()
-    finally:
-        event.remove(engine, "commit", fail_commit)
-    on_entered.assert_not_awaited()
-    async with sessions() as db:
-        assert (await db.get(PrintQueueItem, item_id)).status == "queued"
-
-
-async def test_errors_in_the_post_commit_step_are_raised_not_reported_as_refusals(sessions, monkeypatch):
-    item_id = await job(sessions, "queued")
-    monkeypatch.setattr(preheating, "on_entered", AsyncMock(side_effect=QueueTransitionConflict("in the step")))
-    async with sessions() as db:
-        item = await db.get(PrintQueueItem, item_id)
-        with pytest.raises(QueueTransitionConflict, match="in the step"):
-            await enter_state(db, item, "queued", "preheating")
-    async with sessions() as db:
-        assert (await db.get(PrintQueueItem, item_id)).status == "preheating"  # The hold had committed.
-
-
-async def test_a_heat_soak_entry_raises_its_heater_steps_errors(soak, monkeypatch):
-    # The hold has committed by then, so the error is not a refused hold.
-    monkeypatch.setattr(preheating, "on_entered", AsyncMock(side_effect=QueueTransitionConflict("in the step")))
-    with pytest.raises(QueueTransitionConflict, match="in the step"):
-        await soak.service.enter(soak.db, soak.item)
-    await soak.db.refresh(soak.item)
-    assert soak.item.status == "preheating"
-
-
-@pytest.mark.parametrize("owner", ["worker", None])
-async def test_heater_entry_heats_the_held_printer_only_for_a_workers_hold(soak, owner):
-    # Neither value names the printer: the step heats the one the row holds.
-    values = {"preheat_owner": owner} if owner else {}
-    entered = await enter_state(soak.db, soak.item, "queued", "preheating", values=values)
-    await soak.db.refresh(soak.item)
-    assert soak.item.status == "preheating"
-    assert entered is (owner is not None)
-    assert (soak.item.preheat_started_at is not None) is entered
-    assert soak.client.set_bed_temperature.called is entered
-
-
-async def test_a_state_without_post_commit_entry_has_entered_once_committed(sessions):
-    item_id = await job(sessions, "printing")
-    async with sessions() as db:
-        assert await enter_state(db, await db.get(PrintQueueItem, item_id), "printing", "finished")
-    async with sessions() as db:
-        assert (await db.get(PrintQueueItem, item_id)).status == "finished"
+        assert callable(getattr(import_module(module), "on_enter", None))
 
 
 @pytest.mark.parametrize(

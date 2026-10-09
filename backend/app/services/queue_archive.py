@@ -91,7 +91,6 @@ async def link_dispatch_archive(
     """Claim the held job before flushing its copy; caller commits both together."""
     from backend.app.services.lifecycle.engine import (
         InvalidQueueTransition,
-        QueueTransitionConflict,
         transition_queue_item,
     )
 
@@ -106,11 +105,7 @@ async def link_dispatch_archive(
         or not archive.file_path
     ):
         raise InvalidQueueTransition("Dispatch Archive does not belong to this held job")
-    try:
-        await transition_queue_item(db, item, "dispatching", "dispatching", conditions=conditions)
-    except QueueTransitionConflict:
-        discard_prepared_archive(db, archive)
-        raise
+    await transition_queue_item(db, item, "dispatching", "dispatching", conditions=conditions)
     await db.flush([archive])
     await transition_queue_item(
         db,

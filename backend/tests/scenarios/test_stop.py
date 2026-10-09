@@ -91,6 +91,7 @@ async def test_stop_during_upload_removes_the_upload_and_sends_nothing(app):
 
     assert (await app.job(job_id)).status == "cancelled"
     assert printer.sent("project_file") == []
+    assert printer.sent("stop") == []  # Nothing was sent, so nothing is stopped.
     assert not [name for name in printer.sd if name.endswith(".3mf")]
 
 

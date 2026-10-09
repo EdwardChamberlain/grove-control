@@ -324,30 +324,6 @@ async def test_user_resolution_commits_and_keeps_failed_plate_gate(sessions, out
         assert publish.await_count == (outcome == "printing")
 
 
-@pytest.mark.parametrize("outcome", ["printing", "failed"])
-@pytest.mark.parametrize("preparing", ["upload", "archive"])
-async def test_preparing_dispatch_cannot_be_resolved_as_a_sent_command(sessions, outcome, preparing):
-    from backend.app.api.routes.print_queue import get_queue_item
-
-    async with sessions() as db:
-        item = PrintQueueItem(
-            printer_id=1,
-            status="dispatching",
-            dispatching_at=datetime.now(timezone.utc) - timedelta(minutes=10),
-            dispatched_at=datetime.now(timezone.utc) - timedelta(minutes=10) if preparing == "archive" else None,
-            dispatch_subtask_id="123" if preparing == "archive" else None,
-        )
-        db.add(item)
-        await db.commit()
-        assert not (await get_queue_item(item.id, db, (None, True))).dispatch_needs_resolution
-        with pytest.raises(HTTPException) as conflict:
-            await resolve_queue_dispatch(item.id, DispatchResolution(outcome=outcome), db, (None, True))
-        assert conflict.value.status_code == 409
-        await db.rollback()
-        await db.refresh(item)
-        assert item.status == "dispatching" and item.started_at is None
-
-
 @pytest.mark.parametrize("seconds, expected", [(0, False), (269, False), (271, True)])
 def test_dispatch_confirmation_prompt_requires_a_finished_send_attempt(seconds, expected):
     item = PrintQueueItem(

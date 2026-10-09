@@ -862,7 +862,7 @@ async def bulk_update_queue_items(
 
     for item in items:
         item = await lock_queue_item(db, item.id)
-        if not item or item.status != "queued" or item.dispatching_at is not None:
+        if not item or item.status != "queued":
             skipped_count += 1
             continue
 
@@ -958,9 +958,6 @@ async def update_queue_item(
 
     if item.status != "queued":
         raise HTTPException(400, "Can only update pending items")
-
-    if item.status == "queued" and item.dispatching_at is not None:
-        raise HTTPException(409, "Item is being dispatched — cancel it first to make changes")
 
     update_data = data.model_dump(exclude_unset=True)
 
@@ -1094,15 +1091,6 @@ async def update_queue_item(
         update_data["nozzle_mapping"] = (
             json.dumps(update_data["nozzle_mapping"]) if update_data["nozzle_mapping"] else None
         )
-
-    # Validation above contains awaits, so a scheduler worker may have claimed
-    # this row after the initial guard. Re-check immediately before mutating it.
-    if item.status == "queued":
-        claimed = (
-            await db.execute(select(PrintQueueItem.dispatching_at).where(PrintQueueItem.id == item_id))
-        ).scalar_one_or_none()
-        if claimed is not None:
-            raise HTTPException(409, "Item is being dispatched — cancel it first to make changes")
 
     for field, value in update_data.items():
         setattr(item, field, value)
@@ -1317,14 +1305,13 @@ async def retry_queue_item(
         "manual_start",
         "dispatched_at",
         "dispatch_subtask_id",
-        "dispatching_at",
         "error_message",
         "waiting_reason",
         "been_jumped",
-        "preheat_owner",
         "preheat_requested_at",
-        "preheat_checked_at",
         "preheat_started_at",
+        "deadline_at",
+        "deadline_kind",
     }
     values = {
         column.name: getattr(old, column.name)

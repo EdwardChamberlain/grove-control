@@ -7,18 +7,19 @@ state modules are imported on use because they import this module.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import nullcontext
-from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import partial
 from importlib import import_module
+from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import event, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
+from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -33,6 +34,70 @@ from backend.app.models.printer import Printer
 from backend.app.services.lifecycle import clock
 
 logger = logging.getLogger(__name__)
+
+# One writer per printer (#217). A transaction takes a printer's lock when it
+# first locks or writes a job holding that printer, and keeps it until the
+# transaction ends, so no two transactions ever write one printer's job at once.
+_printer_locks: dict[int, asyncio.Lock] = {}
+_holders: dict[int, Session] = {}
+# Scenarios collect lifecycle conflicts and late locks here instead of logging them.
+violations: list[str] | None = None
+
+
+async def hold_printer(db: AsyncSession, printer_id: int | None) -> None:
+    """Make ``db``'s transaction the printer's only writer until the transaction ends.
+
+    Take it before the transaction's first write: a transaction that has
+    written holds SQLite's single write lock, and the printer's current
+    holder may be waiting for that.
+    """
+    session = db.sync_session
+    if printer_id is None or _holders.get(printer_id) is session:
+        return
+    if session.info.get("wrote"):
+        _violation(f"printer {printer_id}'s lock taken after this transaction wrote")
+    await _printer_locks.setdefault(printer_id, asyncio.Lock()).acquire()
+    _holders[printer_id] = session
+
+
+def printer_busy(printer_id: int) -> bool:
+    """Whether a transaction is writing the printer's job now."""
+    return printer_id in _holders
+
+
+@event.listens_for(Session, "after_transaction_end")
+def _release(session: Session, transaction) -> None:
+    if transaction.parent is not None:
+        return
+    session.info.pop("wrote", None)
+    for printer_id, holder in list(_holders.items()):
+        if holder is session:
+            del _holders[printer_id]
+            _printer_locks[printer_id].release()
+
+
+@event.listens_for(Session, "do_orm_execute")
+def _note_write(state) -> None:
+    if state.is_update or state.is_insert or state.is_delete:
+        state.session.info["wrote"] = True
+
+
+@event.listens_for(Session, "after_flush")
+def _note_flush(session: Session, _context) -> None:
+    session.info["wrote"] = True
+
+
+def _violation(message: str) -> None:
+    if violations is None:
+        logger.warning("lifecycle: %s", message)
+        return
+    import traceback
+
+    frames = [f for f in traceback.extract_stack()[:-2] if "/app/" in f.filename]
+    violations.append(
+        message + " via " + " < ".join(f"{Path(f.filename).stem}.{f.name}" for f in reversed(frames[-4:]))
+    )
+
 
 ALLOWED_TRANSITIONS = {
     "queued": frozenset({"preheating", "dispatching", "unsuccessful"}),
@@ -81,8 +146,7 @@ _RELEASE_ACTIONS = ("clear_plate", "printer_deleted", "hold_transferred", "print
 
 # Each state's steps live in its module. In the caller's transaction, after the
 # conditional write: the old state's on_exit(change, row), then the new state's
-# on_enter(change, row). Once enter_state() has committed: the new state's
-# on_entered(change). State modules import this one, so they are named here
+# on_enter(change, row). State modules import this one, so they are named here
 # and imported on use.
 _LIFECYCLE = "backend.app.services.lifecycle"
 _EXITS = {
@@ -92,15 +156,11 @@ _EXITS = {
     **dict.fromkeys(AWAITING_PLATE_CLEAR_STATUSES, f"{_LIFECYCLE}.awaiting"),
 }
 _ENTRY = {
-    "preheating": f"{_LIFECYCLE}.preheating",
     "dispatching": f"{_LIFECYCLE}.dispatching",
     "printing": f"{_LIFECYCLE}.printing",
     **dict.fromkeys(AWAITING_PLATE_CLEAR_STATUSES, f"{_LIFECYCLE}.awaiting"),
     **dict.fromkeys(FINAL_STATUSES, f"{_LIFECYCLE}.final"),
 }
-# The (job, state) that enter_state() is entering; only it may enter a state
-# with a post-commit step, so that step cannot be skipped.
-_entering: ContextVar[tuple[int, str] | None] = ContextVar("lifecycle_entering", default=None)
 
 
 @dataclass(frozen=True)
@@ -158,19 +218,16 @@ async def transition_queue_item(
     action: str | None = None,
     migration: bool = False,
     archive_failure_reason: str | None = None,
-    dispatch_guard: Callable[[], bool] | None = None,
 ) -> Transition | None:
     """Conditionally change a persisted item, or raise without writing it.
 
-    Same-status writes (heat-soak handoffs, heater cleanup, recovered
-    completions) still check the stored status. ``conditions`` fence dispatch
-    claims; ``values`` change atomically with the status. Integer IDs let the
-    legacy upgrade use its own connection. On conflict nothing is written or
-    queued: the caller rolls back, or skips this item and continues. This never
-    commits or rolls back, and ORM sync never flushes a second status UPDATE.
-    Entry into dispatching reserves the printer before any file copy. A state
-    with a post-commit step is entered only through enter_state(). A session
-    gets back the written change.
+    The caller's transaction takes the job's printer lock here, if it hasn't
+    already. Same-status writes still check the stored status; ``conditions``
+    add further checks, and ``values`` change atomically with the status.
+    Integer IDs let the legacy upgrade use its own connection. On conflict
+    nothing is written or queued. This never commits or rolls back, and ORM
+    sync never flushes a second status UPDATE. A session gets back the
+    written change.
     """
     upgrading = migration and isinstance(db, AsyncConnection) and status in LEGACY_TRANSITIONS.get(expected_status, ())
     _check(expected_status, status, action, upgrading)
@@ -180,18 +237,21 @@ async def transition_queue_item(
         raise ValueError("Transition metadata cannot override status or id")
     if any(key.startswith("physical_") for key in metadata):
         raise ValueError("Physical outcomes are recorded only on entry to an awaiting-plate-clear state")
+    if expected_status != status and not migration:
+        # A deadline belongs to one state: leaving it ends the wait.
+        metadata.setdefault("deadline_at", None)
+        metadata.setdefault("deadline_kind", None)
     item_id = item if isinstance(item, int) else item.id
+    if isinstance(db, AsyncSession) and not isinstance(item, int):
+        if expected_status in HOLDING_STATUSES or status in HOLDING_STATUSES:
+            await hold_printer(db, metadata.get("printer_id", item.printer_id))
     if status == "dispatching" and expected_status != status and not upgrading:
         if metadata.get("printer_id", item.printer_id if not isinstance(item, int) else None) is None:
             raise InvalidQueueTransition("Dispatch requires a selected printer")
     session = isinstance(db, AsyncSession)
-    if session and expected_status != status and _step(status, "on_entered") and _entering.get() != (item_id, status):
-        raise InvalidQueueTransition(f"Enter {status} with enter_state(), which runs its post-commit step")
     if session and (expected_status != status or confirmed):
         if status in AWAITING_PLATE_CLEAR_STATUSES and action != "cancel":
             await _record_physical_outcome(db, item_id, status, metadata, confirmed, archive_failure_reason)
-    if dispatch_guard is not None and not dispatch_guard():
-        raise QueueTransitionConflict("Printer is no longer available for dispatch")
     # SQLAlchemy 2.1 autoflushes Core statements regardless of their statement
     # execution options. Suppress it at the session boundary so a losing CAS
     # cannot flush stale metadata first. Startup repairs use AsyncConnection.
@@ -205,6 +265,8 @@ async def transition_queue_item(
             .execution_options(autoflush=False)
         )
     if result.rowcount != 1:
+        if expected_status in HOLDING_STATUSES:
+            _violation(f"conflict: queue job {item_id} left {expected_status} under another writer")
         raise QueueTransitionConflict(f"Queue item {item_id} no longer matches expected status {expected_status}")
     if not isinstance(item, int):
         set_committed_value(item, "status", status)
@@ -212,6 +274,10 @@ async def transition_queue_item(
             set_committed_value(item, key, value)
     if not session:
         return None
+    if metadata.get("deadline_at") is not None:
+        from backend.app.services.lifecycle import deadlines, effects
+
+        effects.after_commit(db, deadlines.wake, key="lifecycle_wake")
     change = Transition(db, item, item_id, expected_status, status, action, metadata)
     await _written(change)
     return change
@@ -234,7 +300,6 @@ async def _written(change: Transition) -> None:
         "archive_id",
         "library_file_id",
         "preheat_requested_at",
-        "preheat_owner",
         "chamber_heat_soak",
     )
     row = (await db.execute(select(*(table.c[name] for name in names)).where(table.c.id == change.item_id))).one()
@@ -252,31 +317,6 @@ async def _written(change: Transition) -> None:
 
 def _step(state: str, name: str) -> Callable | None:
     return getattr(import_module(_ENTRY[state]), name, None) if state in _ENTRY else None
-
-
-async def enter_state(
-    db: AsyncSession, item: PrintQueueItem, expected_status: str, status: str, **transition: Any
-) -> bool:
-    """Make a transition and commit it, then run the new state's post-commit entry step.
-
-    on_entered(change) is entry work that must wait for the commit, such as
-    heater commands once a hold is durable. It re-checks the job under its own
-    lock, and says whether the job entered. A transition the database refuses
-    (a conflict, or the holding index) is rolled back and returns False before
-    the step runs. Anything else, including the step's own errors, is raised.
-    The writer refuses to enter a state with this step any other way.
-    """
-    entering = _entering.set((item.id, status))
-    try:
-        change = await transition_queue_item(db, item, expected_status, status, **transition)
-        await db.commit()
-    except (IntegrityError, QueueTransitionConflict):
-        await db.rollback()
-        return False
-    finally:
-        _entering.reset(entering)
-    entered = _step(status, "on_entered")
-    return await entered(change) if entered else True
 
 
 async def _record_physical_outcome(
@@ -298,8 +338,10 @@ async def _record_physical_outcome(
 
 
 async def lock_queue_item(db: AsyncSession, item_id: int) -> PrintQueueItem | None:
-    """Take a write lock on both SQLite and PostgreSQL, then discard stale ORM state."""
-    with db.no_autoflush:
+    """Take the job's printer lock and a row write lock on both SQLite and PostgreSQL, then discard stale ORM state."""
+    with db.no_autoflush:  # Pending work, such as an unlinked copy, stays unflushed until the caller's write.
+        printer_id = await db.scalar(select(PrintQueueItem.printer_id).where(PrintQueueItem.id == item_id))
+        await hold_printer(db, printer_id)
         result = await db.execute(
             update(PrintQueueItem)
             .where(PrintQueueItem.id == item_id)

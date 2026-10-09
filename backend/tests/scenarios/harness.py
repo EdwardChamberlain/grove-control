@@ -87,8 +87,17 @@ class Notice:
 class SdCards:
     """Every printer's SD card, reached through the FTP functions."""
 
-    def __init__(self, printers: dict[str, FakePrinter]):
+    def __init__(self, printers: dict[str, FakePrinter], parked: set):
         self._printers = printers
+        self._parked = parked  # Tasks waiting on a scenario's gate; settle doesn't wait for them.
+
+    async def _wait(self, gate: asyncio.Event) -> None:
+        task = asyncio.current_task()
+        self._parked.add(task)
+        try:
+            await gate.wait()
+        finally:
+            self._parked.discard(task)
 
     def card(self, ip: str) -> dict[str, bytes]:
         return self._printers[ip].sd
@@ -98,7 +107,7 @@ class SdCards:
         printer.uploading += 1
         try:
             if printer.upload_gate is not None:
-                await printer.upload_gate.wait()
+                await self._wait(printer.upload_gate)
             if not printer.accepts_uploads:
                 return False
             printer.sd[remote_path] = Path(local_path).read_bytes()
@@ -118,7 +127,7 @@ class SdCards:
         if printer.download_gate is not None:
             printer.downloading += 1
             try:
-                await printer.download_gate.wait()
+                await self._wait(printer.download_gate)
             finally:
                 printer.downloading -= 1
         data = self.card(ip).get(remote_path)
@@ -158,6 +167,7 @@ class Harness:
         self._baseline_tasks: set[asyncio.Task] = set()
         self._fakes: dict = {}
         self._scenario_tasks: set[asyncio.Task] = set()
+        self._parked: set[asyncio.Task] = set()
 
     # ---- lifecycle of the harness ----
 
@@ -178,6 +188,17 @@ class Harness:
         await database.init_db()
 
         self._patch_edges()
+        # A module first imported while another test had swapped the session
+        # factory still holds that factory; point every one at this database.
+        from sqlalchemy.ext.asyncio import async_sessionmaker
+
+        for module in _app_modules():
+            stale = vars(module).get("async_session")
+            if isinstance(stale, async_sessionmaker) and stale is not database.async_session:
+                self.monkeypatch.setattr(module, "async_session", database.async_session)
+        from backend.app.services.lifecycle import engine
+
+        self.monkeypatch.setattr(engine, "violations", [])
         _forget_process_memory()
         self._baseline_tasks = set(asyncio.all_tasks())
         await self.boot()
@@ -203,7 +224,7 @@ class Harness:
         from backend.app.services import bambu_ftp, camera
         from backend.app.services.notification_service import notification_service
 
-        cards = SdCards(self.printers)
+        cards = SdCards(self.printers, self._parked)
         for original, fake in (
             (bambu_ftp.upload_file_async, cards.upload),
             (bambu_ftp.delete_file_async, cards.delete),
@@ -246,9 +267,16 @@ class Harness:
             client._client = FakePaho(printer)
             client.state.connected = True
 
+        def reconnect(client):
+            # The app tore down a stale MQTT session; the printer comes straight back.
+            printer = self.printers[client.ip_address]
+            printer.reconnects += 1
+            asyncio.get_running_loop().call_soon(printer.push)
+
         from backend.app.services.bambu_mqtt import BambuMQTTClient
 
         self.monkeypatch.setattr(BambuMQTTClient, "connect", connect)
+        self.monkeypatch.setattr(BambuMQTTClient, "_reset_client_for_reconnect", reconnect)
 
     # ---- the app process ----
 
@@ -256,8 +284,10 @@ class Harness:
         """Start the app's lifecycle as ``main.lifespan`` does, on the current database."""
         from backend.app import main
         from backend.app.services import print_scheduler as scheduler_module
+        from backend.app.services.lifecycle.lease import lease
         from backend.app.services.printer_manager import printer_manager
 
+        await lease.acquire(self.engine)
         printer_manager.set_event_loop(asyncio.get_running_loop())
         printer_manager.set_status_change_callback(main.on_printer_status_change)
         printer_manager.set_print_start_callback(main.on_print_start)
@@ -271,7 +301,10 @@ class Harness:
         self.scheduler = scheduler_module.PrintScheduler()
         self.monkeypatch.setattr(scheduler_module, "scheduler", self.scheduler)
         self.monkeypatch.setattr(main, "print_scheduler", self.scheduler)
-        await self.scheduler.dispatcher.start()
+        from backend.app.services.lifecycle import deadlines
+
+        deadlines._next_archive_repair = 0.0
+        await deadlines.start(self.scheduler.dispatcher)
         for printer in self.printers.values():
             await self._connect(printer)
 
@@ -291,6 +324,9 @@ class Harness:
         for printer in self.printers.values():
             printer_manager.disconnect_printer(printer.printer_id)
         _forget_process_memory()
+        from backend.app.services.lifecycle.lease import lease
+
+        await lease.release()
 
     async def restart(self, abrupt: bool = False) -> None:
         await self.shutdown(abrupt=abrupt)
@@ -344,13 +380,14 @@ class Harness:
             await db.commit()
             return row.id
 
-    async def queue(self, printer: FakePrinter, file_id: int, **options: Any) -> int:
-        """Add a job through the API, as the Queue page does; returns its id.
+    async def queue(self, printer: FakePrinter | None, file_id: int, **options: Any) -> int:
+        """Add a job through the API, as the Queue page does; returns its id. ``None`` queues for any machine.
 
         Filament matching is not the lifecycle's concern, so jobs opt out of the
         colour check unless a scenario asks for it.
         """
-        body = {"printer_id": printer.printer_id, "library_file_id": file_id, "force_color_match": False, **options}
+        printer_id = printer.printer_id if printer else None
+        body = {"printer_id": printer_id, "library_file_id": file_id, "force_color_match": False, **options}
         response = await self.http.post("/queue/", json=body)
         assert response.status_code == 200, response.text
         return response.json()["id"]
@@ -371,6 +408,7 @@ class Harness:
                 for task in asyncio.all_tasks()
                 if task not in self._baseline_tasks
                 and task not in self._scenario_tasks
+                and task not in self._parked
                 and task is not asyncio.current_task()
                 and not task.done()
             ]
@@ -381,20 +419,14 @@ class Harness:
         raise AssertionError(f"background work never settled:\n{stacks}")
 
     async def run(self, rounds: int = 20) -> None:
-        """Run the app's periodic work until nothing changes: scheduling, recovery and heat soaks."""
-        from backend.app.core.database import run_with_retry
-        from backend.app.services.lifecycle.intake import reconcile_print_archives
+        """Run the app's periodic work until nothing changes: a scheduler pass and a lifecycle-loop tick."""
+        from backend.app.services.lifecycle import deadlines
 
         previous = None
         for _ in range(rounds):
             await self.scheduler.check_queue()
             await self.settle()
-            await run_with_retry(self.scheduler.dispatcher.recover, label="scenario recovery")
-            await self.settle()
-            async with self.session() as db:
-                await self.scheduler._heat_soak.wait(db)
-            await self.settle()
-            await reconcile_print_archives()
+            await deadlines.tick(self.scheduler.dispatcher)
             await self.settle()
             current = await self._fingerprint()
             if current == previous:
@@ -496,10 +528,10 @@ def _forget_process_memory() -> None:
 
     from backend.app import main
     from backend.app.services import layer_timelapse, usage_tracker
-    from backend.app.services.lifecycle import dispatching, intake, preheating
+    from backend.app.services.lifecycle import deadlines, dispatching, engine, intake, preheating, queued
     from backend.app.services.printer_manager import printer_manager
 
-    for module in (main, intake, preheating, dispatching, usage_tracker, layer_timelapse):
+    for module in (main, engine, intake, preheating, dispatching, deadlines, queued, usage_tracker, layer_timelapse):
         for name, value in list(vars(module).items()):
             # Lower-case private containers are state; UPPER_CASE ones are constants.
             if isinstance(value, (dict, set, list)) and name[:1] == "_" and name[1:2].islower():

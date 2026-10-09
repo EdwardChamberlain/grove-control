@@ -167,41 +167,6 @@ async def test_archive_reconciliation_requires_fresh_matching_started_job(sessio
             lock.release()
 
 
-async def test_scheduler_paces_archive_reconciliation_without_overlapping_passes(monkeypatch):
-    import backend.app.main as main
-    from backend.app.services import print_effects
-    from backend.app.services.lifecycle import intake
-    from backend.app.services.print_scheduler import PrintScheduler
-
-    scheduler = PrintScheduler()
-    monkeypatch.setattr(scheduler.dispatcher, "start", AsyncMock())
-    monkeypatch.setattr(scheduler, "check_queue", AsyncMock(return_value=False))
-    scheduler._check_interval = 0.001
-    monkeypatch.setattr("backend.app.services.print_scheduler.ARCHIVE_RECONCILE_INTERVAL_SECONDS", 0.01)
-    calls = []
-    release = asyncio.Event()
-    repeated = asyncio.Event()
-
-    async def repair():
-        calls.append(1)
-        if len(calls) == 2:
-            repeated.set()
-        await release.wait()
-
-    monkeypatch.setattr(intake, "reconcile_print_archives", repair)
-    task = asyncio.create_task(scheduler.run())
-    try:
-        await asyncio.sleep(0.03)
-        assert len(calls) == 1  # An unfinished pass blocks another start.
-        release.set()
-        await asyncio.wait_for(repeated.wait(), 1)
-        assert scheduler.check_queue.await_count > len(calls)
-    finally:
-        scheduler.stop()
-        release.set()
-        await task
-
-
 @pytest.mark.parametrize("archive_kind", ["linked", "unlinked", "downloaded"])
 async def test_recovery_preserves_printer_reported_skipped_objects(sessions, monkeypatch, tmp_path, archive_kind):
     import backend.app.main as main

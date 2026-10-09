@@ -46,12 +46,14 @@ def printer_active(printer_id: int | None) -> bool:
 
 
 def needs_dispatch_resolution(item: PrintQueueItem) -> bool:
+    from backend.app.services.lifecycle.queued import in_flight
+
     # The reservation covers preparation too. A live upload/Archive worker
     # has not yet handed the attempt to confirmation; it cannot be resolved
     # as printing (or failed) while that worker may still send the command.
     if (
         item.status != "dispatching"
-        or item.dispatching_at is not None
+        or in_flight(item.id)
         or not normalize_id(item.dispatch_subtask_id)
         or item.dispatched_at is None
     ):

@@ -45,8 +45,10 @@ class FakePrinter:
     clock: Any = None
     sd: dict[str, bytes] = field(default_factory=dict)
     commands: list[dict] = field(default_factory=list)
-    # When False the printer ignores print commands (a lost command).
-    accepts_prints: bool = True
+    # False: the printer ignores print commands (a lost command). "id_only": it
+    # reports the print's ID but never starts it.
+    accepts_prints: bool | str = True
+    reconnects: int = 0  # MQTT sessions the app forced to reconnect.
     # When False the printer ignores Stop and keeps printing.
     accepts_stop: bool = True
     # When False uploads fail; while ``upload_gate`` is set and unopened, uploads wait on it.
@@ -82,14 +84,16 @@ class FakePrinter:
         self.commands.append(body)
         command = body.get("command")
         loop = asyncio.get_running_loop()
-        if command == "project_file" and self.accepts_prints:
+        if command == "project_file" and self.accepts_prints == "id_only":
+            loop.call_soon(partial(self.push, subtask_id=str(body.get("subtask_id") or "0")))
+        elif command == "project_file" and self.accepts_prints:
             loop.call_soon(self._start, body)
         elif command == "stop" and self.accepts_stop:
-            loop.call_soon(partial(self.push, gcode_state="FAILED"))
+            loop.call_soon(self.fail)
         elif command == "pause":
-            loop.call_soon(partial(self.push, gcode_state="PAUSE"))
+            loop.call_soon(self.pause)
         elif command == "resume":
-            loop.call_soon(partial(self.push, gcode_state="RUNNING"))
+            loop.call_soon(self.resume)
         elif command == "gcode_line":
             for line in str(body.get("param", "")).splitlines():
                 code, _, value = line.partition(" S")
@@ -142,11 +146,30 @@ class FakePrinter:
             mc_percent=1,
         )
 
+    @property
+    def active(self) -> bool:
+        return self.report["gcode_state"] in ("PREPARE", "RUNNING", "PAUSE")
+
     def finish(self) -> None:
-        self.push(gcode_state="FINISH", mc_percent=100, mc_remaining_time=0)
+        """The print completes; a printer that isn't printing just repeats its state."""
+        if self.active:
+            self.report.update(gcode_state="FINISH", mc_percent=100, mc_remaining_time=0)
+        self.push()
 
     def fail(self) -> None:
-        self.push(gcode_state="FAILED")
+        if self.active:
+            self.report.update(gcode_state="FAILED")
+        self.push()
+
+    def pause(self) -> None:
+        if self.report["gcode_state"] == "RUNNING":
+            self.report.update(gcode_state="PAUSE")
+        self.push()
+
+    def resume(self) -> None:
+        if self.report["gcode_state"] == "PAUSE":
+            self.report.update(gcode_state="RUNNING")
+        self.push()
 
     def idle(self) -> None:
         self.push(gcode_state="IDLE")

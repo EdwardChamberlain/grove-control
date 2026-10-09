@@ -22,7 +22,7 @@ from backend.app.models.printer import Printer
 from backend.app.models.user import User
 from backend.app.services.job_identity import find_job, normalize_id, telemetry_identity
 from backend.app.services.lifecycle import clock, effects
-from backend.app.services.lifecycle.engine import transfer_hold, transition_queue_item
+from backend.app.services.lifecycle.engine import hold_printer, transfer_hold, transition_queue_item
 from backend.app.services.lifecycle.preheating import shut_down_inherited
 
 ACTIVE = ("PREPARE", "SLICING", "RUNNING", "PAUSE")
@@ -170,6 +170,7 @@ async def observe_print(
     """
     if not identity:
         return None, False
+    await hold_printer(db, printer_id)
     locked = await db.execute(update(Printer).where(Printer.id == printer_id).values(id=Printer.id))
     if not locked.rowcount:
         return None, False

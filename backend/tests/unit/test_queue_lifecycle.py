@@ -74,23 +74,6 @@ async def test_only_successful_physical_completion_clears_automatically(sessions
         assert item.status == ("successful" if status == "finished" else "unsuccessful")
 
 
-@pytest.mark.parametrize("status", ("queued", *ACTIVE_STATUSES))
-async def test_cancel_chooses_destination_and_retains_active_holds(sessions, status):
-    async with sessions() as db:
-        item = PrintQueueItem(printer_id=1, status=status)
-        db.add(item)
-        await db.commit()
-        with patch("backend.app.services.printer_manager.printer_manager.stop_print") as stop:
-            await cancel_job(db, item)
-        assert item.status == ("unsuccessful" if status == "queued" else "cancelled")
-        assert stop.called == (status != "queued")
-        if status != "queued":
-            db.add(PrintQueueItem(printer_id=1, status="dispatching"))
-            with pytest.raises(IntegrityError):
-                await db.commit()
-            await db.rollback()
-
-
 async def test_stop_succeeds_when_auto_off_cannot_be_scheduled(sessions):
     async with sessions() as db:
         item = PrintQueueItem(printer_id=1, status="printing", auto_off_after=True)

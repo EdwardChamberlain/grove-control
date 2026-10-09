@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models.print_queue import ACTIVE_STATUSES, PrintQueueItem
 from backend.app.services.lifecycle import clock
-from backend.app.services.lifecycle.engine import InvalidQueueTransition, QueueTransitionConflict, transition_queue_item
+from backend.app.services.lifecycle.engine import InvalidQueueTransition, lock_queue_item, transition_queue_item
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ async def cancel_job(db: AsyncSession, item: PrintQueueItem) -> None:
     queued = item.status == "queued"
     if not queued and item.status not in ACTIVE_STATUSES:
         raise InvalidQueueTransition(f"Cannot cancel a job in {item.status}")
-    printer_id, item_id = item.printer_id, item.id
+    printer_id, item_id, item_status, was_sent = item.printer_id, item.id, item.status, item.dispatched_at is not None
     replaced = item.status in ("printing", "paused") and superseded_by(
         item, printer_manager.get_status(printer_id), ACTIVE
     )
@@ -51,7 +51,10 @@ async def cancel_job(db: AsyncSession, item: PrintQueueItem) -> None:
     from backend.app.services.print_scheduler import scheduler
 
     scheduler.workers.cancel(item_id)
-    if not queued and printer_id is not None and not replaced:
+    # Stop only a print that may have been sent: never a soak or an unsent
+    # upload, where a Stop could only reach some other print.
+    sent = item_status in ("printing", "paused") or (item_status == "dispatching" and was_sent)
+    if sent and printer_id is not None and not replaced:
         from backend.app.services.lifecycle.intake import mark_printer_stopped_by_user
 
         mark_printer_stopped_by_user(printer_id)
@@ -63,17 +66,13 @@ async def cancel_job(db: AsyncSession, item: PrintQueueItem) -> None:
         if not stop_sent:
             logger.warning("Stop command could not be sent for cancelled job %s; printer remains held", item_id)
             try:
-                await transition_queue_item(
-                    db,
-                    item,
-                    "cancelled",
-                    "cancelled",
-                    conditions=(PrintQueueItem.physical_outcome.is_(None),),
-                    values={"error_message": "Stop command not sent; inspect the printer before clearing the plate"},
-                )
-                await db.commit()
-            except QueueTransitionConflict:
-                await db.rollback()  # A printer observation already settled this job.
+                item = await lock_queue_item(db, item_id)
+                if item and item.status == "cancelled" and item.physical_outcome is None:
+                    message = "Stop command not sent; inspect the printer before clearing the plate"
+                    await transition_queue_item(db, item, "cancelled", "cancelled", values={"error_message": message})
+                    await db.commit()
+                else:
+                    await db.rollback()  # A printer observation already settled this job.
             except Exception:
                 await db.rollback()
                 logger.exception("Could not record failed Stop delivery for job %s", item_id)

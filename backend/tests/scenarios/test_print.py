@@ -140,3 +140,26 @@ async def test_completion_is_announced_once(app, finish):
     await app.run()
 
     assert len(app.notified("on_print_complete")) == 1
+
+
+async def test_a_print_first_seen_paused_is_recorded_as_paused(app):
+    printer = await app.add_printer()
+    printer.accepts_prints = False
+    job_id = await app.queue(printer, await app.add_file())
+    await app.run()
+
+    body = printer.sent("project_file")[-1]
+    printer.push(gcode_state="PAUSE", gcode_file="part.3mf", subtask_id=str(body["subtask_id"]), mc_percent=1)
+    await app.run()
+
+    assert (await app.job(job_id)).status == "paused"
+
+
+async def test_an_any_machine_job_prints_on_a_matching_printer(app):
+    printer = await app.add_printer(model="X1C")
+    job_id = await app.queue(None, await app.add_file(), target_model="X1C")
+
+    await app.run()
+
+    job = await app.job(job_id)
+    assert (job.status, job.printer_id) == ("printing", printer.printer_id)

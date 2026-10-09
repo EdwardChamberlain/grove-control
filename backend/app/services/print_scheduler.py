@@ -15,7 +15,7 @@ from backend.app.models.settings import Settings, bool_setting
 from backend.app.services.ams_drying import AmsDrying
 from backend.app.services.ams_mapping import AmsMapping
 from backend.app.services.ha_sensor_manager import ha_sensor_manager
-from backend.app.services.lifecycle import queued
+from backend.app.services.lifecycle import deadlines, queued
 from backend.app.services.lifecycle.dispatching import Dispatcher
 from backend.app.services.lifecycle.preheating import ChamberHeatSoak
 from backend.app.services.printer_manager import printer_manager
@@ -25,7 +25,6 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_QUEUE_MAX_CONCURRENT_UPLOADS = 1
 MAX_QUEUE_CONCURRENT_UPLOADS = 16
-ARCHIVE_RECONCILE_INTERVAL_SECONDS = 60
 
 
 class PrintScheduler:
@@ -38,11 +37,9 @@ class PrintScheduler:
         self.mapping = AmsMapping()
         self.drying = AmsDrying()
         self.selection = PrinterSelection(self.mapping, self.drying)
-        self._heat_soak = ChamberHeatSoak()
-        self.dispatcher = Dispatcher(self._heat_soak, self.selection, self.drying)
-        self.workers = queued.Workers(self._heat_soak, self.dispatcher)
-        self._heat_soak_timer: asyncio.Task | None = None
-        self._dispatch_timer: asyncio.Task | None = None
+        self.dispatcher = Dispatcher(self.selection, self.drying)
+        self.workers = queued.Workers(ChamberHeatSoak(), self.dispatcher)
+        self._lifecycle: asyncio.Task | None = None
         self._check_interval = 30  # seconds
         self._fast_check_interval = 3  # seconds while dispatch work is draining
 
@@ -51,11 +48,8 @@ class PrintScheduler:
         self._running = True
         logger.info("Print scheduler started")
 
-        await self.dispatcher.start()
-        self._dispatch_timer = spawn_background_task(self.dispatcher.run(), name="dispatch-recovery-timer")
-        self._heat_soak_timer = spawn_background_task(self._heat_soak.run(), name="heat-soak-timer")
-        next_archive_check = 0.0
-        archive_check: asyncio.Task | None = None
+        await deadlines.start(self.dispatcher)
+        self._lifecycle = spawn_background_task(deadlines.run(self.dispatcher), name="lifecycle-loop")
 
         while self._running:
             dispatched = False
@@ -63,22 +57,13 @@ class PrintScheduler:
                 dispatched = await self.check_queue()
             except Exception as e:
                 logger.error("Scheduler error: %s", e)
-
-            now = asyncio.get_running_loop().time()
-            if now >= next_archive_check and (archive_check is None or archive_check.done()):
-                from backend.app.services.lifecycle.intake import reconcile_print_archives
-
-                archive_check = spawn_background_task(reconcile_print_archives(), name="archive-reconciliation")
-                next_archive_check = now + ARCHIVE_RECONCILE_INTERVAL_SECONDS
-
             await asyncio.sleep(self._fast_check_interval if dispatched else self._check_interval)
 
     def stop(self):
         """Stop the scheduler."""
         self._running = False
-        for timer in (self._heat_soak_timer, self._dispatch_timer):
-            if timer is not None:
-                timer.cancel()
+        if self._lifecycle is not None:
+            self._lifecycle.cancel()
         # App shutdown also cancels the global task registry. Cancelling here
         # prevents a same-process restart from retaining upload reservations.
         for item_id in tuple(self.workers.inflight):
@@ -108,7 +93,7 @@ class PrintScheduler:
                 )
             result = await db.execute(
                 select(PrintQueueItem)
-                .where(PrintQueueItem.status == "queued", PrintQueueItem.dispatching_at.is_(None))
+                .where(PrintQueueItem.status == "queued", PrintQueueItem.id.not_in(list(self.workers.inflight)))
                 .options(
                     selectinload(PrintQueueItem.archive),
                     selectinload(PrintQueueItem.library_file),

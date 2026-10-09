@@ -21,8 +21,8 @@ from backend.app.models.print_queue import AWAITING_PLATE_CLEAR_STATUSES, FINAL_
 from backend.app.models.printer import Printer
 from backend.app.services import print_effects
 from backend.app.services.job_identity import event_identity, find_job, telemetry_identity
-from backend.app.services.lifecycle import dispatching, effects, preheating, printing
-from backend.app.services.lifecycle.engine import QueueTransitionConflict
+from backend.app.services.lifecycle import deadlines, effects, printing
+from backend.app.services.lifecycle.engine import hold_printer
 from backend.app.services.printer_manager import printer_manager
 
 logger = logging.getLogger(__name__)
@@ -94,21 +94,14 @@ async def _observe_print_start(printer_id: int, data: dict, *, recovering: bool 
     if not identity:
         return
     async with async_session() as db:
-        try:
-            await printing.bind_observed_id(db, printer_id, identity, data.get("previous_submission_id"))
-            # A delayed start cannot replace a plate hold. For a very short print,
-            # telemetry may already be terminal while this active snapshot waits
-            # behind another callback; its exact live identity still proves the run.
-            active = (data.get("raw_data") or {}).get("gcode_state") in _ACTIVE
-            live = printer_manager.get_status(printer_id)
-            item, _ = await printing.observe_print(
-                db, printer_id, identity, observed_state=live, active_snapshot=active
-            )
-        except QueueTransitionConflict:
-            # Stop/completion can win after the matching read. Discard the
-            # entire observation before publishing or running archive effects.
-            await db.rollback()
-            return
+        await hold_printer(db, printer_id)  # Read and write the printer's job as its only writer.
+        await printing.bind_observed_id(db, printer_id, identity, data.get("previous_submission_id"))
+        # A delayed start cannot replace a plate hold. For a very short print,
+        # telemetry may already be terminal while this active snapshot waits
+        # behind another callback; its exact live identity still proves the run.
+        active = (data.get("raw_data") or {}).get("gcode_state") in _ACTIVE
+        live = printer_manager.get_status(printer_id)
+        item, _ = await printing.observe_print(db, printer_id, identity, observed_state=live, active_snapshot=active)
         if item is None:
             return  # Missing identity or another job still owns this printer.
         start = {
@@ -140,18 +133,14 @@ async def print_state_changed(printer_id: int, data: dict) -> None:
     async with _lock(printer_id):
 
         async def _apply(db):
+            await hold_printer(db, printer_id)
             item = await find_job(db, printer_id, identity, ("printing", "paused"))
             if item is None:
                 return
             live = printer_manager.get_status(printer_id)
             if live is None or live.state != data.get("state"):
                 return  # A later push superseded this snapshot while the callback waited.
-            try:
-                changed = await printing.sync_print_state(db, item, live)
-            except QueueTransitionConflict:
-                await db.rollback()
-                return  # Stop, completion or another observation already won.
-            if changed:
+            if await printing.sync_print_state(db, item, live):
                 await db.commit()
 
         await run_with_retry(_apply, label="queue pause/resume", session_factory=async_session)
@@ -204,6 +193,7 @@ async def _complete_identified_print(printer_id: int, data: dict):
 
 async def _end(printer_id: int, identity: str | None, data: dict, stopped: bool, db):
     """The ended job's ID and its completion effects, or None for a duplicate or unidentified report."""
+    await hold_printer(db, printer_id)
     await printing.bind_observed_id(db, printer_id, identity, data.get("previous_submission_id"))
     statuses = ("dispatching", "printing", "paused", "cancelled")
     if data.get("_recovered_dispatch"):
@@ -253,18 +243,17 @@ async def _adopt_legacy_archive(db, printer_id: int, identity: str) -> PrintQueu
 
 
 async def printer_status(printer_id: int, state) -> None:
-    """Telemetry: let preheating watch its soaks, and reconcile missed completions on each reconnect.
+    """Telemetry: wake the lifecycle loop on each connect and disconnect, and reconcile missed completions on reconnect.
 
     MQTT's connect broadcast still carries construction defaults (state
     "unknown"), so reconciliation waits for the first real push_status (#1679).
     If that first state is active, it is deferred until the real terminal
     completion, which it would otherwise race (#1542).
     """
-    preheating.observe(printer_id, state)
     known = bool(state.state) and state.state.upper() not in ("", "UNKNOWN")
     if state.connected and known and not _printer_reconciled_since_connect.get(printer_id, False):
         _printer_reconciled_since_connect[printer_id] = True
-        dispatching.wake()
+        deadlines.wake()
         if _is_printer_actively_printing(state):
             _pending_stale_reconciliation.add(printer_id)
         elif printer_id in _pending_stale_reconciliation:
@@ -278,7 +267,7 @@ async def printer_status(printer_id: int, state) -> None:
             )
     elif not state.connected and _printer_reconciled_since_connect.get(printer_id, False):
         _printer_reconciled_since_connect[printer_id] = False  # Re-arm for the next reconnect.
-        dispatching.wake()
+        deadlines.wake()
 
 
 def _is_printer_actively_printing(state) -> bool:
