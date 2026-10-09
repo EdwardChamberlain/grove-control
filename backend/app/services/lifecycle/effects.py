@@ -209,7 +209,7 @@ async def run_queue_outcome_effects(engine: AsyncEngine, effect: QueueOutcomeEff
         attempt = archive if archive and archive.dispatched_queue_item_id == job.id else None
         remote_filename = (attempt.extra_data or {}).get("remote_filename") if attempt else None
         connection = (printer.ip_address, printer.access_code, printer.model) if printer else None
-        auto_off = bool(job.auto_off_after) and not (job.status == "failed" and job.physical_outcome is None)
+        auto_off = bool(job.auto_off_after)
         filename = archive.filename if archive else None
         library_file_id = job.library_file_id
         printer_name = printer.name if printer else None

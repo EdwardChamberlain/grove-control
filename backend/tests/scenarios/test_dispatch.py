@@ -115,12 +115,12 @@ async def test_restart_during_upload_creates_a_fresh_retry_for_the_unsent_attemp
 
     job = await app.job(job_id)
     assert (job.status, bool(job.error_message), job.physical_outcome) == ("failed", True, None)
-    assert printer.sent("project_file") == []
     from backend.app.models.print_queue import PrintQueueItem
 
     async with app.session() as db:
         retries = list(await db.scalars(select(PrintQueueItem).where(PrintQueueItem.id != job_id)))
-    assert len(retries) == 1 and retries[0].status == "queued" and retries[0].retry_on_failure is False
+    assert len(retries) == 1 and retries[0].status == "printing" and retries[0].retry_on_failure is False
+    assert len(printer.sent("project_file")) == 1
 
 
 async def test_restart_after_sending_keeps_the_job_until_the_printer_reports(app):

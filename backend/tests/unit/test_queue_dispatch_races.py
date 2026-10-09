@@ -99,17 +99,18 @@ async def test_reconnect_during_dispatch_waits_for_evidence(queue_factory, monke
         if reconnect in ("different-id", "active"):
             assert job.status == "failed" and archive.status == "failed"
             assert effects.await_args.args[1].new_state == "failed"
+        elif reconnect == "unavailable":
+            assert waits and job.status == "failed" and archive.status == "failed"
+            assert job.physical_outcome is None
+            assert job.dispatched_at is None and job.dispatch_subtask_id is None
+            assert "telemetry unavailable" in job.error_message
+            retry = await db.scalar(select(PrintQueueItem).where(PrintQueueItem.id != job.id))
+            assert retry is not None and retry.status == "queued" and retry.retry_on_failure is False
+            assert effects.await_args.args[1].new_state == "failed"
         else:
             assert waits and job.status == "dispatching"
             assert archive.status == "dispatching"
             effects.assert_not_awaited()  # No failure notice, Auto Off, or heater shutdown.
-            if reconnect == "unavailable":
-                assert job.dispatched_at is None and job.dispatch_subtask_id is None
-                assert "telemetry unavailable" in job.error_message
-                # The ordinary scheduler must not turn this live timeout into failure.
-                await PrintScheduler().dispatcher.recover(db)
-                await db.refresh(job)
-                assert job.status == "dispatching"
     assert ctx.start_print.call_count == int(reconnect == "idle")
 
 
@@ -268,6 +269,9 @@ async def test_requested_snippets_use_settings_helper_and_warn_on_no_result(alig
     monkeypatch.setattr(queue_archive, "inject_gcode_into_3mf", lambda *_args: None)
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
+        await transition_queue_item(db, job, "queued", "dispatching")
+        await db.commit()
+        await db.refresh(job)
         job.gcode_injection = True
         await db.commit()
         assert await prepare_dispatch_archive(db, job) is not None

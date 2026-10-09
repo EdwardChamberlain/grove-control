@@ -405,7 +405,7 @@ async def test_migration_unbinds_waiting_any_machine_jobs_and_keeps_specific_req
     async with sessions() as db:
         stale_pick, specific = [await db.get(PrintQueueItem, i) for i in ids]
         assert (stale_pick.status, stale_pick.printer_id, stale_pick.target_model) == ("queued", None, "X1C")
-        assert (specific.status, specific.printer_id, specific.assigned_printer_id) == ("queued", None, 1)
+        assert (specific.status, specific.printer_id, specific.assigned_printer_id) == ("queued", 1, None)
 
 
 async def test_queue_assignment_migration_splits_preference_and_sets_pending_retry_policy(sessions):

@@ -83,7 +83,12 @@ async def _persist_unstarted_soak(app):
         await db.execute(
             update(PrintQueueItem)
             .where(PrintQueueItem.id == job_id)
-            .values(status="preheating", preheat_requested_at=app.clock.now())
+            .values(
+                status="preheating",
+                printer_id=printer.printer_id,
+                assigned_printer_id=None,
+                preheat_requested_at=app.clock.now(),
+            )
         )
         await db.commit()
     return printer, job_id
@@ -276,7 +281,7 @@ async def test_an_any_machine_soak_holds_the_printer_it_was_given(app):
     assert (await app.job(job_id)).status == "printing"
 
 
-async def test_telemetry_lost_after_the_soak_parks_the_job_and_cools_the_printer(app):
+async def test_telemetry_lost_after_the_soak_retries_as_a_fresh_heat_soak(app):
     printer, job_id = await soaking_job(app)
     printer.upload_gate = asyncio.Event()
     await app.advance(9 * 60)
@@ -299,4 +304,4 @@ async def test_telemetry_lost_after_the_soak_parks_the_job_and_cools_the_printer
 
     async with app.session() as db:
         retries = list(await db.scalars(select(PrintQueueItem).where(PrintQueueItem.id != job_id)))
-    assert len(retries) == 1 and retries[0].status == "queued" and retries[0].retry_on_failure is False
+    assert len(retries) == 1 and retries[0].status == "preheating" and retries[0].retry_on_failure is False

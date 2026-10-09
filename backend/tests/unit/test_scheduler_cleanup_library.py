@@ -302,7 +302,8 @@ async def test_live_upload_is_not_a_dispatch_confirmation_prompt(queue_factory):
         return True
 
     ctx.upload.side_effect = uploading
-    await _dispatch_library_item(ctx)
+    binding = await _selection_binding(ctx, ctx.printer_id, None, unassigned=False)
+    await _dispatch_library_item(ctx, binding=binding)
     ctx.start_print.assert_called_once()
     item, _, _ = await _queue_snapshot(ctx)
     assert item.status == "dispatching" and item.started_at is None
@@ -745,7 +746,11 @@ async def test_proven_unsent_upload_failure_creates_one_fresh_retry_without_plat
             )
         )
         retry = await db.scalar(
-            select(PrintQueueItem).where(PrintQueueItem.id != failed.id, PrintQueueItem.status == "queued")
+            select(PrintQueueItem).where(
+                PrintQueueItem.id != failed.id,
+                PrintQueueItem.status == "queued",
+                PrintQueueItem.retry_on_failure.is_(False),
+            )
         )
         next_job = await db.get(PrintQueueItem, next_id)
         assert held is None

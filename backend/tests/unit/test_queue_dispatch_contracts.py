@@ -13,7 +13,7 @@ from backend.app.api.routes.print_queue import skip_queue_item_heat_soak
 from backend.app.core.config import settings
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
-from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem
+from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem, physical_holding_clause
 from backend.app.models.printer import Printer
 from backend.app.services.archive import ArchiveService
 from backend.app.services.lifecycle import (
@@ -119,8 +119,17 @@ async def test_source_removed_after_eligibility_read_fails_the_committed_hold(
         assert job.status == "failed" and job.printer_id == 1
         cause = "Dispatch source was deleted" if remove == "trash" else "Dispatch source no longer exists"
         assert job.error_message == f"Failed to create Archive record for dispatch: {cause}"
-        assert job.physical_outcome == "failed"
-        assert await db.scalar(select(PrintQueueItem.id).where(PrintQueueItem.status.in_(HOLDING_STATUSES))) == job.id
+        assert job.physical_outcome is None
+        retry = await db.scalar(select(PrintQueueItem).where(PrintQueueItem.id != job.id))
+        assert retry is not None and retry.status == "queued" and retry.retry_on_failure is False
+        assert (
+            await db.scalar(
+                select(PrintQueueItem.id).where(
+                    physical_holding_clause(PrintQueueItem.status, PrintQueueItem.physical_outcome)
+                )
+            )
+            is None
+        )
         assert await db.scalar(select(PrintArchive.id).where(PrintArchive.dispatched_queue_item_id == job.id)) is None
         assigned.assert_not_awaited()
 
