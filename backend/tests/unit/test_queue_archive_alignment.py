@@ -22,7 +22,7 @@ from backend.app.models.settings import Settings
 from backend.app.services.archive import ArchiveService
 from backend.app.services.lifecycle import dispatching as lifecycle_dispatching
 from backend.app.services.lifecycle.awaiting import clear_job_plate
-from backend.app.services.lifecycle.engine import QueueTransitionConflict, transition_queue_item
+from backend.app.services.lifecycle.engine import QueueTransitionConflict, hold_printer, transition_queue_item
 from backend.app.services.queue_actions import cancel_job
 from backend.app.services.queue_archive import link_dispatch_archive, prepare_dispatch_archive
 from backend.app.services.queue_source_cleanup import remove_queue_only_source_if_unused
@@ -192,8 +192,9 @@ async def test_rollback_discards_archive_row_and_prepared_files(alignment, close
 @pytest.mark.parametrize("automatic", [False, True])
 async def test_outcome_commits_on_entry_and_plate_clear_does_not_rewrite_it(alignment, outcome, archived, automatic):
     async with alignment.sessions() as db:
-        db.add(Settings(key="require_plate_clear", value="false" if automatic else "true"))
         job = await db.get(PrintQueueItem, alignment.job_id)
+        await hold_printer(db, job.printer_id)
+        db.add(Settings(key="require_plate_clear", value="false" if automatic else "true"))
         await hold_and_link(db, job)
         now = datetime.now(timezone.utc)
         await transition_queue_item(db, job, "dispatching", "printing", values={"started_at": now})

@@ -65,8 +65,8 @@ async def _stop_intake_race(app, monkeypatch, printer, job_id, blocker):
     original_route_hold = printer_routes.hold_printer
 
     async def observe_stop_lock(db, printer_id):
-        if asyncio.current_task() is stop_task:
-            stop_lock_attempted.set()
+        # Starlette may run the endpoint in a child task of the HTTP client.
+        stop_lock_attempted.set()
         await original_route_hold(db, printer_id)
 
     monkeypatch.setattr(printer_routes, "hold_printer", observe_stop_lock)
@@ -142,8 +142,8 @@ async def test_printer_deletion_waits_for_intake_before_taking_held_job_rows(pos
     original_engine_hold = lifecycle_engine.hold_printer
 
     async def observe_delete_lock(db, printer_id):
-        if asyncio.current_task() is delete_task:
-            deletion_lock_attempted.set()
+        # The deletion endpoint can also run inside an ASGI child task.
+        deletion_lock_attempted.set()
         await original_engine_hold(db, printer_id)
 
     monkeypatch.setattr(lifecycle_engine, "hold_printer", observe_delete_lock)
