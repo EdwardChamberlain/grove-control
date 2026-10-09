@@ -36,6 +36,9 @@ async def alignment(tmp_path, monkeypatch):
     from backend.app.services.lifecycle import effects as queue_outcome_effects
     from backend.app.services.printer_manager import printer_manager
 
+    # The new database's printers must not inherit another test's cached hold.
+    monkeypatch.setattr(printer_manager, "_awaiting_plate_clear", set())
+    monkeypatch.setattr(printer_manager, "_awaiting_plate_clear_archive_id", {})
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: None)
     monkeypatch.setattr(printer_manager, "stop_print", lambda _id: True)
     monkeypatch.setattr(printer_manager, "is_awaiting_plate_clear", lambda _id: False)
