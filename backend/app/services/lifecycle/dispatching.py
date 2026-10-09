@@ -8,7 +8,6 @@ upload. Recovery settles attempts from telemetry after a restart.
 import asyncio
 import json
 import logging
-import time
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass
@@ -36,7 +35,7 @@ from backend.app.services.bambu_ftp import (
     with_ftp_retry,
 )
 from backend.app.services.job_identity import telemetry_identity
-from backend.app.services.lifecycle import effects, preheating, queued
+from backend.app.services.lifecycle import clock, effects, preheating, queued
 from backend.app.services.lifecycle.engine import (
     InvalidQueueTransition,
     QueueTransitionConflict,
@@ -97,7 +96,7 @@ def telemetry_status(printer_status, dispatch_subtask_id: str | None) -> str | N
 
 async def fail(db: AsyncSession, item: PrintQueueItem, message: str, **values) -> None:
     """Commit a failed attempt; its exit and awaiting's entry queue the effects."""
-    values = {"error_message": message, "completed_at": datetime.now(timezone.utc), **values}
+    values = {"error_message": message, "completed_at": clock.now(), **values}
     await transition_queue_item(db, item, item.status, "failed", values=values)
     await db.commit()
 
@@ -155,7 +154,7 @@ class Dispatcher:
             if not item or item.status != "dispatching" or item.preheat_owner != self._heat_soak.owner:
                 await db.rollback()
                 return
-            item.preheat_owner, item.dispatching_at = None, datetime.now(timezone.utc)
+            item.preheat_owner, item.dispatching_at = None, clock.now()
             await db.commit()
             try:
                 await self.enter(db, item, "preheating")
@@ -371,14 +370,14 @@ class Dispatcher:
         if (active and not await self._dry(db, item, active)) or not await self._ready(a):
             return
         try:
-            values = {"dispatched_at": datetime.now(timezone.utc)}
+            values = {"dispatched_at": clock.now()}
             await transition_queue_item(db, item, "dispatching", "dispatching", conditions=conditions, values=values)
             await db.commit()
         except QueueTransitionConflict:
             return await self._lost(a)
         # The row lock is held only across the synchronous publish: a concurrent
         # Stop either wins first, preventing the send, or follows it with Stop.
-        deadline = asyncio.get_running_loop().time() + DISPATCH_TELEMETRY_WAIT_SECONDS
+        deadline = clock.monotonic() + DISPATCH_TELEMETRY_WAIT_SECONDS
         while True:
             if not await self._ready(a, deadline=deadline):
                 return
@@ -511,10 +510,9 @@ class Dispatcher:
         self, printer_id: int, previous_id: str | None, *, deadline: float | None = None
     ) -> bool | None:
         """Wait through a brief reconnect; silence never proves a failed print."""
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + DISPATCH_TELEMETRY_WAIT_SECONDS if deadline is None else deadline
-        while (ready := self._telemetry(printer_id, previous_id)) is None and loop.time() < deadline:
-            await asyncio.sleep(min(0.5, max(0, deadline - loop.time())))
+        deadline = clock.monotonic() + DISPATCH_TELEMETRY_WAIT_SECONDS if deadline is None else deadline
+        while (ready := self._telemetry(printer_id, previous_id)) is None and clock.monotonic() < deadline:
+            await clock.sleep(min(0.5, max(0, deadline - clock.monotonic())))
         return ready
 
     def _confirm_later(self, item_id: int, printer_id: int, subtask_id: str) -> None:
@@ -538,7 +536,7 @@ class Dispatcher:
                     await sync_print_state(db, item, printer_manager.get_status(printer_id))
                 except QueueTransitionConflict:
                     return await db.rollback()
-                item.started_at, item.error_message = datetime.now(timezone.utc), None
+                item.started_at, item.error_message = clock.now(), None
                 await db.commit()
                 await effects.wait_for(effects.spawned(db))
 
@@ -582,8 +580,8 @@ class Dispatcher:
     ) -> tuple[str | None, object | None]:
         """Wait until the sent print reaches an active state; a matching ID alone extends the wait."""
         last_status, landed = None, False
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
+        deadline = clock.monotonic() + timeout
+        while clock.monotonic() < deadline:
             if status := printer_manager.get_status(printer_id):
                 last_status, observed = status, telemetry_status(status, subtask_id)
                 if observed == "printing":
@@ -592,12 +590,12 @@ class Dispatcher:
                     # A matching ID with a terminal state can mix generations; keep polling for an active state.
                     landed = True
                     break
-            await asyncio.sleep(poll_interval)
+            await clock.sleep(poll_interval)
         if not landed:
             return None, last_status
-        deadline = time.monotonic() + phase_b_timeout
-        while time.monotonic() < deadline:
-            await asyncio.sleep(poll_interval)
+        deadline = clock.monotonic() + phase_b_timeout
+        while clock.monotonic() < deadline:
+            await clock.sleep(poll_interval)
             if status := printer_manager.get_status(printer_id):
                 last_status = status
                 if telemetry_status(status, subtask_id) == "printing":
@@ -618,7 +616,7 @@ class Dispatcher:
                 raise InvalidQueueTransition("Printer telemetry has confirmed this job. Refresh and retry.")
         printing = outcome == "printing"
         values = {"error_message": "Confirmed printing by user" if printing else "Printer didn't start the job"}
-        values["started_at" if printing else "completed_at"] = datetime.now(timezone.utc)
+        values["started_at" if printing else "completed_at"] = clock.now()
         await transition_queue_item(db, item, "dispatching", outcome, values=values)
         await db.commit()
         await effects.wait_for(effects.spawned(db))
@@ -627,12 +625,12 @@ class Dispatcher:
         """Exit for Retry of an attempt nothing was sent for: release its hold and remove its upload."""
         if not unsent(item):
             raise InvalidQueueTransition("Only an attempt that was never sent can be withdrawn")
-        values = {"error_message": "Nothing was sent; retried as a new job", "completed_at": datetime.now(timezone.utc)}
+        values = {"error_message": "Nothing was sent; retried as a new job", "completed_at": clock.now()}
         await transition_queue_item(db, item, "dispatching", "unsuccessful", action="withdrawn", values=values)
 
     async def start(self) -> None:
         """Recover at startup: fail attempts left unsent, and release the previous process's worker claims."""
-        self._started_at = datetime.now(timezone.utc)
+        self._started_at = clock.now()
         unsent = (
             PrintQueueItem.status == "dispatching",
             PrintQueueItem.dispatch_subtask_id.is_(None),
@@ -679,7 +677,7 @@ class Dispatcher:
         from backend.app.services.lifecycle.intake import busy as intake_busy  # Its completion may be in flight.
 
         active = PrintQueueItem.status.in_(("dispatching", "printing", "paused"))
-        now = datetime.now(timezone.utc)
+        now = clock.now()
         changed, completions, replaced = False, [], {}
         for item in list(await db.scalars(select(PrintQueueItem).where(active))):
             dispatching, sent = item.status == "dispatching", item.dispatched_at

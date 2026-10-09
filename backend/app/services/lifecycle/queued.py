@@ -14,7 +14,6 @@ import json
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -31,6 +30,7 @@ from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem, Pri
 from backend.app.models.printer import Printer
 from backend.app.schemas.print_queue import PrintQueueItemUpdate
 from backend.app.services.filament_requirements import build_queue_filament_overrides, extract_filament_requirements
+from backend.app.services.lifecycle import clock
 from backend.app.services.lifecycle.engine import QueueTransitionConflict, lock_queue_item, transition_queue_item
 from backend.app.services.lifecycle.preheating import abort_heat_soak
 from backend.app.services.notification_service import notification_service
@@ -224,7 +224,7 @@ async def _claim(db: AsyncSession, item_id: int, binding: _DispatchBinding) -> b
         .where(PrintQueueItem.id == item_id, PrintQueueItem.status == "queued")
         .where(PrintQueueItem.dispatching_at.is_(None))
         .where(printer.is_(None) if binding.unassigned else printer == binding.printer_id)
-        .values(dispatching_at=datetime.now(timezone.utc))
+        .values(dispatching_at=clock.now())
     )
     await db.commit()
     return bool(claim.rowcount)

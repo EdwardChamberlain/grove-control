@@ -12,7 +12,6 @@ from collections.abc import Callable, Mapping, Sequence
 from contextlib import nullcontext
 from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from functools import partial
 from importlib import import_module
 from typing import Any
@@ -31,6 +30,7 @@ from backend.app.models.print_queue import (
     PrintQueueItem,
 )
 from backend.app.models.printer import Printer
+from backend.app.services.lifecycle import clock
 
 logger = logging.getLogger(__name__)
 
@@ -283,7 +283,7 @@ async def _record_physical_outcome(
     db: AsyncSession, item_id: int, status: str, metadata: dict, confirmed: bool, override: str | None
 ) -> None:
     """Capture facts before Clear Plate collapses them; no state decision reads them."""
-    metadata.setdefault("completed_at", datetime.now(timezone.utc))
+    metadata.setdefault("completed_at", clock.now())
     reason = metadata.get("error_message")
     if reason is None:
         with db.no_autoflush:
@@ -292,7 +292,7 @@ async def _record_physical_outcome(
     outcome = ARCHIVE_OUTCOMES[status]
     metadata.update(
         physical_outcome=outcome,
-        physical_completed_at=datetime.now(timezone.utc) if confirmed else metadata["completed_at"],
+        physical_completed_at=clock.now() if confirmed else metadata["completed_at"],
         physical_failure_reason=physical_failure_reason(outcome, reason, override),
     )
 
@@ -341,5 +341,5 @@ async def release_printer(db: AsyncSession, printer: Printer) -> None:
         # explained by the deletion. Jobs that already ended keep their time.
         values = {"error_message": "Printer deleted"} if item.status != "finished" else {}
         if item.completed_at is None:
-            values["completed_at"] = datetime.now(timezone.utc)
+            values["completed_at"] = clock.now()
         await end(db, item, "printer_deleted", **values)

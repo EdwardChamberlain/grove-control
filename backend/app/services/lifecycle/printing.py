@@ -10,7 +10,6 @@ heaters a heat soak left on.
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from functools import partial
 
 from sqlalchemy import select, update
@@ -22,7 +21,7 @@ from backend.app.models.print_queue import AWAITING_PLATE_CLEAR_STATUSES, HOLDIN
 from backend.app.models.printer import Printer
 from backend.app.models.user import User
 from backend.app.services.job_identity import find_job, normalize_id, telemetry_identity
-from backend.app.services.lifecycle import effects
+from backend.app.services.lifecycle import clock, effects
 from backend.app.services.lifecycle.engine import transfer_hold, transition_queue_item
 from backend.app.services.lifecycle.preheating import shut_down_inherited
 
@@ -178,7 +177,7 @@ async def observe_print(
     if item:
         confirmed = item.status == "dispatching"
         if confirmed:
-            values = {"started_at": datetime.now(timezone.utc), "error_message": None}
+            values = {"started_at": clock.now(), "error_message": None}
             await transition_queue_item(db, item, "dispatching", "printing", values=values)
         await sync_print_state(db, item, observed_state)
         return item, confirmed
@@ -214,7 +213,7 @@ async def observe_print(
         if not replace_awaiting or not await transfer_hold(db, held, identity):
             return None, False
     item = PrintQueueItem(
-        printer_id=printer_id, status="printing", dispatch_subtask_id=identity, started_at=datetime.now(timezone.utc)
+        printer_id=printer_id, status="printing", dispatch_subtask_id=identity, started_at=clock.now()
     )
     db.add(item)
     await db.flush()
@@ -253,7 +252,7 @@ async def end(db: AsyncSession, job: PrintQueueItem, data: dict, *, stopped: boo
         completing_cancelled = job.status == "cancelled"
         if completing_cancelled and destination == "finished":
             reason = None  # The identified print finished despite the Stop request.
-        now = datetime.now(timezone.utc)
+        now = clock.now()
         await transition_queue_item(
             db,
             job,
@@ -304,4 +303,4 @@ async def _bump_library_file_usage_if_completed(db, item, queue_status: str) -> 
     if lib_file is None:
         return
     lib_file.print_count = (lib_file.print_count or 0) + 1
-    lib_file.last_printed_at = datetime.now(timezone.utc)
+    lib_file.last_printed_at = clock.now()

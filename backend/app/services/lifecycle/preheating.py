@@ -7,7 +7,6 @@ requested, or a watched printer's telemetry changes.
 
 import asyncio
 import logging
-import time
 from collections.abc import Mapping
 from contextlib import suppress
 from datetime import datetime, timezone
@@ -22,6 +21,7 @@ from backend.app.core.database import async_session
 from backend.app.core.tasks import spawn_background_task
 from backend.app.models.print_queue import ACTIVE_STATUSES, PrintQueueItem
 from backend.app.models.printer import Printer
+from backend.app.services.lifecycle import clock
 from backend.app.services.lifecycle.engine import (
     QueueTransitionConflict,
     enter_state,
@@ -55,7 +55,7 @@ def observe(printer_id: int, state) -> None:
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return clock.naive_now()
 
 
 def supports_airduct(model: str | None) -> bool:
@@ -68,7 +68,7 @@ def _reported(state, key: str, value: int, since: datetime) -> bool:
         report
         and report[0] == value
         and report[1] >= since.replace(tzinfo=timezone.utc).timestamp()
-        and 0 <= time.time() - report[1] < TELEMETRY_TIMEOUT
+        and 0 <= clock.now().timestamp() - report[1] < TELEMETRY_TIMEOUT
     )
 
 
@@ -119,7 +119,7 @@ async def request_heater_shutdown(db: AsyncSession, printer_id: int) -> None:
     printer = await db.get(Printer, printer_id)
     if printer is not None:
         printer.heat_soak_shutdown_pending = True
-        printer.heat_soak_shutdown_at = datetime.now(timezone.utc)
+        printer.heat_soak_shutdown_at = clock.now()
         effects.after_commit(db, wake, key="heat_soak_wake")
 
 

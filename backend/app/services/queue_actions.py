@@ -1,11 +1,11 @@
 """User actions shared by the Queue and printer controls."""
 
 import logging
-from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models.print_queue import ACTIVE_STATUSES, PrintQueueItem
+from backend.app.services.lifecycle import clock
 from backend.app.services.lifecycle.engine import InvalidQueueTransition, QueueTransitionConflict, transition_queue_item
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ async def cancel_job(db: AsyncSession, item: PrintQueueItem) -> None:
     reason = "Cancelled before printing" if queued else "Stop requested by user"
     if replaced:
         reason = f"Stopped without a Stop command: the printer is running a different print ({replaced})"
-    requested_at = datetime.now(timezone.utc)
+    requested_at = clock.now()
     await transition_queue_item(
         db,
         item,
