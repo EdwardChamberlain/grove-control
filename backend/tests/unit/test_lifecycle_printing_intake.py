@@ -61,23 +61,6 @@ async def test_after_commit_work_runs_in_order_and_its_first_failure_reaches_the
     assert ran == ["first", "second"]  # A failure never skips the work after it.
 
 
-@pytest.mark.parametrize("ends", [False, True])
-async def test_printing_entry_from_dispatch_publishes_its_start_only_if_still_printing(alignment, monkeypatch, ends):
-    publish = AsyncMock()
-    monkeypatch.setattr(effects, "publish_queue_job_started", publish)
-    async with alignment.sessions() as db:
-        job = await db.get(PrintQueueItem, alignment.job_id)
-        await transition_queue_item(db, job, "queued", "dispatching")
-        await db.commit()
-        await transition_queue_item(db, job, "dispatching", "printing")
-        if ends:  # An exact terminal report for an unconfirmed dispatch ends it in the same transaction.
-            await transition_queue_item(db, job, "printing", "finished", action="printer_report")
-        publish.assert_not_called()
-        await db.commit()
-        await effects.wait_for(effects.spawned(db))
-    assert publish.await_count == (0 if ends else 1)
-
-
 async def test_completion_credits_the_job_owner_from_the_job(alignment, monkeypatch):
     """No in-memory credit: the matched job's owner is read at completion, so it survives a restart."""
     monkeypatch.setattr(intake, "async_session", alignment.sessions)

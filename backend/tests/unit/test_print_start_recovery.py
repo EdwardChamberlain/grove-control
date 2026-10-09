@@ -47,7 +47,6 @@ async def test_paced_reconciliation_repairs_archive_without_repeating_start_effe
     monkeypatch.setattr(main.printer_manager, "get_client", lambda _id: client)
     monkeypatch.setattr(main.printer_manager, "get_printer", lambda _id: None)
     monkeypatch.setattr(intake, "_job_event_locks", {})
-    monkeypatch.setattr(intake, "_printer_reconciled_since_connect", {1: True})
     monkeypatch.setattr(main, "_printer_last_connected", {1: True})
     monkeypatch.setattr(main, "_last_status_broadcast", {})
     monkeypatch.setattr(print_effects, "get_ftp_retry_settings", AsyncMock(return_value=(False, 0, 0, 1)))

@@ -17,13 +17,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
-from backend.app.models.print_queue import AWAITING_PLATE_CLEAR_STATUSES, HOLDING_STATUSES, PrintQueueItem
+from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.models.user import User
 from backend.app.services.job_identity import find_job, normalize_id, telemetry_identity
 from backend.app.services.lifecycle import clock, effects
 from backend.app.services.lifecycle.engine import hold_printer, transfer_hold, transition_queue_item
 from backend.app.services.lifecycle.preheating import shut_down_inherited
+from backend.app.services.printer_manager import printer_manager
 
 ACTIVE = ("PREPARE", "SLICING", "RUNNING", "PAUSE")
 _REPORTED = (*ACTIVE, "FINISH", "FAILED")
@@ -52,9 +53,11 @@ async def on_enter(change, row) -> None:
 
 
 async def on_exit(change, row) -> None:
-    """Exit: a print that ends where it was confirmed announces only its end; a failed or stopped one shuts heaters down."""
-    if change.after in AWAITING_PLATE_CLEAR_STATUSES:
-        effects.forget(change.db, ("queue_start", change.item_id))
+    """Exit: a failed or stopped print shuts down the heaters its soak left on.
+
+    A print that ends in the transaction that confirmed it announces only its
+    end: the queue start re-reads the job after commit and finds it ended.
+    """
     await shut_down_inherited(change, row)
 
 
@@ -305,3 +308,40 @@ async def _bump_library_file_usage_if_completed(db, item, queue_status: str) -> 
         return
     lib_file.print_count = (lib_file.print_count or 0) + 1
     lib_file.last_printed_at = clock.now()
+
+
+async def adopt_legacy_prints(db: AsyncSession) -> None:
+    """A print an older version archived without a job becomes an ownerless job once fresh telemetry reports its ID.
+
+    Only an exact, unique ID establishes continuity; an Archive left printing
+    by a print that ended long ago never reserves a printer.
+    """
+    legacy = (
+        await db.execute(
+            select(PrintArchive.id, PrintArchive.printer_id, PrintArchive.subtask_id).where(
+                PrintArchive.status == "printing",
+                PrintArchive.dispatched_queue_item_id.is_(None),
+                PrintArchive.printer_id.is_not(None),
+                PrintArchive.subtask_id.is_not(None),
+            )
+        )
+    ).all()
+    await db.rollback()
+    candidates: dict[tuple[int, str], list[int]] = {}
+    for archive_id, printer_id, subtask_id in legacy:
+        candidates.setdefault((printer_id, normalize_id(subtask_id)), []).append(archive_id)
+    for (printer_id, identity), archive_ids in candidates.items():
+        state = printer_manager.get_status(printer_id)
+        live = state and state.connected and getattr(state, "job_telemetry_ready", False)
+        if not identity or len(archive_ids) != 1 or not live or telemetry_identity(state) != identity:
+            continue
+        await hold_printer(db, printer_id)
+        job, _ = await observe_print(db, printer_id, identity)
+        archive = await db.get(PrintArchive, archive_ids[0])
+        if job is None or job.archive_id is not None or archive is None or archive.dispatched_queue_item_id:
+            await db.rollback()
+            continue
+        archive.dispatched_queue_item_id = job.id
+        values = {"archive_id": archive.id, "started_at": archive.started_at or job.started_at}
+        await transition_queue_item(db, job, job.status, job.status, values=values)
+        await db.commit()

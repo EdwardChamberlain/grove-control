@@ -2,6 +2,8 @@
 
 import asyncio
 
+import pytest
+
 from backend.tests.scenarios.fake_printer import sliced_3mf
 from backend.tests.scenarios.test_print import printing_job
 
@@ -87,20 +89,36 @@ async def test_archive_is_repaired_once_the_file_appears(app):
     assert archive.status == "completed"
 
 
-async def test_completion_during_the_start_download_still_records_the_archive(app):
+@pytest.mark.parametrize(
+    "ending, status, archived", [("finish", "finished", "completed"), ("fail", "failed", "failed")]
+)
+@pytest.mark.parametrize("cleared_first", [False, True])
+async def test_an_ending_during_the_start_download_still_records_the_archive(
+    app, ending, status, archived, cleared_first
+):
     printer = await app.add_printer()
     printer.download_gate = asyncio.Event()
     printer.start_local("slow.3mf", subtask_id="561")
     running = app.spawn(app.run())
     await app.until(lambda: printer.downloading)
 
-    printer.finish()
+    getattr(printer, ending)()
+    if cleared_first:  # The loop records the outcome, and the person clears the plate, before the download ends.
+        await app.tick(30)
+        await app.until(lambda: _ended(app, printer, status))
+        [job] = await app.jobs(printer)
+        assert (await app.action(job.id, "clear-plate")).status_code == 200
     printer.download_gate.set()
     await running
     await app.run()
 
     [job] = await app.jobs(printer)
-    assert job.status == "finished"
+    assert job.status == ({"finished": "successful", "failed": "unsuccessful"}[status] if cleared_first else status)
     assert job.archive_id is not None
     archive = next(a for a in await app.archives() if a.id == job.archive_id)
-    assert archive.status == "completed"
+    assert archive.status == archived
+
+
+async def _ended(app, printer, status):
+    jobs = await app.jobs(printer)
+    return bool(jobs) and jobs[0].status == status

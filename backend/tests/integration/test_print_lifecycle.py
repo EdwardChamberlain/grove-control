@@ -99,7 +99,6 @@ class TestPlateClearGate:
             patch("backend.app.services.printer_manager.printer_manager", manager),
             patch.object(print_effects, "ws_manager", AsyncMock()),
             patch.object(print_effects, "mqtt_relay", AsyncMock()),
-            patch.object(intake, "spawn_background_task", discard_background),
             patch.object(print_effects, "spawn_background_task", discard_background),
             patch("backend.app.services.lifecycle.effects.run_queue_outcome_effects", new=AsyncMock()),
             patch("backend.app.services.usage_tracker.on_print_complete", AsyncMock(return_value=[])),
@@ -309,32 +308,6 @@ class TestPlateClearGate:
         assert job.status == "finished"
         await clear_queue_plate(job.id, db_session, None)
         assert job.status == "successful"
-
-    async def test_legacy_external_archive_is_adopted_by_id(self, completion, db_session):
-        from datetime import datetime, timezone
-
-        from backend.app.models.archive import PrintArchive
-        from backend.app.models.print_queue import PrintQueueItem
-
-        await db_session.delete(completion.item)
-        archive = PrintArchive(
-            printer_id=completion.printer.id,
-            filename="same.3mf",
-            file_path="",
-            file_size=0,
-            status="printing",
-            subtask_id="legacy",
-            started_at=datetime.now(timezone.utc),
-        )
-        db_session.add(archive)
-        await db_session.commit()
-        await completion.complete(completion.printer.id, {"subtask_id": "legacy", "status": "completed"})
-        await db_session.refresh(archive)
-        job = await db_session.get(PrintQueueItem, archive.dispatched_queue_item_id)
-        assert job.status == "finished"
-        assert job.archive_id == archive.id
-        assert job.dispatch_subtask_id == "legacy"
-        assert archive.status == "completed"
 
 
 class TestPrintCompleteLogic:

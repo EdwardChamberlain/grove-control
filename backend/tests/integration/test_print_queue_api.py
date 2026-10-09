@@ -2023,7 +2023,6 @@ class TestAbortedStatusNormalisation:
             patch("backend.app.services.lifecycle.intake.async_session", session_maker),
             patch("backend.app.services.print_effects.async_session", session_maker),
             patch("backend.app.core.database.async_session", session_maker),
-            patch("backend.app.services.lifecycle.intake.spawn_background_task", spawn),
             patch("backend.app.services.print_effects.spawn_background_task", spawn),
             patch(
                 "backend.app.services.bambu_ftp.delete_file_async", AsyncMock(return_value=DeleteResult.NOT_FOUND)

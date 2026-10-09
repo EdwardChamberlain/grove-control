@@ -433,6 +433,13 @@ class Harness:
                 return
             previous = current
 
+    async def tick(self, seconds: float = 0) -> None:
+        """One tick of the lifecycle loop, without waiting for other work: the loop runs on its own timer."""
+        from backend.app.services.lifecycle import deadlines
+
+        self.clock.advance(seconds)
+        await deadlines.tick(self.scheduler.dispatcher)
+
     def spawn(self, work) -> asyncio.Task:
         """Run ``work`` concurrently, as a second user or request would; ``settle`` never waits for it."""
         task = asyncio.create_task(work)

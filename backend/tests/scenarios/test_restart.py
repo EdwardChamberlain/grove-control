@@ -125,3 +125,33 @@ async def test_restart_while_cancelled_keeps_the_hold(app):
 
     assert (await app.job(job_id)).status == "cancelled"
     assert len(printer.sent("stop")) == 1
+
+
+async def test_a_sent_print_that_finished_while_the_app_was_down_is_finished(app):
+    printer = await app.add_printer()
+    printer.accepts_prints = False
+    job_id = await app.queue(printer, await app.add_file())
+    await app.run()
+    body = printer.sent("project_file")[-1]
+
+    await app.shutdown()
+    printer.report.update(
+        gcode_state="FINISH", gcode_file="part.3mf", subtask_id=str(body["subtask_id"]), mc_percent=100
+    )
+    await app.boot()
+    await app.run()
+
+    assert (await app.job(job_id)).status == "finished"
+
+
+async def test_a_paused_print_that_finished_while_the_app_was_down_is_finished(app):
+    printer, job_id = await printing_job(app)
+    printer.pause()
+    await app.run()
+
+    await app.shutdown()
+    printer.report.update(gcode_state="FINISH", mc_percent=100)
+    await app.boot()
+    await app.run()
+
+    assert (await app.job(job_id)).status == "finished"

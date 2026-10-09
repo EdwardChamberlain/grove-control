@@ -145,28 +145,6 @@ async def test_restart_recovery_applies_pause_resume_without_restarting_the_job(
     assert publish.await_count == (1 if initial == "dispatching" else 0)
 
 
-@pytest.mark.parametrize("outcome", ["FINISH", "FAILED"])
-async def test_restart_recovers_a_terminal_print_from_paused(sessions, outcome):
-    item_id, archive_id = await add_job(sessions, "paused")
-    tasks = []
-    scheduler = PrintScheduler()
-    with (
-        patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", return_value=telemetry(outcome)),
-        patch(
-            "backend.app.services.lifecycle.dispatching.spawn_background_task",
-            side_effect=lambda coro, **kw: tasks.append(coro),
-        ),
-        patch.object(scheduler.dispatcher, "_complete_recovered_dispatch", AsyncMock()),
-    ):
-        async with sessions() as db:
-            await scheduler.dispatcher.recover(db)
-        for task in tasks:
-            await task
-    async with sessions() as db:
-        assert (await db.get(PrintQueueItem, item_id)).status == ("finished" if outcome == "FINISH" else "failed")
-        assert (await db.get(PrintArchive, archive_id)).status == ("completed" if outcome == "FINISH" else "failed")
-
-
 @pytest.mark.parametrize("invalid", ["wrong_id", "no_id", "offline", "uninitialized", "terminal", "prepare"])
 async def test_unsafe_telemetry_cannot_resume_a_paused_job(sessions, invalid):
     item_id, _ = await add_job(sessions, "paused")

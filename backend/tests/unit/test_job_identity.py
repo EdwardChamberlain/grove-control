@@ -270,39 +270,6 @@ async def test_start_requires_exact_dispatch_id_and_uses_transition(sessions):
         assert item.started_at is not None
 
 
-@pytest.mark.parametrize(
-    "state, identity, connected, expected",
-    [
-        ("FINISH", "123", True, "finished"),
-        ("FAILED", "123", True, "failed"),
-        ("FINISH", "other", True, "printing"),
-        ("FINISH", None, True, "printing"),
-        ("IDLE", "123", True, "printing"),
-        ("FINISH", "123", False, "printing"),
-        ("PAUSE", "123", True, "paused"),
-    ],
-)
-async def test_startup_checks_already_printing_jobs_by_id(sessions, state, identity, connected, expected):
-    item_id = await add_job(sessions, "printing")
-    scheduler = PrintScheduler()
-    status = SimpleNamespace(state=state, subtask_id=identity, connected=connected)
-    spawned = []
-
-    def capture(coro, **kwargs):
-        spawned.append(coro)
-        coro.close()
-
-    with (
-        patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", return_value=status),
-        patch("backend.app.services.lifecycle.dispatching.spawn_background_task", capture),
-    ):
-        async with sessions() as db:
-            await scheduler.dispatcher.recover(db)
-        async with sessions() as db:
-            assert (await db.get(PrintQueueItem, item_id)).status == expected
-    assert bool(spawned) == (expected in ("finished", "failed"))
-
-
 @pytest.mark.parametrize("outcome", ["printing", "failed"])
 async def test_user_resolution_commits_and_keeps_failed_plate_gate(sessions, outcome):
     item_id = await add_job(sessions)

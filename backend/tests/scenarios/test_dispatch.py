@@ -259,3 +259,17 @@ async def test_a_file_that_cannot_be_copied_fails_with_its_cause(app):
     job = await app.job(job_id)
     assert (job.status, printer.sent("project_file")) in (("failed", []), ("queued", []))
     assert job.error_message or job.waiting_reason
+
+
+async def test_a_print_whose_start_was_missed_announces_only_its_end(app):
+    printer = await app.add_printer()
+    printer.accepts_prints = False
+    job_id = await app.queue(printer, await app.add_file())
+    await app.run()
+
+    body = printer.sent("project_file")[-1]
+    printer.push(gcode_state="FINISH", gcode_file="part.3mf", subtask_id=str(body["subtask_id"]), mc_percent=100)
+    await app.run()
+
+    assert (await app.job(job_id)).status == "finished"
+    assert app.notified("on_queue_job_started") == []

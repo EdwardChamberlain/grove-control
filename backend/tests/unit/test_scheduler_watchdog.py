@@ -96,47 +96,6 @@ class TestDurableDispatchingState:
         publish.assert_awaited_once_with(1)
 
     @pytest.mark.asyncio
-    async def test_restart_recovery_publishes_no_start_when_its_commit_fails(self, db_session):
-        """A recovered start is published only once the promotion has committed."""
-        from sqlalchemy import event
-        from sqlalchemy.exc import OperationalError
-
-        async with db_session() as db:
-            item = await db.get(PrintQueueItem, 1)
-            await hold_and_link(db, item)
-            item.dispatched_at = datetime.now(timezone.utc)
-            item.dispatch_subtask_id = "12345"
-            await db.commit()
-
-            scheduler = PrintScheduler()
-            publish, spawn = AsyncMock(), MagicMock()
-
-            def fail_commit(_connection):
-                raise OperationalError("COMMIT", {}, Exception("disk I/O error"))
-
-            engine = db.bind.sync_engine
-            event.listen(engine, "commit", fail_commit)
-            try:
-                with (
-                    patch(
-                        "backend.app.services.lifecycle.dispatching.printer_manager.get_status",
-                        return_value=_status("RUNNING", "12345"),
-                    ),
-                    patch("backend.app.services.lifecycle.dispatching.spawn_background_task", spawn),
-                    patch.object(lifecycle_effects, "publish_queue_job_started", new=publish),
-                    pytest.raises(OperationalError),
-                ):
-                    await scheduler.dispatcher.recover(db)
-            finally:
-                event.remove(engine, "commit", fail_commit)
-            await db.rollback()
-
-        spawn.assert_not_called()
-        publish.assert_not_called()
-        async with db_session() as db:
-            assert (await db.get(PrintQueueItem, 1)).status == "dispatching"
-
-    @pytest.mark.asyncio
     async def test_restart_recovery_does_not_promote_an_active_print_with_another_submission_id(self, db_session):
         """An unrelated manual print must not acknowledge a durable dispatch."""
         async with db_session() as db:
@@ -175,61 +134,6 @@ class TestDurableDispatchingState:
             item = await db.get(PrintQueueItem, 1)
             assert item.status == "dispatching"
             assert item.started_at is None
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        ("printer_state", "expected_status"),
-        [("FINISH", "finished"), ("FAILED", "failed")],
-    )
-    async def test_restart_recovery_completes_matching_terminal_dispatch_instead_of_requeueing(
-        self, db_session, printer_state, expected_status
-    ):
-        """A job that finished while the service was down must not retry.
-
-        BambuMQTT correctly ignores an arbitrary first terminal update after a
-        reconnect. The queue's durable submission id makes this one safe to
-        attribute, so recovery passes it through the normal completion handler.
-        """
-        async with db_session() as db:
-            item = await db.get(PrintQueueItem, 1)
-            await hold_and_link(db, item)
-            item.dispatched_at = datetime.now(timezone.utc) - timedelta(seconds=300)
-            item.dispatch_subtask_id = "12345"
-            await db.commit()
-
-            complete = AsyncMock()
-            status = _status(printer_state, "12345", "completed-while-down.3mf")
-            status.raw_data = {"subtask_id": "12345"}
-            tasks: list[asyncio.Task] = []
-
-            def spawn(coro, **_kwargs):
-                task = asyncio.create_task(coro)
-                tasks.append(task)
-                return task
-
-            with (
-                patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", return_value=status),
-                patch("backend.app.services.lifecycle.intake.print_completed", new=complete),
-                patch("backend.app.services.lifecycle.dispatching.spawn_background_task", side_effect=spawn),
-            ):
-                await PrintScheduler().dispatcher.recover(db)
-                await asyncio.gather(*tasks)
-
-            item = await db.get(PrintQueueItem, 1)
-            assert item.status == expected_status
-            assert item.completed_at is not None
-            complete.assert_awaited_once_with(
-                42,
-                {
-                    "status": "completed" if expected_status == "finished" else expected_status,
-                    "filename": "completed-while-down.3mf",
-                    "subtask_name": "",
-                    "subtask_id": "12345",
-                    "raw_data": {"subtask_id": "12345"},
-                    "_reconciled": True,
-                    "_recovered_dispatch": True,
-                },
-            )
 
 
 class TestActivePrinterReservation:
