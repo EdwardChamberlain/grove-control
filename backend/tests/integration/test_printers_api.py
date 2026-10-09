@@ -415,7 +415,14 @@ class TestPrintersAPI:
         from backend.app.services.bambu_mqtt import PrinterState
 
         printer = await printer_factory()
-        db_session.add(PrintQueueItem(printer_id=printer.id, position=1, status=queue_status))
+        db_session.add(
+            PrintQueueItem(
+                assigned_printer_id=printer.id if queue_status == "queued" else None,
+                printer_id=None if queue_status == "queued" else printer.id,
+                position=1,
+                status=queue_status,
+            )
+        )
         await db_session.commit()
 
         state = PrinterState()

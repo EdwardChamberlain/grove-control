@@ -47,6 +47,7 @@ async def test_trashed_reprint_stays_parked_without_a_printer_hold(handoff, monk
             .values(
                 status="queued",
                 printer_id=None,
+                assigned_printer_id=None,
                 archive_id=source.id,
                 library_file_id=None,
                 chamber_heat_soak=heat_soak,
@@ -140,10 +141,10 @@ async def test_dispatch_entry_rejects_another_jobs_prepared_archive(alignment):
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
         db.add(Printer(id=2, name="Other", serial_number="OTHER", ip_address="127.0.0.2", access_code="code"))
-        other = PrintQueueItem(printer_id=2, library_file_id=alignment.source_id, status="queued")
+        other = PrintQueueItem(assigned_printer_id=2, library_file_id=alignment.source_id, status="queued")
         db.add(other)
         await db.commit()
-        await hold_printers(db, [job.printer_id, other.printer_id])
+        await hold_printers(db, [job.assigned_printer_id, other.assigned_printer_id])
         await transition_queue_item(db, job, "queued", "dispatching")
         await transition_queue_item(db, other, "queued", "dispatching")
         await db.commit()
@@ -162,6 +163,7 @@ async def test_dispatch_entry_rejects_explicitly_clearing_the_selected_printer(a
         await db.rollback()
     async with alignment.sessions() as observer:
         job = await observer.get(PrintQueueItem, alignment.job_id)
-        assert job.status == "queued" and job.printer_id == 1 and job.archive_id is None
+        assert job.status == "queued" and job.printer_id is None and job.assigned_printer_id == 1
+        assert job.archive_id is None
         assert await observer.scalar(select(PrintArchive.id)) is None
     assert not list(settings.archive_dir.rglob("*.3mf"))

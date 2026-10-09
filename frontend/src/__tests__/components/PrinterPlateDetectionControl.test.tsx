@@ -19,20 +19,16 @@ const checkResult: PlateDetectionResult = {
 };
 
 function renderControl(overrides: Partial<React.ComponentProps<typeof PrinterPlateDetectionControl>> = {}) {
-  const onToggle = vi.fn();
   render(
     <PrinterPlateDetectionControl
       printer={printer}
       status={{ chamber_light: true } as PrinterStatus}
-      enabled={false}
       connected
       canUpdate
       iconControlClass="test-control"
-      onToggle={onToggle}
       {...overrides}
     />,
   );
-  return { onToggle };
 }
 
 describe('PrinterPlateDetectionControl', () => {
@@ -45,17 +41,12 @@ describe('PrinterPlateDetectionControl', () => {
     vi.spyOn(api, 'getPlateReferenceThumbnailUrl').mockReturnValue('/reference-thumbnail');
   });
 
-  it('keeps the state toggle separate from the management action and respects permissions', async () => {
-    const user = userEvent.setup();
-    const { onToggle } = renderControl({ canUpdate: false });
+  it('keeps a manual inspection action and respects permissions', async () => {
+    renderControl({ canUpdate: false });
 
     const buttons = screen.getAllByRole('button');
-    expect(buttons).toHaveLength(2);
+    expect(buttons).toHaveLength(1);
     expect(buttons[0]).toBeDisabled();
-    expect(buttons[1]).toBeDisabled();
-
-    await user.click(buttons[0]);
-    expect(onToggle).not.toHaveBeenCalled();
   });
 
   it('shows the plate check result and restores the light when the dialog closes', async () => {
@@ -64,7 +55,7 @@ describe('PrinterPlateDetectionControl', () => {
     const setChamberLight = vi.spyOn(api, 'setChamberLight').mockResolvedValue({ success: true });
 
     renderControl({ status: { chamber_light: false } as PrinterStatus });
-    await user.click(screen.getAllByRole('button')[1]);
+    await user.click(screen.getAllByRole('button')[0]);
 
     await waitFor(() => expect(setChamberLight).toHaveBeenCalledWith(printer.id, true));
     await waitFor(() => expect(checkPlateEmpty).toHaveBeenCalledWith(printer.id, { includeDebugImage: true }), { timeout: 3500 });
@@ -83,7 +74,7 @@ describe('PrinterPlateDetectionControl', () => {
     const calibrate = vi.spyOn(api, 'calibratePlateDetection').mockResolvedValue({ success: true, message: 'Saved', index: 1 });
 
     renderControl();
-    await user.click(screen.getAllByRole('button')[1]);
+    await user.click(screen.getAllByRole('button')[0]);
     expect(await screen.findByText(/calibration required/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Calibrate Empty Plate' }));
@@ -98,7 +89,7 @@ describe('PrinterPlateDetectionControl', () => {
     const deleteReference = vi.spyOn(api, 'deletePlateReference').mockResolvedValue({ success: true, message: 'Deleted' });
 
     renderControl();
-    await user.click(screen.getAllByRole('button')[1]);
+    await user.click(screen.getAllByRole('button')[0]);
     const label = await screen.findByText('Smooth PEI');
     await user.click(label);
     const input = screen.getByDisplayValue('Smooth PEI');
@@ -117,7 +108,7 @@ describe('PrinterPlateDetectionControl', () => {
     const updatePrinter = vi.spyOn(api, 'updatePrinter').mockResolvedValue(printer);
 
     renderControl();
-    await user.click(screen.getAllByRole('button')[1]);
+    await user.click(screen.getAllByRole('button')[0]);
     await user.click(await screen.findByRole('button', { name: 'Edit' }));
     const sliders = screen.getAllByRole('slider');
     fireEvent.change(sliders[0], { target: { value: '0.25' } });
@@ -134,7 +125,7 @@ describe('PrinterPlateDetectionControl', () => {
     const setChamberLight = vi.spyOn(api, 'setChamberLight').mockResolvedValue({ success: true });
 
     renderControl({ status: { chamber_light: false } as PrinterStatus });
-    await user.click(screen.getAllByRole('button')[1]);
+    await user.click(screen.getAllByRole('button')[0]);
 
     await waitFor(() => expect(setChamberLight).toHaveBeenCalledWith(printer.id, true));
     await waitFor(() => expect(setChamberLight).toHaveBeenLastCalledWith(printer.id, false), { timeout: 3500 });

@@ -24,9 +24,9 @@ from backend.app.models.ams_label import AmsLabel
 from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import (
     ACTIVE_STATUSES,
-    AWAITING_PLATE_CLEAR_STATUSES,
     HOLDING_STATUSES,
     PrintQueueItem,
+    awaiting_plate_clear_clause,
 )
 from backend.app.models.printer import Printer
 from backend.app.models.slot_preset import SlotPresetMapping
@@ -440,6 +440,9 @@ async def delete_printer(
     except InvalidQueueTransition as exc:
         raise HTTPException(409, str(exc)) from exc
     await db.execute(update(PrintQueueItem).where(PrintQueueItem.printer_id == printer_id).values(printer_id=None))
+    await db.execute(
+        update(PrintQueueItem).where(PrintQueueItem.assigned_printer_id == printer_id).values(assigned_printer_id=None)
+    )
     if delete_archives:
         # Preserve jobs when the Archive FK would otherwise cascade-delete them.
         await db.execute(
@@ -500,7 +503,8 @@ async def get_printer_status(
     state = printer_manager.get_status(printer_id)
     awaiting_job = await db.scalar(
         select(PrintQueueItem).where(
-            PrintQueueItem.printer_id == printer_id, PrintQueueItem.status.in_(AWAITING_PLATE_CLEAR_STATUSES)
+            PrintQueueItem.printer_id == printer_id,
+            awaiting_plate_clear_clause(PrintQueueItem.status, PrintQueueItem.physical_outcome),
         )
     )
     awaiting = awaiting_job is not None
@@ -3058,7 +3062,8 @@ async def clear_plate(
 
     item = await db.scalar(
         select(PrintQueueItem).where(
-            PrintQueueItem.printer_id == printer_id, PrintQueueItem.status.in_(AWAITING_PLATE_CLEAR_STATUSES)
+            PrintQueueItem.printer_id == printer_id,
+            awaiting_plate_clear_clause(PrintQueueItem.status, PrintQueueItem.physical_outcome),
         )
     )
     if item is None:

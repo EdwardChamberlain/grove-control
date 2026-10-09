@@ -112,13 +112,20 @@ def _discard_uncommitted(session: Session, transaction) -> None:
         _run(session.info.pop(_UNDO, []), "undo step")
 
 
-def publish_printer_view(db: AsyncSession, printer_id: int, status: str, archive_id: int | None) -> None:
+def publish_printer_view(
+    db: AsyncSession,
+    printer_id: int,
+    status: str,
+    archive_id: int | None,
+    *,
+    physical_outcome: str | None = None,
+) -> None:
     """Show the committed holding state in the printer's plate-clear view."""
 
     def publish() -> None:
         from backend.app.services.printer_manager import printer_manager
 
-        awaiting = status in AWAITING_PLATE_CLEAR_STATUSES
+        awaiting = status in AWAITING_PLATE_CLEAR_STATUSES and not (status == "failed" and physical_outcome is None)
         printer_manager.set_awaiting_plate_clear(printer_id, awaiting)
         printer_manager.set_awaiting_plate_clear_archive_id(printer_id, archive_id if awaiting else None)
 
@@ -202,7 +209,7 @@ async def run_queue_outcome_effects(engine: AsyncEngine, effect: QueueOutcomeEff
         attempt = archive if archive and archive.dispatched_queue_item_id == job.id else None
         remote_filename = (attempt.extra_data or {}).get("remote_filename") if attempt else None
         connection = (printer.ip_address, printer.access_code, printer.model) if printer else None
-        auto_off = bool(job.auto_off_after)
+        auto_off = bool(job.auto_off_after) and not (job.status == "failed" and job.physical_outcome is None)
         filename = archive.filename if archive else None
         library_file_id = job.library_file_id
         printer_name = printer.name if printer else None

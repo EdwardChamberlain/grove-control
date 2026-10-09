@@ -682,68 +682,6 @@ async def _begin_new_print(printer_id: int, data: dict, *, memory) -> None:
             await smart_plug_manager.on_print_start(printer_id, db)
     except Exception as e:
         logger.warning("Smart plug on_print_start failed: %s", e)
-    async with async_session() as db:
-        printer = await _one(db, select(Printer).where(Printer.id == printer_id))
-        if printer and printer.plate_detection_enabled:
-            logger.info("[PLATE CHECK] ENTERING plate detection code for printer %s", printer_id)
-            try:
-                from backend.app.services.plate_detection import check_plate_empty
-
-                roi = tuple(getattr(printer, f"plate_detection_roi_{edge}") for edge in "xywh")
-                roi = roi if None not in roi else None
-                light_was_off = False
-                client = printer_manager.get_client(printer_id)
-                if client and client.state:
-                    light_was_off = not client.state.chamber_light
-                    if light_was_off:
-                        logger.info("[PLATE CHECK] Turning on chamber light for printer %s", printer_id)
-                        client.set_chamber_light(True)
-                        await asyncio.sleep(2.5)
-                logger.info("[PLATE CHECK] Running plate detection for printer %s", printer_id)
-                plate_result = await check_plate_empty(
-                    printer_id=printer_id,
-                    ip_address=printer.ip_address,
-                    access_code=printer.access_code,
-                    model=printer.model,
-                    include_debug_image=False,
-                    external_camera_url=printer.external_camera_url,
-                    external_camera_type=printer.external_camera_type,
-                    use_external=printer.external_camera_enabled,
-                    roi=roi,
-                    external_camera_snapshot_url=printer.external_camera_snapshot_url,
-                )
-                if light_was_off and client:
-                    logger.info("[PLATE CHECK] Restoring chamber light to off for printer %s", printer_id)
-                    client.set_chamber_light(False)
-                if not plate_result.needs_calibration and (not plate_result.is_empty):
-                    logger.warning(
-                        f"[PLATE CHECK] Objects detected on plate for printer {printer_id}! Confidence: {plate_result.confidence:.0%}, Diff: {plate_result.difference_percent:.1f}%"
-                    )
-                    client = printer_manager.get_client(printer_id)
-                    if client:
-                        client.pause_print()
-                        logger.info("[PLATE CHECK] Print paused for printer %s", printer_id)
-                    await ws_manager.broadcast(
-                        {
-                            "type": "plate_not_empty",
-                            "printer_id": printer_id,
-                            "printer_name": printer.name,
-                            "message": f"Objects detected on build plate! Print paused. (Diff: {plate_result.difference_percent:.1f}%)",
-                        }
-                    )
-                    try:
-                        await notification_service.on_plate_not_empty(
-                            printer_id=printer_id,
-                            printer_name=printer.name,
-                            db=db,
-                            difference_percent=plate_result.difference_percent,
-                        )
-                    except Exception as notif_err:
-                        logger.warning("[PLATE CHECK] Failed to send notification: %s", notif_err)
-                else:
-                    logger.info("[PLATE CHECK] Plate is empty for printer %s, proceeding with print", printer_id)
-            except Exception as plate_err:
-                logger.warning("[PLATE CHECK] Plate detection failed for printer %s: %s", printer_id, plate_err)
 
 
 async def _finish_new_print(printer_id: int, data: dict, archive_id: int | None) -> None:

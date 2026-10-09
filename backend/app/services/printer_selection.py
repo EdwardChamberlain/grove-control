@@ -91,8 +91,8 @@ def _source_nozzle_mismatch(archive, library_file, printer_id: int) -> str | Non
 def _candidates_for(item: PrintQueueItem) -> list[_ModelCandidate]:
     """Candidate files for ``item``, best first; a job without variants has one, its own columns.
 
-    Least-attempted first, so after a failed start the other machine is tried
-    next (#2555); ties keep the user's order.
+    Keep the user's order. A failed dispatch becomes a separate fresh queue
+    job; this job does not rotate candidates or carry attempt history.
     """
     variants = getattr(item, "variants", None) or []
     if not variants:
@@ -117,7 +117,7 @@ def _candidates_for(item: PrintQueueItem) -> list[_ModelCandidate]:
     # fires there and a hard delete leaves the variant row pointing at nothing.
     usable = [v for v in variants if v.library_file is not None and v.library_file.deleted_at is None]
 
-    ordered = sorted(usable, key=lambda v: (v.attempt_count or 0, v.position, v.id))
+    ordered = sorted(usable, key=lambda v: (v.position, v.id))
     return [
         _ModelCandidate(
             target_model=v.target_model,
@@ -390,11 +390,13 @@ class PrinterSelection:
                 await _wait(db, item, "Material/colour metadata unavailable; cannot verify a safe filament match")
                 continue
 
-            if item.printer_id:
+            specific_printer_id = item.assigned_printer_id
+            if specific_printer_id:
                 sliced_for_model = _sliced_for_model(item.archive, item.library_file)
+                specific_printer = await db.get(Printer, specific_printer_id)
                 waiting_reason = _incompatible_sliced_model_reason(
-                    sliced_for_model, item.printer
-                ) or _source_nozzle_mismatch(item.archive, item.library_file, item.printer_id)
+                    sliced_for_model, specific_printer
+                ) or _source_nozzle_mismatch(item.archive, item.library_file, specific_printer_id)
                 if waiting_reason:
                     await _wait(db, item, waiting_reason)
                     skipped["sliced_model_mismatch"] += 1
@@ -403,7 +405,7 @@ class PrinterSelection:
                     item.waiting_reason = None
                     await db.commit()
 
-                interlock_reason = interlocked.get(item.printer_id)
+                interlock_reason = interlocked.get(specific_printer_id)
                 if interlock_reason:
                     await _wait(db, item, f"Waiting on {interlock_reason}")
                     skipped["sensor_interlock"] += 1
@@ -421,26 +423,26 @@ class PrinterSelection:
                     await db.commit()
 
                 # Specific printer assignment (existing behavior)
-                if item.printer_id in busy_printers:
+                if specific_printer_id in busy_printers:
                     if not cleared_sensor_interlock_reason:
-                        item.waiting_reason = f"Waiting for printer reservation on printer {item.printer_id}"
+                        item.waiting_reason = f"Waiting for printer reservation on printer {specific_printer_id}"
                         await db.commit()
                     continue
 
                 # Check if printer is idle
-                printer_idle = self._is_printer_idle(item.printer_id, require_plate_clear)
-                printer_connected = printer_manager.is_connected(item.printer_id)
+                printer_idle = self._is_printer_idle(specific_printer_id, require_plate_clear)
+                printer_connected = printer_manager.is_connected(specific_printer_id)
 
                 # If printer not connected, try to power on via smart plug
                 if not printer_connected:
-                    plugs = await self._get_smart_plugs(db, item.printer_id)
+                    plugs = await self._get_smart_plugs(db, specific_printer_id)
                     auto_on_plugs = [p for p in plugs if p.auto_on and p.enabled]
                     if auto_on_plugs:
-                        logger.info("Printer %s offline, attempting to power on via smart plug(s)", item.printer_id)
+                        logger.info("Printer %s offline, attempting to power on via smart plug(s)", specific_printer_id)
                         # Power on using the plug that actually feeds the printer,
                         # and wait for that plug to boot it (#2629).
                         primary_plug = self._pick_power_plug(auto_on_plugs)
-                        powered_on = await self._power_on_and_wait(primary_plug, item.printer_id, db)
+                        powered_on = await self._power_on_and_wait(primary_plug, specific_printer_id, db)
                         if powered_on:
                             # Also turn on any remaining auto_on plugs (e.g., filter)
                             for extra_plug in [p for p in auto_on_plugs if p.id != primary_plug.id]:
@@ -448,26 +450,26 @@ class PrinterSelection:
                                     service = await smart_plug_manager.get_service_for_plug(extra_plug, db)
                                     await service.turn_on(extra_plug)
                                     logger.info(
-                                        "Also powered on plug '%s' for printer %s", extra_plug.name, item.printer_id
+                                        "Also powered on plug '%s' for printer %s", extra_plug.name, specific_printer_id
                                     )
                                 except Exception as e:
                                     logger.warning("Failed to power on extra plug '%s': %s", extra_plug.name, e)
                             printer_connected = True
-                            printer_idle = self._is_printer_idle(item.printer_id, require_plate_clear)
+                            printer_idle = self._is_printer_idle(specific_printer_id, require_plate_clear)
                         else:
-                            logger.warning("Could not power on printer %s via smart plug", item.printer_id)
-                            busy_printers.add(item.printer_id)
+                            logger.warning("Could not power on printer %s via smart plug", specific_printer_id)
+                            busy_printers.add(specific_printer_id)
                             continue
                     else:
                         # No plug or auto_on disabled
-                        busy_printers.add(item.printer_id)
+                        busy_printers.add(specific_printer_id)
                         continue
 
                 # Check if printer is idle (busy with another print)
                 if not printer_idle:
                     if not cleared_sensor_interlock_reason:
-                        item.waiting_reason = f"Waiting for printer reservation on printer {item.printer_id}"
-                    busy_printers.add(item.printer_id)
+                        item.waiting_reason = f"Waiting for printer reservation on printer {specific_printer_id}"
+                    busy_printers.add(specific_printer_id)
                     await db.commit()
                     continue
 
@@ -480,20 +482,20 @@ class PrinterSelection:
                     {override["type"] for override in filament_overrides if override.get("type")}
                 )
                 if required_materials:
-                    missing_materials = self._get_missing_filament_types(item.printer_id, required_materials)
+                    missing_materials = self._get_missing_filament_types(specific_printer_id, required_materials)
                     if missing_materials:
                         await _wait(db, item, f"No matching material. Waiting on {', '.join(missing_materials)}")
                         continue
 
                 force_overrides = [override for override in filament_overrides if override.get("force_color_match")]
                 if force_overrides:
-                    missing_colors = self._get_missing_force_color_slots(item.printer_id, force_overrides)
+                    missing_colors = self._get_missing_force_color_slots(specific_printer_id, force_overrides)
                     if missing_colors:
                         await _wait(db, item, self._force_color_waiting_reason(missing_colors))
                         logger.info(
                             "Queue item %s blocked on printer %s by force-colour mismatch: %s",
                             item.id,
-                            item.printer_id,
+                            specific_printer_id,
                             missing_colors,
                         )
                         continue
@@ -502,7 +504,7 @@ class PrinterSelection:
                         await db.commit()
 
                 passed, bound_mapping = await self._gate(
-                    db, item, item.printer_id, filament_overrides, force_overrides, busy_printers
+                    db, item, specific_printer_id, filament_overrides, force_overrides, busy_printers
                 )
                 if not passed:
                     continue
@@ -515,7 +517,7 @@ class PrinterSelection:
                 # not removed until every consumer has an Archive copy.
                 if library_row_conflict(item):
                     skipped["library_row_in_use"] += 1
-                    busy_printers.add(item.printer_id)
+                    busy_printers.add(specific_printer_id)
                     continue
 
                 if item.waiting_reason and (
@@ -524,9 +526,9 @@ class PrinterSelection:
                 ):
                     item.waiting_reason = None
                     selection.changed = True
-                select(item, item.printer_id, bound_mapping)
+                select(item, specific_printer_id, bound_mapping)
                 if sjf_enabled and item.print_time_seconds is not None:
-                    await jumped(item, lambda other, job=item: other.printer_id == job.printer_id)
+                    await jumped(item, lambda other, job=item: other.assigned_printer_id == job.assigned_printer_id)
 
             elif item.target_model or getattr(item, "variants", None):
                 # Model-based assignment - find any idle printer of matching model.
@@ -693,7 +695,7 @@ class PrinterSelection:
                         await jumped(
                             item,
                             lambda other, job=item: (
-                                other.printer_id is None
+                                other.assigned_printer_id is None
                                 and other.target_model
                                 and other.target_model.upper() == job.target_model.upper()
                             ),
@@ -745,7 +747,7 @@ class PrinterSelection:
             from backend.app.services.lifecycle.queued import job_name
 
             name = await job_name(db, item)
-            printer = await db.get(Printer, item.printer_id) if item.printer_id else None
+            printer = await db.get(Printer, printer_id) if printer_id else None
             logger.info(
                 "Queue item %s blocked on filament deficit (%d slot(s)) — promoted to manual_start",
                 item.id,

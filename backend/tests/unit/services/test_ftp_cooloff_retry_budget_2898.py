@@ -312,7 +312,7 @@ async def dispatch_case(tmp_path):
         )
         db.add(archive)
         await db.flush()
-        item = PrintQueueItem(printer_id=printer.id, archive_id=archive.id, status="queued")
+        item = PrintQueueItem(assigned_printer_id=printer.id, archive_id=archive.id, status="queued")
         db.add(item)
         await db.commit()
         item_id = item.id

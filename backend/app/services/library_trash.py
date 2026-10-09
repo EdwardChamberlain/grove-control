@@ -409,7 +409,10 @@ async def release_queue_references(db: AsyncSession, file_ids: list[int]) -> int
     from backend.app.services.lifecycle.preheating import abort_heat_soak
 
     references = await db.execute(
-        select(PrintQueueItem.id, PrintQueueItem.printer_id).where(PrintQueueItem.library_file_id.in_(file_ids))
+        select(
+            PrintQueueItem.id,
+            func.coalesce(PrintQueueItem.printer_id, PrintQueueItem.assigned_printer_id),
+        ).where(PrintQueueItem.library_file_id.in_(file_ids))
     )
     expected_printers = dict(references.all())
     names = dict(

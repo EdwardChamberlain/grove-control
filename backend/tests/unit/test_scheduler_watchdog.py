@@ -40,7 +40,7 @@ async def db_session(tmp_path, monkeypatch):
     async with session_maker() as db:
         db.add(Printer(id=42, name="Test", serial_number="TEST", ip_address="127.0.0.1", access_code="code"))
         db.add(PrintArchive(id=99, filename="source.3mf", file_path=str(source), file_size=15, status="completed"))
-        db.add(PrintQueueItem(id=1, printer_id=42, archive_id=99, status="queued"))
+        db.add(PrintQueueItem(id=1, assigned_printer_id=42, archive_id=99, status="queued"))
         await db.commit()
 
     try:

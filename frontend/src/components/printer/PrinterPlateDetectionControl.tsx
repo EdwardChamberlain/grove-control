@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ChevronDown, Loader2, Pencil, ScanSearch, X } from 'lucide-react';
+import { Loader2, Pencil, ScanSearch, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { api, type PlateDetectionResult, type PlateDetectionROI, type Printer, type PrinterStatus } from '../../api/client';
 import { Button } from '../Button';
@@ -20,16 +20,11 @@ interface PlateReferences {
 interface PrinterPlateDetectionControlProps {
   printer: Printer;
   status?: PrinterStatus | null;
-  enabled: boolean;
   connected?: boolean;
   canUpdate: boolean;
-  togglePending?: boolean;
   iconControlClass: string;
-  activeClassName?: string;
   inactiveClassName?: string;
-  dividerClassName?: string;
   iconClassName?: string;
-  onToggle: () => void;
 }
 
 const defaultRoi: PlateDetectionROI = { x: 0.15, y: 0.35, w: 0.70, h: 0.55 };
@@ -37,16 +32,11 @@ const defaultRoi: PlateDetectionROI = { x: 0.15, y: 0.35, w: 0.70, h: 0.55 };
 export function PrinterPlateDetectionControl({
   printer,
   status,
-  enabled,
   connected = false,
   canUpdate,
-  togglePending = false,
   iconControlClass,
-  activeClassName = 'bg-green-500/10 text-green-400 hover:bg-green-500/20',
   inactiveClassName = 'bg-bambu-dark text-bambu-gray/50 hover:bg-bambu-dark-tertiary hover:text-white',
-  dividerClassName = 'border-l border-bambu-dark-tertiary',
   iconClassName = 'h-4 w-4',
-  onToggle,
 }: PrinterPlateDetectionControlProps) {
   const { t } = useTranslation();
   const { showToast } = useToast();
@@ -171,38 +161,23 @@ export function PrinterPlateDetectionControl({
     return () => window.removeEventListener('keydown', handleEscape);
   }, [plateCheckResult, closePlateCheckModal]);
 
-  const buttonStateClass = enabled ? activeClassName : inactiveClassName;
   const noPermissionTitle = t('printers.plateDetection.noPermission');
 
   return (
     <>
-      <div className={`inline-flex rounded-lg ${enabled ? 'ring-1 ring-green-500' : ''}`}>
-        <button
-          type="button"
-          onClick={onToggle}
-          disabled={!connected || togglePending || !canUpdate}
-          className={`${iconControlClass} rounded-r-none ${buttonStateClass}`}
-          title={!canUpdate ? noPermissionTitle : (enabled ? t('printers.plateDetection.enabledClick') : t('printers.plateDetection.disabledClick'))}
-          aria-label={!canUpdate ? noPermissionTitle : (enabled ? t('printers.plateDetection.enabledClick') : t('printers.plateDetection.disabledClick'))}
-        >
-          {togglePending ? (
-            <Loader2 className={`${iconClassName} animate-spin`} />
-          ) : (
-            <ScanSearch className={iconClassName} />
-          )}
-        </button>
+      <div className="inline-flex rounded-lg">
         <button
           type="button"
           onClick={handleOpenPlateManagement}
           disabled={!connected || isCheckingPlate || !canUpdate}
-          className={`${iconControlClass} rounded-l-none ${dividerClassName} ${buttonStateClass}`}
+          className={`${iconControlClass} ${inactiveClassName}`}
           title={!canUpdate ? noPermissionTitle : t('printers.plateDetection.manageCalibration')}
           aria-label={!canUpdate ? noPermissionTitle : t('printers.plateDetection.manageCalibration')}
         >
           {isCheckingPlate ? (
             <Loader2 className={`${iconClassName} animate-spin`} />
           ) : (
-            <ChevronDown className={iconClassName} />
+            <ScanSearch className={iconClassName} />
           )}
         </button>
       </div>

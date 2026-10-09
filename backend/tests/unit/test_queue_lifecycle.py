@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 import backend.app.models  # noqa: F401
 from backend.app.api.routes.print_queue import clear_queue_plate, retry_queue_item
 from backend.app.api.routes.printers import clear_plate, delete_printer, get_printer_status
-from backend.app.core.database import Base, _migrate_queue_lifecycle
+from backend.app.core.database import Base, _migrate_queue_assignment, _migrate_queue_lifecycle
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
@@ -48,9 +48,18 @@ async def sessions(tmp_path):
 @pytest.mark.parametrize("status", HOLDING_STATUSES)
 async def test_every_holding_state_blocks_a_second_job_even_with_confirmation_off(sessions, status):
     async with sessions() as db:
-        db.add_all([Settings(key="require_plate_clear", value="false"), PrintQueueItem(printer_id=1, status=status)])
+        db.add_all(
+            [
+                Settings(key="require_plate_clear", value="false"),
+                PrintQueueItem(
+                    printer_id=1,
+                    status=status,
+                    physical_outcome="failed" if status == "failed" else None,
+                ),
+            ]
+        )
         await db.commit()
-        db.add(PrintQueueItem(printer_id=1, status="queued"))
+        db.add(PrintQueueItem(assigned_printer_id=1, status="queued"))
         await db.commit()  # Targeting the printer does not hold it.
         db.add(PrintQueueItem(printer_id=1, status="dispatching"))
         with pytest.raises(IntegrityError):
@@ -120,7 +129,7 @@ async def test_plate_view_updates_after_commit_and_not_on_rollback_or_queued_can
     with patch("backend.app.services.printer_manager.printer_manager", manager):
         async with sessions() as db:
             item = PrintQueueItem(printer_id=1, status="printing")
-            queued = PrintQueueItem(printer_id=1, status="queued")
+            queued = PrintQueueItem(assigned_printer_id=1, status="queued")
             db.add_all([item, queued])
             await db.commit()
             await transition_queue_item(db, item, "printing", "failed")
@@ -252,7 +261,7 @@ async def test_retry_uses_archive_copy_when_source_has_gone(sessions, tmp_path):
 async def test_deleting_printer_ends_holding_job_and_leaves_waiting_job_to_retarget(sessions, status):
     async with sessions() as db:
         old = PrintQueueItem(printer_id=1, status=status)
-        waiting = PrintQueueItem(printer_id=1, status="queued")
+        waiting = PrintQueueItem(assigned_printer_id=1, status="queued")
         db.add_all([old, waiting])
         await db.commit()
         with patch("backend.app.api.routes.printers.printer_manager.disconnect_printer"):
@@ -348,7 +357,7 @@ async def test_migration_preserves_exact_hold_creates_missing_job_and_runs_once(
         await db.commit()
     async with engine.begin() as conn:
         await _migrate_queue_lifecycle(conn)
-        assert await conn.scalar(select(Settings.value).where(Settings.key == "queue_lifecycle_version")) == "3"
+        assert await conn.scalar(select(Settings.value).where(Settings.key == "queue_lifecycle_version")) == "4"
     async with sessions() as db:
         jobs = list((await db.scalars(select(PrintQueueItem))).all())
         assert len(jobs) == 5
@@ -389,16 +398,39 @@ async def test_migration_unbinds_waiting_any_machine_jobs_and_keeps_specific_req
         assert (specific.status, specific.printer_id) == ("queued", 1)
 
 
+async def test_queue_assignment_migration_splits_preference_and_sets_pending_retry_policy(sessions):
+    engine = sessions.kw["bind"]
+    async with sessions() as db:
+        db.add_all(
+            [
+                PrintQueueItem(id=70, printer_id=1, status="queued"),
+                PrintQueueItem(id=71, printer_id=1, target_model="H2D", status="dispatching"),
+            ]
+        )
+        await db.commit()
+    async with engine.begin() as conn:
+        await _migrate_queue_assignment(conn)
+    async with sessions() as db:
+        queued = await db.get(PrintQueueItem, 70)
+        active = await db.get(PrintQueueItem, 71)
+        assert queued.printer_id is None and queued.assigned_printer_id == 1
+        assert queued.retry_on_failure is True
+        assert active.printer_id == 1 and active.assigned_printer_id is None
+        assert active.retry_on_failure is False
+
+
 async def test_heat_soak_does_not_restore_a_stale_printer_assignment(sessions):
     from backend.app.services.lifecycle.preheating import ChamberHeatSoak
 
     async with sessions() as db:
-        item = PrintQueueItem(printer_id=1, status="queued", chamber_heat_soak=True)
+        item = PrintQueueItem(assigned_printer_id=1, status="queued", chamber_heat_soak=True)
         db.add(item)
         await db.commit()
-        await db.execute(PrintQueueItem.__table__.update().where(PrintQueueItem.id == item.id).values(printer_id=None))
+        await db.execute(
+            PrintQueueItem.__table__.update().where(PrintQueueItem.id == item.id).values(assigned_printer_id=None)
+        )
         await db.commit()
-        assert item.printer_id == 1  # This worker still has its old snapshot.
+        assert item.assigned_printer_id == 1  # This worker still has its old snapshot.
         assert not await ChamberHeatSoak().enter(db, item)
         await db.refresh(item)
-        assert item.status == "queued" and item.printer_id is None
+        assert item.status == "queued" and item.printer_id is None and item.assigned_printer_id is None

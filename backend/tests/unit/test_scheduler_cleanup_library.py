@@ -722,7 +722,11 @@ async def test_failed_upload_holds_printer_until_clear_even_with_confirmation_of
     failed_id = ctx.queue_item_id
     async with ctx.session_maker() as db:
         db.add(Settings(key="require_plate_clear", value="false"))
-        next_job = PrintQueueItem(printer_id=ctx.printer_id, library_file_id=ctx.library_file_id, status="queued")
+        next_job = PrintQueueItem(
+            assigned_printer_id=ctx.printer_id,
+            library_file_id=ctx.library_file_id,
+            status="queued",
+        )
         db.add(next_job)
         await db.commit()
         next_id = next_job.id

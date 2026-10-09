@@ -1789,14 +1789,6 @@ function SinglePrinterCockpit({
       showToast(error.message || t('printers.toast.failedToSendCommand'), 'error');
     },
   });
-  const plateDetectionMutation = useMutation({
-    mutationFn: (enabled: boolean) => api.updatePrinter(printer.id, { plate_detection_enabled: enabled }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['printers'] });
-      showToast(plateDetectionMutation.variables ? t('printers.toast.plateCheckEnabled') : t('printers.toast.plateCheckDisabled'));
-    },
-    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToUpdateSetting'), 'error'),
-  });
   const xyJogMutation = useMutation({
     mutationFn: ({ x, y }: { x: number; y: number }) => api.xyJog(printer.id, x, y),
     onError: (error: Error) => showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
@@ -2087,9 +2079,6 @@ function SinglePrinterCockpit({
   const currentPrintLabel = status?.preheating
     ? t('heatSoak.status')
     : activePrintName || t('printers.noActiveJob', 'No active job');
-  const plateDetectionEnabled = plateDetectionMutation.isPending && plateDetectionMutation.variables != null
-    ? plateDetectionMutation.variables
-    : printer.plate_detection_enabled;
   const requestBedJog = (distance: number) => {
     const warnedKey = `bambuddy.bedJog.warned.${printer.id}`;
     let warned = false;
@@ -2412,13 +2401,10 @@ function SinglePrinterCockpit({
         <PrinterPlateDetectionControl
           printer={printer}
           status={status}
-          enabled={plateDetectionEnabled}
           connected={!!status?.connected}
           canUpdate={hasPermission('printers:update')}
-          togglePending={plateDetectionMutation.isPending}
           iconControlClass={iconControlClass}
           inactiveClassName="bg-bambu-dark-tertiary/70 text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white"
-          onToggle={() => plateDetectionMutation.mutate(!plateDetectionEnabled)}
         />
         <button
           type="button"
@@ -3883,14 +3869,6 @@ function PrinterCard({
   });
 
   // Plate detection setting mutation
-  const plateDetectionMutation = useMutation({
-    mutationFn: (enabled: boolean) => api.updatePrinter(printer.id, { plate_detection_enabled: enabled }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['printers'] });
-      showToast(plateDetectionMutation.variables ? t('printers.toast.plateCheckEnabled') : t('printers.toast.plateCheckDisabled'));
-    },
-    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToUpdateSetting'), 'error'),
-  });
 
   // Maintenance mode toggle (#1476). Wraps the `is_active` backend field that
   // already gates MQTT connection, queue dispatch, scheduler eligibility,
@@ -3997,11 +3975,6 @@ function PrinterCard({
       showToast(error.message || t('printers.toast.failedToUnload'), 'error');
     },
   });
-
-  // Toggle plate detection enabled/disabled
-  const handleTogglePlateDetection = () => {
-    plateDetectionMutation.mutate(!printer.plate_detection_enabled);
-  };
 
   // Watch ams_status_main to detect when RFID read completes
   // ams_status_main: 0=idle, 2=rfid_identifying
@@ -4877,13 +4850,10 @@ function PrinterCard({
                       <PrinterPlateDetectionControl
                         printer={printer}
                         status={status}
-                        enabled={printer.plate_detection_enabled}
                         connected={status.connected}
                         canUpdate={hasPermission('printers:update')}
-                        togglePending={plateDetectionMutation.isPending}
                         iconControlClass={iconControlClass}
                         iconClassName="w-4 h-4"
-                        onToggle={handleTogglePlateDetection}
                       />
 
                       {/* Print Speed */}

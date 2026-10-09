@@ -53,7 +53,7 @@ async def make_item(sessions, status="queued", **kwargs):
             )
             db.add(source)
             await db.flush()
-            kwargs.setdefault("printer_id", printer.id)
+            kwargs.setdefault("assigned_printer_id", printer.id)
             kwargs.setdefault("library_file_id", source.id)
         item = PrintQueueItem(status=status, **kwargs)
         db.add(item)

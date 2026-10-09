@@ -231,8 +231,18 @@ async def abort_heat_soak(
     commit: bool = True,
 ) -> None:
     """Exit with a reason. Caller holds the job's printer; heater shutdown survives deletion of the job."""
+    action = (
+        "dispatch_failure"
+        if status == "failed" and item.dispatched_at is None and item.dispatch_subtask_id is None
+        else None
+    )
     await transition_queue_item(
-        db, item, item.status, status, values={"error_message": reason, "completed_at": utcnow()}
+        db,
+        item,
+        item.status,
+        status,
+        action=action,
+        values={"error_message": reason, "completed_at": utcnow()},
     )
     if commit:
         await db.commit()
@@ -344,11 +354,12 @@ class ChamberHeatSoak:
         unassigned = bool(binding and binding.unassigned)
         await hold_printer(db, printer_id)  # The selected printer, before any write.
         item = await lock_queue_item(db, item_id)
-        expected_printer = None if unassigned else printer_id
+        expected_assignment = None if unassigned else printer_id
         if (
             not item
             or item.status != "queued"
-            or item.printer_id != expected_printer
+            or item.printer_id is not None
+            or item.assigned_printer_id != expected_assignment
             or (binding and binding.edited_fields(item))
         ):
             await db.rollback()

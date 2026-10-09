@@ -15,13 +15,24 @@ async def on_enter(change, row) -> None:
     Those are Auto Off, and a failure notification unless the printer reported
     the failure, whose completion notifies instead.
     """
-    from backend.app.services.lifecycle import effects
+    from backend.app.services.lifecycle import effects, queued
 
     if change.after == "finished":
         confirmation = await change.db.scalar(select(Settings.value).where(Settings.key == "require_plate_clear"))
         if confirmation is not None and confirmation.lower() in ("false", "0"):
             await clear_job_plate(change.db, change.item, automatic=True)
         return
+    if change.action == "dispatch_failure":
+        item = (
+            change.item
+            if isinstance(change.item, PrintQueueItem)
+            else await change.db.get(PrintQueueItem, change.item_id)
+        )
+        if item is not None and item.retry_on_failure:
+            # This replacement is inserted in the failed transition's own
+            # transaction. A crash cannot commit the failure without its one
+            # child, and the child carries no retry history or parent link.
+            await queued.create_retry_job(change.db, item)
     notify = change.after == "failed" and change.action != "printer_report"
     effects.queue_outcome_effect(
         change.db, effects.QueueOutcomeEffect(change.item_id, change.after, row.printer_id, notify_failure=notify)
@@ -45,6 +56,8 @@ async def clear_job_plate(db: AsyncSession, item: PrintQueueItem | int, *, autom
         item = await db.get(PrintQueueItem, item)
     if item is None or item.status not in AWAITING_PLATE_CLEAR_STATUSES:
         raise InvalidQueueTransition("This job is not awaiting plate clear")
+    if item.status == "failed" and item.physical_outcome is None:
+        raise InvalidQueueTransition("This dispatch failed before the print command; there is no plate hold to clear")
     if printer_active(item.printer_id):
         if automatic:
             return  # Keep the physical outcome and hold if another print is already active.

@@ -20,9 +20,9 @@ def has_queue_work(printer_id, model, location):
         .where(
             PrintQueueItem.status.in_(("queued", *ACTIVE_STATUSES)),
             or_(
-                PrintQueueItem.printer_id == printer_id,
+                func.coalesce(PrintQueueItem.printer_id, PrintQueueItem.assigned_printer_id) == printer_id,
                 and_(
-                    PrintQueueItem.printer_id.is_(None),
+                    func.coalesce(PrintQueueItem.printer_id, PrintQueueItem.assigned_printer_id).is_(None),
                     model != "",
                     model_match,
                     or_(

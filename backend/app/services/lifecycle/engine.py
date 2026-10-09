@@ -17,7 +17,7 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import event, select, update
+from sqlalchemy import event, func, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
@@ -29,6 +29,8 @@ from backend.app.models.print_queue import (
     FINAL_STATUSES,
     HOLDING_STATUSES,
     PrintQueueItem,
+    is_physical_holding,
+    physical_holding_clause,
 )
 from backend.app.models.printer import Printer
 from backend.app.services.lifecycle import clock
@@ -252,6 +254,16 @@ async def transition_queue_item(
         raise ValueError("Transition metadata cannot override status or id")
     if any(key.startswith("physical_") for key in metadata):
         raise ValueError("Physical outcomes are recorded only on entry to an awaiting-plate-clear state")
+    if (
+        expected_status == "queued"
+        and status in ("preheating", "dispatching")
+        and not isinstance(item, int)
+        and "printer_id" not in metadata
+        and item.assigned_printer_id is not None
+    ):
+        # A fixed queue preference becomes the immutable binding at the point
+        # the job leaves the queue. Pool selection supplies this explicitly.
+        metadata["printer_id"] = item.assigned_printer_id
     if expected_status != status and not migration:
         # A deadline belongs to one state: leaving it ends the wait.
         metadata.setdefault("deadline_at", None)
@@ -265,17 +277,32 @@ async def transition_queue_item(
             raise InvalidQueueTransition("Dispatch requires a selected printer")
     session = isinstance(db, AsyncSession)
     if session and (expected_status != status or confirmed):
-        if status in AWAITING_PLATE_CLEAR_STATUSES and action != "cancel":
+        if status in AWAITING_PLATE_CLEAR_STATUSES and action not in ("cancel", "dispatch_failure"):
             await _record_physical_outcome(db, item_id, status, metadata, confirmed, archive_failure_reason)
     # SQLAlchemy 2.1 autoflushes Core statements regardless of their statement
     # execution options. Suppress it at the session boundary so a losing CAS
     # cannot flush stale metadata first. Startup repairs use AsyncConnection.
     table = PrintQueueItem.__table__
+    if not isinstance(item, int) and item.printer_id is not None:
+        requested_printer_id = metadata.get("printer_id", item.printer_id)
+        if requested_printer_id != item.printer_id:
+            raise InvalidQueueTransition("A bound job cannot move to another printer; retry it as a fresh queue job")
     with db.no_autoflush if session else nullcontext():
         outcome_condition = (table.c.physical_outcome.is_(None),) if confirmed else ()
+        binding_condition = (
+            (table.c.printer_id == item.printer_id,)
+            if session and not isinstance(item, int) and item.printer_id is not None
+            else ()
+        )
         result = await db.execute(
             table.update()
-            .where(table.c.id == item_id, table.c.status == expected_status, *conditions, *outcome_condition)
+            .where(
+                table.c.id == item_id,
+                table.c.status == expected_status,
+                *conditions,
+                *outcome_condition,
+                *binding_condition,
+            )
             .values(status=status, **metadata)
             .execution_options(autoflush=False)
         )
@@ -311,7 +338,9 @@ async def _written(change: Transition) -> None:
     linked = change.values.keys() & {"archive_id", "dispatch_subtask_id"}
     if entered or linked or change.after in (*AWAITING_PLATE_CLEAR_STATUSES, *FINAL_STATUSES):
         await align_attempt(change)
-    holding = change.before in HOLDING_STATUSES or change.after in HOLDING_STATUSES
+    before_outcome = getattr(change.item, "physical_outcome", None)
+    after_outcome = change.values.get("physical_outcome", before_outcome)
+    holding = is_physical_holding(change.before, before_outcome) or is_physical_holding(change.after, after_outcome)
     if not (entered or holding or change.action):
         return  # No log, printer view or entry step applies (e.g. a waiting reason).
     names = (
@@ -327,7 +356,13 @@ async def _written(change: Transition) -> None:
         args = (change.item_id, change.before, change.after, row.printer_id, row.archive_id, change.action)
         effects.after_commit(db, partial(logger.info, log, *args))
     if row.printer_id is not None and holding:
-        effects.publish_printer_view(db, row.printer_id, change.after, row.archive_id)
+        effects.publish_printer_view(
+            db,
+            row.printer_id,
+            change.after,
+            row.archive_id,
+            physical_outcome=after_outcome,
+        )
     if entered and change.before in _EXITS:
         await import_module(_EXITS[change.before]).on_exit(change, row)
     if entered and (enter := _step(change.after, "on_enter")):
@@ -375,10 +410,9 @@ async def lock_queue_items(
     with db.no_autoflush:  # Pending work, such as an unlinked copy, stays unflushed until the caller's write.
         for item_id in sorted(expected_printers):
             expected_printer_id = expected_printers[item_id]
+            effective_printer = func.coalesce(PrintQueueItem.printer_id, PrintQueueItem.assigned_printer_id)
             assigned = (
-                PrintQueueItem.printer_id.is_(None)
-                if expected_printer_id is None
-                else PrintQueueItem.printer_id == expected_printer_id
+                effective_printer.is_(None) if expected_printer_id is None else effective_printer == expected_printer_id
             )
             result = await db.execute(
                 update(PrintQueueItem)
@@ -388,7 +422,7 @@ async def lock_queue_items(
             )
             if result.rowcount != 1:
                 current = await db.execute(
-                    select(PrintQueueItem.id, PrintQueueItem.printer_id).where(PrintQueueItem.id == item_id)
+                    select(PrintQueueItem.id, effective_printer).where(PrintQueueItem.id == item_id)
                 )
                 row = current.first()
                 if row is not None:
@@ -403,7 +437,10 @@ async def lock_queue_item(db: AsyncSession, item_id: int) -> PrintQueueItem | No
     """Take the job's printer lock and a row write lock on both SQLite and PostgreSQL, then discard stale ORM state."""
     with db.no_autoflush:
         snapshot = await db.execute(
-            select(PrintQueueItem.id, PrintQueueItem.printer_id).where(PrintQueueItem.id == item_id)
+            select(
+                PrintQueueItem.id,
+                func.coalesce(PrintQueueItem.printer_id, PrintQueueItem.assigned_printer_id),
+            ).where(PrintQueueItem.id == item_id)
         )
         row = snapshot.first()
         if row is None:
@@ -416,7 +453,7 @@ async def transfer_hold(db: AsyncSession, held: PrintQueueItem, identity: str) -
     """Transfer hold under the lifecycle transition rules."""
     from backend.app.services.lifecycle.final import end
 
-    if held.status not in AWAITING_PLATE_CLEAR_STATUSES:
+    if held.status not in AWAITING_PLATE_CLEAR_STATUSES or (held.status == "failed" and held.physical_outcome is None):
         return False
     reason = f"Printer hold transferred to externally started print {identity}"
     message = f"{held.error_message}; {reason}" if held.error_message else reason
@@ -431,7 +468,10 @@ async def release_printer(db: AsyncSession, printer: Printer) -> None:
     from backend.app.services.printer_manager import printer_manager
 
     await hold_printer(db, printer.id)
-    held = (PrintQueueItem.printer_id == printer.id, PrintQueueItem.status.in_(HOLDING_STATUSES))
+    held = (
+        PrintQueueItem.printer_id == printer.id,
+        physical_holding_clause(PrintQueueItem.status, PrintQueueItem.physical_outcome),
+    )
     holding = list(
         (await db.scalars(select(PrintQueueItem).where(*held).order_by(PrintQueueItem.id).with_for_update())).all()
     )

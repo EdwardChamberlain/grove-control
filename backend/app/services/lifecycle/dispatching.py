@@ -89,9 +89,12 @@ def telemetry_status(printer_status, dispatch_subtask_id: str | None) -> str | N
 
 
 async def fail(db: AsyncSession, item: PrintQueueItem, message: str, **values) -> None:
-    """Commit a failed attempt; its exit and awaiting's entry queue the effects."""
+    """Commit a failed attempt, retrying only when the print command is proven unsent."""
     values = {"error_message": message, "completed_at": clock.now(), **values}
-    await transition_queue_item(db, item, item.status, "failed", values=values)
+    dispatched_at = values.get("dispatched_at", item.dispatched_at)
+    subtask_id = values.get("dispatch_subtask_id", item.dispatch_subtask_id)
+    action = "dispatch_failure" if dispatched_at is None and subtask_id is None else None
+    await transition_queue_item(db, item, item.status, "failed", action=action, values=values)
     await db.commit()
 
 
@@ -144,6 +147,14 @@ class Dispatcher:
         Then copy, link, upload and send; each step ends the attempt with a
         reason or hands it on. An unexpected error after the hold fails it.
         """
+        if from_state == "queued" and binding is None and item.assigned_printer_id is not None:
+            binding = queued._DispatchBinding(
+                printer_id=item.assigned_printer_id,
+                ams_mapping=item.ams_mapping,
+                unassigned=False,
+            )
+        if from_state == "queued" and binding is not None:
+            queued._bind_in_memory(item, binding.printer_id, binding.ams_mapping)
         identity, item_id = telemetry_identity(printer_manager.get_status(item.printer_id)), item.id
         if from_state == "queued" and not await self._hold(db, item, binding):
             return
@@ -178,7 +189,7 @@ class Dispatcher:
         if (
             not held
             or held.status != "queued"
-            or held.printer_id != (None if unassigned else printer_id)
+            or held.assigned_printer_id != (None if unassigned else printer_id)
             or (binding and binding.edited_fields(held))
             or not self._selection._is_printer_idle(printer_id)
         ):
@@ -604,14 +615,14 @@ _UPLOAD_FAILED = (
     "Failed to upload file to printer. Check if SD card is inserted and properly formatted (FAT32/exFAT). "
     "See server logs for detailed diagnostics."
 )
-_TELEMETRY_UNAVAILABLE = "Printer telemetry unavailable; nothing was sent. Retry to send this job"
-_INTERRUPTED_BEFORE_SEND = "Dispatch interrupted by a restart; nothing was sent. Retry to send this job"
+_TELEMETRY_UNAVAILABLE = "Printer telemetry unavailable before the print command was sent"
+_INTERRUPTED_BEFORE_SEND = "Dispatch interrupted by a restart before the print command was sent"
 
 
 async def _park(db: AsyncSession, item: PrintQueueItem, message: str) -> None:
-    """Nothing was sent: keep the hold for Retry, which releases it without a plate check; cool a soak's heaters."""
+    """A known-unsent attempt fails into the automatic fresh-job retry, and cools a soak's heaters."""
     values = {"error_message": message, "dispatched_at": None, "dispatch_subtask_id": None}
-    await transition_queue_item(db, item, "dispatching", "dispatching", values=values)
+    await transition_queue_item(db, item, "dispatching", "failed", action="dispatch_failure", values=values)
     if item.chamber_heat_soak or item.preheat_requested_at is not None:
         await request_heater_shutdown(db, item.printer_id)
     await db.commit()

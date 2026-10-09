@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
-from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem
+from backend.app.models.print_queue import PrintQueueItem, physical_holding_clause
 from backend.app.models.printer import Printer
 from backend.app.models.user import User
 from backend.app.services.job_identity import find_job, normalize_id, telemetry_identity
@@ -198,7 +198,10 @@ async def observe_print(
         return None, False  # A duplicate/delayed start cannot revive a finished job.
     held = await db.scalar(
         select(PrintQueueItem)
-        .where(PrintQueueItem.printer_id == printer_id, PrintQueueItem.status.in_(HOLDING_STATUSES))
+        .where(
+            PrintQueueItem.printer_id == printer_id,
+            physical_holding_clause(PrintQueueItem.status, PrintQueueItem.physical_outcome),
+        )
         .execution_options(populate_existing=True)
     )
     if held is not None:

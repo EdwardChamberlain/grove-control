@@ -2109,7 +2109,9 @@ export interface DiscoveredTasmotaDevice {
 // Print Queue types
 export interface PrintQueueItem {
   id: number;
-  printer_id: number | null;  // null = unassigned
+  printer_id: number | null;  // Backwards-compatible effective printer field
+  assigned_printer_id?: number | null;  // Queue preference before dispatch binds a printer
+  bound_printer_id?: number | null;  // Immutable printer binding after dispatch starts
   target_model: string | null;  // Target printer model for model-based assignment
   target_location: string | null;  // Target location filter for model-based assignment
   required_filament_types: string[] | null;  // Required filament types for model-based assignment
@@ -2159,6 +2161,9 @@ export interface PrintQueueItem {
   status: 'queued' | 'preheating' | 'dispatching' | 'printing' | 'paused' | 'finished' | 'failed' | 'cancelled' | 'successful' | 'unsuccessful';
   dispatch_needs_resolution?: boolean;
   dispatch_unsent?: boolean;
+  retry_on_failure?: boolean;
+  physical_outcome?: string | null;
+  awaiting_plate_clear?: boolean;
   dispatched_at: string | null;
   started_at: string | null;
   completed_at: string | null;

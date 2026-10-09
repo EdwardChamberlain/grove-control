@@ -26,7 +26,7 @@ from backend.app.core.database import async_session
 from backend.app.core.tasks import spawn_background_task
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
-from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem, PrintQueueVariant
+from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant, physical_holding_clause
 from backend.app.models.printer import Printer
 from backend.app.schemas.print_queue import PrintQueueItemUpdate
 from backend.app.services.filament_requirements import build_queue_filament_overrides, extract_filament_requirements
@@ -77,20 +77,116 @@ async def create_job(
     """
     if not jobs:
         return []
+    prepared = []
+    for job in jobs:
+        item_values = dict(job)
+        # Queue endpoints historically called this preference ``printer_id``.
+        # The row column now records only the immutable dispatch binding.
+        assigned_printer_id = item_values.pop("assigned_printer_id", None)
+        if "printer_id" in item_values:
+            legacy_printer_id = item_values.pop("printer_id")
+            if assigned_printer_id is None:
+                assigned_printer_id = legacy_printer_id
+        item_values["printer_id"] = None
+        item_values["assigned_printer_id"] = assigned_printer_id
+        item_values.setdefault("retry_on_failure", True)
+        prepared.append(item_values)
     values = {}
     if variants:
         # The scheduler orders a job before its printer is known, by its shortest candidate.
         estimates = [variant["print_time_seconds"] for variant in variants if variant.get("print_time_seconds")]
         values["print_time_seconds"] = min(estimates) if estimates else None
-    models = {model for model in (jobs[0].get("target_model"), *(v["target_model"] for v in variants)) if model}
-    first = await _place(db, jobs[0].get("printer_id"), models, len(jobs), at)
+    models = {model for model in (prepared[0].get("target_model"), *(v["target_model"] for v in variants)) if model}
+    first = await _place(db, prepared[0].get("assigned_printer_id"), models, len(jobs), at)
     created = []
-    for offset, job in enumerate(jobs):
+    for offset, job in enumerate(prepared):
         created.append(PrintQueueItem(**{**job, **values}, status="queued", position=first + offset))
         created[-1].variants.extend(PrintQueueVariant(**variant) for variant in variants)
         db.add(created[-1])
     await db.flush()
     return created
+
+
+async def create_retry_job(db: AsyncSession, item: PrintQueueItem) -> PrintQueueItem:
+    """Create one history-free replacement at the front of its queue."""
+    retry_excluded = {
+        "id",
+        "created_at",
+        "printer_id",
+        "status",
+        "position",
+        "manual_start",
+        "preheat_requested_at",
+        "preheat_started_at",
+        "deadline_at",
+        "deadline_kind",
+        "dispatched_at",
+        "dispatch_subtask_id",
+        "started_at",
+        "completed_at",
+        "error_message",
+        "waiting_reason",
+        "physical_outcome",
+        "physical_completed_at",
+        "physical_failure_reason",
+        "stop_requested_at",
+        "been_jumped",
+        "retry_on_failure",
+    }
+    values = {
+        column.name: getattr(item, column.name)
+        for column in PrintQueueItem.__table__.columns
+        if column.name not in retry_excluded
+    }
+    values.update(
+        printer_id=None,
+        assigned_printer_id=item.assigned_printer_id,
+        retry_on_failure=False,
+        manual_start=False,
+        preheat_requested_at=None,
+        preheat_started_at=None,
+        deadline_at=None,
+        deadline_kind=None,
+        dispatched_at=None,
+        dispatch_subtask_id=None,
+        started_at=None,
+        completed_at=None,
+        error_message=None,
+        waiting_reason=None,
+        physical_outcome=None,
+        physical_completed_at=None,
+        physical_failure_reason=None,
+        stop_requested_at=None,
+        been_jumped=False,
+    )
+    variants = list(
+        (
+            await db.scalars(
+                select(PrintQueueVariant)
+                .where(PrintQueueVariant.queue_item_id == item.id)
+                .order_by(PrintQueueVariant.position, PrintQueueVariant.id)
+            )
+        ).all()
+    )
+    variant_values = [
+        {
+            column.name: getattr(variant, column.name)
+            for column in PrintQueueVariant.__table__.columns
+            if column.name not in {"id", "queue_item_id", "created_at", "attempt_count"}
+        }
+        for variant in variants
+    ]
+    if variant_values:
+        values.update(
+            archive_id=None,
+            library_file_id=None,
+            target_model=variant_values[0]["target_model"],
+            cleanup_library_after_dispatch=False,
+        )
+        for field in ("plate_id", "ams_mapping", "nozzle_mapping", "filament_overrides", "required_filament_types"):
+            values[field] = variant_values[0].get(field)
+    created = await create_job(db, [values], at="top", variants=variant_values)
+    return created[0]
 
 
 async def _place(
@@ -100,7 +196,11 @@ async def _place(
     if db.get_bind().dialect.name == "postgresql":
         # SQLite serializes writes; an empty queue has no rows for PostgreSQL to lock.
         await db.execute(text("SELECT pg_advisory_xact_lock(1625, :k)"), {"k": printer_id or 0})
-    printer = PrintQueueItem.printer_id.is_(None) if printer_id is None else PrintQueueItem.printer_id == printer_id
+    printer = (
+        PrintQueueItem.assigned_printer_id.is_(None)
+        if printer_id is None
+        else PrintQueueItem.assigned_printer_id == printer_id
+    )
     queue = (PrintQueueItem.status == "queued", printer)
     if at == "top":
         if models:
@@ -130,7 +230,8 @@ class _DispatchBinding:
 
     @classmethod
     def for_item(cls, item: PrintQueueItem, printer_id: int, ams_mapping: str | None, *, unassigned: bool):
-        selected = tuple((name, getattr(item, name)) for name in _EDITABLE_FIELDS if hasattr(item, name))
+        fields = (*_EDITABLE_FIELDS, "assigned_printer_id")
+        selected = tuple((name, getattr(item, name)) for name in fields if hasattr(item, name))
         return cls(printer_id, ams_mapping, unassigned, selected)
 
     def values(self) -> dict[str, int | str | None]:
@@ -291,7 +392,10 @@ class Workers:
             problem = "Printer not connected", False
         elif printer and await db.scalar(
             select(PrintQueueItem.id)
-            .where(PrintQueueItem.printer_id == item.printer_id, PrintQueueItem.status.in_(HOLDING_STATUSES))
+            .where(
+                PrintQueueItem.printer_id == item.printer_id,
+                physical_holding_clause(PrintQueueItem.status, PrintQueueItem.physical_outcome),
+            )
             .where(PrintQueueItem.id != item.id)
             .limit(1)
         ):

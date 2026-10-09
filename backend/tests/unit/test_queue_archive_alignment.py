@@ -63,7 +63,7 @@ async def alignment(tmp_path, monkeypatch):
         )
         db.add_all([printer, source])
         await db.flush()
-        job = PrintQueueItem(printer_id=printer.id, library_file_id=source.id, status="queued")
+        job = PrintQueueItem(assigned_printer_id=printer.id, library_file_id=source.id, status="queued")
         db.add(job)
         await db.commit()
     yield SimpleNamespace(sessions=sessions, job_id=job.id, source_id=source.id, source_path=source_path)
@@ -77,7 +77,8 @@ async def alignment(tmp_path, monkeypatch):
 
 
 async def hold_and_link(db, job, before="queued"):
-    await transition_queue_item(db, job, before, "dispatching")
+    values = {"printer_id": job.assigned_printer_id} if before == "queued" else None
+    await transition_queue_item(db, job, before, "dispatching", values=values)
     await db.commit()
     prepared = await prepare_dispatch_archive(db, job)
     await link_dispatch_archive(db, job, prepared)
@@ -140,6 +141,52 @@ async def test_retry_resets_stop_intent_from_the_previous_attempt(alignment):
         assert old.stop_requested_at == requested_at
 
 
+async def test_proven_unsent_failure_creates_one_fresh_top_retry(alignment, monkeypatch):
+    from sqlalchemy import func
+
+    from backend.app.services.lifecycle.dispatching import fail
+
+    monkeypatch.setattr(lifecycle_dispatching.effects, "queue_outcome_effect", MagicMock())
+    async with alignment.sessions() as db:
+        original = await db.get(PrintQueueItem, alignment.job_id)
+        await hold_and_link(db, original)
+        await fail(db, original, "Upload failed")
+
+        rows = list((await db.scalars(select(PrintQueueItem).order_by(PrintQueueItem.id))).all())
+        parent, retry = rows
+        assert parent.status == "failed" and parent.physical_outcome is None
+        assert parent.retry_on_failure is True
+        assert retry.id != parent.id and retry.status == "queued"
+        assert retry.position < parent.position
+        assert retry.printer_id is None and retry.assigned_printer_id == parent.assigned_printer_id
+        assert retry.retry_on_failure is False
+        assert retry.library_file_id == parent.library_file_id
+
+        # A retry-created job has no history link and cannot create a chain.
+        await transition_queue_item(db, retry, "queued", "dispatching")
+        await db.commit()
+        await fail(db, retry, "Upload failed again")
+        assert await db.scalar(select(func.count()).select_from(PrintQueueItem)) == 2
+        assert retry.status == "failed" and retry.physical_outcome is None
+
+
+async def test_send_intent_failure_keeps_hold_and_does_not_create_retry(alignment, monkeypatch):
+    from sqlalchemy import func
+
+    from backend.app.services.lifecycle.dispatching import fail
+
+    monkeypatch.setattr(lifecycle_dispatching.effects, "queue_outcome_effect", MagicMock())
+    async with alignment.sessions() as db:
+        item = await db.get(PrintQueueItem, alignment.job_id)
+        await hold_and_link(db, item)
+        item.dispatch_subtask_id = "send-intent"
+        await db.commit()
+        await fail(db, item, "Send result is ambiguous")
+        await db.refresh(item)
+        assert item.status == "failed" and item.physical_outcome == "failed"
+        assert await db.scalar(select(func.count()).select_from(PrintQueueItem)) == 1
+
+
 @pytest.mark.parametrize("before", ["queued", "preheating"])
 async def test_hold_commits_before_archive_link_and_same_state_never_copies_again(alignment, before):
     async with alignment.sessions() as db:
@@ -147,7 +194,8 @@ async def test_hold_commits_before_archive_link_and_same_state_never_copies_agai
         if before == "preheating":
             await enter_preheating(db, job)
             assert await db.scalar(select(PrintArchive.id)) is None
-        await transition_queue_item(db, job, before, "dispatching")
+        values = {"printer_id": job.assigned_printer_id} if before == "queued" else None
+        await transition_queue_item(db, job, before, "dispatching", values=values)
         await db.commit()
         async with alignment.sessions() as observer:
             assert (await observer.get(PrintQueueItem, job.id)).status == "dispatching"
@@ -173,7 +221,7 @@ async def test_hold_commits_before_archive_link_and_same_state_never_copies_agai
 async def test_rollback_discards_archive_row_and_prepared_files(alignment, close_only):
     db = alignment.sessions()
     job = await db.get(PrintQueueItem, alignment.job_id)
-    await transition_queue_item(db, job, "queued", "dispatching")
+    await transition_queue_item(db, job, "queued", "dispatching", values={"printer_id": job.assigned_printer_id})
     await db.commit()
     prepared = await prepare_dispatch_archive(db, job)
     await link_dispatch_archive(db, job, prepared)
@@ -196,7 +244,7 @@ async def test_rollback_discards_archive_row_and_prepared_files(alignment, close
 async def test_outcome_commits_on_entry_and_plate_clear_does_not_rewrite_it(alignment, outcome, archived, automatic):
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
-        await hold_printer(db, job.printer_id)
+        await hold_printer(db, job.assigned_printer_id)
         db.add(Settings(key="require_plate_clear", value="false" if automatic else "true"))
         await hold_and_link(db, job)
         now = datetime.now(timezone.utc)

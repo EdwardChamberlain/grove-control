@@ -199,7 +199,7 @@ async def test_retry_requires_insert_top_permission(
     printer = await printer_factory()
     source = await _source(db_session, tmp_path / "source.3mf", "X1C")
     old = PrintQueueItem(printer_id=printer.id, library_file_id=source.id, status="failed", created_by_id=owner_id)
-    db_session.add_all([old, PrintQueueItem(printer_id=printer.id, status="queued", position=10)])
+    db_session.add_all([old, PrintQueueItem(assigned_printer_id=printer.id, status="queued", position=10)])
     await db_session.commit()
     if not can_insert_top:
         admission = await async_client.post(

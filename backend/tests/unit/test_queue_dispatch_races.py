@@ -183,6 +183,7 @@ async def test_pool_copy_failure_notifies_failure_without_assignment(alignment, 
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
         job.printer_id = None
+        job.assigned_printer_id = None
         await db.commit()
         binding = lifecycle_queued._DispatchBinding.for_item(job, 1, None, unassigned=True)
         await scheduler.workers.leave(db, job, binding=binding)

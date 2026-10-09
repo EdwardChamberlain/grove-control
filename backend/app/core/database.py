@@ -303,6 +303,7 @@ async def init_db():
         # safety net for interrupted upgrades and restored databases.
         await ensure_queue_insert_schema(conn)
         await _migrate_queue_lifecycle(conn)
+        await _migrate_queue_assignment(conn)
         await _migrate_queue_archive_outcomes(conn)
         await _migrate_queue_legacy_archive_links(conn)
 
@@ -608,6 +609,10 @@ async def _migrate_retired_pipeline_runs(conn) -> None:
 _QUEUE_INSERT_COLUMN_DEFINITIONS: dict[str, tuple[str, str]] = {
     # Identity / queue targeting
     "printer_id": ("INTEGER", "INTEGER"),
+    "assigned_printer_id": (
+        "INTEGER REFERENCES printers(id) ON DELETE SET NULL",
+        "INTEGER REFERENCES printers(id) ON DELETE SET NULL",
+    ),
     "target_model": ("VARCHAR(50)", "VARCHAR(50)"),
     "target_location": ("VARCHAR(100)", "VARCHAR(100)"),
     "required_filament_types": ("TEXT", "TEXT"),
@@ -628,6 +633,9 @@ _QUEUE_INSERT_COLUMN_DEFINITIONS: dict[str, tuple[str, str]] = {
     "deadline_kind": ("VARCHAR(20)", "VARCHAR(20)"),
     "wait_for_drying_complete": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
     "auto_off_after": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
+    # Existing jobs must not gain automatic retries during upgrade. New
+    # application-created queue jobs opt in through the ORM default.
+    "retry_on_failure": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
     "ams_mapping": ("TEXT", "TEXT"),
     "filament_overrides": ("TEXT", "TEXT"),
     "force_color_match": ("BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT true"),
@@ -1001,6 +1009,52 @@ async def _ensure_holding_queue_index(conn) -> None:
     )
 
 
+async def _migrate_queue_assignment(conn) -> None:
+    """Separate a waiting job's printer preference from its immutable binding once."""
+    from sqlalchemy import select, text
+
+    from backend.app.models.settings import Settings
+
+    version_key = "queue_assignment_version"
+    if await conn.scalar(select(Settings.value).where(Settings.key == version_key)) == "1":
+        return
+    if conn.dialect.name == "postgresql":
+        await conn.execute(text("LOCK TABLE print_queue IN SHARE ROW EXCLUSIVE MODE"))
+    if await conn.scalar(select(Settings.value).where(Settings.key == version_key)) == "1":
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_print_queue_assigned_printer_id ON print_queue (assigned_printer_id)")
+        )
+        return
+
+    # Queued rows still carry the old preference in printer_id. For rows that
+    # already left the queue, preserve printer_id as the binding and copy it to
+    # the preference only when there was no model/pool preference to retain.
+    await conn.execute(
+        text(
+            "UPDATE print_queue SET assigned_printer_id = printer_id, printer_id = NULL "
+            "WHERE status = 'queued' AND printer_id IS NOT NULL AND assigned_printer_id IS NULL"
+        )
+    )
+    await conn.execute(
+        text(
+            "UPDATE print_queue SET assigned_printer_id = printer_id "
+            "WHERE status <> 'queued' AND printer_id IS NOT NULL "
+            "AND target_model IS NULL AND assigned_printer_id IS NULL"
+        )
+    )
+    # Jobs already waiting when this version is installed are ordinary queue
+    # jobs too. Existing failed/active rows keep the conservative false value.
+    await conn.execute(text("UPDATE print_queue SET retry_on_failure = true WHERE status = 'queued'"))
+    await conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_print_queue_assigned_printer_id ON print_queue (assigned_printer_id)")
+    )
+    exists = await conn.scalar(select(Settings.key).where(Settings.key == version_key))
+    if exists is None:
+        await conn.execute(Settings.__table__.insert().values(key=version_key, value="1"))
+    else:
+        await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value="1"))
+
+
 async def _migrate_queue_lifecycle(conn) -> None:
     """Upgrade legacy jobs once, retaining an actionable job for every plate hold."""
     from sqlalchemy import select, text
@@ -1013,16 +1067,35 @@ async def _migrate_queue_lifecycle(conn) -> None:
 
     version_key = "queue_lifecycle_version"
     version = await conn.scalar(select(Settings.value).where(Settings.key == version_key))
-    if version == "3":
+    if version == "4":
         await _ensure_holding_queue_index(conn)
+        return
+    if version == "3":
+        if conn.dialect.name == "postgresql":
+            await conn.execute(text("LOCK TABLE print_queue IN SHARE ROW EXCLUSIVE MODE"))
+        version = await conn.scalar(select(Settings.value).where(Settings.key == version_key))
+        if version == "4":
+            await _ensure_holding_queue_index(conn)
+            return
+        # Version 4 excludes proven-unsent failed jobs from the printer hold
+        # index. Rebuild only the index; rerunning the legacy state conversion
+        # would reinterpret already-migrated plate holds.
+        await conn.execute(text(f"DROP INDEX IF EXISTS {HOLDING_INDEX_NAME}"))
+        await _ensure_holding_queue_index(conn)
+        await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value="4"))
         return
     # Serialize concurrent upgraders, and recheck after obtaining the write lock.
     if conn.dialect.name == "postgresql":
         await conn.execute(text("LOCK TABLE print_queue IN SHARE ROW EXCLUSIVE MODE"))
     await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value=Settings.value))
     version = await conn.scalar(select(Settings.value).where(Settings.key == version_key))
-    if version == "3":
+    if version == "4":
         await _ensure_holding_queue_index(conn)
+        return
+    if version == "3":
+        await conn.execute(text(f"DROP INDEX IF EXISTS {HOLDING_INDEX_NAME}"))
+        await _ensure_holding_queue_index(conn)
+        await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value="4"))
         return
     for name in (
         "uq_print_queue_active_printer",
@@ -1104,9 +1177,9 @@ async def _migrate_queue_lifecycle(conn) -> None:
     )
     await _ensure_holding_queue_index(conn)
     if version is None:
-        await conn.execute(Settings.__table__.insert().values(key=version_key, value="3"))
+        await conn.execute(Settings.__table__.insert().values(key=version_key, value="4"))
     else:
-        await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value="3"))
+        await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value="4"))
 
 
 async def _migrate_queue_legacy_archive_links(conn) -> None:
