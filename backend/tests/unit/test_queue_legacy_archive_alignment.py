@@ -178,8 +178,6 @@ async def test_restored_active_archive_follows_real_completion_callback(legacy, 
     monkeypatch.setattr(main.ws_manager, "send_archive_updated", published)
     monkeypatch.setattr(main.mqtt_relay, "on_queue_job_completed", AsyncMock())
     monkeypatch.setattr(main.mqtt_relay, "on_archive_updated", AsyncMock())
-    monkeypatch.setattr(intake, "_schedule_pending_stale_reconciliation", MagicMock())
-    monkeypatch.setattr(intake, "spawn_background_task", lambda coroutine, **_kwargs: coroutine.close())
     monkeypatch.setattr(print_effects, "spawn_background_task", lambda coroutine, **_kwargs: coroutine.close())
 
     # No filename/subtask name: there is no remote file to delete in this test.
@@ -391,7 +389,6 @@ async def test_upgrade_repairs_terminal_legacy_archive_without_replaying_complet
     monkeypatch.setattr(main.ws_manager, "send_print_complete", completed_event)
     monkeypatch.setattr(main.mqtt_relay, "on_queue_job_completed", relayed)
     monkeypatch.setattr(lifecycle_printing, "_bump_library_file_usage_if_completed", usage)
-    monkeypatch.setattr(intake, "spawn_background_task", lambda coroutine, **_kwargs: coroutine.close())
     monkeypatch.setattr(print_effects, "spawn_background_task", lambda coroutine, **_kwargs: coroutine.close())
     async with legacy.sessions() as db:
         job = await db.get(PrintQueueItem, legacy.job_id)
@@ -419,7 +416,6 @@ async def test_upgrade_repairs_terminal_legacy_archive_without_replaying_complet
         )
     async with legacy.sessions.kw["bind"].begin() as conn:
         await _migrate_queue_legacy_archive_links(conn)
-    await intake.reconcile_stale_active_prints(1)
     # A conflicting late report must neither rewrite facts nor replay effects.
     await main.on_print_complete(
         1, {"submission_id": "123", "status": "failed" if outcome == "completed" else "completed"}
@@ -480,7 +476,6 @@ async def test_upgrade_rejects_ambiguous_terminal_legacy_identity(legacy_unmigra
         await db.commit()
     async with legacy.sessions.kw["bind"].begin() as conn:
         await _migrate_queue_legacy_archive_links(conn)
-    await intake.reconcile_stale_active_prints(1)
     async with legacy.sessions() as db:
         archive = await db.get(PrintArchive, legacy.archive_id)
         job = await db.get(PrintQueueItem, legacy.job_id)

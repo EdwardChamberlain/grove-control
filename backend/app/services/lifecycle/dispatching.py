@@ -8,20 +8,18 @@ upload. Recovery settles attempts from telemetry after a restart.
 import asyncio
 import json
 import logging
-import time
-from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import timedelta
 from pathlib import Path
 from secrets import randbelow
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.config import settings
-from backend.app.core.database import async_session, run_with_retry
+from backend.app.core.database import async_session
 from backend.app.core.tasks import spawn_background_task
 from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import PrintQueueItem
@@ -36,14 +34,14 @@ from backend.app.services.bambu_ftp import (
     with_ftp_retry,
 )
 from backend.app.services.job_identity import telemetry_identity
-from backend.app.services.lifecycle import effects, preheating, queued
+from backend.app.services.lifecycle import clock, effects, preheating, printing, queued
 from backend.app.services.lifecycle.engine import (
     InvalidQueueTransition,
-    QueueTransitionConflict,
+    hold_printer,
     lock_queue_item,
     transition_queue_item,
 )
-from backend.app.services.lifecycle.preheating import abort_heat_soak, request_heater_shutdown
+from backend.app.services.lifecycle.preheating import request_heater_shutdown
 from backend.app.services.lifecycle.printing import superseded_by, sync_print_state
 from backend.app.services.printer_manager import printer_manager
 from backend.app.services.printer_selection import _incompatible_sliced_model_reason
@@ -53,8 +51,8 @@ logger = logging.getLogger(__name__)
 # Bambu firmware states that mean the project_file has actually been accepted
 _ACTIVE_PRINT_STATES: frozenset[str] = frozenset({"PREPARE", "SLICING", "RUNNING", "PAUSE"})
 DISPATCH_TELEMETRY_WAIT_SECONDS = 30
-RECOVERY_INTERVAL = 30
-_wake: asyncio.Event | None = None
+ACK_WINDOW = timedelta(seconds=90)  # For the printer to report the sent print's ID.
+ACK_LANDED_WINDOW = timedelta(seconds=180)  # Once the ID landed, for the print to become active.
 
 
 _DISPATCH_REVIEW_MESSAGE = (
@@ -71,11 +69,6 @@ SOAKING = or_(
         PrintQueueItem.dispatch_subtask_id.is_(None),
     ),
 )
-
-
-def wake() -> None:
-    if _wake is not None:
-        _wake.set()
 
 
 def is_soaking(item: PrintQueueItem) -> bool:
@@ -97,18 +90,9 @@ def telemetry_status(printer_status, dispatch_subtask_id: str | None) -> str | N
 
 async def fail(db: AsyncSession, item: PrintQueueItem, message: str, **values) -> None:
     """Commit a failed attempt; its exit and awaiting's entry queue the effects."""
-    values = {"error_message": message, "completed_at": datetime.now(timezone.utc), **values}
+    values = {"error_message": message, "completed_at": clock.now(), **values}
     await transition_queue_item(db, item, item.status, "failed", values=values)
     await db.commit()
-
-
-async def _transition_or_skip(db: AsyncSession, item: PrintQueueItem, status: str, *, action=None, **values) -> bool:
-    try:
-        await transition_queue_item(db, item, item.status, status, values=values, action=action)
-    except QueueTransitionConflict:
-        logger.info("Queue item %s changed concurrently; skipping it this pass", item.id)
-        return False
-    return True
 
 
 @dataclass
@@ -122,7 +106,6 @@ class _Attempt:
     binding: queued._DispatchBinding | None
     item_id: int = 0
     printer_id: int = 0
-    claim: datetime | None = None
     archive_id: int | None = None
     sliced_for: str | None = None
     filename: str = ""
@@ -132,7 +115,7 @@ class _Attempt:
     connection: tuple[str, str, str | None] = ("", "", None)
 
     def __post_init__(self):
-        self.item_id, self.printer_id, self.claim = self.item.id, self.item.printer_id, self.item.dispatching_at
+        self.item_id, self.printer_id = self.item.id, self.item.printer_id
 
     @property
     def remote_path(self) -> str:
@@ -142,30 +125,16 @@ class _Attempt:
 class Dispatcher:
     """Dispatching's worker: each attempt from its hold to the printer's confirmation, and their recovery."""
 
-    def __init__(self, heat_soak: preheating.ChamberHeatSoak, selection, drying):
-        """``heat_soak`` hands soaks over; ``selection`` reports idle printers, and ``drying`` AMS drying."""
-        self._heat_soak, self._selection, self._drying = heat_soak, selection, drying
-        self._started_at: datetime | None = None
-        self._recovering: set[int] = set()
+    def __init__(self, selection, drying):
+        """``selection`` reports idle printers, and ``drying`` AMS drying."""
+        self._selection, self._drying = selection, drying
 
     async def take_over(self, item_id: int) -> None:
-        """Enter from preheating in its own session once a soak hands off; an attempt left unsent ends failed."""
+        """Enter from preheating in its own session once a soak hands off."""
         async with async_session() as db:
-            item = await lock_queue_item(db, item_id)
-            if not item or item.status != "dispatching" or item.preheat_owner != self._heat_soak.owner:
-                await db.rollback()
-                return
-            item.preheat_owner, item.dispatching_at = None, datetime.now(timezone.utc)
-            await db.commit()
-            try:
+            item = await db.get(PrintQueueItem, item_id)
+            if item and item.status == "dispatching" and not item.dispatch_subtask_id:
                 await self.enter(db, item, "preheating")
-            finally:
-                await db.rollback()
-                item = await lock_queue_item(db, item_id)
-                if item and item.status == "dispatching" and not item.dispatch_subtask_id and not item.archive_id:
-                    reason = item.error_message or "Heat-soak dispatch interrupted; retry required"
-                    await abort_heat_soak(db, item, reason)
-                await queued.release_claim(db, item_id)
 
     async def enter(
         self, db: AsyncSession, item: PrintQueueItem, from_state: str, binding: queued._DispatchBinding | None = None
@@ -188,9 +157,6 @@ class Dispatcher:
         except asyncio.CancelledError:
             await self._remove_unsent_upload(db, item_id)
             raise
-        except QueueTransitionConflict:
-            await db.rollback()
-            logger.info("Queue item %s changed while dispatch was in progress", item_id)
         except Exception:
             await db.rollback()
             logger.exception("Dispatch failed for job %s", item_id)
@@ -205,21 +171,22 @@ class Dispatcher:
                 logger.exception("Could not settle queue item %s after a dispatch failure", item_id)
 
     async def _hold(self, db: AsyncSession, item: PrintQueueItem, binding: queued._DispatchBinding | None) -> bool:
-        """From queued: commit the printer hold, with the selected printer and mapping, before any copy."""
+        """From queued: hold the selected idle printer, before any copy, if the job is unchanged since selection."""
         item_id, printer_id, unassigned = item.id, item.printer_id, bool(binding and binding.unassigned)
-        if not self._selection._is_printer_idle(printer_id):
+        await hold_printer(db, printer_id)  # The selected printer, before any write.
+        held = await lock_queue_item(db, item_id)
+        if (
+            not held
+            or held.status != "queued"
+            or held.printer_id != (None if unassigned else printer_id)
+            or (binding and binding.edited_fields(held))
+            or not self._selection._is_printer_idle(printer_id)
+        ):
+            await db.rollback()
             return False
-        printer = PrintQueueItem.printer_id.is_(None) if unassigned else PrintQueueItem.printer_id == printer_id
+        values = {"waiting_reason": None, **(binding.values() if binding else {"printer_id": printer_id})}
         try:
-            await transition_queue_item(
-                db,
-                item,
-                "queued",
-                "dispatching",
-                conditions=(printer, PrintQueueItem.dispatching_at == item.dispatching_at),
-                values={"waiting_reason": None, **(binding.values() if binding else {})},
-                dispatch_guard=lambda: self._selection._is_printer_idle(printer_id),
-            )
+            await transition_queue_item(db, held, "queued", "dispatching", values=values)
             await db.commit()
         except IntegrityError:
             await db.rollback()
@@ -230,7 +197,7 @@ class Dispatcher:
     async def _inherit(self, db: AsyncSession, item: PrintQueueItem) -> PrintQueueItem | None:
         """From preheating: take over the soak's hold once its source still fits the printer."""
         item = await lock_queue_item(db, item.id)
-        if not item or item.status != "dispatching" or item.preheat_owner or item.dispatch_subtask_id:
+        if not item or item.status != "dispatching" or item.dispatch_subtask_id:
             await db.rollback()
             return None
         await db.commit()  # Release the handoff lock before slow Archive and FTP work.
@@ -255,15 +222,12 @@ class Dispatcher:
         """Link the copy to the held job and commit it; no command is ever sent without it."""
         from backend.app.services.queue_archive import link_dispatch_archive
 
-        source = PrintQueueItem.archive_id
-        source = source.is_(None) if a.item.archive_id is None else source == a.item.archive_id
-        try:
-            conditions = (PrintQueueItem.printer_id == a.printer_id, PrintQueueItem.dispatching_at == a.claim, source)
-            await link_dispatch_archive(a.db, a.item, copy, conditions=conditions)
-            await a.db.commit()
-        except QueueTransitionConflict:
-            await a.db.rollback()
+        source_id = a.item.archive_id
+        if not (held := await self._current(a)) or held.archive_id != source_id:
+            await a.db.rollback()  # Discards the unlinked copy.
             return False
+        await link_dispatch_archive(a.db, held, copy)
+        await a.db.commit()
         if a.binding and a.binding.unassigned:
             await queued.notify_assignment(a.db, a.item)
         archive = await a.db.get(PrintArchive, a.item.archive_id) if a.item.archive_id else None
@@ -355,30 +319,25 @@ class Dispatcher:
         if not await self._dry(db, item):  # Drying may have started during the upload.
             return
         subtask_id = str(randbelow(2_147_483_646) + 1)
-        claim = () if a.claim is None else (PrintQueueItem.dispatching_at == a.claim,)
-        conditions = (PrintQueueItem.printer_id == a.printer_id, *claim)
         values = {"dispatched_at": None, "dispatch_subtask_id": subtask_id, "started_at": None, "error_message": None}
-        try:
-            await transition_queue_item(db, item, "dispatching", "dispatching", conditions=conditions, values=values)
-            await db.commit()
-        except IntegrityError:
-            await db.rollback()  # The partial unique index remains the authoritative reservation guard.
-            return
-        except QueueTransitionConflict:
+        if not (item := await self._current(a)):
             return await self._lost(a)
+        await transition_queue_item(db, item, "dispatching", "dispatching", values=values)
+        await db.commit()
         # This drying check closes the window opened by the send-boundary commit.
         active = self._drying._active_drying_ams_ids(a.printer_id)
         if (active and not await self._dry(db, item, active)) or not await self._ready(a):
             return
-        try:
-            values = {"dispatched_at": datetime.now(timezone.utc)}
-            await transition_queue_item(db, item, "dispatching", "dispatching", conditions=conditions, values=values)
-            await db.commit()
-        except QueueTransitionConflict:
+        if not (item := await self._current(a)):
             return await self._lost(a)
+        # From here the print may have been sent; the acknowledgement deadline decides.
+        sent = clock.now()
+        values = {"dispatched_at": sent, "deadline_at": sent + ACK_WINDOW, "deadline_kind": "ack"}
+        await transition_queue_item(db, item, "dispatching", "dispatching", values=values)
+        await db.commit()
         # The row lock is held only across the synchronous publish: a concurrent
         # Stop either wins first, preventing the send, or follows it with Stop.
-        deadline = asyncio.get_running_loop().time() + DISPATCH_TELEMETRY_WAIT_SECONDS
+        deadline = clock.monotonic() + DISPATCH_TELEMETRY_WAIT_SECONDS
         while True:
             if not await self._ready(a, deadline=deadline):
                 return
@@ -410,7 +369,6 @@ class Dispatcher:
             # A transport error doesn't prove the printer missed the command; confirmation decides.
             logger.exception("Queue item %s: print command raised during dispatch", a.item_id)
             await db.rollback()
-            self._confirm_later(a.item_id, a.printer_id, subtask_id)
             return
         if not started:
             values = {"dispatched_at": None, "dispatch_subtask_id": None, "started_at": None}
@@ -422,14 +380,16 @@ class Dispatcher:
         await db.rollback()  # Release the send lock; the reservation is already durable.
         logger.info("Queue item %s: Print command sent successfully - %s", a.item_id, a.filename)
         cache_3mf_download(a.printer_id, a.remote_filename, a.file_path)  # /cover then skips FTP (#1166).
-        # Confirmation runs in the background: a slow printer only delays its own job.
-        self._confirm_later(a.item_id, a.printer_id, subtask_id)
 
     async def _held(self, a: _Attempt) -> PrintQueueItem | None:
         """The attempt's job, locked after a rollback, while this worker still holds it."""
         await a.db.rollback()
+        return await self._current(a)
+
+    async def _current(self, a: _Attempt) -> PrintQueueItem | None:
+        """Lock the attempt's job in the open transaction; None, rolled back, once Stop or recovery ended it."""
         held = await lock_queue_item(a.db, a.item_id)
-        if held and held.status == "dispatching" and held.dispatching_at == a.claim:
+        if held and held.status == "dispatching" and held.printer_id == a.printer_id:
             return held
         await a.db.rollback()
         return None
@@ -444,12 +404,7 @@ class Dispatcher:
         if ready is False:
             await fail(a.db, held, "Printer activity changed during dispatch; inspect the printer")
             return False
-        # Nothing was sent; the attempt waits for Stop and Retry, and its soak's heaters for shutdown.
-        values = {"error_message": _TELEMETRY_UNAVAILABLE, "dispatched_at": None, "dispatch_subtask_id": None}
-        await transition_queue_item(a.db, held, "dispatching", "dispatching", values=values)
-        if held.chamber_heat_soak:
-            await request_heater_shutdown(a.db, a.printer_id)
-        await a.db.commit()
+        await _park(a.db, held, _TELEMETRY_UNAVAILABLE)
         return False
 
     async def _dry(self, db: AsyncSession, item: PrintQueueItem, active: tuple[int, ...] | None = None) -> bool:
@@ -462,7 +417,7 @@ class Dispatcher:
 
     async def _lost(self, a: _Attempt) -> None:
         await a.db.rollback()
-        logger.info("Queue item %s lost its dispatch claim; cleaning up uploaded file", a.item_id)
+        logger.info("Queue item %s changed during dispatch; cleaning up uploaded file", a.item_id)
         await self._discard(a)
 
     async def _discard(self, a: _Attempt, **options) -> None:
@@ -491,7 +446,7 @@ class Dispatcher:
             if not printer or not remote_name or attempt.dispatched_queue_item_id != item_id:
                 return
             connection = (printer.ip_address, printer.access_code, printer.model)
-            await db.commit()  # Keep the worker claim, release the read transaction.
+            await db.commit()  # Release the read transaction before FTP.
             await delete_file_async(connection[0], connection[1], f"/{remote_name}", printer_model=connection[2])
         except Exception:
             await db.rollback()
@@ -511,98 +466,10 @@ class Dispatcher:
         self, printer_id: int, previous_id: str | None, *, deadline: float | None = None
     ) -> bool | None:
         """Wait through a brief reconnect; silence never proves a failed print."""
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + DISPATCH_TELEMETRY_WAIT_SECONDS if deadline is None else deadline
-        while (ready := self._telemetry(printer_id, previous_id)) is None and loop.time() < deadline:
-            await asyncio.sleep(min(0.5, max(0, deadline - loop.time())))
+        deadline = clock.monotonic() + DISPATCH_TELEMETRY_WAIT_SECONDS if deadline is None else deadline
+        while (ready := self._telemetry(printer_id, previous_id)) is None and clock.monotonic() < deadline:
+            await clock.sleep(min(0.5, max(0, deadline - clock.monotonic())))
         return ready
-
-    def _confirm_later(self, item_id: int, printer_id: int, subtask_id: str) -> None:
-        spawn_background_task(self._confirm(item_id, printer_id, subtask_id), name=f"confirm-queue-dispatch-{item_id}")
-
-    async def _confirm(self, item_id: int, printer_id: int, subtask_id: str) -> None:
-        """Wait: promote the sent attempt once telemetry confirms it, or hold it for a person to resolve."""
-        try:
-            status, last_status = await self._wait_for_ack(printer_id, subtask_id)
-        except Exception:
-            logger.exception("Queue item %s: dispatch confirmation crashed", item_id)
-            status, last_status = None, None
-        if status == "printing":
-
-            async def promote(db: AsyncSession) -> None:
-                item = await db.get(PrintQueueItem, item_id)
-                if not item or item.status != "dispatching":
-                    return
-                try:
-                    await transition_queue_item(db, item, "dispatching", "printing")
-                    await sync_print_state(db, item, printer_manager.get_status(printer_id))
-                except QueueTransitionConflict:
-                    return await db.rollback()
-                item.started_at, item.error_message = datetime.now(timezone.utc), None
-                await db.commit()
-                await effects.wait_for(effects.spawned(db))
-
-            return await run_with_retry(promote, label=f"confirm queue dispatch {item_id}")
-        if status in ("completed", "failed"):
-            return  # Completion or recovery owns a correlated terminal print; it is never retried.
-
-        async def hold_for_review(db: AsyncSession) -> bool:
-            item = await db.get(PrintQueueItem, item_id)
-            if not item or item.status != "dispatching":
-                return False
-            item.error_message = _DISPATCH_REVIEW_MESSAGE
-            await db.commit()
-            return True
-
-        if not await run_with_retry(hold_for_review, label=f"hold queue dispatch {item_id}"):
-            return
-        if status == "dispatching":
-            logger.warning(
-                "Queue item %s: printer %d received project_file but did not enter a correlated active state; "
-                "held for manual review",
-                item_id,
-                printer_id,
-            )
-            return
-        logger.warning(
-            "Queue item %s: printer %d did not confirm print command; held for manual review", item_id, printer_id
-        )
-        client = printer_manager.get_client(printer_id)
-        if client and hasattr(client, "force_reconnect_stale_session"):
-            state = getattr(last_status, "state", None) if last_status else None
-            client.force_reconnect_stale_session(f"queue print command unacknowledged after dispatch (state {state})")
-
-    async def _wait_for_ack(
-        self,
-        printer_id: int,
-        subtask_id: str,
-        timeout: float = 90.0,
-        phase_b_timeout: float = 180.0,
-        poll_interval: float = 3.0,
-    ) -> tuple[str | None, object | None]:
-        """Wait until the sent print reaches an active state; a matching ID alone extends the wait."""
-        last_status, landed = None, False
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            if status := printer_manager.get_status(printer_id):
-                last_status, observed = status, telemetry_status(status, subtask_id)
-                if observed == "printing":
-                    return observed, status
-                if observed in ("dispatching", "completed", "failed"):
-                    # A matching ID with a terminal state can mix generations; keep polling for an active state.
-                    landed = True
-                    break
-            await asyncio.sleep(poll_interval)
-        if not landed:
-            return None, last_status
-        deadline = time.monotonic() + phase_b_timeout
-        while time.monotonic() < deadline:
-            await asyncio.sleep(poll_interval)
-            if status := printer_manager.get_status(printer_id):
-                last_status = status
-                if telemetry_status(status, subtask_id) == "printing":
-                    return "printing", status
-        return "dispatching", last_status
 
     async def resolve(self, db: AsyncSession, item: PrintQueueItem, outcome: str) -> None:
         """Exit for a person's resolution of an unconfirmed attempt, awaiting printing's committed start effects."""
@@ -618,7 +485,7 @@ class Dispatcher:
                 raise InvalidQueueTransition("Printer telemetry has confirmed this job. Refresh and retry.")
         printing = outcome == "printing"
         values = {"error_message": "Confirmed printing by user" if printing else "Printer didn't start the job"}
-        values["started_at" if printing else "completed_at"] = datetime.now(timezone.utc)
+        values["started_at" if printing else "completed_at"] = clock.now()
         await transition_queue_item(db, item, "dispatching", outcome, values=values)
         await db.commit()
         await effects.wait_for(effects.spawned(db))
@@ -627,12 +494,11 @@ class Dispatcher:
         """Exit for Retry of an attempt nothing was sent for: release its hold and remove its upload."""
         if not unsent(item):
             raise InvalidQueueTransition("Only an attempt that was never sent can be withdrawn")
-        values = {"error_message": "Nothing was sent; retried as a new job", "completed_at": datetime.now(timezone.utc)}
+        values = {"error_message": "Nothing was sent; retried as a new job", "completed_at": clock.now()}
         await transition_queue_item(db, item, "dispatching", "unsuccessful", action="withdrawn", values=values)
 
     async def start(self) -> None:
-        """Recover at startup: fail attempts left unsent, and release the previous process's worker claims."""
-        self._started_at = datetime.now(timezone.utc)
+        """At startup: an attempt interrupted before its print command sent nothing; park it for Retry."""
         unsent = (
             PrintQueueItem.status == "dispatching",
             PrintQueueItem.dispatch_subtask_id.is_(None),
@@ -641,141 +507,93 @@ class Dispatcher:
         try:
             async with async_session() as db:
                 for item in list(await db.scalars(select(PrintQueueItem).where(*unsent))):
-                    reason = "Dispatch interrupted before print command; retry required"
-                    await _transition_or_skip(db, item, "failed", error_message=reason, completed_at=self._started_at)
-                claims = update(PrintQueueItem).where(PrintQueueItem.dispatching_at.is_not(None))
-                result = await db.execute(claims.values(dispatching_at=None))
-                await db.commit()
-                if result.rowcount:
-                    logger.info("Cleared %d stale queue dispatch claim(s)", result.rowcount)
+                    await _park(db, item, _INTERRUPTED_BEFORE_SEND)
         except Exception:
-            logger.exception("Failed to clear stale queue dispatch claims")
-
-    async def run(self) -> None:
-        """Recover every 30 s, and at once after a printer connects or disconnects.
-
-        A plain timer by design: recovery reads every active job against live
-        telemetry, so a fixed cadence is simpler than tracking each job's events.
-        A locked SQLite database retries the pass rather than skipping it.
-        """
-        global _wake
-        _wake = asyncio.Event()
-        while True:
-            _wake.clear()
-            try:
-                await run_with_retry(self.recover, label="dispatch recovery", session_factory=async_session)
-            except Exception:
-                logger.exception("Dispatch recovery failed")
-            with suppress(TimeoutError):
-                await asyncio.wait_for(_wake.wait(), RECOVERY_INTERVAL)
+            logger.exception("Failed to park dispatches interrupted by the restart")
 
     async def recover(self, db: AsyncSession) -> None:
-        """Recover, each pass: settle attempts that no worker or live confirmation owns, from telemetry.
+        """The one recovery rule, each tick: settle every job no worker owns from fresh telemetry, as a live event would.
 
-        A print whose printer now reports a different print has ended unobserved.
-        Its outcome is unknown, so it fails without Auto Off, and the print that
-        replaced it is then observed as started.
+        Each job is read and settled under its printer's lock in its own
+        transaction. Without fresh telemetry nothing is decided: a sent job is
+        never resolved from missing or stale reports. A print whose printer now
+        reports a different print ended unobserved; its outcome is unknown, so
+        it fails without Auto Off, and the print that replaced it is then
+        observed as started.
         """
+        await printing.adopt_legacy_prints(db)
+        active = PrintQueueItem.status.in_(("dispatching", "printing", "paused"))
+        item_ids = list(await db.scalars(select(PrintQueueItem.id).where(active)))
+        await db.rollback()
+        for item_id in item_ids:
+            if queued.in_flight(item_id):
+                continue  # A live worker still owns this attempt.
+            try:
+                await self._recover(db, item_id)
+            except Exception:
+                await db.rollback()
+                logger.exception("Queue item %s: recovery failed", item_id)
+
+    async def _recover(self, db: AsyncSession, item_id: int) -> None:
         from backend.app.services.lifecycle.intake import busy as intake_busy  # Its completion may be in flight.
 
-        active = PrintQueueItem.status.in_(("dispatching", "printing", "paused"))
-        now = datetime.now(timezone.utc)
-        changed, completions, replaced = False, [], {}
-        for item in list(await db.scalars(select(PrintQueueItem).where(active))):
-            dispatching, sent = item.status == "dispatching", item.dispatched_at
-            sent = sent.replace(tzinfo=timezone.utc) if sent and sent.tzinfo is None else sent
-            if dispatching and (
-                item.dispatching_at is not None  # A live preparation worker still owns this attempt.
-                # Startup failed interrupted workers; a telemetry timeout leaves an unsent hold for Retry.
-                or (sent is None and not item.dispatch_subtask_id)
-                # Live acknowledgement owns a fresh dispatch.
-                or (self._started_at and sent and sent >= self._started_at and (now - sent).total_seconds() < 270)
-            ):
-                continue
-            state = printer_manager.get_status(item.printer_id) if item.printer_id is not None else None
-            if state and (not getattr(state, "connected", False) or not getattr(state, "job_telemetry_ready", True)):
-                state = None
-            subtask_id = str(item.dispatch_subtask_id).strip() if item.dispatch_subtask_id else None
-            observed = telemetry_status(state, subtask_id)
-            if observed in ("completed", "failed"):
-                # Snapshot the matched telemetry now: MQTT can move the live state on to the
-                # next print while this pass awaits the database.
-                report = (state.state, getattr(state, "gcode_file", None), deepcopy(getattr(state, "raw_data", None)))
-                # Commit the printer's terminal outcome before completion effects run, so a
-                # restart never turns a printer-confirmed outcome back into a retry.
-                if observed == "completed" and dispatching:
-                    if not await _transition_or_skip(db, item, "printing", started_at=now):
-                        continue
-                outcome = "finished" if observed == "completed" else "failed"
-                if not await _transition_or_skip(db, item, outcome, action="printer_report", completed_at=now):
-                    continue
-                changed = True
-                completions.append((item, report, subtask_id, observed))
-                logger.info("Recovered terminal queue dispatch %s from %s telemetry", item.id, report[0])
-            elif observed == "printing":
-                if dispatching:
-                    if not await _transition_or_skip(db, item, "printing", started_at=now, error_message=None):
-                        continue
-                    changed = True
-                    logger.info("Recovered dispatched queue item %s as printer-confirmed printing", item.id)
-                try:
-                    changed = await sync_print_state(db, item, state) or changed
-                except QueueTransitionConflict:
-                    continue
-            elif not dispatching and (other := superseded_by(item, state)) and not intake_busy(item.printer_id):
-                reason = f"The printer started print {other} while this one was unobserved; its outcome is unknown"
-                values = {"completed_at": now, "error_message": reason, "auto_off_after": False}
-                if not await _transition_or_skip(db, item, "failed", action="superseded", **values):
-                    continue
-                changed, replaced[item.printer_id] = True, state
-                logger.warning("Queue item %s ended unobserved: printer %s reports %s", item.id, item.printer_id, other)
-            elif dispatching and (sent is None or sent.timestamp() <= now.timestamp() - 270):
-                # An upgrade-interrupted row has no send time, and is held for review at once.
-                if item.error_message != _DISPATCH_REVIEW_MESSAGE:
-                    item.error_message, changed = _DISPATCH_REVIEW_MESSAGE, True
-                    logger.warning(
-                        "Holding stale unconfirmed queue dispatch %s for manual review (printer state=%s)",
-                        item.id,
-                        getattr(state, "state", None),
-                    )
-        if changed:
+        item = await lock_queue_item(db, item_id)
+        if not item or item.status not in ("dispatching", "printing", "paused"):
+            return await db.rollback()
+        dispatching = item.status == "dispatching"
+        if dispatching and not item.dispatch_subtask_id:
+            return await db.rollback()  # Nothing was sent: parked for Retry.
+        state = printer_manager.get_status(item.printer_id) if item.printer_id is not None else None
+        if not state or not getattr(state, "connected", False) or not getattr(state, "job_telemetry_ready", True):
+            return await db.rollback()
+        observed = telemetry_status(state, item.dispatch_subtask_id)
+        now = clock.now()
+        if observed in ("completed", "failed"):
+            # Snapshot the report now: MQTT moves the live state on while this awaits the database.
+            data = {
+                "status": observed,
+                "filename": getattr(state, "gcode_file", None) or "",
+                "subtask_name": getattr(state, "subtask_name", "") or "",
+                "subtask_id": item.dispatch_subtask_id,
+                "raw_data": {
+                    **deepcopy(getattr(state, "raw_data", None) or {}),
+                    "subtask_id": item.dispatch_subtask_id,
+                },
+            }
+            if not data["filename"] and item.archive_id is not None:
+                archive = await db.get(PrintArchive, item.archive_id)
+                data["filename"] = archive.filename if archive else ""
+            await printing.end(db, item, data, stopped=False, memory=printing_memory())
             await db.commit()
-        for item, report, subtask_id, observed in completions:
-            await self._complete_later(db, item, report, subtask_id, observed)
-        for printer_id, state in replaced.items():
+            logger.info("Recovered queue job %s from %s telemetry", item_id, state.state)
+        elif observed == "printing":
+            if dispatching:
+                await transition_queue_item(
+                    db, item, "dispatching", "printing", values={"started_at": now, "error_message": None}
+                )
+            changed = await sync_print_state(db, item, state)
+            if dispatching or changed:
+                await db.commit()
+                logger.info("Recovered queue job %s as printer-confirmed printing", item_id)
+            else:
+                await db.rollback()
+        elif not dispatching and (other := superseded_by(item, state)) and not intake_busy(item.printer_id):
+            reason = f"The printer started print {other} while this one was unobserved; its outcome is unknown"
+            values = {"completed_at": now, "error_message": reason, "auto_off_after": False}
+            await transition_queue_item(db, item, item.status, "failed", action="superseded", values=values)
+            printer_id = item.printer_id
+            await db.commit()
+            logger.warning("Queue item %s ended unobserved: printer %s reports %s", item_id, printer_id, other)
             if state.state in _ACTIVE_PRINT_STATES:
                 spawn_background_task(_observe_replacement(printer_id, state), name=f"observe-print-{printer_id}")
+        else:
+            await db.rollback()
 
-    async def _complete_later(self, db: AsyncSession, item, report: tuple, subtask_id: str, observed: str) -> None:
-        """Run the normal completion for a recovered terminal print, from its matched telemetry snapshot."""
-        if item.id in self._recovering:
-            return
-        _state, filename, raw_data = report
-        if not filename and item.archive_id is not None:
-            archive = await db.get(PrintArchive, item.archive_id)
-            filename = archive.filename if archive else None
-        # Some firmware sends subtask_id=0 at FINISH/FAILED; use the matched ID.
-        raw_data = {**(raw_data or {}), "subtask_id": subtask_id}
-        data = {
-            "status": observed,
-            "filename": filename or f"queue-dispatch-{item.id}",
-            "subtask_name": "",
-            "subtask_id": subtask_id,
-            "raw_data": raw_data,
-            "_reconciled": True,
-            "_recovered_dispatch": True,
-        }
-        self._recovering.add(item.id)
-        name = f"complete-recovered-queue-dispatch-{item.id}"
-        spawn_background_task(self._complete_recovered_dispatch(item.id, item.printer_id, data), name=name)
 
-    async def _complete_recovered_dispatch(self, item_id: int, printer_id: int, completion_data: dict) -> None:
-        try:
-            from backend.app.services.lifecycle.intake import print_completed
+def printing_memory():
+    from backend.app.services.lifecycle.intake import print_memory
 
-            await print_completed(printer_id, completion_data)
-        finally:
-            self._recovering.discard(item_id)
+    return print_memory
 
 
 _UPLOAD_TOO_SLOW = (
@@ -787,13 +605,23 @@ _UPLOAD_FAILED = (
     "See server logs for detailed diagnostics."
 )
 _TELEMETRY_UNAVAILABLE = "Printer telemetry unavailable; nothing was sent. Retry to send this job"
+_INTERRUPTED_BEFORE_SEND = "Dispatch interrupted by a restart; nothing was sent. Retry to send this job"
+
+
+async def _park(db: AsyncSession, item: PrintQueueItem, message: str) -> None:
+    """Nothing was sent: keep the hold for Retry, which releases it without a plate check; cool a soak's heaters."""
+    values = {"error_message": message, "dispatched_at": None, "dispatch_subtask_id": None}
+    await transition_queue_item(db, item, "dispatching", "dispatching", values=values)
+    if item.chamber_heat_soak or item.preheat_requested_at is not None:
+        await request_heater_shutdown(db, item.printer_id)
+    await db.commit()
 
 
 def unsent(item: PrintQueueItem) -> bool:
     """An attempt held with nothing sent and no worker left to send it, which Retry withdraws."""
     return (
         item.status == "dispatching"
-        and item.dispatching_at is None
+        and not queued.in_flight(item.id)
         and item.dispatched_at is None
         and not item.dispatch_subtask_id
     )
@@ -816,16 +644,14 @@ async def _observe_replacement(printer_id: int, state) -> None:
 
 
 async def on_enter(change, row) -> None:
-    """Enter from preheating: this process's worker takes the soak over once the handoff commits."""
+    """Enter from preheating: a worker takes the soak over once the handoff commits."""
     from backend.app.services.print_scheduler import scheduler
 
-    if change.before == "preheating" and row.preheat_owner == scheduler._heat_soak.owner:
-        item_id = change.item_id
+    if change.before == "preheating":
+        item_id, printer_id = change.item_id, row.printer_id
         effects.after_commit(
             change.db,
-            lambda: spawn_background_task(
-                scheduler.dispatcher.take_over(item_id), name=f"heat-soak-dispatch-{item_id}"
-            ),
+            lambda: scheduler.workers.adopt(item_id, printer_id, scheduler.dispatcher.take_over(item_id)),
             key=("take_over", item_id),
         )
 
@@ -836,3 +662,62 @@ async def on_exit(change, row) -> None:
     if (change.after == "failed" and change.action != "printer_report") or change.action == "withdrawn":
         effect = effects.QueueOutcomeEffect(change.item_id, change.after, row.printer_id, clean_sd_copy=True)
         effects.queue_outcome_effect(change.db, effect)
+
+
+async def acknowledgement_due(db: AsyncSession, item_id: int) -> None:
+    """The ``ack`` and ``ack_landed`` deadlines: confirm a sent print from telemetry, or hold it for review.
+
+    The printer has ``ACK_WINDOW`` to report the print's ID. Once it has,
+    the print has ``ACK_LANDED_WINDOW`` more to become active. Intake confirms
+    an observed start at once; this settles what it never saw.
+    """
+    item = await lock_queue_item(db, item_id)
+    if not item or item.status != "dispatching" or item.deadline_kind not in ("ack", "ack_landed"):
+        await db.rollback()
+        return
+    state = printer_manager.get_status(item.printer_id)
+    observed = telemetry_status(state, item.dispatch_subtask_id) if state and state.connected else None
+    if observed == "printing":
+        await transition_queue_item(
+            db, item, "dispatching", "printing", values={"started_at": clock.now(), "error_message": None}
+        )
+        await sync_print_state(db, item, state)
+        await db.commit()
+        return
+    if observed is not None and item.deadline_kind == "ack":
+        values = {"deadline_at": clock.now() + ACK_LANDED_WINDOW, "deadline_kind": "ack_landed"}
+        await transition_queue_item(db, item, "dispatching", "dispatching", values=values)
+        await db.commit()
+        return
+    values = {"error_message": _DISPATCH_REVIEW_MESSAGE, "deadline_at": None, "deadline_kind": None}
+    await transition_queue_item(db, item, "dispatching", "dispatching", values=values)
+    printer_id, landed = item.printer_id, observed is not None
+    await db.commit()
+    logger.warning(
+        "Queue item %s: printer %s %s; held for manual review",
+        item_id,
+        printer_id,
+        "received the print but never started it" if landed else "did not confirm the print command",
+    )
+    client = printer_manager.get_client(printer_id)
+    if not landed and client and hasattr(client, "force_reconnect_stale_session"):
+        client.force_reconnect_stale_session("queue print command unacknowledged after dispatch")
+
+
+async def arm_unconfirmed(db: AsyncSession) -> None:
+    """At startup: a sent attempt the previous process was confirming gets its final acknowledgement deadline."""
+    unconfirmed = select(PrintQueueItem.id).where(
+        PrintQueueItem.status == "dispatching",
+        PrintQueueItem.dispatch_subtask_id.is_not(None),
+        PrintQueueItem.deadline_at.is_(None),
+        or_(PrintQueueItem.error_message.is_(None), PrintQueueItem.error_message != _DISPATCH_REVIEW_MESSAGE),
+    )
+    for item_id in list(await db.scalars(unconfirmed)):
+        item = await lock_queue_item(db, item_id)
+        if not item or item.status != "dispatching" or item.deadline_at is not None:
+            await db.rollback()
+            continue
+        sent = item.dispatched_at or clock.naive_now()
+        values = {"deadline_at": sent + ACK_WINDOW + ACK_LANDED_WINDOW, "deadline_kind": "ack_landed"}
+        await transition_queue_item(db, item, "dispatching", "dispatching", values=values)
+        await db.commit()

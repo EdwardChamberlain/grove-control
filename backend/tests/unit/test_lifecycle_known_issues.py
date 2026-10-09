@@ -110,7 +110,6 @@ async def test_retry_withdraws_an_attempt_nothing_was_sent_for(alignment):
     async with alignment.sessions() as db:
         old = await db.get(PrintQueueItem, alignment.job_id)
         await hold_and_link(db, old)
-        old.dispatching_at = None  # The worker parked it for missing telemetry and left.
         old.error_message = dispatching._TELEMETRY_UNAVAILABLE
         await db.commit()
         assert dispatching.unsent(old)

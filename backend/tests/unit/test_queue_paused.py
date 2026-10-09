@@ -145,28 +145,6 @@ async def test_restart_recovery_applies_pause_resume_without_restarting_the_job(
     assert publish.await_count == (1 if initial == "dispatching" else 0)
 
 
-@pytest.mark.parametrize("outcome", ["FINISH", "FAILED"])
-async def test_restart_recovers_a_terminal_print_from_paused(sessions, outcome):
-    item_id, archive_id = await add_job(sessions, "paused")
-    tasks = []
-    scheduler = PrintScheduler()
-    with (
-        patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", return_value=telemetry(outcome)),
-        patch(
-            "backend.app.services.lifecycle.dispatching.spawn_background_task",
-            side_effect=lambda coro, **kw: tasks.append(coro),
-        ),
-        patch.object(scheduler.dispatcher, "_complete_recovered_dispatch", AsyncMock()),
-    ):
-        async with sessions() as db:
-            await scheduler.dispatcher.recover(db)
-        for task in tasks:
-            await task
-    async with sessions() as db:
-        assert (await db.get(PrintQueueItem, item_id)).status == ("finished" if outcome == "FINISH" else "failed")
-        assert (await db.get(PrintArchive, archive_id)).status == ("completed" if outcome == "FINISH" else "failed")
-
-
 @pytest.mark.parametrize("invalid", ["wrong_id", "no_id", "offline", "uninitialized", "terminal", "prepare"])
 async def test_unsafe_telemetry_cannot_resume_a_paused_job(sessions, invalid):
     item_id, _ = await add_job(sessions, "paused")
@@ -244,39 +222,6 @@ async def test_print_start_skips_a_stop_that_wins_after_the_job_is_read(sessions
         assert len((await db.scalars(select(PrintQueueItem))).all()) == 1
 
 
-async def test_external_print_start_conflict_rolls_back_the_job_and_hold_transfer(sessions):
-    import backend.app.main as main
-    from backend.app.services import print_effects
-    from backend.app.services.lifecycle import intake
-
-    item_id, archive_id = await add_job(sessions, "finished", "previous")
-
-    async def conflicting_pause(db, item, state):
-        assert item.dispatch_subtask_id == state.submission_id == "external"
-        assert (await db.get(PrintQueueItem, item_id)).status == "successful"
-        raise QueueTransitionConflict("A competing transition won")
-
-    with (
-        patch.object(intake, "async_session", sessions),
-        patch.object(print_effects, "async_session", sessions),
-        patch.object(main.printer_manager, "get_status", return_value=telemetry(identity="external")),
-        patch("backend.app.services.lifecycle.printing.sync_print_state", side_effect=conflicting_pause) as sync,
-        patch.object(print_effects, "_archive_print_start", AsyncMock()) as archive_start,
-        patch.object(lifecycle_effects, "publish_queue_job_started", AsyncMock()) as publish,
-    ):
-        await main.on_print_start(1, {"submission_id": "external", "filename": "same.3mf"})
-        sync.assert_awaited_once()
-        archive_start.assert_not_awaited()
-        publish.assert_not_awaited()
-        assert 1 not in intake._started_job_effects
-    async with sessions() as db:
-        items = (await db.scalars(select(PrintQueueItem))).all()
-        assert len(items) == 1
-        assert items[0].id == item_id and items[0].status == "finished"
-        assert items[0].archive_id == archive_id
-        assert (await db.get(PrintArchive, archive_id)).subtask_id == "previous"
-
-
 @pytest.mark.parametrize(
     ("observed", "live", "identity"),
     [
@@ -300,22 +245,6 @@ async def test_delayed_callback_cannot_apply_a_superseded_snapshot(sessions, obs
         await main.on_print_state_change(1, {"submission_id": "123", "state": observed})
     async with sessions() as db:
         assert (await db.get(PrintQueueItem, item_id)).status == initial
-
-
-async def test_dispatch_confirmation_can_first_observe_pause(sessions):
-    item_id, _ = await add_job(sessions, "dispatching")
-    scheduler = PrintScheduler()
-    publish = AsyncMock()
-    with (
-        patch.object(scheduler.dispatcher, "_wait_for_ack", AsyncMock(return_value=("printing", telemetry()))),
-        patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", return_value=telemetry()),
-        patch("backend.app.core.database.async_session", sessions),
-        patch.object(lifecycle_effects, "publish_queue_job_started", publish),
-    ):
-        await scheduler.dispatcher._confirm(item_id=item_id, printer_id=1, subtask_id="123")
-    async with sessions() as db:
-        assert (await db.get(PrintQueueItem, item_id)).status == "paused"
-    publish.assert_awaited_once_with(item_id)
 
 
 @pytest.mark.parametrize("external", [False, True])

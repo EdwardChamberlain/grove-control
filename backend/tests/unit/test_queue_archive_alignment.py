@@ -22,7 +22,7 @@ from backend.app.models.settings import Settings
 from backend.app.services.archive import ArchiveService
 from backend.app.services.lifecycle import dispatching as lifecycle_dispatching
 from backend.app.services.lifecycle.awaiting import clear_job_plate
-from backend.app.services.lifecycle.engine import QueueTransitionConflict, transition_queue_item
+from backend.app.services.lifecycle.engine import QueueTransitionConflict, hold_printer, transition_queue_item
 from backend.app.services.queue_actions import cancel_job
 from backend.app.services.queue_archive import link_dispatch_archive, prepare_dispatch_archive
 from backend.app.services.queue_source_cleanup import remove_queue_only_source_if_unused
@@ -189,39 +189,15 @@ async def test_rollback_discards_archive_row_and_prepared_files(alignment, close
         assert await observer.scalar(select(PrintArchive.id)) is None
 
 
-async def test_cancel_during_copy_wins_without_an_archive_or_losing_pending_row(alignment, monkeypatch):
-    original = ArchiveService.archive_print
-
-    async def cancel_during_copy(service, **kwargs):
-        prepared = await original(service, **kwargs)
-        async with alignment.sessions() as user:
-            job = await user.get(PrintQueueItem, alignment.job_id)
-            await cancel_job(user, job)
-        return prepared
-
-    monkeypatch.setattr(ArchiveService, "archive_print", cancel_during_copy)
-    async with alignment.sessions() as worker:
-        stale = await worker.get(PrintQueueItem, alignment.job_id)
-        await transition_queue_item(worker, stale, "queued", "dispatching")
-        await worker.commit()
-        with pytest.raises(QueueTransitionConflict):
-            await link_dispatch_archive(worker, stale, await prepare_dispatch_archive(worker, stale))
-        # A scheduler handling several jobs may commit after skipping a loser.
-        await worker.commit()
-    async with alignment.sessions() as db:
-        assert (await db.get(PrintQueueItem, alignment.job_id)).status == "cancelled"
-        assert await db.scalar(select(PrintArchive.id)) is None
-    assert list(settings.archive_dir.rglob("*.3mf")) == []
-
-
 @pytest.mark.parametrize(
     "outcome, archived", [("finished", "completed"), ("failed", "failed"), ("cancelled", "aborted")]
 )
 @pytest.mark.parametrize("automatic", [False, True])
 async def test_outcome_commits_on_entry_and_plate_clear_does_not_rewrite_it(alignment, outcome, archived, automatic):
     async with alignment.sessions() as db:
-        db.add(Settings(key="require_plate_clear", value="false" if automatic else "true"))
         job = await db.get(PrintQueueItem, alignment.job_id)
+        await hold_printer(db, job.printer_id)
+        db.add(Settings(key="require_plate_clear", value="false" if automatic else "true"))
         await hold_and_link(db, job)
         now = datetime.now(timezone.utc)
         await transition_queue_item(db, job, "dispatching", "printing", values={"started_at": now})
@@ -401,145 +377,6 @@ async def test_late_external_archive_association_uses_the_jobs_committed_state(a
         assert archive.status == archived
 
 
-async def test_committed_heat_soak_handoff_is_scheduled_without_copying(alignment, monkeypatch):
-    from backend.app.services.lifecycle import dispatching as sched, preheating as heat
-    from backend.app.services.print_scheduler import PrintScheduler
-
-    scheduler = PrintScheduler()
-    service = scheduler._heat_soak
-    states = {i: SimpleNamespace(state="IDLE", connected=True, heat_soak_disconnected_at=0) for i in (1, 2)}
-    manager = MagicMock()
-    manager._broadcast_status_change = AsyncMock()
-    manager.is_connected.return_value = True
-    manager.get_status.side_effect = states.get
-    monkeypatch.setattr(heat, "printer_manager", manager)
-    monkeypatch.setattr(service, "cleanup", AsyncMock())
-    async with alignment.sessions() as db:
-        first = await db.get(PrintQueueItem, alignment.job_id)
-        second_printer = Printer(
-            name="Second", serial_number="SECOND", ip_address="127.0.0.2", access_code="code", model="X1C"
-        )
-        db.add(second_printer)
-        await db.flush()
-        second = PrintQueueItem(printer_id=second_printer.id, library_file_id=alignment.source_id, status="queued")
-        db.add(second)
-        await db.commit()
-        now = heat.utcnow()
-        for job in (first, second):
-            await enter_preheating(
-                db,
-                job,
-                {
-                    "chamber_heat_soak": True,
-                    "heat_soak_minutes": 1,
-                    "preheat_owner": service.owner,
-                    "preheat_requested_at": now - timedelta(minutes=2),
-                    "preheat_started_at": now - timedelta(minutes=2),
-                    "preheat_checked_at": now,
-                },
-            )
-        await db.commit()
-        ready = await service.wait(db)  # Preheating's pass, on its own timer since stage 6.
-        await db.refresh(first)
-        assert first.status == "dispatching" and first.archive_id is None
-        assert await db.scalar(select(PrintArchive.id)) is None
-        # A subsequent normal pass skips the already committed handoff.
-        assert await service.wait(db) == []
-        await db.refresh(first)
-        assert first.id in ready  # Dispatching's entry takes it over after commit.
-
-
-@pytest.mark.parametrize("current", ["busy", "reconnected_busy", "reconnected_idle", "missing", "unready", "offline"])
-async def test_heat_soak_dispatch_uses_current_telemetry_after_archive_copy(alignment, monkeypatch, current):
-    import backend.app.main as main
-    from backend.app.services import print_effects
-    from backend.app.services.lifecycle import dispatching as sched, intake, preheating as heat
-    from backend.app.services.print_scheduler import PrintScheduler
-
-    scheduler = PrintScheduler()
-    monkeypatch.setattr(sched, "DISPATCH_TELEMETRY_WAIT_SECONDS", 0.01)
-    service = scheduler._heat_soak
-    states = {
-        1: SimpleNamespace(
-            state="IDLE", connected=True, job_telemetry_ready=True, heat_soak_disconnected_at=0, raw_data={}
-        )
-    }
-    manager = MagicMock()
-    manager.get_status.side_effect = states.get
-    manager.is_connected.side_effect = lambda printer_id: bool(states[printer_id] and states[printer_id].connected)
-    manager.is_awaiting_plate_clear.return_value = False
-    manager.get_client.return_value = None
-    manager.start_print.return_value = True
-    manager._broadcast_status_change = AsyncMock()
-    monkeypatch.setattr(heat, "printer_manager", manager)
-    monkeypatch.setattr(sched, "printer_manager", manager)
-    monkeypatch.setattr("backend.app.services.printer_selection.printer_manager", manager)
-    monkeypatch.setattr(service, "cleanup", AsyncMock())
-    upload = AsyncMock(return_value=True)
-    monkeypatch.setattr(sched, "upload_file_async", upload)
-    monkeypatch.setattr(sched, "delete_file_async", AsyncMock(return_value=True))
-    monkeypatch.setattr(sched, "get_ftp_retry_settings", AsyncMock(return_value=(False, 0, 0, 1)))
-    monkeypatch.setattr(sched, "cache_3mf_download", MagicMock())
-    monkeypatch.setattr(scheduler.dispatcher, "_confirm_later", MagicMock())
-    monkeypatch.setattr(sched, "async_session", alignment.sessions)
-    original = ArchiveService.archive_print
-
-    async def telemetry_changes_during_copy(self, **kwargs):
-        attempt = await original(self, **kwargs)
-        if current == "busy":
-            states[1].state = "RUNNING"
-        else:
-            # Reconnecting replaces the client's state; the old object can
-            # still say IDLE after fresh telemetry proves another print is active.
-            states[1].connected = False
-            states[1] = (
-                None
-                if current == "missing"
-                else SimpleNamespace(
-                    state="RUNNING" if current == "reconnected_busy" else "IDLE",
-                    connected=current != "offline",
-                    job_telemetry_ready=current != "unready",
-                    heat_soak_disconnected_at=0,
-                    raw_data={},
-                )
-            )
-        return attempt
-
-    monkeypatch.setattr(ArchiveService, "archive_print", telemetry_changes_during_copy)
-    async with alignment.sessions() as db:
-        job = await db.get(PrintQueueItem, alignment.job_id)
-        now = heat.utcnow()
-        await enter_preheating(
-            db,
-            job,
-            {
-                "chamber_heat_soak": True,
-                "heat_soak_minutes": 1,
-                "preheat_owner": service.owner,
-                "preheat_requested_at": now - timedelta(minutes=2),
-                "preheat_started_at": now - timedelta(minutes=2),
-                "preheat_checked_at": now,
-            },
-        )
-        await db.commit()
-        ready = await service.wait(db)
-        for item_id in ready:
-            await scheduler.dispatcher.take_over(item_id)
-        await db.refresh(job)
-        attempt = await db.get(PrintArchive, job.archive_id)
-        assert attempt.dispatched_queue_item_id == job.id
-        if current == "reconnected_idle":
-            assert ready == [job.id] and job.status == "dispatching"
-            upload.assert_awaited_once()
-            manager.start_print.assert_called_once()
-        else:
-            assert ready == [job.id]
-            assert job.status == ("failed" if current in ("busy", "reconnected_busy") else "dispatching")
-            assert attempt.status == job.status
-            upload.assert_not_awaited()
-            manager.start_print.assert_not_called()
-
-
 @pytest.mark.parametrize("outcome", ["failed", "cancelled"])
 @pytest.mark.parametrize("source_kind", ["file", "archive", "variants"])
 async def test_retry_does_not_inherit_physical_outcome_even_when_cancelled_while_queued(
@@ -589,82 +426,6 @@ async def test_retry_does_not_inherit_physical_outcome_even_when_cancelled_while
             original_archive.completed_at,
             original_archive.failure_reason,
         ) == archive_facts
-
-
-@pytest.mark.parametrize("clear_plate", [False, True])
-@pytest.mark.parametrize("outcome, archived", [("failed", "failed"), ("cancelled", "aborted")])
-async def test_late_external_archive_preserves_failure_after_user_clears_plate(
-    alignment, monkeypatch, clear_plate, outcome, archived
-):
-    import backend.app.main as main
-    from backend.app.services import print_effects
-    from backend.app.services.lifecycle import dispatching as sched, intake
-    from backend.app.services.print_scheduler import PrintScheduler
-    from backend.app.services.printer_manager import printer_manager
-
-    identity = "external-42"
-    live = SimpleNamespace(
-        state="RUNNING",
-        connected=True,
-        job_telemetry_ready=True,
-        submission_id=identity,
-        subtask_id=identity,
-        gcode_file="source.3mf",
-        raw_data={"subtask_id": identity},
-    )
-    monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
-    monkeypatch.setattr(intake, "async_session", alignment.sessions)
-    monkeypatch.setattr(print_effects, "async_session", alignment.sessions)
-    monkeypatch.setattr(intake, "_started_job_effects", {})
-    monkeypatch.setattr(intake, "_completed_job_events", {})
-    monkeypatch.setattr(intake, "_user_stopped_printers", set())
-    recovered_callbacks = []
-
-    def wait_behind_start(coroutine, *, name):
-        recovered_callbacks.append(name)
-        coroutine.close()
-
-    monkeypatch.setattr(sched, "spawn_background_task", wait_behind_start)
-
-    async def delayed_download(printer_id, data, *, queue_archive_id=None, queue_job_id=None, memory):
-        assert queue_archive_id is None
-        live.state = "FAILED"
-        # Reconciliation can commit the terminal observation while the slow
-        # start callback owns the per-printer event lock.
-        async with alignment.sessions() as db:
-            if outcome == "failed":
-                await PrintScheduler().dispatcher.recover(db)
-            else:
-                job = await db.scalar(select(PrintQueueItem).where(PrintQueueItem.dispatch_subtask_id == identity))
-                await cancel_job(db, job)
-        async with alignment.sessions() as user:
-            job = await user.scalar(select(PrintQueueItem).where(PrintQueueItem.dispatch_subtask_id == identity))
-            assert job.status == outcome
-            if clear_plate:
-                await clear_job_plate(user, job)
-                await user.commit()
-        async with alignment.sessions() as db:
-            await ArchiveService(db).archive_print(
-                printer_id, alignment.source_path, print_data={"status": "printing"}, subtask_id=identity
-            )
-        return True
-
-    monkeypatch.setattr(print_effects, "_archive_print_start", delayed_download)
-    await main.on_print_start(
-        1, {"submission_id": identity, "filename": "source.3mf", "raw_data": {"gcode_state": "RUNNING"}}
-    )
-    async with alignment.sessions() as db:
-        job = await db.scalar(select(PrintQueueItem).where(PrintQueueItem.dispatch_subtask_id == identity))
-        attempt = await db.get(PrintArchive, job.archive_id)
-        assert job.status == ("unsuccessful" if clear_plate else outcome) and attempt.dispatched_queue_item_id == job.id
-        if outcome == "failed":
-            assert recovered_callbacks
-        assert attempt.status == archived, (job.status, attempt.status, attempt.completed_at)
-        if outcome == "cancelled":
-            assert job.physical_outcome is None and job.physical_completed_at is None
-            assert attempt.completed_at == job.completed_at
-        else:
-            assert attempt.completed_at == job.physical_completed_at
 
 
 async def test_archive_copy_failure_still_runs_configured_auto_off(alignment, monkeypatch):
@@ -745,72 +506,3 @@ async def test_late_archive_uses_immutable_outcome_after_restart_and_display_upd
         assert archive.failure_reason == (
             "HMS 0700_8012" if outcome == "failed" else "User cancelled" if outcome == "cancelled" else None
         )
-
-
-@pytest.mark.parametrize("skip", [False, True])
-async def test_heat_soak_archive_copy_failure_commits_before_auto_off(alignment, monkeypatch, skip):
-    from backend.app.services.lifecycle import dispatching as sched, preheating as heat
-    from backend.app.services.print_scheduler import PrintScheduler
-    from backend.app.services.printer_manager import printer_manager
-    from backend.app.services.smart_plug_manager import smart_plug_manager
-
-    scheduler = PrintScheduler()
-    service = scheduler._heat_soak
-    monkeypatch.setattr(sched, "async_session", alignment.sessions)
-    monkeypatch.setattr("backend.app.services.print_scheduler.scheduler", scheduler)
-    monkeypatch.setattr(service, "cleanup", AsyncMock())
-    state = SimpleNamespace(state="IDLE", connected=True, job_telemetry_ready=True, heat_soak_disconnected_at=0)
-    monkeypatch.setattr(printer_manager, "get_status", lambda _id: state)
-    monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
-    monkeypatch.setattr(printer_manager, "get_client", lambda _id: None)
-    monkeypatch.setattr(printer_manager, "_broadcast_status_change", AsyncMock())
-    monkeypatch.setattr(ArchiveService, "archive_print", AsyncMock(side_effect=OSError("Disk full")))
-
-    done = asyncio.Event()
-
-    async def power_off_after_commit(_printer_id, _db):
-        async with alignment.sessions() as observer:
-            assert (await observer.get(PrintQueueItem, alignment.job_id)).status == "failed"
-        done.set()
-
-    off = AsyncMock(side_effect=power_off_after_commit)
-    monkeypatch.setattr(smart_plug_manager, "schedule_off_after_queue_job", off)
-    handoffs = []
-
-    def capture_handoff(coroutine, *, name):
-        if name.startswith("heat-soak-dispatch"):
-            handoffs.append(coroutine)
-        else:
-            coroutine.close()
-
-    monkeypatch.setattr(heat, "spawn_background_task", capture_handoff)
-
-    monkeypatch.setattr("backend.app.services.lifecycle.dispatching.spawn_background_task", capture_handoff)
-    async with alignment.sessions() as db:
-        job = await db.get(PrintQueueItem, alignment.job_id)
-        now = heat.utcnow()
-        await enter_preheating(
-            db,
-            job,
-            {
-                "auto_off_after": True,
-                "chamber_heat_soak": True,
-                "heat_soak_minutes": 1,
-                "preheat_owner": service.owner,
-                "preheat_requested_at": now - timedelta(minutes=2),
-                "preheat_started_at": now - timedelta(minutes=2),
-                "preheat_checked_at": now,
-            },
-        )
-        await db.commit()
-        if skip:
-            await heat.skip_heat_soak(db, job)
-            assert len(handoffs) == 1
-            await handoffs.pop()
-        else:
-            assert await service.wait(db) == [job.id]
-            await scheduler.dispatcher.take_over(job.id)
-        await db.refresh(job)
-        assert job.status == "failed"
-        await asyncio.wait_for(done.wait(), 2)
-        off.assert_awaited_once()

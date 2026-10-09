@@ -15,14 +15,12 @@ from functools import partial
 from sqlalchemy import or_, select
 
 from backend.app.core.database import async_session, run_with_retry
-from backend.app.core.tasks import spawn_background_task
-from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import AWAITING_PLATE_CLEAR_STATUSES, FINAL_STATUSES, PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services import print_effects
 from backend.app.services.job_identity import event_identity, find_job, telemetry_identity
-from backend.app.services.lifecycle import dispatching, effects, preheating, printing
-from backend.app.services.lifecycle.engine import QueueTransitionConflict
+from backend.app.services.lifecycle import deadlines, effects, printing
+from backend.app.services.lifecycle.engine import hold_printer
 from backend.app.services.printer_manager import printer_manager
 
 logger = logging.getLogger(__name__)
@@ -35,10 +33,8 @@ _started_job_effects: dict[int, int] = {}  # The job whose new-print effects ran
 _completed_job_events: dict[int, int] = {}  # The job whose completion ran.
 # A Stop from the printer controls, which the printer reports as failed or aborted.
 _user_stopped_printers: set[int] = set()
-# Connected-edge reconciliation (#1542): armed once per connection, deferred
-# while the first real state after reconnect is active.
-_printer_reconciled_since_connect: dict[int, bool] = {}
-_pending_stale_reconciliation: set[int] = set()
+# Each printer's last known connection, so a connect or disconnect wakes recovery once.
+_connected: dict[int, bool] = {}
 
 
 @dataclass
@@ -94,21 +90,14 @@ async def _observe_print_start(printer_id: int, data: dict, *, recovering: bool 
     if not identity:
         return
     async with async_session() as db:
-        try:
-            await printing.bind_observed_id(db, printer_id, identity, data.get("previous_submission_id"))
-            # A delayed start cannot replace a plate hold. For a very short print,
-            # telemetry may already be terminal while this active snapshot waits
-            # behind another callback; its exact live identity still proves the run.
-            active = (data.get("raw_data") or {}).get("gcode_state") in _ACTIVE
-            live = printer_manager.get_status(printer_id)
-            item, _ = await printing.observe_print(
-                db, printer_id, identity, observed_state=live, active_snapshot=active
-            )
-        except QueueTransitionConflict:
-            # Stop/completion can win after the matching read. Discard the
-            # entire observation before publishing or running archive effects.
-            await db.rollback()
-            return
+        await hold_printer(db, printer_id)  # Read and write the printer's job as its only writer.
+        await printing.bind_observed_id(db, printer_id, identity, data.get("previous_submission_id"))
+        # A delayed start cannot replace a plate hold. For a very short print,
+        # telemetry may already be terminal while this active snapshot waits
+        # behind another callback; its exact live identity still proves the run.
+        active = (data.get("raw_data") or {}).get("gcode_state") in _ACTIVE
+        live = printer_manager.get_status(printer_id)
+        item, _ = await printing.observe_print(db, printer_id, identity, observed_state=live, active_snapshot=active)
         if item is None:
             return  # Missing identity or another job still owns this printer.
         start = {
@@ -140,18 +129,14 @@ async def print_state_changed(printer_id: int, data: dict) -> None:
     async with _lock(printer_id):
 
         async def _apply(db):
+            await hold_printer(db, printer_id)
             item = await find_job(db, printer_id, identity, ("printing", "paused"))
             if item is None:
                 return
             live = printer_manager.get_status(printer_id)
             if live is None or live.state != data.get("state"):
                 return  # A later push superseded this snapshot while the callback waited.
-            try:
-                changed = await printing.sync_print_state(db, item, live)
-            except QueueTransitionConflict:
-                await db.rollback()
-                return  # Stop, completion or another observation already won.
-            if changed:
+            if await printing.sync_print_state(db, item, live):
                 await db.commit()
 
         await run_with_retry(_apply, label="queue pause/resume", session_factory=async_session)
@@ -164,15 +149,6 @@ async def print_completed(printer_id: int, data: dict):
 
 async def _complete_identified_print(printer_id: int, data: dict):
     """End the identified job for the printer's report, then wait for its completion effects; False if none ended."""
-    # Connected-edge reconciliation runs in the background and can race with
-    # queue dispatch. A synthetic completion must never run while any print is
-    # active: its effects are printer-level, so even a stale archive for a
-    # different job must be deferred.
-    if data.get("_reconciled") and _is_printer_actively_printing(printer_manager.get_status(printer_id)):
-        logger.info(
-            "[CALLBACK] Ignoring stale reconciled completion for printer %s while a print is active", printer_id
-        )
-        return False
     if data.get("status", "completed") not in ("completed", "failed", "aborted", "cancelled"):
         return False
     identity = event_identity(data)
@@ -196,27 +172,19 @@ async def _complete_identified_print(printer_id: int, data: dict):
     _completed_job_events[printer_id] = job_id
     _user_stopped_printers.discard(printer_id)
     await effects.wait_for(completion)
-    # The real terminal callback has now completed its archive, queue and
-    # printer-level state changes. It is safe to reconcile any older stale
-    # archive from the same reconnect without racing the live completion.
-    _schedule_pending_stale_reconciliation(printer_id)
 
 
 async def _end(printer_id: int, identity: str | None, data: dict, stopped: bool, db):
     """The ended job's ID and its completion effects, or None for a duplicate or unidentified report."""
+    await hold_printer(db, printer_id)
     await printing.bind_observed_id(db, printer_id, identity, data.get("previous_submission_id"))
-    statuses = ("dispatching", "printing", "paused", "cancelled")
-    if data.get("_recovered_dispatch"):
-        statuses += ("finished", "failed", "successful")
-    job = await find_job(db, printer_id, identity, statuses)
+    job = await find_job(db, printer_id, identity, ("dispatching", "printing", "paused", "cancelled"))
     done = _completed_job_events.get(printer_id)
     if job is None or done == job.id or (job.status == "cancelled" and job.physical_outcome is not None):
         terminal = (*AWAITING_PLATE_CLEAR_STATUSES, *FINAL_STATUSES)
         ended = job or await find_job(db, printer_id, identity, terminal)
         if ended is not None and ended.status in terminal:
             return None
-    if job is None and identity:
-        job = await _adopt_legacy_archive(db, printer_id, identity)
     if job is None or done == job.id:
         return None
     job_id = job.id
@@ -225,149 +193,17 @@ async def _end(printer_id: int, identity: str | None, data: dict, stopped: bool,
     return job_id, effects.spawned(db)
 
 
-async def _adopt_legacy_archive(db, printer_id: int, identity: str) -> PrintQueueItem | None:
-    """A print an older version archived may finish while Grove is offline; its exact ID establishes a job.
-
-    ID-less or filename-only history cannot establish continuity.
-    """
-    archives = list(
-        await db.scalars(
-            select(PrintArchive).where(
-                PrintArchive.printer_id == printer_id,
-                PrintArchive.subtask_id == identity,
-                PrintArchive.status == "printing",
-                PrintArchive.dispatched_queue_item_id.is_(None),
-            )
-        )
-    )
-    if len(archives) != 1:
-        return None
-    job, _ = await printing.observe_print(db, printer_id, identity)
-    if job is not None:
-        archive = archives[0]
-        job.archive_id = archive.id
-        job.started_at = archive.started_at
-        archive.dispatched_queue_item_id = job.id
-        await db.commit()
-    return job
-
-
 async def printer_status(printer_id: int, state) -> None:
-    """Telemetry: let preheating watch its soaks, and reconcile missed completions on each reconnect.
+    """Telemetry: wake the lifecycle loop when a printer connects or disconnects, for recovery to run at once.
 
     MQTT's connect broadcast still carries construction defaults (state
-    "unknown"), so reconciliation waits for the first real push_status (#1679).
-    If that first state is active, it is deferred until the real terminal
-    completion, which it would otherwise race (#1542).
+    "unknown"), so a connection counts from the first real report (#1679).
     """
-    preheating.observe(printer_id, state)
     known = bool(state.state) and state.state.upper() not in ("", "UNKNOWN")
-    if state.connected and known and not _printer_reconciled_since_connect.get(printer_id, False):
-        _printer_reconciled_since_connect[printer_id] = True
-        dispatching.wake()
-        if _is_printer_actively_printing(state):
-            _pending_stale_reconciliation.add(printer_id)
-        elif printer_id in _pending_stale_reconciliation:
-            # A reconnect can begin in a terminal state without producing a
-            # separate completion callback. This is the safe fallback for a
-            # deferred reconciliation left by an earlier active reconnect.
-            _schedule_pending_stale_reconciliation(printer_id)
-        else:
-            spawn_background_task(
-                reconcile_stale_active_prints(printer_id), name=f"reconcile-stale-prints-{printer_id}"
-            )
-    elif not state.connected and _printer_reconciled_since_connect.get(printer_id, False):
-        _printer_reconciled_since_connect[printer_id] = False  # Re-arm for the next reconnect.
-        dispatching.wake()
-
-
-def _is_printer_actively_printing(state) -> bool:
-    """Whether ``state`` proves the printer is printing; a synthetic completion never runs then."""
-    current_state = (getattr(state, "state", "") or "").upper()
-    return bool(state and getattr(state, "connected", False) and current_state in _ACTIVE)
-
-
-def _schedule_pending_stale_reconciliation(printer_id: int) -> None:
-    """Run a deferred reconciliation once the printer is safe, re-arming it if not."""
-    if printer_id not in _pending_stale_reconciliation:
-        return
-
-    _pending_stale_reconciliation.remove(printer_id)
-
-    async def _run_reconciliation():
-        try:
-            await reconcile_stale_active_prints(printer_id)
-        finally:
-            # A new print may have started while reconciliation was querying
-            # the database, or the printer may have disconnected again. Keep
-            # the retry armed so the next terminal callback/reconnect can
-            # flush the stale archive safely.
-            state = printer_manager.get_status(printer_id)
-            if not state or not state.connected or _is_printer_actively_printing(state):
-                _pending_stale_reconciliation.add(printer_id)
-
-    spawn_background_task(_run_reconciliation(), name=f"reconcile-stale-prints-after-completion-{printer_id}")
-
-
-async def reconcile_stale_active_prints(printer_id: int) -> int:
-    """Complete each unlinked printing Archive whose exact print the printer now reports as ended.
-
-    Runs on each (re)connection and at startup. A print that finished during a
-    disconnect would otherwise keep its SD file, which the firmware replays
-    after a power cycle (#1542). Queue recovery owns linked jobs. Returns the
-    number of Archives reconciled.
-    """
-    state = printer_manager.get_status(printer_id)
-    # Never decide against stale cached state; the connected edge retries.
-    if not state or not state.connected:
-        return 0
-    async with async_session() as db:
-        result = await db.execute(
-            select(PrintArchive).where(PrintArchive.printer_id == printer_id, PrintArchive.status == "printing")
-        )
-        active = list(result.scalars().all())
-    if not active:
-        return 0
-    # The connected-edge task may have read an IDLE state just before queue
-    # dispatch started a print. Re-read after the database await so the stale
-    # snapshot cannot be used to synthesize completion for a live print.
-    state = printer_manager.get_status(printer_id)
-    if not state or not state.connected or _is_printer_actively_printing(state):
-        return 0
-    reconciled = 0
-    for archive in active:
-        if archive.dispatched_queue_item_id is not None:
-            continue  # Queue recovery owns the linked job and its outcome.
-        identity = telemetry_identity(state)
-        if not identity or identity != archive.subtask_id or state.state not in ("FINISH", "FAILED"):
-            continue
-        logger.info(
-            "[RECONCILE] Printer %s: synthesising missed PRINT COMPLETE for archive %s (%s) — %s",
-            printer_id,
-            archive.id,
-            archive.filename,
-            f"matching submission ID in {state.state}",
-        )
-        try:
-            # raw_data is the live state, so usage tracking can compare
-            # end-of-print remain% against the values captured at start.
-            completion_result = await print_completed(
-                printer_id,
-                {
-                    "status": "completed" if state.state == "FINISH" else "failed",
-                    "filename": archive.filename,
-                    "subtask_name": archive.print_name or "",
-                    "subtask_id": archive.subtask_id or "",
-                    "raw_data": state.raw_data or {},
-                    "_reconciled": True,
-                },
-            )
-            if completion_result is not False:
-                reconciled += 1
-        except Exception as e:
-            # The Archive stays printing; the next reconnect retries.
-            logger.warning("[RECONCILE] on_print_complete synthesis failed for archive %s: %s", archive.id, e)
-    return reconciled
+    connected = bool(state.connected and known)
+    if _connected.get(printer_id) != connected and (connected or printer_id in _connected):
+        _connected[printer_id] = connected
+        deadlines.wake()
 
 
 async def reconcile_print_archives() -> None:

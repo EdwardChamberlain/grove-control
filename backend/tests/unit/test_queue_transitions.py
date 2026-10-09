@@ -162,26 +162,6 @@ async def test_deleted_item_cannot_be_transitioned(sessions):
             await transition_queue_item(db, item, "queued", "dispatching")
 
 
-async def test_replaced_dispatch_claim_is_rejected_even_while_pending(sessions):
-    now = datetime.now()
-    item_id = await make_item(sessions, dispatching_at=now)
-    async with sessions() as db:
-        item = await db.get(PrintQueueItem, item_id)
-        with pytest.raises(QueueTransitionConflict):
-            await transition_queue_item(
-                db,
-                item,
-                "queued",
-                "dispatching",
-                conditions=(PrintQueueItem.dispatching_at == now - timedelta(seconds=1),),
-                values={"dispatch_subtask_id": "123"},
-            )
-        await db.rollback()
-        await db.refresh(item)
-        assert item.status == "queued"
-        assert item.dispatch_subtask_id is None
-
-
 async def test_status_and_metadata_share_callers_transaction(sessions):
     item_id = await make_item(sessions)
     async with sessions() as db:
@@ -276,43 +256,6 @@ async def test_late_scheduler_failure_cannot_overwrite_cancel_or_power_off(sessi
         assert await db.scalar(select(PrintQueueItem.status).where(PrintQueueItem.id == item_id)) == "unsuccessful"
 
 
-async def test_stop_winning_confirmation_race_does_not_publish_job_started(sessions):
-    from contextlib import asynccontextmanager
-
-    item_id = await make_item(sessions, "dispatching")
-    scheduler = PrintScheduler()
-    publish = AsyncMock()
-
-    @asynccontextmanager
-    async def racing_session():
-        async with sessions() as db:
-            original_get = db.get
-
-            async def read_then_stop(*args, **kwargs):
-                item = await original_get(*args, **kwargs)
-                await db.commit()
-                async with sessions() as user:
-                    current = await user.get(PrintQueueItem, item_id)
-                    await transition_queue_item(user, current, "dispatching", "cancelled")
-                    await user.commit()
-                return item
-
-            with patch.object(db, "get", read_then_stop):
-                yield db
-
-    with (
-        patch("backend.app.core.database.async_session", racing_session),
-        patch.object(scheduler.dispatcher, "_wait_for_ack", AsyncMock(return_value=("printing", None))),
-        patch.object(lifecycle_effects, "publish_queue_job_started", publish),
-    ):
-        await scheduler.dispatcher._confirm(item_id=item_id, printer_id=1, subtask_id="123")
-    publish.assert_not_awaited()
-    async with sessions() as db:
-        item = await db.get(PrintQueueItem, item_id)
-        assert item.status == "cancelled"
-        assert item.started_at is None
-
-
 async def test_conflict_does_not_autoflush_dirty_metadata(sessions):
     item_id = await make_item(sessions)
     statements = []
@@ -405,43 +348,3 @@ async def test_restart_recovery_skips_an_item_changed_mid_pass(sessions):
     async with sessions() as db:
         statuses = {item.id: item.status for item in (await db.scalars(select(PrintQueueItem))).all()}
     assert statuses == {raced: "cancelled", other: "printing"}
-
-
-async def test_heat_soak_dispatch_that_loses_a_race_still_turns_heaters_off(sessions):
-    async with sessions() as db:
-        printer = Printer(name="Printer", ip_address="127.0.0.1", serial_number="SOAK", access_code="code")
-        db.add(printer)
-        await db.commit()
-        printer_id = printer.id
-    scheduler = PrintScheduler()
-    item_id = await make_item(
-        sessions,
-        "dispatching",
-        printer_id=printer_id,
-        chamber_heat_soak=True,
-        preheat_owner=scheduler._heat_soak.owner,
-    )
-
-    async def inherit_after_user_cancel(db, item):
-        async with sessions() as user:
-            current = await user.get(PrintQueueItem, item.id)
-            await transition_queue_item(user, current, "dispatching", "cancelled")
-            await user.commit()
-        # The worker's copy still says dispatching, so the real writer conflicts.
-        await lifecycle_dispatching.fail(db, item, "Printer not connected")
-
-    heat_soak_printers = MagicMock()
-    heat_soak_printers.get_client.return_value = None
-    heat_soak_printers.get_status.return_value = None
-    with (
-        patch("backend.app.services.lifecycle.dispatching.async_session", sessions),
-        patch("backend.app.services.lifecycle.preheating.printer_manager", heat_soak_printers),
-        patch.object(scheduler.dispatcher, "_inherit", inherit_after_user_cancel),
-    ):
-        await scheduler.dispatcher.take_over(item_id)
-
-    async with sessions() as db:
-        item = await db.get(PrintQueueItem, item_id)
-        printer = await db.get(Printer, printer_id)
-        assert (item.status, item.manual_start, item.preheat_owner) == ("cancelled", False, None)
-        assert printer.heat_soak_shutdown_pending

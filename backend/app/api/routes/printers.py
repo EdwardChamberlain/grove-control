@@ -62,7 +62,7 @@ from backend.app.services.bambu_ftp import (
 )
 from backend.app.services.job_identity import find_job, telemetry_identity
 from backend.app.services.lifecycle.awaiting import clear_job_plate
-from backend.app.services.lifecycle.engine import InvalidQueueTransition, lock_queue_item, release_printer
+from backend.app.services.lifecycle.engine import InvalidQueueTransition, hold_printer, lock_queue_item, release_printer
 from backend.app.services.printer_diagnostic import run_connection_diagnostic
 from backend.app.services.printer_manager import (
     drying_screen_only,
@@ -3001,9 +3001,11 @@ async def stop_print(
     if not printer:
         raise HTTPException(404, "Printer not found")
 
+    await hold_printer(db, printer_id)
     item = await db.scalar(
         select(PrintQueueItem)
         .where(PrintQueueItem.printer_id == printer_id, PrintQueueItem.status.in_(ACTIVE_STATUSES))
+        .order_by(PrintQueueItem.id)
         .with_for_update()
     )
     if item is not None:

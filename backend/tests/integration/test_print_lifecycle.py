@@ -99,7 +99,6 @@ class TestPlateClearGate:
             patch("backend.app.services.printer_manager.printer_manager", manager),
             patch.object(print_effects, "ws_manager", AsyncMock()),
             patch.object(print_effects, "mqtt_relay", AsyncMock()),
-            patch.object(intake, "spawn_background_task", discard_background),
             patch.object(print_effects, "spawn_background_task", discard_background),
             patch("backend.app.services.lifecycle.effects.run_queue_outcome_effects", new=AsyncMock()),
             patch("backend.app.services.usage_tracker.on_print_complete", AsyncMock(return_value=[])),
@@ -310,90 +309,25 @@ class TestPlateClearGate:
         await clear_queue_plate(job.id, db_session, None)
         assert job.status == "successful"
 
-    async def test_legacy_external_archive_is_adopted_by_id(self, completion, db_session):
-        from datetime import datetime, timezone
-
-        from backend.app.models.archive import PrintArchive
-        from backend.app.models.print_queue import PrintQueueItem
-
-        await db_session.delete(completion.item)
-        archive = PrintArchive(
-            printer_id=completion.printer.id,
-            filename="same.3mf",
-            file_path="",
-            file_size=0,
-            status="printing",
-            subtask_id="legacy",
-            started_at=datetime.now(timezone.utc),
-        )
-        db_session.add(archive)
-        await db_session.commit()
-        await completion.complete(completion.printer.id, {"subtask_id": "legacy", "status": "completed"})
-        await db_session.refresh(archive)
-        job = await db_session.get(PrintQueueItem, archive.dispatched_queue_item_id)
-        assert job.status == "finished"
-        assert job.archive_id == archive.id
-        assert job.dispatch_subtask_id == "legacy"
-        assert archive.status == "completed"
-
 
 class TestPrintCompleteLogic:
     """Test print complete callback logic."""
 
     @pytest.mark.asyncio
     async def test_print_complete_no_import_errors(self, capture_logs):
-        """Verify on_print_complete doesn't have import shadowing issues."""
-        # Snapshot tasks before the call so we can cancel orphans afterwards.
-        # on_print_complete fires background tasks (maintenance check, notifications,
-        # smart-plug) via asyncio.create_task.  If those tasks outlive the mock
-        # context they use the *real* async_session and can send real notifications.
-        tasks_before = set(asyncio.all_tasks())
+        """Verify the print-complete callback delegates without import errors."""
+        from backend.app import main
 
-        with (
-            patch("backend.app.services.lifecycle.intake.async_session") as mock_session_maker,
-            patch("backend.app.services.print_effects.async_session", mock_session_maker),
-            patch("backend.app.services.print_effects.notification_service") as mock_notif,
-            patch("backend.app.services.print_effects.smart_plug_manager") as mock_plug,
-            patch("backend.app.services.print_effects.ws_manager") as mock_ws,
-            patch("backend.app.services.print_effects.mqtt_relay") as mock_relay,
-            patch("backend.app.services.lifecycle.intake.printer_manager") as mock_pm,
-            patch("backend.app.services.print_effects.printer_manager", mock_pm),
-        ):
-            mock_notif.on_print_complete = AsyncMock()
-            mock_plug.on_print_complete = AsyncMock()
-            mock_ws.send_print_complete = AsyncMock()
-            mock_ws.broadcast = AsyncMock()
-            mock_relay.on_print_complete = AsyncMock()
-            mock_pm.get_printer.return_value = None
-
-            # Mock the database session
-            mock_session = AsyncMock()
-            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_session.__aexit__ = AsyncMock()
-            mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
-            mock_session_maker.return_value = mock_session
-
-            from backend.app.main import on_print_complete
-
-            await on_print_complete(
-                1,
-                {
-                    "status": "completed",
-                    "filename": "/data/Metadata/test.gcode",
-                    "subtask_name": "Test",
-                    "timelapse_was_active": False,
-                },
-            )
-
-            # Cancel background tasks spawned by on_print_complete before
-            # leaving the mock context — prevents them from running with
-            # the real async_session and sending real notifications.
-            for task in asyncio.all_tasks() - tasks_before:
-                task.cancel()
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):
-                    pass
+        completed = AsyncMock(return_value="completed")
+        data = {
+            "status": "completed",
+            "filename": "/data/Metadata/test.gcode",
+            "subtask_name": "Test",
+            "timelapse_was_active": False,
+        }
+        with patch.object(main.intake, "print_completed", new=completed):
+            assert await main.on_print_complete(1, data) == "completed"
+        completed.assert_awaited_once_with(1, data)
 
         # Verify no import shadowing errors - this would have caught the ArchiveService bug
         errors = [r for r in capture_logs.get_errors() if "cannot access local variable" in str(r.message)]

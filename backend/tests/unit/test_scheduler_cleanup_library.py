@@ -230,7 +230,6 @@ async def _dispatch_library_item(
             assigned_notification or AsyncMock(),
         ),
         patch("backend.app.services.mqtt_relay.mqtt_relay.on_queue_job_started", AsyncMock()),
-        patch.object(scheduler.dispatcher, "_confirm_later", MagicMock()),
     ]
     if unlink_side_effect:
         patches.append(patch.object(type(ctx.source_path), "unlink", unlink_side_effect))
@@ -244,7 +243,7 @@ async def _dispatch_library_item(
             stack.enter_context(patcher)
 
         if binding is not None:
-            # The real worker path: claim, then bind only at the hold.
+            # The real worker path: bind only at the hold.
             await scheduler.workers._work(ctx.queue_item_id, binding)
             return
         async with ctx.session_maker() as db:
@@ -287,10 +286,6 @@ async def test_live_upload_is_not_a_dispatch_confirmation_prompt(queue_factory):
 
     ctx = await queue_factory(cleanup=False)
 
-    async def claim(db, item):
-        item.dispatching_at = datetime.now(timezone.utc)
-        await db.commit()
-
     async def uploading(*_args, **_kwargs):
         ctx.start_print.assert_not_called()
         async with ctx.session_maker() as db:
@@ -307,7 +302,7 @@ async def test_live_upload_is_not_a_dispatch_confirmation_prompt(queue_factory):
         return True
 
     ctx.upload.side_effect = uploading
-    await _dispatch_library_item(ctx, before_reservation=claim)
+    await _dispatch_library_item(ctx)
     ctx.start_print.assert_called_once()
     item, _, _ = await _queue_snapshot(ctx)
     assert item.status == "dispatching" and item.started_at is None
@@ -756,33 +751,6 @@ async def test_failed_upload_holds_printer_until_clear_even_with_confirmation_of
     ctx.start_print.assert_called_once()
 
 
-@pytest.mark.parametrize("change", ["printer_id", "dispatching_at"])
-@pytest.mark.asyncio
-async def test_reservation_rejects_a_retargeted_job_or_replaced_claim_before_ftp(queue_factory, change):
-    from datetime import datetime, timezone
-
-    from backend.app.services.lifecycle.engine import QueueTransitionConflict
-
-    ctx = await queue_factory(cleanup=True)
-
-    async def change_before_reservation(db, item):
-        value = None if change == "printer_id" else datetime.now(timezone.utc)
-        # A second writer changes metadata while this worker holds a stale ORM snapshot.
-        await db.execute(PrintQueueItem.__table__.update().where(PrintQueueItem.id == item.id).values({change: value}))
-        await db.commit()
-
-    with pytest.raises(QueueTransitionConflict):
-        await _dispatch_library_item(ctx, before_reservation=change_before_reservation)
-    item, library, _ = await _queue_snapshot(ctx)
-    assert item.status == "queued" and library is not None
-    if change == "printer_id":
-        assert item.printer_id is None
-    else:
-        assert item.dispatching_at is not None
-    ctx.upload.assert_not_awaited()
-    ctx.start_print.assert_not_called()
-
-
 async def _make_any_machine_job(ctx):
     """Turn the case's job into an "Any machine" job, as the Queue creates it."""
     async with ctx.session_maker() as db:
@@ -796,35 +764,6 @@ async def _make_any_machine_job(ctx):
 async def _row(ctx):
     async with ctx.session_maker() as db:
         return await db.get(PrintQueueItem, ctx.queue_item_id)
-
-
-@pytest.mark.asyncio
-async def test_any_machine_job_gets_its_printer_only_from_the_hold_transition(queue_factory):
-    from backend.app.services.lifecycle.queued import _DispatchBinding
-
-    ctx = await queue_factory(cleanup=False)
-    await _make_any_machine_job(ctx)
-    held_during_upload = []
-
-    async def upload(*_args, **_kwargs):
-        row = await _row(ctx)
-        held_during_upload.append((row.status, row.printer_id, row.ams_mapping))
-        return True
-
-    ctx.upload.side_effect = upload
-    assigned = AsyncMock()
-    await _dispatch_library_item(
-        ctx, binding=_DispatchBinding(ctx.printer_id, "[4]", unassigned=True), assigned_notification=assigned
-    )
-
-    # The printer and its tray mapping were written with the move out of the
-    # queue, before the upload, and nowhere earlier.
-    assert held_during_upload == [("dispatching", ctx.printer_id, "[4]")]
-    row = await _row(ctx)
-    assert (row.status, row.printer_id, row.target_model) == ("dispatching", ctx.printer_id, "X1C")
-    assert row.dispatching_at is None
-    assigned.assert_awaited_once()
-    assert assigned.await_args.kwargs["printer_id"] == ctx.printer_id
 
 
 @pytest.mark.parametrize("pool", [True, False], ids=["any-machine", "specific-machine"])
@@ -884,40 +823,6 @@ async def _selection_binding(ctx, printer_id, ams_mapping, *, unassigned):
     async with ctx.session_maker() as db:
         item = await db.get(PrintQueueItem, ctx.queue_item_id)
         return _DispatchBinding.for_item(item, printer_id, ams_mapping, unassigned=unassigned)
-
-
-@pytest.mark.parametrize(
-    "edit",
-    [
-        {"target_model": "X1E"},
-        {"ams_mapping": "[1]"},
-        {"manual_start": True},
-        {"scheduled_time": "future"},
-    ],
-    ids=["retargeted-model", "tray-mapping", "manual-start", "postponed"],
-)
-@pytest.mark.asyncio
-async def test_edit_accepted_after_selection_is_not_dispatched_with_the_stale_decision(queue_factory, edit):
-    from datetime import datetime, timedelta
-
-    ctx = await queue_factory(cleanup=False)
-    await _make_any_machine_job(ctx)
-    # Selection chose this X1C printer and computed a tray mapping for it.
-    binding = await _selection_binding(ctx, ctx.printer_id, "[4]", unassigned=True)
-    async with ctx.session_maker() as db:
-        item = await db.get(PrintQueueItem, ctx.queue_item_id)
-        for name, value in edit.items():
-            setattr(item, name, datetime.now() + timedelta(days=1) if value == "future" else value)
-        await db.commit()
-
-    await _dispatch_library_item(ctx, binding=binding)
-
-    row = await _row(ctx)
-    assert (row.status, row.printer_id, row.dispatching_at) == ("queued", None, None)
-    for name, value in edit.items():
-        if value != "future":
-            assert getattr(row, name) == value, "the accepted edit is kept"
-    ctx.upload.assert_not_awaited()
 
 
 @pytest.mark.asyncio

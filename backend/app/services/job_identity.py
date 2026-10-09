@@ -5,12 +5,13 @@ prints with no firmware ID get a session ID from the MQTT client; after an
 application restart that ID cannot prove continuity, so the old job stays put.
 """
 
-from datetime import datetime, timezone
+from datetime import timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models.print_queue import ACTIVE_STATUSES, PrintQueueItem
+from backend.app.services.lifecycle import clock
 
 
 def normalize_id(value) -> str | None:
@@ -45,18 +46,20 @@ def printer_active(printer_id: int | None) -> bool:
 
 
 def needs_dispatch_resolution(item: PrintQueueItem) -> bool:
+    from backend.app.services.lifecycle.queued import in_flight
+
     # The reservation covers preparation too. A live upload/Archive worker
     # has not yet handed the attempt to confirmation; it cannot be resolved
     # as printing (or failed) while that worker may still send the command.
     if (
         item.status != "dispatching"
-        or item.dispatching_at is not None
+        or in_flight(item.id)
         or not normalize_id(item.dispatch_subtask_id)
         or item.dispatched_at is None
     ):
         return False
     sent = item.dispatched_at
-    return (datetime.now(timezone.utc) - sent.replace(tzinfo=timezone.utc)).total_seconds() >= 270
+    return (clock.now() - sent.replace(tzinfo=timezone.utc)).total_seconds() >= 270
 
 
 async def find_job(db: AsyncSession, printer_id: int, identity: str | None, statuses=ACTIVE_STATUSES):

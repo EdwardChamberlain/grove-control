@@ -4732,9 +4732,12 @@ async def bulk_delete(
     Files not owned by the user are skipped (unless user has *_all permission).
     """
     user, can_modify_all = auth_result
-    deleted_files = 0
-    deleted_folders = 0
     skipped_files = 0
+    deleted_file_ids: set[int] = set()
+    queue_release_file_ids: set[int] = set()
+    external_files: dict[int, LibraryFile] = {}
+    managed_files: dict[int, LibraryFile] = {}
+    folders: dict[int, LibraryFolder] = {}
 
     # Delete files first. Managed files go to trash (sweeper hard-deletes bytes
     # later); external files bypass trash since their disk state is outside our
@@ -4756,13 +4759,11 @@ async def bulk_delete(
                     abs_thumb_path.unlink()
                 except OSError as e:
                     logger.warning("Failed to delete thumbnail from disk: %s", e)
-            from backend.app.services.library_trash import release_queue_references
-
-            await release_queue_references(db, [file.id])
-            await db.delete(file)
+            external_files[file.id] = file
+            queue_release_file_ids.add(file.id)
         else:
-            file.deleted_at = now
-        deleted_files += 1
+            managed_files[file.id] = file
+        deleted_file_ids.add(file.id)
 
     # Delete folders (cascade will handle contents)
     # Note: Folders don't have ownership tracking currently, require *_all permission
@@ -4779,17 +4780,31 @@ async def bulk_delete(
             # cascade runs or ON DELETE CASCADE will silently remove queued
             # items instead of cancelling/detaching them.
             folder_file_ids = await _collect_descendant_file_ids(db, folder_id)
-            file_count_result = await db.execute(
-                select(func.count(LibraryFile.id))
+            active_file_ids = await db.scalars(
+                select(LibraryFile.id)
                 .where(LibraryFile.id.in_(folder_file_ids))
                 .where(LibraryFile.deleted_at.is_(None))
             )
-            deleted_files += file_count_result.scalar() or 0
-            from backend.app.services.library_trash import release_queue_references
+            deleted_file_ids.update(active_file_ids)
+            queue_release_file_ids.update(folder_file_ids)
+            folders[folder_id] = folder
 
-            await release_queue_references(db, folder_file_ids)
-            await db.delete(folder)
-            deleted_folders += 1
+    # Release every affected queue reference in one lifecycle transaction so
+    # all printer locks are acquired before any queue rows are written.
+    if queue_release_file_ids:
+        from backend.app.services.library_trash import release_queue_references
+
+        await release_queue_references(db, sorted(queue_release_file_ids))
+
+    for file in managed_files.values():
+        file.deleted_at = now
+    for file in external_files.values():
+        await db.delete(file)
+    for folder in folders.values():
+        await db.delete(folder)
+
+    deleted_files = len(deleted_file_ids)
+    deleted_folders = len(folders)
 
     await db.commit()
 

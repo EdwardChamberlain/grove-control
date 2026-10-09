@@ -24,23 +24,17 @@ from backend.app.services.lifecycle.dispatching import SOAKING, is_soaking
 from backend.app.services.lifecycle.engine import (
     ALLOWED_TRANSITIONS,
     QueueTransitionConflict,
-    enter_state,
     transition_queue_item,
 )
 from backend.tests.unit.test_chamber_heat_soak import soak  # noqa: F401
 
-CLAIM = ("preheat_owner", "preheat_started_at", "preheat_checked_at")
 REQUESTED = datetime(2026, 1, 1, 12, 0)
 
 
 async def enter_preheating(db, job, values=None) -> None:
-    """Hold a queued job in preheating through the engine, for tests that start from a soak.
-
-    The heater step is specified in test_chamber_heat_soak, so it is stubbed
-    here: the soak's heaters are already on, as ``values`` describes.
-    """
-    with patch.object(preheating, "on_entered", AsyncMock(return_value=True)):
-        assert await enter_state(db, job, "queued", "preheating", values=values)
+    """Hold a queued job in preheating, for tests that start from a soak whose heaters are on, as ``values`` says."""
+    await transition_queue_item(db, job, "queued", "preheating", values=values)
+    await db.commit()
 
 
 @pytest.fixture
@@ -70,58 +64,6 @@ async def preheating_job(sessions) -> int:
         db.add(item)
         await db.commit()
         return item.id
-
-
-@pytest.mark.parametrize(
-    "after,action",
-    [("dispatching", None), ("failed", None), ("cancelled", "cancel"), ("unsuccessful", "printer_deleted")],
-)
-async def test_leaving_preheating_releases_the_soak_unless_dispatching_inherits_it(sessions, after, action):
-    item_id = await preheating_job(sessions)
-    async with sessions() as db:
-        item = await db.get(PrintQueueItem, item_id)
-        await transition_queue_item(db, item, "preheating", after, action=action)
-        await db.commit()
-        released = after != "dispatching"
-        assert all((getattr(item, field) is None) == released for field in CLAIM)
-    async with sessions() as db:
-        row = await db.get(PrintQueueItem, item_id)
-        assert row.status == after
-        assert all((getattr(row, field) is None) == released for field in CLAIM)
-        assert row.preheat_requested_at == REQUESTED
-        # Exit shuts the heaters down; a deleted printer has none left to shut down.
-        shut_down = after in ("failed", "cancelled")
-        assert (await db.get(Printer, 1)).heat_soak_shutdown_pending is shut_down
-    assert effects.shut_down_heaters.called is shut_down
-    # The next state doesn't clean up after preheating.
-    assert not any(outcome.args[1].shut_down_heaters for outcome in effects.queue_outcome_effect.call_args_list)
-
-
-async def test_exit_runs_only_after_the_conditional_write(sessions):
-    item_id = await preheating_job(sessions)
-    async with sessions() as db:
-        item = await db.get(PrintQueueItem, item_id)
-        with pytest.raises(QueueTransitionConflict):
-            await transition_queue_item(
-                db, item, "preheating", "failed", conditions=(PrintQueueItem.preheat_owner == "another-worker",)
-            )
-        await db.rollback()
-    async with sessions() as db:
-        row = await db.get(PrintQueueItem, item_id)
-        assert row.status == "preheating" and row.preheat_owner == "worker"
-        assert not (await db.get(Printer, 1)).heat_soak_shutdown_pending
-    effects.shut_down_heaters.assert_not_called()
-
-
-async def test_a_same_state_write_is_not_an_exit(sessions):
-    item_id = await preheating_job(sessions)
-    async with sessions() as db:
-        item = await db.get(PrintQueueItem, item_id)
-        await transition_queue_item(db, item, "preheating", "preheating", values={"error_message": "Inspect"})
-        await db.commit()
-    async with sessions() as db:
-        row = await db.get(PrintQueueItem, item_id)
-        assert row.preheat_owner == "worker" and row.preheat_checked_at == REQUESTED
 
 
 def test_every_exit_belongs_to_a_lifecycle_state_module():
@@ -170,48 +112,6 @@ async def test_failed_reservation_commit_never_enters_heating(soak):
     soak.client.set_airduct_mode.assert_not_called()
 
 
-async def test_stop_after_reservation_commit_prevents_heater_entry(soak, monkeypatch):
-    commit = soak.db.commit
-
-    async def stop_after_commit():
-        await commit()
-        async with AsyncSession(soak.engine, expire_on_commit=False) as user:
-            current = await user.get(PrintQueueItem, soak.item.id)
-            await transition_queue_item(user, current, "preheating", "cancelled", action="cancel")
-            await user.commit()
-
-    monkeypatch.setattr(soak.db, "commit", stop_after_commit)
-    assert not await soak.service.enter(soak.db, soak.item)
-    await soak.wait_effects()
-    await soak.db.refresh(soak.item)
-    assert soak.item.status == "cancelled"
-    assert soak.item.preheat_owner is None
-    assert call(60) not in soak.client.set_bed_temperature.call_args_list
-    assert call(60) not in soak.client.set_chamber_temperature.call_args_list
-    assert call("heating") not in soak.client.set_airduct_mode.call_args_list
-
-
-async def test_rolled_back_exit_preserves_the_timer_and_printer_view(soak):
-    assert await soak.service.enter(soak.db, soak.item)
-    started = soak.item.preheat_started_at
-    soak.client.reset_mock()
-    await transition_queue_item(soak.db, soak.item, "preheating", "failed")
-    assert soak.state.preheating
-    await soak.db.rollback()
-    await soak.db.refresh(soak.item)
-    await soak.db.refresh(soak.printer)
-    assert (soak.item.status, soak.item.preheat_owner, soak.item.preheat_started_at) == (
-        "preheating",
-        soak.service.owner,
-        started,
-    )
-    assert soak.state.preheating
-    assert not soak.printer.heat_soak_shutdown_pending
-    await soak.wait_effects()
-    soak.client.set_bed_temperature.assert_not_called()
-    soak.client.set_chamber_temperature.assert_not_called()
-
-
 async def test_a_transition_outside_preheating_does_not_load_deferred_columns(soak):
     soak.db.expunge(soak.item)
     item = await soak.db.scalar(select(PrintQueueItem).options(defer(PrintQueueItem.chamber_heat_soak)))
@@ -220,35 +120,3 @@ async def test_a_transition_outside_preheating_does_not_load_deferred_columns(so
     await soak.db.commit()
     assert item.status == "dispatching"
     soak.client.set_bed_temperature.assert_not_called()
-
-
-async def test_a_pass_that_selected_a_soak_before_skip_leaves_the_handoff_alone(soak, monkeypatch):
-    from backend.app.services.print_scheduler import scheduler
-
-    assert await soak.service.enter(soak.db, soak.item)
-    monkeypatch.setattr(scheduler, "_heat_soak", soak.service)
-    monkeypatch.setattr(scheduler.dispatcher, "take_over", AsyncMock())
-    lock = preheating.lock_queue_item
-
-    async def skip_then_lock(db, item_id):
-        # Skip commits between this pass's select and its lock of the row.
-        monkeypatch.setattr(preheating, "lock_queue_item", lock)
-        async with AsyncSession(soak.engine, expire_on_commit=False) as user:
-            result = await preheating.skip_heat_soak(user, await lock(user, item_id))
-        assert result == preheating.SkipHeatSoakResult.SKIPPED
-        return await lock(db, item_id)
-
-    monkeypatch.setattr(preheating, "lock_queue_item", skip_then_lock)
-    assert await soak.service.wait(soak.db) == []
-    await soak.db.refresh(soak.item)
-    assert (soak.item.status, soak.item.error_message) == ("dispatching", None)
-    scheduler.dispatcher.take_over.assert_called_once_with(soak.item.id)
-
-
-async def test_a_handoff_for_another_printer_leaves_the_soak_alone(soak):
-    assert await soak.service.enter(soak.db, soak.item)
-    values = {"dispatching_at": preheating.utcnow()}
-    handoff = await preheating._hand_off(soak.db, soak.item.id, soak.service.owner, 2, values)
-    assert handoff == (False, preheating.SkipHeatSoakResult.SOAK_CHANGED)
-    await soak.db.refresh(soak.item)
-    assert (soak.item.status, soak.item.printer_id) == ("preheating", 1)

@@ -65,10 +65,13 @@ class PrintQueueItem(Base):
     chamber_heat_soak: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     heat_soak_temperature: Mapped[int] = mapped_column(Integer, default=60, server_default="60")
     heat_soak_minutes: Mapped[int] = mapped_column(Integer, default=30, server_default="30")
-    preheat_owner: Mapped[str | None] = mapped_column(String(36), nullable=True)
     preheat_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    preheat_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     preheat_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # The job's one pending wait (#217): when it falls due and what for. A
+    # status change clears it unless the transition sets a new one.
+    deadline_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    deadline_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     # Power management
     auto_off_after: Mapped[bool] = mapped_column(Boolean, default=False)  # Power off printer after print
@@ -131,7 +134,6 @@ class PrintQueueItem(Base):
     # preparation or FTP I/O so pending rows cannot be reassigned or selected
     # by another worker. The claim is cleared when the worker exits; startup
     # reconciliation clears claims left by a process restart.
-    dispatching_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Set by the dispatch scheduler when the assigned spool can't satisfy
     # this print's per-slot filament weight (#1496). Display-only flag — the

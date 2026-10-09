@@ -114,6 +114,18 @@ def reset_auth_enabled_cache():
     invalidate_auth_enabled_cache()
 
 
+@pytest.fixture(autouse=True)
+def reset_printer_locks():
+    """Each test starts with no printer locks held; a test that leaks a transaction can't block the next."""
+    from backend.app.services.lifecycle import engine
+
+    engine._printer_locks.clear()
+    engine._holders.clear()
+    yield
+    engine._printer_locks.clear()
+    engine._holders.clear()
+
+
 @pytest.fixture(scope="session")
 def event_loop():
     """Create an instance of the default event loop for each test session."""

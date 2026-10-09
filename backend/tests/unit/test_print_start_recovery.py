@@ -47,7 +47,6 @@ async def test_paced_reconciliation_repairs_archive_without_repeating_start_effe
     monkeypatch.setattr(main.printer_manager, "get_client", lambda _id: client)
     monkeypatch.setattr(main.printer_manager, "get_printer", lambda _id: None)
     monkeypatch.setattr(intake, "_job_event_locks", {})
-    monkeypatch.setattr(intake, "_printer_reconciled_since_connect", {1: True})
     monkeypatch.setattr(main, "_printer_last_connected", {1: True})
     monkeypatch.setattr(main, "_last_status_broadcast", {})
     monkeypatch.setattr(print_effects, "get_ftp_retry_settings", AsyncMock(return_value=(False, 0, 0, 1)))
@@ -165,41 +164,6 @@ async def test_archive_reconciliation_requires_fresh_matching_started_job(sessio
     finally:
         if lock.locked():
             lock.release()
-
-
-async def test_scheduler_paces_archive_reconciliation_without_overlapping_passes(monkeypatch):
-    import backend.app.main as main
-    from backend.app.services import print_effects
-    from backend.app.services.lifecycle import intake
-    from backend.app.services.print_scheduler import PrintScheduler
-
-    scheduler = PrintScheduler()
-    monkeypatch.setattr(scheduler.dispatcher, "start", AsyncMock())
-    monkeypatch.setattr(scheduler, "check_queue", AsyncMock(return_value=False))
-    scheduler._check_interval = 0.001
-    monkeypatch.setattr("backend.app.services.print_scheduler.ARCHIVE_RECONCILE_INTERVAL_SECONDS", 0.01)
-    calls = []
-    release = asyncio.Event()
-    repeated = asyncio.Event()
-
-    async def repair():
-        calls.append(1)
-        if len(calls) == 2:
-            repeated.set()
-        await release.wait()
-
-    monkeypatch.setattr(intake, "reconcile_print_archives", repair)
-    task = asyncio.create_task(scheduler.run())
-    try:
-        await asyncio.sleep(0.03)
-        assert len(calls) == 1  # An unfinished pass blocks another start.
-        release.set()
-        await asyncio.wait_for(repeated.wait(), 1)
-        assert scheduler.check_queue.await_count > len(calls)
-    finally:
-        scheduler.stop()
-        release.set()
-        await task
 
 
 @pytest.mark.parametrize("archive_kind", ["linked", "unlinked", "downloaded"])

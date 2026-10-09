@@ -43,7 +43,14 @@ from backend.app.services.filament_requirements import (
 from backend.app.services.job_identity import needs_dispatch_resolution
 from backend.app.services.lifecycle.awaiting import clear_job_plate
 from backend.app.services.lifecycle.dispatching import unsent
-from backend.app.services.lifecycle.engine import InvalidQueueTransition, lock_queue_item, transition_queue_item
+from backend.app.services.lifecycle.engine import (
+    InvalidQueueTransition,
+    QueueTransitionConflict,
+    hold_printers,
+    lock_queue_item,
+    lock_queue_items,
+    transition_queue_item,
+)
 from backend.app.services.lifecycle.preheating import SkipHeatSoakResult, heat_soak_dispatch_started, skip_heat_soak
 from backend.app.services.lifecycle.queued import create_job, filament_contract
 from backend.app.services.notification_service import notification_service
@@ -841,6 +848,7 @@ async def bulk_update_queue_items(
     Items not owned by the user are also skipped (unless user has *_all permission).
     """
     user, can_modify_all = auth_result
+    owner_id = user.id if user is not None else None
 
     if not data.item_ids:
         raise HTTPException(400, "No item IDs provided")
@@ -850,27 +858,44 @@ async def bulk_update_queue_items(
     if not update_data:
         raise HTTPException(400, "No fields to update")
 
-    # Validate printer_id if being changed
-    if "printer_id" in update_data and update_data["printer_id"] is not None:
-        result = await db.execute(select(Printer).where(Printer.id == update_data["printer_id"]))
-        if not result.scalar_one_or_none():
-            raise HTTPException(400, "Printer not found")
-
-    # Fetch all items
-    result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.id.in_(data.item_ids)))
-    items = result.scalars().all()
+    # Discover assignments without row locks, then take every source and
+    # destination printer lock before the batch's ordered job row locks.
+    result = await db.execute(
+        select(PrintQueueItem.id, PrintQueueItem.printer_id).where(PrintQueueItem.id.in_(data.item_ids))
+    )
+    expected_printers = dict(result.all())
+    target_printer_id = update_data.get("printer_id")
+    await db.rollback()  # Do not carry a stale SQLite read snapshot while waiting for printer locks.
+    try:
+        await hold_printers(db, [*expected_printers.values(), target_printer_id])
+        if target_printer_id is not None:
+            printer_exists = await db.scalar(select(Printer.id).where(Printer.id == target_printer_id))
+            if printer_exists is None:
+                await db.rollback()
+                raise HTTPException(400, "Printer not found")
+        current_result = await db.execute(
+            select(PrintQueueItem.id, PrintQueueItem.printer_id).where(PrintQueueItem.id.in_(expected_printers))
+        )
+        current_printers = dict(current_result.all())
+        if any(expected_printers[item_id] != printer_id for item_id, printer_id in current_printers.items()):
+            await db.rollback()
+            raise HTTPException(409, "A queue item's printer changed; refresh before updating the selection")
+        items_by_id = await lock_queue_items(db, expected_printers)
+    except QueueTransitionConflict as exc:
+        await db.rollback()
+        raise HTTPException(409, "A queue item's printer changed; refresh before updating the selection") from exc
 
     updated_count = 0
     skipped_count = 0
 
-    for item in items:
-        item = await lock_queue_item(db, item.id)
-        if not item or item.status != "queued" or item.dispatching_at is not None:
+    for item_id in sorted(expected_printers):
+        item = items_by_id.get(item_id)
+        if not item or item.status != "queued":
             skipped_count += 1
             continue
 
         # Ownership check
-        if not can_modify_all and item.created_by_id != user.id:
+        if not can_modify_all and item.created_by_id != owner_id:
             skipped_count += 1
             continue
 
@@ -942,8 +967,29 @@ async def update_queue_item(
 ):
     """Update a queue item."""
     user, can_modify_all = auth_result
+    owner_id = user.id if user is not None else None
+    update_data = data.model_dump(exclude_unset=True)
 
-    item = await lock_queue_item(db, item_id)
+    snapshot = await db.execute(
+        select(PrintQueueItem.id, PrintQueueItem.printer_id).where(PrintQueueItem.id == item_id)
+    )
+    row = snapshot.first()
+    if row is None:
+        raise HTTPException(404, "Queue item not found")
+    expected_printer_id = row.printer_id
+    target_printer_id = update_data.get("printer_id", expected_printer_id)
+    await db.rollback()  # Start lock acquisition without retaining a stale SQLite read snapshot.
+    try:
+        await hold_printers(db, [expected_printer_id, target_printer_id])
+        if target_printer_id is not None:
+            printer_exists = await db.scalar(select(Printer.id).where(Printer.id == target_printer_id))
+            if printer_exists is None:
+                await db.rollback()
+                raise HTTPException(400, "Printer not found")
+        item = (await lock_queue_items(db, {item_id: expected_printer_id}))[item_id]
+    except QueueTransitionConflict as exc:
+        await db.rollback()
+        raise HTTPException(409, "A queue item's printer changed; refresh before updating it") from exc
     if item:
         # Keep the write lock from above while eager-loading candidates for the
         # edit guard and response payload.
@@ -958,16 +1004,11 @@ async def update_queue_item(
 
     # Ownership check
     if not can_modify_all:
-        if item.created_by_id != user.id:
+        if item.created_by_id != owner_id:
             raise HTTPException(403, "You can only update your own queue items")
 
     if item.status != "queued":
         raise HTTPException(400, "Can only update pending items")
-
-    if item.status == "queued" and item.dispatching_at is not None:
-        raise HTTPException(409, "Item is being dispatched — cancel it first to make changes")
-
-    update_data = data.model_dump(exclude_unset=True)
 
     # Normalize target_model if being updated (see add_to_queue for why the
     # code map has to run first).
@@ -997,12 +1038,6 @@ async def update_queue_item(
     new_target_model = update_data.get("target_model", item.target_model)
     if new_printer_id and new_target_model:
         raise HTTPException(400, "Cannot specify both printer_id and target_model")
-
-    # Validate new printer_id if being changed (and not None)
-    if "printer_id" in update_data and update_data["printer_id"] is not None:
-        result = await db.execute(select(Printer).where(Printer.id == update_data["printer_id"]))
-        if not result.scalar_one_or_none():
-            raise HTTPException(400, "Printer not found")
 
     # Validate target_model has active printers
     if "target_model" in update_data and update_data["target_model"]:
@@ -1100,15 +1135,6 @@ async def update_queue_item(
             json.dumps(update_data["nozzle_mapping"]) if update_data["nozzle_mapping"] else None
         )
 
-    # Validation above contains awaits, so a scheduler worker may have claimed
-    # this row after the initial guard. Re-check immediately before mutating it.
-    if item.status == "queued":
-        claimed = (
-            await db.execute(select(PrintQueueItem.dispatching_at).where(PrintQueueItem.id == item_id))
-        ).scalar_one_or_none()
-        if claimed is not None:
-            raise HTTPException(409, "Item is being dispatched — cancel it first to make changes")
-
     for field, value in update_data.items():
         setattr(item, field, value)
 
@@ -1178,6 +1204,7 @@ async def reorder_queue(
 ):
     """Bulk update positions for pending queue items within the caller's scope."""
     user, can_modify_all = auth_result
+    owner_id = user.id if user is not None else None
     if user is not None and not user.has_permission(Permission.QUEUE_REORDER.value):
         raise HTTPException(403, "You do not have permission to reorder queue items")
 
@@ -1187,33 +1214,37 @@ async def reorder_queue(
     if not item_ids:
         return {"message": "Reordered 0 items"}
 
-    result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.id.in_(item_ids)).with_for_update())
-    items_by_id = {item.id: item for item in result.scalars().all()}
-
+    result = await db.execute(select(PrintQueueItem).where(PrintQueueItem.id.in_(item_ids)))
+    discovered = {item.id: item for item in result.scalars().all()}
+    initial_printers = {item_id: item.printer_id for item_id, item in discovered.items()}
+    pending: dict[int, PrintQueueItem] = {}
     if user is not None and not can_modify_all:
-        requested_items = [items_by_id.get(item_id) for item_id in item_ids]
-        if any(item is None for item in requested_items):
+        discovered_items = [discovered.get(item_id) for item_id in item_ids]
+        if any(item is None for item in discovered_items):
             raise HTTPException(404, "Queue item not found")
-        if any(item.status != "queued" for item in requested_items if item is not None):
+        if any(item.status != "queued" for item in discovered_items if item is not None):
             raise HTTPException(400, "Only pending queue items can be reordered")
-        if any(item.created_by_id != user.id for item in requested_items if item is not None):
+        if any(item.created_by_id != owner_id for item in discovered_items if item is not None):
             raise HTTPException(403, "You can only reorder your own queue items")
-
-        # An own-only caller may rearrange an owned contiguous block, but must
-        # not be able to jump it over another user's item by submitting an
-        # arbitrary position.  The submitted positions therefore have to be
-        # the same positions currently occupied by the requested items, and
-        # every pending item in that interval must be part of the request.
-        requested_positions = {
-            item_id: reorder_item.position for item_id, reorder_item in zip(item_ids, data.items, strict=True)
-        }
-        current_positions = {item.id: item.position for item in requested_items if item is not None}
-        if set(requested_positions.values()) != set(current_positions.values()):
-            raise HTTPException(403, "You can only reorder your own contiguous queue items")
-
-        queue_printer_id = requested_items[0].printer_id
-        if any(item.printer_id != queue_printer_id for item in requested_items):
+        queue_printer_id = discovered_items[0].printer_id
+        if any(item.printer_id != queue_printer_id for item in discovered_items):
             raise HTTPException(400, "Queue items must belong to the same printer")
+
+        # The printer lock fences queue creation and reassignment while the
+        # contiguous interval is refreshed and its rows are discovered.
+        await db.rollback()  # Do not retain a stale SQLite snapshot while waiting for the printer lock.
+        await hold_printers(db, [queue_printer_id])
+        refreshed = await db.execute(
+            select(PrintQueueItem).where(PrintQueueItem.id.in_(item_ids)).execution_options(populate_existing=True)
+        )
+        discovered = {item.id: item for item in refreshed.scalars().all()}
+        discovered_items = [discovered.get(item_id) for item_id in item_ids]
+        if any(item is None for item in discovered_items):
+            raise HTTPException(404, "Queue item not found")
+        if any(item.printer_id != initial_printers[item.id] for item in discovered_items if item is not None):
+            await db.rollback()
+            raise HTTPException(409, "A queue item's printer changed; refresh before reordering")
+        positions = [item.position for item in discovered_items if item is not None]
         pending_query = (
             select(PrintQueueItem)
             .where(PrintQueueItem.status == "queued")
@@ -1222,12 +1253,51 @@ async def reorder_queue(
                 if queue_printer_id is None
                 else PrintQueueItem.printer_id == queue_printer_id
             )
-            .where(PrintQueueItem.position >= min(current_positions.values()))
-            .where(PrintQueueItem.position <= max(current_positions.values()))
-            .with_for_update()
+            .where(PrintQueueItem.position >= min(positions))
+            .where(PrintQueueItem.position <= max(positions))
         )
         pending_result = await db.execute(pending_query)
-        blocked_items = [item for item in pending_result.scalars().all() if item.id not in items_by_id]
+        pending = {item.id: item for item in pending_result.scalars().all()}
+    else:
+        await db.rollback()  # Release the discovery snapshot before waiting for multiple printer locks.
+        await hold_printers(db, list(initial_printers.values()))
+        refreshed = await db.execute(
+            select(PrintQueueItem).where(PrintQueueItem.id.in_(item_ids)).execution_options(populate_existing=True)
+        )
+        discovered = {item.id: item for item in refreshed.scalars().all()}
+        if any(item.printer_id != initial_printers[item_id] for item_id, item in discovered.items()):
+            await db.rollback()
+            raise HTTPException(409, "A queue item's printer changed; refresh before reordering")
+
+    expected_printers = {
+        **initial_printers,
+        **{item_id: item.printer_id for item_id, item in pending.items()},
+    }
+    try:
+        await hold_printers(db, list(expected_printers.values()))
+        items_by_id = await lock_queue_items(db, expected_printers)
+    except QueueTransitionConflict as exc:
+        await db.rollback()
+        raise HTTPException(409, "A queue item's printer changed; refresh before reordering") from exc
+
+    requested_items = [items_by_id.get(item_id) for item_id in item_ids]
+    if user is not None and not can_modify_all:
+        if any(item is None for item in requested_items):
+            raise HTTPException(404, "Queue item not found")
+        if any(item.status != "queued" for item in requested_items if item is not None):
+            raise HTTPException(400, "Only pending queue items can be reordered")
+        if any(item.created_by_id != owner_id for item in requested_items if item is not None):
+            raise HTTPException(403, "You can only reorder your own queue items")
+        requested_positions = {
+            item_id: reorder_item.position for item_id, reorder_item in zip(item_ids, data.items, strict=True)
+        }
+        current_positions = {item.id: item.position for item in requested_items if item is not None}
+        if set(requested_positions.values()) != set(current_positions.values()):
+            raise HTTPException(403, "You can only reorder your own contiguous queue items")
+        queue_printer_id = requested_items[0].printer_id
+        if any(item.printer_id != queue_printer_id for item in requested_items):
+            raise HTTPException(400, "Queue items must belong to the same printer")
+        blocked_items = [items_by_id[item_id] for item_id in pending if item_id not in discovered]
         if blocked_items:
             raise HTTPException(403, "You can only reorder your own contiguous queue items")
 
@@ -1323,14 +1393,13 @@ async def retry_queue_item(
         "manual_start",
         "dispatched_at",
         "dispatch_subtask_id",
-        "dispatching_at",
         "error_message",
         "waiting_reason",
         "been_jumped",
-        "preheat_owner",
         "preheat_requested_at",
-        "preheat_checked_at",
         "preheat_started_at",
+        "deadline_at",
+        "deadline_kind",
     }
     values = {
         column.name: getattr(old, column.name)

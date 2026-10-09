@@ -622,10 +622,10 @@ _QUEUE_INSERT_COLUMN_DEFINITIONS: dict[str, tuple[str, str]] = {
     "chamber_heat_soak": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
     "heat_soak_temperature": ("INTEGER DEFAULT 60", "INTEGER DEFAULT 60"),
     "heat_soak_minutes": ("INTEGER DEFAULT 30", "INTEGER DEFAULT 30"),
-    "preheat_owner": ("VARCHAR(36)", "VARCHAR(36)"),
     "preheat_requested_at": ("DATETIME", "TIMESTAMP"),
-    "preheat_checked_at": ("DATETIME", "TIMESTAMP"),
     "preheat_started_at": ("DATETIME", "TIMESTAMP"),
+    "deadline_at": ("DATETIME", "TIMESTAMP"),
+    "deadline_kind": ("VARCHAR(20)", "VARCHAR(20)"),
     "wait_for_drying_complete": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
     "auto_off_after": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
     "ams_mapping": ("TEXT", "TEXT"),
@@ -650,7 +650,6 @@ _QUEUE_INSERT_COLUMN_DEFINITIONS: dict[str, tuple[str, str]] = {
     "nozzle_offset_cali": ("VARCHAR(8) DEFAULT 'auto'", "VARCHAR(8) DEFAULT 'auto'"),
     # Lifecycle / audit fields
     "status": ("VARCHAR(20) DEFAULT 'queued'", "VARCHAR(20) DEFAULT 'queued'"),
-    "dispatching_at": ("DATETIME", "TIMESTAMP"),
     "dispatched_at": ("DATETIME", "TIMESTAMP"),
     "dispatch_subtask_id": ("VARCHAR(32)", "VARCHAR(32)"),
     "started_at": ("DATETIME", "TIMESTAMP"),
@@ -1081,7 +1080,7 @@ async def _migrate_queue_lifecycle(conn) -> None:
         if new != old:
             values = {"waiting_reason": None}
             if new == "queued":
-                values.update(error_message=None, completed_at=None, dispatching_at=None)
+                values.update(error_message=None, completed_at=None)
                 if row["target_model"]:
                     # Older schedulers wrote their pick onto waiting "Any
                     # machine" jobs. A queued printer_id is now only a
@@ -1583,10 +1582,10 @@ async def run_migrations(conn):
         "chamber_heat_soak",
         "heat_soak_temperature",
         "heat_soak_minutes",
-        "preheat_owner",
         "preheat_requested_at",
-        "preheat_checked_at",
         "preheat_started_at",
+        "deadline_at",
+        "deadline_kind",
     ):
         sql_type = _QUEUE_INSERT_COLUMN_DEFINITIONS[column][0 if is_sqlite() else 1]
         await _safe_execute(conn, f"ALTER TABLE print_queue ADD COLUMN {column} {sql_type}")

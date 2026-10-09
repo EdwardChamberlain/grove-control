@@ -25,6 +25,7 @@ from backend.app.services.lifecycle.engine import (
     AWAITING_PLATE_CLEAR_STATUSES,
     HOLDING_STATUSES,
     InvalidQueueTransition,
+    hold_printers,
     transition_queue_item,
 )
 from backend.app.services.printer_manager import PrinterManager
@@ -72,23 +73,6 @@ async def test_only_successful_physical_completion_clears_automatically(sessions
             await clear_job_plate(db, item)
             await db.commit()
         assert item.status == ("successful" if status == "finished" else "unsuccessful")
-
-
-@pytest.mark.parametrize("status", ("queued", *ACTIVE_STATUSES))
-async def test_cancel_chooses_destination_and_retains_active_holds(sessions, status):
-    async with sessions() as db:
-        item = PrintQueueItem(printer_id=1, status=status)
-        db.add(item)
-        await db.commit()
-        with patch("backend.app.services.printer_manager.printer_manager.stop_print") as stop:
-            await cancel_job(db, item)
-        assert item.status == ("unsuccessful" if status == "queued" else "cancelled")
-        assert stop.called == (status != "queued")
-        if status != "queued":
-            db.add(PrintQueueItem(printer_id=1, status="dispatching"))
-            with pytest.raises(IntegrityError):
-                await db.commit()
-            await db.rollback()
 
 
 async def test_stop_succeeds_when_auto_off_cannot_be_scheduled(sessions):
@@ -358,6 +342,7 @@ async def test_migration_preserves_exact_hold_creates_missing_job_and_runs_once(
         assert jobs[ids[2]].error_message is None
         synthetic = next(item for item in jobs.values() if item.printer_id == 2)
         assert synthetic.status == "finished"
+        await hold_printers(db, [jobs[held.id].printer_id, synthetic.printer_id])
         await clear_job_plate(db, jobs[held.id])
         await clear_job_plate(db, synthetic)
         await db.commit()

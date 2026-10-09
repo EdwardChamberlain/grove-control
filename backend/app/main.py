@@ -2450,6 +2450,12 @@ async def lifespan(app: FastAPI):
 
     await init_db()
 
+    # One Grove process per database: the lifecycle's printer writers live in memory.
+    from backend.app.core.database import engine as _db_engine
+    from backend.app.services.lifecycle.lease import lease
+
+    await lease.acquire(_db_engine)
+
     # Register an app-scoped httpx client for Bambu Cloud services so
     # per-request BambuCloudService instances reuse the same connection pool
     # (important for routes like /cloud/filament-info that chain many
@@ -2762,6 +2768,7 @@ async def lifespan(app: FastAPI):
             logging.info("WAL checkpoint completed")
         except Exception as e:
             logging.warning("WAL checkpoint failed: %s", e)
+    await lease.release()
     await engine.dispose()
 
 

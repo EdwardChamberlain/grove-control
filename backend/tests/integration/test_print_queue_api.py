@@ -788,7 +788,6 @@ class TestPrintQueueAPI:
         item = await queue_item_factory(
             status="preheating",
             chamber_heat_soak=True,
-            preheat_owner="test-worker",
             preheat_started_at=datetime.now(timezone.utc),
         )
         from backend.app.core.config import settings
@@ -826,7 +825,6 @@ class TestPrintQueueAPI:
         assert item.status == "dispatching"
         assert item.chamber_heat_soak is False
         assert item.manual_start is False
-        assert item.preheat_owner is not None
         assert item.preheat_started_at is not None
 
     async def test_skip_heat_soak_reports_unready_printer(
@@ -837,9 +835,7 @@ class TestPrintQueueAPI:
         from backend.app.services.printer_manager import printer_manager
 
         stale = "Heat soak interrupted; inspect the printer, then stop or skip heat soak"
-        item = await queue_item_factory(
-            status="preheating", chamber_heat_soak=True, preheat_owner="test-worker", error_message=stale
-        )
+        item = await queue_item_factory(status="preheating", chamber_heat_soak=True, error_message=stale)
         live = SimpleNamespace(state="IDLE", connected=True, job_telemetry_ready=False)
         monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
         monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
@@ -858,7 +854,7 @@ class TestPrintQueueAPI:
     ):
         from backend.app.models.printer import Printer
 
-        item = await queue_item_factory(status="preheating", chamber_heat_soak=True, preheat_owner="test-worker")
+        item = await queue_item_factory(status="preheating", chamber_heat_soak=True)
         printer_id = item.printer_id
         url = f"/api/v1/queue/{item.id}"
         if action == "edit":
@@ -872,11 +868,9 @@ class TestPrintQueueAPI:
         if action in ("edit", "delete"):
             assert response.status_code == (400 if action == "edit" else 409), response.text
             assert item.status == "preheating"
-            assert item.preheat_owner == "test-worker"
         else:
             assert response.status_code == 200, response.text
             assert item.status == "cancelled"
-            assert item.preheat_owner is None
             assert printer.heat_soak_shutdown_pending
             assert printer.heat_soak_shutdown_at
 
@@ -2029,7 +2023,6 @@ class TestAbortedStatusNormalisation:
             patch("backend.app.services.lifecycle.intake.async_session", session_maker),
             patch("backend.app.services.print_effects.async_session", session_maker),
             patch("backend.app.core.database.async_session", session_maker),
-            patch("backend.app.services.lifecycle.intake.spawn_background_task", spawn),
             patch("backend.app.services.print_effects.spawn_background_task", spawn),
             patch(
                 "backend.app.services.bambu_ftp.delete_file_async", AsyncMock(return_value=DeleteResult.NOT_FOUND)

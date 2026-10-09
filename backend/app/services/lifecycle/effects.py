@@ -45,11 +45,6 @@ def after_commit_task(db: AsyncSession, work: Callable[[], Awaitable], *, key: H
     return session.info.setdefault(_TASKS, [])
 
 
-def forget(db: AsyncSession, key: Hashable) -> None:
-    """Drop async work this transaction queued under ``key``."""
-    _outermost(db).info.get(_ASYNC, {}).pop(key, None)
-
-
 def spawned(db: AsyncSession) -> list:
     """Take the tasks this session's commits started, for the caller to wait for."""
     return db.sync_session.info.pop(_TASKS, [])

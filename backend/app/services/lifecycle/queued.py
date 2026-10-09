@@ -3,10 +3,10 @@
 Enter: ``create_job`` adds every new job, from the Queue, Files, a webhook, a
 virtual printer or Retry. Wait: each scheduler pass, printer selection picks a
 printer and tray mapping in memory; nothing is written to the job. Exit: an
-exit worker claims the job, rechecks the printer and source under that claim,
-and starts preheating or dispatching, whose entry holds the printer; or a
-person cancels the job (unsuccessful). Recover: the job is durable, and startup
-releases the previous process's worker claims.
+exit worker rechecks the printer and source, and starts preheating or
+dispatching, whose entry holds the printer if the job is unchanged since its
+selection; or a person cancels the job (unsuccessful). Recover: the job is
+durable; nothing about a waiting job lives in memory.
 """
 
 import asyncio
@@ -14,7 +14,6 @@ import json
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -175,8 +174,7 @@ async def blocker(db: AsyncSession, item: PrintQueueItem, printer: Printer | Non
 async def stay(db: AsyncSession, item: PrintQueueItem, reason: str, *, park: bool = False) -> None:
     """Keep a job in the pool with a display-only reason, parked for Manual start if a person must act."""
     values: dict[str, str | bool] = {"waiting_reason": reason, **({"manual_start": True} if park else {})}
-    conditions = () if item.dispatching_at is None else (PrintQueueItem.dispatching_at == item.dispatching_at,)
-    await transition_queue_item(db, item, "queued", "queued", values=values, conditions=conditions)
+    await transition_queue_item(db, item, "queued", "queued", values=values)
     await db.commit()
     logger.info("Queue item %s stays queued: %s", item.id, reason)
 
@@ -216,27 +214,15 @@ async def notify_assignment(db: AsyncSession, item: PrintQueueItem) -> None:
         logger.warning("Could not send assignment notification for queue item %s", item.id, exc_info=True)
 
 
-async def _claim(db: AsyncSession, item_id: int, binding: _DispatchBinding) -> bool:
-    """Claim a waiting job for its selected printer, unless another worker or an edit got there first."""
-    printer = PrintQueueItem.printer_id
-    claim = await db.execute(
-        update(PrintQueueItem)
-        .where(PrintQueueItem.id == item_id, PrintQueueItem.status == "queued")
-        .where(PrintQueueItem.dispatching_at.is_(None))
-        .where(printer.is_(None) if binding.unassigned else printer == binding.printer_id)
-        .values(dispatching_at=datetime.now(timezone.utc))
-    )
-    await db.commit()
-    return bool(claim.rowcount)
+# This process's exit and dispatch workers, by job: (task, printer). One process
+# runs per database (lifecycle.lease), so this is the whole truth of which jobs
+# a worker still owns.
+_inflight: dict[int, tuple[asyncio.Task, int]] = {}
 
 
-async def release_claim(db: AsyncSession, item_id: int) -> None:
-    """Release a worker claim without changing the job's state."""
-    try:
-        await db.execute(update(PrintQueueItem).where(PrintQueueItem.id == item_id).values(dispatching_at=None))
-        await db.commit()
-    except Exception:
-        logger.exception("Failed to clear dispatch claim for queue item %s", item_id)
+def in_flight(item_id: int) -> bool:
+    """Whether a worker is still preparing or sending this job."""
+    return item_id in _inflight
 
 
 class Workers:
@@ -245,7 +231,7 @@ class Workers:
     def __init__(self, heat_soak, dispatcher):
         """``heat_soak`` and ``dispatcher`` are the next states' entries: preheating and dispatching."""
         self._heat_soak, self._dispatcher = heat_soak, dispatcher
-        self.inflight: dict[int, tuple[asyncio.Task, int]] = {}
+        self.inflight = _inflight
 
     def launch(self, bindings: Mapping[int, _DispatchBinding], limit: int) -> None:
         """Start a worker per selected job while slots are free, at most one per printer."""
@@ -260,19 +246,23 @@ class Workers:
             self.inflight[item_id] = (task, binding.printer_id)
             task.add_done_callback(lambda _task, item_id=item_id: self.inflight.pop(item_id, None))
 
+    def adopt(self, item_id: int, printer_id: int, work) -> None:
+        """Track a worker started outside the queue (a soak's dispatch), so Stop cancels it like any other."""
+        task = spawn_background_task(work, name=f"heat-soak-dispatch-{item_id}")
+        self.inflight[item_id] = (task, printer_id)
+        task.add_done_callback(lambda _task: self.inflight.pop(item_id, None))
+
     def cancel(self, item_id: int) -> bool:
         """Cancel a worker after its job has been cancelled or deleted."""
         task = self.inflight.get(item_id, (None,))[0]
         return bool(task and not task.done() and task.cancel())
 
     async def _work(self, item_id: int, binding: _DispatchBinding) -> None:
-        """Leave the queue in its own session under a claim that blocks edits, released on every outcome."""
+        """Leave the queue in its own session; the hold itself checks the job is unchanged since selection."""
         async with async_session() as db:
-            if not await _claim(db, item_id, binding):
-                return
             try:
                 item = await db.get(PrintQueueItem, item_id)
-                if item and not binding.edited_fields(item):
+                if item and item.status == "queued" and not binding.edited_fields(item):
                     await self.leave(db, item, binding)
             except asyncio.CancelledError:
                 # Stop can land mid-write, such as the hold before its commit. Releasing the
@@ -286,8 +276,6 @@ class Workers:
                 await db.rollback()
                 logger.exception("Exit worker failed for job %s", item_id)
                 await _settle(db, item_id)
-            finally:
-                await release_claim(db, item_id)
 
     async def leave(self, db: AsyncSession, item: PrintQueueItem, binding: _DispatchBinding | None = None) -> None:
         """Exit to the selected printer: preheating for a heat soak, otherwise dispatching.
@@ -315,8 +303,7 @@ class Workers:
         elif getattr(item, "chamber_heat_soak", False) is not True:
             await self._dispatcher.enter(db, item, "queued", binding)
         else:
-            unassigned, values = bool(binding and binding.unassigned), binding.values() if binding else None
-            if await self._heat_soak.enter(db, item, bind_values=values, unassigned=unassigned) and unassigned:
+            if await self._heat_soak.enter(db, item, binding) and binding and binding.unassigned:
                 await notify_assignment(db, item)
 
 
