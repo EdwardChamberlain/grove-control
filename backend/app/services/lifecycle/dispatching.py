@@ -555,7 +555,10 @@ class Dispatcher:
                 "filename": getattr(state, "gcode_file", None) or "",
                 "subtask_name": getattr(state, "subtask_name", "") or "",
                 "subtask_id": item.dispatch_subtask_id,
-                "raw_data": {**deepcopy(getattr(state, "raw_data", None) or {}), "subtask_id": item.dispatch_subtask_id},
+                "raw_data": {
+                    **deepcopy(getattr(state, "raw_data", None) or {}),
+                    "subtask_id": item.dispatch_subtask_id,
+                },
             }
             if not data["filename"] and item.archive_id is not None:
                 archive = await db.get(PrintArchive, item.archive_id)
@@ -565,7 +568,9 @@ class Dispatcher:
             logger.info("Recovered queue job %s from %s telemetry", item_id, state.state)
         elif observed == "printing":
             if dispatching:
-                await transition_queue_item(db, item, "dispatching", "printing", values={"started_at": now, "error_message": None})
+                await transition_queue_item(
+                    db, item, "dispatching", "printing", values={"started_at": now, "error_message": None}
+                )
             changed = await sync_print_state(db, item, state)
             if dispatching or changed:
                 await db.commit()
