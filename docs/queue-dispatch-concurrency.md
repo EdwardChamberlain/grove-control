@@ -18,12 +18,12 @@ Pool capacity is applied before model-targeted assignments are persisted, so
 an Any Machine job waiting for a pool slot remains eligible for a fresh printer
 match on the next scheduler pass.
 
-Before source preparation or FTP I/O, each worker claims its queue row in the
-database together with the printer selected for that pass. A reassignment that
-wins before the claim is rejected and retried on a later pass; claimed rows
-cannot be reassigned or selected by another worker. Cancellation and deletion
-cancel the matching worker, and a final compare-and-set prevents a cancelled
-or removed row from publishing an MQTT print command.
+Before source preparation or FTP I/O, each worker holds the selected printer
+under its lock, if the job is still unchanged since that pass's selection. An
+edit or reassignment that wins first leaves the job for a later pass; a job
+with a live worker is not selected again. Cancellation and deletion cancel the
+matching worker, and each later step re-reads the job under the printer's lock,
+so a cancelled or removed job never publishes an MQTT print command.
 
 ## Rollout
 

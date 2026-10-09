@@ -45,8 +45,8 @@ If the firmware ID arrives after a partial start update, its callback carries
 the exact prior session ID. The same job and linked Archive are bound to the
 reported ID without repeating start effects. Archiving waits for file metadata
 when the first active update has none.
-Missing Archive projections for started jobs are reconciled by the scheduler at
-most once per minute, with one pass at a time. Status pushes launch no retries.
+Missing Archive projections for started jobs are repaired by the lifecycle loop
+at most once per minute. Status pushes launch no retries.
 Repair rechecks fresh telemetry and the exact identity under the event lock,
 reuses committed owned Archives and cached 3MF downloads, and never repeats
 new-print plate checks, notifications, usage resets or power-on automation.
@@ -67,22 +67,22 @@ Files storage is unchanged.
 
 ## Startup and reconnect
 
-The scheduler checks both `dispatching` and `printing` rows against connected
-telemetry. Cached state from before a reconnect is not evidence. A matching
+Recovery checks `dispatching`, `printing` and `paused` jobs against connected
+telemetry each tick of the lifecycle loop. Cached state from before a reconnect is not evidence. A matching
 active ID confirms dispatch; a matching FINISH or FAILED records the physical
 outcome and runs normal completion handling. The recovered terminal job retains the printer reservation until Clear Plate
 (or automatic Clear Plate for successful completion with confirmation off).
 Mismatches, disconnected printers and ambiguous IDLE reports leave a possibly
 sent job held. A held dispatch with no submission ID and no send timestamp can
-never have sent `project_file`; after a restart clears its worker claim, Grove
-marks that attempt failed for inspection, whether Archive linking had finished
-or not.
+never have sent `project_file`; after a restart Grove parks that attempt for
+Retry, which releases the printer without a plate check.
 The first active observation after application restart restores job and Archive
 association without rerunning new-print plate detection, start notifications,
 smart-plug actions or usage-session initialization.
 
-An interrupted heat soak stays reserved until the user chooses Stop or Skip
-heat soak. A second live scheduler does not take over another worker's timer.
+An interrupted heat soak has its heaters turned off and stays reserved until
+the user chooses Stop or Skip heat soak. Only one Grove process runs per
+database, so no other process can be running a soak.
 No heaters are restarted automatically after an application restart.
 
 ## Unconfirmed dispatch

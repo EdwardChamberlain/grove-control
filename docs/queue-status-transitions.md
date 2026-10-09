@@ -80,80 +80,88 @@ printer leaves the job queued. Missing sources park it with Manual start and a
 reason; the system never ends a queued job. Files purging likewise detaches
 missing sources without cancelling waiting jobs.
 
-A worker first claims the waiting row, blocking edits. It compares every
-editable field with the selection snapshot; an intervening edit releases the
-claim and causes a fresh selection. Printer and tray mapping are persisted
-only by the conditional transition to `preheating` or `dispatching`.
-
-Leaving the queue is queued's exit. Its bounded pool of exit workers, one
-session each, claims a selected job, rechecks its printer and source, and starts
-preheating for a heat soak or dispatching otherwise. A blocked job stays queued
-with its reason. `services/lifecycle/dispatching.py` owns the attempt:
+Leaving the queue is queued's exit. A bounded pool of exit workers, one session
+each, rechecks the selected printer and source and starts preheating for a heat
+soak or dispatching otherwise. Their entry takes the printer's lock, re-reads
+the job and holds the printer only if the job is unchanged since its selection,
+so an edit accepted in between always wins and causes a fresh selection.
+Printer and tray mapping are persisted only by that hold. A blocked job stays
+queued with its reason. `services/lifecycle/dispatching.py` owns the attempt:
 `Dispatcher.enter` holds the printer when entered from `queued`, or inherits the
 soak's hold from `preheating`, then copies, links, uploads and sends, one step
-each. Dispatching starts itself from a soak: its entry from `preheating` starts
-this process's takeover worker once the handoff commits, for the soak's timer
-and for **Skip heat soak** alike.
-
-Preheating's wait runs on its own timer, not the scheduler's pass. While a soak
-or a heater shutdown is in progress it runs every heartbeat (30 seconds),
-sooner when a soak starts, a shutdown is requested, or intake reports a
-connection or state change for a soaking or shutting-down printer. Otherwise it
-is idle. After a restart its first pass follows the printers' first telemetry.
+each. A soak's entry into dispatching (its deadline or **Skip heat soak**)
+starts the dispatch once the handoff commits. Which jobs a worker still owns is
+the in-process worker registry: only one Grove process runs per database
+(`services/lifecycle/lease.py` refuses a second at startup).
 
 Dispatch follows this order:
 
 1. Commit the printer hold: `queued` or `preheating` → `dispatching`.
 2. Copy the exact file with current G-code injection.
-3. Conditionally link the new Archive to that job and commit.
+3. Link the new Archive to that job and commit.
 4. Upload its unique SD filename and persist a fresh submission ID.
-5. Commit the send timestamp, recheck ownership and telemetry, and publish.
+5. Commit the send timestamp with an acknowledgement deadline, recheck the job
+   and telemetry, and publish.
 
+Each step locks the job and confirms the attempt still holds it before it
+writes, so a Stop or recovery that ended the attempt makes it stand down.
 No print command is sent without its committed Archive. Copy failures use the
-ordinary `dispatching` → `failed` path; Stop during copying removes the unlinked
-copy. Stop during upload drains the transfer before removing an unsent upload.
-The final synchronous MQTT publish takes the job's short write lock: Stop
-wins before it, or follows the send with a Stop command. Slow I/O and reconnect
-waiting do not hold that lock.
+ordinary `dispatching` → `failed` path. Stop cancels the attempt's worker:
+during copying the copy is discarded, during upload the transfer drains and the
+unsent upload is removed. The final MQTT publish happens under the job's lock:
+Stop wins before it, or follows the send with a Stop command. Slow I/O and
+reconnect waiting never hold the lock. Stop sends a Stop command only for a
+print that may have been sent, never for a soak or an unsent upload.
 
 Missing or uninitialized telemetry waits for up to 30 seconds at each dispatch
 boundary. An active print state or a different nonempty identity fails the
 held attempt. An empty ID after reconnect is not evidence of another print.
 If telemetry remains unavailable, nothing is sent: the job stays `dispatching`
-with **Retry** instructions, without a failure notification or Auto Off. An unsent heat-soak hold schedules heater shutdown after its worker exits.
-A restart fails an interrupted unsent attempt (no ID and no send timestamp);
-an attempt that might have sent a command stays held for telemetry or review.
+with **Retry** instructions, without a failure notification or Auto Off, and a
+soak's heaters are shut down. A restart parks an interrupted unsent attempt the
+same way. Retry withdraws such an attempt and releases the printer without a
+plate check, because nothing was sent.
 
-The unconfirmed-dispatch prompt requires an ID, a send timestamp, an expired
-270-second acknowledgement window, and no live worker claim. **It's printing**
-confirms `printing`; **It didn't start** records `failed`. Printing's entry from
-`dispatching` registers the queue-start notification and relay publication with
-the effects registry, whether live confirmation, manual resolution, an observed
-start or restart recovery made the transition. Confirmation, resolution and
-intake await the committed publication; restart recovery keeps its background
-delivery. Rollback or a failed commit emits no start, and a print that ends in
-the transaction that confirmed it announces only its end.
+A sent attempt waits on its acknowledgement deadline: the printer has 90
+seconds to report the print's ID and, once it has, 180 more to start it.
+Intake confirms an observed start at once. A deadline that falls due without a
+confirmation holds the job for review, resetting the MQTT session if the ID
+never arrived. The unconfirmed-dispatch prompt requires an ID, a send
+timestamp, an expired 270-second window, and no live worker. **It's printing**
+confirms `printing`; **It didn't start** records `failed`. Printing's entry
+from `dispatching` registers the queue-start notification and relay
+publication, which re-reads the job after commit: rollback emits no start, and
+a print that ends in the transaction that confirmed it announces only its end.
 
-Unsent heat-soak handoffs belong to dispatching, whose worker owns them until
-it sends or ends the attempt; neither state watches their soak heartbeat, so a
-long upload is never reported as an interrupted soak. A restart fails them.
-Dispatching runs its telemetry recovery on its own 30-second timer, with an
-immediate first pass; a printer connecting or disconnecting wakes it sooner.
-The timer is deliberate: recovery checks every active job against live
-telemetry, which a fixed cadence does simply. A locked SQLite database retries
-the pass. Queue selection drives neither state's timer, and shutdown cancels
-both.
+## Waits and recovery
 
-A soak whose worker is gone, after a restart, is recovered by preheating once
-its heartbeat lapses: its heaters are turned off and the hold is kept, with an
-inspection message, until a person stops it or skips the soak.
+A job's pending wait is a deadline on its row (`deadline_at`,
+`deadline_kind`): a soak's end, or a sent attempt's acknowledgement. The engine
+clears it on every status change unless the transition sets a new one. One
+loop, `services/lifecycle/deadlines.py`, runs due deadlines, then recovery and
+heater-shutdown retries. It sleeps until the next deadline or 30 seconds,
+whichever is sooner, and wakes early when a commit sets a deadline or a printer
+connects or disconnects. Queue selection is the scheduler's only loop.
 
-Recovery also ends a `printing` or `paused` job whose printer reports a
-different firmware print ID with fresh telemetry: the printer finished it and
-started another while Grove wasn't watching. Its outcome is unknown, so it
-becomes `failed` without Auto Off, and an active replacement print is then
-observed as started, which transfers the hold to it. A session-local ID on
-either side proves nothing, and the job stays put.
+A live soak carries its `soak_end` deadline. When it falls due the soak hands
+off to dispatching once the printer is idle. While it runs, each tick ends it
+if the printer becomes unavailable. At startup a soak that still has a deadline
+was interrupted: its heaters are turned off and its hold is kept, with an
+inspection message and no deadline, until a person stops it or skips the soak.
+
+Recovery is one rule. Each tick, every `dispatching`, `printing` or `paused`
+job that no worker owns is read under its printer's lock and compared with
+fresh telemetry, then settled with the functions a live event uses: a
+reported end through `printing.end`, an active print by confirming it and
+syncing pause state. Without fresh telemetry nothing is decided, so a sent job
+is never resolved from missing or stale reports. A `printing` or `paused` job
+whose printer reports a different firmware print ID ended unobserved: its
+outcome is unknown, so it becomes `failed` without Auto Off, and an active
+replacement print is then observed as started, which transfers the hold to it.
+A session-local ID on either side proves nothing, and the job stays put. A
+print an older version archived without a job becomes an ownerless job once
+fresh telemetry reports its exact, unique ID, and is then recovered like any
+other.
 
 A stored tray mapping that maps no slot (`[-1]`) is never sent (#2589). Printer
 selection recomputes it from the loaded trays, and the job waits with a reason
@@ -173,8 +181,7 @@ need: whose start and completion already ran, a Stop sent from the printer
 controls, finish-photo frames and producer events, timelapse baselines, and
 bed-cooldown waiters. The photo-moment and bed-temperature adapters also enter
 through intake. Heavy services receive its `PrintMemory` explicitly and keep
-no global per-print context. Each reconnect also reconciles missed completions of unlinked legacy
-Archives, deferring while the first real state is active.
+no global per-print context.
 
 Start, pause and completion match printer plus persisted submission ID, never
 filename, display name or recency. Printing (`services/lifecycle/printing.py`)
@@ -215,8 +222,8 @@ initialization or power-on actions. Skipped objects and an existing timelapse
 baseline are preserved. Runtime tracking is restored only if fresh telemetry
 still identifies that active print after Archive I/O.
 
-The scheduler reconciles missing Archive links for started, identified jobs at
-most once per minute, with one pass at a time. MQTT status pushes do not launch
+The lifecycle loop repairs missing Archive links for started, identified jobs at
+most once per minute. MQTT status pushes do not launch
 retries. A committed Archive's unique job owner restores a missing Queue link
 without another download; failed writes reuse cached 3MF files. Repair may
 finish after completion and uses the retained physical facts. Legacy association
@@ -231,21 +238,25 @@ cleanup, deletion is skipped. FTP failure does not undo plate clearing.
 ## Transactions and effects
 
 `transition_queue_item` in `services/lifecycle/engine.py` is the sole status
-writer. It checks allowed edges and conditionally matches ID, expected state
-and supplied claim. Metadata is written atomically; ORM synchronization cannot
+writer. A transaction takes a printer's lock when it first locks or writes a
+job holding that printer, and keeps it until the transaction ends, so each
+printer's job has one writer at a time; take it before the transaction's first
+write. The writer checks allowed edges and conditionally matches ID and
+expected state. Metadata is written atomically; ORM synchronization cannot
 flush a second unconditional status update. Same-state writes still check
-persisted state. Reasons are display-only. A losing update raises
-`QueueTransitionConflict`; callers roll back before publishing effects. Invalid
-edges fail before writing. User cancellation, Clear Plate, printer deletion,
-hold transfer and printer reports have explicit action guards. After the
-write, the engine aligns the Archive attempt, runs the old state's exit step and
-then the new state's entry step, all in the same transaction.
+persisted state. Reasons are display-only. Writers read under the lock, so a
+losing update (`QueueTransitionConflict`) is left only for the shared queued
+pool. Invalid edges fail before writing. User cancellation, Clear Plate,
+printer deletion, hold transfer and printer reports have explicit action
+guards. After the write, the engine aligns the Archive attempt, runs the old
+state's exit step and then the new state's entry step, all in the same
+transaction.
 
 Each state's steps live in its module in `services/lifecycle/`: `queued.py`,
 `preheating.py`, `dispatching.py`, `printing.py` (`printing`, `paused`),
 `awaiting.py` (`finished`, `failed`, `cancelled`) and `final.py` (`successful`,
-`unsuccessful`). Leaving `preheating` other than for `dispatching` releases the
-soak's claim and shuts its heaters down. Leaving `dispatching`, `printing` or
+`unsuccessful`). Leaving `preheating` other than for `dispatching` shuts its
+heaters down. Leaving `dispatching`, `printing` or
 `paused` for `failed` or `cancelled` shuts down the heaters an inherited soak
 left on; a dispatch that fails, unless the printer reported it, also removes its
 unsent upload. Entry into an awaiting state writes the physical outcome with the
@@ -258,16 +269,11 @@ deletion's heat-soak shutdown guard. Leaving `failed` or `cancelled` through
 Clear Plate removes the attempt's sent upload; a state cleans up on its own
 exit. Entry into a final state releases unused Queue sources.
 
-Some entry work may start only after the transition commits. `enter_state`
-makes the transition, commits it, then runs the new state's post-commit step,
-which re-checks the job under its own lock. Preheating uses it to turn the
-heaters on only once the hold is durable, so a Stop committed in between
-prevents any heater command. A transition the database refuses (a conflict, or
-the holding index) is rolled back and runs no step; errors from the step itself
-are raised. `transition_queue_item` refuses to enter a state with a post-commit
-step itself, so the step cannot be skipped.
+Preheating turns its heaters on only once its hold has committed, re-reading the
+job under its lock first, so a Stop committed in between prevents any heater
+command.
 
-The caller owns the transaction, except in `enter_state`. Lifecycle work queues
+The caller owns the transaction. Lifecycle work queues
 after-commit effects and rollback cleanup in one registry,
 `services/lifecycle/effects.py`. Async work, such as the queue start and the
 print start and completion effects, runs in order in one task per commit, which
@@ -296,6 +302,15 @@ Finalization removes unused sources after commit; saved Files and external
 sources remain. Archive deletion/purge and user-with-items deletion refuse
 any affected hold, including an Archive whose job owner exists before its Queue
 link. Account-only deletion leaves jobs ownerless with their controls available.
+
+## One process per database
+
+Each printer's writer and the worker registry live in process memory, so only
+one Grove process may run against a database. Startup takes a lease (a lock
+file beside a SQLite database, a session advisory lock on PostgreSQL) and
+refuses to start if another process holds it. Run one container or service
+instance, with one uvicorn worker. The operating system or database releases
+the lease if the process dies.
 
 ## One-time upgrade
 
