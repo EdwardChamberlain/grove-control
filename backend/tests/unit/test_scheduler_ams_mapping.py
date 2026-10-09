@@ -19,57 +19,57 @@ class TestSchedulerAmsMappingHelpers:
 
     def test_normalize_color_with_hash(self, scheduler):
         """Color with hash should return #RRGGBB format."""
-        result = scheduler._normalize_color("#FF5500")
+        result = scheduler.mapping._normalize_color("#FF5500")
         assert result == "#FF5500"
 
     def test_normalize_color_without_hash(self, scheduler):
         """Color without hash should add hash prefix."""
-        result = scheduler._normalize_color("FF5500")
+        result = scheduler.mapping._normalize_color("FF5500")
         assert result == "#FF5500"
 
     def test_normalize_color_with_alpha(self, scheduler):
         """Color with alpha channel should strip it."""
-        result = scheduler._normalize_color("FF5500AA")
+        result = scheduler.mapping._normalize_color("FF5500AA")
         assert result == "#FF5500"
 
     def test_normalize_color_none(self, scheduler):
         """None color should return default gray."""
-        result = scheduler._normalize_color(None)
+        result = scheduler.mapping._normalize_color(None)
         assert result == "#808080"
 
     def test_normalize_color_empty(self, scheduler):
         """Empty color should return default gray."""
-        result = scheduler._normalize_color("")
+        result = scheduler.mapping._normalize_color("")
         assert result == "#808080"
 
     def test_normalize_color_for_compare(self, scheduler):
         """Color for compare should be lowercase without hash."""
-        result = scheduler._normalize_color_for_compare("#FF5500")
+        result = scheduler.mapping._normalize_color_for_compare("#FF5500")
         assert result == "ff5500"
 
     def test_normalize_color_for_compare_with_alpha(self, scheduler):
         """Alpha channel should be stripped for comparison."""
-        result = scheduler._normalize_color_for_compare("#FF5500AA")
+        result = scheduler.mapping._normalize_color_for_compare("#FF5500AA")
         assert result == "ff5500"
 
     def test_colors_are_similar_exact_match(self, scheduler):
         """Exact same colors should be similar."""
-        assert scheduler._colors_are_similar("#FF5500", "#FF5500") is True
+        assert scheduler.mapping._colors_are_similar("#FF5500", "#FF5500") is True
 
     def test_colors_are_similar_within_threshold(self, scheduler):
         """Colors within threshold should be similar."""
         # Red difference of 10, well within default threshold of 40
-        assert scheduler._colors_are_similar("#FF5500", "#F55500") is True
+        assert scheduler.mapping._colors_are_similar("#FF5500", "#F55500") is True
 
     def test_colors_are_similar_outside_threshold(self, scheduler):
         """Colors outside threshold should not be similar."""
         # Red: FF (255) vs 00 (0) = 255 difference
-        assert scheduler._colors_are_similar("#FF0000", "#00FF00") is False
+        assert scheduler.mapping._colors_are_similar("#FF0000", "#00FF00") is False
 
     def test_colors_are_similar_none_colors(self, scheduler):
         """None colors should not be similar."""
-        assert scheduler._colors_are_similar(None, "#FF5500") is False
-        assert scheduler._colors_are_similar("#FF5500", None) is False
+        assert scheduler.mapping._colors_are_similar(None, "#FF5500") is False
+        assert scheduler.mapping._colors_are_similar("#FF5500", None) is False
 
 
 class TestBuildLoadedFilaments:
@@ -85,7 +85,7 @@ class TestBuildLoadedFilaments:
         class MockStatus:
             raw_data = {}
 
-        result = scheduler._build_loaded_filaments(MockStatus())
+        result = scheduler.mapping._build_loaded_filaments(MockStatus())
         assert result == []
 
     def test_build_loaded_filaments_with_ams(self, scheduler):
@@ -104,7 +104,7 @@ class TestBuildLoadedFilaments:
                 ]
             }
 
-        result = scheduler._build_loaded_filaments(MockStatus())
+        result = scheduler.mapping._build_loaded_filaments(MockStatus())
         assert len(result) == 2
 
         # First filament
@@ -131,7 +131,7 @@ class TestBuildLoadedFilaments:
                 ]
             }
 
-        result = scheduler._build_loaded_filaments(MockStatus())
+        result = scheduler.mapping._build_loaded_filaments(MockStatus())
         assert len(result) == 1
         assert result[0]["is_ht"] is True
         assert result[0]["global_tray_id"] == 128  # AMS-HT uses ams_id directly
@@ -142,7 +142,7 @@ class TestBuildLoadedFilaments:
         class MockStatus:
             raw_data = {"vt_tray": [{"tray_type": "TPU", "tray_color": "0000FF"}]}
 
-        result = scheduler._build_loaded_filaments(MockStatus())
+        result = scheduler.mapping._build_loaded_filaments(MockStatus())
         assert len(result) == 1
         assert result[0]["type"] == "TPU"
         assert result[0]["is_external"] is True
@@ -165,7 +165,7 @@ class TestBuildLoadedFilaments:
                 ]
             }
 
-        result = scheduler._build_loaded_filaments(MockStatus())
+        result = scheduler.mapping._build_loaded_filaments(MockStatus())
         assert len(result) == 1
         assert result[0]["type"] == "PLA"
 
@@ -179,7 +179,7 @@ class TestMatchFilamentsToSlots:
 
     def test_match_empty_required(self, scheduler):
         """Empty required list should return None."""
-        result = scheduler._match_filaments_to_slots([], [])
+        result = scheduler.mapping._match_filaments_to_slots([], [])
         assert result is None
 
     def test_match_exact_color(self, scheduler):
@@ -190,7 +190,7 @@ class TestMatchFilamentsToSlots:
             {"type": "PLA", "color": "#FF0000", "global_tray_id": 1},  # Exact match
         ]
 
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         assert result == [1]  # Should pick tray 1 (exact color match)
 
     def test_match_similar_color(self, scheduler):
@@ -200,7 +200,7 @@ class TestMatchFilamentsToSlots:
             {"type": "PLA", "color": "#FF5510", "global_tray_id": 0},  # Similar
         ]
 
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         assert result == [0]
 
     def test_match_type_only(self, scheduler):
@@ -210,7 +210,7 @@ class TestMatchFilamentsToSlots:
             {"type": "PLA", "color": "#0000FF", "global_tray_id": 5},  # Type match, color way off
         ]
 
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         assert result == [5]
 
     def test_match_no_match_returns_minus_one(self, scheduler):
@@ -220,7 +220,7 @@ class TestMatchFilamentsToSlots:
             {"type": "PETG", "color": "#FF0000", "global_tray_id": 0},  # Wrong type
         ]
 
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         assert result == [-1]
 
     def test_match_multiple_filaments(self, scheduler):
@@ -234,7 +234,7 @@ class TestMatchFilamentsToSlots:
             {"type": "PETG", "color": "#00FF00", "global_tray_id": 1},
         ]
 
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         assert result == [0, 1]
 
     def test_match_avoids_duplicate_assignment(self, scheduler):
@@ -247,7 +247,7 @@ class TestMatchFilamentsToSlots:
             {"type": "PLA", "color": "#FF0000", "global_tray_id": 0},  # Only one PLA
         ]
 
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         # First slot gets the match, second slot gets -1
         assert result == [0, -1]
 
@@ -258,7 +258,7 @@ class TestMatchFilamentsToSlots:
             {"type": "PLA", "color": "#FF0000", "global_tray_id": 512},  # AMS 128, slot 0
         ]
 
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         assert result == [512]
 
     def test_match_external_spool(self, scheduler):
@@ -268,7 +268,7 @@ class TestMatchFilamentsToSlots:
             {"type": "TPU", "color": "#0000FF", "global_tray_id": 254, "is_external": True},
         ]
 
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         assert result == [254]
 
     def test_match_by_tray_info_idx_priority(self, scheduler):
@@ -295,7 +295,7 @@ class TestMatchFilamentsToSlots:
             },  # Same color, different spool
         ]
 
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         assert result == [1]  # Should pick tray 1 (exact tray_info_idx match)
 
     def test_match_by_tray_info_idx_with_different_colors(self, scheduler):
@@ -311,7 +311,7 @@ class TestMatchFilamentsToSlots:
             },  # Exact spool (slightly different color reported)
         ]
 
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         assert result == [3]  # Should pick tray 3 (exact tray_info_idx match)
 
     def test_match_fallback_to_color_when_no_tray_info_idx(self, scheduler):
@@ -322,7 +322,7 @@ class TestMatchFilamentsToSlots:
             {"type": "PLA", "color": "#FF0000", "global_tray_id": 1, "tray_info_idx": "GFB00"},  # Color match
         ]
 
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         assert result == [1]  # Should pick tray 1 (color match)
 
     def test_match_fallback_to_color_when_no_matching_tray_info_idx(self, scheduler):
@@ -337,7 +337,7 @@ class TestMatchFilamentsToSlots:
             },  # Different idx but same color
         ]
 
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         assert result == [0]  # Should fall back to color match
 
     def test_match_multiple_same_color_with_tray_info_idx(self, scheduler):
@@ -358,7 +358,7 @@ class TestMatchFilamentsToSlots:
             },  # Tray 3 - the one we want
         ]
 
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         assert result == [3]  # Should pick tray 3, not tray 0
 
     def test_match_tray_info_idx_not_reused(self, scheduler):
@@ -372,7 +372,7 @@ class TestMatchFilamentsToSlots:
             {"type": "PLA", "color": "#000000", "global_tray_id": 1, "tray_info_idx": "GFA01"},
         ]
 
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         assert result == [0, 1]  # Each slot gets its specific tray
 
     def test_match_non_unique_tray_info_idx_uses_color(self, scheduler):
@@ -393,7 +393,7 @@ class TestMatchFilamentsToSlots:
             {"type": "PLA", "color": "#00FF00", "global_tray_id": 4, "tray_info_idx": "GFA00"},  # Green PLA
         ]
 
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         assert result == [-1, 4]  # Should pick tray 4 (color match), not tray 3 (first match)
 
     def test_match_non_unique_tray_info_idx_same_color(self, scheduler):
@@ -410,7 +410,7 @@ class TestMatchFilamentsToSlots:
             {"type": "PLA", "color": "#FFFFFF", "global_tray_id": 4, "tray_info_idx": "GFA00"},
         ]
 
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         # Both have same color, so first is used
         assert result == [-1, 3]
 
@@ -430,7 +430,7 @@ class TestPreferLowestFilament:
             {"type": "PLA", "color": "#FF0000", "global_tray_id": 1, "remain": 30},
         ]
 
-        result = scheduler._match_filaments_to_slots(required, loaded, prefer_lowest=True)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded, prefer_lowest=True)
         assert result == [1]  # Should pick tray 1 (30% remaining)
 
     def test_prefer_lowest_disabled_picks_first(self, scheduler):
@@ -441,7 +441,7 @@ class TestPreferLowestFilament:
             {"type": "PLA", "color": "#FF0000", "global_tray_id": 1, "remain": 30},
         ]
 
-        result = scheduler._match_filaments_to_slots(required, loaded, prefer_lowest=False)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded, prefer_lowest=False)
         assert result == [0]  # Should pick tray 0 (first match)
 
     def test_prefer_lowest_unknown_remain_sorted_last(self, scheduler):
@@ -452,7 +452,7 @@ class TestPreferLowestFilament:
             {"type": "PLA", "color": "#FF0000", "global_tray_id": 1, "remain": 50},
         ]
 
-        result = scheduler._match_filaments_to_slots(required, loaded, prefer_lowest=True)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded, prefer_lowest=True)
         assert result == [1]  # Should pick tray 1 (known 50%) over unknown
 
     def test_prefer_lowest_missing_remain_sorted_last(self, scheduler):
@@ -463,7 +463,7 @@ class TestPreferLowestFilament:
             {"type": "PLA", "color": "#FF0000", "global_tray_id": 1, "remain": 50},
         ]
 
-        result = scheduler._match_filaments_to_slots(required, loaded, prefer_lowest=True)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded, prefer_lowest=True)
         assert result == [1]  # Should pick tray 1 (known 50%) over missing
 
     def test_prefer_lowest_multiple_slots(self, scheduler):
@@ -478,7 +478,7 @@ class TestPreferLowestFilament:
             {"type": "PLA", "color": "#FF0000", "global_tray_id": 2, "remain": 60},
         ]
 
-        result = scheduler._match_filaments_to_slots(required, loaded, prefer_lowest=True)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded, prefer_lowest=True)
         # Slot 1 gets tray 1 (30%), slot 2 gets tray 2 (60%) — tray 0 (80%) unused
         assert result == [1, 2]
 
@@ -490,7 +490,7 @@ class TestPreferLowestFilament:
             {"type": "PLA", "color": "#FFFFFF", "global_tray_id": 1, "tray_info_idx": "GFA00", "remain": 20},
         ]
 
-        result = scheduler._match_filaments_to_slots(required, loaded, prefer_lowest=True)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded, prefer_lowest=True)
         assert result == [1]  # Should pick tray 1 (20%) within idx subset
 
     def test_prefer_lowest_external_spool(self, scheduler):
@@ -501,7 +501,7 @@ class TestPreferLowestFilament:
             {"type": "PLA", "color": "#FF0000", "global_tray_id": 254, "remain": 10, "is_external": True},
         ]
 
-        result = scheduler._match_filaments_to_slots(required, loaded, prefer_lowest=True)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded, prefer_lowest=True)
         assert result == [254]  # Should pick external spool (10%) over AMS (80%)
 
 
@@ -549,7 +549,7 @@ class TestPreferLowestInventoryOverride:
         # Slot 1 (gtid 0) is the fresh clone at 950 g; slot 4 (gtid 3) is the
         # nearly-empty original at 50 g.
         overrides = {0: 950.0, 3: 50.0}
-        result = scheduler._match_filaments_to_slots(
+        result = scheduler.mapping._match_filaments_to_slots(
             required, loaded, prefer_lowest=True, inventory_remain_overrides=overrides
         )
         assert result == [3]
@@ -580,7 +580,7 @@ class TestPreferLowestInventoryOverride:
             },
         ]
         overrides = {0: 500.0, 1: 0.0}
-        result = scheduler._match_filaments_to_slots(
+        result = scheduler.mapping._match_filaments_to_slots(
             required, loaded, prefer_lowest=True, inventory_remain_overrides=overrides
         )
         assert result == [1]
@@ -612,7 +612,7 @@ class TestPreferLowestInventoryOverride:
             },
         ]
         overrides = {1: 800.0}  # only slot 2 has an inventory binding
-        result = scheduler._match_filaments_to_slots(
+        result = scheduler.mapping._match_filaments_to_slots(
             required, loaded, prefer_lowest=True, inventory_remain_overrides=overrides
         )
         assert result == [1]
@@ -642,7 +642,7 @@ class TestPreferLowestInventoryOverride:
             },
         ]
         overrides = {0: 500.0, 1: 500.0}
-        result = scheduler._match_filaments_to_slots(
+        result = scheduler.mapping._match_filaments_to_slots(
             required, loaded, prefer_lowest=True, inventory_remain_overrides=overrides
         )
         assert result == [0]
@@ -671,7 +671,7 @@ class TestPreferLowestInventoryOverride:
                 "remain": 30,
             },
         ]
-        result = scheduler._match_filaments_to_slots(
+        result = scheduler.mapping._match_filaments_to_slots(
             required, loaded, prefer_lowest=True, inventory_remain_overrides={}
         )
         assert result == [1]
@@ -700,7 +700,7 @@ class TestPreferLowestInventoryOverride:
                 "remain": 50,
             },
         ]
-        result = scheduler._match_filaments_to_slots(
+        result = scheduler.mapping._match_filaments_to_slots(
             required, loaded, prefer_lowest=True, inventory_remain_overrides=None
         )
         assert result == [1]
@@ -734,7 +734,7 @@ class TestPreferLowestInventoryOverride:
                 "is_external": True,
             },
         ]
-        result = scheduler._match_filaments_to_slots(
+        result = scheduler.mapping._match_filaments_to_slots(
             required, loaded, prefer_lowest=True, inventory_remain_overrides=None
         )
         assert result == [0]
@@ -763,7 +763,7 @@ class TestPreferLowestInventoryOverride:
                 "remain": 50,
             },
         ]
-        result = scheduler._match_filaments_to_slots(
+        result = scheduler.mapping._match_filaments_to_slots(
             required, loaded, prefer_lowest=True, inventory_remain_overrides=None
         )
         assert result == [0]
@@ -792,7 +792,7 @@ class TestBuildLoadedFilamentsTrayInfoIdx:
                 ]
             }
 
-        result = scheduler._build_loaded_filaments(MockStatus())
+        result = scheduler.mapping._build_loaded_filaments(MockStatus())
         assert len(result) == 2
         assert result[0]["tray_info_idx"] == "GFA00"
         assert result[1]["tray_info_idx"] == "GFA01"
@@ -812,7 +812,7 @@ class TestBuildLoadedFilamentsTrayInfoIdx:
                 ]
             }
 
-        result = scheduler._build_loaded_filaments(MockStatus())
+        result = scheduler.mapping._build_loaded_filaments(MockStatus())
         assert len(result) == 1
         assert result[0]["tray_info_idx"] == ""
 
@@ -822,7 +822,7 @@ class TestBuildLoadedFilamentsTrayInfoIdx:
         class MockStatus:
             raw_data = {"vt_tray": [{"tray_type": "TPU", "tray_color": "0000FF", "tray_info_idx": "P4d64437"}]}
 
-        result = scheduler._build_loaded_filaments(MockStatus())
+        result = scheduler.mapping._build_loaded_filaments(MockStatus())
         assert len(result) == 1
         assert result[0]["tray_info_idx"] == "P4d64437"
         assert result[0]["is_external"] is True
@@ -1050,7 +1050,7 @@ class TestNozzleAwareMapping:
         # Without nozzle filtering, slot 1 (red, right) would match tray 4 (red, left) by color.
         # With nozzle filtering, slot 1 (right nozzle) can only use tray 0 (right extruder),
         # and slot 2 (left nozzle) can only use tray 4 (left extruder).
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         assert result == [0, 4]
 
     def test_nozzle_hard_filter_no_fallback(self, scheduler):
@@ -1063,7 +1063,7 @@ class TestNozzleAwareMapping:
             {"type": "PLA", "color": "#FF0000", "global_tray_id": 4, "extruder_id": 1},
         ]
         # No trays on extruder 0 — hard filter returns -1, no cross-nozzle fallback
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         assert result == [-1]
 
     def test_no_nozzle_id_skips_filtering(self, scheduler):
@@ -1076,7 +1076,7 @@ class TestNozzleAwareMapping:
             {"type": "PLA", "color": "#FF0000", "global_tray_id": 4, "extruder_id": 1},
         ]
         # Should match first available (tray 0) regardless of extruder
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         assert result == [0]
 
     def test_extruder_id_in_loaded_filaments(self, scheduler):
@@ -1091,7 +1091,7 @@ class TestNozzleAwareMapping:
                 "ams_extruder_map": {"0": 0, "1": 1},
             }
 
-        result = scheduler._build_loaded_filaments(MockStatus())
+        result = scheduler.mapping._build_loaded_filaments(MockStatus())
         assert len(result) == 2
         assert result[0]["extruder_id"] == 0
         assert result[1]["extruder_id"] == 1
@@ -1106,7 +1106,7 @@ class TestNozzleAwareMapping:
                 ]
             }
 
-        result = scheduler._build_loaded_filaments(MockStatus())
+        result = scheduler.mapping._build_loaded_filaments(MockStatus())
         assert len(result) == 1
         assert result[0]["extruder_id"] is None
 
@@ -1119,7 +1119,7 @@ class TestNozzleAwareMapping:
                 "ams_extruder_map": {"0": 0},
             }
 
-        result = scheduler._build_loaded_filaments(MockStatus())
+        result = scheduler.mapping._build_loaded_filaments(MockStatus())
         assert len(result) == 1
         # Default vt_tray id=254 → Ext-L → LEFT nozzle (extruder 1)
         assert result[0]["extruder_id"] == 1
@@ -1131,7 +1131,7 @@ class TestNozzleAwareMapping:
         class MockStatus:
             raw_data = {"vt_tray": [{"tray_type": "TPU", "tray_color": "0000FF"}]}
 
-        result = scheduler._build_loaded_filaments(MockStatus())
+        result = scheduler.mapping._build_loaded_filaments(MockStatus())
         assert len(result) == 1
         assert result[0]["extruder_id"] is None
 
@@ -1145,7 +1145,7 @@ class TestNozzleAwareMapping:
             {"type": "PLA", "color": "#000000", "global_tray_id": 0, "tray_info_idx": "GFA00", "extruder_id": 0},
             {"type": "PLA", "color": "#000000", "global_tray_id": 4, "tray_info_idx": "GFA01", "extruder_id": 1},
         ]
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         assert result == [0, 4]
 
 
@@ -1256,7 +1256,7 @@ class TestH2DModel:
         class MockStatus:
             raw_data = _h2d_raw_data()
 
-        result = scheduler._build_loaded_filaments(MockStatus())
+        result = scheduler.mapping._build_loaded_filaments(MockStatus())
 
         # Should have 13 loaded filaments (4 + 4 + 0 + 4 + 1 external)
         assert len(result) == 13
@@ -1289,7 +1289,7 @@ class TestH2DModel:
         class MockStatus:
             raw_data = _h2d_raw_data()
 
-        result = scheduler._build_loaded_filaments(MockStatus())
+        result = scheduler.mapping._build_loaded_filaments(MockStatus())
         ext = [f for f in result if f["is_external"]]
         assert len(ext) == 1  # Only 254 has filament
         assert ext[0]["global_tray_id"] == 254
@@ -1302,11 +1302,11 @@ class TestH2DModel:
         class MockStatus:
             raw_data = _h2d_raw_data()
 
-        loaded = scheduler._build_loaded_filaments(MockStatus())
+        loaded = scheduler.mapping._build_loaded_filaments(MockStatus())
         required = [
             {"slot_id": 1, "type": "PLA", "color": "#000000", "nozzle_id": 1},  # LEFT
         ]
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         # Black PLA on LEFT: AMS 0 T4 (global 3)
         assert result == [3]
 
@@ -1316,11 +1316,11 @@ class TestH2DModel:
         class MockStatus:
             raw_data = _h2d_raw_data()
 
-        loaded = scheduler._build_loaded_filaments(MockStatus())
+        loaded = scheduler.mapping._build_loaded_filaments(MockStatus())
         required = [
             {"slot_id": 1, "type": "PLA", "color": "#FFFFFF", "nozzle_id": 0},  # RIGHT
         ]
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         # White PLA on RIGHT: AMS 1 T1 (global 4)
         assert result == [4]
 
@@ -1330,12 +1330,12 @@ class TestH2DModel:
         class MockStatus:
             raw_data = _h2d_raw_data()
 
-        loaded = scheduler._build_loaded_filaments(MockStatus())
+        loaded = scheduler.mapping._build_loaded_filaments(MockStatus())
         # PLA-S only exists on AMS 2 T1 (LEFT), require on RIGHT
         required = [
             {"slot_id": 1, "type": "PLA-S", "color": "#FFFFFF", "nozzle_id": 0},
         ]
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         assert result == [-1]  # No fallback to wrong nozzle
 
     def test_dual_nozzle_multi_filament(self, scheduler):
@@ -1344,12 +1344,12 @@ class TestH2DModel:
         class MockStatus:
             raw_data = _h2d_raw_data()
 
-        loaded = scheduler._build_loaded_filaments(MockStatus())
+        loaded = scheduler.mapping._build_loaded_filaments(MockStatus())
         required = [
             {"slot_id": 1, "type": "PETG", "color": "#FFFFFF", "nozzle_id": 1, "tray_info_idx": "GFG02"},
             {"slot_id": 2, "type": "PLA", "color": "#FFFFFF", "nozzle_id": 0, "tray_info_idx": "GFA00"},
         ]
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         # PETG white on LEFT: AMS 0 T1 (global 0)
         # PLA white on RIGHT: AMS 1 T1 (global 4)
         assert result == [0, 4]
@@ -1360,11 +1360,11 @@ class TestH2DModel:
         class MockStatus:
             raw_data = _h2d_raw_data()
 
-        loaded = scheduler._build_loaded_filaments(MockStatus())
+        loaded = scheduler.mapping._build_loaded_filaments(MockStatus())
         required = [
             {"slot_id": 1, "type": "PLA", "color": "#000000", "nozzle_id": 1, "tray_info_idx": "P4d64437"},
         ]
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         assert result == [254]  # External spool on left nozzle
 
 
@@ -1381,7 +1381,7 @@ class TestX1CModel:
         class MockStatus:
             raw_data = _x1c_raw_data()
 
-        result = scheduler._build_loaded_filaments(MockStatus())
+        result = scheduler.mapping._build_loaded_filaments(MockStatus())
 
         # Only 3 loaded (AMS 1 trays 1-3)
         assert len(result) == 3
@@ -1396,11 +1396,11 @@ class TestX1CModel:
         class MockStatus:
             raw_data = _x1c_raw_data()
 
-        loaded = scheduler._build_loaded_filaments(MockStatus())
+        loaded = scheduler.mapping._build_loaded_filaments(MockStatus())
         required = [
             {"slot_id": 1, "type": "PLA", "color": "#0066FF"},  # No nozzle_id
         ]
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         # Blue PLA → AMS 1 T4 (global 7)
         assert result == [7]
 
@@ -1410,11 +1410,11 @@ class TestX1CModel:
         class MockStatus:
             raw_data = _x1c_raw_data()
 
-        loaded = scheduler._build_loaded_filaments(MockStatus())
+        loaded = scheduler.mapping._build_loaded_filaments(MockStatus())
         required = [
             {"slot_id": 1, "type": "PLA", "color": "#EBCFA6", "tray_info_idx": "PFUS22b2"},
         ]
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         # Unique tray_info_idx → AMS 1 T2 (global 5)
         assert result == [5]
 
@@ -1424,12 +1424,12 @@ class TestX1CModel:
         class MockStatus:
             raw_data = _x1c_raw_data()
 
-        loaded = scheduler._build_loaded_filaments(MockStatus())
+        loaded = scheduler.mapping._build_loaded_filaments(MockStatus())
         # P4d64437 appears in AMS 1 T3 and T4
         required = [
             {"slot_id": 1, "type": "PLA", "color": "#FCECD6", "tray_info_idx": "P4d64437"},
         ]
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         # Should pick AMS 1 T3 (global 6, color FCECD6) over T4 (0066FF)
         assert result == [6]
 
@@ -1439,12 +1439,12 @@ class TestX1CModel:
         class MockStatus:
             raw_data = _x1c_raw_data()
 
-        loaded = scheduler._build_loaded_filaments(MockStatus())
+        loaded = scheduler.mapping._build_loaded_filaments(MockStatus())
         required = [
             {"slot_id": 1, "type": "PLA", "color": "#EBCFA6"},
             {"slot_id": 2, "type": "PLA", "color": "#0066FF"},
         ]
-        result = scheduler._match_filaments_to_slots(required, loaded)
+        result = scheduler.mapping._match_filaments_to_slots(required, loaded)
         assert result == [5, 7]
 
 
@@ -1474,7 +1474,7 @@ class TestFtsNozzleBypass:
         (gtid 1) — not the wrong-colour red already on the right (gtid 6).
         Reproduces #2186 (b3 fed red instead of black)."""
         required = [{"slot_id": 1, "type": "PLA", "color": "#000000", "nozzle_id": 0}]
-        result = scheduler._match_filaments_to_slots(required, self._repro_loaded(), fts_installed=True)
+        result = scheduler.mapping._match_filaments_to_slots(required, self._repro_loaded(), fts_installed=True)
         assert result == [1]  # black PLA from AMS-A, routed to the right nozzle by the FTS
 
     def test_without_fts_nozzle_filter_still_applies(self, scheduler):
@@ -1482,7 +1482,7 @@ class TestFtsNozzleBypass:
         is restricted to right-side trays and matches the red PLA by type. Correct
         non-FTS behaviour — and exactly why #2186 needed the FTS bypass."""
         required = [{"slot_id": 1, "type": "PLA", "color": "#000000", "nozzle_id": 0}]
-        result = scheduler._match_filaments_to_slots(required, self._repro_loaded(), fts_installed=False)
+        result = scheduler.mapping._match_filaments_to_slots(required, self._repro_loaded(), fts_installed=False)
         assert result == [6]  # only the right-side PLA is eligible
 
     def test_fts_flag_is_noop_without_nozzle_id(self, scheduler):
@@ -1491,5 +1491,5 @@ class TestFtsNozzleBypass:
         way. (Single-nozzle printers also never have an FTS.)"""
         required = [{"slot_id": 1, "type": "PLA", "color": "#000000"}]
         for fts in (True, False):
-            result = scheduler._match_filaments_to_slots(required, self._repro_loaded(), fts_installed=fts)
+            result = scheduler.mapping._match_filaments_to_slots(required, self._repro_loaded(), fts_installed=fts)
             assert result == [1]  # exact black match, no nozzle involved

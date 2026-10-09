@@ -11,7 +11,7 @@ values for filament grams, time estimate, and per-slot breakdown.
 import io
 import zipfile
 
-from backend.app.main import _scope_notification_archive_data_to_plate
+from backend.app.services.print_effects import _scope_notification_archive_data_to_plate
 
 
 def _write_multi_plate_3mf(tmp_path, name="multi.3mf") -> "tuple":

@@ -11,20 +11,15 @@ from backend.app.core.database import async_session
 from backend.app.core.tasks import spawn_background_task
 from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem, PrintQueueVariant
 from backend.app.models.printer import Printer
-from backend.app.models.settings import Settings
+from backend.app.models.settings import Settings, bool_setting
 from backend.app.services.ams_drying import AmsDrying
 from backend.app.services.ams_mapping import AmsMapping
-from backend.app.services.filament_deficit import compute_deficit_for_queue_item
 from backend.app.services.ha_sensor_manager import ha_sensor_manager
 from backend.app.services.lifecycle import queued
 from backend.app.services.lifecycle.dispatching import Dispatcher
 from backend.app.services.lifecycle.preheating import ChamberHeatSoak
-from backend.app.services.notification_service import notification_service
 from backend.app.services.printer_manager import printer_manager
-from backend.app.services.printer_selection import (
-    _UPLOAD_POOL_WAITING_PREFIX,
-    PrinterSelection,
-)
+from backend.app.services.printer_selection import _UPLOAD_POOL_WAITING_PREFIX, PrinterSelection
 
 logger = logging.getLogger(__name__)
 
@@ -33,15 +28,21 @@ MAX_QUEUE_CONCURRENT_UPLOADS = 16
 ARCHIVE_RECONCILE_INTERVAL_SECONDS = 60
 
 
-class PrintScheduler(PrinterSelection, AmsMapping, AmsDrying):
-    """Background scheduler that processes the print queue."""
+class PrintScheduler:
+    """Background scheduler: each pass selects printers for queued jobs and starts their exit workers."""
+
+    _get_bool_setting = staticmethod(bool_setting)
 
     def __init__(self):
-        super().__init__()
         self._running = False
+        self.mapping = AmsMapping()
+        self.drying = AmsDrying()
+        self.selection = PrinterSelection(self.mapping, self.drying)
         self._heat_soak = ChamberHeatSoak()
-        self.dispatcher = Dispatcher(self._heat_soak, self)
+        self.dispatcher = Dispatcher(self._heat_soak, self.selection, self.drying)
         self.workers = queued.Workers(self._heat_soak, self.dispatcher)
+        self._heat_soak_timer: asyncio.Task | None = None
+        self._dispatch_timer: asyncio.Task | None = None
         self._check_interval = 30  # seconds
         self._fast_check_interval = 3  # seconds while dispatch work is draining
 
@@ -51,6 +52,8 @@ class PrintScheduler(PrinterSelection, AmsMapping, AmsDrying):
         logger.info("Print scheduler started")
 
         await self.dispatcher.start()
+        self._dispatch_timer = spawn_background_task(self.dispatcher.run(), name="dispatch-recovery-timer")
+        self._heat_soak_timer = spawn_background_task(self._heat_soak.run(), name="heat-soak-timer")
         next_archive_check = 0.0
         archive_check: asyncio.Task | None = None
 
@@ -63,7 +66,7 @@ class PrintScheduler(PrinterSelection, AmsMapping, AmsDrying):
 
             now = asyncio.get_running_loop().time()
             if now >= next_archive_check and (archive_check is None or archive_check.done()):
-                from backend.app.main import reconcile_print_archives
+                from backend.app.services.lifecycle.intake import reconcile_print_archives
 
                 archive_check = spawn_background_task(reconcile_print_archives(), name="archive-reconciliation")
                 next_archive_check = now + ARCHIVE_RECONCILE_INTERVAL_SECONDS
@@ -73,24 +76,23 @@ class PrintScheduler(PrinterSelection, AmsMapping, AmsDrying):
     def stop(self):
         """Stop the scheduler."""
         self._running = False
+        for timer in (self._heat_soak_timer, self._dispatch_timer):
+            if timer is not None:
+                timer.cancel()
         # App shutdown also cancels the global task registry. Cancelling here
         # prevents a same-process restart from retaining upload reservations.
         for item_id in tuple(self.workers.inflight):
             self.workers.cancel(item_id)
         logger.info("Print scheduler stopped")
 
-    async def _check_heat_soaks(self, db: AsyncSession) -> set[int]:
-        ready = await self._heat_soak.wait(db)
-        await self.dispatcher.wait_unsent(db)
-        for item_id in ready:
-            spawn_background_task(self.dispatcher.take_over(item_id), name=f"heat-soak-dispatch-{item_id}")
+    async def _shutdown_printers(self, db: AsyncSession) -> set[int]:
+        """Printers unavailable for selection while their heaters are shutting down."""
         return set((await db.scalars(select(Printer.id).where(Printer.heat_soak_shutdown_pending.is_(True)))).all())
 
     async def check_queue(self) -> bool:
         """Check for prints ready to start and report whether to tick quickly."""
         async with async_session() as db:
-            shutdown_printers = await self._check_heat_soaks(db)
-            await self.dispatcher.recover(db)
+            shutdown_printers = await self._shutdown_printers(db)
 
             # Check if shortest-job-first scheduling is enabled
             sjf_enabled = await self._get_bool_setting(db, "queue_shortest_first")
@@ -140,14 +142,14 @@ class PrintScheduler(PrinterSelection, AmsMapping, AmsDrying):
             busy_printers.update(pid for _task, pid in inflight.values())
 
             try:
-                await self._check_scheduled_dryings(db)
+                await self.drying._check_scheduled_dryings(db)
             except StopAsyncIteration:  # A finite mocked query sequence has no optional drying work.
                 logger.debug("Scheduled drying check had no further mocked database results")
 
             if not items:
                 # No dispatchable items — still check auto-drying, but do not
                 # dry a printer whose upload is about to start printing.
-                await self._check_auto_drying(db, [], busy_printers, require_plate_clear=require_plate_clear)
+                await self.drying._check_auto_drying(db, [], busy_printers, require_plate_clear=require_plate_clear)
                 return bool(inflight)
 
             logger.info(
@@ -182,7 +184,7 @@ class PrintScheduler(PrinterSelection, AmsMapping, AmsDrying):
                 logger.warning("Home Assistant interlock check failed: %s", e)
                 interlocked = {}
 
-            selection = await self._select_printers(
+            selection = await self.selection._select_printers(
                 db,
                 items,
                 busy_printers,
@@ -193,20 +195,15 @@ class PrintScheduler(PrinterSelection, AmsMapping, AmsDrying):
                 pool_reason=pool_waiting_reason,
             )
             dispatch_ids = list(selection.printers)
-            if busy_printers:
-                # Log why each printer was busy (first time it was checked)
-                for pid in busy_printers:
-                    state = printer_manager.get_status(pid)
-                    connected = printer_manager.is_connected(pid)
-                    awaiting = printer_manager.is_awaiting_plate_clear(pid)
-                    state_name = state.state if state else "NO_STATUS"
-                    logger.info(
-                        "Queue: printer %d not available — connected=%s, state=%s, awaiting_plate_clear=%s",
-                        pid,
-                        connected,
-                        state_name,
-                        awaiting,
-                    )
+            for pid in busy_printers:  # Why each printer is unavailable this pass.
+                state = printer_manager.get_status(pid)
+                logger.info(
+                    "Queue: printer %d not available — connected=%s, state=%s, awaiting_plate_clear=%s",
+                    pid,
+                    printer_manager.is_connected(pid),
+                    state.state if state else "NO_STATUS",
+                    printer_manager.is_awaiting_plate_clear(pid),
+                )
 
             # Commit selection metadata before workers open their independent sessions.
             if dispatch_ids or selection.changed:
@@ -232,30 +229,17 @@ class PrintScheduler(PrinterSelection, AmsMapping, AmsDrying):
                 await asyncio.sleep(0)
 
             # Auto-drying: start drying on idle printers that have no pending queue items
-            await self._check_auto_drying(db, items, busy_printers, require_plate_clear=require_plate_clear)
+            await self.drying._check_auto_drying(db, items, busy_printers, require_plate_clear=require_plate_clear)
 
             # Keep checking quickly while workers are active or work was selected
             # but deferred by a full pool.
             return bool(dispatch_ids) or bool(inflight)
 
-    async def _get_setting(self, db: AsyncSession, key: str) -> str | None:
-        """Read a setting value from the database."""
-        result = await db.execute(select(Settings).where(Settings.key == key))
-        setting = result.scalar_one_or_none()
-        return setting.value if setting else None
-
-    async def _get_bool_setting(self, db: AsyncSession, key: str, default: bool = False) -> bool:
-        """Read a boolean setting from the database."""
-        result = await db.execute(select(Settings).where(Settings.key == key))
-        setting = result.scalar_one_or_none()
-        if setting:
-            return setting.value.lower() == "true"
-        return default
-
     async def _get_int_setting(self, db: AsyncSession, key: str, default: int) -> int:
         """Read an integer setting, falling back safely for legacy rows."""
         try:
-            value = await self._get_setting(db, key)
+            setting = (await db.execute(select(Settings).where(Settings.key == key))).scalar_one_or_none()
+            value = setting.value if setting else None
         except StopAsyncIteration:
             # A few lightweight scheduler tests provide a finite mocked query
             # sequence from before this optional setting existed. A missing
@@ -266,68 +250,6 @@ class PrintScheduler(PrinterSelection, AmsMapping, AmsDrying):
         except (TypeError, ValueError):
             logger.warning("Invalid integer setting %s=%r; using %s", key, value, default)
             return default
-
-    async def _block_on_filament_deficit(
-        self,
-        db: AsyncSession,
-        item: PrintQueueItem,
-        *,
-        printer_id: int | None = None,
-        ams_mapping: str | None = None,
-    ) -> bool:
-        """Promote the item to manual_start when the assigned spool is short (#1496).
-
-        Returns True when this dispatch attempt was blocked, False when the
-        item is clear to start. A previously-flagged item whose spool has
-        since been swapped to one with enough material clears the flag here
-        so the next scheduler tick dispatches it. ``printer_id`` and
-        ``ams_mapping`` are the selected printer for an "Any machine" job.
-        """
-        # An explicit Print Anyway acknowledgement bypasses the deficit check.
-        if item.skip_filament_check:
-            # Keep the acknowledgement visible in support logs (#1762).
-            logger.info(
-                "Queue item %s honouring user's Print Anyway acknowledgement — skipping deficit check",
-                item.id,
-            )
-            return False
-
-        try:
-            deficit = await compute_deficit_for_queue_item(db, item, printer_id=printer_id, ams_mapping=ams_mapping)
-        except Exception as e:
-            # Never let a flaky deficit check wedge the queue — log and let
-            # dispatch proceed. The PrintModal-side check still runs on the
-            # manual paths.
-            logger.warning("Filament deficit check failed for item %s: %s", item.id, e)
-            return False
-
-        if deficit:
-            item.filament_short = True
-            item.manual_start = True
-            await db.commit()
-            job_name = await queued.job_name(db, item)
-            printer = await db.get(Printer, item.printer_id) if item.printer_id else None
-            logger.info(
-                "Queue item %s blocked on filament deficit (%d slot(s)) — promoted to manual_start",
-                item.id,
-                len(deficit),
-            )
-            try:
-                await notification_service.on_queue_job_waiting(
-                    job_name=job_name,
-                    target_model=(printer.model if printer else "") or "",
-                    waiting_reason="filament_short",
-                    db=db,
-                )
-            except Exception as e:
-                logger.debug("filament_short notification failed for item %s: %s", item.id, e)
-            return True
-
-        # No deficit — clear any stale flag from a previous tick.
-        if item.filament_short:
-            item.filament_short = False
-            await db.commit()
-        return False
 
 
 # Global scheduler instance

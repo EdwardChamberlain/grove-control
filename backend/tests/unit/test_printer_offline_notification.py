@@ -21,6 +21,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from backend.app import main as main_module
+from backend.app.services.lifecycle import intake
 
 
 def _state(connected: bool, state: str = "IDLE") -> SimpleNamespace:
@@ -57,7 +58,7 @@ def _reset_edge_state():
         if not task.done():
             task.cancel()
     main_module._printer_offline_notify_tasks.clear()
-    main_module._printer_reconciled_since_connect.clear()
+    intake._printer_reconciled_since_connect.clear()
     main_module._last_status_broadcast.clear()
     yield
     main_module._printer_last_connected.clear()

@@ -460,7 +460,7 @@ class TestDurableDispatchingState:
 
             with (
                 patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", return_value=status),
-                patch("backend.app.main.on_print_complete", new=complete),
+                patch("backend.app.services.lifecycle.intake.print_completed", new=complete),
                 patch("backend.app.services.lifecycle.dispatching.spawn_background_task", side_effect=spawn),
             ):
                 await PrintScheduler().dispatcher.recover(db)
@@ -572,13 +572,16 @@ class TestDispatchConfirmationScheduling:
             patch("backend.app.services.print_scheduler.async_session") as session_factory,
             patch("backend.app.services.lifecycle.queued.async_session", session_factory),
             patch.object(scheduler.dispatcher, "recover", new=AsyncMock()),
-            patch.object(scheduler, "_check_heat_soaks", new=AsyncMock(return_value=set())),
+            patch.object(scheduler, "_shutdown_printers", new=AsyncMock(return_value=set())),
             patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=False)),
+            patch.object(scheduler.mapping, "_get_bool_setting", new=AsyncMock(return_value=False)),
+            patch.object(scheduler.drying, "_get_bool_setting", new=AsyncMock(return_value=False)),
             patch.object(scheduler, "_get_int_setting", new=AsyncMock(return_value=2)),
-            patch.object(scheduler, "_is_printer_idle", return_value=True),
+            patch.object(scheduler.selection, "_is_printer_idle", return_value=True),
+            patch.object(scheduler.drying, "_is_printer_idle", return_value=True),
             patch("backend.app.services.lifecycle.dispatching.printer_manager.is_connected", return_value=True),
-            patch.object(scheduler, "_ams_mapping_uses_compatible_materials", return_value=True),
-            patch.object(scheduler, "_block_on_filament_deficit", new=AsyncMock(return_value=False)),
+            patch.object(scheduler.mapping, "_ams_mapping_uses_compatible_materials", return_value=True),
+            patch.object(scheduler.selection, "_block_on_filament_deficit", new=AsyncMock(return_value=False)),
             patch("backend.app.services.lifecycle.queued._claim", new=AsyncMock(return_value=True)),
             patch("backend.app.services.lifecycle.queued.release_claim", new=AsyncMock()),
             patch.object(scheduler.workers, "leave", new=start_print),

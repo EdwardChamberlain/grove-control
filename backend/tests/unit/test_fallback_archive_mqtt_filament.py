@@ -13,7 +13,7 @@ expansion can count filaments per print.
 
 import pytest
 
-from backend.app.main import _extract_filament_data_from_mqtt
+from backend.app.services.print_effects import _extract_filament_data_from_mqtt
 
 
 def _ams_unit(unit_id: int, trays: list[dict]) -> dict:

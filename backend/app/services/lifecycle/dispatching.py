@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import time
+from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -34,7 +35,7 @@ from backend.app.services.bambu_ftp import (
     upload_file_async,
     with_ftp_retry,
 )
-from backend.app.services.job_identity import sync_print_state, telemetry_identity
+from backend.app.services.job_identity import telemetry_identity
 from backend.app.services.lifecycle import effects, preheating, queued
 from backend.app.services.lifecycle.engine import (
     InvalidQueueTransition,
@@ -43,6 +44,7 @@ from backend.app.services.lifecycle.engine import (
     transition_queue_item,
 )
 from backend.app.services.lifecycle.preheating import abort_heat_soak, request_heater_shutdown
+from backend.app.services.lifecycle.printing import sync_print_state
 from backend.app.services.printer_manager import printer_manager
 from backend.app.services.printer_selection import _incompatible_sliced_model_reason
 
@@ -51,6 +53,10 @@ logger = logging.getLogger(__name__)
 # Bambu firmware states that mean the project_file has actually been accepted
 _ACTIVE_PRINT_STATES: frozenset[str] = frozenset({"PREPARE", "SLICING", "RUNNING", "PAUSE"})
 DISPATCH_TELEMETRY_WAIT_SECONDS = 30
+RECOVERY_INTERVAL = 30
+_wake: asyncio.Event | None = None
+
+
 _DISPATCH_REVIEW_MESSAGE = (
     "Printer did not provide a correlated active-state confirmation; "
     "dispatch held for manual review to avoid a duplicate print."
@@ -65,6 +71,11 @@ SOAKING = or_(
         PrintQueueItem.dispatch_subtask_id.is_(None),
     ),
 )
+
+
+def wake() -> None:
+    if _wake is not None:
+        _wake.set()
 
 
 def is_soaking(item: PrintQueueItem) -> bool:
@@ -100,16 +111,6 @@ async def _transition_or_skip(db: AsyncSession, item: PrintQueueItem, status: st
     return True
 
 
-async def owner_of(db: AsyncSession, item: PrintQueueItem) -> tuple[int, str] | None:
-    """The job's owner, whom the print-complete callback credits; None for an ownerless job."""
-    if not item.created_by_id:
-        return None
-    from backend.app.models.user import User
-
-    owner = await db.get(User, item.created_by_id)
-    return (owner.id, owner.username) if owner else None
-
-
 @dataclass
 class _Attempt:
     """One held attempt, passed from step to step. Scalars survive a rollback's expiry."""
@@ -141,9 +142,9 @@ class _Attempt:
 class Dispatcher:
     """Dispatching's worker: each attempt from its hold to the printer's confirmation, and their recovery."""
 
-    def __init__(self, heat_soak: preheating.ChamberHeatSoak, printers):
-        """``heat_soak`` hands soaks over; ``printers`` reports idle printers and AMS drying (the scheduler)."""
-        self._heat_soak, self._printers = heat_soak, printers
+    def __init__(self, heat_soak: preheating.ChamberHeatSoak, selection, drying):
+        """``heat_soak`` hands soaks over; ``selection`` reports idle printers, and ``drying`` AMS drying."""
+        self._heat_soak, self._selection, self._drying = heat_soak, selection, drying
         self._started_at: datetime | None = None
         self._recovering: set[int] = set()
         self._visible_unsent: set[int] = set()
@@ -207,7 +208,7 @@ class Dispatcher:
     async def _hold(self, db: AsyncSession, item: PrintQueueItem, binding: queued._DispatchBinding | None) -> bool:
         """From queued: commit the printer hold, with the selected printer and mapping, before any copy."""
         item_id, printer_id, unassigned = item.id, item.printer_id, bool(binding and binding.unassigned)
-        if not self._printers._is_printer_idle(printer_id):
+        if not self._selection._is_printer_idle(printer_id):
             return False
         printer = PrintQueueItem.printer_id.is_(None) if unassigned else PrintQueueItem.printer_id == printer_id
         try:
@@ -218,7 +219,7 @@ class Dispatcher:
                 "dispatching",
                 conditions=(printer, PrintQueueItem.dispatching_at == item.dispatching_at),
                 values={"waiting_reason": None, **(binding.values() if binding else {})},
-                dispatch_guard=lambda: self._printers._is_printer_idle(printer_id),
+                dispatch_guard=lambda: self._selection._is_printer_idle(printer_id),
             )
             await db.commit()
         except IntegrityError:
@@ -367,10 +368,9 @@ class Dispatcher:
         except QueueTransitionConflict:
             return await self._lost(a)
         # This drying check closes the window opened by the send-boundary commit.
-        active = self._printers._active_drying_ams_ids(a.printer_id)
+        active = self._drying._active_drying_ams_ids(a.printer_id)
         if (active and not await self._dry(db, item, active)) or not await self._ready(a):
             return
-        owner = await owner_of(db, item)  # Read now, so the send-time commit ends this read.
         try:
             values = {"dispatched_at": datetime.now(timezone.utc)}
             await transition_queue_item(db, item, "dispatching", "dispatching", conditions=conditions, values=values)
@@ -390,8 +390,6 @@ class Dispatcher:
             if self._telemetry(a.printer_id, a.identity) is True:
                 break
             await db.rollback()  # Never wait for reconnect while holding the Stop lock.
-        if owner:  # Credited only with a command, so a print the attempt never sent isn't.
-            printer_manager.set_current_print_user(a.printer_id, *owner)
         try:
             started = printer_manager.start_print(
                 a.printer_id,
@@ -416,7 +414,6 @@ class Dispatcher:
             self._confirm_later(a.item_id, a.printer_id, subtask_id)
             return
         if not started:
-            printer_manager.clear_current_print_user(a.printer_id)
             values = {"dispatched_at": None, "dispatch_subtask_id": None, "started_at": None}
             await fail(db, item, "Failed to send print command to printer", **values)
             logger.error(
@@ -458,7 +455,7 @@ class Dispatcher:
 
     async def _dry(self, db: AsyncSession, item: PrintQueueItem, active: tuple[int, ...] | None = None) -> bool:
         """Whether no AMS drying blocks the print command; otherwise the attempt fails for its reason."""
-        if not (reason := await self._printers._drying_reason(item, item.printer_id, active)):
+        if not (reason := await self._drying._drying_reason(item, item.printer_id, active)):
             return True
         values = {"dispatched_at": None, "dispatch_subtask_id": None, "started_at": None, "waiting_reason": reason}
         await fail(db, item, reason, **values)
@@ -509,7 +506,7 @@ class Dispatcher:
         current_id = telemetry_identity(state)
         if state.state in _ACTIVE_PRINT_STATES or (previous_id and current_id and current_id != previous_id):
             return False
-        return True if self._printers._is_printer_idle(printer_id) else None
+        return True if self._selection._is_printer_idle(printer_id) else None
 
     async def _wait_for_telemetry(
         self, printer_id: int, previous_id: str | None, *, deadline: float | None = None
@@ -543,9 +540,8 @@ class Dispatcher:
                 except QueueTransitionConflict:
                     return await db.rollback()
                 item.started_at, item.error_message = datetime.now(timezone.utc), None
-                started = effects.queue_job_started(db, item_id)
                 await db.commit()
-                await effects.wait_for(started)
+                await effects.wait_for(effects.spawned(db))
 
             return await run_with_retry(promote, label=f"confirm queue dispatch {item_id}")
         if status in ("completed", "failed"):
@@ -610,7 +606,7 @@ class Dispatcher:
         return "dispatching", last_status
 
     async def resolve(self, db: AsyncSession, item: PrintQueueItem, outcome: str) -> None:
-        """Exit for a person's resolution of an unconfirmed attempt, awaiting its committed start effects."""
+        """Exit for a person's resolution of an unconfirmed attempt, awaiting printing's committed start effects."""
         state = printer_manager.get_status(item.printer_id)
         if state and state.connected:
             observed = telemetry_identity(state)
@@ -625,9 +621,8 @@ class Dispatcher:
         values = {"error_message": "Confirmed printing by user" if printing else "Printer didn't start the job"}
         values["started_at" if printing else "completed_at"] = datetime.now(timezone.utc)
         await transition_queue_item(db, item, "dispatching", outcome, values=values)
-        started = effects.queue_job_started(db, item.id) if printing else []
         await db.commit()
-        await effects.wait_for(started)
+        await effects.wait_for(effects.spawned(db))
 
     async def wait_unsent(self, db: AsyncSession) -> None:
         """Wait: keep the heartbeat of unsent soak handoffs, holding an expired one for inspection."""
@@ -640,22 +635,12 @@ class Dispatcher:
         for item_id in list(await db.scalars(unsent)):
             try:
                 item = await lock_queue_item(db, item_id)
-                if not item or item.status != "dispatching" or not is_soaking(item):
-                    await db.rollback()
-                    continue
-                checked = item.preheat_checked_at
-                elapsed = (preheating.utcnow() - checked).total_seconds() if checked else preheating.HEARTBEAT_TIMEOUT
-                live = 0 <= elapsed < preheating.HEARTBEAT_TIMEOUT
-                if item.preheat_owner != self._heat_soak.owner and not live:
-                    item.error_message = "Heat soak interrupted; inspect the printer, then stop or skip heat soak"
-                    preheating._show_preheating(item.printer_id, True)
-                    visible.add(item.printer_id)
-                    await db.commit()
-                elif item.preheat_owner == self._heat_soak.owner and not live:
-                    await abort_heat_soak(
-                        db, item, "Heat soak interrupted by restart or scheduler timeout; retry required"
-                    )
-                else:
+                if (
+                    not item
+                    or item.status != "dispatching"
+                    or not is_soaking(item)
+                    or not await preheating.lapsed(db, item, self._heat_soak.owner, visible)
+                ):
                     await db.rollback()
             except Exception:
                 await db.rollback()
@@ -688,6 +673,29 @@ class Dispatcher:
                     logger.info("Cleared %d stale queue dispatch claim(s)", result.rowcount)
         except Exception:
             logger.exception("Failed to clear stale queue dispatch claims")
+
+    async def run(self) -> None:
+        """Recover and watch unsent handoffs every 30 s, and at once after a printer connects or disconnects.
+
+        A plain timer by design: recovery reads every active job against live
+        telemetry, so a fixed cadence is simpler than tracking each job's events.
+        A locked SQLite database retries the pass rather than skipping it.
+        """
+        global _wake
+        _wake = asyncio.Event()
+
+        async def recover(db: AsyncSession) -> None:
+            await self.wait_unsent(db)
+            await self.recover(db)
+
+        while True:
+            _wake.clear()
+            try:
+                await run_with_retry(recover, label="dispatch recovery", session_factory=async_session)
+            except Exception:
+                logger.exception("Dispatch recovery failed")
+            with suppress(TimeoutError):
+                await asyncio.wait_for(_wake.wait(), RECOVERY_INTERVAL)
 
     async def recover(self, db: AsyncSession) -> None:
         """Recover, each pass: settle attempts that no worker or live confirmation owns, from telemetry."""
@@ -730,7 +738,6 @@ class Dispatcher:
                     if not await _transition_or_skip(db, item, "printing", started_at=now, error_message=None):
                         continue
                     changed = True
-                    effects.queue_job_started(db, item.id, background=True)
                     logger.info("Recovered dispatched queue item %s as printer-confirmed printing", item.id)
                 try:
                     changed = await sync_print_state(db, item, state) or changed
@@ -775,9 +782,9 @@ class Dispatcher:
 
     async def _complete_recovered_dispatch(self, item_id: int, printer_id: int, completion_data: dict) -> None:
         try:
-            from backend.app.main import on_print_complete
+            from backend.app.services.lifecycle.intake import print_completed
 
-            await on_print_complete(printer_id, completion_data)
+            await print_completed(printer_id, completion_data)
         finally:
             self._recovering.discard(item_id)
 
@@ -791,6 +798,21 @@ _UPLOAD_FAILED = (
     "See server logs for detailed diagnostics."
 )
 _TELEMETRY_UNAVAILABLE = "Printer telemetry unavailable; Stop and Retry to send this job"
+
+
+async def on_enter(change, row) -> None:
+    """Enter from preheating: this process's worker takes the soak over once the handoff commits."""
+    from backend.app.services.print_scheduler import scheduler
+
+    if change.before == "preheating" and row.preheat_owner == scheduler._heat_soak.owner:
+        item_id = change.item_id
+        effects.after_commit(
+            change.db,
+            lambda: spawn_background_task(
+                scheduler.dispatcher.take_over(item_id), name=f"heat-soak-dispatch-{item_id}"
+            ),
+            key=("take_over", item_id),
+        )
 
 
 async def on_exit(change, row) -> None:

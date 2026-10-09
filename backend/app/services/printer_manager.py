@@ -295,8 +295,6 @@ class PrinterManager:
         self._on_drying_complete: Callable[[int, int], None] | None = None
         self._on_tray_change: Callable[[int, int, int], None] | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
-        # Track who started the current print (Issue #206)
-        self._current_print_user: dict[int, dict] = {}  # {printer_id: {"user_id": int, "username": str}}
         # Track printers awaiting plate-clear acknowledgment after a finished/failed print.
         # Read-only view of holding jobs, rehydrated at startup and refreshed
         # after lifecycle commits. The queue index is the reservation authority.
@@ -308,18 +306,6 @@ class PrinterManager:
     def get_printer(self, printer_id: int) -> PrinterInfo | None:
         """Get printer info by ID."""
         return self._printer_info.get(printer_id)
-
-    def set_current_print_user(self, printer_id: int, user_id: int, username: str):
-        """Track who started the current print (Issue #206)."""
-        self._current_print_user[printer_id] = {"user_id": user_id, "username": username}
-
-    def get_current_print_user(self, printer_id: int) -> dict | None:
-        """Get the user who started the current print (Issue #206)."""
-        return self._current_print_user.get(printer_id)
-
-    def clear_current_print_user(self, printer_id: int):
-        """Clear the current print user when print completes (Issue #206)."""
-        self._current_print_user.pop(printer_id, None)
 
     def is_awaiting_plate_clear(self, printer_id: int) -> bool:
         """Return True when the printer finished/failed a print and is waiting for the
@@ -788,51 +774,6 @@ class PrinterManager:
         """Stop the current print on a connected printer."""
         if printer_id in self._clients:
             return self._clients[printer_id].stop_print()
-        return False
-
-    async def wait_for_cooldown(
-        self,
-        printer_id: int,
-        target_temp: float = 50.0,
-        timeout: int = 600,
-        check_interval: int = 10,
-    ) -> bool:
-        """Wait for the nozzle to cool down to a safe temperature.
-
-        Args:
-            printer_id: The printer to monitor
-            target_temp: Target temperature to wait for (default 50°C)
-            timeout: Maximum seconds to wait (default 600s = 10 min)
-            check_interval: Seconds between temperature checks (default 10s)
-
-        Returns:
-            True if cooled down, False if timeout or not connected
-        """
-        import logging
-
-        logger = logging.getLogger(__name__)
-
-        elapsed = 0
-        while elapsed < timeout:
-            state = self.get_status(printer_id)
-            if not state or not state.connected:
-                logger.warning("Printer %s disconnected during cooldown wait", printer_id)
-                return False
-
-            # Check nozzle temperature (and nozzle_2 for dual extruders)
-            nozzle_temp = state.temperatures.get("nozzle", 0)
-            nozzle_2_temp = state.temperatures.get("nozzle_2", 0)
-            max_temp = max(nozzle_temp, nozzle_2_temp)
-
-            if max_temp <= target_temp:
-                logger.info("Printer %s cooled down to %s°C", printer_id, max_temp)
-                return True
-
-            logger.debug("Printer %s nozzle at %s°C, waiting for %s°C...", printer_id, max_temp, target_temp)
-            await asyncio.sleep(check_interval)
-            elapsed += check_interval
-
-        logger.warning("Printer %s cooldown timeout after %ss", printer_id, timeout)
         return False
 
     def enable_logging(self, printer_id: int, enabled: bool = True) -> bool:

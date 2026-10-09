@@ -168,12 +168,14 @@ async def test_stop_during_heat_soak_archive_copy_wins_without_rows_or_directori
     handoffs = []
 
     def capture(coroutine, *, name):
-        if name.startswith("skip-heat-soak-dispatch"):
+        if name.startswith("heat-soak-dispatch"):
             handoffs.append(coroutine)
         else:
             coroutine.close()
 
     monkeypatch.setattr(heat, "spawn_background_task", capture)
+
+    monkeypatch.setattr("backend.app.services.lifecycle.dispatching.spawn_background_task", capture)
     async with handoff.sessions() as db:
         if skip:
             job = await heat.lock_queue_item(db, handoff.job_id)
@@ -200,14 +202,14 @@ async def test_losing_dispatch_update_cleans_its_upload_and_retains_the_cancelle
     live = SimpleNamespace(state="IDLE", connected=True, job_telemetry_ready=True)
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
     monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
-    monkeypatch.setattr("backend.app.main._user_stopped_printers", set())
+    monkeypatch.setattr("backend.app.services.lifecycle.intake._user_stopped_printers", set())
     # A control from another worker cannot cancel this process's local task.
     monkeypatch.setattr(scheduler.workers, "cancel", lambda _id: False)
     monkeypatch.setattr(scheduling, "async_session", alignment.sessions)
     monkeypatch.setattr(lifecycle_queued, "async_session", alignment.sessions)
     monkeypatch.setattr(scheduling, "get_ftp_retry_settings", AsyncMock(return_value=(False, 1, 0, 30)))
-    monkeypatch.setattr(scheduler, "_prepare_drying_for_dispatch", AsyncMock(return_value=True))
-    monkeypatch.setattr(scheduler, "_active_drying_ams_ids", lambda _id: [])
+    monkeypatch.setattr(scheduler.drying, "_prepare_drying_for_dispatch", AsyncMock(return_value=True))
+    monkeypatch.setattr(scheduler.drying, "_active_drying_ams_ids", lambda _id: [])
     started = MagicMock()
     monkeypatch.setattr(printer_manager, "start_print", started)
     notified = AsyncMock()
@@ -303,7 +305,7 @@ async def test_local_stop_drains_final_upload_ack_then_removes_only_its_unsent_c
     monkeypatch.setattr(scheduling, "async_session", alignment.sessions)
     monkeypatch.setattr(lifecycle_queued, "async_session", alignment.sessions)
     monkeypatch.setattr(scheduling, "get_ftp_retry_settings", AsyncMock(return_value=(False, 1, 0, 30)))
-    monkeypatch.setattr(scheduler, "_prepare_drying_for_dispatch", AsyncMock(return_value=True))
+    monkeypatch.setattr(scheduler.drying, "_prepare_drying_for_dispatch", AsyncMock(return_value=True))
     started = MagicMock()
     monkeypatch.setattr(printer_manager, "start_print", started)
     if heat_soak:
@@ -417,21 +419,14 @@ async def test_database_error_in_second_heat_soak_preserves_first_dispatch(hando
         return await original(db, item, before, after, **kwargs)
 
     monkeypatch.setattr(heat, "transition_queue_item", fail_second_handoff)
-    dispatched = []
-
-    def collect(coroutine, *, name):
-        dispatched.append(name)
-        coroutine.close()
-
-    monkeypatch.setattr("backend.app.services.print_scheduler.spawn_background_task", collect)
     async with handoff.sessions() as db:
-        await handoff.scheduler._check_heat_soaks(db)
+        ready = await handoff.service.wait(db)  # Preheating's pass, on its own timer since stage 6.
     async with handoff.sessions() as observer:
         first = await observer.get(PrintQueueItem, handoff.job_id)
         second = await observer.scalar(select(PrintQueueItem).where(PrintQueueItem.printer_id == 2))
         assert first.status == "dispatching" and first.archive_id is None
         assert second.status == "preheating" and second.archive_id is None
-    assert dispatched == [f"heat-soak-dispatch-{handoff.job_id}"]
+    assert ready == [handoff.job_id]  # Dispatching's entry takes it over after commit.
 
 
 async def test_unready_telemetry_keeps_heat_soak_alive_without_copying(handoff, monkeypatch):
@@ -559,12 +554,14 @@ async def test_skip_route_holds_job_then_copy_failure_is_recorded(handoff, monke
     handoffs = []
 
     def capture(coroutine, *, name):
-        if name.startswith("skip-heat-soak-dispatch"):
+        if name.startswith("heat-soak-dispatch"):
             handoffs.append(coroutine)
         else:
             coroutine.close()
 
     monkeypatch.setattr(heat, "spawn_background_task", capture)
+
+    monkeypatch.setattr("backend.app.services.lifecycle.dispatching.spawn_background_task", capture)
     async with handoff.sessions() as db:
         result = await skip_queue_item_heat_soak(handoff.job_id, db=db, auth_result=(None, True))
         assert result == {"message": "Heat soak skipped"}
@@ -714,6 +711,8 @@ async def test_requested_snippets_use_settings_helper_and_warn_on_no_result(alig
 @pytest.mark.parametrize("linked", [False, True])
 async def test_print_start_does_not_take_association_lock_without_a_candidate(alignment, monkeypatch, linked):
     import backend.app.main as main
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import intake
 
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
@@ -728,11 +727,12 @@ async def test_print_start_does_not_take_association_lock_without_a_candidate(al
         await db.commit()
     live = SimpleNamespace(state="RUNNING", connected=True, job_telemetry_ready=True, submission_id="123")
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
-    monkeypatch.setattr(main, "async_session", alignment.sessions)
-    monkeypatch.setattr(main, "_started_job_effects", {})
-    monkeypatch.setattr(main, "_archive_print_start", AsyncMock())
+    monkeypatch.setattr(intake, "async_session", alignment.sessions)
+    monkeypatch.setattr(print_effects, "async_session", alignment.sessions)
+    monkeypatch.setattr(intake, "_started_job_effects", {})
+    monkeypatch.setattr(print_effects, "_archive_print_start", AsyncMock())
     monkeypatch.setattr(lifecycle_effects, "publish_queue_job_started", AsyncMock())
     lock = AsyncMock(side_effect=AssertionError("No association needs a write lock"))
     monkeypatch.setattr(heat, "lock_queue_item", lock)
-    await main._observe_print_start(1, {"submission_id": "123", "filename": "source.3mf"})
+    await intake._observe_print_start(1, {"submission_id": "123", "filename": "source.3mf"})
     lock.assert_not_awaited()

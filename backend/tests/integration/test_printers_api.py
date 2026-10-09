@@ -924,33 +924,43 @@ class TestPrinterDataIntegrity:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_get_current_print_user_returns_empty_when_no_user(self, async_client: AsyncClient, printer_factory):
-        """Verify empty object returned when no user is tracked."""
+    async def test_get_current_print_user_returns_empty_when_no_user(
+        self, async_client: AsyncClient, printer_factory, db_session
+    ):
+        """An idle printer, or an ownerless active job, credits nobody."""
+        from backend.app.models.print_queue import PrintQueueItem
+
         printer = await printer_factory(name="Test Printer")
+        response = await async_client.get(f"/api/v1/printers/{printer.id}/current-print-user")
+        assert response.status_code == 200
+        assert response.json() == {}
 
-        with patch("backend.app.api.routes.printers.printer_manager") as mock_pm:
-            mock_pm.get_current_print_user.return_value = None
-
-            response = await async_client.get(f"/api/v1/printers/{printer.id}/current-print-user")
-
-            assert response.status_code == 200
-            assert response.json() == {}
+        db_session.add(PrintQueueItem(printer_id=printer.id, status="printing", position=1))
+        await db_session.commit()
+        response = await async_client.get(f"/api/v1/printers/{printer.id}/current-print-user")
+        assert response.status_code == 200
+        assert response.json() == {}
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_get_current_print_user_returns_user_info(self, async_client: AsyncClient, printer_factory):
-        """Verify user info is returned when tracked."""
+    async def test_get_current_print_user_returns_user_info(
+        self, async_client: AsyncClient, printer_factory, db_session
+    ):
+        """The active job's owner is the current print user, read from the job (#204 stage 6)."""
+        from backend.app.models.print_queue import PrintQueueItem
+        from backend.app.models.user import User
+
         printer = await printer_factory(name="Test Printer")
+        owner = User(username="testuser", password_hash="x", is_active=True)
+        db_session.add(owner)
+        await db_session.flush()
+        db_session.add(PrintQueueItem(printer_id=printer.id, status="printing", position=1, created_by_id=owner.id))
+        await db_session.commit()
 
-        with patch("backend.app.api.routes.printers.printer_manager") as mock_pm:
-            mock_pm.get_current_print_user.return_value = {"user_id": 42, "username": "testuser"}
+        response = await async_client.get(f"/api/v1/printers/{printer.id}/current-print-user")
 
-            response = await async_client.get(f"/api/v1/printers/{printer.id}/current-print-user")
-
-            assert response.status_code == 200
-            result = response.json()
-            assert result["user_id"] == 42
-            assert result["username"] == "testuser"
+        assert response.status_code == 200
+        assert response.json() == {"user_id": owner.id, "username": "testuser"}
 
 
 class TestPrintControlAPI:

@@ -1,9 +1,9 @@
-"""Tests for main._format_hms_error_summary — the helper that turns MQTT hms_errors
+"""Tests for print_effects._format_hms_error_summary — the helper that turns MQTT hms_errors
 into a human-readable PrintQueueItem.error_message on pre-print failures (#1111)."""
 
 
 def _format(hms_errors):
-    from backend.app.main import _format_hms_error_summary
+    from backend.app.services.print_effects import _format_hms_error_summary
 
     return _format_hms_error_summary(hms_errors)
 

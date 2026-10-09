@@ -107,11 +107,12 @@ async def _run(ctx, scheduler, blocked, launched, finder=None, idle=True, drying
             "backend.app.services.notification_service.notification_service.on_queue_job_assigned",
             AsyncMock(),
         ),
-        patch.object(scheduler, "_is_printer_idle", MagicMock(return_value=idle)),
-        patch.object(scheduler, "_check_auto_drying", drying or AsyncMock()),
-        patch.object(scheduler, "_compute_ams_mapping_for_printer", AsyncMock(return_value=None)),
-        patch.object(scheduler, "_block_on_filament_deficit", AsyncMock(return_value=False)),
-        patch.object(scheduler, "_prepare_drying_for_dispatch", AsyncMock(return_value=True)),
+        patch.object(scheduler.selection, "_is_printer_idle", MagicMock(return_value=idle)),
+        patch.object(scheduler.drying, "_is_printer_idle", MagicMock(return_value=idle)),
+        patch.object(scheduler.drying, "_check_auto_drying", drying or AsyncMock()),
+        patch.object(scheduler.mapping, "_compute_ams_mapping_for_printer", AsyncMock(return_value=None)),
+        patch.object(scheduler.selection, "_block_on_filament_deficit", AsyncMock(return_value=False)),
+        patch.object(scheduler.drying, "_prepare_drying_for_dispatch", AsyncMock(return_value=True)),
         patch.object(scheduler.workers, "launch", launched),
     ]
     if blocked is not None:
@@ -122,7 +123,7 @@ async def _run(ctx, scheduler, blocked, launched, finder=None, idle=True, drying
             )
         )
     if finder is not None:
-        patches.append(patch.object(scheduler, "_find_idle_printer_for_model", finder))
+        patches.append(patch.object(scheduler.selection, "_find_idle_printer_for_model", finder))
     with ExitStack() as stack:
         for p in patches:
             stack.enter_context(p)

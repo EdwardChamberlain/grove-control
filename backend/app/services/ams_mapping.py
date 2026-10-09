@@ -1,6 +1,6 @@
 """AMS tray mapping (#204): which loaded tray feeds each sliced filament slot of a queue job.
 
-Mixed into the print scheduler, which maps a job when it selects a printer for it.
+Printer selection maps a job when it selects a printer for it.
 """
 
 import json
@@ -14,6 +14,7 @@ from backend.app.core.config import settings
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem
+from backend.app.models.settings import bool_setting
 from backend.app.models.spool_assignment import SpoolAssignment
 from backend.app.models.spoolman_slot_assignment import SpoolmanSlotAssignment
 from backend.app.services.filament_requirements import canonical_filament_type, extract_filament_requirements
@@ -23,7 +24,9 @@ logger = logging.getLogger(__name__)
 
 
 class AmsMapping:
-    """Maps a queue job's filaments to a printer's trays; mixed into ``PrintScheduler``."""
+    """Maps a queue job's filaments to a printer's trays."""
+
+    _get_bool_setting = staticmethod(bool_setting)
 
     @staticmethod
     def _get_filament_overrides(item: PrintQueueItem) -> list[dict]:

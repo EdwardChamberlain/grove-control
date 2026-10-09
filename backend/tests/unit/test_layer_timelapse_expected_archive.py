@@ -23,7 +23,7 @@ unrelated side effects (plate detection, DB queries, MQTT relay, etc.).
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from backend.app.main import _maybe_start_layer_timelapse
+from backend.app.services.print_effects import _maybe_start_layer_timelapse
 
 
 def _make_printer(*, external_camera_enabled: bool, external_camera_url: str | None):

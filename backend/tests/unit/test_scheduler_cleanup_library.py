@@ -237,7 +237,7 @@ async def _dispatch_library_item(
     if binding is not None:
         patches.append(patch("backend.app.services.lifecycle.queued.async_session", ctx.session_maker))
     if drying_checks is not None:
-        patches.append(patch.object(scheduler, "_active_drying_ams_ids", side_effect=drying_checks))
+        patches.append(patch.object(scheduler.drying, "_active_drying_ams_ids", side_effect=drying_checks))
 
     with ExitStack() as stack:
         for patcher in patches:
@@ -350,8 +350,10 @@ async def test_archive_preparation_is_unsent_and_cancellation_still_fences_mqtt(
 async def test_old_completion_cannot_delete_a_later_upload(queue_factory, recorded_path, subtask_name):
     """Overlap real completion and dispatch; only the completed upload may go."""
     import backend.app.main as main
+    from backend.app.services import print_effects
     from backend.app.services.archive import ArchiveService
     from backend.app.services.bambu_ftp import DeleteResult
+    from backend.app.services.lifecycle import intake
 
     ctx = await queue_factory(cleanup=False)
     old_remote = "/same__grove_previous.3mf" if recorded_path else "/same.3mf"
@@ -403,8 +405,9 @@ async def test_old_completion_cannot_delete_a_later_upload(queue_factory, record
     ctx.upload.side_effect = upload_new
     state = SimpleNamespace(state="FINISH", connected=True, submission_id="123", subtask_id="123", raw_data={})
     with (
-        patch.object(main, "async_session", ctx.session_maker),
-        patch.object(main, "_completed_job_events", {}),
+        patch.object(intake, "async_session", ctx.session_maker),
+        patch.object(print_effects, "async_session", ctx.session_maker),
+        patch.object(intake, "_completed_job_events", {}),
         patch.object(main.printer_manager, "get_status", return_value=state),
         patch.object(main.printer_manager, "is_connected", return_value=True),
         patch.object(scheduler_module.settings, "base_dir", ctx.base_dir),
@@ -414,7 +417,7 @@ async def test_old_completion_cannot_delete_a_later_upload(queue_factory, record
         patch("backend.app.services.usage_tracker.on_print_complete", AsyncMock(side_effect=asyncio.CancelledError)),
     ):
         completion = asyncio.create_task(
-            main._complete_identified_print(
+            intake._complete_identified_print(
                 ctx.printer_id,
                 {
                     "status": "completed",
@@ -661,16 +664,6 @@ async def test_command_boundary_retains_reservation_if_drying_starts_after_final
         wait_for_drying_complete=wait_for_drying_complete,
     )
     clear = SimpleNamespace(raw_data={"ams": [{"id": 0, "dry_time": 0}]})
-    from backend.app.models.user import User
-    from backend.app.services.printer_manager import printer_manager
-
-    async with ctx.session_maker() as db:
-        owner = User(username="owner", password_hash="x", is_active=True)
-        db.add(owner)
-        await db.flush()
-        (await db.get(PrintQueueItem, ctx.queue_item_id)).created_by_id = owner.id
-        await db.commit()
-    printer_manager.clear_current_print_user(ctx.printer_id)
     await _dispatch_library_item(
         ctx,
         printer_status=clear,
@@ -690,8 +683,6 @@ async def test_command_boundary_retains_reservation_if_drying_starts_after_final
     assert archive.status == "failed"
     assert ctx.source_path.exists()
     assert ctx.archive_path.exists()
-    # No command was sent, so nobody is credited for the printer's next print.
-    assert printer_manager.get_current_print_user(ctx.printer_id) is None
     if wait_for_drying_complete:
         ctx.stop_drying.assert_not_called()
     else:
@@ -979,34 +970,3 @@ async def test_printer_becoming_busy_during_archive_copy_fails_the_hold_before_f
     assert ctx.archive_path.exists()
     ctx.upload.assert_not_awaited()
     ctx.start_print.assert_not_called()
-
-
-@pytest.mark.parametrize("accepted", [True, False])
-@pytest.mark.asyncio
-async def test_the_owner_is_credited_with_the_print_command(queue_factory, accepted):
-    from backend.app.models.user import User
-    from backend.app.services.printer_manager import printer_manager
-
-    ctx = await queue_factory(cleanup=False)
-    async with ctx.session_maker() as db:
-        user = User(username="owner", password_hash="x", is_active=True)
-        db.add(user)
-        await db.flush()
-        (await db.get(PrintQueueItem, ctx.queue_item_id)).created_by_id = user.id
-        await db.commit()
-    credited = []
-
-    def start_print(printer_id, *_args, **_kwargs):
-        credited.append(printer_manager.get_current_print_user(printer_id))
-        return accepted
-
-    ctx.start_print.side_effect = start_print
-    printer_manager.clear_current_print_user(ctx.printer_id)
-    try:
-        await _dispatch_library_item(ctx)
-        # The completion callback credits whoever is set when the command goes out;
-        # a refused command leaves nobody to credit.
-        assert credited == [{"user_id": user.id, "username": "owner"}]
-        assert (printer_manager.get_current_print_user(ctx.printer_id) is not None) is accepted
-    finally:
-        printer_manager.clear_current_print_user(ctx.printer_id)

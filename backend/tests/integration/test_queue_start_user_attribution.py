@@ -10,9 +10,9 @@ The fix is two-sided:
   - `POST /queue/{id}/start` credits the clicker as `created_by_id` when
     no prior owner is set (does NOT overwrite an existing owner — a
     UI-added queue item's original uploader keeps attribution).
-  - `Dispatcher._send` propagates `item.created_by_id` into
-    `printer_manager.set_current_print_user` so the print-complete callback
-    can write the username into the PrintLogEntry row.
+  - The print-complete callback credits the job's owner (`created_by_id`)
+    from the matched job, so the PrintLogEntry row gets the username, even
+    after a restart (#204 stage 6).
 
 These tests pin both halves so a future refactor can't silently regress
 either one back to "blank User column."
@@ -165,17 +165,16 @@ class TestStartCreditsTheClicker:
         assert refreshed.created_by_id is None
 
 
-class TestSchedulerPropagatesOwnerToPrinterManager:
-    """`dispatching.owner_of` looks up the user row by `created_by_id`; the
-    dispatcher forwards it into `printer_manager.set_current_print_user` with
-    the print command, so the print-complete callback can write the username
-    into PrintLogEntry."""
+class TestCompletionCreditsTheJobOwner:
+    """`printing.owner_of` looks up the user row by `created_by_id`; the
+    print-complete callback credits it from the matched job, so it can write
+    the username into PrintLogEntry."""
 
     @pytest.mark.asyncio
     @pytest.mark.integration
     async def test_propagates_when_created_by_id_resolves_to_user(self, db_session, queue_item, monkeypatch):
         from backend.app.models.user import User
-        from backend.app.services.lifecycle import dispatching as scheduler_module
+        from backend.app.services.lifecycle import printing as scheduler_module
 
         user = User(username="clickeruser", password_hash="x", is_active=True)
         db_session.add(user)
@@ -195,7 +194,7 @@ class TestSchedulerPropagatesOwnerToPrinterManager:
         """VP-uploaded queue items that never got manual-started (e.g.
         auto-dispatch) carry no owner — the helper must stay silent rather
         than synthesise a placeholder user."""
-        from backend.app.services.lifecycle import dispatching as scheduler_module
+        from backend.app.services.lifecycle import printing as scheduler_module
 
         assert queue_item.created_by_id is None
 
@@ -207,7 +206,7 @@ class TestSchedulerPropagatesOwnerToPrinterManager:
         """`created_by_id` points at a user that's since been deleted —
         helper must not crash the dispatch. The print log row will just be
         un-credited for this run, same as auth-disabled."""
-        from backend.app.services.lifecycle import dispatching as scheduler_module
+        from backend.app.services.lifecycle import printing as scheduler_module
 
         queue_item.created_by_id = 999_999  # no such user row
         db_session.add(queue_item)

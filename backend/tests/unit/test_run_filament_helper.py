@@ -6,7 +6,7 @@ don't inflate stats with the full slicer estimate, and tracker-aware so
 completed prints agree with the per-spool counter on the Inventory page.
 """
 
-from backend.app.main import _compute_run_filament_grams
+from backend.app.services.print_effects import _compute_run_filament_grams
 
 
 class TestComputeRunFilamentGrams:

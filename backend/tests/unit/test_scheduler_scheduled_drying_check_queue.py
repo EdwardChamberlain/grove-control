@@ -123,8 +123,9 @@ async def _run(ctx, scheduler, *, state):
             "backend.app.services.lifecycle.dispatching.printer_manager.send_drying_command",
             MagicMock(return_value=True),
         ),
-        patch.object(scheduler, "_is_printer_idle", MagicMock(return_value=True)),
-        patch.object(scheduler, "_block_on_filament_deficit", AsyncMock(return_value=False)),
+        patch.object(scheduler.selection, "_is_printer_idle", MagicMock(return_value=True)),
+        patch.object(scheduler.drying, "_is_printer_idle", MagicMock(return_value=True)),
+        patch.object(scheduler.selection, "_block_on_filament_deficit", AsyncMock(return_value=False)),
         patch.object(scheduler.workers, "leave", started),
     ]
     with ExitStack() as stack:
@@ -154,7 +155,7 @@ async def test_a_due_row_dispatches_through_the_real_queue_pass(queue_db):
     async with queue_db.session_maker() as db:
         stored = (await db.execute(select(ScheduledDrying).where(ScheduledDrying.id == row.id))).scalar_one()
         assert stored.status == "running"
-    assert 1 in scheduler._drying_in_progress
+    assert 1 in scheduler.drying._drying_in_progress
 
 
 @pytest.mark.asyncio
