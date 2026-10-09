@@ -15,6 +15,7 @@ from backend.app.core.auth import RequirePermissionIfAuthEnabled, require_owners
 from backend.app.core.config import settings
 from backend.app.core.database import get_db
 from backend.app.core.permissions import Permission
+from backend.app.core.websocket import ws_manager
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import FINAL_STATUSES, HOLDING_STATUSES, PrintQueueItem, PrintQueueVariant
@@ -770,6 +771,8 @@ async def add_to_queue(
         )
         raise
 
+    await ws_manager.send_queue_work_changed()
+
     # Refresh the first item for the response
     item = items[0]
     await db.refresh(item)
@@ -876,6 +879,8 @@ async def bulk_update_queue_items(
         updated_count += 1
 
     await db.commit()
+    if updated_count:
+        await ws_manager.send_queue_work_changed()
 
     logger.info("Bulk updated %s queue items, skipped %s", updated_count, skipped_count)
     return PrintQueueBulkUpdateResponse(
@@ -1108,6 +1113,7 @@ async def update_queue_item(
         setattr(item, field, value)
 
     await db.commit()
+    await ws_manager.send_queue_work_changed()
     await db.refresh(item, ["archive", "printer", "library_file", "created_by"])
 
     logger.info("Updated queue item %s", item_id)
@@ -1393,6 +1399,7 @@ async def retry_queue_item(
 
         await scheduler.dispatcher.withdraw(db, old)  # After the new job references the source.
     await db.commit()
+    await ws_manager.send_queue_work_changed()
     return await get_queue_item(new.id, db, (user, can_modify_all))
 
 

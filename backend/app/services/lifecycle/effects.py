@@ -130,6 +130,19 @@ def publish_printer_view(db: AsyncSession, printer_id: int, status: str, archive
     after_commit(db, publish, key=("printer_view", printer_id))
 
 
+def publish_queue_work_changed(db: AsyncSession) -> None:
+    """Tell browsers to refresh the shared queue-work summary after a committed change."""
+
+    def spawn() -> None:
+        from backend.app.core.tasks import spawn_background_task
+        from backend.app.core.websocket import ws_manager
+
+        if ws_manager.active_connections:
+            spawn_background_task(ws_manager.send_queue_work_changed(), name="queue-work-changed")
+
+    after_commit(db, spawn, key="queue_work_changed")
+
+
 def shut_down_heaters(db: AsyncSession, printer_id: int) -> None:
     """Retry the printer's recorded heater shutdown once this transaction commits."""
     engine = db.bind

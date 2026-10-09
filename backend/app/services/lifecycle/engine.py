@@ -213,6 +213,10 @@ async def transition_queue_item(
     if not session:
         return None
     change = Transition(db, item, item_id, expected_status, status, action, metadata)
+    if expected_status != status or metadata.keys() & {"printer_id", "target_model", "target_location"}:
+        from backend.app.services.lifecycle import effects
+
+        effects.publish_queue_work_changed(db)
     await _written(change)
     return change
 

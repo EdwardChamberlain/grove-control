@@ -5,7 +5,7 @@ import zipfile
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import func, literal, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -19,6 +19,7 @@ from backend.app.core.config import settings
 from backend.app.core.database import get_db
 from backend.app.core.permissions import Permission
 from backend.app.core.tasks import spawn_background_task
+from backend.app.core.websocket import ws_manager
 from backend.app.models.ams_label import AmsLabel
 from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import (
@@ -26,7 +27,6 @@ from backend.app.models.print_queue import (
     AWAITING_PLATE_CLEAR_STATUSES,
     HOLDING_STATUSES,
     PrintQueueItem,
-    PrintQueueVariant,
 )
 from backend.app.models.printer import Printer
 from backend.app.models.slot_preset import SlotPresetMapping
@@ -74,6 +74,7 @@ from backend.app.services.printer_manager import (
     supports_drying,
     supports_drying_while_printing,
 )
+from backend.app.services.queue_work import has_queue_work
 from backend.app.services.slot_nozzle import resolve_slot_nozzle
 from backend.app.utils.http import build_content_disposition
 from backend.app.utils.printer_models import uses_exhaust_fan_label
@@ -175,6 +176,7 @@ async def create_printer(
     printer = Printer(**printer_data.model_dump())
     db.add(printer)
     await db.commit()
+    await ws_manager.send_queue_work_changed()
     await db.refresh(printer)
 
     # Connect to the printer
@@ -330,6 +332,16 @@ async def get_developer_mode_warnings(
     return warnings
 
 
+@router.get("/queue-work", response_model=dict[int, bool])
+async def get_printer_queue_work(
+    _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
+    db: AsyncSession = Depends(get_db),
+):
+    """One authoritative queue-work summary for the printer action labels."""
+    result = await db.execute(select(Printer.id, has_queue_work(Printer.id, Printer.model, Printer.location)))
+    return dict(result.all())
+
+
 @router.get("/{printer_id}")
 async def get_printer(
     printer_id: int,
@@ -384,6 +396,8 @@ async def update_printer(
         setattr(printer, field, value)
 
     await db.commit()
+    if update_data.keys() & {"model", "location"}:
+        await ws_manager.send_queue_work_changed()
     await db.refresh(printer)
 
     # Reconnect if connection settings changed
@@ -465,6 +479,7 @@ async def delete_printer(
 
     await db.delete(printer)
     await db.commit()
+    await ws_manager.send_queue_work_changed()
 
     printer_manager.disconnect_printer(printer_id)
     return {"status": "deleted", "archives_deleted": delete_archives}
@@ -490,33 +505,9 @@ async def get_printer_status(
     )
     awaiting = awaiting_job is not None
 
-    queue_work_filter = [
-        PrintQueueItem.status.in_(["queued", *ACTIVE_STATUSES]),
-    ]
-    if printer.model:
-        queue_work_filter.append(
-            or_(
-                PrintQueueItem.printer_id == printer_id,
-                and_(
-                    PrintQueueItem.printer_id.is_(None),
-                    or_(
-                        func.lower(PrintQueueItem.target_model) == printer.model.lower(),
-                        select(PrintQueueVariant.id)
-                        .where(PrintQueueVariant.queue_item_id == PrintQueueItem.id)
-                        .where(func.lower(PrintQueueVariant.target_model) == printer.model.lower())
-                        .exists(),
-                    ),
-                    or_(
-                        PrintQueueItem.target_location.is_(None),
-                        PrintQueueItem.target_location == "",
-                        PrintQueueItem.target_location == printer.location,
-                    ),
-                ),
-            )
-        )
-    else:
-        queue_work_filter.append(PrintQueueItem.printer_id == printer_id)
-    has_queued_work = (await db.scalar(select(PrintQueueItem.id).where(*queue_work_filter).limit(1))) is not None
+    has_queued_work = bool(
+        await db.scalar(select(has_queue_work(literal(printer_id), literal(printer.model), literal(printer.location))))
+    )
     if not state:
         return PrinterStatus(
             id=printer_id,
