@@ -385,6 +385,13 @@ class Workers:
         state's hold writes them. A disconnected or held printer is simply not
         available yet.
         """
+        if binding is None and item.printer_id is None and item.assigned_printer_id is not None:
+            # A fixed printer preference is itself the selection for callers
+            # that enter this worker directly (for example, preheating handoff
+            # and focused lifecycle tests). It remains unbound until the next
+            # state's conditional hold commits.
+            binding = _DispatchBinding.for_item(item, item.assigned_printer_id, item.ams_mapping, unassigned=False)
+        original_mapping = item.ams_mapping
         if binding is not None:
             _bind_in_memory(item, binding.printer_id, binding.ams_mapping)
         printer = await db.get(Printer, item.printer_id)
@@ -403,6 +410,8 @@ class Workers:
         else:
             problem = await blocker(db, item, printer)
         if problem:
+            if binding is not None:
+                _bind_in_memory(item, None, original_mapping)
             await stay(db, item, problem[0], park=problem[1])
         elif getattr(item, "chamber_heat_soak", False) is not True:
             await self._dispatcher.enter(db, item, "queued", binding)

@@ -350,6 +350,14 @@ class ChamberHeatSoak:
         "Any machine" job must still be unassigned, any other must still
         require that printer.
         """
+        if binding is None and item.printer_id is None and item.assigned_printer_id is not None:
+            from backend.app.services.lifecycle.queued import _DispatchBinding
+
+            binding = _DispatchBinding.for_item(item, item.assigned_printer_id, item.ams_mapping, unassigned=False)
+        if binding is not None:
+            from backend.app.services.lifecycle.queued import _bind_in_memory
+
+            _bind_in_memory(item, binding.printer_id, binding.ams_mapping)
         item_id, printer_id = item.id, item.printer_id
         unassigned = bool(binding and binding.unassigned)
         await hold_printer(db, printer_id)  # The selected printer, before any write.

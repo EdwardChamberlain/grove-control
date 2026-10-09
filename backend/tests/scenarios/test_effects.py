@@ -68,7 +68,17 @@ async def test_failure_notice_for_a_failed_upload(app):
 
     await app.run()
 
-    assert len(app.notified("on_queue_job_failed")) == 1
+    # The original job creates one fresh retry; both failed attempts notify,
+    # while the retry's flag prevents an endless chain.
+    assert len(app.notified("on_queue_job_failed")) == 2
+    from sqlalchemy import select
+
+    from backend.app.models.print_queue import PrintQueueItem
+
+    async with app.session() as db:
+        jobs = list(await db.scalars(select(PrintQueueItem).order_by(PrintQueueItem.id)))
+    assert len(jobs) == 2
+    assert sorted(job.retry_on_failure for job in jobs) == [False, True]
 
 
 async def test_archive_is_repaired_once_the_file_appears(app):

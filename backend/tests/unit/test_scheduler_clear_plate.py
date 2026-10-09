@@ -110,7 +110,14 @@ class TestAwaitingPlateClearProjection:
             db.add(archive)
             await db.flush()
             archive_id = archive.id
-            db.add(PrintQueueItem(printer_id=1, archive_id=archive_id, status=status))
+            db.add(
+                PrintQueueItem(
+                    printer_id=1,
+                    archive_id=archive_id,
+                    status=status,
+                    physical_outcome="failed" if status == "failed" else None,
+                )
+            )
             await db.commit()
         manager = PrinterManager()
         with patch("backend.app.core.database.async_session", projection_db):
@@ -263,7 +270,10 @@ class TestSchedulerQueueCheckLogging:
         mock_item = MagicMock()
         mock_item.id = 42
         mock_item.printer_id = 1
+        mock_item.assigned_printer_id = 1
         mock_item.archive_id = 100
+        mock_item.archive = None
+        mock_item.library_file = None
         mock_item.library_file_id = None
         mock_item.scheduled_time = None
         mock_item.manual_start = False

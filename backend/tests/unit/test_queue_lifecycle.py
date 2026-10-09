@@ -155,7 +155,7 @@ async def test_clear_plate_works_offline_and_final_jobs_leave_the_live_queue(ses
     from backend.app.api.routes.print_queue import list_queue
 
     async with sessions() as db:
-        item = PrintQueueItem(printer_id=1, status="failed")
+        item = PrintQueueItem(printer_id=1, status="failed", physical_outcome="failed")
         db.add(item)
         await db.commit()
         with patch("backend.app.api.routes.printers.printer_manager.get_status", return_value=None):
@@ -265,7 +265,11 @@ async def test_retry_uses_archive_copy_when_source_has_gone(sessions, tmp_path):
 @pytest.mark.parametrize("status", HOLDING_STATUSES)
 async def test_deleting_printer_ends_holding_job_and_leaves_waiting_job_to_retarget(sessions, status):
     async with sessions() as db:
-        old = PrintQueueItem(printer_id=1, status=status)
+        old = PrintQueueItem(
+            printer_id=1,
+            status=status,
+            physical_outcome="failed" if status == "failed" else None,
+        )
         waiting = PrintQueueItem(assigned_printer_id=1, status="queued")
         db.add_all([old, waiting])
         await db.commit()
@@ -401,7 +405,7 @@ async def test_migration_unbinds_waiting_any_machine_jobs_and_keeps_specific_req
     async with sessions() as db:
         stale_pick, specific = [await db.get(PrintQueueItem, i) for i in ids]
         assert (stale_pick.status, stale_pick.printer_id, stale_pick.target_model) == ("queued", None, "X1C")
-        assert (specific.status, specific.printer_id) == ("queued", 1)
+        assert (specific.status, specific.printer_id, specific.assigned_printer_id) == ("queued", None, 1)
 
 
 async def test_queue_assignment_migration_splits_preference_and_sets_pending_retry_policy(sessions):

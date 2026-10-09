@@ -92,6 +92,7 @@ async def test_source_removed_after_eligibility_read_fails_the_committed_hold(
             .values(
                 status="queued",
                 printer_id=None,
+                assigned_printer_id=None,
                 chamber_heat_soak=False,
                 archive_id=source_id if source_kind == "archive" else None,
                 library_file_id=source_id if source_kind == "library" else None,

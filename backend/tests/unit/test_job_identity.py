@@ -52,6 +52,8 @@ async def add_job(sessions, status="dispatching", **kwargs):
             status=status,
             dispatch_subtask_id="123",
             dispatched_at=datetime.now(timezone.utc) - timedelta(minutes=10),
+            physical_outcome={"failed": "failed"}.get(status),
+            physical_completed_at=datetime.now(timezone.utc) if status == "failed" else None,
             **kwargs,
         )
         db.add(item)
@@ -61,7 +63,13 @@ async def add_job(sessions, status="dispatching", **kwargs):
 
 async def add_linked_job(sessions, identity, status="printing", with_archive=True):
     async with sessions() as db:
-        item = PrintQueueItem(printer_id=1, status=status, dispatch_subtask_id=identity)
+        item = PrintQueueItem(
+            printer_id=1,
+            status=status,
+            dispatch_subtask_id=identity,
+            physical_outcome={"failed": "failed"}.get(status),
+            physical_completed_at=datetime.now(timezone.utc) if status == "failed" else None,
+        )
         db.add(item)
         await db.flush()
         if with_archive:

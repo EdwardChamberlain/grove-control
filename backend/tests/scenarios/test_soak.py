@@ -290,6 +290,13 @@ async def test_telemetry_lost_after_the_soak_parks_the_job_and_cools_the_printer
     await app.advance(60)
 
     job = await app.job(job_id)
-    assert job.status == "dispatching"
+    assert job.status == "failed" and job.physical_outcome is None
     assert printer.sent("project_file") == []
     assert "M140 S0" in gcode(printer)
+    from sqlalchemy import select
+
+    from backend.app.models.print_queue import PrintQueueItem
+
+    async with app.session() as db:
+        retries = list(await db.scalars(select(PrintQueueItem).where(PrintQueueItem.id != job_id)))
+    assert len(retries) == 1 and retries[0].status == "queued" and retries[0].retry_on_failure is False

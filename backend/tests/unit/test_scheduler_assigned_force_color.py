@@ -13,7 +13,8 @@ from backend.app.services.print_scheduler import PrintScheduler
 def _queue_item(*, force_color_match: bool = True):
     return SimpleNamespace(
         id=17,
-        printer_id=3,
+        printer_id=None,
+        assigned_printer_id=3,
         target_model=None,
         target_location=None,
         required_filament_types='["PLA"]',

@@ -148,10 +148,8 @@ class Dispatcher:
         reason or hands it on. An unexpected error after the hold fails it.
         """
         if from_state == "queued" and binding is None and item.assigned_printer_id is not None:
-            binding = queued._DispatchBinding(
-                printer_id=item.assigned_printer_id,
-                ams_mapping=item.ams_mapping,
-                unassigned=False,
+            binding = queued._DispatchBinding.for_item(
+                item, item.assigned_printer_id, item.ams_mapping, unassigned=False
             )
         if from_state == "queued" and binding is not None:
             queued._bind_in_memory(item, binding.printer_id, binding.ams_mapping)
@@ -553,7 +551,11 @@ class Dispatcher:
             return await db.rollback()
         dispatching = item.status == "dispatching"
         if dispatching and not item.dispatch_subtask_id:
-            return await db.rollback()  # Nothing was sent: parked for Retry.
+            if item.dispatched_at is None:
+                await fail(db, item, "Dispatch was interrupted before the print command was sent")
+            else:
+                await db.rollback()  # A send intent without printer identity is ambiguous; leave it for review.
+            return
         state = printer_manager.get_status(item.printer_id) if item.printer_id is not None else None
         if not state or not getattr(state, "connected", False) or not getattr(state, "job_telemetry_ready", True):
             return await db.rollback()

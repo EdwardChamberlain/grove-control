@@ -62,6 +62,7 @@ async def add_held_job(sessions, status, reference):
         item = PrintQueueItem(
             printer_id=1,
             status=status,
+            physical_outcome="failed" if status == "failed" else None,
             archive_id=archive.id,
             library_file_id=library.id,
             created_by_id=1 if reference == "job" else None,

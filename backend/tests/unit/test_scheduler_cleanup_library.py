@@ -714,9 +714,11 @@ async def test_oserror_during_unlink_logs_orphan_path_and_does_not_crash_dispatc
 
 
 @pytest.mark.asyncio
-async def test_failed_upload_holds_printer_until_clear_even_with_confirmation_off(queue_factory):
+async def test_proven_unsent_upload_failure_creates_one_fresh_retry_without_plate_hold(queue_factory):
+    from sqlalchemy import select
+
+    from backend.app.models.print_queue import physical_holding_clause
     from backend.app.models.settings import Settings
-    from backend.app.services.lifecycle.awaiting import clear_job_plate
 
     ctx = await queue_factory(cleanup=True)
     failed_id = ctx.queue_item_id
@@ -733,26 +735,34 @@ async def test_failed_upload_holds_printer_until_clear_even_with_confirmation_of
     ctx.upload.return_value = False
     await _dispatch_library_item(ctx)
     failed, library, _ = await _queue_snapshot(ctx)
-    assert failed.status == "failed"
+    assert failed.status == "failed" and failed.physical_outcome is None
     assert library is not None and ctx.source_path.is_file()
-
-    ctx.queue_item_id = next_id
-    await _dispatch_library_item(ctx)
-    waiting, _, _ = await _queue_snapshot(ctx)
-    assert waiting.status == "queued"
-    assert ctx.upload.await_count == 1
-    ctx.start_print.assert_not_called()
-
     async with ctx.session_maker() as db:
-        failed = await db.get(PrintQueueItem, failed_id)
-        await clear_job_plate(db, failed)
-        await db.commit()
-    ctx.upload.return_value = True
+        held = await db.scalar(
+            select(PrintQueueItem.id).where(
+                PrintQueueItem.printer_id == ctx.printer_id,
+                physical_holding_clause(PrintQueueItem.status, PrintQueueItem.physical_outcome),
+            )
+        )
+        retry = await db.scalar(
+            select(PrintQueueItem).where(PrintQueueItem.id != failed.id, PrintQueueItem.status == "queued")
+        )
+        next_job = await db.get(PrintQueueItem, next_id)
+        assert held is None
+        assert retry is not None and retry.retry_on_failure is False
+        assert retry.position < next_job.position
+
+    # The retry has no parent link and cannot start an automatic retry chain.
+    ctx.queue_item_id = retry.id
     await _dispatch_library_item(ctx)
-    dispatched, _, _ = await _queue_snapshot(ctx)
-    assert dispatched.status == "dispatching"
+    retry, _, _ = await _queue_snapshot(ctx)
+    async with ctx.session_maker() as db:
+        jobs = list(await db.scalars(select(PrintQueueItem).order_by(PrintQueueItem.id)))
+    assert len(jobs) == 3
+    assert retry.status == "failed" and retry.physical_outcome is None
     assert ctx.upload.await_count == 2
-    ctx.start_print.assert_called_once()
+    ctx.start_print.assert_not_called()
+    assert failed.id == failed_id
 
 
 async def _make_any_machine_job(ctx):
@@ -760,6 +770,7 @@ async def _make_any_machine_job(ctx):
     async with ctx.session_maker() as db:
         item = await db.get(PrintQueueItem, ctx.queue_item_id)
         item.printer_id = None
+        item.assigned_printer_id = None
         item.target_model = "X1C"
         item.ams_mapping = None
         await db.commit()
@@ -784,7 +795,8 @@ async def test_disconnected_printer_leaves_the_job_queued_and_unheld(queue_facto
 
     row = await _row(ctx)
     assert row.status == "queued"
-    assert row.printer_id == (None if pool else ctx.printer_id), "a waiting job is never bound to a printer"
+    assert row.printer_id is None, "a waiting job is never bound to a printer"
+    assert row.assigned_printer_id == (None if pool else ctx.printer_id)
     assert row.waiting_reason == "Printer not connected"
     assert row.manual_start is False, "a transient printer problem retries on its own"
     ctx.upload.assert_not_awaited()
@@ -812,7 +824,8 @@ async def test_missing_source_parks_the_job_in_the_queue(queue_factory, pool):
 
     row = await _row(ctx)
     assert row.status == "queued"
-    assert row.printer_id == (None if pool else ctx.printer_id)
+    assert row.printer_id is None
+    assert row.assigned_printer_id == (None if pool else ctx.printer_id)
     assert row.waiting_reason == "Source file not found on disk"
     # Parked for a manual start, so it neither fails onto a printer nor
     # blocks the jobs behind it by being retried every tick.
@@ -841,7 +854,12 @@ async def test_specific_machine_edit_after_selection_is_honoured(queue_factory):
     await _dispatch_library_item(ctx, binding=binding)
 
     row = await _row(ctx)
-    assert (row.status, row.printer_id, row.ams_mapping) == ("queued", ctx.printer_id, "[1]")
+    assert (row.status, row.printer_id, row.assigned_printer_id, row.ams_mapping) == (
+        "queued",
+        None,
+        ctx.printer_id,
+        "[1]",
+    )
     ctx.upload.assert_not_awaited()
 
 

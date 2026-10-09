@@ -37,7 +37,13 @@ async def legacy_unmigrated(alignment):
         await db.execute(
             PrintQueueItem.__table__.update()
             .where(PrintQueueItem.id == alignment.job_id)
-            .values(status="printing", archive_id=archive.id, dispatch_subtask_id="123", started_at=archive.started_at)
+            .values(
+                status="printing",
+                printer_id=1,
+                archive_id=archive.id,
+                dispatch_subtask_id="123",
+                started_at=archive.started_at,
+            )
         )
         await db.commit()
         archive_id = archive.id
@@ -99,6 +105,7 @@ async def test_full_startup_repairs_terminal_legacy_archives(
             .where(PrintQueueItem.id == alignment.job_id)
             .values(
                 status=old_status,
+                printer_id=1,
                 archive_id=archive.id,
                 dispatch_subtask_id="123",
                 completed_at=completed,

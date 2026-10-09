@@ -326,6 +326,7 @@ class TestQueueUploadSourceLifecycle:
             library_file_id=library_file_id,
             position=1,
             status="failed",
+            physical_outcome="failed",
             error_message="Previous print failed or was aborted",
             cleanup_library_after_dispatch=True,
         )
@@ -517,7 +518,7 @@ class TestDispatchArchiveLifecycle:
         from backend.app.models.archive import PrintArchive
 
         printer = await printer_factory()
-        item = PrintQueueItem(printer_id=printer.id, position=1, status="failed")
+        item = PrintQueueItem(printer_id=printer.id, position=1, status="failed", physical_outcome="failed")
         db_session.add(item)
         await db_session.commit()
         await db_session.refresh(item)
