@@ -78,7 +78,12 @@ async def soak(tmp_path, monkeypatch):
         db.add_all([printer, source])
         await db.flush()
         item = PrintQueueItem(
-            id=1, printer_id=1, library_file_id=source.id, chamber_heat_soak=True, heat_soak_minutes=1, status="queued"
+            id=1,
+            assigned_printer_id=1,
+            library_file_id=source.id,
+            chamber_heat_soak=True,
+            heat_soak_minutes=1,
+            status="queued",
         )
         db.add(item)
         await db.commit()

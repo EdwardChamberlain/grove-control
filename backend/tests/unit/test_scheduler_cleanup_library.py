@@ -79,7 +79,7 @@ async def queue_factory(tmp_path):
             await db.flush()
 
             item = PrintQueueItem(
-                printer_id=printer.id,
+                assigned_printer_id=printer.id,
                 library_file_id=library_file.id,
                 status="queued",
                 cleanup_library_after_dispatch=cleanup,

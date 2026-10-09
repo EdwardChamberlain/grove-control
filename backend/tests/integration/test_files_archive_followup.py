@@ -330,7 +330,7 @@ class TestQueueUploadSourceLifecycle:
             cleanup_library_after_dispatch=True,
         )
         deleted_item = PrintQueueItem(
-            printer_id=printer.id,
+            assigned_printer_id=printer.id,
             library_file_id=library_file_id,
             position=2,
             status="queued",
@@ -386,7 +386,7 @@ class TestQueueUploadSourceLifecycle:
         if keep_for_active_item:
             printer = await printer_factory()
             pending_item = PrintQueueItem(
-                printer_id=printer.id,
+                assigned_printer_id=printer.id,
                 library_file_id=library_file_id,
                 position=1,
                 status="queued",
@@ -477,7 +477,7 @@ class TestQueueUploadSourceLifecycle:
         # A later fan-out request can still link the same source after the
         # first item has already dispatched.
         later_item = PrintQueueItem(
-            printer_id=printer.id,
+            assigned_printer_id=printer.id,
             library_file_id=library_file_id,
             position=2,
             status="queued",

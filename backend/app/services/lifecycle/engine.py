@@ -439,7 +439,7 @@ async def lock_queue_item(db: AsyncSession, item_id: int) -> PrintQueueItem | No
         snapshot = await db.execute(
             select(
                 PrintQueueItem.id,
-                func.coalesce(PrintQueueItem.printer_id, PrintQueueItem.assigned_printer_id),
+                func.coalesce(PrintQueueItem.printer_id, PrintQueueItem.assigned_printer_id).label("printer_id"),
             ).where(PrintQueueItem.id == item_id)
         )
         row = snapshot.first()

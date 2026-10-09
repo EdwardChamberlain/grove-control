@@ -76,9 +76,9 @@ async def positions(sessions) -> dict[int, int]:
 async def test_jobs_join_the_end_of_their_own_queue(sessions):
     await existing(
         sessions,
-        {"printer_id": 1, "position": 4},
+        {"assigned_printer_id": 1, "position": 4},
         {"printer_id": 1, "position": 9, "status": "printing"},  # No longer waiting.
-        {"printer_id": 2, "position": 6},
+        {"assigned_printer_id": 2, "position": 6},
         {"position": 8},
     )
     async with sessions() as db:
@@ -95,9 +95,9 @@ async def test_jobs_join_the_end_of_their_own_queue(sessions):
 async def test_jobs_added_at_a_position_make_room_only_in_their_queue(sessions):
     first, second, other, pool = await existing(
         sessions,
-        {"printer_id": 1, "position": 1},
-        {"printer_id": 1, "position": 2},
-        {"printer_id": 2, "position": 1},
+        {"assigned_printer_id": 1, "position": 1},
+        {"assigned_printer_id": 1, "position": 2},
+        {"assigned_printer_id": 2, "position": 1},
         {"position": 1},
     )
     async with sessions() as db:
@@ -114,14 +114,14 @@ async def test_jobs_added_at_a_position_make_room_only_in_their_queue(sessions):
 
 @pytest.mark.parametrize(("at", "expected"), [(99, 3), (0, 1), (-5, 1)])
 async def test_a_position_is_kept_within_the_queue(sessions, at, expected):
-    await existing(sessions, {"printer_id": 1, "position": 1}, {"printer_id": 1, "position": 2})
+    await existing(sessions, {"assigned_printer_id": 1, "position": 1}, {"assigned_printer_id": 1, "position": 2})
     async with sessions() as db:
         [job] = await create_job(db, [{"printer_id": 1}], at=at)
     assert job.position == expected
 
 
 async def test_the_top_of_a_printers_queue_is_ahead_of_every_waiting_job(sessions):
-    await existing(sessions, {"printer_id": 1, "position": -3}, {"printer_id": 2, "position": -9})
+    await existing(sessions, {"assigned_printer_id": 1, "position": -3}, {"assigned_printer_id": 2, "position": -9})
     async with sessions() as db:
         [job] = await create_job(db, [{"printer_id": 1}], at="top")
         [first] = await create_job(db, [{"printer_id": 2}], at="top")
@@ -134,7 +134,7 @@ async def test_the_top_of_the_pool_is_ahead_of_the_jobs_that_could_take_the_same
         {"target_model": "H2S", "position": -2},
         {"target_model": "H2D", "position": -5, "variants": [{"library_file_id": 8, "target_model": "H2C"}]},
         {"target_model": "X1C", "position": -20},  # Can't take an H2S or H2C printer.
-        {"printer_id": 1, "position": -30},
+        {"assigned_printer_id": 1, "position": -30},
     )
     async with sessions() as db:
         [h2s] = await create_job(db, [{"target_model": "H2S"}], at="top")

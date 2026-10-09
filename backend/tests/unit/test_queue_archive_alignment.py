@@ -380,7 +380,7 @@ async def test_preheat_failure_creates_no_archive_or_early_source_cleanup(alignm
         assert alignment.source_path.exists()
 
 
-async def test_archive_copy_failure_holds_the_first_job_without_touching_source(alignment, monkeypatch):
+async def test_unsent_archive_copy_failure_retries_without_touching_source(alignment, monkeypatch):
     from backend.app.services.print_scheduler import PrintScheduler
     from backend.app.services.printer_manager import printer_manager
 
@@ -395,8 +395,11 @@ async def test_archive_copy_failure_holds_the_first_job_without_touching_source(
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
         await PrintScheduler().workers.leave(db, job)
-        assert job.status == "failed" and job.printer_id is not None
+        assert job.status == "failed" and job.printer_id is not None and job.physical_outcome is None
         assert job.archive_id is None and alignment.source_path.exists()
+        retry = await db.scalar(select(PrintQueueItem).where(PrintQueueItem.id != job.id))
+        assert retry is not None and retry.status == "queued" and retry.retry_on_failure is False
+        assert retry.printer_id is None and retry.assigned_printer_id == job.assigned_printer_id
 
 
 @pytest.mark.parametrize(
@@ -492,7 +495,10 @@ async def test_archive_copy_failure_still_runs_configured_auto_off(alignment, mo
 
     async def power_off_after_commit(_printer_id, _db):
         async with alignment.sessions() as observer:
-            assert (await observer.get(PrintQueueItem, alignment.job_id)).status == "failed"
+            job = await observer.get(PrintQueueItem, alignment.job_id)
+            assert job.status == "failed" and job.physical_outcome is None
+            retry = await observer.scalar(select(PrintQueueItem).where(PrintQueueItem.id != job.id))
+            assert retry is not None and retry.status == "queued" and retry.retry_on_failure is False
         done.set()
 
     off = AsyncMock(side_effect=power_off_after_commit)

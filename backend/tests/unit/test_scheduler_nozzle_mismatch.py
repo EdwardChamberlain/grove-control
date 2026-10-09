@@ -202,7 +202,7 @@ async def archive_case(tmp_path):
             db.add(archive)
             await db.flush()
             item = PrintQueueItem(
-                printer_id=printer.id,
+                assigned_printer_id=printer.id,
                 archive_id=archive.id,
                 status="queued",
                 bed_levelling="on",

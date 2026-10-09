@@ -477,7 +477,8 @@ class TestPrintersAPI:
         await db_session.flush()
         db_session.add(
             PrintQueueItem(
-                printer_id=printer.id,
+                assigned_printer_id=printer.id if queue_status == "queued" else None,
+                printer_id=None if queue_status == "queued" else printer.id,
                 position=1,
                 status=queue_status,
                 created_by_id=owner.id,

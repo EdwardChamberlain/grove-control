@@ -8,6 +8,14 @@ import pytest
 from httpx import AsyncClient
 
 
+def _persist_queue_preference(values):
+    """Test setup uses the public queue printer field for waiting jobs."""
+    if values.get("status") == "queued":
+        printer_id = values.pop("printer_id", None)
+        values.setdefault("assigned_printer_id", printer_id)
+        values["printer_id"] = None
+
+
 def _write_queue_3mf(path, *, color: str = "#FF0000") -> None:
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr(
@@ -117,6 +125,7 @@ class TestPrintQueueAPI:
             }
             defaults.update(kwargs)
 
+            _persist_queue_preference(defaults)
             item = PrintQueueItem(**defaults)
             db_session.add(item)
             await db_session.commit()
@@ -960,6 +969,7 @@ class TestQueueStartEndpoint:
             }
             defaults.update(kwargs)
 
+            _persist_queue_preference(defaults)
             item = PrintQueueItem(**defaults)
             db_session.add(item)
             await db_session.commit()
@@ -1227,6 +1237,7 @@ class TestQueueCancelEndpoint:
             }
             defaults.update(kwargs)
 
+            _persist_queue_preference(defaults)
             item = PrintQueueItem(**defaults)
             db_session.add(item)
             await db_session.commit()
@@ -1402,7 +1413,7 @@ class TestQueueLibraryFileSupport:
 
         # Create queue item directly
         item = PrintQueueItem(
-            printer_id=printer.id,
+            assigned_printer_id=printer.id,
             library_file_id=lib_file.id,
             status="queued",
             position=1,
@@ -1436,7 +1447,7 @@ class TestQueueLibraryFileSupport:
         )
 
         item = PrintQueueItem(
-            printer_id=printer.id,
+            assigned_printer_id=printer.id,
             library_file_id=lib_file.id,
             status="queued",
             position=1,
@@ -1540,6 +1551,7 @@ class TestBulkUpdateEndpoint:
             }
             defaults.update(kwargs)
 
+            _persist_queue_preference(defaults)
             item = PrintQueueItem(**defaults)
             db_session.add(item)
             await db_session.commit()
@@ -1633,7 +1645,7 @@ class TestBulkUpdateEndpoint:
         item1 = await queue_item_factory()
         item2 = await queue_item_factory()
 
-        original_printer_id = item1.printer_id
+        original_printer_id = item1.assigned_printer_id
 
         response = await async_client.patch(
             "/api/v1/queue/bulk",
@@ -1643,9 +1655,10 @@ class TestBulkUpdateEndpoint:
 
         await db_session.refresh(item1)
         await db_session.refresh(item2)
-        assert item1.printer_id == new_printer.id
-        assert item2.printer_id == new_printer.id
-        assert item1.printer_id != original_printer_id
+        assert item1.printer_id is None and item2.printer_id is None
+        assert item1.assigned_printer_id == new_printer.id
+        assert item2.assigned_printer_id == new_printer.id
+        assert item1.assigned_printer_id != original_printer_id
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -1770,6 +1783,7 @@ class TestTargetLocationFeature:
             }
             defaults.update(kwargs)
 
+            _persist_queue_preference(defaults)
             item = PrintQueueItem(**defaults)
             db_session.add(item)
             await db_session.commit()
@@ -1987,6 +2001,7 @@ class TestAbortedStatusNormalisation:
             }
             defaults.update(kwargs)
 
+            _persist_queue_preference(defaults)
             item = PrintQueueItem(**defaults)
             db_session.add(item)
             await db_session.commit()

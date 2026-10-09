@@ -226,7 +226,7 @@ async def reconcile_print_archives() -> None:
                     PrintQueueItem.plate_id,
                     PrintQueueItem.created_by_id,
                 )
-                .join(Printer)
+                .join(Printer, Printer.id == PrintQueueItem.printer_id)
                 .where(
                     PrintQueueItem.archive_id.is_(None),
                     PrintQueueItem.started_at.is_not(None),

@@ -1043,8 +1043,9 @@ async def _migrate_queue_assignment(conn) -> None:
         )
     )
     # Jobs already waiting when this version is installed are ordinary queue
-    # jobs too. Existing failed/active rows keep the conservative false value.
+    # jobs too. Rows that have left the queue must never start a retry chain.
     await conn.execute(text("UPDATE print_queue SET retry_on_failure = true WHERE status = 'queued'"))
+    await conn.execute(text("UPDATE print_queue SET retry_on_failure = false WHERE status <> 'queued'"))
     await conn.execute(
         text("CREATE INDEX IF NOT EXISTS ix_print_queue_assigned_printer_id ON print_queue (assigned_printer_id)")
     )

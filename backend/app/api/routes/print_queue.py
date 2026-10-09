@@ -1003,7 +1003,7 @@ async def update_queue_item(
     snapshot = await db.execute(
         select(
             PrintQueueItem.id,
-            func.coalesce(PrintQueueItem.printer_id, PrintQueueItem.assigned_printer_id),
+            func.coalesce(PrintQueueItem.printer_id, PrintQueueItem.assigned_printer_id).label("printer_id"),
         ).where(PrintQueueItem.id == item_id)
     )
     row = snapshot.first()

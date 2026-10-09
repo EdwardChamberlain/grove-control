@@ -13,7 +13,12 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 import backend.app.models  # noqa: F401
 from backend.app.api.routes.print_queue import clear_queue_plate, retry_queue_item
 from backend.app.api.routes.printers import clear_plate, delete_printer, get_printer_status
-from backend.app.core.database import Base, _migrate_queue_assignment, _migrate_queue_lifecycle
+from backend.app.core.database import (
+    Base,
+    _migrate_queue_archive_outcomes,
+    _migrate_queue_assignment,
+    _migrate_queue_lifecycle,
+)
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
@@ -345,6 +350,7 @@ async def test_migration_preserves_exact_hold_creates_missing_job_and_runs_once(
         ids = held.id, queued.id, skipped.id, history.id
     async with engine.begin() as conn:
         await _migrate_queue_lifecycle(conn)
+        await _migrate_queue_archive_outcomes(conn)
     async with sessions() as db:
         jobs = {item.id: item for item in (await db.scalars(select(PrintQueueItem))).all()}
         assert tuple(jobs[i].status for i in ids) == ("failed", "queued", "queued", "successful")

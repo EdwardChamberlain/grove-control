@@ -16,7 +16,8 @@ def _item(*, wait: bool = False, printer_id: int | None = 1, target_model: str |
     return SimpleNamespace(
         id=10,
         status="queued",
-        printer_id=printer_id,
+        printer_id=None,
+        assigned_printer_id=printer_id,
         target_model=target_model,
         target_location=None,
         archive_id=20,

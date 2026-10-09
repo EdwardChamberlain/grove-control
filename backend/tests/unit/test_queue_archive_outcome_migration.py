@@ -19,6 +19,7 @@ async def test_upgrade_backfills_only_proven_outcomes_and_runs_once():
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
             # Model a pre-stage-5 database, then use the startup repair path.
+            await conn.execute(text("DROP INDEX uq_print_queue_holding_printer"))
             for column in ("physical_outcome", "physical_completed_at", "physical_failure_reason"):
                 await conn.execute(text(f"ALTER TABLE print_queue DROP COLUMN {column}"))
             completed = datetime(2026, 10, 1, 12)
