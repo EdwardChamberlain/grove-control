@@ -847,6 +847,12 @@ function SortableQueueItem({
                 </Button>
               </>
             )}
+            {item.dispatch_unsent && (
+              <Button size="sm" variant="ghost" onClick={onRequeue}
+                disabled={!hasPermission('queue:create') || !hasPermission('queue:insert_top') || !canModify('queue', 'update', item.created_by_id)}>
+                <RefreshCw className="w-4 h-4" />{t('queue.actions.retry')}
+              </Button>
+            )}
             {isAwaiting && (
               <>
                 <Button size="sm" variant="secondary" onClick={onClearPlate}

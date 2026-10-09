@@ -23,6 +23,23 @@ from backend.app.services.printer_manager import printer_manager
 logger = logging.getLogger(__name__)
 
 
+def unresolved(mapping: list | str | None) -> bool:
+    """Whether a tray mapping maps no slot to a tray: a stored [-1] is an artifact, never the external spool (#2589).
+
+    Padding -1s beside a mapped slot, and an explicit external spool (254 and up), are resolved.
+    """
+    if isinstance(mapping, str):
+        try:
+            mapping = json.loads(mapping)
+        except ValueError:
+            return False
+    return (
+        bool(mapping)
+        and isinstance(mapping, list)
+        and all(tray is None or (isinstance(tray, int) and tray < 0) for tray in mapping)
+    )
+
+
 class AmsMapping:
     """Maps a queue job's filaments to a printer's trays."""
 

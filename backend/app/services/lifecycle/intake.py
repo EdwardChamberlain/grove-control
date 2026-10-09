@@ -66,6 +66,11 @@ def _lock(printer_id: int) -> asyncio.Lock:
     return _job_event_locks.setdefault(printer_id, asyncio.Lock())
 
 
+def busy(printer_id: int) -> bool:
+    """Whether one of the printer's events is in progress, such as a completion recovery mustn't race."""
+    return _lock(printer_id).locked()
+
+
 def mark_printer_stopped_by_user(printer_id: int) -> None:
     """Record a Grove Stop, so the printer's "failed" or "aborted" report completes as cancelled."""
     _user_stopped_printers.add(printer_id)

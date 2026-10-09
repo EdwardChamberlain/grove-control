@@ -15,7 +15,7 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.database import async_session
@@ -32,6 +32,7 @@ from backend.app.services.printer_manager import printer_manager, supports_chamb
 
 logger = logging.getLogger(__name__)
 HEARTBEAT_TIMEOUT = 90
+INTERRUPTED = "Heat soak interrupted and its heaters turned off; inspect the printer, then stop or skip heat soak"
 TELEMETRY_TIMEOUT = 60
 CHECK_INTERVAL = HEARTBEAT_TIMEOUT / 3
 _wake: asyncio.Event | None = None  # Preheating's timer, while it runs.
@@ -148,10 +149,12 @@ async def cleanup_heat_soak_shutdown(db: AsyncSession, printer_id: int) -> bool:
         select(PrintQueueItem.id).where(
             PrintQueueItem.printer_id == printer_id,
             PrintQueueItem.status.in_(ACTIVE_STATUSES),
-            # An unsent dispatch whose worker has stopped can cool while its
-            # plate hold remains. An uploading or potentially sent job cannot.
+            # A recovered soak, and an unsent dispatch whose worker has stopped,
+            # can cool while their hold remains. A live soak, an upload or a
+            # potentially sent job cannot.
             or_(
-                PrintQueueItem.status != "dispatching",
+                PrintQueueItem.status.not_in(("preheating", "dispatching")),
+                and_(PrintQueueItem.status == "preheating", PrintQueueItem.preheat_owner.is_not(None)),
                 PrintQueueItem.dispatching_at.is_not(None),
                 PrintQueueItem.dispatched_at.is_not(None),
             ),
@@ -244,11 +247,12 @@ async def abort_heat_soak(db: AsyncSession, item: PrintQueueItem, reason: str, *
     await db.commit()
 
 
-async def lapsed(db: AsyncSession, item: PrintQueueItem, owner: str, visible: set[int]) -> bool:
+async def lapsed(db: AsyncSession, item: PrintQueueItem, owner: str) -> bool:
     """Whether the soak's heartbeat lapsed; settles it under the caller's lock if so.
 
-    This worker's soak ends. Another's is held for a person: before dispatch
-    there is no submission ID, so telemetry cannot prove what happened to it.
+    This worker's soak ends. Another's is recovered: its heaters are turned off
+    and the hold is kept for a person, since before dispatch there is no
+    submission ID for telemetry to prove what happened to it.
     """
     checked = item.preheat_checked_at
     if checked and 0 <= (utcnow() - checked).total_seconds() < HEARTBEAT_TIMEOUT:
@@ -256,9 +260,10 @@ async def lapsed(db: AsyncSession, item: PrintQueueItem, owner: str, visible: se
     if item.preheat_owner == owner:
         await abort_heat_soak(db, item, "Heat soak interrupted by restart or scheduler timeout; retry required")
         return True
-    item.error_message = "Heat soak interrupted; inspect the printer, then stop or skip heat soak"
-    _show_preheating(item.printer_id, True)
-    visible.add(item.printer_id)
+    if item.preheat_owner is not None:  # No owner marks a recovered soak, whose shutdown is already recorded.
+        item.preheat_owner = None
+        await request_heater_shutdown(db, item.printer_id)
+    item.error_message = INTERRUPTED
     await db.commit()
     return True
 
@@ -438,7 +443,7 @@ class ChamberHeatSoak:
                     await db.rollback()
                     continue
                 printer_id, now = item.printer_id, utcnow()
-                if await lapsed(db, item, self.owner, visible):
+                if await lapsed(db, item, self.owner):
                     continue
                 if item.preheat_owner != self.owner:
                     await db.rollback()  # Recover: a live soak this worker doesn't own is left alone.

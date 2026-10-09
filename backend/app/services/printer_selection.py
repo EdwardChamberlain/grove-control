@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
 from backend.app.models.printer import Printer
 from backend.app.models.smart_plug import SmartPlug
+from backend.app.services.ams_mapping import unresolved
 from backend.app.services.filament_deficit import compute_deficit_for_queue_item
 from backend.app.services.filament_requirements import canonical_filament_type
 from backend.app.services.lifecycle.engine import lock_queue_item
@@ -806,16 +807,21 @@ class PrinterSelection:
         mapping = item.ams_mapping
         material_safe = self._mapping._ams_mapping_uses_compatible_materials(printer_id, item.ams_mapping, overrides)
         # Recompute forced jobs even with a stored mapping, so the tray also has the required colour.
-        if force_overrides or not item.ams_mapping or not material_safe:
+        if force_overrides or not item.ams_mapping or not material_safe or unresolved(mapping):
             computed = await self._mapping._compute_ams_mapping_for_printer(db, printer_id, item)
             missing = self._mapping._get_missing_force_mapping_slots(computed, force_overrides)
             if missing:
                 item.waiting_reason = self._force_color_waiting_reason(missing)
                 await db.commit()
                 return False, None
-            if computed:
+            if computed and not unresolved(computed):
                 mapping = json.dumps(computed)
                 logger.info("Queue item %s: Computed AMS mapping for printer %s: %s", item.id, printer_id, computed)
+            elif unresolved(mapping):
+                # A stored [-1] would print from the external spool (#2589); the job waits for its filament.
+                item.waiting_reason = "No loaded tray matches this job's filament; load it or edit the tray mapping"
+                await db.commit()
+                return False, None
         return True, mapping
 
     async def _find_idle_printer_for_model(

@@ -217,7 +217,7 @@ async def test_dispatch_recovery_timer_confirms_a_job_without_a_scheduler_pass(a
         monkeypatch.setattr(dispatching, "_wake", None)
 
 
-async def test_dispatch_timer_watches_an_expired_unsent_handoff(alignment, monkeypatch):
+async def test_dispatch_timer_leaves_an_expired_unsent_handoff_to_its_worker(alignment, monkeypatch):
     from datetime import timedelta
 
     from backend.app.services.lifecycle import dispatching
@@ -242,8 +242,7 @@ async def test_dispatch_timer_watches_an_expired_unsent_handoff(alignment, monke
         await asyncio.wait_for(recovered.wait(), 2)
         async with alignment.sessions() as db:
             job = await db.get(PrintQueueItem, alignment.job_id)
-            assert job.status == "dispatching"
-            assert job.error_message == "Heat soak interrupted; inspect the printer, then stop or skip heat soak"
+            assert job.status == "dispatching" and job.error_message is None
     finally:
         timer.cancel()
         await asyncio.gather(timer, return_exceptions=True)
@@ -257,18 +256,22 @@ async def test_dispatch_timer_retries_failures_and_wakes_before_its_timeout(alig
     service = PrintScheduler().dispatcher
     monkeypatch.setattr(dispatching, "async_session", alignment.sessions)
     monkeypatch.setattr(dispatching, "RECOVERY_INTERVAL", 0.01)
-    service.wait_unsent = AsyncMock(side_effect=[RuntimeError("database busy"), None, None])
-    recovered = asyncio.Event()
-    service.recover = AsyncMock(side_effect=lambda _: recovered.set())
+    calls, recovered = AsyncMock(side_effect=[RuntimeError("database busy"), None, None]), asyncio.Event()
+
+    async def recover(db):
+        await calls(db)
+        recovered.set()
+
+    service.recover = recover
     timer = asyncio.create_task(service.run())
     try:
         await asyncio.wait_for(recovered.wait(), 2)  # A failed pass must not kill recovery.
-        assert service.wait_unsent.await_count == 2
+        assert calls.await_count == 2
         monkeypatch.setattr(dispatching, "RECOVERY_INTERVAL", 60)
         recovered.clear()
         dispatching.wake()
         await asyncio.wait_for(recovered.wait(), 2)
-        assert service.wait_unsent.await_count == 3
+        assert calls.await_count == 3
     finally:
         timer.cancel()
         await asyncio.gather(timer, return_exceptions=True)
@@ -305,13 +308,17 @@ async def test_dispatch_recovery_retries_a_locked_database_within_the_pass(align
     monkeypatch.setattr("backend.app.core.database.is_sqlite", lambda: True)
     monkeypatch.setattr("backend.app.core.database.asyncio.sleep", AsyncMock())
     locked = OperationalError("UPDATE print_queue", {}, Exception("database is locked"))
-    service.wait_unsent = AsyncMock(side_effect=[locked, None])
-    recovered = asyncio.Event()
-    service.recover = AsyncMock(side_effect=lambda _: recovered.set())
+    calls, recovered = AsyncMock(side_effect=[locked, None]), asyncio.Event()
+
+    async def recover(db):
+        await calls(db)
+        recovered.set()
+
+    service.recover = recover
     timer = asyncio.create_task(service.run())
     try:
         await asyncio.wait_for(recovered.wait(), 2)  # The same pass, not the next timer.
-        assert service.wait_unsent.await_count == 2
+        assert calls.await_count == 2
     finally:
         timer.cancel()
         await asyncio.gather(timer, return_exceptions=True)

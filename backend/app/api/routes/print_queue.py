@@ -41,6 +41,7 @@ from backend.app.services.filament_requirements import (
 )
 from backend.app.services.job_identity import needs_dispatch_resolution
 from backend.app.services.lifecycle.awaiting import clear_job_plate
+from backend.app.services.lifecycle.dispatching import unsent
 from backend.app.services.lifecycle.engine import InvalidQueueTransition, lock_queue_item, transition_queue_item
 from backend.app.services.lifecycle.preheating import SkipHeatSoakResult, heat_soak_dispatch_started, skip_heat_soak
 from backend.app.services.lifecycle.queued import create_job, filament_contract
@@ -245,6 +246,7 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
         "status": item.status,
         "dispatched_at": item.dispatched_at,
         "dispatch_needs_resolution": needs_dispatch_resolution(item),
+        "dispatch_unsent": unsent(item),
         "started_at": item.started_at,
         "completed_at": item.completed_at,
         "error_message": item.error_message,
@@ -1297,8 +1299,10 @@ async def retry_queue_item(
         raise HTTPException(404, "Queue item not found")
     if user is not None and not can_modify_all and old.created_by_id != user.id:
         raise HTTPException(403, "You can only retry your own queue items")
-    if old.status not in ("failed", "cancelled"):
-        raise HTTPException(409, "Only failed or cancelled jobs awaiting plate clear can be retried")
+    if old.status not in ("failed", "cancelled") and not unsent(old):
+        raise HTTPException(
+            409, "Only failed or cancelled jobs awaiting plate clear, or unsent dispatches, can be retried"
+        )
     excluded = {
         "id",
         "status",
@@ -1384,6 +1388,10 @@ async def retry_queue_item(
         for candidate in candidates
     ]
     [new] = await create_job(db, [values], at="top", variants=variants)
+    if unsent(old):
+        from backend.app.services.print_scheduler import scheduler
+
+        await scheduler.dispatcher.withdraw(db, old)  # After the new job references the source.
     await db.commit()
     return await get_queue_item(new.id, db, (user, can_modify_all))
 

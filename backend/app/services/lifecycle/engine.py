@@ -137,7 +137,10 @@ def _check(before: str, after: str, action: str | None, upgrading: bool) -> None
     if before == "queued" and after == "unsuccessful" and action != "cancel":
         raise InvalidQueueTransition("Only a user cancellation may end a queued job")
     if before in ACTIVE_STATUSES and after == "unsuccessful" and action != "printer_deleted":
-        raise InvalidQueueTransition("Only printer deletion may release an active job")
+        if not (before == "dispatching" and action == "withdrawn"):
+            raise InvalidQueueTransition(
+                "Only printer deletion, or Retry of an unsent attempt, may release an active job"
+            )
     if before in AWAITING_PLATE_CLEAR_STATUSES and action not in _RELEASE_ACTIONS:
         raise InvalidQueueTransition(
             "A holding job requires Clear Plate, printer deletion, or an observed hold transfer"

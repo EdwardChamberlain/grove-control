@@ -320,8 +320,16 @@ async def test_restart_preserves_preheat_until_user_stops_or_skips(soak):
     restarted = heat.ChamberHeatSoak()
     assert await restarted.wait(soak.db) == []
     await soak.db.refresh(soak.item)
-    assert soak.item.status == "preheating"
+    await soak.db.refresh(soak.printer)
+    assert soak.item.status == "preheating" and soak.item.preheat_owner is None
     assert "inspect" in soak.item.error_message
+    assert soak.printer.heat_soak_shutdown_pending  # Recovery turns the soak's heaters off.
+    soak.client.set_bed_temperature.reset_mock()
+    assert await restarted.wait(soak.db) == []
+    soak.client.set_bed_temperature.assert_called_once_with(0)
+    soak.client.set_chamber_temperature.assert_called_with(0)
+    await soak.db.refresh(soak.item)
+    assert soak.item.status == "preheating" and "inspect" in soak.item.error_message  # The hold is kept.
     await heat.skip_heat_soak(soak.db, soak.item)
     assert soak.item.status == "dispatching"
 
