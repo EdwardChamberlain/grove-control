@@ -40,8 +40,10 @@ async def _stop_intake_race(app, monkeypatch, printer, job_id, blocker):
 
     job = await app.job(job_id)
     printer.client.on_state_change = None
-    printer.push(gcode_state="PAUSE")
-    printer.client.on_state_change = None
+    # Set the telemetry snapshot without emitting an MQTT callback. The test
+    # below invokes intake explicitly so a second callback cannot take the
+    # printer lock before the transaction being coordinated here.
+    printer.client.state.state = "PAUSE"
 
     intake_entered = asyncio.Event()
     finish_intake = asyncio.Event()
@@ -109,11 +111,14 @@ async def test_printer_deletion_waits_for_intake_before_taking_held_job_rows(pos
 
     original_start = printer.client.on_print_start
     original_state = printer.client.on_state_change
+    original_running = printer.client.on_print_running_observed
     printer.client.on_print_start = None
     printer.client.on_state_change = None
+    printer.client.on_print_running_observed = None
     printer.start_local("external.3mf", subtask_id="778")
     printer.client.on_print_start = original_start
     printer.client.on_state_change = original_state
+    printer.client.on_print_running_observed = original_running
 
     blocker = postgres_app.session()
     await blocker.execute(select(PrintQueueItem.id).where(PrintQueueItem.id == job_id).with_for_update())
@@ -233,13 +238,11 @@ async def test_dispatch_can_race_a_bulk_edit_without_database_lock_errors(postgr
     first = await postgres_app.queue(printer, file_id)
     second = await postgres_app.queue(printer, file_id)
 
-    response, _ = await asyncio.wait_for(
-        asyncio.gather(
-            postgres_app.http.patch("/queue/bulk", json={"item_ids": [first, second], "manual_start": True}),
-            postgres_app.run(rounds=1),
-        ),
-        timeout=8,
+    bulk_update = postgres_app.spawn(
+        postgres_app.http.patch("/queue/bulk", json={"item_ids": [first, second], "manual_start": True})
     )
+    await asyncio.wait_for(postgres_app.run(rounds=1), timeout=8)
+    response = await asyncio.wait_for(bulk_update, timeout=8)
     assert response.status_code == 200, response.text
     assert (await postgres_app.job(first)).status in ("queued", "printing")
     assert (await postgres_app.job(second)).status in ("queued", "printing")

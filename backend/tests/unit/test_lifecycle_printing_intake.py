@@ -15,7 +15,7 @@ from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.user import User
 from backend.app.services import print_effects
 from backend.app.services.lifecycle import effects, intake, preheating
-from backend.app.services.lifecycle.engine import transition_queue_item
+from backend.app.services.lifecycle.engine import hold_printer, transition_queue_item
 from backend.tests.unit.test_lifecycle_preheating import enter_preheating
 from backend.tests.unit.test_queue_archive_alignment import alignment  # noqa: F401
 
@@ -72,6 +72,7 @@ async def test_completion_credits_the_job_owner_from_the_job(alignment, monkeypa
     monkeypatch.setattr(print_effects, "spawn_background_task", lambda coroutine, **_: coroutine.close())
     monkeypatch.setattr(print_effects.ws_manager, "send_print_complete", AsyncMock())
     async with alignment.sessions() as db:
+        await hold_printer(db, 1)
         owner = User(username="owner", password_hash="x", is_active=True)
         db.add(owner)
         await db.flush()
