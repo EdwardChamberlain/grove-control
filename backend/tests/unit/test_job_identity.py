@@ -16,14 +16,9 @@ from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.schemas.print_queue import DispatchResolution
-from backend.app.services.job_identity import (
-    bind_observed_id,
-    event_identity,
-    find_job,
-    needs_dispatch_resolution,
-    observe_print,
-)
+from backend.app.services.job_identity import event_identity, find_job, needs_dispatch_resolution
 from backend.app.services.lifecycle.engine import HOLDING_STATUSES, transition_queue_item
+from backend.app.services.lifecycle.printing import bind_observed_id, observe_print
 from backend.app.services.print_scheduler import PrintScheduler
 from backend.app.services.printer_manager import PrinterManager
 
@@ -31,10 +26,12 @@ from backend.app.services.printer_manager import PrinterManager
 @pytest.fixture
 async def sessions(tmp_path):
     import backend.app.main as main
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import intake
 
-    main._completed_job_events.clear()
-    main._started_job_effects.clear()
-    main._user_stopped_printers.clear()
+    intake._completed_job_events.clear()
+    intake._started_job_effects.clear()
+    intake._user_stopped_printers.clear()
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'jobs.db'}")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -44,7 +41,7 @@ async def sessions(tmp_path):
         db.add(Printer(id=1, name="Printer", serial_number="TEST", ip_address="127.0.0.1", access_code="12345678"))
         await db.commit()
     yield maker
-    main._user_stopped_printers.clear()
+    intake._user_stopped_printers.clear()
     await engine.dispose()
 
 
@@ -91,15 +88,19 @@ async def test_stop_unmatched_run_keeps_plate_gate_before_release_and_after_rest
     sessions, status, stop_outcome, with_archive
 ):
     import backend.app.main as main
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import intake
 
     item_id, archive_id = await add_linked_job(sessions, "old-session", status, with_archive)
     manager = PrinterManager()
     live = SimpleNamespace(state="RUNNING", connected=True, submission_id="new-session", subtask_id="0")
     with (
-        patch.object(main, "async_session", sessions),
-        patch.object(main, "printer_manager", manager),
+        patch.object(intake, "async_session", sessions),
+        patch.object(print_effects, "async_session", sessions),
+        patch.object(intake, "printer_manager", manager),
+        patch.object(print_effects, "printer_manager", manager),
         patch("backend.app.services.printer_manager.printer_manager", manager),
-        patch("backend.app.services.print_scheduler.printer_manager", manager),
+        patch("backend.app.services.lifecycle.dispatching.printer_manager", manager),
         patch.object(manager, "get_status", return_value=live),
         patch.object(manager, "is_connected", return_value=True),
         patch.object(
@@ -121,7 +122,7 @@ async def test_stop_unmatched_run_keeps_plate_gate_before_release_and_after_rest
                 await stop_queue_item(item_id, db, (None, True))
 
         live.state = "IDLE"
-        assert not PrintScheduler()._is_printer_idle(1, require_plate_clear=True)
+        assert not PrintScheduler().selection._is_printer_idle(1, require_plate_clear=True)
         # The reconnect identity cannot match the old job. Its rejected
         # completion must not be needed to protect the physical plate.
         assert await main.on_print_complete(1, {"submission_id": "new-session", "status": "aborted"}) is False
@@ -186,7 +187,9 @@ def test_mqtt_omitted_active_id_and_terminal_zero_preserve_the_observed_run(term
 
 async def test_mqtt_id_loss_cannot_complete_or_recover_the_previous_job(sessions):
     import backend.app.main as main
+    from backend.app.services import print_effects
     from backend.app.services.bambu_mqtt import BambuMQTTClient
+    from backend.app.services.lifecycle import intake
 
     item_id, archive_id = await add_linked_job(sessions, "123")
     client = BambuMQTTClient(ip_address="127.0.0.1", serial_number="TEST", access_code="12345678")
@@ -196,11 +199,13 @@ async def test_mqtt_id_loss_cannot_complete_or_recover_the_previous_job(sessions
     client.on_print_start = starts.append
     client.on_print_complete = finishes.append
     with (
-        patch.object(main, "async_session", sessions),
-        patch.object(main, "_archive_print_start", AsyncMock()),
-        patch.object(main, "printer_manager", MagicMock()) as manager,
-        patch("backend.app.services.print_scheduler.printer_manager", manager),
-        patch.object(main, "ws_manager", AsyncMock()) as websocket,
+        patch.object(intake, "async_session", sessions),
+        patch.object(print_effects, "async_session", sessions),
+        patch.object(print_effects, "_archive_print_start", AsyncMock()),
+        patch.object(intake, "printer_manager", MagicMock()) as manager,
+        patch.object(print_effects, "printer_manager", manager),
+        patch("backend.app.services.lifecycle.dispatching.printer_manager", manager),
+        patch.object(print_effects, "ws_manager", AsyncMock()) as websocket,
     ):
         manager.get_status.return_value = client.state
         client._process_message({"print": {"gcode_state": "RUNNING", "subtask_id": "123", "gcode_file": "same.3mf"}})
@@ -210,7 +215,7 @@ async def test_mqtt_id_loss_cannot_complete_or_recover_the_previous_job(sessions
         client._process_message({"print": {"gcode_state": "FINISH", "subtask_id": "0"}})
         assert await main.on_print_complete(1, finishes[-1]) is False
         async with sessions() as db:
-            await PrintScheduler()._recover_stale_dispatches(db)
+            await PrintScheduler().dispatcher.recover(db)
         manager.set_awaiting_plate_clear.assert_not_called()
         websocket.send_print_complete.assert_not_awaited()
     async with sessions() as db:
@@ -288,11 +293,11 @@ async def test_startup_checks_already_printing_jobs_by_id(sessions, state, ident
         coro.close()
 
     with (
-        patch("backend.app.services.print_scheduler.printer_manager.get_status", return_value=status),
-        patch("backend.app.services.print_scheduler.spawn_background_task", capture),
+        patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", return_value=status),
+        patch("backend.app.services.lifecycle.dispatching.spawn_background_task", capture),
     ):
         async with sessions() as db:
-            await scheduler._recover_stale_dispatches(db)
+            await scheduler.dispatcher.recover(db)
         async with sessions() as db:
             assert (await db.get(PrintQueueItem, item_id)).status == expected
     assert bool(spawned) == (expected in ("finished", "failed"))
@@ -305,7 +310,7 @@ async def test_user_resolution_commits_and_keeps_failed_plate_gate(sessions, out
     manager.get_status.return_value = None
     with (
         patch("backend.app.services.printer_manager.printer_manager", manager),
-        patch("backend.app.services.print_scheduler.scheduler._publish_queue_job_started", AsyncMock()) as publish,
+        patch("backend.app.services.lifecycle.effects.publish_queue_job_started", AsyncMock()) as publish,
     ):
         async with sessions() as db:
             await resolve_queue_dispatch(item_id, DispatchResolution(outcome=outcome), db, (None, True))
@@ -378,9 +383,11 @@ async def test_wrong_or_missing_completion_id_has_no_side_effects(sessions, iden
 
     item_id = await add_job(sessions, "printing")
     with (
-        patch("backend.app.main.async_session", sessions),
-        patch("backend.app.main.printer_manager", MagicMock()) as manager,
-        patch("backend.app.main.ws_manager", AsyncMock()) as websocket,
+        patch("backend.app.services.lifecycle.intake.async_session", sessions),
+        patch("backend.app.services.print_effects.async_session", sessions),
+        patch("backend.app.services.lifecycle.intake.printer_manager", MagicMock()) as manager,
+        patch("backend.app.services.print_effects.printer_manager", manager),
+        patch("backend.app.services.print_effects.ws_manager", AsyncMock()) as websocket,
     ):
         assert (
             await on_print_complete(1, {"subtask_id": identity, "status": "completed", "filename": "same.3mf"}) is False
@@ -393,20 +400,23 @@ async def test_wrong_or_missing_completion_id_has_no_side_effects(sessions, iden
 
 async def test_external_observation_survives_callbacks_and_restart(sessions):
     import backend.app.main as main
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import intake
 
-    main._started_job_effects.clear()
+    intake._started_job_effects.clear()
     with (
-        patch.object(main, "async_session", sessions),
-        patch.object(main, "_archive_print_start", AsyncMock()) as archive,
-        patch.object(main, "_begin_new_print", AsyncMock()) as begin,
-        patch.object(main, "_finish_new_print", AsyncMock()) as finish,
+        patch.object(intake, "async_session", sessions),
+        patch.object(print_effects, "async_session", sessions),
+        patch.object(print_effects, "_archive_print_start", AsyncMock()) as archive,
+        patch.object(print_effects, "_begin_new_print", AsyncMock()) as begin,
+        patch.object(print_effects, "_finish_new_print", AsyncMock()) as finish,
     ):
         await main.on_print_start(1, {"submission_id": "external", "filename": "same.3mf"})
         await main.on_print_start(1, {"submission_id": "external", "filename": "renamed.3mf"})
         assert archive.await_count == 2
         begin.assert_awaited_once()
         finish.assert_awaited_once()
-        main._started_job_effects.clear()  # Simulate a new application process.
+        intake._started_job_effects.clear()  # Simulate a new application process.
         await main.on_print_start(1, {"submission_id": "external", "filename": "same.3mf"})
     async with sessions() as db:
         items = list((await db.scalars(select(PrintQueueItem))).all())
@@ -416,38 +426,44 @@ async def test_external_observation_survives_callbacks_and_restart(sessions):
 
 async def test_failed_archive_start_is_retried_for_the_same_job(sessions):
     import backend.app.main as main
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import intake
 
     archive = AsyncMock(side_effect=[RuntimeError("start WebSocket failed"), True])
     with (
-        patch.object(main, "async_session", sessions),
-        patch.object(main, "_archive_print_start", archive),
-        patch.object(main, "_begin_new_print", AsyncMock()) as begin,
-        patch.object(main, "_finish_new_print", AsyncMock()) as finish,
+        patch.object(intake, "async_session", sessions),
+        patch.object(print_effects, "async_session", sessions),
+        patch.object(print_effects, "_archive_print_start", archive),
+        patch.object(print_effects, "_begin_new_print", AsyncMock()) as begin,
+        patch.object(print_effects, "_finish_new_print", AsyncMock()) as finish,
     ):
         event = {"submission_id": "external", "filename": "same.3mf"}
         with pytest.raises(RuntimeError, match="start WebSocket failed"):
             await main.on_print_start(1, event)
-        assert main._started_job_effects.get(1) is not None
+        assert intake._started_job_effects.get(1) is not None
         await main.on_print_start(1, event)
         begin.assert_awaited_once()
         finish.assert_awaited_once()
     assert archive.await_count == 2
     async with sessions() as db:
         job = await find_job(db, 1, "external")
-        assert main._started_job_effects[1] == job.id
+        assert intake._started_job_effects[1] == job.id
 
 
 async def test_running_recovery_observes_job_without_new_start_effects(sessions):
     import backend.app.main as main
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import intake
 
     job_id, archive_id = await add_linked_job(sessions, "existing")
     archive_start = AsyncMock()
     live = SimpleNamespace(state="RUNNING", connected=True, job_telemetry_ready=True, submission_id="existing")
     with (
-        patch.object(main, "async_session", sessions),
-        patch.object(main, "_archive_print_start", archive_start),
-        patch.object(main, "_restore_usage_tracking_session", AsyncMock()),
-        patch.object(main, "_capture_timelapse_baseline_at_start", AsyncMock()),
+        patch.object(intake, "async_session", sessions),
+        patch.object(print_effects, "async_session", sessions),
+        patch.object(print_effects, "_archive_print_start", archive_start),
+        patch.object(print_effects, "_restore_usage_tracking_session", AsyncMock()),
+        patch.object(print_effects, "_capture_timelapse_baseline_at_start", AsyncMock()),
         patch.object(main.printer_manager, "get_status", return_value=live),
     ):
         await main.on_print_running_observed(
@@ -457,6 +473,7 @@ async def test_running_recovery_observes_job_without_new_start_effects(sessions)
     assert archive_start.await_args.kwargs == {
         "queue_archive_id": archive_id,
         "queue_job_id": job_id,
+        "memory": intake.print_memory,
     }
     async with sessions() as db:
         assert (await db.get(PrintQueueItem, job_id)).status == "printing"
@@ -465,6 +482,8 @@ async def test_running_recovery_observes_job_without_new_start_effects(sessions)
 @pytest.mark.parametrize("previous_status", ["finished", "failed", "cancelled"])
 async def test_touchscreen_print_takes_over_the_hold_without_releasing_the_printer(sessions, previous_status):
     import backend.app.main as main
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import intake
 
     old_id, archive_id = await add_linked_job(sessions, "previous", previous_status)
     previous_outcome = {"finished": "completed", "failed": "failed", "cancelled": "aborted"}[previous_status]
@@ -476,13 +495,15 @@ async def test_touchscreen_print_takes_over_the_hold_without_releasing_the_print
         connected=True, job_telemetry_ready=True, state="RUNNING", submission_id="touchscreen", subtask_id="0"
     )
     with (
-        patch.object(main, "async_session", sessions),
-        patch.object(main, "printer_manager", manager),
+        patch.object(intake, "async_session", sessions),
+        patch.object(print_effects, "async_session", sessions),
+        patch.object(intake, "printer_manager", manager),
+        patch.object(print_effects, "printer_manager", manager),
         patch("backend.app.services.printer_manager.printer_manager", manager),
         patch.object(manager, "get_status", return_value=live),
-        patch.object(main, "_archive_print_start", AsyncMock()) as archive_print,
-        patch.object(main, "_begin_new_print", AsyncMock()) as begin,
-        patch.object(main, "_finish_new_print", AsyncMock()) as finish,
+        patch.object(print_effects, "_archive_print_start", AsyncMock()) as archive_print,
+        patch.object(print_effects, "_begin_new_print", AsyncMock()) as begin,
+        patch.object(print_effects, "_finish_new_print", AsyncMock()) as finish,
     ):
         await main.on_print_start(1, {"submission_id": "touchscreen", "filename": "same.3mf"})
         await main.on_print_start(1, {"submission_id": "touchscreen", "filename": "same.3mf"})
@@ -499,7 +520,7 @@ async def test_touchscreen_print_takes_over_the_hold_without_releasing_the_print
                 await clear_queue_plate(old_id, db, None)
             assert conflict.value.status_code == 409
             await db.rollback()
-        main._started_job_effects.clear()  # Simulate restart while the touchscreen print is running.
+        intake._started_job_effects.clear()  # Simulate restart while the touchscreen print is running.
         await main.on_print_start(1, {"submission_id": "touchscreen", "filename": "same.3mf"})
         async with sessions() as db:
             new = await find_job(db, 1, "touchscreen")
@@ -517,13 +538,16 @@ async def test_touchscreen_print_takes_over_the_hold_without_releasing_the_print
 )
 async def test_delayed_or_disconnected_start_cannot_replace_a_plate_hold(sessions, connected, ready, identity):
     import backend.app.main as main
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import intake
 
     old_id = await add_job(sessions, "finished")
     state = SimpleNamespace(connected=connected, job_telemetry_ready=ready, state="RUNNING", submission_id=identity)
     with (
-        patch.object(main, "async_session", sessions),
+        patch.object(intake, "async_session", sessions),
+        patch.object(print_effects, "async_session", sessions),
         patch.object(main.printer_manager, "get_status", return_value=state),
-        patch.object(main, "_archive_print_start", AsyncMock()) as archive,
+        patch.object(print_effects, "_archive_print_start", AsyncMock()) as archive,
     ):
         await main.on_print_start(1, {"submission_id": "new", "filename": "same.3mf"})
         archive.assert_not_awaited()
@@ -554,13 +578,16 @@ async def test_rolling_back_external_hold_transfer_restores_the_previous_job(ses
 @pytest.mark.parametrize("terminal", ["FINISH", "FAILED", "IDLE"])
 async def test_short_external_start_still_transfers_the_hold_before_its_terminal_callback(sessions, terminal):
     import backend.app.main as main
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import intake
 
     await add_job(sessions, "failed")
     live = SimpleNamespace(connected=True, job_telemetry_ready=True, state=terminal, submission_id="short-print")
     with (
-        patch.object(main, "async_session", sessions),
+        patch.object(intake, "async_session", sessions),
+        patch.object(print_effects, "async_session", sessions),
         patch.object(main.printer_manager, "get_status", return_value=live),
-        patch.object(main, "_archive_print_start", AsyncMock()),
+        patch.object(print_effects, "_archive_print_start", AsyncMock()),
     ):
         await main.on_print_start(1, {"submission_id": "short-print", "raw_data": {"gcode_state": "RUNNING"}})
     async with sessions() as db:
@@ -581,9 +608,14 @@ async def test_old_duplicate_identity_cannot_take_the_hold_from_another_ended_jo
 @pytest.mark.parametrize("live_state", ["RUNNING", "FINISH", "FAILED"])
 async def test_delayed_cancelled_completion_cannot_run_effects_for_a_later_job(sessions, live_state):
     import backend.app.main as main
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import intake
 
     await add_job(sessions, "cancelled")
-    with patch.object(main, "async_session", sessions), patch.object(main, "printer_manager", MagicMock()) as manager:
+    with (
+        patch.object(intake, "async_session", sessions),
+        patch.object(intake, "printer_manager", MagicMock()) as manager,
+    ):
         manager.get_status.return_value = SimpleNamespace(state=live_state, connected=True, subtask_id="later-job")
         assert await main.on_print_complete(1, {"subtask_id": "123", "status": "failed"}) is False
         manager.set_awaiting_plate_clear.assert_not_called()
@@ -591,10 +623,13 @@ async def test_delayed_cancelled_completion_cannot_run_effects_for_a_later_job(s
 
 async def test_partial_start_waits_for_file_metadata_before_archiving(sessions):
     import backend.app.main as main
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import intake
 
     with (
-        patch.object(main, "async_session", sessions),
-        patch.object(main, "_archive_print_start", AsyncMock()) as archive,
+        patch.object(intake, "async_session", sessions),
+        patch.object(print_effects, "async_session", sessions),
+        patch.object(print_effects, "_archive_print_start", AsyncMock()) as archive,
     ):
         await main.on_print_start(1, {"submission_id": "external"})
         archive.assert_not_awaited()
@@ -667,8 +702,10 @@ async def test_duplicate_start_after_stop_does_not_create_an_external_job(sessio
 async def test_external_archive_is_linked_by_identity_not_name(sessions):
     import backend.app.main as main
     from backend.app.models.archive import PrintArchive
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import intake
 
-    main._started_job_effects.clear()
+    intake._started_job_effects.clear()
 
     async def archive_worker(printer_id, data, **kwargs):
         async with sessions() as db:
@@ -695,7 +732,11 @@ async def test_external_archive_is_linked_by_identity_not_name(sessions):
             await db.commit()
         return True
 
-    with patch.object(main, "async_session", sessions), patch.object(main, "_archive_print_start", archive_worker):
+    with (
+        patch.object(intake, "async_session", sessions),
+        patch.object(print_effects, "async_session", sessions),
+        patch.object(print_effects, "_archive_print_start", archive_worker),
+    ):
         await main.on_print_start(1, {"submission_id": "external", "filename": "same.3mf"})
     async with sessions() as db:
         item = await find_job(db, 1, "external")
@@ -713,9 +754,11 @@ async def test_external_archive_is_linked_by_identity_not_name(sessions):
 async def test_debug_completion_uses_identified_active_attempt(sessions, monkeypatch):
     import backend.app.main as main
     from backend.app.api.routes.printers import debug_simulate_print_complete
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import intake
 
     complete = AsyncMock()
-    monkeypatch.setattr(main, "on_print_complete", complete)
+    monkeypatch.setattr(intake, "print_completed", complete)
     _, archive_id = await add_linked_job(sessions, "current")
     async with sessions() as db:
         ended = PrintQueueItem(printer_id=1, status="unsuccessful", dispatch_subtask_id="ended")

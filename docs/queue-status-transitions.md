@@ -10,7 +10,7 @@ after failure, and Require previous success have been removed.
 | --- | --- |
 | `queued` | `preheating`, `dispatching`, `unsuccessful` (user cancellation) |
 | `preheating` | `dispatching`, `failed`, `cancelled` |
-| `dispatching` | `printing`, `failed`, `cancelled` |
+| `dispatching` | `printing`, `failed`, `cancelled`, `unsuccessful` (Retry of an unsent attempt) |
 | `printing` | `paused`, `finished`, `failed`, `cancelled` |
 | `paused` | `printing`, `finished`, `failed`, `cancelled` |
 | `finished` | `successful` (Clear Plate) |
@@ -28,7 +28,9 @@ their heaters have been shut down; disconnected printers can be deleted.
 
 **Cancel** ends a waiting job as `unsuccessful`. **Cancel / Stop Print** on active
 work commits `cancelled`, records Stop intent, then sends Stop. A failed command
-or offline printer keeps the hold with an inspection reason. Editing and
+or offline printer keeps the hold with an inspection reason. If fresh telemetry
+shows the printer running a different identified print, the job is stopped
+without a Stop command, which would stop that print, and without Auto Off. Editing and
 deleting holding jobs is refused. **Skip heat soak** proceeds to `dispatching`
 with the same hold.
 
@@ -46,7 +48,10 @@ Retry repeats the complete heat soak and retains available variant slices and
 per-file settings. If those are gone, it uses the selected Files source or the
 Archive copy. It requires queue creation, ownership update and `queue:insert_top`
 permissions. The old job retains its hold; a model-targeted retry can use a
-different free printer.
+different free printer. Retry is also offered on a `dispatching` attempt that
+nothing was sent for and no worker still owns. That attempt is withdrawn as
+`unsuccessful` in the same transaction, releasing its hold and removing its
+upload, because there is no plate to clear.
 
 A new, positively identified touchscreen/SD print can transfer an earlier
 terminal job's hold. The old job becomes final and the new external job takes
@@ -65,10 +70,12 @@ job that could take the same printer.
 
 `queued` jobs form a pool. A populated `printer_id` is a **Specific machine**
 requirement; an **Any machine** job remains unassigned until its hold commits.
-Each pass, printer selection (`services/printer_selection.py`) chooses the
-printer and its tray mapping (`services/ams_mapping.py`) in memory. Eligibility
-checks cover model, nozzle, material, drying (`services/ams_drying.py`) and
-fresh idle telemetry. A missing
+Each scheduler pass, printer selection (`services/printer_selection.py`)
+chooses the printer and its tray mapping (`services/ams_mapping.py`) in memory.
+Eligibility checks cover model, nozzle, material, drying (`services/ams_drying.py`)
+and fresh idle telemetry. Selection, mapping and drying are standalone services
+that the scheduler composes; drying is not lifecycle code, and selection and
+dispatching only ask whether it blocks a print. A missing
 printer leaves the job queued. Missing sources park it with Manual start and a
 reason; the system never ends a queued job. Files purging likewise detaches
 missing sources without cancelling waiting jobs.
@@ -77,6 +84,22 @@ A worker first claims the waiting row, blocking edits. It compares every
 editable field with the selection snapshot; an intervening edit releases the
 claim and causes a fresh selection. Printer and tray mapping are persisted
 only by the conditional transition to `preheating` or `dispatching`.
+
+Leaving the queue is queued's exit. Its bounded pool of exit workers, one
+session each, claims a selected job, rechecks its printer and source, and starts
+preheating for a heat soak or dispatching otherwise. A blocked job stays queued
+with its reason. `services/lifecycle/dispatching.py` owns the attempt:
+`Dispatcher.enter` holds the printer when entered from `queued`, or inherits the
+soak's hold from `preheating`, then copies, links, uploads and sends, one step
+each. Dispatching starts itself from a soak: its entry from `preheating` starts
+this process's takeover worker once the handoff commits, for the soak's timer
+and for **Skip heat soak** alike.
+
+Preheating's wait runs on its own timer, not the scheduler's pass. While a soak
+or a heater shutdown is in progress it runs every heartbeat (30 seconds),
+sooner when a soak starts, a shutdown is requested, or intake reports a
+connection or state change for a soaking or shutting-down printer. Otherwise it
+is idle. After a restart its first pass follows the printers' first telemetry.
 
 Dispatch follows this order:
 
@@ -97,21 +120,66 @@ Missing or uninitialized telemetry waits for up to 30 seconds at each dispatch
 boundary. An active print state or a different nonempty identity fails the
 held attempt. An empty ID after reconnect is not evidence of another print.
 If telemetry remains unavailable, nothing is sent: the job stays `dispatching`
-with **Stop and Retry** instructions, without a failure notification or Auto
-Off. An unsent heat-soak hold schedules heater shutdown after its worker exits.
+with **Retry** instructions, without a failure notification or Auto Off. An unsent heat-soak hold schedules heater shutdown after its worker exits.
 A restart fails an interrupted unsent attempt (no ID and no send timestamp);
 an attempt that might have sent a command stays held for telemetry or review.
 
 The unconfirmed-dispatch prompt requires an ID, a send timestamp, an expired
 270-second acknowledgement window, and no live worker claim. **It's printing**
-confirms `printing`; **It didn't start** records `failed`. See
+confirms `printing`; **It didn't start** records `failed`. Printing's entry from
+`dispatching` registers the queue-start notification and relay publication with
+the effects registry, whether live confirmation, manual resolution, an observed
+start or restart recovery made the transition. Confirmation, resolution and
+intake await the committed publication; restart recovery keeps its background
+delivery. Rollback or a failed commit emits no start, and a print that ends in
+the transaction that confirmed it announces only its end.
+
+Unsent heat-soak handoffs belong to dispatching, whose worker owns them until
+it sends or ends the attempt; neither state watches their soak heartbeat, so a
+long upload is never reported as an interrupted soak. A restart fails them.
+Dispatching runs its telemetry recovery on its own 30-second timer, with an
+immediate first pass; a printer connecting or disconnecting wakes it sooner.
+The timer is deliberate: recovery checks every active job against live
+telemetry, which a fixed cadence does simply. A locked SQLite database retries
+the pass. Queue selection drives neither state's timer, and shutdown cancels
+both.
+
+A soak whose worker is gone, after a restart, is recovered by preheating once
+its heartbeat lapses: its heaters are turned off and the hold is kept, with an
+inspection message, until a person stops it or skips the soak.
+
+Recovery also ends a `printing` or `paused` job whose printer reports a
+different firmware print ID with fresh telemetry: the printer finished it and
+started another while Grove wasn't watching. Its outcome is unknown, so it
+becomes `failed` without Auto Off, and an active replacement print is then
+observed as started, which transfers the hold to it. A session-local ID on
+either side proves nothing, and the job stays put.
+
+A stored tray mapping that maps no slot (`[-1]`) is never sent (#2589). Printer
+selection recomputes it from the loaded trays, and the job waits with a reason
+while nothing matches.
+
+See
 [job identity](queue-job-identity.md) for matching and recovery details and
 [concurrency](queue-dispatch-concurrency.md) for upload pool settings.
 
 ## Identity, pause and Archive outcomes
 
+MQTT print events reach the lifecycle through intake
+(`services/lifecycle/intake.py`); the `main.py` callbacks only hand them on.
+Intake runs each printer's start, pause/resume, completion and reconnect events
+one at a time, matches each to its job, and keeps the per-print memory events
+need: whose start and completion already ran, a Stop sent from the printer
+controls, finish-photo frames and producer events, timelapse baselines, and
+bed-cooldown waiters. The photo-moment and bed-temperature adapters also enter
+through intake. Heavy services receive its `PrintMemory` explicitly and keep
+no global per-print context. Each reconnect also reconciles missed completions of unlinked legacy
+Archives, deferring while the first real state is active.
+
 Start, pause and completion match printer plus persisted submission ID, never
-filename, display name or recency. External prints create ownerless jobs.
+filename, display name or recency. Printing (`services/lifecycle/printing.py`)
+confirms a dispatched job on its observed start, or adopts a print the printer
+started itself as a new ownerless job.
 Fresh `PAUSE` / `RUNNING` telemetry changes `printing` / `paused` without
 replaying start effects, changing settings or releasing the hold. First
 observation in PAUSE records printing and paused in the same transaction.
@@ -126,6 +194,20 @@ a genuine failure records `failed`. Identified FINISH after an unconfirmed Stop
 permits `cancelled` → `finished` and records `completed`. Confirmed outcomes
 cannot be overwritten by duplicate reports. `stop_requested_at` preserves Stop
 intent across restart and a late Archive download.
+
+A printer's completion report ends the job through printing's exit
+(`printing.end`) into the awaiting state for its outcome. A Grove Stop is
+reported as `cancelled`, also after a restart. The completion credits the
+job's owner, read from the job in the completion transaction, in the print log
+and on an unowned reused Archive; nothing is kept in memory, so the credit
+survives a restart. The current-print-user route reads the active job's owner.
+
+The start and completion effects (Archive association, new-print actions,
+notifications, usage tracking, photos, energy and SD cleanup) live in
+`services/print_effects.py`. They run from the effects registry once the
+transition that observed the start or end commits, and intake waits for them
+before the printer's next event. Printer-supplied file names are joined under
+the download directory with `safe_join_under`.
 
 Archive association and new-print effects are separate. Recovery restores file,
 usage and object context without replaying plate checks, notifications, usage
@@ -160,15 +242,21 @@ write, the engine aligns the Archive attempt, runs the old state's exit step and
 then the new state's entry step, all in the same transaction.
 
 Each state's steps live in its module in `services/lifecycle/`: `queued.py`,
-`preheating.py`, `awaiting.py` (`finished`, `failed`, `cancelled`) and
-`final.py` (`successful`, `unsuccessful`). Leaving `preheating` other than for `dispatching` releases the
-soak's claim and shuts its heaters down. Entry into an awaiting state writes the
-physical outcome with the status, then clears a finished plate when confirmation
-is off or queues a failed or stopped job's effects. Clear Plate, hold transfer
-and printer deletion end a job through `final.end`. Leaving `failed` or
-`cancelled` through Clear Plate removes the attempt's sent upload; a state
-cleans up on its own exit. Entry into a final state releases unused Queue
-sources.
+`preheating.py`, `dispatching.py`, `printing.py` (`printing`, `paused`),
+`awaiting.py` (`finished`, `failed`, `cancelled`) and `final.py` (`successful`,
+`unsuccessful`). Leaving `preheating` other than for `dispatching` releases the
+soak's claim and shuts its heaters down. Leaving `dispatching`, `printing` or
+`paused` for `failed` or `cancelled` shuts down the heaters an inherited soak
+left on; a dispatch that fails, unless the printer reported it, also removes its
+unsent upload. Entry into an awaiting state writes the physical outcome with the
+status, then clears a finished plate when confirmation is off, or queues Auto
+Off and, unless the printer reported the failure, a failure notification. The
+effects an exit and an entry queue for one outcome run together after commit.
+Clear Plate, hold transfer and printer deletion end a job through `final.end`.
+Machine-level hold transfer and printer deletion live in the engine, including
+deletion's heat-soak shutdown guard. Leaving `failed` or `cancelled` through
+Clear Plate removes the attempt's sent upload; a state cleans up on its own
+exit. Entry into a final state releases unused Queue sources.
 
 Some entry work may start only after the transition commits. `enter_state`
 makes the transition, commits it, then runs the new state's post-commit step,
@@ -181,7 +269,10 @@ step itself, so the step cannot be skipped.
 
 The caller owns the transaction, except in `enter_state`. Lifecycle work queues
 after-commit effects and rollback cleanup in one registry,
-`services/lifecycle/effects.py`. Effects run
+`services/lifecycle/effects.py`. Async work, such as the queue start and the
+print start and completion effects, runs in order in one task per commit, which
+the caller may wait for; the first failure reaches the waiter and never skips
+the work after it. Effects run
 only after the outermost commit; savepoints neither run nor discard them, and a
 failing effect is logged without affecting the commit or later effects.
 Plate-clear flags and Archive IDs in printer views are projections, rehydrated

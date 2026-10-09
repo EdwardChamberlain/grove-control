@@ -11,9 +11,9 @@ point of resolving it in one place is that they cannot drift apart.
 
 import pytest
 
-from backend.app.main import _format_hms_error_summary
 from backend.app.schemas.printer import HMSErrorResponse
 from backend.app.services.bambu_mqtt import HMSError, PrinterState
+from backend.app.services.print_effects import _format_hms_error_summary
 from backend.app.services.printer_manager import printer_state_to_dict
 
 RUNOUT_SENTENCE = "Filament ran out. Please load new filament."

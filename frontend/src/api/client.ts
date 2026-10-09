@@ -2158,6 +2158,7 @@ export interface PrintQueueItem {
   nozzle_offset_cali: CalibrationMode;
   status: 'queued' | 'preheating' | 'dispatching' | 'printing' | 'paused' | 'finished' | 'failed' | 'cancelled' | 'successful' | 'unsuccessful';
   dispatch_needs_resolution?: boolean;
+  dispatch_unsent?: boolean;
   dispatched_at: string | null;
   started_at: string | null;
   completed_at: string | null;

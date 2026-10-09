@@ -25,7 +25,7 @@ def _patch_status(backup):
     """Patch ``printer_manager.get_status`` to return a stub PrinterState whose
     ``ams_filament_backup`` is the requested tri-state value."""
     return patch(
-        "backend.app.services.print_scheduler.printer_manager.get_status",
+        "backend.app.services.lifecycle.dispatching.printer_manager.get_status",
         return_value=SimpleNamespace(ams_filament_backup=backup, raw_data={}),
     )
 
@@ -56,13 +56,13 @@ async def _run_with_backup(scheduler, backup_state, prefer_lowest_setting):
 
     with (
         _patch_status(backup_state),
-        patch.object(scheduler, "_get_filament_requirements", new=AsyncMock(return_value=filament_reqs)),
-        patch.object(scheduler, "_build_loaded_filaments", return_value=loaded),
-        patch.object(scheduler, "_get_bool_setting", new=AsyncMock(return_value=prefer_lowest_setting)),
-        patch.object(scheduler, "_build_inventory_remain_overrides", new=AsyncMock(return_value={})),
-        patch.object(scheduler, "_match_filaments_to_slots", side_effect=_capture_match),
+        patch.object(scheduler.mapping, "_get_filament_requirements", new=AsyncMock(return_value=filament_reqs)),
+        patch.object(scheduler.mapping, "_build_loaded_filaments", return_value=loaded),
+        patch.object(scheduler.mapping, "_get_bool_setting", new=AsyncMock(return_value=prefer_lowest_setting)),
+        patch.object(scheduler.mapping, "_build_inventory_remain_overrides", new=AsyncMock(return_value={})),
+        patch.object(scheduler.mapping, "_match_filaments_to_slots", side_effect=_capture_match),
     ):
-        await scheduler._compute_ams_mapping_for_printer(db, printer_id=1, item=item)
+        await scheduler.mapping._compute_ams_mapping_for_printer(db, printer_id=1, item=item)
 
     return captured.get("prefer_lowest")
 

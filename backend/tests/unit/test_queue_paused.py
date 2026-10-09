@@ -13,17 +13,20 @@ from backend.app.core.database import Base
 from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services.job_identity import bind_observed_id, observe_print, sync_print_state
+from backend.app.services.lifecycle import effects as lifecycle_effects
 from backend.app.services.lifecycle.engine import QueueTransitionConflict, transition_queue_item
+from backend.app.services.lifecycle.printing import bind_observed_id, observe_print, sync_print_state
 from backend.app.services.print_scheduler import PrintScheduler
 
 
 @pytest.fixture
 async def sessions(tmp_path):
     import backend.app.main as main
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import intake
 
-    main._started_job_effects.clear()
-    main._completed_job_events.clear()
+    intake._started_job_effects.clear()
+    intake._completed_job_events.clear()
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'paused.db'}")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -123,13 +126,13 @@ async def test_restart_recovery_applies_pause_resume_without_restarting_the_job(
         tasks.append(coro)
 
     with (
-        patch("backend.app.services.print_scheduler.printer_manager.get_status", return_value=telemetry(state)),
-        patch("backend.app.services.print_scheduler.spawn_background_task", side_effect=spawn),
-        patch.object(scheduler, "_publish_queue_job_started", publish),
+        patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", return_value=telemetry(state)),
+        patch("backend.app.services.lifecycle.dispatching.spawn_background_task", side_effect=spawn),
+        patch.object(lifecycle_effects, "publish_queue_job_started", publish),
     ):
         async with sessions() as db:
             before = (await db.get(PrintQueueItem, item_id)).started_at
-            await scheduler._recover_stale_dispatches(db)
+            await scheduler.dispatcher.recover(db)
         for task in tasks:
             await task
     async with sessions() as db:
@@ -148,15 +151,15 @@ async def test_restart_recovers_a_terminal_print_from_paused(sessions, outcome):
     tasks = []
     scheduler = PrintScheduler()
     with (
-        patch("backend.app.services.print_scheduler.printer_manager.get_status", return_value=telemetry(outcome)),
+        patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", return_value=telemetry(outcome)),
         patch(
-            "backend.app.services.print_scheduler.spawn_background_task",
+            "backend.app.services.lifecycle.dispatching.spawn_background_task",
             side_effect=lambda coro, **kw: tasks.append(coro),
         ),
-        patch.object(scheduler, "_complete_recovered_dispatch", AsyncMock()),
+        patch.object(scheduler.dispatcher, "_complete_recovered_dispatch", AsyncMock()),
     ):
         async with sessions() as db:
-            await scheduler._recover_stale_dispatches(db)
+            await scheduler.dispatcher.recover(db)
         for task in tasks:
             await task
     async with sessions() as db:
@@ -208,6 +211,8 @@ async def test_cancel_winning_a_pause_observation_cannot_be_overwritten(sessions
 )
 async def test_print_start_skips_a_stop_that_wins_after_the_job_is_read(sessions, initial, state):
     import backend.app.main as main
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import intake
 
     item_id, archive_id = await add_job(sessions, initial)
     async with sessions() as stale:
@@ -220,16 +225,17 @@ async def test_print_start_skips_a_stop_that_wins_after_the_job_is_read(sessions
         # SQLite serializes writers at the printer lock. Supply the pre-Stop
         # snapshot to exercise the stale-read conflict possible on PostgreSQL.
         with (
-            patch.object(main, "async_session", return_value=stale),
+            patch.object(intake, "async_session", return_value=stale),
+            patch.object(print_effects, "async_session", return_value=stale),
             patch.object(main.printer_manager, "get_status", return_value=telemetry(state)),
             patch("backend.app.services.job_identity.find_job", AsyncMock(return_value=item)),
-            patch.object(main, "_archive_print_start", AsyncMock()) as archive_start,
-            patch.object(main.print_scheduler, "_publish_queue_job_started", AsyncMock()) as publish,
+            patch.object(print_effects, "_archive_print_start", AsyncMock()) as archive_start,
+            patch.object(lifecycle_effects, "publish_queue_job_started", AsyncMock()) as publish,
         ):
             await main.on_print_start(1, {"submission_id": "123", "filename": "same.3mf"})
             archive_start.assert_not_awaited()
             publish.assert_not_awaited()
-            assert 1 not in main._started_job_effects
+            assert 1 not in intake._started_job_effects
     async with sessions() as db:
         item = await db.get(PrintQueueItem, item_id)
         assert item.status == "cancelled"
@@ -240,6 +246,8 @@ async def test_print_start_skips_a_stop_that_wins_after_the_job_is_read(sessions
 
 async def test_external_print_start_conflict_rolls_back_the_job_and_hold_transfer(sessions):
     import backend.app.main as main
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import intake
 
     item_id, archive_id = await add_job(sessions, "finished", "previous")
 
@@ -249,17 +257,18 @@ async def test_external_print_start_conflict_rolls_back_the_job_and_hold_transfe
         raise QueueTransitionConflict("A competing transition won")
 
     with (
-        patch.object(main, "async_session", sessions),
+        patch.object(intake, "async_session", sessions),
+        patch.object(print_effects, "async_session", sessions),
         patch.object(main.printer_manager, "get_status", return_value=telemetry(identity="external")),
-        patch("backend.app.services.job_identity.sync_print_state", side_effect=conflicting_pause) as sync,
-        patch.object(main, "_archive_print_start", AsyncMock()) as archive_start,
-        patch.object(main.print_scheduler, "_publish_queue_job_started", AsyncMock()) as publish,
+        patch("backend.app.services.lifecycle.printing.sync_print_state", side_effect=conflicting_pause) as sync,
+        patch.object(print_effects, "_archive_print_start", AsyncMock()) as archive_start,
+        patch.object(lifecycle_effects, "publish_queue_job_started", AsyncMock()) as publish,
     ):
         await main.on_print_start(1, {"submission_id": "external", "filename": "same.3mf"})
         sync.assert_awaited_once()
         archive_start.assert_not_awaited()
         publish.assert_not_awaited()
-        assert 1 not in main._started_job_effects
+        assert 1 not in intake._started_job_effects
     async with sessions() as db:
         items = (await db.scalars(select(PrintQueueItem))).all()
         assert len(items) == 1
@@ -278,11 +287,14 @@ async def test_external_print_start_conflict_rolls_back_the_job_and_hold_transfe
 )
 async def test_delayed_callback_cannot_apply_a_superseded_snapshot(sessions, observed, live, identity):
     import backend.app.main as main
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import intake
 
     initial = "printing" if observed == "PAUSE" else "paused"
     item_id, _ = await add_job(sessions, initial)
     with (
-        patch.object(main, "async_session", sessions),
+        patch.object(intake, "async_session", sessions),
+        patch.object(print_effects, "async_session", sessions),
         patch.object(main.printer_manager, "get_status", return_value=telemetry(live, identity)),
     ):
         await main.on_print_state_change(1, {"submission_id": "123", "state": observed})
@@ -295,12 +307,12 @@ async def test_dispatch_confirmation_can_first_observe_pause(sessions):
     scheduler = PrintScheduler()
     publish = AsyncMock()
     with (
-        patch.object(scheduler, "_wait_for_print_start_ack", AsyncMock(return_value=("printing", telemetry()))),
-        patch("backend.app.services.print_scheduler.printer_manager.get_status", return_value=telemetry()),
+        patch.object(scheduler.dispatcher, "_wait_for_ack", AsyncMock(return_value=("printing", telemetry()))),
+        patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", return_value=telemetry()),
         patch("backend.app.core.database.async_session", sessions),
-        patch.object(scheduler, "_publish_queue_job_started", publish),
+        patch.object(lifecycle_effects, "publish_queue_job_started", publish),
     ):
-        await scheduler._confirm_dispatch(queue_item_id=item_id, printer_id=1, dispatch_subtask_id="123")
+        await scheduler.dispatcher._confirm(item_id=item_id, printer_id=1, subtask_id="123")
     async with sessions() as db:
         assert (await db.get(PrintQueueItem, item_id)).status == "paused"
     publish.assert_awaited_once_with(item_id)
@@ -309,7 +321,9 @@ async def test_dispatch_confirmation_can_first_observe_pause(sessions):
 @pytest.mark.parametrize("external", [False, True])
 async def test_mqtt_manager_and_callbacks_persist_pause_resume_without_repeated_start_effects(sessions, external):
     import backend.app.main as main
+    from backend.app.services import print_effects
     from backend.app.services.bambu_mqtt import BambuMQTTClient
+    from backend.app.services.lifecycle import intake
     from backend.app.services.printer_manager import PrinterManager
 
     manager = PrinterManager()
@@ -322,9 +336,11 @@ async def test_mqtt_manager_and_callbacks_persist_pause_resume_without_repeated_
     if not external:
         await add_job(sessions)
     with (
-        patch.object(main, "async_session", sessions),
-        patch.object(main, "printer_manager", manager),
-        patch.object(main, "_archive_print_start", archive_start),
+        patch.object(intake, "async_session", sessions),
+        patch.object(print_effects, "async_session", sessions),
+        patch.object(intake, "printer_manager", manager),
+        patch.object(print_effects, "printer_manager", manager),
+        patch.object(print_effects, "_archive_print_start", archive_start),
         patch.object(manager, "_schedule_async", side_effect=callbacks.append),
         patch.object(BambuMQTTClient, "connect"),
     ):

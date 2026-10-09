@@ -30,6 +30,7 @@ from backend.app.models.print_queue import (
     HOLDING_STATUSES,
     PrintQueueItem,
 )
+from backend.app.models.printer import Printer
 
 logger = logging.getLogger(__name__)
 
@@ -86,10 +87,14 @@ _RELEASE_ACTIONS = ("clear_plate", "printer_deleted", "hold_transferred", "print
 _LIFECYCLE = "backend.app.services.lifecycle"
 _EXITS = {
     "preheating": f"{_LIFECYCLE}.preheating",
+    "dispatching": f"{_LIFECYCLE}.dispatching",
+    **dict.fromkeys(("printing", "paused"), f"{_LIFECYCLE}.printing"),
     **dict.fromkeys(AWAITING_PLATE_CLEAR_STATUSES, f"{_LIFECYCLE}.awaiting"),
 }
 _ENTRY = {
     "preheating": f"{_LIFECYCLE}.preheating",
+    "dispatching": f"{_LIFECYCLE}.dispatching",
+    "printing": f"{_LIFECYCLE}.printing",
     **dict.fromkeys(AWAITING_PLATE_CLEAR_STATUSES, f"{_LIFECYCLE}.awaiting"),
     **dict.fromkeys(FINAL_STATUSES, f"{_LIFECYCLE}.final"),
 }
@@ -132,7 +137,10 @@ def _check(before: str, after: str, action: str | None, upgrading: bool) -> None
     if before == "queued" and after == "unsuccessful" and action != "cancel":
         raise InvalidQueueTransition("Only a user cancellation may end a queued job")
     if before in ACTIVE_STATUSES and after == "unsuccessful" and action != "printer_deleted":
-        raise InvalidQueueTransition("Only printer deletion may release an active job")
+        if not (before == "dispatching" and action == "withdrawn"):
+            raise InvalidQueueTransition(
+                "Only printer deletion, or Retry of an unsent attempt, may release an active job"
+            )
     if before in AWAITING_PLATE_CLEAR_STATUSES and action not in _RELEASE_ACTIONS:
         raise InvalidQueueTransition(
             "A holding job requires Clear Plate, printer deletion, or an observed hold transfer"
@@ -225,7 +233,14 @@ async def _written(change: Transition) -> None:
     holding = change.before in HOLDING_STATUSES or change.after in HOLDING_STATUSES
     if not (entered or holding or change.action):
         return  # No log, printer view or entry step applies (e.g. a waiting reason).
-    names = ("printer_id", "archive_id", "library_file_id", "preheat_requested_at", "chamber_heat_soak")
+    names = (
+        "printer_id",
+        "archive_id",
+        "library_file_id",
+        "preheat_requested_at",
+        "preheat_owner",
+        "chamber_heat_soak",
+    )
     row = (await db.execute(select(*(table.c[name] for name in names)).where(table.c.id == change.item_id))).one()
     if entered or change.action is not None:
         log = "Queue job %s: %s -> %s (printer=%s, archive=%s, action=%s)"
@@ -298,3 +313,37 @@ async def lock_queue_item(db: AsyncSession, item_id: int) -> PrintQueueItem | No
         if not result.rowcount:
             return None
         return await db.get(PrintQueueItem, item_id, populate_existing=True)
+
+
+async def transfer_hold(db: AsyncSession, held: PrintQueueItem, identity: str) -> bool:
+    """Transfer hold under the lifecycle transition rules."""
+    from backend.app.services.lifecycle.final import end
+
+    if held.status not in AWAITING_PLATE_CLEAR_STATUSES:
+        return False
+    reason = f"Printer hold transferred to externally started print {identity}"
+    message = f"{held.error_message}; {reason}" if held.error_message else reason
+    await end(db, held, "hold_transferred", error_message=message)
+    return True
+
+
+async def release_printer(db: AsyncSession, printer: Printer) -> None:
+    """Release printer under the lifecycle transition rules."""
+    from backend.app.services.lifecycle.dispatching import is_soaking
+    from backend.app.services.lifecycle.final import end
+    from backend.app.services.printer_manager import printer_manager
+
+    held = (PrintQueueItem.printer_id == printer.id, PrintQueueItem.status.in_(HOLDING_STATUSES))
+    holding = list((await db.scalars(select(PrintQueueItem).where(*held).with_for_update())).all())
+    soaking = printer.heat_soak_shutdown_pending or any(is_soaking(item) for item in holding)
+    if soaking and printer_manager.is_connected(printer.id):
+        raise InvalidQueueTransition(
+            "Stop the heat soak and wait for heater shutdown to be confirmed before deleting this printer"
+        )
+    for item in holding:
+        # A finished print keeps its outcome; only an unsuccessful end is
+        # explained by the deletion. Jobs that already ended keep their time.
+        values = {"error_message": "Printer deleted"} if item.status != "finished" else {}
+        if item.completed_at is None:
+            values["completed_at"] = datetime.now(timezone.utc)
+        await end(db, item, "printer_deleted", **values)

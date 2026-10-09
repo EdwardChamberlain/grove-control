@@ -27,6 +27,7 @@ from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
 from backend.app.models.printer import Printer
 from backend.app.services.print_scheduler import PrintScheduler
 from backend.app.services.printer_selection import (
+    PrinterSelection,
     _candidate_model_label,
     _candidates_for,
     _collapse_waiting_reasons,
@@ -175,13 +176,13 @@ def test_all_busy_stays_busy_only_so_no_notification_fires():
     scheduler = PrintScheduler()
     collapsed = _collapse_waiting_reasons([("H2S", "Busy: H2S-1 (Printing)"), ("H2C", "Busy: H2C-1 (Printing)")])
     assert collapsed == "Busy: H2S-1 (Printing) | Busy: H2C-1 (Printing)"
-    assert scheduler._is_busy_only(collapsed)
+    assert scheduler.selection._is_busy_only(collapsed)
 
 
 def test_differing_reasons_are_labelled_by_model():
     collapsed = _collapse_waiting_reasons([("H2S", "No PETG loaded"), ("H2C", "Busy: H2C-1 (Printing)")])
     assert collapsed == "H2S: No PETG loaded; H2C: Busy: H2C-1 (Printing)"
-    assert not PrintScheduler._is_busy_only(collapsed), "a real blocker must still notify"
+    assert not PrinterSelection._is_busy_only(collapsed), "a real blocker must still notify"
 
 
 def test_empty_reasons_are_dropped():
@@ -289,9 +290,9 @@ async def _run_check_queue(ctx, scheduler, finder, waiting_notification=None, pr
     patches = [
         patch("backend.app.services.print_scheduler.async_session", ctx.session_maker),
         patch("backend.app.core.database.async_session", ctx.session_maker),
-        patch("backend.app.services.print_scheduler.printer_manager.is_connected", MagicMock(return_value=True)),
+        patch("backend.app.services.lifecycle.dispatching.printer_manager.is_connected", MagicMock(return_value=True)),
         patch(
-            "backend.app.services.print_scheduler.printer_manager.get_status",
+            "backend.app.services.lifecycle.dispatching.printer_manager.get_status",
             MagicMock(side_effect=lambda printer_id: (printer_states or {}).get(printer_id)),
         ),
         patch(
@@ -302,12 +303,12 @@ async def _run_check_queue(ctx, scheduler, finder, waiting_notification=None, pr
             "backend.app.services.notification_service.notification_service.on_queue_job_assigned",
             AsyncMock(),
         ),
-        patch.object(scheduler, "_find_idle_printer_for_model", finder),
-        patch.object(scheduler, "_check_auto_drying", AsyncMock()),
+        patch.object(scheduler.selection, "_find_idle_printer_for_model", finder),
+        patch.object(scheduler.drying, "_check_auto_drying", AsyncMock()),
         # Selection is what's under test — keep the filament-deficit probe
         # out of the way, and never actually dispatch.
-        patch.object(scheduler, "_block_on_filament_deficit", AsyncMock(return_value=False)),
-        patch.object(scheduler, "_launch_uploads", scheduler.launch_uploads),
+        patch.object(scheduler.selection, "_block_on_filament_deficit", AsyncMock(return_value=False)),
+        patch.object(scheduler.workers, "launch", scheduler.launch_uploads),
     ]
     with ExitStack() as stack:
         for p in patches:
@@ -323,7 +324,7 @@ def _selected_printer(scheduler, item_id):
     """
     if not scheduler.launch_uploads.called:
         return None
-    _ids, _printers, _limit, bindings = scheduler.launch_uploads.call_args.args
+    bindings, _limit = scheduler.launch_uploads.call_args.args
     return bindings[item_id].printer_id if item_id in bindings else None
 
 

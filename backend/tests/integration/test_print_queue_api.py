@@ -2010,7 +2010,8 @@ class TestAbortedStatusNormalisation:
 
         from sqlalchemy.ext.asyncio import async_sessionmaker
 
-        from backend.app.main import _completed_job_events, _user_stopped_printers, on_print_complete
+        from backend.app.main import on_print_complete
+        from backend.app.services.lifecycle.intake import _completed_job_events, _user_stopped_printers
 
         _completed_job_events.clear()
         _user_stopped_printers.clear()
@@ -2025,23 +2026,27 @@ class TestAbortedStatusNormalisation:
             return task
 
         with (
-            patch("backend.app.main.async_session", session_maker),
+            patch("backend.app.services.lifecycle.intake.async_session", session_maker),
+            patch("backend.app.services.print_effects.async_session", session_maker),
             patch("backend.app.core.database.async_session", session_maker),
-            patch("backend.app.main.spawn_background_task", spawn),
+            patch("backend.app.services.lifecycle.intake.spawn_background_task", spawn),
+            patch("backend.app.services.print_effects.spawn_background_task", spawn),
             patch(
                 "backend.app.services.bambu_ftp.delete_file_async", AsyncMock(return_value=DeleteResult.NOT_FOUND)
             ) as ftp,
             patch("backend.app.services.camera.capture_camera_frame_bytes", AsyncMock(return_value=None)),
-            patch("backend.app.main._capture_finish_photo_from_timelapse", AsyncMock(return_value=False)),
-            patch("backend.app.main.ws_manager", AsyncMock()),
-            patch("backend.app.main.mqtt_relay", AsyncMock()) as relay,
-            patch("backend.app.main.notification_service", AsyncMock()),
-            patch("backend.app.main.smart_plug_manager", AsyncMock()),
-            patch("backend.app.main.printer_manager") as manager,
+            patch(
+                "backend.app.services.print_effects._capture_finish_photo_from_timelapse", AsyncMock(return_value=False)
+            ),
+            patch("backend.app.services.print_effects.ws_manager", AsyncMock()),
+            patch("backend.app.services.print_effects.mqtt_relay", AsyncMock()) as relay,
+            patch("backend.app.services.print_effects.notification_service", AsyncMock()),
+            patch("backend.app.services.print_effects.smart_plug_manager", AsyncMock()),
+            patch("backend.app.services.lifecycle.intake.printer_manager") as manager,
+            patch("backend.app.services.print_effects.printer_manager", manager),
         ):
             manager.get_printer.return_value = None
             manager.get_status.return_value = None
-            manager.get_current_print_user.return_value = None
             try:
                 yield SimpleNamespace(complete=on_print_complete, ftp=ftp, relay=relay)
             finally:
@@ -2159,9 +2164,9 @@ class TestAbortedStatusNormalisation:
         """Successful completion increments print_count and stamps last_printed_at."""
         from datetime import datetime, timezone
 
-        from backend.app.main import _bump_library_file_usage_if_completed
         from backend.app.models.library import LibraryFile
         from backend.app.models.print_queue import PrintQueueItem
+        from backend.app.services.lifecycle.printing import _bump_library_file_usage_if_completed
 
         printer = await printer_factory()
         lib_file = LibraryFile(
@@ -2196,9 +2201,9 @@ class TestAbortedStatusNormalisation:
     @pytest.mark.integration
     async def test_bump_library_file_usage_repeated_prints_increment_count(self, printer_factory, db_session):
         """Each successful completion bumps print_count cumulatively."""
-        from backend.app.main import _bump_library_file_usage_if_completed
         from backend.app.models.library import LibraryFile
         from backend.app.models.print_queue import PrintQueueItem
+        from backend.app.services.lifecycle.printing import _bump_library_file_usage_if_completed
 
         printer = await printer_factory()
         lib_file = LibraryFile(
@@ -2231,9 +2236,9 @@ class TestAbortedStatusNormalisation:
     @pytest.mark.parametrize("terminal_status", ["failed", "cancelled"])
     async def test_bump_library_file_usage_skips_non_completed(self, printer_factory, db_session, terminal_status):
         """Failed and cancelled prints must NOT count as usage."""
-        from backend.app.main import _bump_library_file_usage_if_completed
         from backend.app.models.library import LibraryFile
         from backend.app.models.print_queue import PrintQueueItem
+        from backend.app.services.lifecycle.printing import _bump_library_file_usage_if_completed
 
         printer = await printer_factory()
         lib_file = LibraryFile(
@@ -2268,8 +2273,8 @@ class TestAbortedStatusNormalisation:
         self, printer_factory, archive_factory, db_session
     ):
         """Queue items without library_file_id (e.g. archive reprints) are a no-op."""
-        from backend.app.main import _bump_library_file_usage_if_completed
         from backend.app.models.print_queue import PrintQueueItem
+        from backend.app.services.lifecycle.printing import _bump_library_file_usage_if_completed
 
         printer = await printer_factory()
         archive = await archive_factory()

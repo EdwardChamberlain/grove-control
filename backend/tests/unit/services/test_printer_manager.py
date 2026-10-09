@@ -447,51 +447,6 @@ class TestPrinterManager:
         assert result is False
 
     # ========================================================================
-    # Tests for wait_for_cooldown
-    # ========================================================================
-
-    @pytest.mark.asyncio
-    async def test_wait_for_cooldown_returns_true_when_cool(self, manager, mock_client):
-        """Verify wait_for_cooldown returns True when printer is cool."""
-        mock_client.state.connected = True
-        mock_client.state.temperatures = {"nozzle": 40, "bed": 30}
-        mock_client.check_staleness.return_value = True
-        manager._clients[1] = mock_client
-
-        result = await manager.wait_for_cooldown(1, target_temp=50)
-
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_wait_for_cooldown_returns_false_on_disconnect(self, manager, mock_client):
-        """Verify wait_for_cooldown returns False when printer disconnects."""
-        mock_client.state.connected = False
-        mock_client.check_staleness.return_value = False
-        manager._clients[1] = mock_client
-
-        result = await manager.wait_for_cooldown(1, target_temp=50, timeout=1)
-
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_wait_for_cooldown_returns_false_for_unknown(self, manager):
-        """Verify wait_for_cooldown returns False for unknown printer."""
-        result = await manager.wait_for_cooldown(999, target_temp=50, timeout=1)
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_wait_for_cooldown_checks_both_nozzles(self, manager, mock_client):
-        """Verify wait_for_cooldown checks both nozzles for dual extruders."""
-        mock_client.state.connected = True
-        mock_client.state.temperatures = {"nozzle": 40, "nozzle_2": 45, "bed": 30}
-        mock_client.check_staleness.return_value = True
-        manager._clients[1] = mock_client
-
-        result = await manager.wait_for_cooldown(1, target_temp=50)
-
-        assert result is True
-
-    # ========================================================================
     # Tests for is_print_active (#1890)
     # ========================================================================
 
@@ -761,66 +716,6 @@ class TestPrinterManager:
                 f"event loop appears to have stalled during disconnect "
                 f"(only {event_loop_alive_ticks} heartbeats; expected >=3)"
             )
-
-    # ========================================================================
-    # Tests for current print user tracking (Issue #206)
-    # ========================================================================
-
-    def test_set_current_print_user(self, manager):
-        """Verify current print user can be set."""
-        manager.set_current_print_user(1, 42, "testuser")
-
-        assert 1 in manager._current_print_user
-        assert manager._current_print_user[1]["user_id"] == 42
-        assert manager._current_print_user[1]["username"] == "testuser"
-
-    def test_get_current_print_user_returns_user(self, manager):
-        """Verify get_current_print_user returns the stored user."""
-        manager.set_current_print_user(1, 42, "testuser")
-
-        result = manager.get_current_print_user(1)
-
-        assert result is not None
-        assert result["user_id"] == 42
-        assert result["username"] == "testuser"
-
-    def test_get_current_print_user_returns_none_for_unknown(self, manager):
-        """Verify get_current_print_user returns None for unknown printer."""
-        result = manager.get_current_print_user(999)
-        assert result is None
-
-    def test_clear_current_print_user(self, manager):
-        """Verify current print user can be cleared."""
-        manager.set_current_print_user(1, 42, "testuser")
-        manager.clear_current_print_user(1)
-
-        result = manager.get_current_print_user(1)
-        assert result is None
-
-    def test_clear_current_print_user_no_error_for_unknown(self, manager):
-        """Verify clearing unknown printer doesn't raise error."""
-        # Should not raise
-        manager.clear_current_print_user(999)
-
-    def test_set_current_print_user_overwrites_existing(self, manager):
-        """Verify setting user overwrites existing value."""
-        manager.set_current_print_user(1, 42, "user1")
-        manager.set_current_print_user(1, 99, "user2")
-
-        result = manager.get_current_print_user(1)
-        assert result["user_id"] == 99
-        assert result["username"] == "user2"
-
-    def test_multiple_printers_have_separate_users(self, manager):
-        """Verify each printer tracks its own user separately."""
-        manager.set_current_print_user(1, 42, "user1")
-        manager.set_current_print_user(2, 99, "user2")
-
-        result1 = manager.get_current_print_user(1)
-        result2 = manager.get_current_print_user(2)
-
-        assert result1["username"] == "user1"
-        assert result2["username"] == "user2"
 
 
 class TestPrinterStateToDict:

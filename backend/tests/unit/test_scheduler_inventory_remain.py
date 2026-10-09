@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from backend.app.services.ams_mapping import AmsMapping
 from backend.app.services.print_scheduler import PrintScheduler
 
 
@@ -61,8 +62,8 @@ class TestInternalInventoryOverrides:
             {"ams_id": 0, "tray_id": 3, "global_tray_id": 3, "is_external": False},
         ]
         db = _make_async_session_returning(rows)
-        with patch.object(PrintScheduler, "_is_spoolman_mode", new=AsyncMock(return_value=False)):
-            out = await scheduler._build_inventory_remain_overrides(db, printer_id=1, loaded=loaded)
+        with patch.object(AmsMapping, "_is_spoolman_mode", new=AsyncMock(return_value=False)):
+            out = await scheduler.mapping._build_inventory_remain_overrides(db, printer_id=1, loaded=loaded)
         assert out == {0: 950.0, 3: 50.0}
 
     @pytest.mark.asyncio
@@ -75,8 +76,8 @@ class TestInternalInventoryOverrides:
             {"ams_id": -1, "tray_id": 0, "global_tray_id": 254, "is_external": True},
         ]
         db = _make_async_session_returning([])
-        with patch.object(PrintScheduler, "_is_spoolman_mode", new=AsyncMock(return_value=False)):
-            out = await scheduler._build_inventory_remain_overrides(db, printer_id=1, loaded=loaded)
+        with patch.object(AmsMapping, "_is_spoolman_mode", new=AsyncMock(return_value=False)):
+            out = await scheduler.mapping._build_inventory_remain_overrides(db, printer_id=1, loaded=loaded)
         # DB shouldn't even be queried — nothing AMS-side to look up.
         db.execute.assert_not_called()
         assert out == {}
@@ -87,8 +88,8 @@ class TestInternalInventoryOverrides:
         before this is called in practice, but the function must be
         defensive — it's used in any prefer_lowest dispatch path."""
         db = _make_async_session_returning([])
-        with patch.object(PrintScheduler, "_is_spoolman_mode", new=AsyncMock(return_value=False)):
-            out = await scheduler._build_inventory_remain_overrides(db, printer_id=1, loaded=[])
+        with patch.object(AmsMapping, "_is_spoolman_mode", new=AsyncMock(return_value=False)):
+            out = await scheduler.mapping._build_inventory_remain_overrides(db, printer_id=1, loaded=[])
         assert out == {}
         db.execute.assert_not_called()
 
@@ -104,8 +105,8 @@ class TestInternalInventoryOverrides:
         ]
         loaded = [{"ams_id": 0, "tray_id": 0, "global_tray_id": 0, "is_external": False}]
         db = _make_async_session_returning(rows)
-        with patch.object(PrintScheduler, "_is_spoolman_mode", new=AsyncMock(return_value=False)):
-            out = await scheduler._build_inventory_remain_overrides(db, printer_id=1, loaded=loaded)
+        with patch.object(AmsMapping, "_is_spoolman_mode", new=AsyncMock(return_value=False)):
+            out = await scheduler.mapping._build_inventory_remain_overrides(db, printer_id=1, loaded=loaded)
         assert out == {0: 0.0}
 
     @pytest.mark.asyncio
@@ -126,8 +127,8 @@ class TestInternalInventoryOverrides:
             {"ams_id": 0, "tray_id": 1, "global_tray_id": 1, "is_external": False},
         ]
         db = _make_async_session_returning(rows)
-        with patch.object(PrintScheduler, "_is_spoolman_mode", new=AsyncMock(return_value=False)):
-            out = await scheduler._build_inventory_remain_overrides(db, printer_id=1, loaded=loaded)
+        with patch.object(AmsMapping, "_is_spoolman_mode", new=AsyncMock(return_value=False)):
+            out = await scheduler.mapping._build_inventory_remain_overrides(db, printer_id=1, loaded=loaded)
         assert out == {0: 900.0}
         assert 1 not in out
 
@@ -154,13 +155,13 @@ class TestSpoolmanModeOverrides:
             return {42: 720.0, 99: 80.0}[spool_id]
 
         with (
-            patch.object(PrintScheduler, "_is_spoolman_mode", new=AsyncMock(return_value=True)),
+            patch.object(AmsMapping, "_is_spoolman_mode", new=AsyncMock(return_value=True)),
             patch(
                 "backend.app.services.filament_deficit._spoolman_remaining_grams",
                 new=AsyncMock(side_effect=_fake_grams),
             ),
         ):
-            out = await scheduler._build_inventory_remain_overrides(db, printer_id=1, loaded=loaded)
+            out = await scheduler.mapping._build_inventory_remain_overrides(db, printer_id=1, loaded=loaded)
         assert out == {0: 720.0, 2: 80.0}
 
     @pytest.mark.asyncio
@@ -183,12 +184,12 @@ class TestSpoolmanModeOverrides:
             return 500.0 if spool_id == 42 else None
 
         with (
-            patch.object(PrintScheduler, "_is_spoolman_mode", new=AsyncMock(return_value=True)),
+            patch.object(AmsMapping, "_is_spoolman_mode", new=AsyncMock(return_value=True)),
             patch(
                 "backend.app.services.filament_deficit._spoolman_remaining_grams",
                 new=AsyncMock(side_effect=_fake_grams),
             ),
         ):
-            out = await scheduler._build_inventory_remain_overrides(db, printer_id=1, loaded=loaded)
+            out = await scheduler.mapping._build_inventory_remain_overrides(db, printer_id=1, loaded=loaded)
         assert out == {0: 500.0}
         assert 1 not in out

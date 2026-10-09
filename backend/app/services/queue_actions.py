@@ -12,13 +12,24 @@ logger = logging.getLogger(__name__)
 
 
 async def cancel_job(db: AsyncSession, item: PrintQueueItem) -> None:
-    """Cancel waiting work or stop active work, retaining every active hold."""
+    """Cancel waiting work or stop active work, retaining every active hold.
+
+    A print the printer has since replaced with another is stopped without
+    sending Stop, which would stop the other print.
+    """
+    from backend.app.services.lifecycle.printing import ACTIVE, superseded_by
     from backend.app.services.printer_manager import printer_manager
 
     queued = item.status == "queued"
     if not queued and item.status not in ACTIVE_STATUSES:
         raise InvalidQueueTransition(f"Cannot cancel a job in {item.status}")
     printer_id, item_id = item.printer_id, item.id
+    replaced = item.status in ("printing", "paused") and superseded_by(
+        item, printer_manager.get_status(printer_id), ACTIVE
+    )
+    reason = "Cancelled before printing" if queued else "Stop requested by user"
+    if replaced:
+        reason = f"Stopped without a Stop command: the printer is running a different print ({replaced})"
     requested_at = datetime.now(timezone.utc)
     await transition_queue_item(
         db,
@@ -27,9 +38,10 @@ async def cancel_job(db: AsyncSession, item: PrintQueueItem) -> None:
         "unsuccessful" if queued else "cancelled",
         action="cancel",
         values={
-            "error_message": "Cancelled before printing" if queued else "Stop requested by user",
+            "error_message": reason,
             "completed_at": requested_at,
             **({"stop_requested_at": requested_at} if not queued else {}),
+            **({"auto_off_after": False} if replaced else {}),  # Never power off the other print.
         },
     )
     # Ending a queued job releases its one-off source inside the transition;
@@ -38,9 +50,9 @@ async def cancel_job(db: AsyncSession, item: PrintQueueItem) -> None:
 
     from backend.app.services.print_scheduler import scheduler
 
-    scheduler.cancel_inflight(item_id)
-    if not queued and printer_id is not None:
-        from backend.app.main import mark_printer_stopped_by_user
+    scheduler.workers.cancel(item_id)
+    if not queued and printer_id is not None and not replaced:
+        from backend.app.services.lifecycle.intake import mark_printer_stopped_by_user
 
         mark_printer_stopped_by_user(printer_id)
         try:

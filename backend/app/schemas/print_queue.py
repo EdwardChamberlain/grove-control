@@ -244,6 +244,7 @@ class PrintQueueItemResponse(BaseModel):
     ]
     preheat_started_at: UTCDatetime = None
     dispatch_needs_resolution: bool = False
+    dispatch_unsent: bool = False
     dispatched_at: UTCDatetime
     started_at: UTCDatetime
     completed_at: UTCDatetime

@@ -15,10 +15,16 @@ from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
-from backend.app.services import print_scheduler as scheduling
 from backend.app.services.archive import ArchiveService
-from backend.app.services.lifecycle import preheating as heat
+from backend.app.services.lifecycle import (
+    dispatching as scheduling,
+    effects as lifecycle_effects,
+    preheating as heat,
+    queued as lifecycle_queued,
+)
+from backend.app.services.lifecycle.dispatching import Dispatcher
 from backend.app.services.lifecycle.engine import QueueTransitionConflict, transition_queue_item
+from backend.app.services.print_scheduler import PrintScheduler, scheduler
 from backend.app.services.printer_manager import printer_manager
 from backend.app.services.queue_actions import cancel_job
 from backend.app.services.queue_archive import link_dispatch_archive, prepare_dispatch_archive
@@ -52,7 +58,7 @@ async def test_reconnect_during_dispatch_waits_for_evidence(queue_factory, monke
             live.submission_id = "another-print"
 
     waits = []
-    original_wait = scheduling.PrintScheduler._wait_for_dispatch_telemetry
+    original_wait = Dispatcher._wait_for_telemetry
 
     async def wait(self, *args, **kwargs):
         if not live.job_telemetry_ready:
@@ -71,7 +77,7 @@ async def test_reconnect_during_dispatch_waits_for_evidence(queue_factory, monke
                     await task
         return await original_wait(self, *args, **kwargs)
 
-    monkeypatch.setattr(scheduling.PrintScheduler, "_wait_for_dispatch_telemetry", wait)
+    monkeypatch.setattr(Dispatcher, "_wait_for_telemetry", wait)
     if phase == "upload":
 
         async def upload(*args, **kwargs):
@@ -101,7 +107,7 @@ async def test_reconnect_during_dispatch_waits_for_evidence(queue_factory, monke
                 assert job.dispatched_at is None and job.dispatch_subtask_id is None
                 assert "telemetry unavailable" in job.error_message
                 # The ordinary scheduler must not turn this live timeout into failure.
-                await scheduling.PrintScheduler()._recover_stale_dispatches(db)
+                await PrintScheduler().dispatcher.recover(db)
                 await db.refresh(job)
                 assert job.status == "dispatching"
     assert ctx.start_print.call_count == int(reconnect == "idle")
@@ -109,7 +115,7 @@ async def test_reconnect_during_dispatch_waits_for_evidence(queue_factory, monke
 
 @pytest.fixture
 async def handoff(alignment, monkeypatch):
-    scheduler = scheduling.PrintScheduler()
+    scheduler = PrintScheduler()
     service = scheduler._heat_soak
     states = {
         1: SimpleNamespace(
@@ -158,16 +164,18 @@ async def test_stop_during_heat_soak_archive_copy_wins_without_rows_or_directori
 
     monkeypatch.setattr(ArchiveService, "archive_print", stop_during_copy)
     monkeypatch.setattr(scheduling, "async_session", handoff.sessions)
-    monkeypatch.setattr(scheduling, "scheduler", handoff.scheduler)
+    monkeypatch.setattr("backend.app.services.print_scheduler.scheduler", handoff.scheduler)
     handoffs = []
 
     def capture(coroutine, *, name):
-        if name.startswith("skip-heat-soak-dispatch"):
+        if name.startswith("heat-soak-dispatch"):
             handoffs.append(coroutine)
         else:
             coroutine.close()
 
     monkeypatch.setattr(heat, "spawn_background_task", capture)
+
+    monkeypatch.setattr("backend.app.services.lifecycle.dispatching.spawn_background_task", capture)
     async with handoff.sessions() as db:
         if skip:
             job = await heat.lock_queue_item(db, handoff.job_id)
@@ -176,7 +184,7 @@ async def test_stop_during_heat_soak_archive_copy_wins_without_rows_or_directori
             await handoffs.pop()
         else:
             assert await handoff.service.wait(db) == [handoff.job_id]
-            await handoff.scheduler._dispatch_after_heat_soak(handoff.job_id)
+            await handoff.scheduler.dispatcher.take_over(handoff.job_id)
     async with handoff.sessions() as observer:
         job = await observer.get(PrintQueueItem, handoff.job_id)
         assert job.status == "cancelled" and job.physical_outcome is None
@@ -190,21 +198,22 @@ async def test_stop_during_heat_soak_archive_copy_wins_without_rows_or_directori
 async def test_losing_dispatch_update_cleans_its_upload_and_retains_the_cancelled_archive(
     alignment, monkeypatch, boundary, cleanup_fails
 ):
-    scheduler = scheduling.PrintScheduler()
+    scheduler = PrintScheduler()
     live = SimpleNamespace(state="IDLE", connected=True, job_telemetry_ready=True)
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
     monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
-    monkeypatch.setattr("backend.app.main._user_stopped_printers", set())
+    monkeypatch.setattr("backend.app.services.lifecycle.intake._user_stopped_printers", set())
     # A control from another worker cannot cancel this process's local task.
-    monkeypatch.setattr(scheduling.scheduler, "cancel_inflight", lambda _id: False)
+    monkeypatch.setattr(scheduler.workers, "cancel", lambda _id: False)
     monkeypatch.setattr(scheduling, "async_session", alignment.sessions)
+    monkeypatch.setattr(lifecycle_queued, "async_session", alignment.sessions)
     monkeypatch.setattr(scheduling, "get_ftp_retry_settings", AsyncMock(return_value=(False, 1, 0, 30)))
-    monkeypatch.setattr(scheduler, "_prepare_drying_for_dispatch", AsyncMock(return_value=True))
-    monkeypatch.setattr(scheduler, "_active_drying_ams_ids", lambda _id: [])
+    monkeypatch.setattr(scheduler.drying, "_prepare_drying_for_dispatch", AsyncMock(return_value=True))
+    monkeypatch.setattr(scheduler.drying, "_active_drying_ams_ids", lambda _id: [])
     started = MagicMock()
     monkeypatch.setattr(printer_manager, "start_print", started)
     notified = AsyncMock()
-    monkeypatch.setattr(scheduling.notification_service, "on_queue_job_failed", notified)
+    monkeypatch.setattr(lifecycle_effects.notification_service, "on_queue_job_failed", notified)
     remote_files = {"/another-print.3mf": b"another print"}
     uploaded = False
 
@@ -258,7 +267,7 @@ async def test_losing_dispatch_update_cleans_its_upload_and_retains_the_cancelle
         return await original_lock(db, item_id)
 
     monkeypatch.setattr(scheduling, "lock_queue_item", stop_before_command)
-    await scheduler._dispatch_one(alignment.job_id, 1)
+    await scheduler.workers._work(alignment.job_id, lifecycle_queued._DispatchBinding(1, None, unassigned=False))
     assert uploaded and stopped is not None
     started.assert_not_called()
     notified.assert_not_awaited()
@@ -287,15 +296,16 @@ async def test_losing_dispatch_update_cleans_its_upload_and_retains_the_cancelle
 
 @pytest.mark.parametrize("heat_soak", [False, True])
 async def test_local_stop_drains_final_upload_ack_then_removes_only_its_unsent_copy(alignment, monkeypatch, heat_soak):
-    scheduler = scheduling.PrintScheduler()
+    scheduler = PrintScheduler()
     live = SimpleNamespace(state="IDLE", connected=True, job_telemetry_ready=True, raw_data={})
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
     monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
     monkeypatch.setattr(printer_manager, "get_client", lambda _id: None)
-    monkeypatch.setattr(scheduling, "scheduler", scheduler)
+    monkeypatch.setattr("backend.app.services.print_scheduler.scheduler", scheduler)
     monkeypatch.setattr(scheduling, "async_session", alignment.sessions)
+    monkeypatch.setattr(lifecycle_queued, "async_session", alignment.sessions)
     monkeypatch.setattr(scheduling, "get_ftp_retry_settings", AsyncMock(return_value=(False, 1, 0, 30)))
-    monkeypatch.setattr(scheduler, "_prepare_drying_for_dispatch", AsyncMock(return_value=True))
+    monkeypatch.setattr(scheduler.drying, "_prepare_drying_for_dispatch", AsyncMock(return_value=True))
     started = MagicMock()
     monkeypatch.setattr(printer_manager, "start_print", started)
     if heat_soak:
@@ -335,12 +345,12 @@ async def test_local_stop_drains_final_upload_ack_then_removes_only_its_unsent_c
     monkeypatch.setattr(scheduling, "upload_file_async", uploads)
     monkeypatch.setattr(scheduling, "delete_file_async", deletions)
     dispatch = (
-        scheduler._dispatch_after_heat_soak(alignment.job_id)
+        scheduler.dispatcher.take_over(alignment.job_id)
         if heat_soak
-        else scheduler._dispatch_one(alignment.job_id, 1)
+        else scheduler.workers._work(alignment.job_id, lifecycle_queued._DispatchBinding(1, None, unassigned=False))
     )
     task = asyncio.create_task(dispatch)
-    scheduler._inflight[alignment.job_id] = (task, 1)
+    scheduler.workers.inflight[alignment.job_id] = (task, 1)
     try:
         await asyncio.wait_for(uploaded.wait(), 2)
         remote_path = uploads.call_args.args[3]
@@ -378,7 +388,7 @@ async def test_cancellation_cleanup_keeps_a_copy_after_the_persisted_send_bounda
             .values(status=status, dispatched_at=datetime.now(timezone.utc))
         )
         await db.commit()
-        await scheduling.PrintScheduler()._cleanup_unsent_dispatch_upload(db, job.id)
+        await PrintScheduler().dispatcher._remove_unsent_upload(db, job.id)
     deleted.assert_not_awaited()
 
 
@@ -409,21 +419,14 @@ async def test_database_error_in_second_heat_soak_preserves_first_dispatch(hando
         return await original(db, item, before, after, **kwargs)
 
     monkeypatch.setattr(heat, "transition_queue_item", fail_second_handoff)
-    dispatched = []
-
-    def collect(coroutine, *, name):
-        dispatched.append(name)
-        coroutine.close()
-
-    monkeypatch.setattr(scheduling, "spawn_background_task", collect)
     async with handoff.sessions() as db:
-        await handoff.scheduler._check_heat_soaks(db)
+        ready = await handoff.service.wait(db)  # Preheating's pass, on its own timer since stage 6.
     async with handoff.sessions() as observer:
         first = await observer.get(PrintQueueItem, handoff.job_id)
         second = await observer.scalar(select(PrintQueueItem).where(PrintQueueItem.printer_id == 2))
         assert first.status == "dispatching" and first.archive_id is None
         assert second.status == "preheating" and second.archive_id is None
-    assert dispatched == [f"heat-soak-dispatch-{handoff.job_id}"]
+    assert ready == [handoff.job_id]  # Dispatching's entry takes it over after commit.
 
 
 async def test_unready_telemetry_keeps_heat_soak_alive_without_copying(handoff, monkeypatch):
@@ -531,7 +534,7 @@ async def test_deleted_heat_soak_source_fails_without_an_attempt(handoff, monkey
         source.deleted_at = heat.utcnow()
         await db.commit()
         assert await handoff.service.wait(db) == [job.id]
-        await handoff.scheduler._dispatch_after_heat_soak(job.id)
+        await handoff.scheduler.dispatcher.take_over(job.id)
         await db.refresh(job)
         assert job.status == "failed" and job.physical_outcome == "failed"
         assert job.error_message == (
@@ -547,16 +550,18 @@ async def test_skip_route_holds_job_then_copy_failure_is_recorded(handoff, monke
 
     monkeypatch.setattr(ArchiveService, "archive_print", AsyncMock(side_effect=OSError("Disk full")))
     monkeypatch.setattr(scheduling, "async_session", handoff.sessions)
-    monkeypatch.setattr(scheduling, "scheduler", handoff.scheduler)
+    monkeypatch.setattr("backend.app.services.print_scheduler.scheduler", handoff.scheduler)
     handoffs = []
 
     def capture(coroutine, *, name):
-        if name.startswith("skip-heat-soak-dispatch"):
+        if name.startswith("heat-soak-dispatch"):
             handoffs.append(coroutine)
         else:
             coroutine.close()
 
     monkeypatch.setattr(heat, "spawn_background_task", capture)
+
+    monkeypatch.setattr("backend.app.services.lifecycle.dispatching.spawn_background_task", capture)
     async with handoff.sessions() as db:
         result = await skip_queue_item_heat_soak(handoff.job_id, db=db, auth_result=(None, True))
         assert result == {"message": "Heat soak skipped"}
@@ -576,23 +581,23 @@ async def test_pool_copy_failure_notifies_failure_without_assignment(alignment, 
     monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
     monkeypatch.setattr(printer_manager, "is_awaiting_plate_clear", lambda _id: False)
     monkeypatch.setattr(ArchiveService, "archive_print", AsyncMock(side_effect=OSError("Disk full")))
-    scheduler = scheduling.PrintScheduler()
+    scheduler = PrintScheduler()
     assigned, failed, upload = AsyncMock(), AsyncMock(), AsyncMock()
-    monkeypatch.setattr(scheduler, "_notify_pool_assignment", assigned)
+    monkeypatch.setattr(lifecycle_queued, "notify_assignment", assigned)
     notified = asyncio.Event()
 
     async def record_failure(**kwargs):
         await failed(**kwargs)
         notified.set()
 
-    monkeypatch.setattr(scheduling.notification_service, "on_queue_job_failed", record_failure)
+    monkeypatch.setattr(lifecycle_effects.notification_service, "on_queue_job_failed", record_failure)
     monkeypatch.setattr(scheduling, "upload_file_async", upload)
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
         job.printer_id = None
         await db.commit()
-        binding = scheduling._DispatchBinding.for_item(job, 1, None, unassigned=True)
-        await scheduler._start_print(db, job, binding=binding)
+        binding = lifecycle_queued._DispatchBinding.for_item(job, 1, None, unassigned=True)
+        await scheduler.workers.leave(db, job, binding=binding)
         assert job.status == "failed" and job.printer_id == 1
         assigned.assert_not_awaited()
         await asyncio.wait_for(notified.wait(), 2)
@@ -706,6 +711,8 @@ async def test_requested_snippets_use_settings_helper_and_warn_on_no_result(alig
 @pytest.mark.parametrize("linked", [False, True])
 async def test_print_start_does_not_take_association_lock_without_a_candidate(alignment, monkeypatch, linked):
     import backend.app.main as main
+    from backend.app.services import print_effects
+    from backend.app.services.lifecycle import intake
 
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
@@ -720,11 +727,12 @@ async def test_print_start_does_not_take_association_lock_without_a_candidate(al
         await db.commit()
     live = SimpleNamespace(state="RUNNING", connected=True, job_telemetry_ready=True, submission_id="123")
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
-    monkeypatch.setattr(main, "async_session", alignment.sessions)
-    monkeypatch.setattr(main, "_started_job_effects", {})
-    monkeypatch.setattr(main, "_archive_print_start", AsyncMock())
-    monkeypatch.setattr(main.print_scheduler, "_publish_queue_job_started", AsyncMock())
+    monkeypatch.setattr(intake, "async_session", alignment.sessions)
+    monkeypatch.setattr(print_effects, "async_session", alignment.sessions)
+    monkeypatch.setattr(intake, "_started_job_effects", {})
+    monkeypatch.setattr(print_effects, "_archive_print_start", AsyncMock())
+    monkeypatch.setattr(lifecycle_effects, "publish_queue_job_started", AsyncMock())
     lock = AsyncMock(side_effect=AssertionError("No association needs a write lock"))
     monkeypatch.setattr(heat, "lock_queue_item", lock)
-    await main._observe_print_start(1, {"submission_id": "123", "filename": "source.3mf"})
+    await intake._observe_print_start(1, {"submission_id": "123", "filename": "source.3mf"})
     lock.assert_not_awaited()

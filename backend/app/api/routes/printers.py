@@ -62,8 +62,7 @@ from backend.app.services.bambu_ftp import (
 )
 from backend.app.services.job_identity import find_job, telemetry_identity
 from backend.app.services.lifecycle.awaiting import clear_job_plate
-from backend.app.services.lifecycle.engine import InvalidQueueTransition, lock_queue_item
-from backend.app.services.lifecycle.final import release_printer
+from backend.app.services.lifecycle.engine import InvalidQueueTransition, lock_queue_item, release_printer
 from backend.app.services.printer_diagnostic import run_connection_diagnostic
 from backend.app.services.printer_manager import (
     drying_screen_only,
@@ -929,19 +928,20 @@ async def get_current_print_user(
     _=RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get the user who started the current print (for reprint tracking).
-
-    Returns user info if available, empty object otherwise.
-    This tracks users for reprints (which bypass the queue).
-    For queue-based prints, use the queue item's created_by field instead.
-    """
+    """The owner of the printer's active job, or an empty object for an ownerless or idle printer."""
     result = await db.execute(select(Printer).where(Printer.id == printer_id))
     printer = result.scalar_one_or_none()
     if not printer:
         raise HTTPException(404, "Printer not found")
 
-    user_info = printer_manager.get_current_print_user(printer_id)
-    return user_info or {}
+    owner = await db.execute(
+        select(User.id, User.username)
+        .join(PrintQueueItem, PrintQueueItem.created_by_id == User.id)
+        .where(PrintQueueItem.printer_id == printer_id, PrintQueueItem.status.in_(ACTIVE_STATUSES))
+        .limit(1)
+    )
+    row = owner.first()
+    return {"user_id": row.id, "username": row.username} if row else {}
 
 
 @router.post("/{printer_id}/refresh-status")
@@ -2066,15 +2066,15 @@ async def get_inventory_remain(
     Spoolman; unbound slots are absent from the map (client falls back to the
     printer's MQTT `remain` for those).
     """
-    from backend.app.services.print_scheduler import PrintScheduler
+    from backend.app.services.ams_mapping import AmsMapping
 
     state = printer_manager.get_status(printer_id)
     if not state:
         return {"inventory_remain_g": {}}
 
-    scheduler = PrintScheduler()
-    loaded = scheduler._build_loaded_filaments(state)
-    overrides = await scheduler._build_inventory_remain_overrides(db, printer_id, loaded)
+    mapping = AmsMapping()
+    loaded = mapping._build_loaded_filaments(state)
+    overrides = await mapping._build_inventory_remain_overrides(db, printer_id, loaded)
     return {"inventory_remain_g": {str(k): v for k, v in overrides.items()}}
 
 
@@ -2944,8 +2944,8 @@ async def debug_simulate_print_complete(
     This triggers the same code path as a real print completion,
     without needing to wait for an actual print to finish.
     """
-    from backend.app.main import on_print_complete
     from backend.app.models.archive import PrintArchive
+    from backend.app.services.lifecycle.intake import print_completed
 
     # Simulate the identified active attempt, never unrelated historical work.
     result = await db.execute(
@@ -2978,8 +2978,8 @@ async def debug_simulate_print_complete(
 
     logger.info("Simulating print complete for printer %s, archive %s", printer_id, archive.id)
 
-    # Call the actual on_print_complete handler
-    await on_print_complete(printer_id, data)
+    # Call the actual print-complete handler
+    await print_completed(printer_id, data)
 
     return {"success": True, "archive_id": archive.id, "message": "Print completion simulated"}
 
@@ -3028,7 +3028,7 @@ async def stop_print(
     # the HMS heuristic in _dispatch_archive_update mislabels user-cancels
     # (e.g. the H2D's cancel-sequence module-0x0C HMS) as "Layer shift".
     try:
-        from backend.app.main import mark_printer_stopped_by_user
+        from backend.app.services.lifecycle.intake import mark_printer_stopped_by_user
 
         mark_printer_stopped_by_user(printer_id)
     except Exception as _mark_err:

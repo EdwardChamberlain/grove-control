@@ -115,16 +115,18 @@ async def _run(ctx, scheduler, *, state):
     started = AsyncMock()
     patches = [
         patch("backend.app.services.print_scheduler.async_session", ctx.session_maker),
+        patch("backend.app.services.lifecycle.queued.async_session", ctx.session_maker),
         patch("backend.app.core.database.async_session", ctx.session_maker),
-        patch("backend.app.services.print_scheduler.printer_manager.is_connected", MagicMock(return_value=True)),
-        patch("backend.app.services.print_scheduler.printer_manager.get_status", MagicMock(return_value=state)),
+        patch("backend.app.services.lifecycle.dispatching.printer_manager.is_connected", MagicMock(return_value=True)),
+        patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", MagicMock(return_value=state)),
         patch(
-            "backend.app.services.print_scheduler.printer_manager.send_drying_command",
+            "backend.app.services.lifecycle.dispatching.printer_manager.send_drying_command",
             MagicMock(return_value=True),
         ),
-        patch.object(scheduler, "_is_printer_idle", MagicMock(return_value=True)),
-        patch.object(scheduler, "_block_on_filament_deficit", AsyncMock(return_value=False)),
-        patch.object(scheduler, "_start_print", started),
+        patch.object(scheduler.selection, "_is_printer_idle", MagicMock(return_value=True)),
+        patch.object(scheduler.drying, "_is_printer_idle", MagicMock(return_value=True)),
+        patch.object(scheduler.selection, "_block_on_filament_deficit", AsyncMock(return_value=False)),
+        patch.object(scheduler.workers, "leave", started),
     ]
     with ExitStack() as stack:
         for p in patches:
@@ -153,7 +155,7 @@ async def test_a_due_row_dispatches_through_the_real_queue_pass(queue_db):
     async with queue_db.session_maker() as db:
         stored = (await db.execute(select(ScheduledDrying).where(ScheduledDrying.id == row.id))).scalar_one()
         assert stored.status == "running"
-    assert 1 in scheduler._drying_in_progress
+    assert 1 in scheduler.drying._drying_in_progress
 
 
 @pytest.mark.asyncio

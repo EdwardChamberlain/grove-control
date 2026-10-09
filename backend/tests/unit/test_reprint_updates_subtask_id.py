@@ -21,32 +21,30 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from backend.app.core.config import settings as app_settings
-from backend.app.main import (
-    _timelapse_baselines,
-)
+from backend.app.services.lifecycle.intake import print_memory
 
 
 @pytest.fixture(autouse=True)
 def _clear_dicts():
-    _timelapse_baselines.clear()
+    print_memory.timelapse_baselines.clear()
     yield
-    _timelapse_baselines.clear()
+    print_memory.timelapse_baselines.clear()
 
 
 def _patches():
     return (
-        patch("backend.app.main.async_session"),
-        patch("backend.app.main.notification_service"),
-        patch("backend.app.main.smart_plug_manager"),
-        patch("backend.app.main.ws_manager"),
-        patch("backend.app.main.printer_manager"),
-        patch("backend.app.main.mqtt_relay"),
-        patch("backend.app.main._record_energy_start", new_callable=AsyncMock),
-        patch("backend.app.main._load_objects_from_archive"),
-        patch("backend.app.main._store_spoolman_print_data", new_callable=AsyncMock),
-        patch("backend.app.main._send_print_start_notification", new_callable=AsyncMock),
+        patch("backend.app.services.print_effects.async_session"),
+        patch("backend.app.services.print_effects.notification_service"),
+        patch("backend.app.services.print_effects.smart_plug_manager"),
+        patch("backend.app.services.print_effects.ws_manager"),
+        patch("backend.app.services.print_effects.printer_manager"),
+        patch("backend.app.services.print_effects.mqtt_relay"),
+        patch("backend.app.services.print_effects._record_energy_start", new_callable=AsyncMock),
+        patch("backend.app.services.print_effects._load_objects_from_archive"),
+        patch("backend.app.services.print_effects._store_spoolman_print_data", new_callable=AsyncMock),
+        patch("backend.app.services.print_effects._send_print_start_notification", new_callable=AsyncMock),
         patch(
-            "backend.app.main._list_timelapse_videos",
+            "backend.app.services.print_effects._list_timelapse_videos",
             new=AsyncMock(return_value=([], "/timelapse")),
         ),
     )
@@ -148,7 +146,7 @@ async def _drive(tmp_path, mock_archive, mqtt_subtask_id: str | None):
         mock_pm.get_printer = MagicMock(return_value=MagicMock(name="Test", serial_number="TEST123"))
         mock_pm.get_client = MagicMock(return_value=MagicMock())
 
-        from backend.app.main import _archive_print_start as on_print_start
+        from backend.app.services.print_effects import _archive_print_start as on_print_start
 
         await on_print_start(
             1,
@@ -158,6 +156,7 @@ async def _drive(tmp_path, mock_archive, mqtt_subtask_id: str | None):
                 "raw_data": {"subtask_id": mqtt_subtask_id} if mqtt_subtask_id is not None else {},
             },
             queue_archive_id=mock_archive.id,
+            memory=print_memory,
         )
 
 

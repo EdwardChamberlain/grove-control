@@ -4,20 +4,23 @@ Effects queued in the caller's transaction run, in order, once it commits. If
 it ends any other way (rollback, failed commit, closed session) they are
 discarded and the undo steps run instead. A key replaces an earlier effect in
 its original position. Each callback runs once; a failing one is logged and
-never undoes or misreports the commit, nor skips the others. Work is queued
-only in the outermost transaction: a savepoint can be released or rolled back
-on its own, so it neither runs nor discards the outer transaction's work.
+never undoes or misreports the commit, nor skips the others. Async work runs
+the same way, in one task per commit that the caller may wait for. Work is
+queued only in the outermost transaction: a savepoint can be released or rolled
+back on its own, so it neither runs nor discards the outer transaction's work.
 Effects must not queue further effects; those would be dropped unrun.
 """
 
 import logging
-from collections.abc import Callable, Hashable
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Hashable
+from dataclasses import dataclass, replace
+from functools import partial
 
-from sqlalchemy import event
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
+from backend.app.core.database import async_session
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
 from backend.app.models.print_queue import AWAITING_PLATE_CLEAR_STATUSES, PrintQueueItem
@@ -28,11 +31,47 @@ from backend.app.services.notification_service import notification_service
 from backend.app.services.smart_plug_manager import smart_plug_manager
 
 logger = logging.getLogger(__name__)
-_COMMIT, _UNDO = "lifecycle_after_commit", "lifecycle_undo"
+_COMMIT, _UNDO, _ASYNC, _TASKS = "lifecycle_after_commit", "lifecycle_undo", "lifecycle_async", "lifecycle_tasks"
 
 
 def after_commit(db: AsyncSession, effect: Callable[[], object], *, key: Hashable | None = None) -> None:
     _outermost(db).info.setdefault(_COMMIT, {})[object() if key is None else key] = effect
+
+
+def after_commit_task(db: AsyncSession, work: Callable[[], Awaitable], *, key: Hashable) -> list:
+    """Await ``work()`` once this transaction commits; returns the list its commit's task joins."""
+    session = _outermost(db)
+    session.info.setdefault(_ASYNC, {})[key] = work
+    return session.info.setdefault(_TASKS, [])
+
+
+def forget(db: AsyncSession, key: Hashable) -> None:
+    """Drop async work this transaction queued under ``key``."""
+    _outermost(db).info.get(_ASYNC, {}).pop(key, None)
+
+
+def spawned(db: AsyncSession) -> list:
+    """Take the tasks this session's commits started, for the caller to wait for."""
+    return db.sync_session.info.pop(_TASKS, [])
+
+
+async def wait_for(tasks: list) -> None:
+    for task in tasks:
+        await task
+
+
+async def _run_async(work: list[Callable[[], Awaitable]]) -> None:
+    """Run every step; the first failure is raised for whoever waits, and later ones are logged."""
+    failed = None
+    for step in work:
+        try:
+            await step()
+        except Exception as error:
+            if failed is not None:
+                logger.exception("Lifecycle effect failed: %r", step)
+            failed = failed or error
+    if failed is not None:
+        raise failed
 
 
 def on_rollback(db: AsyncSession, undo: Callable[[], object]) -> None:
@@ -61,6 +100,11 @@ def _run_effects(session: Session) -> None:
     if not session.in_nested_transaction():
         session.info.pop(_UNDO, None)
         _run(session.info.pop(_COMMIT, {}).values(), "effect")
+        if work := list(session.info.pop(_ASYNC, {}).values()):
+            from backend.app.core.tasks import spawn_background_task
+
+            task = spawn_background_task(_run_async(work), name="lifecycle-after-commit")
+            session.info.setdefault(_TASKS, []).append(task)
 
 
 @event.listens_for(Session, "after_transaction_end")
@@ -69,6 +113,7 @@ def _discard_uncommitted(session: Session, transaction) -> None:
     # transaction here. A commit has already taken its pending work above.
     if transaction.parent is None:
         session.info.pop(_COMMIT, None)
+        session.info.pop(_ASYNC, None)
         _run(session.info.pop(_UNDO, []), "undo step")
 
 
@@ -132,15 +177,22 @@ class QueueOutcomeEffect:
 
 
 def queue_outcome_effect(db: AsyncSession, effect: QueueOutcomeEffect) -> None:
-    engine = db.bind
+    """Run an outcome's effects after commit; an exit's and an entry's effects for one outcome combine."""
+    key = ("outcome", effect.job_id, effect.new_state)
+    if queued := _outermost(db).info.get(_COMMIT, {}).get(key):
+        earlier = queued.args[1]
+        effect = replace(effect, **{name: getattr(earlier, name) or getattr(effect, name) for name in _FLAGS})
+    after_commit(db, partial(_spawn_outcome, db.bind, effect), key=key)
 
-    def spawn() -> None:
-        from backend.app.core.tasks import spawn_background_task
 
-        name = f"queue-{effect.new_state}-effects-{effect.job_id}"
-        spawn_background_task(run_queue_outcome_effects(engine, effect), name=name)
+_FLAGS = ("shut_down_heaters", "notify_failure", "clean_sd_copy")
 
-    after_commit(db, spawn, key=("outcome", effect.job_id, effect.new_state))
+
+def _spawn_outcome(engine: AsyncEngine, effect: QueueOutcomeEffect) -> None:
+    from backend.app.core.tasks import spawn_background_task
+
+    name = f"queue-{effect.new_state}-effects-{effect.job_id}"
+    spawn_background_task(run_queue_outcome_effects(engine, effect), name=name)
 
 
 async def run_queue_outcome_effects(engine: AsyncEngine, effect: QueueOutcomeEffect) -> None:
@@ -203,3 +255,51 @@ async def run_queue_outcome_effects(engine: AsyncEngine, effect: QueueOutcomeEff
             )
         except Exception:
             logger.exception("Queue job %s: failed to remove SD dispatch copy", effect.job_id)
+
+
+def queue_job_started(db: AsyncSession, job_id: int, *, publish=None) -> list:
+    """Publish a confirmed job's queue start after commit; returns the list its task joins, for ``wait_for``."""
+    publish = publish or publish_queue_job_started
+    return after_commit_task(db, partial(publish, job_id), key=("queue_start", job_id))
+
+
+async def publish_queue_job_started(queue_item_id: int) -> None:
+    """Publish the normal queue-start side effects for a confirmed job."""
+    try:
+        async with async_session() as db:
+            result = await db.execute(
+                select(PrintQueueItem)
+                .options(
+                    selectinload(PrintQueueItem.archive),
+                    selectinload(PrintQueueItem.library_file),
+                    selectinload(PrintQueueItem.printer),
+                )
+                .where(PrintQueueItem.id == queue_item_id)
+            )
+            item = result.scalar_one_or_none()
+            if not item or item.status not in ("printing", "paused") or not item.printer:
+                return
+
+            source = item.archive or item.library_file
+            filename = source.filename if source else f"Job #{item.id}"
+            estimated_time = item.print_time_seconds or getattr(source, "print_time_seconds", None)
+            printer = item.printer
+            await notification_service.on_queue_job_started(
+                job_name=filename.replace(".gcode.3mf", "").replace(".3mf", ""),
+                printer_id=printer.id,
+                printer_name=printer.name,
+                db=db,
+                estimated_time=estimated_time,
+            )
+
+        from backend.app.services.mqtt_relay import mqtt_relay
+
+        await mqtt_relay.on_queue_job_started(
+            job_id=queue_item_id,
+            filename=filename,
+            printer_id=printer.id,
+            printer_name=printer.name,
+            printer_serial=printer.serial_number,
+        )
+    except Exception:
+        logger.exception("Queue item %s: confirmed but failed to publish start side effects", queue_item_id)

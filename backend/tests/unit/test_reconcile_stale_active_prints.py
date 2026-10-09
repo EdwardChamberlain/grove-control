@@ -77,6 +77,7 @@ class TestReconcileStaleActivePrints:
         """An active reconnect must not race its later completion callback."""
         from backend.app import main as main_module
         from backend.app.main import on_printer_status_change
+        from backend.app.services.lifecycle import intake
 
         scheduled = []
 
@@ -86,23 +87,24 @@ class TestReconcileStaleActivePrints:
 
         with (
             patch("backend.app.main.spawn_background_task", side_effect=capture_task),
+            patch("backend.app.services.lifecycle.intake.spawn_background_task", side_effect=capture_task),
             patch("backend.app.main.mqtt_relay") as mock_relay,
             patch("backend.app.main.printer_state_to_dict", return_value={}),
-            patch.dict(main_module._printer_reconciled_since_connect, {}, clear=True),
-            patch.object(main_module, "_pending_stale_reconciliation", set()),
+            patch.dict(intake._printer_reconciled_since_connect, {}, clear=True),
+            patch.object(intake, "_pending_stale_reconciliation", set()),
             patch.dict(main_module._last_status_broadcast, {}, clear=True),
         ):
             mock_relay.on_printer_status = AsyncMock()
             await on_printer_status_change(1, _status_state("RUNNING"))
             assert scheduled == []
-            assert main_module._pending_stale_reconciliation == {1}
+            assert intake._pending_stale_reconciliation == {1}
 
             await on_printer_status_change(1, _status_state("IDLE"))
             assert scheduled == []
 
             # The real completion callback calls this after its terminal work
             # has finished, making the deferred reconciliation safe to run.
-            main_module._schedule_pending_stale_reconciliation(1)
+            intake._schedule_pending_stale_reconciliation(1)
 
         assert scheduled == ["reconcile-stale-prints-after-completion-1"]
 
@@ -110,6 +112,7 @@ class TestReconcileStaleActivePrints:
     async def test_terminal_reconnect_flushes_pending_reconciliation(self):
         from backend.app import main as main_module
         from backend.app.main import on_printer_status_change
+        from backend.app.services.lifecycle import intake
 
         scheduled = []
 
@@ -119,10 +122,11 @@ class TestReconcileStaleActivePrints:
 
         with (
             patch("backend.app.main.spawn_background_task", side_effect=capture_task),
+            patch("backend.app.services.lifecycle.intake.spawn_background_task", side_effect=capture_task),
             patch("backend.app.main.mqtt_relay") as mock_relay,
             patch("backend.app.main.printer_state_to_dict", return_value={}),
-            patch.dict(main_module._printer_reconciled_since_connect, {}, clear=True),
-            patch.object(main_module, "_pending_stale_reconciliation", set()),
+            patch.dict(intake._printer_reconciled_since_connect, {}, clear=True),
+            patch.object(intake, "_pending_stale_reconciliation", set()),
             patch.dict(main_module._last_status_broadcast, {}, clear=True),
         ):
             mock_relay.on_printer_status = AsyncMock()
@@ -134,18 +138,18 @@ class TestReconcileStaleActivePrints:
 
     @pytest.mark.asyncio
     async def test_no_status_skips_reconciliation(self):
-        from backend.app.main import reconcile_stale_active_prints
+        from backend.app.services.lifecycle.intake import reconcile_stale_active_prints
 
-        with patch("backend.app.main.printer_manager") as mock_pm:
+        with patch("backend.app.services.lifecycle.intake.printer_manager") as mock_pm:
             mock_pm.get_status.return_value = None
             count = await reconcile_stale_active_prints(printer_id=1)
         assert count == 0
 
     @pytest.mark.asyncio
     async def test_disconnected_status_skips_reconciliation(self):
-        from backend.app.main import reconcile_stale_active_prints
+        from backend.app.services.lifecycle.intake import reconcile_stale_active_prints
 
-        with patch("backend.app.main.printer_manager") as mock_pm:
+        with patch("backend.app.services.lifecycle.intake.printer_manager") as mock_pm:
             mock_pm.get_status.return_value = _state("RUNNING", connected=False)
             count = await reconcile_stale_active_prints(printer_id=1)
         # Disconnected state would be making decisions against cached state —
@@ -155,11 +159,11 @@ class TestReconcileStaleActivePrints:
 
     @pytest.mark.asyncio
     async def test_no_active_archives_returns_zero(self):
-        from backend.app.main import reconcile_stale_active_prints
+        from backend.app.services.lifecycle.intake import reconcile_stale_active_prints
 
-        with patch("backend.app.main.printer_manager") as mock_pm:
+        with patch("backend.app.services.lifecycle.intake.printer_manager") as mock_pm:
             mock_pm.get_status.return_value = _state("IDLE")
-            with patch("backend.app.main.async_session") as mock_session:
+            with patch("backend.app.services.lifecycle.intake.async_session") as mock_session:
                 session_ctx = AsyncMock()
                 session_ctx.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [])))
                 mock_session.return_value.__aenter__.return_value = session_ctx
@@ -168,16 +172,16 @@ class TestReconcileStaleActivePrints:
 
     @pytest.mark.asyncio
     async def test_exact_terminal_identity_synthesises_completion(self):
-        from backend.app.main import reconcile_stale_active_prints
+        from backend.app.services.lifecycle.intake import reconcile_stale_active_prints
 
         stale = _archive(subtask_id="OLD_ID", filename="ghost.3mf", print_name="ghost")
-        with patch("backend.app.main.printer_manager") as mock_pm:
+        with patch("backend.app.services.lifecycle.intake.printer_manager") as mock_pm:
             mock_pm.get_status.return_value = _state("FINISH", subtask_id="OLD_ID", subtask_name="")
-            with patch("backend.app.main.async_session") as mock_session:
+            with patch("backend.app.services.lifecycle.intake.async_session") as mock_session:
                 session_ctx = AsyncMock()
                 session_ctx.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [stale])))
                 mock_session.return_value.__aenter__.return_value = session_ctx
-                with patch("backend.app.main.on_print_complete", new=AsyncMock()) as mock_complete:
+                with patch("backend.app.services.lifecycle.intake.print_completed", new=AsyncMock()) as mock_complete:
                     count = await reconcile_stale_active_prints(printer_id=1)
         assert count == 1
         mock_complete.assert_awaited_once()
@@ -193,18 +197,18 @@ class TestReconcileStaleActivePrints:
     async def test_status_is_rechecked_after_archive_query(self):
         """A connected-edge IDLE snapshot must not complete a print that has
         started while reconciliation was waiting on the archive query."""
-        from backend.app.main import reconcile_stale_active_prints
+        from backend.app.services.lifecycle.intake import reconcile_stale_active_prints
 
         active = _archive(subtask_id="ABC123", filename="job.3mf", print_name="job")
         idle = _state("IDLE")
         running = _state("RUNNING", subtask_id="ABC123", subtask_name="job")
-        with patch("backend.app.main.printer_manager") as mock_pm:
+        with patch("backend.app.services.lifecycle.intake.printer_manager") as mock_pm:
             mock_pm.get_status.side_effect = [idle, running]
-            with patch("backend.app.main.async_session") as mock_session:
+            with patch("backend.app.services.lifecycle.intake.async_session") as mock_session:
                 session_ctx = AsyncMock()
                 session_ctx.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [active])))
                 mock_session.return_value.__aenter__.return_value = session_ctx
-                with patch("backend.app.main.on_print_complete", new=AsyncMock()) as mock_complete:
+                with patch("backend.app.services.lifecycle.intake.print_completed", new=AsyncMock()) as mock_complete:
                     count = await reconcile_stale_active_prints(printer_id=1)
 
         assert count == 0
@@ -212,18 +216,18 @@ class TestReconcileStaleActivePrints:
 
     @pytest.mark.asyncio
     async def test_non_stale_archive_does_not_synthesise(self):
-        from backend.app.main import reconcile_stale_active_prints
+        from backend.app.services.lifecycle.intake import reconcile_stale_active_prints
 
         healthy = _archive(subtask_id="ABC123")
-        with patch("backend.app.main.printer_manager") as mock_pm:
+        with patch("backend.app.services.lifecycle.intake.printer_manager") as mock_pm:
             mock_pm.get_status.return_value = _state("RUNNING", subtask_id="ABC123", subtask_name="ghost")
-            with patch("backend.app.main.async_session") as mock_session:
+            with patch("backend.app.services.lifecycle.intake.async_session") as mock_session:
                 session_ctx = AsyncMock()
                 session_ctx.execute = AsyncMock(
                     return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [healthy]))
                 )
                 mock_session.return_value.__aenter__.return_value = session_ctx
-                with patch("backend.app.main.on_print_complete", new=AsyncMock()) as mock_complete:
+                with patch("backend.app.services.lifecycle.intake.print_completed", new=AsyncMock()) as mock_complete:
                     count = await reconcile_stale_active_prints(printer_id=1)
         assert count == 0
         mock_complete.assert_not_called()
@@ -233,7 +237,7 @@ class TestReconcileStaleActivePrints:
         """An exception during one archive's synthesis must not abort
         reconciliation for the other archives — and must not propagate to
         the caller (the connected-edge handler is a hot path)."""
-        from backend.app.main import reconcile_stale_active_prints
+        from backend.app.services.lifecycle.intake import reconcile_stale_active_prints
 
         a1 = _archive(subtask_id="A", filename="a.3mf")
         a1.id = 1
@@ -241,9 +245,9 @@ class TestReconcileStaleActivePrints:
         a2.id = 2
         a3 = _archive(subtask_id="C", filename="c.3mf")
         a3.id = 3
-        with patch("backend.app.main.printer_manager") as mock_pm:
+        with patch("backend.app.services.lifecycle.intake.printer_manager") as mock_pm:
             mock_pm.get_status.return_value = _state("FINISH", subtask_id="B")
-            with patch("backend.app.main.async_session") as mock_session:
+            with patch("backend.app.services.lifecycle.intake.async_session") as mock_session:
                 session_ctx = AsyncMock()
                 session_ctx.execute = AsyncMock(
                     return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [a1, a2, a3]))
@@ -251,7 +255,7 @@ class TestReconcileStaleActivePrints:
                 mock_session.return_value.__aenter__.return_value = session_ctx
                 # First call raises, second is suppressed, and the third succeeds.
                 mock_complete = AsyncMock(side_effect=[RuntimeError("boom"), False, None])
-                with patch("backend.app.main.on_print_complete", new=mock_complete):
+                with patch("backend.app.services.lifecycle.intake.print_completed", new=mock_complete):
                     count = await reconcile_stale_active_prints(printer_id=1)
         # Only the third archive is recorded as reconciled: the first raised
         # and the second explicitly reported that it was suppressed.
@@ -265,9 +269,9 @@ class TestReconcileStaleActivePrints:
         from backend.app.main import on_print_complete
 
         with (
-            patch("backend.app.main.printer_manager") as mock_pm,
-            patch("backend.app.main.clear_3mf_cache") as mock_clear_cache,
-            patch("backend.app.main.ws_manager") as mock_ws,
+            patch("backend.app.services.lifecycle.intake.printer_manager") as mock_pm,
+            patch("backend.app.services.print_effects.clear_3mf_cache") as mock_clear_cache,
+            patch("backend.app.services.print_effects.ws_manager") as mock_ws,
         ):
             mock_pm.get_status.return_value = _state(
                 "RUNNING",
@@ -303,19 +307,19 @@ class TestReconcileStaleActivePrints:
         would raise plate-clear and publish a false completion for the live
         printer, so reconciliation must defer the archive instead.
         """
-        from backend.app.main import reconcile_stale_active_prints
+        from backend.app.services.lifecycle.intake import reconcile_stale_active_prints
 
         stale = _archive(subtask_id="OLD_ID", filename="old.gcode.3mf", print_name="old")
         running = _state("RUNNING", subtask_id="NEW_ID", subtask_name="new")
         running.gcode_file = "/data/Metadata/new.gcode.3mf"
         running.current_print = "/data/Metadata/new.gcode.3mf"
-        with patch("backend.app.main.printer_manager") as mock_pm:
+        with patch("backend.app.services.lifecycle.intake.printer_manager") as mock_pm:
             mock_pm.get_status.return_value = running
-            with patch("backend.app.main.async_session") as mock_session:
+            with patch("backend.app.services.lifecycle.intake.async_session") as mock_session:
                 session_ctx = AsyncMock()
                 session_ctx.execute = AsyncMock(return_value=MagicMock(scalars=lambda: MagicMock(all=lambda: [stale])))
                 mock_session.return_value.__aenter__.return_value = session_ctx
-                with patch("backend.app.main.on_print_complete", new=AsyncMock()) as mock_complete:
+                with patch("backend.app.services.lifecycle.intake.print_completed", new=AsyncMock()) as mock_complete:
                     count = await reconcile_stale_active_prints(printer_id=1)
 
         assert count == 0

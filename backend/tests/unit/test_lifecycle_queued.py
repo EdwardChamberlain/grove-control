@@ -229,8 +229,8 @@ def test_filament_contract_without_a_readable_source(tmp_path):
 
 
 def test_only_create_job_makes_a_waiting_job():
-    # An externally started print is adopted while printing; intake takes that over in stage 6.
-    allowed = {APP / "services/lifecycle/queued.py", APP / "services/job_identity.py"}
+    # An externally started print is adopted while printing, by printing's entry (stage 6).
+    allowed = {APP / "services/lifecycle/queued.py", APP / "services/lifecycle/printing.py"}
     makers = []
     for path in APP.rglob("*.py"):
         for node in ast.walk(ast.parse(path.read_text())):

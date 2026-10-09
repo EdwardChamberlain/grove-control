@@ -2,7 +2,6 @@
 
 import json
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
@@ -41,8 +40,9 @@ from backend.app.services.filament_requirements import (
     extract_filament_requirements,
     overrides_for_plate,
 )
-from backend.app.services.job_identity import needs_dispatch_resolution, telemetry_identity
+from backend.app.services.job_identity import needs_dispatch_resolution
 from backend.app.services.lifecycle.awaiting import clear_job_plate
+from backend.app.services.lifecycle.dispatching import unsent
 from backend.app.services.lifecycle.engine import InvalidQueueTransition, lock_queue_item, transition_queue_item
 from backend.app.services.lifecycle.preheating import SkipHeatSoakResult, heat_soak_dispatch_started, skip_heat_soak
 from backend.app.services.lifecycle.queued import create_job, filament_contract
@@ -247,6 +247,7 @@ def _enrich_response(item: PrintQueueItem) -> PrintQueueItemResponse:
         "status": item.status,
         "dispatched_at": item.dispatched_at,
         "dispatch_needs_resolution": needs_dispatch_resolution(item),
+        "dispatch_unsent": unsent(item),
         "started_at": item.started_at,
         "completed_at": item.completed_at,
         "error_message": item.error_message,
@@ -1158,7 +1159,7 @@ async def delete_queue_item(
 
     from backend.app.services.print_scheduler import scheduler
 
-    scheduler.cancel_inflight(item_id)
+    scheduler.workers.cancel(item_id)
 
     logger.info("Deleted queue item %s", item_id)
     return {"message": "Queue item deleted", "deleted": True}
@@ -1304,8 +1305,10 @@ async def retry_queue_item(
         raise HTTPException(404, "Queue item not found")
     if user is not None and not can_modify_all and old.created_by_id != user.id:
         raise HTTPException(403, "You can only retry your own queue items")
-    if old.status not in ("failed", "cancelled"):
-        raise HTTPException(409, "Only failed or cancelled jobs awaiting plate clear can be retried")
+    if old.status not in ("failed", "cancelled") and not unsent(old):
+        raise HTTPException(
+            409, "Only failed or cancelled jobs awaiting plate clear, or unsent dispatches, can be retried"
+        )
     excluded = {
         "id",
         "status",
@@ -1391,6 +1394,10 @@ async def retry_queue_item(
         for candidate in candidates
     ]
     [new] = await create_job(db, [values], at="top", variants=variants)
+    if unsent(old):
+        from backend.app.services.print_scheduler import scheduler
+
+        await scheduler.dispatcher.withdraw(db, old)  # After the new job references the source.
     await db.commit()
     await ws_manager.send_queue_work_changed()
     return await get_queue_item(new.id, db, (user, can_modify_all))
@@ -1407,7 +1414,6 @@ async def resolve_queue_dispatch(
 ):
     """Resolve an unconfirmed dispatch after checking the physical printer."""
     from backend.app.services.print_scheduler import scheduler
-    from backend.app.services.printer_manager import printer_manager
 
     user, can_modify_all = auth_result
     item = await lock_queue_item(db, item_id)
@@ -1417,32 +1423,10 @@ async def resolve_queue_dispatch(
         raise HTTPException(403, "You can only resolve your own queue items")
     if not needs_dispatch_resolution(item):
         raise HTTPException(409, "This job is no longer awaiting dispatch confirmation. Refresh and retry.")
-    state = printer_manager.get_status(item.printer_id)
-    if state and state.connected:
-        observed = telemetry_identity(state)
-        if (
-            observed
-            and observed != item.dispatch_subtask_id
-            and state.state in ("RUNNING", "PAUSE", "PREPARE", "SLICING")
-        ):
-            raise HTTPException(
-                409, "The printer reports a different job. Stop or inspect it before resolving this job."
-            )
-        if observed == item.dispatch_subtask_id:
-            from backend.app.services.print_scheduler import _queue_status_from_dispatch_telemetry
-
-            known = _queue_status_from_dispatch_telemetry(state, item.dispatch_subtask_id)
-            if known in ("completed", "failed") or (known == "printing" and data.outcome == "failed"):
-                raise HTTPException(409, "Printer telemetry has confirmed this job. Refresh and retry.")
-    now = datetime.now(timezone.utc)
-    values = {
-        "error_message": "Confirmed printing by user" if data.outcome == "printing" else "Printer didn't start the job"
-    }
-    values["started_at" if data.outcome == "printing" else "completed_at"] = now
-    await transition_queue_item(db, item, "dispatching", data.outcome, values=values)
-    await db.commit()
-    if data.outcome == "printing":
-        await scheduler._publish_queue_job_started(item.id)
+    try:
+        await scheduler.dispatcher.resolve(db, item, data.outcome)
+    except InvalidQueueTransition as error:
+        raise HTTPException(409, str(error))
     return {"message": "Dispatch resolved"}
 
 
