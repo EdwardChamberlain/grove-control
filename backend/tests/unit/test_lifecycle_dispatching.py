@@ -99,8 +99,9 @@ async def test_failed_start_commit_keeps_dispatch_held_and_emits_no_start(alignm
     publish.assert_not_called()
 
 
-@pytest.mark.parametrize("owner,expired", [("own", True), ("foreign", True), ("foreign", False)])
-async def test_unsent_soak_liveness_belongs_to_dispatching(handoff, owner, expired):
+@pytest.mark.parametrize("owner", ["own", "foreign"])
+async def test_a_long_upload_after_a_soak_handoff_raises_no_soak_warning(handoff, owner):
+    """Dispatching owns its unsent attempts: an expired soak heartbeat during the upload is not an interrupted soak."""
     async with handoff.sessions() as db:
         item = await db.get(PrintQueueItem, handoff.job_id)
         await transition_queue_item(
@@ -109,27 +110,16 @@ async def test_unsent_soak_liveness_belongs_to_dispatching(handoff, owner, expir
             "preheating",
             "dispatching",
             values={
-                "preheat_owner": handoff.service.owner if owner == "own" else "another-worker",
-                "preheat_checked_at": preheating.utcnow() - timedelta(seconds=91 if expired else 1),
+                "preheat_owner": handoff.service.owner if owner == "own" else None,
+                "preheat_checked_at": preheating.utcnow() - timedelta(seconds=91),
             },
         )
         await db.commit()
         assert await handoff.service.wait(db) == []
+        await handoff.scheduler.dispatcher.recover(db)
         await db.refresh(item)
         assert item.status == "dispatching" and item.error_message is None
-        await handoff.scheduler.dispatcher.wait_unsent(db)
-        await db.refresh(item)
-        if expired and owner == "own":
-            assert item.status == "failed" and "scheduler timeout" in item.error_message
-        elif expired:
-            assert item.status == "dispatching" and "inspect the printer" in item.error_message
-            assert handoff.states[1].preheating
-            item.dispatch_subtask_id = "123"
-            await db.commit()
-            await handoff.scheduler.dispatcher.wait_unsent(db)
-            assert not handoff.states[1].preheating
-        else:
-            assert item.status == "dispatching" and item.error_message is None
+        assert not getattr(handoff.states[1], "preheating", False)
 
 
 async def test_dispatch_exit_rolls_back_its_shutdown_and_failure_effect(alignment, monkeypatch):

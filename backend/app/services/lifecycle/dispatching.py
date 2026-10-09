@@ -44,7 +44,7 @@ from backend.app.services.lifecycle.engine import (
     transition_queue_item,
 )
 from backend.app.services.lifecycle.preheating import abort_heat_soak, request_heater_shutdown
-from backend.app.services.lifecycle.printing import sync_print_state
+from backend.app.services.lifecycle.printing import superseded_by, sync_print_state
 from backend.app.services.printer_manager import printer_manager
 from backend.app.services.printer_selection import _incompatible_sliced_model_reason
 
@@ -147,7 +147,6 @@ class Dispatcher:
         self._heat_soak, self._selection, self._drying = heat_soak, selection, drying
         self._started_at: datetime | None = None
         self._recovering: set[int] = set()
-        self._visible_unsent: set[int] = set()
 
     async def take_over(self, item_id: int) -> None:
         """Enter from preheating in its own session once a soak hands off; an attempt left unsent ends failed."""
@@ -624,34 +623,12 @@ class Dispatcher:
         await db.commit()
         await effects.wait_for(effects.spawned(db))
 
-    async def wait_unsent(self, db: AsyncSession) -> None:
-        """Wait: keep the heartbeat of unsent soak handoffs, holding an expired one for inspection."""
-        unsent = select(PrintQueueItem.id).where(
-            PrintQueueItem.status == "dispatching",
-            PrintQueueItem.chamber_heat_soak.is_(True),
-            PrintQueueItem.dispatch_subtask_id.is_(None),
-        )
-        visible = set()
-        for item_id in list(await db.scalars(unsent)):
-            try:
-                item = await lock_queue_item(db, item_id)
-                if (
-                    not item
-                    or item.status != "dispatching"
-                    or not is_soaking(item)
-                    or not await preheating.lapsed(db, item, self._heat_soak.owner, visible)
-                ):
-                    await db.rollback()
-            except Exception:
-                await db.rollback()
-                logger.exception("Queue item %s: unsent dispatch recovery failed", item_id)
-        for printer_id in self._visible_unsent - visible:
-            preheating_job = select(PrintQueueItem.id).where(
-                PrintQueueItem.printer_id == printer_id, PrintQueueItem.status == "preheating"
-            )
-            if await db.scalar(preheating_job.limit(1)) is None:
-                preheating._show_preheating(printer_id, False)
-        self._visible_unsent = visible
+    async def withdraw(self, db: AsyncSession, item: PrintQueueItem) -> None:
+        """Exit for Retry of an attempt nothing was sent for: release its hold and remove its upload."""
+        if not unsent(item):
+            raise InvalidQueueTransition("Only an attempt that was never sent can be withdrawn")
+        values = {"error_message": "Nothing was sent; retried as a new job", "completed_at": datetime.now(timezone.utc)}
+        await transition_queue_item(db, item, "dispatching", "unsuccessful", action="withdrawn", values=values)
 
     async def start(self) -> None:
         """Recover at startup: fail attempts left unsent, and release the previous process's worker claims."""
@@ -675,7 +652,7 @@ class Dispatcher:
             logger.exception("Failed to clear stale queue dispatch claims")
 
     async def run(self) -> None:
-        """Recover and watch unsent handoffs every 30 s, and at once after a printer connects or disconnects.
+        """Recover every 30 s, and at once after a printer connects or disconnects.
 
         A plain timer by design: recovery reads every active job against live
         telemetry, so a fixed cadence is simpler than tracking each job's events.
@@ -683,31 +660,33 @@ class Dispatcher:
         """
         global _wake
         _wake = asyncio.Event()
-
-        async def recover(db: AsyncSession) -> None:
-            await self.wait_unsent(db)
-            await self.recover(db)
-
         while True:
             _wake.clear()
             try:
-                await run_with_retry(recover, label="dispatch recovery", session_factory=async_session)
+                await run_with_retry(self.recover, label="dispatch recovery", session_factory=async_session)
             except Exception:
                 logger.exception("Dispatch recovery failed")
             with suppress(TimeoutError):
                 await asyncio.wait_for(_wake.wait(), RECOVERY_INTERVAL)
 
     async def recover(self, db: AsyncSession) -> None:
-        """Recover, each pass: settle attempts that no worker or live confirmation owns, from telemetry."""
+        """Recover, each pass: settle attempts that no worker or live confirmation owns, from telemetry.
+
+        A print whose printer now reports a different print has ended unobserved.
+        Its outcome is unknown, so it fails without Auto Off, and the print that
+        replaced it is then observed as started.
+        """
+        from backend.app.services.lifecycle.intake import busy as intake_busy  # Its completion may be in flight.
+
         active = PrintQueueItem.status.in_(("dispatching", "printing", "paused"))
         now = datetime.now(timezone.utc)
-        changed, completions = False, []
+        changed, completions, replaced = False, [], {}
         for item in list(await db.scalars(select(PrintQueueItem).where(active))):
             dispatching, sent = item.status == "dispatching", item.dispatched_at
             sent = sent.replace(tzinfo=timezone.utc) if sent and sent.tzinfo is None else sent
             if dispatching and (
                 item.dispatching_at is not None  # A live preparation worker still owns this attempt.
-                # Startup failed interrupted workers; a telemetry timeout leaves an unsent hold for Stop and Retry.
+                # Startup failed interrupted workers; a telemetry timeout leaves an unsent hold for Retry.
                 or (sent is None and not item.dispatch_subtask_id)
                 # Live acknowledgement owns a fresh dispatch.
                 or (self._started_at and sent and sent >= self._started_at and (now - sent).total_seconds() < 270)
@@ -743,6 +722,13 @@ class Dispatcher:
                     changed = await sync_print_state(db, item, state) or changed
                 except QueueTransitionConflict:
                     continue
+            elif not dispatching and (other := superseded_by(item, state)) and not intake_busy(item.printer_id):
+                reason = f"The printer started print {other} while this one was unobserved; its outcome is unknown"
+                values = {"completed_at": now, "error_message": reason, "auto_off_after": False}
+                if not await _transition_or_skip(db, item, "failed", action="superseded", **values):
+                    continue
+                changed, replaced[item.printer_id] = True, state
+                logger.warning("Queue item %s ended unobserved: printer %s reports %s", item.id, item.printer_id, other)
             elif dispatching and (sent is None or sent.timestamp() <= now.timestamp() - 270):
                 # An upgrade-interrupted row has no send time, and is held for review at once.
                 if item.error_message != _DISPATCH_REVIEW_MESSAGE:
@@ -756,6 +742,9 @@ class Dispatcher:
             await db.commit()
         for item, report, subtask_id, observed in completions:
             await self._complete_later(db, item, report, subtask_id, observed)
+        for printer_id, state in replaced.items():
+            if state.state in _ACTIVE_PRINT_STATES:
+                spawn_background_task(_observe_replacement(printer_id, state), name=f"observe-print-{printer_id}")
 
     async def _complete_later(self, db: AsyncSession, item, report: tuple, subtask_id: str, observed: str) -> None:
         """Run the normal completion for a recovered terminal print, from its matched telemetry snapshot."""
@@ -797,7 +786,33 @@ _UPLOAD_FAILED = (
     "Failed to upload file to printer. Check if SD card is inserted and properly formatted (FAT32/exFAT). "
     "See server logs for detailed diagnostics."
 )
-_TELEMETRY_UNAVAILABLE = "Printer telemetry unavailable; Stop and Retry to send this job"
+_TELEMETRY_UNAVAILABLE = "Printer telemetry unavailable; nothing was sent. Retry to send this job"
+
+
+def unsent(item: PrintQueueItem) -> bool:
+    """An attempt held with nothing sent and no worker left to send it, which Retry withdraws."""
+    return (
+        item.status == "dispatching"
+        and item.dispatching_at is None
+        and item.dispatched_at is None
+        and not item.dispatch_subtask_id
+    )
+
+
+async def _observe_replacement(printer_id: int, state) -> None:
+    """Observe the print that replaced an unobserved one, as intake does for a print running at startup."""
+    from backend.app.services.lifecycle.intake import print_started
+
+    data = {
+        "submission_id": telemetry_identity(state),
+        "filename": state.gcode_file or getattr(state, "current_print", None),
+        "subtask_name": getattr(state, "subtask_name", None),
+        "raw_data": dict(state.raw_data or {}),
+    }
+    try:
+        await print_started(printer_id, data, recovering=True)
+    except Exception:
+        logger.exception("Printer %s: could not observe its replacement print", printer_id)
 
 
 async def on_enter(change, row) -> None:
@@ -816,8 +831,8 @@ async def on_enter(change, row) -> None:
 
 
 async def on_exit(change, row) -> None:
-    """Exit: a failed or stopped attempt shuts down an inherited soak; a failed one removes its unsent upload."""
+    """Exit: a failed or stopped attempt shuts down an inherited soak; a failed or withdrawn one removes its upload."""
     await preheating.shut_down_inherited(change, row)
-    if change.after == "failed" and change.action != "printer_report":
-        effect = effects.QueueOutcomeEffect(change.item_id, "failed", row.printer_id, clean_sd_copy=True)
+    if (change.after == "failed" and change.action != "printer_report") or change.action == "withdrawn":
+        effect = effects.QueueOutcomeEffect(change.item_id, change.after, row.printer_id, clean_sd_copy=True)
         effects.queue_outcome_effect(change.db, effect)

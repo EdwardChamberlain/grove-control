@@ -10,7 +10,7 @@ after failure, and Require previous success have been removed.
 | --- | --- |
 | `queued` | `preheating`, `dispatching`, `unsuccessful` (user cancellation) |
 | `preheating` | `dispatching`, `failed`, `cancelled` |
-| `dispatching` | `printing`, `failed`, `cancelled` |
+| `dispatching` | `printing`, `failed`, `cancelled`, `unsuccessful` (Retry of an unsent attempt) |
 | `printing` | `paused`, `finished`, `failed`, `cancelled` |
 | `paused` | `printing`, `finished`, `failed`, `cancelled` |
 | `finished` | `successful` (Clear Plate) |
@@ -28,7 +28,9 @@ their heaters have been shut down; disconnected printers can be deleted.
 
 **Cancel** ends a waiting job as `unsuccessful`. **Cancel / Stop Print** on active
 work commits `cancelled`, records Stop intent, then sends Stop. A failed command
-or offline printer keeps the hold with an inspection reason. Editing and
+or offline printer keeps the hold with an inspection reason. If fresh telemetry
+shows the printer running a different identified print, the job is stopped
+without a Stop command, which would stop that print, and without Auto Off. Editing and
 deleting holding jobs is refused. **Skip heat soak** proceeds to `dispatching`
 with the same hold.
 
@@ -46,7 +48,10 @@ Retry repeats the complete heat soak and retains available variant slices and
 per-file settings. If those are gone, it uses the selected Files source or the
 Archive copy. It requires queue creation, ownership update and `queue:insert_top`
 permissions. The old job retains its hold; a model-targeted retry can use a
-different free printer.
+different free printer. Retry is also offered on a `dispatching` attempt that
+nothing was sent for and no worker still owns. That attempt is withdrawn as
+`unsuccessful` in the same transaction, releasing its hold and removing its
+upload, because there is no plate to clear.
 
 A new, positively identified touchscreen/SD print can transfer an earlier
 terminal job's hold. The old job becomes final and the new external job takes
@@ -115,8 +120,7 @@ Missing or uninitialized telemetry waits for up to 30 seconds at each dispatch
 boundary. An active print state or a different nonempty identity fails the
 held attempt. An empty ID after reconnect is not evidence of another print.
 If telemetry remains unavailable, nothing is sent: the job stays `dispatching`
-with **Stop and Retry** instructions, without a failure notification or Auto
-Off. An unsent heat-soak hold schedules heater shutdown after its worker exits.
+with **Retry** instructions, without a failure notification or Auto Off. An unsent heat-soak hold schedules heater shutdown after its worker exits.
 A restart fails an interrupted unsent attempt (no ID and no send timestamp);
 an attempt that might have sent a command stays held for telemetry or review.
 
@@ -130,15 +134,30 @@ intake await the committed publication; restart recovery keeps its background
 delivery. Rollback or a failed commit emits no start, and a print that ends in
 the transaction that confirmed it announces only its end.
 
-Unsent heat-soak handoffs belong to dispatching rather than preheating's wait.
-Dispatching keeps their existing heartbeat abort, inspection message and view
-recovery policy, shared with preheating's. Dispatching runs this watch and its
-telemetry recovery on its own 30-second timer, with an immediate first pass;
-a printer connecting or disconnecting wakes it sooner. The timer is deliberate:
-recovery checks every active job against live telemetry, which a fixed cadence
-does simply. A locked SQLite database retries the pass. Queue selection drives
-neither state's timer, and shutdown cancels both. The separate long-upload and
-interrupted-soak behavior fixes listed in #204 remain follow-up work.
+Unsent heat-soak handoffs belong to dispatching, whose worker owns them until
+it sends or ends the attempt; neither state watches their soak heartbeat, so a
+long upload is never reported as an interrupted soak. A restart fails them.
+Dispatching runs its telemetry recovery on its own 30-second timer, with an
+immediate first pass; a printer connecting or disconnecting wakes it sooner.
+The timer is deliberate: recovery checks every active job against live
+telemetry, which a fixed cadence does simply. A locked SQLite database retries
+the pass. Queue selection drives neither state's timer, and shutdown cancels
+both.
+
+A soak whose worker is gone, after a restart, is recovered by preheating once
+its heartbeat lapses: its heaters are turned off and the hold is kept, with an
+inspection message, until a person stops it or skips the soak.
+
+Recovery also ends a `printing` or `paused` job whose printer reports a
+different firmware print ID with fresh telemetry: the printer finished it and
+started another while Grove wasn't watching. Its outcome is unknown, so it
+becomes `failed` without Auto Off, and an active replacement print is then
+observed as started, which transfers the hold to it. A session-local ID on
+either side proves nothing, and the job stays put.
+
+A stored tray mapping that maps no slot (`[-1]`) is never sent (#2589). Printer
+selection recomputes it from the loaded trays, and the job waits with a reason
+while nothing matches.
 
 See
 [job identity](queue-job-identity.md) for matching and recovery details and

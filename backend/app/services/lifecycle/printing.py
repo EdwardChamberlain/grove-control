@@ -26,6 +26,9 @@ from backend.app.services.lifecycle import effects
 from backend.app.services.lifecycle.engine import transfer_hold, transition_queue_item
 from backend.app.services.lifecycle.preheating import shut_down_inherited
 
+ACTIVE = ("PREPARE", "SLICING", "RUNNING", "PAUSE")
+_REPORTED = (*ACTIVE, "FINISH", "FAILED")
+
 
 @dataclass(frozen=True)
 class Completion:
@@ -72,6 +75,17 @@ def job_ams_mapping(stored: str | None, observed: list[int] | None) -> list[int]
         except (ValueError, TypeError):
             pass  # Malformed legacy metadata must not block the job's lifecycle.
     return observed
+
+
+def superseded_by(item: PrintQueueItem, state, states=_REPORTED) -> str | None:
+    """The different print fresh telemetry reports in ``states``, which proves ``item``'s print has ended.
+
+    Only firmware IDs count: a session-local ID can't prove continuity across a restart.
+    """
+    if not state or not state.connected or not getattr(state, "job_telemetry_ready", True) or state.state not in states:
+        return None
+    ours, live = normalize_id(item.dispatch_subtask_id), telemetry_identity(state)
+    return live if ours and live and ours != live and ours.isdigit() and live.isdigit() else None
 
 
 async def sync_print_state(db: AsyncSession, item: PrintQueueItem, state) -> bool:
