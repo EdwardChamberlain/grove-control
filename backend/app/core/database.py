@@ -1298,13 +1298,13 @@ async def _migrate_queue_archive_outcomes(conn) -> None:
     from backend.app.services.lifecycle.engine import physical_failure_reason
 
     version_key = "queue_archive_outcome_version"
-    if await conn.scalar(select(Settings.value).where(Settings.key == version_key)) == "1":
+    if await conn.scalar(select(Settings.value).where(Settings.key == version_key)) == "2":
         return
     if conn.dialect.name == "postgresql":
         await conn.execute(text("LOCK TABLE print_queue IN SHARE ROW EXCLUSIVE MODE"))
     await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value=Settings.value))
     version = await conn.scalar(select(Settings.value).where(Settings.key == version_key))
-    if version == "1":
+    if version == "2":
         return
 
     table = PrintQueueItem.__table__
@@ -1315,7 +1315,6 @@ async def _migrate_queue_archive_outcomes(conn) -> None:
                 select(
                     table,
                     archives.c.status.label("attempt_status"),
-                    archives.c.completed_at.label("attempt_completed_at"),
                     archives.c.failure_reason.label("attempt_failure_reason"),
                 )
                 .select_from(
@@ -1324,7 +1323,6 @@ async def _migrate_queue_archive_outcomes(conn) -> None:
                         and_(
                             archives.c.id == table.c.archive_id,
                             archives.c.dispatched_queue_item_id == table.c.id,
-                            archives.c.status.in_(("completed", "failed", "aborted")),
                         ),
                     )
                 )
@@ -1336,36 +1334,49 @@ async def _migrate_queue_archive_outcomes(conn) -> None:
     )
     for row in rows:
         attempt_status = row["attempt_status"]
-        outcome = attempt_status
-        if outcome is None:
-            outcome = {
-                "finished": "completed",
-                "successful": "completed",
-            }.get(row["status"])
-            if row["status"] == "failed" and row["started_at"] is not None:
-                outcome = "failed"
-        if outcome is None:
-            continue  # A legacy unsuccessful job alone cannot prove failure vs Stop.
-        reason = (
-            row["attempt_failure_reason"]
-            if attempt_status is not None
-            else physical_failure_reason(outcome, row["error_message"])
-        )
-        await conn.execute(
-            table.update()
-            .where(table.c.id == row["id"])
-            .values(
-                physical_outcome=outcome,
-                physical_completed_at=row["attempt_completed_at"]
-                if attempt_status is not None
-                else row["completed_at"],
-                physical_failure_reason=reason,
+        # Archive status is only a projection. Legacy Stop handling could mark
+        # an unconfirmed command as aborted, and dispatch failures could mark
+        # an unsent attempt as failed, so neither status proves a physical
+        # outcome. Recover only outcomes the job row itself establishes.
+        outcome = {
+            "finished": "completed",
+            "successful": "completed",
+        }.get(row["status"])
+        if row["status"] == "failed" and row["started_at"] is not None:
+            outcome = "failed"
+
+        archive_outcome = outcome or {
+            "failed": "failed",
+            "cancelled": "cancelled",
+        }.get(row["status"])
+        if row["status"] == "unsuccessful" and row["stop_requested_at"] is not None:
+            archive_outcome = "cancelled"
+
+        if outcome is not None:
+            reason = (
+                row["attempt_failure_reason"]
+                if outcome == "failed" and attempt_status == "failed"
+                else physical_failure_reason(outcome, row["error_message"])
             )
-        )
+            await conn.execute(
+                table.update()
+                .where(table.c.id == row["id"])
+                .values(
+                    physical_outcome=outcome,
+                    physical_completed_at=row["completed_at"],
+                    physical_failure_reason=reason,
+                )
+            )
+        if attempt_status is not None and archive_outcome is not None and attempt_status != archive_outcome:
+            await conn.execute(
+                archives.update()
+                .where(and_(archives.c.id == row["archive_id"], archives.c.dispatched_queue_item_id == row["id"]))
+                .values(status=archive_outcome)
+            )
     if version is None:
-        await conn.execute(Settings.__table__.insert().values(key=version_key, value="1"))
+        await conn.execute(Settings.__table__.insert().values(key=version_key, value="2"))
     else:
-        await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value="1"))
+        await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value="2"))
 
 
 async def run_migrations(conn):

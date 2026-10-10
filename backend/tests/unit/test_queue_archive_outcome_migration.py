@@ -18,6 +18,7 @@ async def test_upgrade_backfills_only_proven_outcomes_and_runs_once():
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(Settings.__table__.insert().values(key="queue_archive_outcome_version", value="1"))
             # Model a pre-stage-5 database, then use the startup repair path.
             await conn.execute(text("DROP INDEX uq_print_queue_holding_printer"))
             for column in ("physical_outcome", "physical_completed_at", "physical_failure_reason"):
@@ -82,10 +83,23 @@ async def test_upgrade_backfills_only_proven_outcomes_and_runs_once():
                         "failure_reason": "User cancelled",
                         "dispatched_queue_item_id": 7,
                     },
+                    {
+                        "id": 4,
+                        "filename": "confirmed-failure.3mf",
+                        "file_path": "confirmed-failure.3mf",
+                        "file_size": 1,
+                        "status": "failed",
+                        "completed_at": completed,
+                        "failure_reason": "HMS 0700_8012",
+                        "dispatched_queue_item_id": 9,
+                    },
                 ],
             )
             await conn.execute(
-                text("UPDATE print_queue SET archive_id = CASE id WHEN 5 THEN 1 WHEN 6 THEN 2 WHEN 7 THEN 3 END")
+                text(
+                    "UPDATE print_queue SET archive_id = CASE id "
+                    "WHEN 5 THEN 1 WHEN 6 THEN 2 WHEN 7 THEN 3 WHEN 9 THEN 4 END"
+                )
             )
             await ensure_queue_insert_schema(conn)
             await _migrate_queue_archive_outcomes(conn)
@@ -95,16 +109,17 @@ async def test_upgrade_backfills_only_proven_outcomes_and_runs_once():
                 2: None,
                 3: "completed",
                 4: None,
-                5: "failed",
+                5: None,
                 6: None,
-                7: "aborted",
+                7: None,
                 8: None,
                 9: "failed",
             }
-            assert rows[5].physical_failure_reason == "HMS 0700_8012"
-            assert rows[5].physical_completed_at == completed
+            assert rows[9].physical_failure_reason == "HMS 0700_8012"
+            assert rows[9].physical_completed_at == completed
+            assert await conn.scalar(select(PrintArchive.status).where(PrintArchive.id == 3)) == "cancelled"
             assert (
-                await conn.scalar(select(Settings.value).where(Settings.key == "queue_archive_outcome_version")) == "1"
+                await conn.scalar(select(Settings.value).where(Settings.key == "queue_archive_outcome_version")) == "2"
             )
             await conn.execute(text("UPDATE print_queue SET physical_outcome = NULL, status = 'failed' WHERE id = 8"))
             await _migrate_queue_archive_outcomes(conn)
@@ -151,6 +166,6 @@ async def test_backfill_reads_attempts_together_without_rewriting_queue_to_lock(
                 "FROM print_archives" in sql or "SET id=print_queue.id" in sql or "SET id = id" in sql
                 for sql in statements
             )
-            assert set(await conn.scalars(select(PrintQueueItem.physical_outcome))) == {"failed"}
+            assert set(await conn.scalars(select(PrintQueueItem.physical_outcome))) == {None}
     finally:
         await engine.dispose()
