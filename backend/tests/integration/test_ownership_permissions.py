@@ -798,13 +798,14 @@ class TestQueueOwnershipPermissions(TestOwnershipPermissionsSetup):
     @pytest.mark.integration
     @pytest.mark.parametrize("status", ["dispatching", "printing"])
     async def test_operator_can_stop_own_active_queue_item(
-        self, async_client: AsyncClient, auth_setup, queue_item_factory, status
+        self, async_client: AsyncClient, auth_setup, queue_item_factory, db_session, status
     ):
         """Operator can stop their own dispatching or printing queue item."""
         item = await queue_item_factory(
             created_by_id=auth_setup["operator_user"]["id"],
             status=status,
         )
+        await db_session.commit()
 
         response = await async_client.post(
             f"/api/v1/queue/{item.id}/stop",
