@@ -1574,12 +1574,7 @@ async def run_migrations(conn):
         pass  # Already applied
 
     # Migration: Add plate not empty notification column to notification_providers
-    if is_sqlite():
-        await _safe_execute(conn, "ALTER TABLE notification_providers ADD COLUMN on_plate_not_empty BOOLEAN DEFAULT 1")
-    else:
-        await _safe_execute(
-            conn, "ALTER TABLE notification_providers ADD COLUMN on_plate_not_empty BOOLEAN DEFAULT true"
-        )
+    await _safe_execute(conn, "ALTER TABLE notification_providers ADD COLUMN on_plate_not_empty BOOLEAN DEFAULT true")
 
     # Migration: Add notes column to projects (Phase 2)
     await _safe_execute(conn, "ALTER TABLE projects ADD COLUMN notes TEXT")
@@ -2163,7 +2158,7 @@ async def run_migrations(conn):
     await _safe_execute(conn, "ALTER TABLE library_folders ADD COLUMN external_path VARCHAR(500)")
 
     # Migration: Add plate_detection_enabled column to printers
-    await _safe_execute(conn, "ALTER TABLE printers ADD COLUMN plate_detection_enabled BOOLEAN DEFAULT 0")
+    await _safe_execute(conn, "ALTER TABLE printers ADD COLUMN plate_detection_enabled BOOLEAN DEFAULT false")
 
     # Migration: Add plate detection ROI columns to printers
     await _safe_execute(conn, "ALTER TABLE printers ADD COLUMN plate_detection_roi_x REAL")
