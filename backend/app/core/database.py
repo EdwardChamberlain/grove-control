@@ -303,6 +303,7 @@ async def init_db():
         # safety net for interrupted upgrades and restored databases.
         await ensure_queue_insert_schema(conn)
         await _migrate_queue_lifecycle(conn)
+        await _migrate_queue_assignment(conn)
         await _migrate_queue_archive_outcomes(conn)
         await _migrate_queue_legacy_archive_links(conn)
 
@@ -608,12 +609,17 @@ async def _migrate_retired_pipeline_runs(conn) -> None:
 _QUEUE_INSERT_COLUMN_DEFINITIONS: dict[str, tuple[str, str]] = {
     # Identity / queue targeting
     "printer_id": ("INTEGER", "INTEGER"),
+    "assigned_printer_id": (
+        "INTEGER REFERENCES printers(id) ON DELETE SET NULL",
+        "INTEGER REFERENCES printers(id) ON DELETE SET NULL",
+    ),
     "target_model": ("VARCHAR(50)", "VARCHAR(50)"),
     "target_location": ("VARCHAR(100)", "VARCHAR(100)"),
     "required_filament_types": ("TEXT", "TEXT"),
     "waiting_reason": ("TEXT", "TEXT"),
     "archive_id": ("INTEGER", "INTEGER"),
     "library_file_id": ("INTEGER", "INTEGER"),
+    "source_filename": ("VARCHAR(512)", "VARCHAR(512)"),
     "project_id": ("INTEGER", "INTEGER"),
     # Scheduling and dispatch policy
     "position": ("INTEGER DEFAULT 0", "INTEGER DEFAULT 0"),
@@ -628,6 +634,9 @@ _QUEUE_INSERT_COLUMN_DEFINITIONS: dict[str, tuple[str, str]] = {
     "deadline_kind": ("VARCHAR(20)", "VARCHAR(20)"),
     "wait_for_drying_complete": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
     "auto_off_after": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
+    # Existing jobs must not gain automatic retries during upgrade. New
+    # application-created queue jobs opt in through the ORM default.
+    "retry_on_failure": ("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT false"),
     "ams_mapping": ("TEXT", "TEXT"),
     "filament_overrides": ("TEXT", "TEXT"),
     "force_color_match": ("BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT true"),
@@ -651,7 +660,9 @@ _QUEUE_INSERT_COLUMN_DEFINITIONS: dict[str, tuple[str, str]] = {
     # Lifecycle / audit fields
     "status": ("VARCHAR(20) DEFAULT 'queued'", "VARCHAR(20) DEFAULT 'queued'"),
     "dispatched_at": ("DATETIME", "TIMESTAMP"),
+    "dispatch_stage": ("VARCHAR(24)", "VARCHAR(24)"),
     "dispatch_subtask_id": ("VARCHAR(32)", "VARCHAR(32)"),
+    "dispatch_baseline_subtask_id": ("VARCHAR(32)", "VARCHAR(32)"),
     "started_at": ("DATETIME", "TIMESTAMP"),
     "completed_at": ("DATETIME", "TIMESTAMP"),
     "error_message": ("TEXT", "TEXT"),
@@ -1001,6 +1012,53 @@ async def _ensure_holding_queue_index(conn) -> None:
     )
 
 
+async def _migrate_queue_assignment(conn) -> None:
+    """Separate a waiting job's printer preference from its immutable binding once."""
+    from sqlalchemy import select, text
+
+    from backend.app.models.settings import Settings
+
+    version_key = "queue_assignment_version"
+    if await conn.scalar(select(Settings.value).where(Settings.key == version_key)) == "1":
+        return
+    if conn.dialect.name == "postgresql":
+        await conn.execute(text("LOCK TABLE print_queue IN SHARE ROW EXCLUSIVE MODE"))
+    if await conn.scalar(select(Settings.value).where(Settings.key == version_key)) == "1":
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_print_queue_assigned_printer_id ON print_queue (assigned_printer_id)")
+        )
+        return
+
+    # Queued rows still carry the old preference in printer_id. For rows that
+    # already left the queue, preserve printer_id as the binding and copy it to
+    # the preference only when there was no model/pool preference to retain.
+    await conn.execute(
+        text(
+            "UPDATE print_queue SET assigned_printer_id = printer_id, printer_id = NULL "
+            "WHERE status = 'queued' AND printer_id IS NOT NULL AND assigned_printer_id IS NULL"
+        )
+    )
+    await conn.execute(
+        text(
+            "UPDATE print_queue SET assigned_printer_id = printer_id "
+            "WHERE status <> 'queued' AND printer_id IS NOT NULL "
+            "AND target_model IS NULL AND assigned_printer_id IS NULL"
+        )
+    )
+    # Jobs already waiting when this version is installed are ordinary queue
+    # jobs too. Rows that have left the queue must never start a retry chain.
+    await conn.execute(text("UPDATE print_queue SET retry_on_failure = true WHERE status = 'queued'"))
+    await conn.execute(text("UPDATE print_queue SET retry_on_failure = false WHERE status <> 'queued'"))
+    await conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_print_queue_assigned_printer_id ON print_queue (assigned_printer_id)")
+    )
+    exists = await conn.scalar(select(Settings.key).where(Settings.key == version_key))
+    if exists is None:
+        await conn.execute(Settings.__table__.insert().values(key=version_key, value="1"))
+    else:
+        await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value="1"))
+
+
 async def _migrate_queue_lifecycle(conn) -> None:
     """Upgrade legacy jobs once, retaining an actionable job for every plate hold."""
     from sqlalchemy import select, text
@@ -1013,16 +1071,35 @@ async def _migrate_queue_lifecycle(conn) -> None:
 
     version_key = "queue_lifecycle_version"
     version = await conn.scalar(select(Settings.value).where(Settings.key == version_key))
-    if version == "3":
+    if version == "4":
         await _ensure_holding_queue_index(conn)
+        return
+    if version == "3":
+        if conn.dialect.name == "postgresql":
+            await conn.execute(text("LOCK TABLE print_queue IN SHARE ROW EXCLUSIVE MODE"))
+        version = await conn.scalar(select(Settings.value).where(Settings.key == version_key))
+        if version == "4":
+            await _ensure_holding_queue_index(conn)
+            return
+        # Version 4 excludes proven-unsent failed jobs from the printer hold
+        # index. Rebuild only the index; rerunning the legacy state conversion
+        # would reinterpret already-migrated plate holds.
+        await conn.execute(text(f"DROP INDEX IF EXISTS {HOLDING_INDEX_NAME}"))
+        await _ensure_holding_queue_index(conn)
+        await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value="4"))
         return
     # Serialize concurrent upgraders, and recheck after obtaining the write lock.
     if conn.dialect.name == "postgresql":
         await conn.execute(text("LOCK TABLE print_queue IN SHARE ROW EXCLUSIVE MODE"))
     await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value=Settings.value))
     version = await conn.scalar(select(Settings.value).where(Settings.key == version_key))
-    if version == "3":
+    if version == "4":
         await _ensure_holding_queue_index(conn)
+        return
+    if version == "3":
+        await conn.execute(text(f"DROP INDEX IF EXISTS {HOLDING_INDEX_NAME}"))
+        await _ensure_holding_queue_index(conn)
+        await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value="4"))
         return
     for name in (
         "uq_print_queue_active_printer",
@@ -1104,9 +1181,9 @@ async def _migrate_queue_lifecycle(conn) -> None:
     )
     await _ensure_holding_queue_index(conn)
     if version is None:
-        await conn.execute(Settings.__table__.insert().values(key=version_key, value="3"))
+        await conn.execute(Settings.__table__.insert().values(key=version_key, value="4"))
     else:
-        await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value="3"))
+        await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value="4"))
 
 
 async def _migrate_queue_legacy_archive_links(conn) -> None:
@@ -1117,7 +1194,7 @@ async def _migrate_queue_legacy_archive_links(conn) -> None:
     from backend.app.models.print_queue import PrintQueueItem
     from backend.app.models.settings import Settings
     from backend.app.services.job_identity import normalize_id
-    from backend.app.services.lifecycle.engine import ARCHIVE_OUTCOMES, physical_failure_reason
+    from backend.app.services.lifecycle.engine import physical_failure_reason
 
     version_key = "queue_legacy_archive_link_version"
     # Version 1 ran before outcome backfill and missed terminal legacy jobs.
@@ -1155,11 +1232,15 @@ async def _migrate_queue_legacy_archive_links(conn) -> None:
             )
         ):
             continue
-        outcome = row["physical_outcome"] or ARCHIVE_OUTCOMES.get(row["status"])
-        if outcome is None and row["status"] == "successful":
-            outcome = "completed"
-        if outcome is None and row["status"] == "unsuccessful" and row["stop_requested_at"] is not None:
-            outcome = "aborted"
+        outcome = row["physical_outcome"]
+        if outcome is None:
+            outcome = {
+                "finished": "completed",
+                "successful": "completed",
+                "cancelled": "cancelled",
+            }.get(row["status"])
+            if row["status"] == "unsuccessful" and row["stop_requested_at"] is not None:
+                outcome = "cancelled"
         values = {"dispatched_queue_item_id": row["id"]}
         if outcome is not None:
             values.update(
@@ -1167,6 +1248,8 @@ async def _migrate_queue_legacy_archive_links(conn) -> None:
                 completed_at=row["physical_completed_at"] or row["completed_at"],
                 failure_reason=row["physical_failure_reason"]
                 if row["physical_outcome"] is not None
+                else "User cancelled"
+                if outcome == "cancelled"
                 else physical_failure_reason(outcome, row["error_message"]),
             )
         if row["started_at"] is not None:
@@ -1213,16 +1296,16 @@ async def _migrate_queue_archive_outcomes(conn) -> None:
     from backend.app.models.archive import PrintArchive
     from backend.app.models.print_queue import PrintQueueItem
     from backend.app.models.settings import Settings
-    from backend.app.services.lifecycle.engine import ARCHIVE_OUTCOMES, physical_failure_reason
+    from backend.app.services.lifecycle.engine import physical_failure_reason
 
     version_key = "queue_archive_outcome_version"
-    if await conn.scalar(select(Settings.value).where(Settings.key == version_key)) == "1":
+    if await conn.scalar(select(Settings.value).where(Settings.key == version_key)) == "2":
         return
     if conn.dialect.name == "postgresql":
         await conn.execute(text("LOCK TABLE print_queue IN SHARE ROW EXCLUSIVE MODE"))
     await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value=Settings.value))
     version = await conn.scalar(select(Settings.value).where(Settings.key == version_key))
-    if version == "1":
+    if version == "2":
         return
 
     table = PrintQueueItem.__table__
@@ -1233,7 +1316,6 @@ async def _migrate_queue_archive_outcomes(conn) -> None:
                 select(
                     table,
                     archives.c.status.label("attempt_status"),
-                    archives.c.completed_at.label("attempt_completed_at"),
                     archives.c.failure_reason.label("attempt_failure_reason"),
                 )
                 .select_from(
@@ -1242,7 +1324,6 @@ async def _migrate_queue_archive_outcomes(conn) -> None:
                         and_(
                             archives.c.id == table.c.archive_id,
                             archives.c.dispatched_queue_item_id == table.c.id,
-                            archives.c.status.in_(("completed", "failed", "aborted", "cancelled")),
                         ),
                     )
                 )
@@ -1254,35 +1335,50 @@ async def _migrate_queue_archive_outcomes(conn) -> None:
     )
     for row in rows:
         attempt_status = row["attempt_status"]
-        outcome = (
-            ("aborted" if attempt_status == "cancelled" else attempt_status)
-            if attempt_status is not None
-            else ARCHIVE_OUTCOMES.get(row["status"])
-        )
-        if outcome is None and row["status"] == "successful":
-            outcome = "completed"
-        if outcome is None:
-            continue  # A legacy unsuccessful job alone cannot prove failure vs Stop.
-        reason = (
-            row["attempt_failure_reason"]
-            if attempt_status is not None
-            else physical_failure_reason(outcome, row["error_message"])
-        )
-        await conn.execute(
-            table.update()
-            .where(table.c.id == row["id"])
-            .values(
-                physical_outcome=outcome,
-                physical_completed_at=row["attempt_completed_at"]
-                if attempt_status is not None
-                else row["completed_at"],
-                physical_failure_reason=reason,
+        # Archive status is only a projection. Legacy Stop handling could mark
+        # an unconfirmed command as aborted, and dispatch failures could mark
+        # an unsent attempt as failed, so neither status proves a physical
+        # outcome. Recover only outcomes the job row itself establishes.
+        outcome = {
+            "finished": "completed",
+            "successful": "completed",
+        }.get(row["status"])
+        if row["status"] == "failed" and row["dispatched_at"] is not None:
+            outcome = "failed"
+
+        archive_outcome = outcome or {
+            "failed": "failed",
+            "cancelled": "cancelled",
+            # An unsuccessful legacy job without persisted physical evidence
+            # may have been stopped before send. Keep its Archive conservative.
+            "unsuccessful": "cancelled",
+        }.get(row["status"])
+
+        if outcome is not None:
+            reason = (
+                row["attempt_failure_reason"]
+                if outcome == "failed" and attempt_status == "failed"
+                else physical_failure_reason(outcome, row["error_message"])
             )
-        )
+            await conn.execute(
+                table.update()
+                .where(table.c.id == row["id"])
+                .values(
+                    physical_outcome=outcome,
+                    physical_completed_at=row["completed_at"],
+                    physical_failure_reason=reason,
+                )
+            )
+        if attempt_status is not None and archive_outcome is not None and attempt_status != archive_outcome:
+            await conn.execute(
+                archives.update()
+                .where(and_(archives.c.id == row["archive_id"], archives.c.dispatched_queue_item_id == row["id"]))
+                .values(status=archive_outcome)
+            )
     if version is None:
-        await conn.execute(Settings.__table__.insert().values(key=version_key, value="1"))
+        await conn.execute(Settings.__table__.insert().values(key=version_key, value="2"))
     else:
-        await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value="1"))
+        await conn.execute(Settings.__table__.update().where(Settings.key == version_key).values(value="2"))
 
 
 async def run_migrations(conn):
@@ -1466,6 +1562,7 @@ async def run_migrations(conn):
     # Migration: Add auto_off_pending columns to smart_plugs (for restart recovery)
     await _safe_execute(conn, "ALTER TABLE smart_plugs ADD COLUMN auto_off_pending BOOLEAN DEFAULT 0")
     await _safe_execute(conn, "ALTER TABLE smart_plugs ADD COLUMN auto_off_pending_since DATETIME")
+    await _safe_execute(conn, "ALTER TABLE smart_plugs ADD COLUMN auto_off_pending_job_id INTEGER")
 
     # Migration: Add auto_off_persistent column to smart_plugs (keep auto-off enabled between prints)
     await _safe_execute(conn, "ALTER TABLE smart_plugs ADD COLUMN auto_off_persistent BOOLEAN DEFAULT 0")
@@ -1497,7 +1594,7 @@ async def run_migrations(conn):
         pass  # Already applied
 
     # Migration: Add plate not empty notification column to notification_providers
-    await _safe_execute(conn, "ALTER TABLE notification_providers ADD COLUMN on_plate_not_empty BOOLEAN DEFAULT 1")
+    await _safe_execute(conn, "ALTER TABLE notification_providers ADD COLUMN on_plate_not_empty BOOLEAN DEFAULT true")
 
     # Migration: Add notes column to projects (Phase 2)
     await _safe_execute(conn, "ALTER TABLE projects ADD COLUMN notes TEXT")
@@ -2081,7 +2178,7 @@ async def run_migrations(conn):
     await _safe_execute(conn, "ALTER TABLE library_folders ADD COLUMN external_path VARCHAR(500)")
 
     # Migration: Add plate_detection_enabled column to printers
-    await _safe_execute(conn, "ALTER TABLE printers ADD COLUMN plate_detection_enabled BOOLEAN DEFAULT 0")
+    await _safe_execute(conn, "ALTER TABLE printers ADD COLUMN plate_detection_enabled BOOLEAN DEFAULT false")
 
     # Migration: Add plate detection ROI columns to printers
     await _safe_execute(conn, "ALTER TABLE printers ADD COLUMN plate_detection_roi_x REAL")

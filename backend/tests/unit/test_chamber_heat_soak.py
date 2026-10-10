@@ -23,6 +23,7 @@ from backend.app.services.bambu_mqtt import PrinterState
 from backend.app.services.heat_soak_telemetry import record_heat_soak_reports
 from backend.app.services.library_trash import release_queue_references
 from backend.app.services.lifecycle import preheating as heat
+from backend.app.services.lifecycle.engine import writer
 from backend.app.services.print_scheduler import PrintScheduler, scheduler
 
 
@@ -78,7 +79,12 @@ async def soak(tmp_path, monkeypatch):
         db.add_all([printer, source])
         await db.flush()
         item = PrintQueueItem(
-            id=1, printer_id=1, library_file_id=source.id, chamber_heat_soak=True, heat_soak_minutes=1, status="queued"
+            id=1,
+            assigned_printer_id=1,
+            library_file_id=source.id,
+            chamber_heat_soak=True,
+            heat_soak_minutes=1,
+            status="queued",
         )
         db.add(item)
         await db.commit()
@@ -163,7 +169,8 @@ async def test_failed_command_stops_every_supported_heater(soak):
 
 async def test_abort_does_not_change_automatic_start_policy(soak):
     assert await soak.service.enter(soak.db, soak.item)
-    await heat.abort_heat_soak(soak.db, soak.item, "Printer disconnected during soak")
+    async with writer(soak.item.printer_id):
+        await heat.abort_heat_soak(soak.db, soak.item, "Printer disconnected during soak")
     await soak.db.refresh(soak.item)
     assert soak.item.status == "failed"
     assert soak.item.manual_start is False

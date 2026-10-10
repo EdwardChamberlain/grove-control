@@ -13,11 +13,12 @@ import backend.app.models  # noqa: F401
 from backend.app.api.routes.print_queue import clear_queue_plate, resolve_queue_dispatch, stop_queue_item
 from backend.app.core.database import Base, _migrate_queue_lifecycle
 from backend.app.models.archive import PrintArchive
-from backend.app.models.print_queue import PrintQueueItem
+from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem
 from backend.app.models.printer import Printer
+from backend.app.models.settings import Settings
 from backend.app.schemas.print_queue import DispatchResolution
 from backend.app.services.job_identity import event_identity, find_job, needs_dispatch_resolution
-from backend.app.services.lifecycle.engine import HOLDING_STATUSES, transition_queue_item
+from backend.app.services.lifecycle.engine import transition_queue_item, writer
 from backend.app.services.lifecycle.printing import bind_observed_id, observe_print
 from backend.app.services.print_scheduler import PrintScheduler
 from backend.app.services.printer_manager import PrinterManager
@@ -29,9 +30,7 @@ async def sessions(tmp_path):
     from backend.app.services import print_effects
     from backend.app.services.lifecycle import intake
 
-    intake._completed_job_events.clear()
-    intake._started_job_effects.clear()
-    intake._user_stopped_printers.clear()
+    intake.print_memory.started_job_effects.clear()
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'jobs.db'}")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -39,9 +38,9 @@ async def sessions(tmp_path):
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
         db.add(Printer(id=1, name="Printer", serial_number="TEST", ip_address="127.0.0.1", access_code="12345678"))
+        db.add(Settings(key="require_plate_clear", value="true"))
         await db.commit()
     yield maker
-    intake._user_stopped_printers.clear()
     await engine.dispose()
 
 
@@ -52,6 +51,8 @@ async def add_job(sessions, status="dispatching", **kwargs):
             status=status,
             dispatch_subtask_id="123",
             dispatched_at=datetime.now(timezone.utc) - timedelta(minutes=10),
+            physical_outcome={"failed": "failed"}.get(status),
+            physical_completed_at=datetime.now(timezone.utc) if status == "failed" else None,
             **kwargs,
         )
         db.add(item)
@@ -59,9 +60,26 @@ async def add_job(sessions, status="dispatching", **kwargs):
         return item.id
 
 
+async def add_awaiting_resolution_job(sessions):
+    from backend.app.services.lifecycle.dispatching import _DISPATCH_REVIEW_MESSAGE
+
+    return await add_job(
+        sessions,
+        dispatch_stage="awaiting_ack",
+        error_message=_DISPATCH_REVIEW_MESSAGE,
+    )
+
+
 async def add_linked_job(sessions, identity, status="printing", with_archive=True):
     async with sessions() as db:
-        item = PrintQueueItem(printer_id=1, status=status, dispatch_subtask_id=identity)
+        item = PrintQueueItem(
+            printer_id=1,
+            status=status,
+            dispatch_subtask_id=identity,
+            dispatched_at=datetime.now(timezone.utc) if status == "dispatching" else None,
+            physical_outcome={"failed": "failed"}.get(status),
+            physical_completed_at=datetime.now(timezone.utc) if status == "failed" else None,
+        )
         db.add(item)
         await db.flush()
         if with_archive:
@@ -132,7 +150,9 @@ async def test_stop_unmatched_run_keeps_plate_gate_before_release_and_after_rest
             assert manager.is_awaiting_plate_clear(1)
             assert manager.get_awaiting_plate_clear_archive_id(1) == archive_id
             if archive_id:
-                assert (await db.get(PrintArchive, archive_id)).status == "aborted"
+                # The Stop command was not correlated to this job, so the
+                # Archive records intent rather than claiming a confirmed abort.
+                assert (await db.get(PrintArchive, archive_id)).status == "cancelled"
 
         restarted = PrinterManager()
         with patch("backend.app.core.database.async_session", sessions):
@@ -246,7 +266,9 @@ async def test_external_start_is_one_job_and_cannot_take_a_dispatch(sessions):
         assert first.status == "printing"
         assert first.created_by_id is None
         assert await observe_print(db, 1, "different") == (None, False)
-        await transition_queue_item(db, first, "printing", "finished")
+        async with writer(getattr(first, "printer_id", None) or getattr(first, "assigned_printer_id", None)):
+            await transition_queue_item(db, first, "printing", "finished")
+        await db.commit()
         from backend.app.services.lifecycle.awaiting import clear_job_plate
 
         await clear_job_plate(db, first)
@@ -272,7 +294,7 @@ async def test_start_requires_exact_dispatch_id_and_uses_transition(sessions):
 
 @pytest.mark.parametrize("outcome", ["printing", "failed"])
 async def test_user_resolution_commits_and_keeps_failed_plate_gate(sessions, outcome):
-    item_id = await add_job(sessions)
+    item_id = await add_awaiting_resolution_job(sessions)
     manager = MagicMock()
     manager.get_status.return_value = None
     with (
@@ -291,18 +313,39 @@ async def test_user_resolution_commits_and_keeps_failed_plate_gate(sessions, out
         assert publish.await_count == (outcome == "printing")
 
 
-@pytest.mark.parametrize("seconds, expected", [(0, False), (269, False), (271, True)])
-def test_dispatch_confirmation_prompt_requires_a_finished_send_attempt(seconds, expected):
+@pytest.mark.parametrize(
+    "stage, deadline_kind, deadline_pending, review_marker, expected",
+    [
+        ("uploading", None, False, False, False),
+        ("awaiting_ack", "dispatch_ack", True, False, False),
+        ("awaiting_ack", None, False, True, True),
+        ("awaiting_ack", None, False, False, False),
+    ],
+)
+def test_dispatch_confirmation_prompt_uses_the_settled_persisted_deadline(
+    stage, deadline_kind, deadline_pending, review_marker, expected
+):
+    from backend.app.services.lifecycle.dispatching import _DISPATCH_REVIEW_MESSAGE
+
+    now = datetime.now(timezone.utc)
     item = PrintQueueItem(
         status="dispatching",
+        dispatch_stage=stage,
         dispatch_subtask_id="123",
-        dispatched_at=datetime.now(timezone.utc) - timedelta(seconds=seconds),
+        dispatched_at=now,
+        deadline_kind=deadline_kind,
+        deadline_at=now + timedelta(seconds=270) if deadline_pending else None,
+        error_message=_DISPATCH_REVIEW_MESSAGE
+        if review_marker
+        else "Other dispatch error"
+        if stage == "awaiting_ack"
+        else None,
     )
     assert needs_dispatch_resolution(item) is expected
 
 
 async def test_resolution_rejects_other_owner_and_conflicting_live_job(sessions):
-    item_id = await add_job(sessions)
+    item_id = await add_awaiting_resolution_job(sessions)
     async with sessions() as db:
         with pytest.raises(HTTPException) as forbidden:
             await resolve_queue_dispatch(
@@ -346,7 +389,7 @@ async def test_external_observation_survives_callbacks_and_restart(sessions):
     from backend.app.services import print_effects
     from backend.app.services.lifecycle import intake
 
-    intake._started_job_effects.clear()
+    intake.print_memory.started_job_effects.clear()
     with (
         patch.object(intake, "async_session", sessions),
         patch.object(print_effects, "async_session", sessions),
@@ -359,7 +402,7 @@ async def test_external_observation_survives_callbacks_and_restart(sessions):
         assert archive.await_count == 2
         begin.assert_awaited_once()
         finish.assert_awaited_once()
-        intake._started_job_effects.clear()  # Simulate a new application process.
+        intake.print_memory.started_job_effects.clear()  # Simulate a new application process.
         await main.on_print_start(1, {"submission_id": "external", "filename": "same.3mf"})
     async with sessions() as db:
         items = list((await db.scalars(select(PrintQueueItem))).all())
@@ -383,14 +426,14 @@ async def test_failed_archive_start_is_retried_for_the_same_job(sessions):
         event = {"submission_id": "external", "filename": "same.3mf"}
         with pytest.raises(RuntimeError, match="start WebSocket failed"):
             await main.on_print_start(1, event)
-        assert intake._started_job_effects.get(1) is not None
+        assert intake.print_memory.started_job_effects.get(1) is not None
         await main.on_print_start(1, event)
         begin.assert_awaited_once()
         finish.assert_awaited_once()
     assert archive.await_count == 2
     async with sessions() as db:
         job = await find_job(db, 1, "external")
-        assert intake._started_job_effects[1] == job.id
+        assert intake.print_memory.started_job_effects[1] == job.id
 
 
 async def test_running_recovery_observes_job_without_new_start_effects(sessions):
@@ -429,7 +472,7 @@ async def test_touchscreen_print_takes_over_the_hold_without_releasing_the_print
     from backend.app.services.lifecycle import intake
 
     old_id, archive_id = await add_linked_job(sessions, "previous", previous_status)
-    previous_outcome = {"finished": "completed", "failed": "failed", "cancelled": "aborted"}[previous_status]
+    previous_outcome = {"finished": "completed", "failed": "failed", "cancelled": "cancelled"}[previous_status]
     async with sessions() as db:
         (await db.get(PrintArchive, archive_id)).status = previous_outcome
         await db.commit()
@@ -463,12 +506,13 @@ async def test_touchscreen_print_takes_over_the_hold_without_releasing_the_print
                 await clear_queue_plate(old_id, db, None)
             assert conflict.value.status_code == 409
             await db.rollback()
-        intake._started_job_effects.clear()  # Simulate restart while the touchscreen print is running.
+        intake.print_memory.started_job_effects.clear()  # Simulate restart while the touchscreen print is running.
         await main.on_print_start(1, {"submission_id": "touchscreen", "filename": "same.3mf"})
         async with sessions() as db:
             new = await find_job(db, 1, "touchscreen")
             live.state = "FINISH"
-            await transition_queue_item(db, new, "printing", "finished")
+            async with writer(getattr(new, "printer_id", None) or getattr(new, "assigned_printer_id", None)):
+                await transition_queue_item(db, new, "printing", "finished")
             await db.commit()
             assert manager.is_awaiting_plate_clear(1)
             await clear_queue_plate(new.id, db, None)
@@ -648,7 +692,7 @@ async def test_external_archive_is_linked_by_identity_not_name(sessions):
     from backend.app.services import print_effects
     from backend.app.services.lifecycle import intake
 
-    intake._started_job_effects.clear()
+    intake.print_memory.started_job_effects.clear()
 
     async def archive_worker(printer_id, data, **kwargs):
         async with sessions() as db:
@@ -686,7 +730,8 @@ async def test_external_archive_is_linked_by_identity_not_name(sessions):
         archive = await db.get(PrintArchive, item.archive_id)
         assert archive.subtask_id == "external"
         assert archive.dispatched_queue_item_id == item.id
-        await bind_observed_id(db, 1, "firmware", "external")
+        async with writer(1):
+            await bind_observed_id(db, 1, "firmware", "external")
         await db.commit()
         assert item.dispatch_subtask_id == "firmware"
         assert archive.subtask_id == "firmware"

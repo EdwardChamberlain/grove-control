@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from backend.app.models.print_queue import PrintQueueItem
-from backend.app.services.lifecycle.engine import transition_queue_item
+from backend.app.services.lifecycle.engine import transition_queue_item, writer
 from backend.tests.unit.test_queue_archive_alignment import alignment, hold_and_link  # noqa: F401
 
 
@@ -25,7 +25,8 @@ async def test_start_context_comes_from_identified_job_without_filename_registra
         job.plate_id = 3
         job.created_by_id = 42
         await hold_and_link(db, job)
-        await transition_queue_item(db, job, "dispatching", "printing", values={"dispatch_subtask_id": "123"})
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "dispatching", "printing", values={"dispatch_subtask_id": "123"})
         await db.commit()
         archive_id = job.archive_id
     observed = AsyncMock(return_value=True)
@@ -33,7 +34,7 @@ async def test_start_context_comes_from_identified_job_without_filename_registra
     monkeypatch.setattr(intake, "async_session", alignment.sessions)
     monkeypatch.setattr(print_effects, "async_session", alignment.sessions)
     monkeypatch.setattr(main.printer_manager, "get_status", lambda _id: live)
-    monkeypatch.setattr(intake, "_started_job_effects", {})
+    monkeypatch.setattr(intake, "print_memory", intake.PrintMemory())
     monkeypatch.setattr(print_effects, "_archive_print_start", observed)
     await intake._observe_print_start(
         1,

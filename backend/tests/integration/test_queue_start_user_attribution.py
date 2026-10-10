@@ -89,7 +89,7 @@ async def queue_item(db_session):
     await db_session.refresh(archive)
 
     item = PrintQueueItem(
-        printer_id=printer.id,
+        assigned_printer_id=printer.id,
         archive_id=archive.id,
         status="queued",
         position=1,

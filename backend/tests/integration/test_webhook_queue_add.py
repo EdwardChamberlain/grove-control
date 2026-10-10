@@ -121,7 +121,7 @@ async def test_webhook_queue_status_includes_dispatching(async_client: AsyncClie
     api_key, printer, _archive = webhook_queue_setup
     db_session.add_all(
         [
-            PrintQueueItem(printer_id=printer.id, position=1, status="queued"),
+            PrintQueueItem(assigned_printer_id=printer.id, position=1, status="queued"),
             PrintQueueItem(printer_id=printer.id, position=2, status="dispatching"),
         ]
     )

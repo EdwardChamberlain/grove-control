@@ -589,7 +589,7 @@ async def _capture_mjpeg_frame(url: str, timeout: int) -> bytes | None:
 
     # Stream ended / timed out / buffer cap before a second frame arrived.
     # Return whatever warm-up frame we managed to read; better an iffy frame
-    # than None for callers that need *some* image (snapshot UX, plate-detect
+    # than None for callers that need *some* image (snapshot UX, image-check
     # CV, finish photo). None only if no frame ever arrived at all.
     return first_frame
 

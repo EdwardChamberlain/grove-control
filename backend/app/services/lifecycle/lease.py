@@ -1,6 +1,6 @@
 """One Grove process per database.
 
-The lifecycle keeps each printer's writer in process memory (``engine.hold_printer``),
+The lifecycle keeps each printer's writer in process memory (``engine.writer``),
 so two processes on one database would each believe they were the only
 writer. Startup takes this lease and refuses to run without it. SQLite uses a
 lock file beside the database; PostgreSQL a session advisory lock on a

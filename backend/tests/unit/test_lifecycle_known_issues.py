@@ -10,7 +10,7 @@ import pytest
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.services.ams_mapping import unresolved
 from backend.app.services.lifecycle import dispatching
-from backend.app.services.lifecycle.engine import InvalidQueueTransition, transition_queue_item
+from backend.app.services.lifecycle.engine import InvalidQueueTransition, transition_queue_item, writer
 from backend.app.services.print_scheduler import PrintScheduler
 from backend.app.services.printer_selection import PrinterSelection
 from backend.app.services.queue_actions import cancel_job
@@ -32,8 +32,12 @@ def live(state: str, identity: str):
 async def printing_job(db, alignment, identity: str = "111", **values) -> PrintQueueItem:
     job = await db.get(PrintQueueItem, alignment.job_id)
     job.auto_off_after = True
-    await transition_queue_item(db, job, "queued", "dispatching", values={"dispatch_subtask_id": identity, **values})
-    await transition_queue_item(db, job, "dispatching", "printing")
+    async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+        await transition_queue_item(
+            db, job, "queued", "dispatching", values={"dispatch_subtask_id": identity, **values}
+        )
+    async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+        await transition_queue_item(db, job, "dispatching", "printing")
     await db.commit()
     return job
 
@@ -59,15 +63,31 @@ async def test_recovery_ends_a_print_the_printer_has_replaced(alignment, monkeyp
 
 
 async def test_recovery_leaves_a_replaced_print_to_its_completion_in_flight(alignment, monkeypatch):
-    from backend.app.services.lifecycle import intake
-
     monkeypatch.setattr(dispatching.printer_manager, "get_status", lambda _: live("RUNNING", "222"))
     async with alignment.sessions() as db:
         job = await printing_job(db, alignment)
-        async with intake._lock(job.printer_id):  # The printer's completion event is being processed.
-            await PrintScheduler().dispatcher.recover(db)
+        recovery_started = asyncio.Event()
+
+        async def recover():
+            recovery_started.set()
+            async with alignment.sessions() as recovery_db:
+                await PrintScheduler().dispatcher.recover(recovery_db)
+
+        async with writer(job.printer_id):  # A completion owns the printer while recovery waits.
+            recovery = asyncio.create_task(recover())
+            await recovery_started.wait()
+            await asyncio.sleep(0.01)
+            await transition_queue_item(
+                db,
+                job,
+                "printing",
+                "finished",
+                action="printer_report",
+            )
+            await db.commit()
+        await recovery
         await db.refresh(job)
-        assert job.status == "printing"
+        assert job.status == "finished"
 
 
 @pytest.mark.parametrize(
@@ -123,12 +143,15 @@ async def test_retry_withdraws_an_attempt_nothing_was_sent_for(alignment):
 async def test_only_an_unsent_attempt_is_withdrawn(alignment):
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
-        await transition_queue_item(db, job, "queued", "dispatching", values={"dispatch_subtask_id": "111"})
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "queued", "dispatching", values={"dispatch_subtask_id": "111"})
         await db.commit()
         with pytest.raises(InvalidQueueTransition):
             await PrintScheduler().dispatcher.withdraw(db, job)
+        await db.refresh(job)
         with pytest.raises(InvalidQueueTransition):  # Nor through the engine, for any other reason.
-            await transition_queue_item(db, job, "dispatching", "unsuccessful", action="cancel")
+            async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+                await transition_queue_item(db, job, "dispatching", "unsuccessful", action="cancel")
 
 
 @pytest.mark.parametrize(

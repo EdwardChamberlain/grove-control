@@ -14,6 +14,7 @@ import uuid
 from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 from sqlalchemy import func, or_, select
 
@@ -40,7 +41,7 @@ from backend.app.services.bambu_ftp import (
 )
 from backend.app.services.homeassistant import homeassistant_service
 from backend.app.services.job_identity import event_identity, telemetry_identity
-from backend.app.services.lifecycle.engine import lock_queue_item, transition_queue_item
+from backend.app.services.lifecycle.engine import lock_queue_item, transition_queue_item, writer
 from backend.app.services.mqtt_relay import mqtt_relay
 from backend.app.services.notification_service import notification_service
 from backend.app.services.printer_manager import parse_plate_id, printer_manager
@@ -596,7 +597,7 @@ def _load_objects_from_archive(archive, printer_id: int, logger, *, reset_skippe
 
 async def _link_observed_archive(printer_id: int, item_id: int, identity: str) -> int | None:
     """Link the owned attempt, or a single unowned legacy Archive with this ID."""
-    async with async_session() as db:
+    async with writer(printer_id), async_session() as db:
         item = await db.get(PrintQueueItem, item_id)
         if item is None:
             return None
@@ -682,68 +683,6 @@ async def _begin_new_print(printer_id: int, data: dict, *, memory) -> None:
             await smart_plug_manager.on_print_start(printer_id, db)
     except Exception as e:
         logger.warning("Smart plug on_print_start failed: %s", e)
-    async with async_session() as db:
-        printer = await _one(db, select(Printer).where(Printer.id == printer_id))
-        if printer and printer.plate_detection_enabled:
-            logger.info("[PLATE CHECK] ENTERING plate detection code for printer %s", printer_id)
-            try:
-                from backend.app.services.plate_detection import check_plate_empty
-
-                roi = tuple(getattr(printer, f"plate_detection_roi_{edge}") for edge in "xywh")
-                roi = roi if None not in roi else None
-                light_was_off = False
-                client = printer_manager.get_client(printer_id)
-                if client and client.state:
-                    light_was_off = not client.state.chamber_light
-                    if light_was_off:
-                        logger.info("[PLATE CHECK] Turning on chamber light for printer %s", printer_id)
-                        client.set_chamber_light(True)
-                        await asyncio.sleep(2.5)
-                logger.info("[PLATE CHECK] Running plate detection for printer %s", printer_id)
-                plate_result = await check_plate_empty(
-                    printer_id=printer_id,
-                    ip_address=printer.ip_address,
-                    access_code=printer.access_code,
-                    model=printer.model,
-                    include_debug_image=False,
-                    external_camera_url=printer.external_camera_url,
-                    external_camera_type=printer.external_camera_type,
-                    use_external=printer.external_camera_enabled,
-                    roi=roi,
-                    external_camera_snapshot_url=printer.external_camera_snapshot_url,
-                )
-                if light_was_off and client:
-                    logger.info("[PLATE CHECK] Restoring chamber light to off for printer %s", printer_id)
-                    client.set_chamber_light(False)
-                if not plate_result.needs_calibration and (not plate_result.is_empty):
-                    logger.warning(
-                        f"[PLATE CHECK] Objects detected on plate for printer {printer_id}! Confidence: {plate_result.confidence:.0%}, Diff: {plate_result.difference_percent:.1f}%"
-                    )
-                    client = printer_manager.get_client(printer_id)
-                    if client:
-                        client.pause_print()
-                        logger.info("[PLATE CHECK] Print paused for printer %s", printer_id)
-                    await ws_manager.broadcast(
-                        {
-                            "type": "plate_not_empty",
-                            "printer_id": printer_id,
-                            "printer_name": printer.name,
-                            "message": f"Objects detected on build plate! Print paused. (Diff: {plate_result.difference_percent:.1f}%)",
-                        }
-                    )
-                    try:
-                        await notification_service.on_plate_not_empty(
-                            printer_id=printer_id,
-                            printer_name=printer.name,
-                            db=db,
-                            difference_percent=plate_result.difference_percent,
-                        )
-                    except Exception as notif_err:
-                        logger.warning("[PLATE CHECK] Failed to send notification: %s", notif_err)
-                else:
-                    logger.info("[PLATE CHECK] Plate is empty for printer %s, proceeding with print", printer_id)
-            except Exception as plate_err:
-                logger.warning("[PLATE CHECK] Plate detection failed for printer %s: %s", printer_id, plate_err)
 
 
 async def _finish_new_print(printer_id: int, data: dict, archive_id: int | None) -> None:
@@ -850,8 +789,18 @@ async def _archive_print_start(
             logger.info("Resuming archive %s on subtask_id match (%s)", existing_archive.id, subtask_id)
             await _restore_archive_print_context(db, printer, existing_archive, data, memory=memory)
             return True
+        # FTP can take a while. Close the session before waiting so no SQLite
+        # connection stays open across the network request. AsyncSession can
+        # be reused below to load the printer and persist the Archive.
+        download_printer = SimpleNamespace(
+            id=printer.id,
+            ip_address=printer.ip_address,
+            access_code=printer.access_code,
+            model=printer.model,
+        )
+        await db.close()
         retry = await get_ftp_retry_settings()
-        temp_path, downloaded_filename = await _fetch_print_3mf(printer, filename, subtask_name, retry)
+        temp_path, downloaded_filename = await _fetch_print_3mf(download_printer, filename, subtask_name, retry)
         if downloaded_filename:
             expected_plate = parse_plate_id(filename)
             actual_plate = peek_plate_index_in_3mf(temp_path) if expected_plate is not None else None
@@ -869,7 +818,7 @@ async def _archive_print_start(
                     for try_filename in (f"{corrected_subtask}.gcode.3mf", f"{corrected_subtask}.3mf"):
                         retry_path = _temp_3mf(try_filename)
                         if retry_path and await _download_from_dirs(
-                            printer, try_filename, retry_path, retry, plate=expected_plate
+                            download_printer, try_filename, retry_path, retry, plate=expected_plate
                         ):
                             retried = try_filename, retry_path
                             break
@@ -891,6 +840,15 @@ async def _archive_print_start(
                     )
                     temp_path = downloaded_filename = None
                     subtask_name = corrected_subtask or ""
+        # Re-read after the network wait; rollback expired the ORM instance and
+        # the printer may have been removed while the callback was suspended.
+        printer = await _one(db, select(Printer).where(Printer.id == printer_id))
+        if not printer:
+            if temp_path and temp_path.exists():
+                with suppress(OSError):
+                    temp_path.unlink()
+            logger.info("Skipping delayed Archive start - printer %s no longer exists", printer_id)
+            return True
         if not downloaded_filename or not temp_path:
             logger.warning("Could not find 3MF file for print: %s", filename or subtask_name)
             try:
@@ -1428,15 +1386,27 @@ async def on_finish_photo_moment(printer_id: int, data: dict, *, memory):
 async def print_started(printer_id: int, data: dict, job_id: int, archive_id: int | None, *, new: bool, memory) -> None:
     """A print's start effects: new-print actions once per print, its Archive, then the start notification."""
     linked = archive_id
+    has_archive_source = bool(data.get("filename") or data.get("subtask_name"))
+    repair_task = memory.archive_repairs_in_flight.get(job_id) if job_id is not None else None
+    owns_archive_start = has_archive_source and job_id is not None and repair_task is None
+    if owns_archive_start:
+        # Register before any other awaited start effect, so recovery cannot
+        # launch a duplicate acquisition while _begin_new_print is running.
+        memory.archive_starts_in_flight.add(job_id)
     try:
         if new:
             await _begin_new_print(printer_id, data, memory=memory)
-        if data.get("filename") or data.get("subtask_name"):
+        if repair_task is not None:
+            await repair_task
+        elif has_archive_source:
             await _archive_print_start(
                 printer_id, data, queue_archive_id=archive_id, queue_job_id=job_id, memory=memory
             )
-        linked = await _link_observed_archive(printer_id, job_id, data["submission_id"])
+        if job_id is not None:
+            linked = await _link_observed_archive(printer_id, job_id, data["submission_id"])
     finally:
+        if owns_archive_start:
+            memory.archive_starts_in_flight.discard(job_id)
         if new:
             await _finish_new_print(printer_id, data, linked)
 
@@ -1506,7 +1476,6 @@ async def print_completed(c, *, memory) -> None:
     photo = spawn_background_task(
         _capture_finish_photo(printer_id, archive_id, data, memory=memory), name="background-finish-photo"
     )
-    spawn_background_task(_smart_plug_completed(printer_id, status), name="background-smart-plug")
     spawn_background_task(_check_maintenance(printer_id, status), name="background-maintenance-check")
     spawn_background_task(_notify_after_photo(c, usage_results, photo), name="photo-then-notify")
     spawn_background_task(_finish_layer_timelapse(printer_id, archive_id, status), name="background-layer-timelapse")
@@ -1579,12 +1548,7 @@ async def _clean_sd_card(c) -> None:
 
 
 async def _queue_completed(c, name: str) -> None:
-    """Publish the job's end, notify once the queue empties, and schedule a completed job's Auto Off.
-
-    Failed and stopped jobs schedule Auto Off on entering their awaiting
-    state. The smart-plug manager honours each plug's strategy, is cancelled
-    by a new print, and never cuts power on a loaded print (#1890).
-    """
+    """Publish the job's end and notify once the queue empties."""
     with suppress(Exception):
         info = printer_manager.get_printer(c.printer_id)
         await mqtt_relay.on_queue_job_completed(
@@ -1606,12 +1570,6 @@ async def _queue_completed(c, name: str) -> None:
                     )
                 )
                 await notification_service.on_queue_completed(completed_count=completed.scalar() or 1, db=db)
-    if c.auto_off and c.queue_status == "completed":
-        try:
-            async with async_session() as db:
-                await smart_plug_manager.schedule_off_after_queue_job(c.printer_id, db)
-        except Exception as e:
-            logger.warning("Failed to schedule queue auto-off for printer %s: %s", c.printer_id, e)
 
 
 async def _await_bed_cooldown(printer_id: int, name: str, *, memory) -> None:
@@ -1975,16 +1933,6 @@ async def _capture_finish_photo(printer_id: int, archive_id: int, data: dict, *,
     except Exception as e:
         logger.warning("[PHOTO-BG] Failed: %s", e)
         return None
-
-
-async def _smart_plug_completed(printer_id: int, status: str) -> None:
-    try:
-        logger.info("[AUTO-OFF-BG] Starting smart plug automation for printer %s", printer_id)
-        async with async_session() as db:
-            await smart_plug_manager.on_print_complete(printer_id, status, db)
-            logger.info("[AUTO-OFF-BG] Completed")
-    except Exception as e:
-        logger.warning("[AUTO-OFF-BG] Failed: %s", e)
 
 
 async def _check_maintenance(printer_id: int, status: str) -> None:

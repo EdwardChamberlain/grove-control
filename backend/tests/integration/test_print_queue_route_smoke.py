@@ -25,6 +25,10 @@ async def queue_item_factory(db_session, printer_factory, archive_factory):
             "position": counter,
         }
         defaults.update(kwargs)
+        if defaults.get("status") == "queued":
+            printer_id = defaults.pop("printer_id", None)
+            defaults.setdefault("assigned_printer_id", printer_id)
+            defaults["printer_id"] = None
 
         item = PrintQueueItem(**defaults)
         db_session.add(item)

@@ -15,7 +15,7 @@ from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.user import User
 from backend.app.services import print_effects
 from backend.app.services.lifecycle import effects, intake, preheating
-from backend.app.services.lifecycle.engine import hold_printer, transition_queue_item
+from backend.app.services.lifecycle.engine import transition_queue_item, writer
 from backend.tests.unit.test_lifecycle_preheating import enter_preheating
 from backend.tests.unit.test_queue_archive_alignment import alignment  # noqa: F401
 
@@ -65,14 +65,12 @@ async def test_completion_credits_the_job_owner_from_the_job(alignment, monkeypa
     """No in-memory credit: the matched job's owner is read at completion, so it survives a restart."""
     monkeypatch.setattr(intake, "async_session", alignment.sessions)
     monkeypatch.setattr(print_effects, "async_session", alignment.sessions)
-    monkeypatch.setattr(intake, "_completed_job_events", {})
     for effect in ("_clean_sd_card", "_queue_completed", "_await_bed_cooldown", "_publish_archive_outcome"):
         monkeypatch.setattr(print_effects, effect, AsyncMock())
     monkeypatch.setattr(print_effects, "_track_usage", AsyncMock(return_value=[]))
     monkeypatch.setattr(print_effects, "spawn_background_task", lambda coroutine, **_: coroutine.close())
     monkeypatch.setattr(print_effects.ws_manager, "send_print_complete", AsyncMock())
     async with alignment.sessions() as db:
-        await hold_printer(db, 1)
         owner = User(username="owner", password_hash="x", is_active=True)
         db.add(owner)
         await db.flush()
@@ -84,8 +82,10 @@ async def test_completion_credits_the_job_owner_from_the_job(alignment, monkeypa
         await db.flush()
         archive.dispatched_queue_item_id = job.id
         job.created_by_id, owner_id = owner.id, owner.id
-        await transition_queue_item(db, job, "queued", "dispatching", values={"dispatch_subtask_id": "123"})
-        await transition_queue_item(db, job, "dispatching", "printing", values={"archive_id": archive.id})
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "queued", "dispatching", values={"dispatch_subtask_id": "123"})
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "dispatching", "printing", values={"archive_id": archive.id})
         await db.commit()
     assert await intake.print_completed(1, {"submission_id": "123", "status": "completed"}) is None
     async with alignment.sessions() as db:

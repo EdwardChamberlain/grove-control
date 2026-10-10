@@ -415,7 +415,14 @@ class TestPrintersAPI:
         from backend.app.services.bambu_mqtt import PrinterState
 
         printer = await printer_factory()
-        db_session.add(PrintQueueItem(printer_id=printer.id, position=1, status=queue_status))
+        db_session.add(
+            PrintQueueItem(
+                assigned_printer_id=printer.id if queue_status == "queued" else None,
+                printer_id=None if queue_status == "queued" else printer.id,
+                position=1,
+                status=queue_status,
+            )
+        )
         await db_session.commit()
 
         state = PrinterState()
@@ -470,7 +477,8 @@ class TestPrintersAPI:
         await db_session.flush()
         db_session.add(
             PrintQueueItem(
-                printer_id=printer.id,
+                assigned_printer_id=printer.id if queue_status == "queued" else None,
+                printer_id=None if queue_status == "queued" else printer.id,
                 position=1,
                 status=queue_status,
                 created_by_id=owner.id,
@@ -979,35 +987,49 @@ class TestPrintControlAPI:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_stop_print_not_connected(self, async_client: AsyncClient, printer_factory):
-        """Verify error when printer is not connected."""
+    async def test_stop_print_refuses_without_an_identifiable_job(self, async_client: AsyncClient, printer_factory):
+        """A printer-wide Stop must not guess which physical print to stop."""
         printer = await printer_factory(name="Disconnected Printer")
 
-        with patch("backend.app.api.routes.printers.printer_manager") as mock_pm:
-            mock_pm.get_client.return_value = None
+        with patch("backend.app.services.printer_manager.printer_manager") as mock_pm:
+            mock_pm.get_status.return_value = None
 
             response = await async_client.post(f"/api/v1/printers/{printer.id}/print/stop")
 
-            assert response.status_code == 400
-            assert "not connected" in response.json()["detail"].lower()
+            assert response.status_code == 409
+            assert "identifiable active print" in response.json()["detail"].lower()
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_stop_print_success(self, async_client: AsyncClient, printer_factory):
-        """Verify successful stop print request."""
+    async def test_stop_print_success_for_the_identified_job(
+        self, async_client: AsyncClient, db_session, printer_factory
+    ):
+        """Stop targets the current queue job identified by fresh telemetry."""
+        from types import SimpleNamespace
+
+        from backend.app.models.print_queue import PrintQueueItem
+
         printer = await printer_factory(name="Printing Printer")
+        job = PrintQueueItem(printer_id=printer.id, status="printing", dispatch_subtask_id="known-run")
+        db_session.add(job)
+        await db_session.commit()
 
-        mock_client = MagicMock()
-        mock_client.stop_print.return_value = True
-
-        with patch("backend.app.api.routes.printers.printer_manager") as mock_pm:
-            mock_pm.get_client.return_value = mock_client
+        with patch("backend.app.services.printer_manager.printer_manager") as mock_pm:
+            mock_pm.get_status.return_value = SimpleNamespace(
+                connected=True,
+                job_telemetry_ready=True,
+                state="RUNNING",
+                submission_id="known-run",
+            )
+            mock_pm.stop_print.return_value = True
 
             response = await async_client.post(f"/api/v1/printers/{printer.id}/print/stop")
 
             assert response.status_code == 200
             assert response.json()["success"] is True
-            mock_client.stop_print.assert_called_once()
+            mock_pm.stop_print.assert_called_once_with(printer.id)
+        await db_session.refresh(job)
+        assert job.stop_requested_at is not None
 
     # ========================================================================
     # Pause print endpoint

@@ -322,8 +322,6 @@ export interface Printer {
   external_camera_enabled: boolean;
   external_camera_snapshot_url: string | null;  // optional single-frame override (#1177)
   camera_rotation: number;  // 0, 90, 180, 270 degrees
-  plate_detection_enabled: boolean;  // Check plate before print
-  plate_detection_roi?: PlateDetectionROI;  // ROI for plate detection
   created_at: string;
   updated_at: string;
 }
@@ -592,51 +590,6 @@ export interface PrinterCreate {
   external_camera_enabled?: boolean;
   external_camera_snapshot_url?: string | null;
   camera_rotation?: number;
-  plate_detection_enabled?: boolean;
-  plate_detection_roi?: PlateDetectionROI;
-}
-
-// Plate Detection
-export interface PlateDetectionROI {
-  x: number;  // X start % (0.0-1.0)
-  y: number;  // Y start % (0.0-1.0)
-  w: number;  // Width % (0.0-1.0)
-  h: number;  // Height % (0.0-1.0)
-}
-
-export interface PlateDetectionResult {
-  is_empty: boolean;
-  confidence: number;
-  difference_percent: number;
-  message: string;
-  has_debug_image: boolean;
-  debug_image_url?: string;
-  needs_calibration: boolean;
-  light_warning?: boolean;
-  reference_count?: number;
-  max_references?: number;
-  roi?: PlateDetectionROI;
-}
-
-export interface PlateDetectionStatus {
-  available: boolean;
-  calibrated: boolean;
-  reference_count: number;
-  max_references: number;
-  message: string;
-}
-
-export interface CalibrationResult {
-  success: boolean;
-  message: string;
-}
-
-export interface PlateReference {
-  index: number;
-  label: string;
-  timestamp: string;
-  has_image: boolean;
-  thumbnail_url: string;
 }
 
 // Archive types
@@ -2109,7 +2062,9 @@ export interface DiscoveredTasmotaDevice {
 // Print Queue types
 export interface PrintQueueItem {
   id: number;
-  printer_id: number | null;  // null = unassigned
+  printer_id: number | null;  // Backwards-compatible effective printer field
+  assigned_printer_id?: number | null;  // Queue preference before dispatch binds a printer
+  bound_printer_id?: number | null;  // Immutable printer binding after dispatch starts
   target_model: string | null;  // Target printer model for model-based assignment
   target_location: string | null;  // Target location filter for model-based assignment
   required_filament_types: string[] | null;  // Required filament types for model-based assignment
@@ -2159,6 +2114,9 @@ export interface PrintQueueItem {
   status: 'queued' | 'preheating' | 'dispatching' | 'printing' | 'paused' | 'finished' | 'failed' | 'cancelled' | 'successful' | 'unsuccessful';
   dispatch_needs_resolution?: boolean;
   dispatch_unsent?: boolean;
+  retry_on_failure?: boolean;
+  physical_outcome?: string | null;
+  awaiting_plate_clear?: boolean;
   dispatched_at: string | null;
   started_at: string | null;
   completed_at: string | null;
@@ -2419,8 +2377,6 @@ export interface NotificationProvider {
   // AMS-HT environmental alarms
   on_ams_ht_humidity_high: boolean;
   on_ams_ht_temperature_high: boolean;
-  // Build plate detection
-  on_plate_not_empty: boolean;
   // Bed cooled
   on_bed_cooled: boolean;
   on_ha_sensor_alert: boolean;
@@ -2480,8 +2436,6 @@ export interface NotificationProviderCreate {
   // AMS-HT environmental alarms
   on_ams_ht_humidity_high?: boolean;
   on_ams_ht_temperature_high?: boolean;
-  // Build plate detection
-  on_plate_not_empty?: boolean;
   // Bed cooled
   on_bed_cooled?: boolean;
   on_ha_sensor_alert?: boolean;
@@ -2534,8 +2488,6 @@ export interface NotificationProviderUpdate {
   // AMS-HT environmental alarms
   on_ams_ht_humidity_high?: boolean;
   on_ams_ht_temperature_high?: boolean;
-  // Build plate detection
-  on_plate_not_empty?: boolean;
   // Bed cooled
   on_bed_cooled?: boolean;
   on_ha_sensor_alert?: boolean;
@@ -5885,65 +5837,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-
-  // Plate Detection - Multi-reference calibration (stores up to 5 references per printer)
-  checkPlateEmpty: (printerId: number, options?: { useExternal?: boolean; includeDebugImage?: boolean }) => {
-    const params = new URLSearchParams();
-    // Only forward use_external when the caller explicitly sets it. Omitted →
-    // backend derives the default from the printer's external_camera_enabled
-    // setting so calibration and runtime checks use the same camera (#1359).
-    if (options?.useExternal !== undefined) {
-      params.set('use_external', String(options.useExternal));
-    }
-    params.set('include_debug_image', String(options?.includeDebugImage ?? false));
-    return request<PlateDetectionResult>(
-      `/printers/${printerId}/camera/check-plate?${params.toString()}`
-    );
-  },
-  getPlateDetectionStatus: (printerId: number) => {
-    return request<PlateDetectionStatus & { chamber_light?: boolean }>(
-      `/printers/${printerId}/camera/plate-detection/status`
-    );
-  },
-  calibratePlateDetection: (printerId: number, options?: { label?: string; useExternal?: boolean }) => {
-    const params = new URLSearchParams();
-    if (options?.label) params.set('label', options.label);
-    if (options?.useExternal !== undefined) {
-      params.set('use_external', String(options.useExternal));
-    }
-    return request<CalibrationResult & { index: number }>(
-      `/printers/${printerId}/camera/plate-detection/calibrate?${params.toString()}`,
-      { method: 'POST' }
-    );
-  },
-  deletePlateCalibration: (printerId: number) => {
-    return request<CalibrationResult>(
-      `/printers/${printerId}/camera/plate-detection/calibrate`,
-      { method: 'DELETE' }
-    );
-  },
-  getPlateReferences: (printerId: number) => {
-    return request<{
-      references: PlateReference[];
-      max_references: number;
-    }>(`/printers/${printerId}/camera/plate-detection/references`);
-  },
-  getPlateReferenceThumbnailUrl: (printerId: number, index: number) =>
-    withStreamToken(`${API_BASE}/printers/${printerId}/camera/plate-detection/references/${index}/thumbnail`),
-  updatePlateReferenceLabel: (printerId: number, index: number, label: string) => {
-    const params = new URLSearchParams();
-    params.set('label', label);
-    return request<{ success: boolean; index: number; label: string }>(
-      `/printers/${printerId}/camera/plate-detection/references/${index}?${params.toString()}`,
-      { method: 'PUT' }
-    );
-  },
-  deletePlateReference: (printerId: number, index: number) => {
-    return request<{ success: boolean; message: string }>(
-      `/printers/${printerId}/camera/plate-detection/references/${index}`,
-      { method: 'DELETE' }
-    );
-  },
 
   // External Links
   getExternalLinks: () => request<ExternalLink[]>('/external-links/'),

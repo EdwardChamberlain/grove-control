@@ -2,6 +2,8 @@
 
 import asyncio
 
+from sqlalchemy import select
+
 from backend.tests.scenarios.fake_printer import sliced_3mf
 from backend.tests.scenarios.test_print import printing_job
 
@@ -69,13 +71,14 @@ async def test_telemetry_lost_before_sending_sends_nothing_and_offers_retry(app)
     await app.advance(60)
 
     job = await app.job(job_id)
-    assert job.status == "dispatching"
+    assert job.status == "failed" and job.physical_outcome is None
     assert printer.sent("project_file") == []
+    from backend.app.models.print_queue import PrintQueueItem
 
-    response = await app.action(job_id, "retry")
-    assert response.status_code == 200, response.text
-    assert (await app.job(job_id)).status == "unsuccessful"
-    retried = response.json()["id"]
+    async with app.session() as db:
+        retries = list(await db.scalars(select(PrintQueueItem).where(PrintQueueItem.id != job_id)))
+    assert len(retries) == 1 and retries[0].status == "queued" and retries[0].retry_on_failure is False
+    retried = retries[0].id
     printer.upload_gate = None
     printer.push()  # The printer comes back.
     await app.run()
@@ -99,7 +102,7 @@ async def test_retry_after_a_failure_prints_once_the_plate_is_cleared(app):
     assert (await app.job(retried)).status == "printing"
 
 
-async def test_restart_during_upload_parks_the_unsent_attempt_for_retry(app):
+async def test_restart_during_upload_creates_a_fresh_retry_for_the_unsent_attempt(app):
     printer = await app.add_printer()
     printer.upload_gate = asyncio.Event()
     job_id = await app.queue(printer, await app.add_file())
@@ -111,15 +114,13 @@ async def test_restart_during_upload_parks_the_unsent_attempt_for_retry(app):
     await app.run()
 
     job = await app.job(job_id)
-    assert (job.status, bool(job.error_message)) == ("dispatching", True)
-    assert printer.sent("project_file") == []
+    assert (job.status, bool(job.error_message), job.physical_outcome) == ("failed", True, None)
+    from backend.app.models.print_queue import PrintQueueItem
 
-    # Nothing was sent, so Retry releases the printer without a plate check.
-    response = await app.action(job_id, "retry")
-    assert response.status_code == 200, response.text
-    assert (await app.job(job_id)).status == "unsuccessful"
-    await app.run()
-    assert (await app.job(response.json()["id"])).status == "printing"
+    async with app.session() as db:
+        retries = list(await db.scalars(select(PrintQueueItem).where(PrintQueueItem.id != job_id)))
+    assert len(retries) == 1 and retries[0].status == "printing" and retries[0].retry_on_failure is False
+    assert len(printer.sent("project_file")) == 1
 
 
 async def test_restart_after_sending_keeps_the_job_until_the_printer_reports(app):
@@ -182,7 +183,7 @@ async def test_an_unacknowledged_print_command_resets_the_printer_session(app):
     await app.queue(printer, await app.add_file())
     await app.run()
 
-    await app.advance(120)
+    await app.advance(300)
 
     assert printer.reconnects == 1
 
@@ -251,7 +252,6 @@ async def test_a_file_that_cannot_be_copied_fails_with_its_cause(app):
     printer = await app.add_printer()
     file_id = await app.add_file("gone.3mf")
     os.remove(app.tmp_path / "library" / "gone.3mf")
-    app.allowed_errors += ["failed to copy dispatch Archive"]
 
     job_id = await app.queue(printer, file_id)
     await app.run()

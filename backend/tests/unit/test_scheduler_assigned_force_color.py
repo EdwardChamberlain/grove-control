@@ -13,7 +13,8 @@ from backend.app.services.print_scheduler import PrintScheduler
 def _queue_item(*, force_color_match: bool = True):
     return SimpleNamespace(
         id=17,
-        printer_id=3,
+        printer_id=None,
+        assigned_printer_id=3,
         target_model=None,
         target_location=None,
         required_filament_types='["PLA"]',
@@ -156,6 +157,7 @@ async def test_model_unforced_job_accepts_same_material_without_exact_colour(moc
 async def test_model_unforced_job_recomputes_cross_material_mapping(mock_pm, scheduler):
     item = _queue_item(force_color_match=False)
     item.printer_id = None
+    item.assigned_printer_id = None
     item.target_model = "P1S"
     item.ams_mapping = "[2]"  # Client supplied a tray that contains ABS on the selected printer.
     items_result, busy_result = _queue_results(item)

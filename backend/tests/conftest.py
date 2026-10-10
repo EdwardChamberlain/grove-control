@@ -120,10 +120,8 @@ def reset_printer_locks():
     from backend.app.services.lifecycle import engine
 
     engine._printer_locks.clear()
-    engine._holders.clear()
     yield
     engine._printer_locks.clear()
-    engine._holders.clear()
 
 
 @pytest.fixture(scope="session")

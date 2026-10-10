@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Clock, Home, Play, Power, Zap } from 'lucide-react';
+import { Home, Play, Power, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { api } from '../../api/client';
@@ -55,16 +55,6 @@ export function PrinterPowerControls({
     },
     onError: (error: Error) => showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
   });
-  const toggleAutoOffMutation = useMutation({
-    mutationFn: (enabled: boolean) => smartPlug
-      ? api.updateSmartPlug(smartPlug.id, { auto_off: enabled })
-      : Promise.reject(new Error('No power socket is assigned')),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['smartPlugByPrinter', printer.id] });
-      queryClient.invalidateQueries({ queryKey: ['smart-plugs'] });
-    },
-    onError: (error: Error) => showToast(error.message || t('printers.toast.failedToSendCommand'), 'error'),
-  });
   const runScriptMutation = useMutation({
     mutationFn: ({ id, action }: { id: number; action: 'on' | 'toggle' }) => api.controlSmartPlug(id, action),
     onSuccess: () => showToast(t('printers.toast.scriptTriggered')),
@@ -93,20 +83,6 @@ export function PrinterPowerControls({
           </span>
           <div className="flex-1" />
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => toggleAutoOffMutation.mutate(!smartPlug.auto_off)}
-              disabled={toggleAutoOffMutation.isPending || smartPlug.auto_off_executed || !hasPermission('smart_plugs:control')}
-              title={!hasPermission('smart_plugs:control') ? t('printers.permission.noSmartPlugControl') : (smartPlug.auto_off_executed ? t('printers.autoOffExecuted') : t('printers.autoOffAfterPrint'))}
-              aria-label={t('printers.autoOffAfterPrint')}
-              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                smartPlug.auto_off || smartPlug.auto_off_executed
-                  ? 'bg-bambu-green/20 text-bambu-green hover:bg-bambu-green/30'
-                  : 'bg-bambu-dark-tertiary text-bambu-gray hover:bg-bambu-dark-tertiary/80 hover:text-white'
-              }`}
-            >
-              <Clock className="h-4 w-4" />
-            </button>
             <button
               type="button"
               onClick={() => plugStatus?.state === 'ON' ? setShowPowerOffConfirm(true) : setShowPowerOnConfirm(true)}

@@ -305,7 +305,7 @@ async def compute_deficit_for_queue_item(
     """
     if await _warnings_disabled(db):
         return []
-    printer_id = printer_id if printer_id is not None else item.printer_id
+    printer_id = printer_id if printer_id is not None else (item.printer_id or item.assigned_printer_id)
     if printer_id is None:
         return []
 

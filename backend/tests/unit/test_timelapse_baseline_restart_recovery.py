@@ -29,11 +29,11 @@ def _clear_baselines():
 
 
 @pytest.mark.asyncio
-async def test_recovery_archive_work_does_not_replay_plate_check_or_start_notifications():
+async def test_recovery_archive_work_does_not_replay_start_notifications():
     import backend.app.main as main
     from backend.app.services import print_effects
 
-    printer = MagicMock(plate_detection_enabled=True, auto_archive=False)
+    printer = MagicMock(auto_archive=False)
     printer.id = 1
     result = MagicMock(scalar_one_or_none=MagicMock(return_value=printer))
     db = AsyncMock()
@@ -44,14 +44,12 @@ async def test_recovery_archive_work_does_not_replay_plate_check_or_start_notifi
         patch.object(print_effects, "async_session", return_value=db),
         patch.object(main.ws_manager, "send_print_start", new_callable=AsyncMock) as websocket_start,
         patch.object(print_effects, "_send_print_start_notification", new_callable=AsyncMock) as notify_start,
-        patch("backend.app.services.plate_detection.check_plate_empty", new_callable=AsyncMock) as plate_check,
     ):
         await print_effects._archive_print_start(
             1, {"submission_id": "existing", "filename": "same.3mf"}, memory=print_memory
         )
     websocket_start.assert_not_awaited()
     notify_start.assert_not_awaited()
-    plate_check.assert_not_awaited()
 
 
 @pytest.mark.asyncio

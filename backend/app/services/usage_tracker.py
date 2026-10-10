@@ -655,10 +655,12 @@ async def on_print_start(
             select(PrintQueueItem)
             .where(PrintQueueItem.printer_id == printer_id)
             .where(PrintQueueItem.status.in_(("printing", "paused")))
+            .order_by(PrintQueueItem.id)
         )
         queue_item = queue_result.scalars().first()
-        if queue_item is not None:
-            plate_id = queue_item.plate_id
+        queue_plate_id = getattr(queue_item, "plate_id", None)
+        if isinstance(queue_plate_id, int):
+            plate_id = queue_plate_id
 
     # Always create session (even without valid remain data) so print_name
     # is available at completion for 3MF-based tracking
@@ -1072,7 +1074,20 @@ def _donor_3mf_conflicts(candidate: Path, expected_plate: int | None) -> str | N
     return None
 
 
-async def _resolve_3mf_fallback(archive, db: AsyncSession, base_dir):
+async def _queue_item_for_archive(archive, db: AsyncSession):
+    """Return the durable job that owns an Archive, including legacy links."""
+    from backend.app.models.print_queue import PrintQueueItem
+
+    dispatched_queue_item_id = getattr(archive, "dispatched_queue_item_id", None)
+    if isinstance(dispatched_queue_item_id, int):
+        return await db.get(PrintQueueItem, dispatched_queue_item_id)
+    result = await db.execute(
+        select(PrintQueueItem).where(PrintQueueItem.archive_id == archive.id).order_by(PrintQueueItem.id)
+    )
+    return result.scalars().first()
+
+
+async def _resolve_3mf_fallback(archive, db: AsyncSession, base_dir, *, plate_id: int | None = None):
     """Try to find a 3MF file from library or a previous archive when the current archive has none.
 
     This handles fallback archives (FTP download failed) where the 3MF may already exist
@@ -1087,9 +1102,7 @@ async def _resolve_3mf_fallback(archive, db: AsyncSession, base_dir):
     if not search_base:
         return None
     print_data = (getattr(archive, "extra_data", None) or {}).get("_print_data") or {}
-    expected_plate = _expected_plate_for_print(
-        getattr(archive, "plate_id", None), archive.filename or print_data.get("filename")
-    )
+    expected_plate = _expected_plate_for_print(plate_id, archive.filename or print_data.get("filename"))
 
     # 1. Try library files matching the name (match base name at file boundary)
     try:
@@ -1284,6 +1297,19 @@ async def _track_from_3mf(
 
     file_path: Path | None = threemf_path
     archive: PrintArchive | None = None
+    queue_item: PrintQueueItem | None = None
+    queue_item_loaded = False
+
+    async def _dispatch_queue_item() -> PrintQueueItem | None:
+        nonlocal archive, queue_item, queue_item_loaded
+        if not queue_item_loaded:
+            queue_item_loaded = True
+            if archive_id:
+                if archive is None:
+                    archive = await db.get(PrintArchive, archive_id)
+                if archive is not None:
+                    queue_item = await _queue_item_for_archive(archive, db)
+        return queue_item
 
     if file_path is None and archive_id:
         result = await db.execute(select(PrintArchive).where(PrintArchive.id == archive_id))
@@ -1298,50 +1324,41 @@ async def _track_from_3mf(
             if candidate.exists():
                 file_path = candidate
 
-        # Fallback: find 3MF from library or a previous archive with the same filename
-        if file_path is None:
-            file_path = await _resolve_3mf_fallback(archive, db, app_settings.base_dir)
+    # The job owns the plate selection and dispatched mapping. Resolve the job
+    # once before looking for a donor 3MF so the plate check and usage parser
+    # use the same durable row, including after a restart.
+    if plate_id is None and archive_id:
+        queue_item = await _dispatch_queue_item()
+        queue_plate_id = getattr(queue_item, "plate_id", None)
+        if isinstance(queue_plate_id, int):
+            plate_id = queue_plate_id
+            logger.info(
+                "[UsageTracker] 3MF: plate_id=%s recovered from queue item %s",
+                plate_id,
+                queue_item.id,
+            )
+
+    # Fallback: find 3MF from library or a previous archive with the same filename.
+    # PrintArchive has no plate_id; the owning job's selection is passed above.
+    if file_path is None and archive is not None:
+        file_path = await _resolve_3mf_fallback(archive, db, app_settings.base_dir, plate_id=plate_id)
 
     if file_path is None:
         logger.info("[UsageTracker] 3MF: no file available for archive %s, skipping", archive_id)
         return []
 
-    # The queue item carries both the plate and the dispatched mapping; look it
-    # up at most once. ``.first()`` rather than ``.scalar_one_or_none()``
-    # because a batch dispatches one archive as several queue items, and
-    # raising there would cost the print all of its usage tracking.
-    _queue_item_lookup: list = []
-
-    async def _dispatch_queue_item():
-        if not _queue_item_lookup:
-            if not archive_id:
-                _queue_item_lookup.append(None)
-            else:
-                queue_result = await db.execute(
-                    select(PrintQueueItem)
-                    .where(PrintQueueItem.archive_id == archive_id)
-                    .where(PrintQueueItem.status.in_(["printing", "paused", "finished", "successful", "failed"]))
-                )
-                _queue_item_lookup.append(queue_result.scalars().first())
-        return _queue_item_lookup[0]
-
-    # The caller's plate_id comes from the in-memory session, which a restart
-    # mid-print destroys. Both the archive and the queue item recorded the
-    # plate at dispatch — without falling back to them the parser sums every
-    # plate of a multi-plate file and charges the lot to one spool.
+    # ``.first()`` in _queue_item_for_archive avoids treating a shared legacy
+    # Archive link as a reason to lose the entire print's usage tracking.
     if plate_id is None:
-        if archive is not None and archive.plate_id is not None:
-            plate_id = archive.plate_id
-            logger.info("[UsageTracker] 3MF: plate_id=%s recovered from archive %s", plate_id, archive_id)
-        else:
-            plate_queue_item = await _dispatch_queue_item()
-            if plate_queue_item is not None and plate_queue_item.plate_id is not None:
-                plate_id = plate_queue_item.plate_id
-                logger.info(
-                    "[UsageTracker] 3MF: plate_id=%s recovered from queue item %s",
-                    plate_id,
-                    plate_queue_item.id,
-                )
+        plate_queue_item = await _dispatch_queue_item()
+        queue_plate_id = getattr(plate_queue_item, "plate_id", None)
+        if isinstance(queue_plate_id, int):
+            plate_id = queue_plate_id
+            logger.info(
+                "[UsageTracker] 3MF: plate_id=%s recovered from queue item %s",
+                plate_id,
+                plate_queue_item.id,
+            )
 
     filament_usage = extract_filament_usage_from_3mf(file_path, plate_id)
     if not filament_usage and plate_id is not None:

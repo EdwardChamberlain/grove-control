@@ -417,6 +417,7 @@ function SortableQueueItem({
   const isScheduled = isPending && !!item.scheduled_time
     && (parseUTCDate(item.scheduled_time)?.getTime() ?? 0) > Date.now();
   const isAwaiting = ['finished', 'failed', 'cancelled'].includes(item.status);
+  const canClearPlate = item.awaiting_plate_clear ?? isAwaiting;
 
   const isMobileSelectable = isPending && onToggleSelect;
 
@@ -855,10 +856,12 @@ function SortableQueueItem({
             )}
             {isAwaiting && (
               <>
-                <Button size="sm" variant="secondary" onClick={onClearPlate}
-                  disabled={!hasPermission('printers:clear_plate')}>
-                  <CheckCircle className="w-4 h-4" />{t('queue.actions.clearPlate')}
-                </Button>
+                {canClearPlate && (
+                  <Button size="sm" variant="secondary" onClick={onClearPlate}
+                    disabled={!hasPermission('printers:clear_plate')}>
+                    <CheckCircle className="w-4 h-4" />{t('queue.actions.clearPlate')}
+                  </Button>
+                )}
                 {item.status !== 'finished' && (
                   <Button size="sm" variant="ghost" onClick={onRequeue}
                     disabled={!hasPermission('queue:create') || !hasPermission('queue:insert_top') || !canModify('queue', 'update', item.created_by_id)}>

@@ -282,7 +282,7 @@ async def dispatch_case(tmp_path):
     from backend.app.models.print_queue import PrintQueueItem
     from backend.app.models.printer import Printer
 
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'dispatch.db'}", echo=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
@@ -312,7 +312,7 @@ async def dispatch_case(tmp_path):
         )
         db.add(archive)
         await db.flush()
-        item = PrintQueueItem(printer_id=printer.id, archive_id=archive.id, status="queued")
+        item = PrintQueueItem(assigned_printer_id=printer.id, archive_id=archive.id, status="queued")
         db.add(item)
         await db.commit()
         item_id = item.id
@@ -332,11 +332,13 @@ async def _failed_dispatch_message(dispatch_case, *, handshake_fails: bool) -> s
     """
     from backend.app.models.print_queue import PrintQueueItem
     from backend.app.services.lifecycle import dispatching as scheduler_module
+    from backend.app.services.lifecycle.dispatching import Dispatcher
     from backend.app.services.print_scheduler import PrintScheduler
 
     async def _upload(*_args, **_kwargs):
         if handshake_fails:
             _arm()
+            raise OSError("TLS handshake failed")
         return False
 
     scheduler = PrintScheduler()
@@ -344,6 +346,9 @@ async def _failed_dispatch_message(dispatch_case, *, handshake_fails: bool) -> s
         item = await db.get(PrintQueueItem, dispatch_case.item_id)
         patches = [
             patch.object(scheduler_module.settings, "base_dir", dispatch_case.base_dir),
+            patch.object(Dispatcher, "_telemetry", return_value=True),
+            patch("backend.app.services.lifecycle.dispatching.async_session", dispatch_case.session_maker),
+            patch("backend.app.services.lifecycle.queued.async_session", dispatch_case.session_maker),
             patch(
                 "backend.app.services.lifecycle.dispatching.printer_manager.is_connected", MagicMock(return_value=True)
             ),
@@ -368,8 +373,14 @@ async def _failed_dispatch_message(dispatch_case, *, handshake_fails: bool) -> s
             for p in patches:
                 stack.enter_context(p)
             await scheduler.workers.leave(db, item)
+            from backend.tests.unit.test_scheduler_cleanup_library import _wait_for_dispatch
 
-        refreshed = await db.get(PrintQueueItem, dispatch_case.item_id)
+            await _wait_for_dispatch(
+                SimpleNamespace(session_maker=dispatch_case.session_maker, queue_item_id=dispatch_case.item_id)
+            )
+
+        await db.refresh(item)
+        refreshed = item
         assert refreshed.status == "failed"
         return refreshed.error_message or ""
 

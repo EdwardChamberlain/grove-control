@@ -405,11 +405,14 @@ async def release_queue_references(db: AsyncSession, file_ids: list[int]) -> int
     # A live heat-soak must be aborted through its service so heater shutdown,
     # reservation cleanup, and queue status are persisted together.
     from backend.app.services.lifecycle.dispatching import is_soaking
-    from backend.app.services.lifecycle.engine import hold_printers, lock_queue_items
+    from backend.app.services.lifecycle.engine import lock_queue_items, writer
     from backend.app.services.lifecycle.preheating import abort_heat_soak
 
     references = await db.execute(
-        select(PrintQueueItem.id, PrintQueueItem.printer_id).where(PrintQueueItem.library_file_id.in_(file_ids))
+        select(
+            PrintQueueItem.id,
+            func.coalesce(PrintQueueItem.printer_id, PrintQueueItem.assigned_printer_id),
+        ).where(PrintQueueItem.library_file_id.in_(file_ids))
     )
     expected_printers = dict(references.all())
     names = dict(
@@ -420,25 +423,25 @@ async def release_queue_references(db: AsyncSession, file_ids: list[int]) -> int
         file_id: f"'{names.get(file_id, 'The library file')}' was deleted from the library" for file_id in file_ids
     }
 
-    await hold_printers(db, expected_printers.values())
-    items = await lock_queue_items(db, expected_printers)
-    for item_id in sorted(items):
-        item = items[item_id]
-        if item is None or item.library_file_id not in file_ids:
-            continue
-        if item.archive_id is None and (item.status == "queued" or is_soaking(item)):
-            if is_soaking(item):
-                await abort_heat_soak(
-                    db,
-                    item,
-                    reason_by_file.get(item.library_file_id, "The library file was deleted"),
-                    status="cancelled",
-                    commit=False,
-                )
-            else:
-                item.error_message = reason_by_file.get(item.library_file_id, "The library file was deleted")
-            released += 1
-        item.library_file_id = None
+    async with writer(expected_printers.values()):
+        items = await lock_queue_items(db, expected_printers)
+        for item_id in sorted(items):
+            item = items[item_id]
+            if item is None or item.library_file_id not in file_ids:
+                continue
+            if item.archive_id is None and (item.status == "queued" or is_soaking(item)):
+                if is_soaking(item):
+                    await abort_heat_soak(
+                        db,
+                        item,
+                        reason_by_file.get(item.library_file_id, "The library file was deleted"),
+                        status="cancelled",
+                        commit=False,
+                    )
+                else:
+                    item.error_message = reason_by_file.get(item.library_file_id, "The library file was deleted")
+                released += 1
+            item.library_file_id = None
 
     return released
 

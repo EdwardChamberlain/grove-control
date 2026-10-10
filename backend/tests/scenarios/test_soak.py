@@ -52,7 +52,7 @@ async def test_stop_during_soak_turns_the_heaters_off(app):
     await app.action(job_id, "stop")
     await app.run()
 
-    assert (await app.job(job_id)).status == "cancelled"
+    assert (await app.job(job_id)).status == "unsuccessful"
     assert "M140 S0" in gcode(printer)
     assert "M141 S0" in gcode(printer)
     assert printer.sent("project_file") == []
@@ -73,7 +73,7 @@ async def test_soak_interrupted_by_restart_turns_heaters_off_and_keeps_the_hold(
 
     await app.action(job_id, "stop")
     await app.run()
-    assert (await app.job(job_id)).status == "cancelled"
+    assert (await app.job(job_id)).status == "unsuccessful"
 
 
 async def _persist_unstarted_soak(app):
@@ -83,7 +83,12 @@ async def _persist_unstarted_soak(app):
         await db.execute(
             update(PrintQueueItem)
             .where(PrintQueueItem.id == job_id)
-            .values(status="preheating", preheat_requested_at=app.clock.now())
+            .values(
+                status="preheating",
+                printer_id=printer.printer_id,
+                assigned_printer_id=None,
+                preheat_requested_at=app.clock.now(),
+            )
         )
         await db.commit()
     return printer, job_id
@@ -167,7 +172,7 @@ async def test_stop_as_the_soak_hands_off_sends_nothing_and_turns_heaters_off(ap
     await running
     await app.run()
 
-    assert (await app.job(job_id)).status == "cancelled"
+    assert (await app.job(job_id)).status == "unsuccessful"
     assert printer.sent("project_file") == []
     assert "M140 S0" in gcode(printer)
 
@@ -253,7 +258,6 @@ async def test_a_file_lost_during_the_soak_fails_the_dispatch_and_cools_the_prin
     job_id = await app.queue(printer, await app.add_file("lost.3mf"), **SOAK)
     await app.run()
     os.remove(app.tmp_path / "library" / "lost.3mf")
-    app.allowed_errors += ["failed to copy dispatch Archive"]
 
     await app.advance(11 * 60)
 
@@ -276,7 +280,7 @@ async def test_an_any_machine_soak_holds_the_printer_it_was_given(app):
     assert (await app.job(job_id)).status == "printing"
 
 
-async def test_telemetry_lost_after_the_soak_parks_the_job_and_cools_the_printer(app):
+async def test_telemetry_lost_after_the_soak_retries_as_a_fresh_heat_soak(app):
     printer, job_id = await soaking_job(app)
     printer.upload_gate = asyncio.Event()
     await app.advance(9 * 60)
@@ -290,6 +294,13 @@ async def test_telemetry_lost_after_the_soak_parks_the_job_and_cools_the_printer
     await app.advance(60)
 
     job = await app.job(job_id)
-    assert job.status == "dispatching"
+    assert job.status == "failed" and job.physical_outcome is None
     assert printer.sent("project_file") == []
     assert "M140 S0" in gcode(printer)
+    from sqlalchemy import select
+
+    from backend.app.models.print_queue import PrintQueueItem
+
+    async with app.session() as db:
+        retries = list(await db.scalars(select(PrintQueueItem).where(PrintQueueItem.id != job_id)))
+    assert len(retries) == 1 and retries[0].status == "preheating" and retries[0].retry_on_failure is False

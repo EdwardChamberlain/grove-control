@@ -20,9 +20,7 @@ from backend.app.services.lifecycle import clock
 
 logger = logging.getLogger(__name__)
 TICK = 30
-ARCHIVE_REPAIR_INTERVAL = 60
 _wake: asyncio.Event | None = None
-_next_archive_repair = 0.0
 
 
 def wake() -> None:
@@ -31,13 +29,13 @@ def wake() -> None:
         _wake.set()
 
 
-def _handlers():
+def _handlers(dispatcher):
     from backend.app.services.lifecycle import dispatching, preheating
 
     return {
         "soak_end": preheating.soak_ended,
-        "ack": dispatching.acknowledgement_due,
-        "ack_landed": dispatching.acknowledgement_due,
+        "dispatch_ready": dispatcher.ready_due,
+        "dispatch_ack": dispatching.acknowledgement_due,
     }
 
 
@@ -55,10 +53,9 @@ async def start(dispatcher) -> None:
 
 async def tick(dispatcher) -> None:
     """Run due deadlines, then recovery and heater shutdowns."""
-    global _next_archive_repair
     from backend.app.services.lifecycle import preheating
 
-    handlers = _handlers()
+    handlers = _handlers(dispatcher)
     async with database.async_session() as db:
         due = (
             await db.execute(
@@ -81,15 +78,6 @@ async def tick(dispatcher) -> None:
             await run_with_retry(step, label=step.__qualname__, session_factory=database.async_session)
         except Exception:
             logger.exception("Lifecycle step %s failed", step.__qualname__)
-    now = clock.monotonic()
-    if now >= _next_archive_repair:
-        from backend.app.services.lifecycle.intake import reconcile_print_archives
-
-        _next_archive_repair = now + ARCHIVE_REPAIR_INTERVAL
-        try:
-            await reconcile_print_archives()
-        except Exception:
-            logger.exception("Archive repair failed")
 
 
 async def _run(handler, item_id: int, db) -> None:
