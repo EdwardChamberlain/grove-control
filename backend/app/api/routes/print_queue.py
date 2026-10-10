@@ -1484,6 +1484,10 @@ async def retry_queue_item(
         )
         for field in ("plate_id", "ams_mapping", "nozzle_mapping", "filament_overrides", "required_filament_types"):
             values[field] = getattr(candidates[0], field)
+        # Variant retries return to the printer pool. Their previous tray IDs
+        # belong to the printer that handled the old job; choose a fresh
+        # mapping once the scheduler selects a printer for this replacement.
+        values["ams_mapping"] = None
     else:
         library = await db.get(LibraryFile, old.library_file_id) if old.library_file_id is not None else None
         if source_available(library):
@@ -1509,6 +1513,8 @@ async def retry_queue_item(
         }
         for candidate in candidates
     ]
+    for variant in variants:
+        variant["ams_mapping"] = None
     [new] = await create_job(db, [values], at="top", variants=variants)
     if unsent(old):
         from backend.app.services.print_scheduler import scheduler

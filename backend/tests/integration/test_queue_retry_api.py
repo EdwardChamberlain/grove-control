@@ -1,4 +1,4 @@
-"""Retry keeps the job's candidate snapshots and respects priority permissions."""
+"""Retry keeps candidate snapshots, rebinds printer-specific mapping, and respects priority permissions."""
 
 import pytest
 from sqlalchemy import func, select
@@ -50,7 +50,7 @@ async def _source(db, path, model):
 
 
 @pytest.mark.parametrize("missing", [None, "selected", "alternative"])
-async def test_retry_preserves_available_candidate_snapshots(
+async def test_retry_preserves_candidate_snapshots_but_resets_printer_mapping(
     async_client, db_session, printer_factory, tmp_path, monkeypatch, missing
 ):
     monkeypatch.setattr(settings, "base_dir", tmp_path)
@@ -119,15 +119,16 @@ async def test_retry_preserves_available_candidate_snapshots(
             "target_model",
             "position",
             "plate_id",
-            "ams_mapping",
             "nozzle_mapping",
             "filament_overrides",
             "required_filament_types",
             "print_time_seconds",
         ):
             assert getattr(candidate, field) == getattr(original, field)
+        assert candidate.ams_mapping is None
         assert candidate.attempt_count == 0 and candidate.id != original.id
     assert body["archive_id"] is None and body["library_file_id"] is None and body["printer_id"] is None
+    assert body["ams_mapping"] is None
     assert body["target_model"] == originals[0].target_model
     assert body["chamber_heat_soak"] is True and body["force_color_match"] is False
     assert body["position"] < (-20 if missing == "alternative" else -30)
