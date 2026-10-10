@@ -29,12 +29,12 @@ def wake() -> None:
         _wake.set()
 
 
-def _handlers():
+def _handlers(dispatcher):
     from backend.app.services.lifecycle import dispatching, preheating
 
     return {
         "soak_end": preheating.soak_ended,
-        "dispatch_ready": dispatching.ready_due,
+        "dispatch_ready": dispatcher.ready_due,
         "dispatch_ack": dispatching.acknowledgement_due,
     }
 
@@ -55,7 +55,7 @@ async def tick(dispatcher) -> None:
     """Run due deadlines, then recovery and heater shutdowns."""
     from backend.app.services.lifecycle import preheating
 
-    handlers = _handlers()
+    handlers = _handlers(dispatcher)
     async with database.async_session() as db:
         due = (
             await db.execute(
