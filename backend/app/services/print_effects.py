@@ -1386,21 +1386,27 @@ async def on_finish_photo_moment(printer_id: int, data: dict, *, memory):
 async def print_started(printer_id: int, data: dict, job_id: int, archive_id: int | None, *, new: bool, memory) -> None:
     """A print's start effects: new-print actions once per print, its Archive, then the start notification."""
     linked = archive_id
+    has_archive_source = bool(data.get("filename") or data.get("subtask_name"))
+    repair_task = memory.archive_repairs_in_flight.get(job_id) if job_id is not None else None
+    owns_archive_start = has_archive_source and job_id is not None and repair_task is None
+    if owns_archive_start:
+        # Register before any other awaited start effect, so recovery cannot
+        # launch a duplicate acquisition while _begin_new_print is running.
+        memory.archive_starts_in_flight.add(job_id)
     try:
         if new:
             await _begin_new_print(printer_id, data, memory=memory)
-        if data.get("filename") or data.get("subtask_name"):
-            if job_id is not None:
-                memory.archive_starts_in_flight.add(job_id)
-            try:
-                await _archive_print_start(
-                    printer_id, data, queue_archive_id=archive_id, queue_job_id=job_id, memory=memory
-                )
-            finally:
-                if job_id is not None:
-                    memory.archive_starts_in_flight.discard(job_id)
-        linked = await _link_observed_archive(printer_id, job_id, data["submission_id"])
+        if repair_task is not None:
+            await repair_task
+        elif has_archive_source:
+            await _archive_print_start(
+                printer_id, data, queue_archive_id=archive_id, queue_job_id=job_id, memory=memory
+            )
+        if job_id is not None:
+            linked = await _link_observed_archive(printer_id, job_id, data["submission_id"])
     finally:
+        if owns_archive_start:
+            memory.archive_starts_in_flight.discard(job_id)
         if new:
             await _finish_new_print(printer_id, data, linked)
 

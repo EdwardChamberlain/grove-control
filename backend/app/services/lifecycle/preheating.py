@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.core.tasks import spawn_background_task
 from backend.app.models.print_queue import ACTIVE_STATUSES, PrintQueueItem
 from backend.app.models.printer import Printer
+from backend.app.services.job_identity import telemetry_identity
 from backend.app.services.lifecycle import clock
 from backend.app.services.lifecycle.engine import (
     lock_queue_item,
@@ -276,12 +277,23 @@ class SkipHeatSoakResult(str, Enum):
 
 async def _hand_off(db: AsyncSession, item: PrintQueueItem, values: Mapping[str, Any]) -> None:
     """Exit to dispatching; dispatching's entry starts the dispatch once this commits."""
+    state = printer_manager.get_status(item.printer_id)
+    baseline_identity = (
+        telemetry_identity(state)
+        if state and state.connected and getattr(state, "job_telemetry_ready", False)
+        else None
+    )
     await transition_queue_item(
         db,
         item,
         "preheating",
         "dispatching",
-        values={"dispatched_at": None, "dispatch_stage": "copying", **values},
+        values={
+            "dispatched_at": None,
+            "dispatch_stage": "copying",
+            "dispatch_baseline_subtask_id": baseline_identity,
+            **values,
+        },
     )
     await db.commit()
 

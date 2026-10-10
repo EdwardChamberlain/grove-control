@@ -37,6 +37,9 @@ class PrintMemory:
     started_job_effects: dict[int, int] = field(default_factory=dict)
     # Archive recovery must not duplicate a start-time FTP request for this job.
     archive_starts_in_flight: set[int] = field(default_factory=set)
+    # Archive repair tasks are keyed by job so a late start callback can join
+    # the same acquisition instead of opening a second FTP request.
+    archive_repairs_in_flight: dict[int, asyncio.Task] = field(default_factory=dict)
 
 
 print_memory = PrintMemory()
@@ -182,7 +185,9 @@ async def printer_status(printer_id: int, state) -> None:
 
 
 async def reconcile_print_archives() -> None:
-    """Retry Archive acquisition for started jobs using their durable source identity."""
+    """Schedule missing Archive acquisition without blocking lifecycle deadlines."""
+    from backend.app.core.tasks import spawn_background_task
+
     async with async_session() as db:
         jobs = (
             await db.execute(
@@ -205,8 +210,8 @@ async def reconcile_print_archives() -> None:
             )
         ).all()
     for job in jobs:
-        if job.id in print_memory.archive_starts_in_flight:
-            continue  # The original start effect is already acquiring this Archive.
+        if job.id in print_memory.archive_starts_in_flight or job.id in print_memory.archive_repairs_in_flight:
+            continue  # The original start effect or a repair task already owns this Archive.
         live = printer_manager.get_status(job.printer_id)
         matching_live = bool(
             live and live.connected and live.job_telemetry_ready and telemetry_identity(live) == job.dispatch_subtask_id
@@ -224,8 +229,24 @@ async def reconcile_print_archives() -> None:
             "plate_id": job.plate_id,
             "owner_id": job.created_by_id,
         }
-        try:
-            await print_effects._archive_print_start(job.printer_id, data, queue_job_id=job.id, memory=print_memory)
-            await print_effects._link_observed_archive(job.printer_id, job.id, job.dispatch_subtask_id)
-        except Exception:
-            logger.exception("Archive reconciliation failed for Queue job %s", job.id)
+        task = spawn_background_task(
+            _repair_print_archive(job.id, job.printer_id, job.dispatch_subtask_id, data),
+            name=f"archive-repair-{job.id}",
+        )
+        print_memory.archive_repairs_in_flight[job.id] = task
+
+
+async def _repair_print_archive(job_id: int, printer_id: int, identity: str, data: dict) -> None:
+    """Acquire and attach one missing Archive without holding up the lifecycle loop."""
+    try:
+        # A normal start callback may have begun after reconciliation selected
+        # this row but before its background task got scheduled.
+        if job_id in print_memory.archive_starts_in_flight:
+            return
+        await print_effects._archive_print_start(printer_id, data, queue_job_id=job_id, memory=print_memory)
+        await print_effects._link_observed_archive(printer_id, job_id, identity)
+    except Exception:
+        logger.exception("Archive reconciliation failed for Queue job %s", job_id)
+    finally:
+        if print_memory.archive_repairs_in_flight.get(job_id) is asyncio.current_task():
+            print_memory.archive_repairs_in_flight.pop(job_id, None)

@@ -662,6 +662,7 @@ _QUEUE_INSERT_COLUMN_DEFINITIONS: dict[str, tuple[str, str]] = {
     "dispatched_at": ("DATETIME", "TIMESTAMP"),
     "dispatch_stage": ("VARCHAR(24)", "VARCHAR(24)"),
     "dispatch_subtask_id": ("VARCHAR(32)", "VARCHAR(32)"),
+    "dispatch_baseline_subtask_id": ("VARCHAR(32)", "VARCHAR(32)"),
     "started_at": ("DATETIME", "TIMESTAMP"),
     "completed_at": ("DATETIME", "TIMESTAMP"),
     "error_message": ("TEXT", "TEXT"),

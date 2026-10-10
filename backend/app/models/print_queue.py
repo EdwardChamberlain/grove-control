@@ -218,6 +218,10 @@ class PrintQueueItem(Base):
     # persisted before dispatch so terminal printer telemetry can still be
     # attributed to this exact attempt after an application restart.
     dispatch_subtask_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Printer identity observed when this bound attempt entered Dispatching.
+    # It distinguishes a cleared prior terminal report from another print
+    # that completed while this attempt was preparing its file.
+    dispatch_baseline_subtask_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

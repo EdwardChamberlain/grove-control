@@ -73,6 +73,7 @@ def telemetry_status(printer_status, dispatch_subtask_id: str | None) -> str | N
 async def fail(db: AsyncSession, item: PrintQueueItem, message: str, **values) -> None:
     """Commit a failed attempt, retrying only when the print command is proven unsent."""
     values = {"error_message": message, "completed_at": clock.now(), **values}
+    values.setdefault("dispatch_baseline_subtask_id", None)
     dispatched_at = values.get("dispatched_at", item.dispatched_at)
     subtask_id = values.get("dispatch_subtask_id", item.dispatch_subtask_id)
     action = "dispatch_failure" if dispatched_at is None and subtask_id is None else None
@@ -128,6 +129,7 @@ class Dispatcher:
             values = {
                 "waiting_reason": None,
                 "dispatch_stage": "copying",
+                "dispatch_baseline_subtask_id": telemetry_identity(printer_manager.get_status(printer_id)),
                 **(binding.values() if binding else {"printer_id": printer_id}),
             }
             try:
@@ -351,7 +353,7 @@ class Dispatcher:
             if printer is None or archive is None or archive.dispatched_queue_item_id != item.id:
                 await db.rollback()
                 raise RuntimeError("Dispatch Archive or printer is missing")
-            ready = self._telemetry(printer_id)
+            ready = self._telemetry(printer_id, item.dispatch_baseline_subtask_id)
             if ready is not True:
                 await db.rollback()
                 if ready is False:
@@ -391,6 +393,7 @@ class Dispatcher:
                 "deadline_kind": "dispatch_ack",
                 "started_at": None,
                 "error_message": None,
+                "dispatch_baseline_subtask_id": None,
             }
             await transition_queue_item(
                 db,
@@ -459,7 +462,7 @@ class Dispatcher:
             if not self._is_stage(item, stage):
                 await db.rollback()
                 return False
-            ready = self._telemetry(item.printer_id)
+            ready = self._telemetry(item.printer_id, item.dispatch_baseline_subtask_id)
             if ready is True:
                 if item.deadline_kind == "dispatch_ready":
                     await transition_queue_item(
@@ -528,7 +531,7 @@ class Dispatcher:
                 await db.rollback()
                 return
             stage = item.dispatch_stage
-            ready = self._telemetry(printer_id)
+            ready = self._telemetry(printer_id, item.dispatch_baseline_subtask_id)
             if ready is True:
                 await transition_queue_item(
                     db,
@@ -552,8 +555,8 @@ class Dispatcher:
             item and item.status == "dispatching" and item.dispatch_stage == stage and item.dispatched_at is None
         )
 
-    def _telemetry(self, printer_id: int | None) -> bool | None:
-        """True: fresh idle telemetry; False: printer is active; None: stale or unavailable."""
+    def _telemetry(self, printer_id: int | None, baseline_identity: str | None = None) -> bool | None:
+        """True: safe idle telemetry; False: active printer; None: stale, changed or unavailable."""
         if printer_id is None:
             return False
         state = printer_manager.get_status(printer_id)
@@ -561,8 +564,12 @@ class Dispatcher:
             return None
         if state.state in _ACTIVE_PRINT_STATES:
             return False
-        if state.state != "IDLE":
-            return None  # FINISH/FAILED is terminal, but not fresh idle confirmation for a new send.
+        if state.state in ("FINISH", "FAILED"):
+            identity = telemetry_identity(state)
+            if not baseline_identity or identity != baseline_identity:
+                return None  # Another print reached a terminal state while this job was preparing.
+        elif state.state != "IDLE":
+            return None
         return True if self._selection._is_printer_idle(printer_id) else None
 
     async def _fail_unsent(self, item_id: int, message: str, *, expected_stage: str | None = None, **values) -> None:
@@ -758,7 +765,7 @@ class Dispatcher:
 
             if dispatching and item.dispatch_stage in ("copying", "uploading", "uploaded"):
                 stage = item.dispatch_stage
-                ready = self._telemetry(item.printer_id)
+                ready = self._telemetry(item.printer_id, item.dispatch_baseline_subtask_id)
                 if item.deadline_kind == "dispatch_ready":
                     if ready is True:
                         await transition_queue_item(

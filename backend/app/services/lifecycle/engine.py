@@ -253,6 +253,7 @@ async def transition_queue_item(
         metadata.setdefault("deadline_kind", None)
     if expected_status == "dispatching" and status != "dispatching":
         metadata.setdefault("dispatch_stage", None)
+        metadata.setdefault("dispatch_baseline_subtask_id", None)
     item_id = item if isinstance(item, int) else item.id
     session = isinstance(db, AsyncSession)
     printer_id = metadata.get("printer_id", item.printer_id if not isinstance(item, int) else None)
