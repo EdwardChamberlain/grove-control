@@ -25,7 +25,7 @@ async def sessions(tmp_path):
     from backend.app.services import print_effects
     from backend.app.services.lifecycle import intake
 
-    intake._started_job_effects.clear()
+    intake.print_memory.started_job_effects.clear()
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'paused.db'}")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -214,7 +214,7 @@ async def test_print_start_skips_a_stop_that_wins_after_the_job_is_read(sessions
             await main.on_print_start(1, {"submission_id": "123", "filename": "same.3mf"})
             archive_start.assert_not_awaited()
             publish.assert_not_awaited()
-            assert 1 not in intake._started_job_effects
+            assert 1 not in intake.print_memory.started_job_effects
     async with sessions() as db:
         item = await db.get(PrintQueueItem, item_id)
         assert item.status == "cancelled"

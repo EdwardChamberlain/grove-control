@@ -5,14 +5,14 @@ committed, and the writer refuses to enter such a state any other way. A
 refused transition runs no step; the step's own errors are raised. Awaiting
 and final own their entry and exit steps, which run in the transition's
 transaction after the conditional write; a state cleans up on its own exit.
-Only an ended job can pass its hold to a new external print.
+An external print can replace only an ended job on the same printer.
 """
 
 from importlib import import_module
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy import event
+from sqlalchemy import event, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -119,7 +119,7 @@ async def test_awaiting_and_final_steps_run_only_after_the_conditional_write(
         ("cancelled", "unsuccessful", "clear_plate"),
         ("finished", "successful", "clear_plate"),
         ("failed", "unsuccessful", "printer_deleted"),
-        ("cancelled", "unsuccessful", "hold_transferred"),
+        ("cancelled", "unsuccessful", "external_replacement"),
         ("cancelled", "finished", "printer_report"),
         ("queued", "unsuccessful", "cancel"),
     ],
@@ -159,7 +159,11 @@ async def test_automatic_clear_plate_belongs_to_the_finishing_transaction(sessio
 
 
 @pytest.mark.parametrize("status", ["dispatching", "printing", "paused", "finished", "failed", "cancelled"])
-async def test_only_an_ended_job_passes_its_hold_to_a_new_external_print(sessions, status):
+async def test_external_start_only_replaces_an_ended_job_and_keeps_its_binding(sessions, status):
+    from types import SimpleNamespace
+
+    from backend.app.services.lifecycle.printing import observe_print
+
     ended = status in AWAITING_PLATE_CLEAR_STATUSES
     item_id = await job(sessions, "printing" if ended else status)
     async with sessions() as db:
@@ -170,14 +174,31 @@ async def test_only_an_ended_job_passes_its_hold_to_a_new_external_print(session
                 await transition_queue_item(db, held, "printing", status, values=values)
             await db.commit()
         outcome = held.physical_outcome
-        assert await lifecycle_engine.transfer_hold(db, held, "new-run") is ended
+        observed, confirmed = await observe_print(
+            db,
+            1,
+            "new-run",
+            observed_state=SimpleNamespace(
+                connected=True,
+                job_telemetry_ready=True,
+                state="RUNNING",
+                submission_id="new-run",
+            ),
+            active_snapshot=True,
+        )
         await db.commit()
     async with sessions() as db:
         row = await db.get(PrintQueueItem, item_id)
+        all_jobs = list(await db.scalars(select(PrintQueueItem).order_by(PrintQueueItem.id)))
     if not ended:
         assert (row.status, row.error_message) == (status, None)
+        assert observed is None and not confirmed
+        assert len(all_jobs) == 1
         return
-    reason = "Printer hold transferred to externally started print new-run"
+    reason = "Plate hold released after external print new-run replaced this job"
     assert row.status == ("successful" if status == "finished" else "unsuccessful")
     assert row.error_message == (f"Nozzle clog; {reason}" if status == "failed" else reason)
     assert outcome is not None and row.physical_outcome == outcome
+    assert observed is not None and observed.id != row.id and observed.status == "printing"
+    assert not confirmed
+    assert len(all_jobs) == 2 and all(item.printer_id == 1 for item in all_jobs)

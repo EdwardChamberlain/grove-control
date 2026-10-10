@@ -11,10 +11,9 @@ from backend.app.api.routes.users import delete_user
 from backend.app.core.database import Base
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
-from backend.app.models.print_queue import PrintQueueItem
+from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.models.user import User
-from backend.app.services.lifecycle.engine import HOLDING_STATUSES
 
 
 @pytest.fixture(params=[False, True], ids=["sqlite-default", "foreign-keys"])

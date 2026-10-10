@@ -658,8 +658,9 @@ async def on_print_start(
             .order_by(PrintQueueItem.id)
         )
         queue_item = queue_result.scalars().first()
-        if queue_item is not None:
-            plate_id = queue_item.plate_id
+        queue_plate_id = getattr(queue_item, "plate_id", None)
+        if isinstance(queue_plate_id, int):
+            plate_id = queue_plate_id
 
     # Always create session (even without valid remain data) so print_name
     # is available at completion for 3MF-based tracking
@@ -1077,8 +1078,9 @@ async def _queue_item_for_archive(archive, db: AsyncSession):
     """Return the durable job that owns an Archive, including legacy links."""
     from backend.app.models.print_queue import PrintQueueItem
 
-    if archive.dispatched_queue_item_id is not None:
-        return await db.get(PrintQueueItem, archive.dispatched_queue_item_id)
+    dispatched_queue_item_id = getattr(archive, "dispatched_queue_item_id", None)
+    if isinstance(dispatched_queue_item_id, int):
+        return await db.get(PrintQueueItem, dispatched_queue_item_id)
     result = await db.execute(
         select(PrintQueueItem).where(PrintQueueItem.archive_id == archive.id).order_by(PrintQueueItem.id)
     )
@@ -1327,8 +1329,9 @@ async def _track_from_3mf(
     # use the same durable row, including after a restart.
     if plate_id is None and archive_id:
         queue_item = await _dispatch_queue_item()
-        if queue_item is not None and queue_item.plate_id is not None:
-            plate_id = queue_item.plate_id
+        queue_plate_id = getattr(queue_item, "plate_id", None)
+        if isinstance(queue_plate_id, int):
+            plate_id = queue_plate_id
             logger.info(
                 "[UsageTracker] 3MF: plate_id=%s recovered from queue item %s",
                 plate_id,
@@ -1348,8 +1351,9 @@ async def _track_from_3mf(
     # Archive link as a reason to lose the entire print's usage tracking.
     if plate_id is None:
         plate_queue_item = await _dispatch_queue_item()
-        if plate_queue_item is not None and plate_queue_item.plate_id is not None:
-            plate_id = plate_queue_item.plate_id
+        queue_plate_id = getattr(plate_queue_item, "plate_id", None)
+        if isinstance(queue_plate_id, int):
+            plate_id = queue_plate_id
             logger.info(
                 "[UsageTracker] 3MF: plate_id=%s recovered from queue item %s",
                 plate_id,

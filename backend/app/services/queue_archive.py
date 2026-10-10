@@ -60,7 +60,7 @@ async def align_attempt(change: "Transition") -> None:
     if (change.before == "dispatching" and status == "printing") or (attaching and status in ("printing", "paused")):
         attempt.status = "printing"
         attempt.started_at = row.started_at or datetime.now(timezone.utc)
-    recorded = status in AWAITING_PLATE_CLEAR_STATUSES and (
+    recorded = status in (*AWAITING_PLATE_CLEAR_STATUSES, *FINAL_STATUSES) and (
         change.before != status or change.action == "printer_report"
     )
     if recorded or (attaching and status in (*AWAITING_PLATE_CLEAR_STATUSES, *FINAL_STATUSES)):

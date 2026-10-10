@@ -20,7 +20,7 @@ from backend.app.core.database import Base
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services.lifecycle import effects, engine as lifecycle_engine, preheating
-from backend.app.services.lifecycle.dispatching import SOAKING, is_soaking
+from backend.app.services.lifecycle.dispatching import is_soaking
 from backend.app.services.lifecycle.engine import (
     ALLOWED_TRANSITIONS,
     QueueTransitionConflict,
@@ -75,7 +75,7 @@ def test_every_exit_belongs_to_a_lifecycle_state_module():
         assert callable(import_module(module).on_exit)
 
 
-async def test_soaking_query_and_row_check_agree(sessions):
+async def test_soaking_statuses_match_the_state_predicate(sessions):
     rows = [
         ("queued", True, None),
         ("preheating", True, None),
@@ -89,10 +89,9 @@ async def test_soaking_query_and_row_check_agree(sessions):
         # No printer, so the holding index does not limit the rows to one per printer.
         db.add_all(PrintQueueItem(status=s, chamber_heat_soak=c, dispatch_subtask_id=d) for s, c, d in rows)
         await db.commit()
-        queried = set(await db.scalars(select(PrintQueueItem.id).where(SOAKING)))
         items = list(await db.scalars(select(PrintQueueItem).order_by(PrintQueueItem.id)))
-    assert queried == {item.id for item in items if is_soaking(item)}
-    assert [item.status for item in items if item.id in queried] == ["preheating", "dispatching"]
+    soaking = {item.id for item in items if is_soaking(item)}
+    assert [item.status for item in items if item.id in soaking] == ["preheating", "dispatching"]
 
 
 async def test_failed_reservation_commit_never_enters_heating(soak):

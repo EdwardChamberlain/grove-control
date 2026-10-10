@@ -22,7 +22,7 @@ from backend.app.services.lifecycle import (
     preheating as heat,
     queued as lifecycle_queued,
 )
-from backend.app.services.lifecycle.engine import InvalidQueueTransition, hold_printers, transition_queue_item, writer
+from backend.app.services.lifecycle.engine import InvalidQueueTransition, transition_queue_item, writer
 from backend.app.services.print_scheduler import PrintScheduler, scheduler
 from backend.app.services.queue_archive import link_dispatch_archive, prepare_dispatch_archive
 from backend.tests.unit.test_lifecycle_preheating import enter_preheating
@@ -155,7 +155,6 @@ async def test_dispatch_entry_rejects_another_jobs_prepared_archive(alignment):
         other = PrintQueueItem(assigned_printer_id=2, library_file_id=alignment.source_id, status="queued")
         db.add(other)
         await db.commit()
-        await hold_printers(db, [job.assigned_printer_id, other.assigned_printer_id])
         async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
             await transition_queue_item(db, job, "queued", "dispatching")
         async with writer(getattr(other, "printer_id", None) or getattr(other, "assigned_printer_id", None)):

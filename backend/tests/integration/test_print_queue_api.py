@@ -858,7 +858,7 @@ class TestPrintQueueAPI:
         assert item.status == "preheating" and item.error_message == stale
 
     @pytest.mark.parametrize("action", ["cancel", "stop", "edit", "delete"])
-    async def test_preheating_actions_preserve_the_printer_hold(
+    async def test_preheating_actions_preserve_dispatch_safety(
         self, async_client, queue_item_factory, db_session, action
     ):
         from backend.app.models.printer import Printer
@@ -879,7 +879,8 @@ class TestPrintQueueAPI:
             assert item.status == "preheating"
         else:
             assert response.status_code == 200, response.text
-            assert item.status == "cancelled"
+            assert item.status == "unsuccessful"
+            assert item.physical_outcome is None
             assert printer.heat_soak_shutdown_pending
             assert printer.heat_soak_shutdown_at
 

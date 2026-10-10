@@ -663,20 +663,20 @@ class Dispatcher:
         """Schedule persisted pre-send stages and reconcile sent jobs from fresh telemetry."""
         await printing.adopt_legacy_prints(db)
         active = PrintQueueItem.status.in_(("dispatching", "printing", "paused"))
-        jobs = list(
+        job_ids = list(
             await db.scalars(
-                select(PrintQueueItem).where(active).order_by(PrintQueueItem.printer_id, PrintQueueItem.id)
+                select(PrintQueueItem.id).where(active).order_by(PrintQueueItem.printer_id, PrintQueueItem.id)
             )
         )
         await db.rollback()
-        for job in jobs:
-            if queued.in_flight(job.id):
+        for item_id in job_ids:
+            if queued.in_flight(item_id):
                 continue
             try:
-                await self._recover(db, job.id)
+                await self._recover(db, item_id)
             except Exception:
                 await db.rollback()
-                logger.exception("Queue item %s: recovery failed", job.id)
+                logger.exception("Queue item %s: recovery failed", item_id)
         from backend.app.services.lifecycle.intake import reconcile_print_archives
 
         await reconcile_print_archives()

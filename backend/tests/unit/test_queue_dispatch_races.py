@@ -309,7 +309,7 @@ async def test_print_start_does_not_take_association_lock_without_a_candidate(al
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
     monkeypatch.setattr(intake, "async_session", alignment.sessions)
     monkeypatch.setattr(print_effects, "async_session", alignment.sessions)
-    monkeypatch.setattr(intake, "_started_job_effects", {})
+    monkeypatch.setattr(intake, "print_memory", intake.PrintMemory())
     monkeypatch.setattr(print_effects, "_archive_print_start", AsyncMock())
     monkeypatch.setattr(lifecycle_effects, "publish_queue_job_started", AsyncMock())
     lock = AsyncMock(side_effect=AssertionError("No association needs a write lock"))

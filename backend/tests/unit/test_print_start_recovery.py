@@ -118,7 +118,7 @@ async def test_paced_reconciliation_repairs_archive_without_repeating_start_effe
         archive = await db.get(PrintArchive, job.archive_id)
         assert archive is not None and archive.dispatched_queue_item_id == job.id
         assert archive.subtask_id == "external-run"
-        assert intake._started_job_effects[1] == job.id
+        assert intake.print_memory.started_job_effects[1] == job.id
         assert len(list(await db.scalars(select(PrintArchive)))) == 1
     for effect in (started, notified, powered_on, usage):
         assert effect.await_count == int(not recovering)

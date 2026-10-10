@@ -114,7 +114,13 @@ LEGACY_TRANSITIONS = {
 }
 
 
-ARCHIVE_OUTCOMES = {"finished": "completed", "failed": "failed", "cancelled": "aborted"}
+ARCHIVE_OUTCOMES = {
+    "finished": "completed",
+    "failed": "failed",
+    "cancelled": "aborted",
+    "successful": "completed",
+    "unsuccessful": "aborted",
+}
 
 
 def physical_failure_reason(outcome: str, error_message: str | None, override: str | None = None) -> str | None:
@@ -195,7 +201,7 @@ def _check(before: str, after: str, action: str | None, upgrading: bool) -> None
             )
     if before in AWAITING_PLATE_CLEAR_STATUSES and action not in _RELEASE_ACTIONS:
         raise InvalidQueueTransition(
-            "A holding job requires Clear Plate, printer deletion, or an observed hold transfer"
+            "A held job requires Clear Plate, printer deletion, an observed external replacement, or a printer report"
         )
 
 

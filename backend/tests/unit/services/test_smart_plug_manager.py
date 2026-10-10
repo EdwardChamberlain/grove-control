@@ -924,12 +924,22 @@ class TestActivePrintGuard:
             physical_outcome="failed",
             auto_off_after=True,
         )
+        db_session.add(origin)
+        await db_session.commit()
+
+        # A later print can start only after the earlier failed plate was
+        # explicitly cleared. Keep the physical result on its historical job.
+        from backend.app.services.lifecycle.awaiting import clear_job_plate
+
+        monkeypatch.setattr(printer_manager, "get_status", lambda _id: None)
+        await clear_job_plate(db_session, origin.id)
+
         later = PrintQueueItem(
             printer_id=printer.id,
             status="printing",
             started_at=ended_at + timedelta(seconds=1),
         )
-        db_session.add_all((origin, later))
+        db_session.add(later)
         await db_session.commit()
 
         monkeypatch.setattr(printer_manager, "is_print_active", lambda _id: False)

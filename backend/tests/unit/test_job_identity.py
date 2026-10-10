@@ -13,11 +13,11 @@ import backend.app.models  # noqa: F401
 from backend.app.api.routes.print_queue import clear_queue_plate, resolve_queue_dispatch, stop_queue_item
 from backend.app.core.database import Base, _migrate_queue_lifecycle
 from backend.app.models.archive import PrintArchive
-from backend.app.models.print_queue import PrintQueueItem
+from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.schemas.print_queue import DispatchResolution
 from backend.app.services.job_identity import event_identity, find_job, needs_dispatch_resolution
-from backend.app.services.lifecycle.engine import HOLDING_STATUSES, transition_queue_item, writer
+from backend.app.services.lifecycle.engine import transition_queue_item, writer
 from backend.app.services.lifecycle.printing import bind_observed_id, observe_print
 from backend.app.services.print_scheduler import PrintScheduler
 from backend.app.services.printer_manager import PrinterManager
@@ -29,7 +29,7 @@ async def sessions(tmp_path):
     from backend.app.services import print_effects
     from backend.app.services.lifecycle import intake
 
-    intake._started_job_effects.clear()
+    intake.print_memory.started_job_effects.clear()
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'jobs.db'}")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -352,7 +352,7 @@ async def test_external_observation_survives_callbacks_and_restart(sessions):
     from backend.app.services import print_effects
     from backend.app.services.lifecycle import intake
 
-    intake._started_job_effects.clear()
+    intake.print_memory.started_job_effects.clear()
     with (
         patch.object(intake, "async_session", sessions),
         patch.object(print_effects, "async_session", sessions),
@@ -365,7 +365,7 @@ async def test_external_observation_survives_callbacks_and_restart(sessions):
         assert archive.await_count == 2
         begin.assert_awaited_once()
         finish.assert_awaited_once()
-        intake._started_job_effects.clear()  # Simulate a new application process.
+        intake.print_memory.started_job_effects.clear()  # Simulate a new application process.
         await main.on_print_start(1, {"submission_id": "external", "filename": "same.3mf"})
     async with sessions() as db:
         items = list((await db.scalars(select(PrintQueueItem))).all())
@@ -389,14 +389,14 @@ async def test_failed_archive_start_is_retried_for_the_same_job(sessions):
         event = {"submission_id": "external", "filename": "same.3mf"}
         with pytest.raises(RuntimeError, match="start WebSocket failed"):
             await main.on_print_start(1, event)
-        assert intake._started_job_effects.get(1) is not None
+        assert intake.print_memory.started_job_effects.get(1) is not None
         await main.on_print_start(1, event)
         begin.assert_awaited_once()
         finish.assert_awaited_once()
     assert archive.await_count == 2
     async with sessions() as db:
         job = await find_job(db, 1, "external")
-        assert intake._started_job_effects[1] == job.id
+        assert intake.print_memory.started_job_effects[1] == job.id
 
 
 async def test_running_recovery_observes_job_without_new_start_effects(sessions):
@@ -469,7 +469,7 @@ async def test_touchscreen_print_takes_over_the_hold_without_releasing_the_print
                 await clear_queue_plate(old_id, db, None)
             assert conflict.value.status_code == 409
             await db.rollback()
-        intake._started_job_effects.clear()  # Simulate restart while the touchscreen print is running.
+        intake.print_memory.started_job_effects.clear()  # Simulate restart while the touchscreen print is running.
         await main.on_print_start(1, {"submission_id": "touchscreen", "filename": "same.3mf"})
         async with sessions() as db:
             new = await find_job(db, 1, "touchscreen")
@@ -655,7 +655,7 @@ async def test_external_archive_is_linked_by_identity_not_name(sessions):
     from backend.app.services import print_effects
     from backend.app.services.lifecycle import intake
 
-    intake._started_job_effects.clear()
+    intake.print_memory.started_job_effects.clear()
 
     async def archive_worker(printer_id, data, **kwargs):
         async with sessions() as db:

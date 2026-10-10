@@ -21,16 +21,14 @@ from backend.app.core.database import (
 )
 from backend.app.models.archive import PrintArchive
 from backend.app.models.library import LibraryFile
-from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant
+from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem, PrintQueueVariant
 from backend.app.models.printer import Printer
 from backend.app.models.settings import Settings
 from backend.app.services.lifecycle.awaiting import clear_job_plate
 from backend.app.services.lifecycle.engine import (
     ACTIVE_STATUSES,
     AWAITING_PLATE_CLEAR_STATUSES,
-    HOLDING_STATUSES,
     InvalidQueueTransition,
-    hold_printers,
     transition_queue_item,
     writer,
 )
@@ -368,7 +366,6 @@ async def test_migration_preserves_exact_hold_creates_missing_job_and_runs_once(
         assert jobs[ids[2]].error_message is None
         synthetic = next(item for item in jobs.values() if item.printer_id == 2)
         assert synthetic.status == "finished"
-        await hold_printers(db, [jobs[held.id].printer_id, synthetic.printer_id])
         await clear_job_plate(db, jobs[held.id])
         await clear_job_plate(db, synthetic)
         await db.commit()

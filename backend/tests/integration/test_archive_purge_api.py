@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from httpx import AsyncClient
 
-from backend.app.services.lifecycle.engine import HOLDING_STATUSES
+from backend.app.models.print_queue import HOLDING_STATUSES
 
 
 @pytest.mark.parametrize("status", HOLDING_STATUSES)

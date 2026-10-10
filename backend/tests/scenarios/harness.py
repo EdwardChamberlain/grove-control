@@ -197,9 +197,6 @@ class Harness:
             stale = vars(module).get("async_session")
             if isinstance(stale, async_sessionmaker) and stale is not database.async_session:
                 self.monkeypatch.setattr(module, "async_session", database.async_session)
-        from backend.app.services.lifecycle import engine
-
-        self.monkeypatch.setattr(engine, "violations", [])
         _forget_process_memory()
         self._baseline_tasks = set(asyncio.all_tasks())
         await self.boot()
@@ -242,7 +239,7 @@ class Harness:
 
         from backend.app.services.smart_plug_manager import smart_plug_manager
 
-        for name in ("on_print_start", "on_print_complete", "schedule_off_after_queue_job"):
+        for name in ("on_print_start", "schedule_off_after_queue_job"):
 
             async def plug(*args, _event=name, **kwargs):
                 self.plug_events.append(Notice(_event, args, kwargs))

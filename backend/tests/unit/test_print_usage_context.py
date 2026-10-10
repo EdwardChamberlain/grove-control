@@ -34,7 +34,7 @@ async def test_start_context_comes_from_identified_job_without_filename_registra
     monkeypatch.setattr(intake, "async_session", alignment.sessions)
     monkeypatch.setattr(print_effects, "async_session", alignment.sessions)
     monkeypatch.setattr(main.printer_manager, "get_status", lambda _id: live)
-    monkeypatch.setattr(intake, "_started_job_effects", {})
+    monkeypatch.setattr(intake, "print_memory", intake.PrintMemory())
     monkeypatch.setattr(print_effects, "_archive_print_start", observed)
     await intake._observe_print_start(
         1,
