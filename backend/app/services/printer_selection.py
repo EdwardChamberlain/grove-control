@@ -10,7 +10,7 @@ import logging
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +21,7 @@ from backend.app.models.smart_plug import SmartPlug
 from backend.app.services.ams_mapping import unresolved
 from backend.app.services.filament_deficit import compute_deficit_for_queue_item
 from backend.app.services.filament_requirements import canonical_filament_type
+from backend.app.services.lifecycle import clock
 from backend.app.services.lifecycle.engine import lock_queue_item
 from backend.app.services.notification_service import notification_service
 from backend.app.services.printer_manager import printer_manager
@@ -36,6 +37,19 @@ _UPLOAD_POOL_WAITING_PREFIX = "Waiting for upload slot"
 # registry.
 _RACK_NOZZLE_IDS: frozenset[int] = frozenset(range(16, 22))
 _EMPTY_NOZZLE_SERIAL = "N/A"
+
+
+def _queue_start_waiting_reason(item: PrintQueueItem) -> str | None:
+    """Return the queue gate that still blocks this item's start, if any."""
+    if item.scheduled_time:
+        scheduled = item.scheduled_time
+        if scheduled.tzinfo is None:
+            scheduled = scheduled.replace(tzinfo=timezone.utc)
+        if scheduled > clock.now():
+            return "scheduled_future"
+    if item.manual_start:
+        return "manual_start"
+    return None
 
 
 def _parse_nozzle_diameter(raw) -> float | None:
@@ -357,18 +371,8 @@ class PrinterSelection:
             await db.commit()
 
         for item in items:
-            # Check scheduled time first (scheduled_time is stored in UTC from ISO string)
-            if item.scheduled_time:
-                sched = item.scheduled_time
-                if sched.tzinfo is None:
-                    sched = sched.replace(tzinfo=timezone.utc)
-                if sched > datetime.now(timezone.utc):
-                    skipped["scheduled_future"] += 1
-                    continue
-
-            # Skip items that require manual start
-            if item.manual_start:
-                skipped["manual_start"] += 1
+            if waiting_reason := _queue_start_waiting_reason(item):
+                skipped[waiting_reason] += 1
                 continue
 
             # A safe-default job without readable per-slot metadata cannot

@@ -37,7 +37,7 @@ from backend.app.services.lifecycle.engine import (
 )
 from backend.app.services.lifecycle.printing import superseded_by, sync_print_state
 from backend.app.services.printer_manager import printer_manager
-from backend.app.services.printer_selection import _incompatible_sliced_model_reason
+from backend.app.services.printer_selection import _incompatible_sliced_model_reason, _queue_start_waiting_reason
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +120,7 @@ class Dispatcher:
             if (
                 not held
                 or held.status != "queued"
+                or _queue_start_waiting_reason(held)
                 or held.assigned_printer_id != (None if unassigned else printer_id)
                 or (binding and binding.edited_fields(held))
                 or not self._selection._is_printer_idle(printer_id)

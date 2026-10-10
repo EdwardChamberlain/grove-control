@@ -28,6 +28,7 @@ from backend.app.services.lifecycle.engine import (
     writer,
 )
 from backend.app.services.printer_manager import printer_manager, supports_chamber_heater
+from backend.app.services.printer_selection import _queue_start_waiting_reason
 
 logger = logging.getLogger(__name__)
 INTERRUPTED = "Heat soak interrupted and its heaters turned off; inspect the printer, then stop or skip heat soak"
@@ -433,6 +434,7 @@ class ChamberHeatSoak:
         if (
             not item
             or item.status != "queued"
+            or _queue_start_waiting_reason(item)
             or item.printer_id is not None
             or item.assigned_printer_id != expected_assignment
             or (binding and binding.edited_fields(item))
