@@ -228,7 +228,8 @@ async def test_send_intent_failure_keeps_hold_and_does_not_create_retry(alignmen
 
 
 @pytest.mark.parametrize("before", ["queued", "preheating"])
-async def test_hold_commits_before_archive_link_and_same_state_never_copies_again(alignment, before):
+@pytest.mark.parametrize("flush_prepared", [False, True])
+async def test_hold_commits_before_archive_link_and_same_state_never_copies_again(alignment, before, flush_prepared):
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
         if before == "preheating":
@@ -242,6 +243,9 @@ async def test_hold_commits_before_archive_link_and_same_state_never_copies_agai
             assert (await observer.get(PrintQueueItem, job.id)).status == "dispatching"
             assert await observer.scalar(select(PrintArchive.id)) is None
         prepared = await prepare_dispatch_archive(db, job)
+        if flush_prepared:
+            # PostgreSQL's lock query can autoflush this row before the link is written.
+            await db.flush([prepared])
         async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
             await link_dispatch_archive(db, job, prepared)
         attempt = await db.get(PrintArchive, job.archive_id)

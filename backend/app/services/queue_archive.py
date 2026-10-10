@@ -97,7 +97,6 @@ async def link_dispatch_archive(
     if (
         item.status != "dispatching"
         or archive not in db
-        or not inspect(archive).pending
         or archive.dispatched_queue_item_id != item.id
         or archive.printer_id != item.printer_id
         or archive.status != "dispatching"
