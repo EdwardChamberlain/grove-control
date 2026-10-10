@@ -1342,7 +1342,7 @@ async def _migrate_queue_archive_outcomes(conn) -> None:
             "finished": "completed",
             "successful": "completed",
         }.get(row["status"])
-        if row["status"] == "failed" and row["started_at"] is not None:
+        if row["status"] == "failed" and row["dispatched_at"] is not None:
             outcome = "failed"
 
         archive_outcome = outcome or {

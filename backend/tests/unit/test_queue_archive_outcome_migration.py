@@ -46,9 +46,7 @@ async def test_upgrade_backfills_only_proven_outcomes_and_runs_once():
                     )
                 ],
             )
-            await conn.execute(
-                text("UPDATE print_queue SET started_at = :started WHERE id = 9"), {"started": completed}
-            )
+            await conn.execute(text("UPDATE print_queue SET dispatched_at = :sent WHERE id = 9"), {"sent": completed})
             archives = PrintArchive.__table__
             await conn.execute(
                 archives.insert(),
