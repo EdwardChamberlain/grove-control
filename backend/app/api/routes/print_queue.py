@@ -1168,10 +1168,26 @@ async def update_queue_item(
             json.dumps(update_data["nozzle_mapping"]) if update_data["nozzle_mapping"] else None
         )
 
-    for field, value in update_data.items():
-        setattr(item, field, value)
-
-    await db.commit()
+    effective_printer = func.coalesce(PrintQueueItem.printer_id, PrintQueueItem.assigned_printer_id)
+    assignment_unchanged = (
+        effective_printer.is_(None) if expected_printer_id is None else effective_printer == expected_printer_id
+    )
+    try:
+        # An edit and dispatch can both pass their earlier queued-state checks.
+        # Apply the edit as a conditional same-state lifecycle write so only
+        # one wins the row: a stale edit must not succeed after dispatch starts.
+        await transition_queue_item(
+            db,
+            item,
+            "queued",
+            "queued",
+            values=update_data,
+            conditions=(assignment_unchanged,),
+        )
+        await db.commit()
+    except QueueTransitionConflict as exc:
+        await db.rollback()
+        raise HTTPException(409, "Queue item changed while it was being updated; refresh and try again") from exc
     await ws_manager.send_queue_work_changed()
     await db.refresh(item, ["archive", "printer", "assigned_printer", "library_file", "created_by"])
 
