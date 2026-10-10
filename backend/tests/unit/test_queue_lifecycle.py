@@ -47,6 +47,13 @@ async def sessions(tmp_path):
         db.add(Printer(id=1, name="Printer", serial_number="TEST", ip_address="127.0.0.1", access_code="code"))
         await db.commit()
     yield maker
+    # Terminal lifecycle transitions launch best-effort queue effects after
+    # commit. Let those tasks finish while their temporary database is alive.
+    from backend.app.core.tasks import _background_tasks
+
+    queue_tasks = tuple(task for task in _background_tasks if task.get_name().startswith("queue-"))
+    if queue_tasks:
+        await asyncio.gather(*queue_tasks, return_exceptions=True)
     await engine.dispose()
 
 
