@@ -1348,9 +1348,10 @@ async def _migrate_queue_archive_outcomes(conn) -> None:
         archive_outcome = outcome or {
             "failed": "failed",
             "cancelled": "cancelled",
+            # An unsuccessful legacy job without persisted physical evidence
+            # may have been stopped before send. Keep its Archive conservative.
+            "unsuccessful": "cancelled",
         }.get(row["status"])
-        if row["status"] == "unsuccessful" and row["stop_requested_at"] is not None:
-            archive_outcome = "cancelled"
 
         if outcome is not None:
             reason = (

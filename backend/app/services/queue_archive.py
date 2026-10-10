@@ -74,9 +74,8 @@ async def align_attempt(change: "Transition") -> None:
                 "failed": "failed",  # Includes a proven-unsent dispatch failure.
                 "cancelled": "cancelled",  # Intent only; the printer may still be running.
                 "successful": "completed",  # Unambiguous legacy final state.
+                "unsuccessful": "cancelled",  # No confirmed print outcome; do not infer a physical failure.
             }.get(status)
-            if status == "unsuccessful" and row.stop_requested_at is not None:
-                outcome = "cancelled"
         if outcome is not None:
             attempt.status = outcome
             attempt.completed_at = row.physical_completed_at or row.completed_at

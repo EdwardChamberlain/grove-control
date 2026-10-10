@@ -332,11 +332,13 @@ async def _failed_dispatch_message(dispatch_case, *, handshake_fails: bool) -> s
     """
     from backend.app.models.print_queue import PrintQueueItem
     from backend.app.services.lifecycle import dispatching as scheduler_module
+    from backend.app.services.lifecycle.dispatching import Dispatcher
     from backend.app.services.print_scheduler import PrintScheduler
 
     async def _upload(*_args, **_kwargs):
         if handshake_fails:
             _arm()
+            raise OSError("TLS handshake failed")
         return False
 
     scheduler = PrintScheduler()
@@ -344,6 +346,7 @@ async def _failed_dispatch_message(dispatch_case, *, handshake_fails: bool) -> s
         item = await db.get(PrintQueueItem, dispatch_case.item_id)
         patches = [
             patch.object(scheduler_module.settings, "base_dir", dispatch_case.base_dir),
+            patch.object(Dispatcher, "_telemetry", return_value=True),
             patch("backend.app.services.lifecycle.dispatching.async_session", dispatch_case.session_maker),
             patch("backend.app.services.lifecycle.queued.async_session", dispatch_case.session_maker),
             patch(
@@ -376,7 +379,8 @@ async def _failed_dispatch_message(dispatch_case, *, handshake_fails: bool) -> s
                 SimpleNamespace(session_maker=dispatch_case.session_maker, queue_item_id=dispatch_case.item_id)
             )
 
-        refreshed = await db.get(PrintQueueItem, dispatch_case.item_id)
+        await db.refresh(item)
+        refreshed = item
         assert refreshed.status == "failed"
         return refreshed.error_message or ""
 

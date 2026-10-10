@@ -280,7 +280,8 @@ async def test_late_scheduler_failure_cannot_overwrite_cancel_or_power_off(sessi
             patch("backend.app.services.lifecycle.dispatching.printer_manager.is_connected", return_value=False),
             pytest.raises(QueueTransitionConflict),
         ):
-            await scheduler.workers.leave(worker, stale)
+            async with writer(stale.assigned_printer_id):
+                await scheduler.workers.leave(worker, stale)
         await worker.rollback()
     async with sessions() as db:
         assert await db.scalar(select(PrintQueueItem.status).where(PrintQueueItem.id == item_id)) == "unsuccessful"
@@ -365,7 +366,7 @@ def _cancel_after_first_select(sessions, db, item_id, *, marker=None):
                 async with writer(
                     getattr(current, "printer_id", None) or getattr(current, "assigned_printer_id", None)
                 ):
-                    await transition_queue_item(user, current, current.status, "cancelled")
+                    await transition_queue_item(user, current, current.status, "cancelled", action="cancel")
                 await user.commit()
         return result
 
@@ -375,8 +376,22 @@ def _cancel_after_first_select(sessions, db, item_id, *, marker=None):
 async def test_restart_recovery_skips_an_item_changed_mid_pass(sessions):
     from types import SimpleNamespace
 
-    raced = await make_item(sessions, "dispatching", printer_id=1, dispatch_subtask_id="111")
-    other = await make_item(sessions, "dispatching", printer_id=2, dispatch_subtask_id="222")
+    sent = datetime.now()
+    ack_deadline = sent + timedelta(minutes=4)
+    dispatch_values = {
+        "dispatch_stage": "awaiting_ack",
+        "dispatch_subtask_id": "111",
+        "dispatched_at": sent,
+        "deadline_kind": "dispatch_ack",
+        "deadline_at": ack_deadline,
+    }
+    raced = await make_item(sessions, "dispatching", printer_id=1, **dispatch_values)
+    other = await make_item(
+        sessions,
+        "dispatching",
+        printer_id=2,
+        **{**dispatch_values, "dispatch_subtask_id": "222"},
+    )
     telemetry = {
         1: SimpleNamespace(connected=True, state="RUNNING", subtask_id="111"),
         2: SimpleNamespace(connected=True, state="RUNNING", subtask_id="222"),

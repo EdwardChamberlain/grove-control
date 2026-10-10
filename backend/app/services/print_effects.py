@@ -14,6 +14,7 @@ import uuid
 from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 from sqlalchemy import func, or_, select
 
@@ -788,8 +789,18 @@ async def _archive_print_start(
             logger.info("Resuming archive %s on subtask_id match (%s)", existing_archive.id, subtask_id)
             await _restore_archive_print_context(db, printer, existing_archive, data, memory=memory)
             return True
+        # FTP can take a while. Close the session before waiting so no SQLite
+        # connection stays open across the network request. AsyncSession can
+        # be reused below to load the printer and persist the Archive.
+        download_printer = SimpleNamespace(
+            id=printer.id,
+            ip_address=printer.ip_address,
+            access_code=printer.access_code,
+            model=printer.model,
+        )
+        await db.close()
         retry = await get_ftp_retry_settings()
-        temp_path, downloaded_filename = await _fetch_print_3mf(printer, filename, subtask_name, retry)
+        temp_path, downloaded_filename = await _fetch_print_3mf(download_printer, filename, subtask_name, retry)
         if downloaded_filename:
             expected_plate = parse_plate_id(filename)
             actual_plate = peek_plate_index_in_3mf(temp_path) if expected_plate is not None else None
@@ -807,7 +818,7 @@ async def _archive_print_start(
                     for try_filename in (f"{corrected_subtask}.gcode.3mf", f"{corrected_subtask}.3mf"):
                         retry_path = _temp_3mf(try_filename)
                         if retry_path and await _download_from_dirs(
-                            printer, try_filename, retry_path, retry, plate=expected_plate
+                            download_printer, try_filename, retry_path, retry, plate=expected_plate
                         ):
                             retried = try_filename, retry_path
                             break
@@ -829,6 +840,15 @@ async def _archive_print_start(
                     )
                     temp_path = downloaded_filename = None
                     subtask_name = corrected_subtask or ""
+        # Re-read after the network wait; rollback expired the ORM instance and
+        # the printer may have been removed while the callback was suspended.
+        printer = await _one(db, select(Printer).where(Printer.id == printer_id))
+        if not printer:
+            if temp_path and temp_path.exists():
+                with suppress(OSError):
+                    temp_path.unlink()
+            logger.info("Skipping delayed Archive start - printer %s no longer exists", printer_id)
+            return True
         if not downloaded_filename or not temp_path:
             logger.warning("Could not find 3MF file for print: %s", filename or subtask_name)
             try:
@@ -1370,9 +1390,15 @@ async def print_started(printer_id: int, data: dict, job_id: int, archive_id: in
         if new:
             await _begin_new_print(printer_id, data, memory=memory)
         if data.get("filename") or data.get("subtask_name"):
-            await _archive_print_start(
-                printer_id, data, queue_archive_id=archive_id, queue_job_id=job_id, memory=memory
-            )
+            if job_id is not None:
+                memory.archive_starts_in_flight.add(job_id)
+            try:
+                await _archive_print_start(
+                    printer_id, data, queue_archive_id=archive_id, queue_job_id=job_id, memory=memory
+                )
+            finally:
+                if job_id is not None:
+                    memory.archive_starts_in_flight.discard(job_id)
         linked = await _link_observed_archive(printer_id, job_id, data["submission_id"])
     finally:
         if new:

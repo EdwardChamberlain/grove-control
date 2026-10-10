@@ -82,11 +82,15 @@ async def test_legacy_archive_repair_runs_only_once(legacy_unmigrated):
 
 @pytest.mark.parametrize("previous_link_version", [None, "1"])
 @pytest.mark.parametrize(
-    "old_status,status,outcome",
-    [("completed", "finished", "completed"), ("failed", "failed", "failed"), ("cancelled", "cancelled", "aborted")],
+    "old_status,status,physical_outcome,archive_outcome",
+    [
+        ("completed", "finished", "completed", "completed"),
+        ("failed", "failed", "failed", "failed"),
+        ("cancelled", "cancelled", None, "cancelled"),
+    ],
 )
 async def test_full_startup_repairs_terminal_legacy_archives(
-    alignment, monkeypatch, previous_link_version, old_status, status, outcome
+    alignment, monkeypatch, previous_link_version, old_status, status, physical_outcome, archive_outcome
 ):
     from backend.app.core import database
 
@@ -108,8 +112,10 @@ async def test_full_startup_repairs_terminal_legacy_archives(
                 printer_id=1,
                 archive_id=archive.id,
                 dispatch_subtask_id="123",
+                dispatched_at=completed if old_status == "failed" else None,
+                stop_requested_at=completed if old_status == "cancelled" else None,
                 completed_at=completed,
-                error_message="Original failure" if outcome == "failed" else None,
+                error_message="Original failure" if physical_outcome == "failed" else None,
             )
         )
         printer = await db.get(Printer, 1)
@@ -142,8 +148,12 @@ async def test_full_startup_repairs_terminal_legacy_archives(
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
         archive = await db.get(PrintArchive, archive_id)
-        assert (job.status, job.physical_outcome) == (status, outcome)
-        assert (archive.status, archive.dispatched_queue_item_id, archive.completed_at) == (outcome, job.id, completed)
+        assert (job.status, job.physical_outcome) == (status, physical_outcome)
+        assert (archive.status, archive.dispatched_queue_item_id, archive.completed_at) == (
+            archive_outcome,
+            job.id,
+            completed,
+        )
         assert await db.scalar(select(Settings.value).where(Settings.key == "queue_legacy_archive_link_version")) == "2"
 
 

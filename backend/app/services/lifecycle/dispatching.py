@@ -561,6 +561,8 @@ class Dispatcher:
             return None
         if state.state in _ACTIVE_PRINT_STATES:
             return False
+        if state.state != "IDLE":
+            return None  # FINISH/FAILED is terminal, but not fresh idle confirmation for a new send.
         return True if self._selection._is_printer_idle(printer_id) else None
 
     async def _fail_unsent(self, item_id: int, message: str, *, expected_stage: str | None = None, **values) -> None:

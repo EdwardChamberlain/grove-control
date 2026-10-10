@@ -35,6 +35,8 @@ class PrintMemory:
     bed_cool_waiters: dict[int, dict] = field(default_factory=dict)
     # Best-effort start-effect registration only; the persisted job owns state.
     started_job_effects: dict[int, int] = field(default_factory=dict)
+    # Archive recovery must not duplicate a start-time FTP request for this job.
+    archive_starts_in_flight: set[int] = field(default_factory=set)
 
 
 print_memory = PrintMemory()
@@ -203,6 +205,8 @@ async def reconcile_print_archives() -> None:
             )
         ).all()
     for job in jobs:
+        if job.id in print_memory.archive_starts_in_flight:
+            continue  # The original start effect is already acquiring this Archive.
         live = printer_manager.get_status(job.printer_id)
         matching_live = bool(
             live and live.connected and live.job_telemetry_ready and telemetry_identity(live) == job.dispatch_subtask_id

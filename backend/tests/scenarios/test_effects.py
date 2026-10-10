@@ -112,14 +112,18 @@ async def test_an_ending_during_the_start_download_still_records_the_archive(
     running = app.spawn(app.run())
     await app.until(lambda: printer.downloading)
 
-    getattr(printer, ending)()
-    if cleared_first:  # The loop records the outcome, and the person clears the plate, before the download ends.
-        await app.tick(30)
-        await app.until(lambda: _ended(app, printer, status))
-        [job] = await app.jobs(printer)
-        assert (await app.action(job.id, "clear-plate")).status_code == 200
-    printer.download_gate.set()
-    await running
+    try:
+        getattr(printer, ending)()
+        if cleared_first:  # The loop records the outcome, and the person clears the plate, before the download ends.
+            await app.tick(30)
+            await app.until(lambda: _ended(app, printer, status))
+            [job] = await app.jobs(printer)
+            assert (await app.action(job.id, "clear-plate")).status_code == 200
+    finally:
+        # Always let the background start effect finish if an assertion above
+        # fails, so harness teardown does not hang on the deliberately gated FTP.
+        printer.download_gate.set()
+    await asyncio.wait_for(running, timeout=5)
     await app.run()
 
     [job] = await app.jobs(printer)

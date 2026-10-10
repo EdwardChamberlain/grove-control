@@ -32,6 +32,7 @@ async def test_upgrade_backfills_only_proven_outcomes_and_runs_once():
                         "status": status,
                         "completed_at": completed if status != "printing" else None,
                         "error_message": reason,
+                        "stop_requested_at": completed if i == 7 else None,
                     }
                     for i, status, reason in (
                         (1, "failed", "Printer error"),
@@ -115,6 +116,7 @@ async def test_upgrade_backfills_only_proven_outcomes_and_runs_once():
             }
             assert rows[9].physical_failure_reason == "HMS 0700_8012"
             assert rows[9].physical_completed_at == completed
+            assert await conn.scalar(select(PrintArchive.status).where(PrintArchive.id == 1)) == "cancelled"
             assert await conn.scalar(select(PrintArchive.status).where(PrintArchive.id == 3)) == "cancelled"
             assert (
                 await conn.scalar(select(Settings.value).where(Settings.key == "queue_archive_outcome_version")) == "2"

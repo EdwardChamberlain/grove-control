@@ -10,11 +10,10 @@ from sqlalchemy import event, select
 from sqlalchemy.exc import OperationalError
 
 from backend.app.models.archive import PrintArchive
-from backend.app.models.notification import NotificationLog, NotificationProvider
+from backend.app.models.notification import NotificationProvider
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services.lifecycle import (
-    dispatching as print_scheduler,
     effects as queue_outcome_effects,
     preheating as heat,
 )
@@ -28,7 +27,7 @@ from backend.tests.unit.test_queue_archive_alignment import alignment, hold_and_
 
 
 @pytest.mark.parametrize("status", ["dispatching", "printing"])
-@pytest.mark.parametrize("outcome", ["commit", "rollback", "ftp_failure", "reconnected"])
+@pytest.mark.parametrize("outcome", ["commit", "ftp_failure", "reconnected"])
 async def test_clear_plate_cleans_sent_upload_after_offline_stop(alignment, monkeypatch, status, outcome):
     from backend.app.core import tasks
 
@@ -71,17 +70,11 @@ async def test_clear_plate_cleans_sent_upload_after_offline_stop(alignment, monk
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
         await clear_job_plate(db, job)
-        assert not pending
-        if outcome == "rollback":
-            await db.rollback()
-        else:
-            await db.commit()
-    if outcome != "rollback":
-        assert len(pending) == 1
-        if outcome == "reconnected":
-            live.connected = live.job_telemetry_ready = True
-            live.state = "RUNNING"
-        await pending.pop()
+    assert len(pending) == 1
+    if outcome == "reconnected":
+        live.connected = live.job_telemetry_ready = True
+        live.state = "RUNNING"
+    await pending.pop()
     if outcome in ("commit", "ftp_failure"):
         deleted.assert_awaited_once()
         assert deleted.call_args.args[2] == f"/{remote_filename}"
@@ -91,12 +84,10 @@ async def test_clear_plate_cleans_sent_upload_after_offline_stop(alignment, monk
     notified.assert_not_awaited()
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
-        assert job.status == ("cancelled" if outcome == "rollback" else "unsuccessful")
+        assert job.status == "unsuccessful"
 
 
-@pytest.mark.parametrize(
-    "failing_step", ["notification_source", "notification_log", "notification_status", "power", "heaters"]
-)
+@pytest.mark.parametrize("failing_step", ["notification_source", "notification_log", "notification_status", "heaters"])
 async def test_database_failure_in_one_effect_does_not_skip_later_cleanup(alignment, monkeypatch, failing_step):
     from backend.app.core import tasks
 
@@ -108,21 +99,16 @@ async def test_database_failure_in_one_effect_does_not_skip_later_cleanup(alignm
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: state)
     monkeypatch.setattr(printer_manager, "is_connected", lambda _id: True)
     monkeypatch.setattr(printer_manager, "_broadcast_status_change", AsyncMock())
+    if failing_step == "heaters":
+        # The durable shutdown clears only after fresh zero-target telemetry;
+        # make that write the injected database failure.
+        monkeypatch.setattr(heat, "_reported", lambda *_args: True)
     # Exercise the real notification service's status/log commits; replace
     # only network delivery, then fail the SQL statement under review.
     monkeypatch.setattr(
         queue_outcome_effects.notification_service, "_send_to_provider", AsyncMock(return_value=(True, ""))
     )
-    powered_off, deleted = AsyncMock(), AsyncMock(return_value=True)
-
-    async def power(printer_id, db):
-        await powered_off(printer_id)
-        assert await db.scalar(select(Printer.id).where(Printer.id == printer_id)) == printer_id
-        if failing_step == "power":
-            db.add(NotificationLog(provider_id=None, event_type="test", title="test", message="test"))
-            await db.flush()  # Real failed flush expires ORM rows and poisons this session.
-
-    monkeypatch.setattr(queue_outcome_effects.smart_plug_manager, "schedule_off_after_queue_job", power)
+    deleted = AsyncMock(return_value=True)
     monkeypatch.setattr(queue_outcome_effects, "delete_file_async", deleted)
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
@@ -162,14 +148,13 @@ async def test_database_failure_in_one_effect_does_not_skip_later_cleanup(alignm
         await committed[0]
     finally:
         event.remove(engine.sync_engine, "before_cursor_execute", fail_statement)
-    assert bool(failures) is (failing_step != "power")
-    powered_off.assert_awaited_once()
+    assert failures
     if remote_name:
         deleted.assert_awaited_once()
         assert deleted.call_args.args[2] == f"/{remote_name}"
     else:
         deleted.assert_not_awaited()
-    assert client.set_bed_temperature.call_count == int(failing_step != "heaters")
+    assert client.set_bed_temperature.call_count == 1
     async with alignment.sessions() as db:
         assert (await db.get(PrintQueueItem, alignment.job_id)).status == "failed"
         assert (await db.get(Printer, 1)).heat_soak_shutdown_pending
@@ -208,7 +193,14 @@ async def test_failed_dispatch_effects_run_only_after_commit(alignment, monkeypa
         archive = await db.get(PrintArchive, job.archive_id)
         remote_name = archive.extra_data["remote_filename"]
         async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
-            await transition_queue_item(db, job, "dispatching", "failed", values={"error_message": "Upload failed"})
+            await transition_queue_item(
+                db,
+                job,
+                "dispatching",
+                "failed",
+                action="dispatch_failure",
+                values={"error_message": "Upload failed"},
+            )
         notified.assert_not_awaited()
         powered_off.assert_not_awaited()
         deleted.assert_not_awaited()
@@ -225,7 +217,7 @@ async def test_failed_dispatch_effects_run_only_after_commit(alignment, monkeypa
         await asyncio.wait_for(done.wait(), 2)
         notified.assert_awaited_once()
         assert notified.call_args.kwargs["reason"] == "Upload failed"
-        powered_off.assert_awaited_once()
+        powered_off.assert_not_awaited()  # An unsent dispatch failure is not a physical job end.
         deleted.assert_awaited_once()
         assert deleted.call_args.args[2] == f"/{remote_name}"
         client.set_bed_temperature.assert_called_once_with(0)
@@ -259,7 +251,14 @@ async def test_delayed_failure_cannot_shut_down_a_new_external_print(alignment, 
         job.preheat_requested_at = heat.utcnow()
         await db.commit()
         async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
-            await transition_queue_item(db, job, "dispatching", "failed", action="dispatch_failure")
+            await transition_queue_item(
+                db,
+                job,
+                "dispatching",
+                "failed",
+                action="dispatch_failure",
+                values={"error_message": "Failed before send"},
+            )
         await db.commit()
     await asyncio.wait_for(entered.wait(), 2)
     try:
@@ -267,7 +266,7 @@ async def test_delayed_failure_cannot_shut_down_a_new_external_print(alignment, 
             new_job, _ = await observe_print(db, 1, "new-run", observed_state=live)
             assert new_job is not None
             await db.commit()
-            assert (await db.get(PrintQueueItem, alignment.job_id)).status == "unsuccessful"
+            assert (await db.get(PrintQueueItem, alignment.job_id)).status == "failed"
     finally:
         resume.set()
     from backend.app.core.tasks import _background_tasks
@@ -340,6 +339,7 @@ async def test_incompatible_uploaded_dispatch_cleans_up_only_after_failure_commi
     monkeypatch.setattr(dispatch_stages, "delete_file_async", AsyncMock(return_value=True))
     monkeypatch.setattr(dispatch_stages, "upload_file_async", upload)
     monkeypatch.setattr(dispatch_stages, "get_ftp_retry_settings", AsyncMock(return_value=(False, 0, 0, 1.0)))
+    monkeypatch.setattr(dispatch_stages.Dispatcher, "_telemetry", lambda *_args: True)
     monkeypatch.setattr(
         printer_manager,
         "get_status",
@@ -364,6 +364,7 @@ async def test_incompatible_uploaded_dispatch_cleans_up_only_after_failure_commi
         await db.commit()
         await PrintScheduler().dispatcher._upload_stage(job.id)
         await asyncio.wait_for(done.wait(), 2)
+        await db.refresh(job)
         assert job.status == "failed"
         assert job.physical_outcome is None
         retry = await db.scalar(select(PrintQueueItem).where(PrintQueueItem.id != job.id))

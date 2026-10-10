@@ -561,7 +561,7 @@ class TestDispatchArchiveLifecycle:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
-    async def test_stopping_dispatch_marks_its_attempt_archive_aborted(
+    async def test_stopping_unsent_dispatch_marks_its_attempt_archive_cancelled(
         self,
         async_client: AsyncClient,
         db_session: AsyncSession,
@@ -591,5 +591,5 @@ class TestDispatchArchiveLifecycle:
 
         assert response.status_code == 200, response.text
         await db_session.refresh(archive)
-        assert archive.status == "aborted"
+        assert archive.status == "cancelled"
         assert archive.completed_at is not None

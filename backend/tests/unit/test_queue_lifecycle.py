@@ -353,7 +353,12 @@ async def test_migration_preserves_exact_hold_creates_missing_job_and_runs_once(
         archive = PrintArchive(printer_id=1, filename="old.3mf", file_path="old.3mf", file_size=1, status="failed")
         db.add(archive)
         await db.flush()
-        held = PrintQueueItem(printer_id=1, archive_id=archive.id, status="failed")
+        held = PrintQueueItem(
+            printer_id=1,
+            archive_id=archive.id,
+            status="failed",
+            dispatched_at=datetime(2026, 10, 1, 12),
+        )
         queued = PrintQueueItem(printer_id=1, status="pending")
         skipped = PrintQueueItem(status="skipped", error_message="Old skip reason")
         history = PrintQueueItem(status="completed")

@@ -150,7 +150,9 @@ async def test_stop_unmatched_run_keeps_plate_gate_before_release_and_after_rest
             assert manager.is_awaiting_plate_clear(1)
             assert manager.get_awaiting_plate_clear_archive_id(1) == archive_id
             if archive_id:
-                assert (await db.get(PrintArchive, archive_id)).status == "aborted"
+                # The Stop command was not correlated to this job, so the
+                # Archive records intent rather than claiming a confirmed abort.
+                assert (await db.get(PrintArchive, archive_id)).status == "cancelled"
 
         restarted = PrinterManager()
         with patch("backend.app.core.database.async_session", sessions):
@@ -470,7 +472,7 @@ async def test_touchscreen_print_takes_over_the_hold_without_releasing_the_print
     from backend.app.services.lifecycle import intake
 
     old_id, archive_id = await add_linked_job(sessions, "previous", previous_status)
-    previous_outcome = {"finished": "completed", "failed": "failed", "cancelled": "aborted"}[previous_status]
+    previous_outcome = {"finished": "completed", "failed": "failed", "cancelled": "cancelled"}[previous_status]
     async with sessions() as db:
         (await db.get(PrintArchive, archive_id)).status = previous_outcome
         await db.commit()

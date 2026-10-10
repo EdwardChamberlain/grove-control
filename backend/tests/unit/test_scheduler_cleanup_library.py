@@ -239,7 +239,11 @@ async def _dispatch_library_item(
     if binding is not None:
         patches.append(patch("backend.app.services.lifecycle.queued.async_session", ctx.session_maker))
     if drying_checks is not None:
-        patches.append(patch.object(scheduler.drying, "_active_drying_ams_ids", side_effect=drying_checks))
+        # Persisted stages run through the process scheduler singleton even
+        # when this helper starts a focused PrintScheduler instance.
+        from backend.app.services.print_scheduler import scheduler as process_scheduler
+
+        patches.append(patch.object(process_scheduler.drying, "_active_drying_ams_ids", side_effect=drying_checks))
 
     with ExitStack() as stack:
         for patcher in patches:
@@ -628,11 +632,14 @@ async def test_final_dispatch_boundary_stops_new_drying_and_does_not_send_print(
 
     item, library_file, archive = await _queue_snapshot(ctx)
     assert item.status == "failed"
-    assert item.waiting_reason == "Stopping AMS drying before dispatch"
+    assert item.error_message == "Stopping AMS drying before dispatch"
     assert library_file is not None
     assert archive.status == "failed"
     ctx.stop_drying.assert_called_once_with(ctx.printer_id, 0, 0, 0, mode=0)
     ctx.start_print.assert_not_called()
+    async with ctx.session_maker() as db:
+        retry = await db.scalar(select(PrintQueueItem).where(PrintQueueItem.id != ctx.queue_item_id))
+        assert retry is not None and retry.status == "queued" and retry.retry_on_failure is False
 
 
 @pytest.mark.parametrize("after_upload_state", ["RUNNING", "FINISH"])
@@ -651,8 +658,17 @@ async def test_external_print_during_upload_blocks_project_file(queue_factory, a
     await _dispatch_library_item(ctx, printer_status=status)
 
     item, _, attempt = await _queue_snapshot(ctx)
-    assert item.status == "failed" and attempt.status == "failed"
-    assert "Printer activity changed" in item.error_message
+    if after_upload_state == "RUNNING":
+        assert item.status == "failed" and attempt.status == "failed"
+        assert "Printer activity changed" in item.error_message
+        async with ctx.session_maker() as db:
+            retry = await db.scalar(select(PrintQueueItem).where(PrintQueueItem.id != ctx.queue_item_id))
+            assert retry is not None and retry.status == "queued" and retry.retry_on_failure is False
+    else:
+        # FINISH is not fresh idle telemetry. Keep the upload reserved and
+        # wait for an explicit idle report before considering the send stage.
+        assert item.status == "dispatching" and attempt.status == "dispatching"
+        assert item.deadline_kind == "dispatch_ready"
     ctx.start_print.assert_not_called()
 
 
@@ -666,11 +682,14 @@ async def test_final_dispatch_boundary_can_wait_for_natural_drying_completion(qu
 
     item, library_file, archive = await _queue_snapshot(ctx)
     assert item.status == "failed"
-    assert item.waiting_reason == "Waiting for AMS drying to complete"
+    assert item.error_message == "Waiting for AMS drying to complete"
     assert library_file is not None
     assert archive.status == "failed"
     ctx.stop_drying.assert_not_called()
     ctx.start_print.assert_not_called()
+    async with ctx.session_maker() as db:
+        retry = await db.scalar(select(PrintQueueItem).where(PrintQueueItem.id != ctx.queue_item_id))
+        assert retry is not None and retry.status == "queued" and retry.retry_on_failure is False
 
 
 @pytest.mark.parametrize(
@@ -692,19 +711,20 @@ async def test_command_boundary_retains_reservation_if_drying_starts_after_final
         wait_for_drying_complete=wait_for_drying_complete,
     )
     clear = SimpleNamespace(raw_data={"ams": [{"id": 0, "dry_time": 0}]})
+    drying_checks = [(0,), (0,)] if not wait_for_drying_complete else [(0,)]
     await _dispatch_library_item(
         ctx,
         printer_status=clear,
-        # First drying check: clear after upload. Second: drying at the
-        # command boundary. The third lets _stop_drying confirm it.
-        drying_checks=[(), (0,), (0,)],
+        # Drying appears at the final pre-send gate; stopping checks it once
+        # more to confirm the stop command can be sent.
+        drying_checks=drying_checks,
     )
 
     item, library_file, archive = await _queue_snapshot(ctx)
     assert item.status == "failed"
     assert item.dispatched_at is None
     assert item.dispatch_subtask_id is None
-    assert item.waiting_reason == waiting_reason
+    assert item.error_message == waiting_reason
     assert item.library_file_id == ctx.library_file_id
     assert item.archive_id == archive.id
     assert library_file is not None
@@ -716,6 +736,9 @@ async def test_command_boundary_retains_reservation_if_drying_starts_after_final
     else:
         ctx.stop_drying.assert_called_once_with(ctx.printer_id, 0, 0, 0, mode=0)
     ctx.start_print.assert_not_called()
+    async with ctx.session_maker() as db:
+        retry = await db.scalar(select(PrintQueueItem).where(PrintQueueItem.id != ctx.queue_item_id))
+        assert retry is not None and retry.status == "queued" and retry.retry_on_failure is False
 
 
 @pytest.mark.asyncio

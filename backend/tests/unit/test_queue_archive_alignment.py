@@ -584,7 +584,7 @@ async def test_retry_does_not_inherit_physical_outcome_even_when_cancelled_while
         ) == archive_facts
 
 
-async def test_archive_copy_failure_still_runs_configured_auto_off(alignment, monkeypatch):
+async def test_archive_copy_failure_retries_without_auto_off(alignment, monkeypatch):
     from backend.app.services.lifecycle import dispatching as sched
     from backend.app.services.print_scheduler import PrintScheduler
     from backend.app.services.printer_manager import printer_manager
@@ -596,17 +596,7 @@ async def test_archive_copy_failure_still_runs_configured_auto_off(alignment, mo
     monkeypatch.setattr(printer_manager, "is_awaiting_plate_clear", lambda _id: False)
     monkeypatch.setattr(ArchiveService, "archive_print", AsyncMock(side_effect=OSError("Disk full")))
     scheduler = PrintScheduler()
-    done = asyncio.Event()
-
-    async def power_off_after_commit(_printer_id, _db):
-        async with alignment.sessions() as observer:
-            job = await observer.get(PrintQueueItem, alignment.job_id)
-            assert job.status == "failed" and job.physical_outcome is None
-            retry = await observer.scalar(select(PrintQueueItem).where(PrintQueueItem.id != job.id))
-            assert retry is not None and retry.status == "queued" and retry.retry_on_failure is False
-        done.set()
-
-    off = AsyncMock(side_effect=power_off_after_commit)
+    off = AsyncMock()
     upload = AsyncMock()
     monkeypatch.setattr(smart_plug_manager, "schedule_off_after_queue_job", off)
     monkeypatch.setattr(sched, "upload_file_async", upload)
@@ -622,8 +612,9 @@ async def test_archive_copy_failure_still_runs_configured_auto_off(alignment, mo
         await db.refresh(job)
         assert job.status == "failed" and job.auto_off_after
         upload.assert_not_awaited()
-        await asyncio.wait_for(done.wait(), 2)
-        assert off.await_count == 1
+        retry = await db.scalar(select(PrintQueueItem).where(PrintQueueItem.id != job.id))
+        assert retry is not None and retry.status == "queued" and retry.retry_on_failure is False
+    off.assert_not_awaited()
 
 
 async def _wait_for_alignment_dispatch(job_id: int) -> None:
@@ -662,10 +653,12 @@ async def test_late_archive_uses_immutable_outcome_after_restart_and_display_upd
                 job,
                 "printing",
                 outcome,
+                action="printer_report",
                 values={"completed_at": completed, "error_message": "Detailed printer error"},
                 archive_failure_reason="HMS 0700_8012",
             )
         await db.commit()
+        expected_physical_completion = job.physical_completed_at.replace(tzinfo=None)
     async with alignment.sessions() as user:
         job = await user.get(PrintQueueItem, job_id)
         await clear_job_plate(user, job)
@@ -682,13 +675,17 @@ async def test_late_archive_uses_immutable_outcome_after_restart_and_display_upd
     async with alignment.sessions() as restarted:
         job = await restarted.get(PrintQueueItem, job_id)
         archive = await ArchiveService(restarted).archive_print(
-            None, alignment.source_path, print_data={"status": "printing"}
+            job.printer_id, alignment.source_path, print_data={"status": "printing"}
         )
         archive.dispatched_queue_item_id = job.id
         async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
             await transition_queue_item(restarted, job, job.status, job.status, values={"archive_id": archive.id})
         await restarted.commit()
-        assert (archive.status, archive.started_at, archive.completed_at) == (archived, started, completed)
+        assert (archive.status, archive.started_at, archive.completed_at) == (
+            archived,
+            started,
+            expected_physical_completion,
+        )
         assert archive.failure_reason == (
             "HMS 0700_8012" if outcome == "failed" else "User cancelled" if outcome == "cancelled" else None
         )

@@ -75,7 +75,7 @@ async def test_trashed_reprint_stays_parked_without_a_printer_hold(handoff, monk
 
 @pytest.mark.parametrize("source_kind", ["archive", "library"])
 @pytest.mark.parametrize("remove", ["trash", "delete"])
-async def test_source_removed_after_eligibility_read_fails_the_committed_hold(
+async def test_source_removed_after_eligibility_read_fails_without_an_unusable_retry(
     handoff, monkeypatch, source_kind, remove
 ):
     from backend.app.services import queue_archive
@@ -126,8 +126,10 @@ async def test_source_removed_after_eligibility_read_fails_the_committed_hold(
         cause = "Dispatch source was deleted" if remove == "trash" else "Dispatch source no longer exists"
         assert job.error_message == f"Failed to create Archive record for dispatch: {cause}"
         assert job.physical_outcome is None
+        # A retry is a fresh queue job, but cannot be constructed without a
+        # live source file. Keep the failed attempt visible for review.
         retry = await db.scalar(select(PrintQueueItem).where(PrintQueueItem.id != job.id))
-        assert retry is not None and retry.status == "queued" and retry.retry_on_failure is False
+        assert retry is None
         assert (
             await db.scalar(
                 select(PrintQueueItem.id).where(
