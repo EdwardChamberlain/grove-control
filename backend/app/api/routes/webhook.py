@@ -188,6 +188,7 @@ async def webhook_start_print(
 async def webhook_stop_print(
     printer_id: int,
     api_key: APIKey = Depends(get_api_key),
+    db: AsyncSession = Depends(get_db),
 ):
     """Stop the current print on a printer.
 
@@ -196,29 +197,22 @@ async def webhook_stop_print(
     check_permission(api_key, "control_printer")
     check_printer_access(api_key, printer_id)
 
-    status = printer_manager.get_status(printer_id)
-    # `printer_manager.get_status(...)` returns a ``PrinterState`` dataclass
-    # (see backend/app/services/bambu_mqtt.py), not a dict — `.get(...)` on it
-    # raises AttributeError and surfaces as a generic 500 (#1584).
-    if not status or not status.connected:
-        raise HTTPException(status_code=503, detail="Printer not connected")
-
-    if status.state != "RUNNING":
-        raise HTTPException(status_code=409, detail="No print in progress")
-
     try:
-        await printer_manager.stop_print(printer_id)
-    except Exception as e:
-        logger.error("Failed to stop print: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        from backend.app.services.lifecycle.engine import InvalidQueueTransition
+        from backend.app.services.queue_actions import stop_current_job
 
-    return {"message": "Print stopped"}
+        _item, _physical_attempt, command_sent = await stop_current_job(db, printer_id)
+    except InvalidQueueTransition as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+    return {"message": "Print stop command sent" if command_sent else "Stop intent recorded; inspect the printer"}
 
 
 @router.post("/printer/{printer_id}/cancel")
 async def webhook_cancel_print(
     printer_id: int,
     api_key: APIKey = Depends(get_api_key),
+    db: AsyncSession = Depends(get_db),
 ):
     """Cancel the current print on a printer.
 
@@ -227,21 +221,15 @@ async def webhook_cancel_print(
     check_permission(api_key, "control_printer")
     check_printer_access(api_key, printer_id)
 
-    status = printer_manager.get_status(printer_id)
-    # Same dataclass-not-dict shape as stop_print above (#1584).
-    if not status or not status.connected:
-        raise HTTPException(status_code=503, detail="Printer not connected")
-
-    if status.state not in ["RUNNING", "PAUSE"]:
-        raise HTTPException(status_code=409, detail="No print to cancel")
-
     try:
-        await printer_manager.cancel_print(printer_id)
-    except Exception as e:
-        logger.error("Failed to cancel print: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        from backend.app.services.lifecycle.engine import InvalidQueueTransition
+        from backend.app.services.queue_actions import stop_current_job
 
-    return {"message": "Print cancelled"}
+        _item, _physical_attempt, command_sent = await stop_current_job(db, printer_id)
+    except InvalidQueueTransition as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+    return {"message": "Print stop command sent" if command_sent else "Stop intent recorded; inspect the printer"}
 
 
 @router.get("/printer/{printer_id}/status", response_model=PrinterStatusResponse)

@@ -19,7 +19,7 @@ from backend.app.models.printer import Printer
 from backend.app.models.settings import Settings
 from backend.app.services.archive import ArchiveService
 from backend.app.services.lifecycle.awaiting import clear_job_plate
-from backend.app.services.lifecycle.engine import QueueTransitionConflict, transition_queue_item
+from backend.app.services.lifecycle.engine import QueueTransitionConflict, transition_queue_item, writer
 from backend.app.services.lifecycle.printing import bind_observed_id
 from backend.app.services.print_scheduler import PrintScheduler, scheduler
 from backend.app.services.queue_actions import cancel_job
@@ -172,8 +172,6 @@ async def test_restored_active_archive_follows_real_completion_callback(legacy, 
     monkeypatch.setattr(printer_manager, "get_printer", lambda _id: None)
     monkeypatch.setattr(intake, "async_session", legacy.sessions)
     monkeypatch.setattr(print_effects, "async_session", legacy.sessions)
-    monkeypatch.setattr(intake, "_completed_job_events", {})
-    monkeypatch.setattr(intake, "_user_stopped_printers", set())
     monkeypatch.setattr(print_effects, "_report_spoolman_usage", AsyncMock())
     monkeypatch.setattr(print_effects, "_cleanup_spoolman_tracking", AsyncMock())
     monkeypatch.setattr(usage, "on_print_complete", AsyncMock(return_value=[]))
@@ -223,12 +221,15 @@ async def test_legacy_link_and_outcome_commit_through_independent_lifecycle_path
             monkeypatch.setattr(scheduling, "spawn_background_task", lambda coroutine, **_kwargs: coroutine.close())
             await PrintScheduler().dispatcher.recover(db)
         elif path == "pause":
-            await transition_queue_item(db, job, "printing", "paused")
-            await transition_queue_item(db, job, "paused", "finished")
+            async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+                await transition_queue_item(db, job, "printing", "paused")
+            async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+                await transition_queue_item(db, job, "paused", "finished")
             await db.commit()
         else:
             completed = datetime.now(timezone.utc).replace(tzinfo=None)
-            await transition_queue_item(db, job, "printing", "failed", values={"completed_at": completed})
+            async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+                await transition_queue_item(db, job, "printing", "failed", values={"completed_at": completed})
             await clear_job_plate(db, job)
             await db.commit()
     async with legacy.sessions() as observer:
@@ -247,7 +248,8 @@ async def test_migrated_link_survives_a_rolled_back_job_outcome(legacy):
         job = await db.get(PrintQueueItem, legacy.job_id)
         # Include a preloaded Archive to catch stale identity-map projections.
         archive = await db.get(PrintArchive, legacy.archive_id)
-        await transition_queue_item(db, job, "printing", "failed")
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "printing", "failed")
         assert archive.dispatched_queue_item_id == job.id and archive.status == "failed"
         await db.rollback()
     async with legacy.sessions() as observer:
@@ -263,7 +265,8 @@ async def test_stale_completion_cannot_rewrite_a_legacy_stop_outcome(legacy):
         async with legacy.sessions() as user:
             await cancel_job(user, await user.get(PrintQueueItem, legacy.job_id))
         with pytest.raises(QueueTransitionConflict):
-            await transition_queue_item(stale, job, "printing", "failed")
+            async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+                await transition_queue_item(stale, job, "printing", "failed")
         await stale.commit()
     async with legacy.sessions() as observer:
         job = await observer.get(PrintQueueItem, legacy.job_id)
@@ -280,7 +283,8 @@ async def test_late_firmware_identity_binds_the_legacy_archive_in_the_same_trans
         archive = await db.get(PrintArchive, legacy.archive_id)
         assert job.dispatch_subtask_id == archive.subtask_id == "456"
         assert archive.dispatched_queue_item_id == job.id
-        await transition_queue_item(db, job, "printing", "failed")
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "printing", "failed")
         await db.commit()
     async with legacy.sessions() as observer:
         archive = await observer.get(PrintArchive, legacy.archive_id)
@@ -346,14 +350,14 @@ async def test_legacy_association_does_not_guess_or_modify_another_attempt(legac
         original = (archive.status, archive.subtask_id, archive.dispatched_queue_item_id, archive.completed_at)
         async with legacy.sessions.kw["bind"].begin() as conn:
             await _migrate_queue_legacy_archive_links(conn)
-        await transition_queue_item(db, job, "printing", "failed")
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "printing", "failed")
         await db.commit()
         await db.refresh(archive)
         assert (archive.status, archive.subtask_id, archive.dispatched_queue_item_id, archive.completed_at) == original
         assert job.status == "failed" and job.physical_outcome == "failed"
 
 
-@pytest.mark.parametrize("cached", [False, True])
 @pytest.mark.parametrize(
     "status,outcome",
     [
@@ -366,7 +370,7 @@ async def test_legacy_association_does_not_guess_or_modify_another_attempt(legac
     ],
 )
 async def test_upgrade_repairs_terminal_legacy_archive_without_replaying_completion(
-    legacy_unmigrated, monkeypatch, cached, status, outcome
+    legacy_unmigrated, monkeypatch, status, outcome
 ):
     legacy = legacy_unmigrated
     import backend.app.main as main
@@ -387,9 +391,6 @@ async def test_upgrade_repairs_terminal_legacy_archive_without_replaying_complet
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
     monkeypatch.setattr(intake, "async_session", legacy.sessions)
     monkeypatch.setattr(print_effects, "async_session", legacy.sessions)
-    cache = {1: legacy.job_id} if cached else {}
-    monkeypatch.setattr(intake, "_completed_job_events", cache)
-    monkeypatch.setattr(intake, "_user_stopped_printers", set())
     notified, completed_event, relayed = AsyncMock(), AsyncMock(), AsyncMock()
     usage = AsyncMock()
     monkeypatch.setattr(main.notification_service, "on_queue_completed", notified)
@@ -444,7 +445,6 @@ async def test_upgrade_repairs_terminal_legacy_archive_without_replaying_complet
         assert await db.scalar(select(PrintLogEntry.id)) is None
     for effect in (notified, completed_event, relayed, usage):
         effect.assert_not_awaited()
-    assert cache == ({1: legacy.job_id} if cached else {})
 
 
 @pytest.mark.parametrize("duplicate", ["archive", "job"])
@@ -464,7 +464,6 @@ async def test_upgrade_rejects_ambiguous_terminal_legacy_identity(legacy_unmigra
     )
     monkeypatch.setattr(intake, "async_session", legacy.sessions)
     monkeypatch.setattr(print_effects, "async_session", legacy.sessions)
-    monkeypatch.setattr(intake, "_completed_job_events", {})
     completed = datetime(2026, 10, 1, 12)
     async with legacy.sessions() as db:
         await db.execute(
@@ -490,9 +489,8 @@ async def test_upgrade_rejects_ambiguous_terminal_legacy_identity(legacy_unmigra
         assert job.status == "failed" and job.physical_completed_at == completed
 
 
-@pytest.mark.parametrize("cached", [False, True])
 @pytest.mark.parametrize("status", ["finished", "failed", "successful", "unsuccessful"])
-async def test_duplicate_modern_completion_needs_no_write_transaction(alignment, monkeypatch, cached, status):
+async def test_duplicate_modern_completion_needs_no_write_transaction(alignment, monkeypatch, status):
     import backend.app.main as main
     from backend.app.services import print_effects
     from backend.app.services.lifecycle import intake, printing as lifecycle_printing
@@ -501,9 +499,11 @@ async def test_duplicate_modern_completion_needs_no_write_transaction(alignment,
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
         attempt = await hold_and_link(db, job)
-        await transition_queue_item(db, job, "dispatching", "printing", values={"dispatch_subtask_id": "123"})
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "dispatching", "printing", values={"dispatch_subtask_id": "123"})
         awaiting = "finished" if status in ("finished", "successful") else "failed"
-        await transition_queue_item(db, job, "printing", awaiting, values={"error_message": "Original reason"})
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "printing", awaiting, values={"error_message": "Original reason"})
         if status in ("successful", "unsuccessful"):
             await clear_job_plate(db, job)
         await db.commit()
@@ -527,8 +527,6 @@ async def test_duplicate_modern_completion_needs_no_write_transaction(alignment,
 
     monkeypatch.setattr(intake, "async_session", alignment.sessions)
     monkeypatch.setattr(print_effects, "async_session", alignment.sessions)
-    monkeypatch.setattr(intake, "_completed_job_events", {1: alignment.job_id} if cached else {})
-    monkeypatch.setattr(intake, "_user_stopped_printers", set())
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: None)
     notified, published, usage = AsyncMock(), AsyncMock(), AsyncMock()
     monkeypatch.setattr(main.notification_service, "on_queue_completed", notified)

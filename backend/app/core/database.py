@@ -619,6 +619,7 @@ _QUEUE_INSERT_COLUMN_DEFINITIONS: dict[str, tuple[str, str]] = {
     "waiting_reason": ("TEXT", "TEXT"),
     "archive_id": ("INTEGER", "INTEGER"),
     "library_file_id": ("INTEGER", "INTEGER"),
+    "source_filename": ("VARCHAR(512)", "VARCHAR(512)"),
     "project_id": ("INTEGER", "INTEGER"),
     # Scheduling and dispatch policy
     "position": ("INTEGER DEFAULT 0", "INTEGER DEFAULT 0"),
@@ -659,6 +660,7 @@ _QUEUE_INSERT_COLUMN_DEFINITIONS: dict[str, tuple[str, str]] = {
     # Lifecycle / audit fields
     "status": ("VARCHAR(20) DEFAULT 'queued'", "VARCHAR(20) DEFAULT 'queued'"),
     "dispatched_at": ("DATETIME", "TIMESTAMP"),
+    "dispatch_stage": ("VARCHAR(24)", "VARCHAR(24)"),
     "dispatch_subtask_id": ("VARCHAR(32)", "VARCHAR(32)"),
     "started_at": ("DATETIME", "TIMESTAMP"),
     "completed_at": ("DATETIME", "TIMESTAMP"),
@@ -1540,6 +1542,7 @@ async def run_migrations(conn):
     # Migration: Add auto_off_pending columns to smart_plugs (for restart recovery)
     await _safe_execute(conn, "ALTER TABLE smart_plugs ADD COLUMN auto_off_pending BOOLEAN DEFAULT 0")
     await _safe_execute(conn, "ALTER TABLE smart_plugs ADD COLUMN auto_off_pending_since DATETIME")
+    await _safe_execute(conn, "ALTER TABLE smart_plugs ADD COLUMN auto_off_pending_job_id INTEGER")
 
     # Migration: Add auto_off_persistent column to smart_plugs (keep auto-off enabled between prints)
     await _safe_execute(conn, "ALTER TABLE smart_plugs ADD COLUMN auto_off_persistent BOOLEAN DEFAULT 0")

@@ -1256,7 +1256,6 @@ describe('SettingsPage', () => {
       external_camera_enabled: true,
       external_camera_snapshot_url: null,
       camera_rotation: 0,
-      plate_detection_enabled: false,
       created_at: '2026-01-01T00:00:00Z',
       updated_at: '2026-01-01T00:00:00Z',
     };

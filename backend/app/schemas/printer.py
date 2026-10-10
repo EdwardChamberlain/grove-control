@@ -2,8 +2,6 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
-from backend.app.utils.printer_models import supports_nozzle_flow_type
-
 
 class PrinterBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
@@ -48,15 +46,6 @@ class PrinterCreate(PrinterBase):
     access_code: str = Field(..., min_length=1, max_length=20)
 
 
-class PlateDetectionROI(BaseModel):
-    """Region of interest for plate detection (percentages 0.0-1.0)."""
-
-    x: float = Field(..., ge=0.0, le=1.0)  # X start %
-    y: float = Field(..., ge=0.0, le=1.0)  # Y start %
-    w: float = Field(..., ge=0.0, le=1.0)  # Width %
-    h: float = Field(..., ge=0.0, le=1.0)  # Height %
-
-
 class PrinterUpdate(BaseModel):
     name: str | None = None
     ip_address: str | None = Field(
@@ -75,8 +64,6 @@ class PrinterUpdate(BaseModel):
     external_camera_enabled: bool | None = None
     external_camera_snapshot_url: str | None = None  # #1177
     camera_rotation: int | None = None  # 0, 90, 180, 270 degrees
-    plate_detection_enabled: bool | None = None
-    plate_detection_roi: PlateDetectionROI | None = None
 
 
 class PrinterResponse(PrinterBase):
@@ -94,54 +81,11 @@ class PrinterResponse(PrinterBase):
     external_camera_enabled: bool = False
     external_camera_snapshot_url: str | None = None  # #1177
     camera_rotation: int = 0  # 0, 90, 180, 270 degrees
-    plate_detection_enabled: bool = False
-    plate_detection_roi: PlateDetectionROI | None = None
     created_at: datetime
     updated_at: datetime
 
     class Config:
         from_attributes = True
-
-    @classmethod
-    def from_orm_with_roi(cls, printer) -> "PrinterResponse":
-        """Create response from ORM model, converting ROI fields to nested object."""
-        data = {
-            "id": printer.id,
-            "name": printer.name,
-            "serial_number": printer.serial_number,
-            "ip_address": printer.ip_address,
-            "model": printer.model,
-            "location": printer.location,
-            "auto_archive": printer.auto_archive,
-            "external_camera_url": printer.external_camera_url,
-            "external_camera_type": printer.external_camera_type,
-            "external_camera_enabled": printer.external_camera_enabled,
-            "external_camera_snapshot_url": printer.external_camera_snapshot_url,
-            "camera_rotation": printer.camera_rotation,
-            "is_active": printer.is_active,
-            "nozzle_count": printer.nozzle_count,
-            "supports_nozzle_flow_type": supports_nozzle_flow_type(printer.model),
-            "print_hours_offset": printer.print_hours_offset,
-            "plate_detection_enabled": printer.plate_detection_enabled,
-            "created_at": printer.created_at,
-            "updated_at": printer.updated_at,
-        }
-        # Build ROI object if any ROI field is set
-        if any(
-            [
-                printer.plate_detection_roi_x is not None,
-                printer.plate_detection_roi_y is not None,
-                printer.plate_detection_roi_w is not None,
-                printer.plate_detection_roi_h is not None,
-            ]
-        ):
-            data["plate_detection_roi"] = PlateDetectionROI(
-                x=printer.plate_detection_roi_x or 0.15,
-                y=printer.plate_detection_roi_y or 0.35,
-                w=printer.plate_detection_roi_w or 0.70,
-                h=printer.plate_detection_roi_h or 0.55,
-            )
-        return cls(**data)
 
 
 class PrinterResponseWithSecret(PrinterResponse):

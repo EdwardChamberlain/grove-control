@@ -10,16 +10,15 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable, Mapping, Sequence
-from contextlib import nullcontext
+from contextlib import asynccontextmanager, nullcontext
+from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import partial
 from importlib import import_module
-from pathlib import Path
 from typing import Any
 
-from sqlalchemy import event, func, select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
-from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -27,7 +26,6 @@ from backend.app.models.print_queue import (
     ACTIVE_STATUSES,
     AWAITING_PLATE_CLEAR_STATUSES,
     FINAL_STATUSES,
-    HOLDING_STATUSES,
     PrintQueueItem,
     is_physical_holding,
     physical_holding_clause,
@@ -37,83 +35,58 @@ from backend.app.services.lifecycle import clock
 
 logger = logging.getLogger(__name__)
 
-# One writer per printer (#217). A transaction takes a printer's lock when it
-# first locks or writes a job holding that printer, and keeps it until the
-# transaction ends, so no two transactions ever write one printer's job at once.
+# A lifecycle writer is an explicit scope around work that may affect a
+# printer. The database CAS and holding index remain the durable safeguards;
+# this lock orders in-process effects and the send-command boundary.
 _printer_locks: dict[int, asyncio.Lock] = {}
-_holders: dict[int, Session] = {}
-# Scenarios collect lifecycle conflicts and late locks here instead of logging them.
-violations: list[str] | None = None
 
 
-async def hold_printer(db: AsyncSession, printer_id: int | None) -> None:
-    """Make ``db``'s transaction the printer's only writer until the transaction ends.
+@dataclass(frozen=True)
+class _WriterState:
+    task: asyncio.Task
+    printer_ids: frozenset[int]
 
-    Take it before the transaction's first write: a transaction that has
-    written holds SQLite's single write lock, and the printer's current
-    holder may be waiting for that.
+
+_writer_state: ContextVar[_WriterState | None] = ContextVar("lifecycle_writer", default=None)
+
+
+@asynccontextmanager
+async def writer(printer_ids: int | Sequence[int | None] | None):
+    """Serialize lifecycle work for one or more printers in ascending ID order.
+
+    Use this before a lifecycle transaction and keep it through any synchronous
+    printer command whose authorization comes from that transaction. Nested
+    calls by the same task are reentrant; child tasks must acquire their own
+    writer even when they inherit the context variable.
     """
-    session = db.sync_session
-    if printer_id is None or _holders.get(printer_id) is session:
-        return
-    if session.info.get("wrote"):
-        message = f"printer {printer_id}'s lock taken after this transaction wrote"
-        _violation(message)
-        raise RuntimeError(f"lifecycle lock-order invariant violated: {message}")
-    held = session.info.setdefault("held_printer_ids", set())
-    if held and printer_id < max(held):
-        message = f"printer {printer_id}'s lock taken after higher printer lock {max(held)}"
-        _violation(message)
-        raise RuntimeError(f"lifecycle lock-order invariant violated: {message}")
-    await _printer_locks.setdefault(printer_id, asyncio.Lock()).acquire()
-    _holders[printer_id] = session
-    held.add(printer_id)
+    requested = {printer_ids} if isinstance(printer_ids, int) else set(printer_ids or ())
+    requested.discard(None)
+    task = asyncio.current_task()
+    if task is None:
+        raise RuntimeError("Lifecycle writers require an asyncio task")
+    previous = _writer_state.get()
+    inherited = previous.printer_ids if previous is not None and previous.task is task else frozenset()
+    acquired: list[tuple[int, asyncio.Lock]] = []
+    try:
+        for printer_id in sorted(requested - inherited):
+            lock = _printer_locks.setdefault(printer_id, asyncio.Lock())
+            await lock.acquire()
+            acquired.append((printer_id, lock))
+        token = _writer_state.set(_WriterState(task, inherited | requested))
+        try:
+            yield
+        finally:
+            _writer_state.reset(token)
+    finally:
+        for _printer_id, lock in reversed(acquired):
+            lock.release()
 
 
-async def hold_printers(db: AsyncSession, printer_ids: Sequence[int | None]) -> None:
-    """Acquire a transaction's printer locks in the shared ascending order."""
-    for printer_id in sorted({printer_id for printer_id in printer_ids if printer_id is not None}):
-        await hold_printer(db, printer_id)
-
-
-def printer_busy(printer_id: int) -> bool:
-    """Whether a transaction is writing the printer's job now."""
-    return printer_id in _holders
-
-
-@event.listens_for(Session, "after_transaction_end")
-def _release(session: Session, transaction) -> None:
-    if transaction.parent is not None:
-        return
-    session.info.pop("wrote", None)
-    session.info.pop("held_printer_ids", None)
-    for printer_id, holder in list(_holders.items()):
-        if holder is session:
-            del _holders[printer_id]
-            _printer_locks[printer_id].release()
-
-
-@event.listens_for(Session, "do_orm_execute")
-def _note_write(state) -> None:
-    if state.is_update or state.is_insert or state.is_delete:
-        state.session.info["wrote"] = True
-
-
-@event.listens_for(Session, "after_flush")
-def _note_flush(session: Session, _context) -> None:
-    session.info["wrote"] = True
-
-
-def _violation(message: str) -> None:
-    if violations is None:
-        logger.warning("lifecycle: %s", message)
-        return
-    import traceback
-
-    frames = [f for f in traceback.extract_stack()[:-2] if "/app/" in f.filename]
-    violations.append(
-        message + " via " + " < ".join(f"{Path(f.filename).stem}.{f.name}" for f in reversed(frames[-4:]))
-    )
+def owns_writer(printer_id: int | None) -> bool:
+    """Whether the current task owns the lifecycle writer for ``printer_id``."""
+    state = _writer_state.get()
+    task = asyncio.current_task()
+    return bool(printer_id is not None and state is not None and state.task is task and printer_id in state.printer_ids)
 
 
 ALLOWED_TRANSITIONS = {
@@ -159,7 +132,7 @@ class QueueTransitionConflict(RuntimeError):
 
 
 # Only these actions may move a job out of an awaiting-plate-clear state.
-_RELEASE_ACTIONS = ("clear_plate", "printer_deleted", "hold_transferred", "printer_report")
+_RELEASE_ACTIONS = ("clear_plate", "printer_deleted", "external_replacement", "printer_report")
 
 # Each state's steps live in its module. In the caller's transaction, after the
 # conditional write: the old state's on_exit(change, row), then the new state's
@@ -214,9 +187,11 @@ def _check(before: str, after: str, action: str | None, upgrading: bool) -> None
     if before == "queued" and after == "unsuccessful" and action != "cancel":
         raise InvalidQueueTransition("Only a user cancellation may end a queued job")
     if before in ACTIVE_STATUSES and after == "unsuccessful" and action != "printer_deleted":
-        if not (before == "dispatching" and action == "withdrawn"):
+        if not (before == "dispatching" and action == "withdrawn") and not (
+            before in ("preheating", "dispatching") and action == "cancel_unsent"
+        ):
             raise InvalidQueueTransition(
-                "Only printer deletion, or Retry of an unsent attempt, may release an active job"
+                "Only printer deletion, cancellation of an unsent job, or Retry of an unsent attempt may release an active job"
             )
     if before in AWAITING_PLATE_CLEAR_STATUSES and action not in _RELEASE_ACTIONS:
         raise InvalidQueueTransition(
@@ -238,13 +213,15 @@ async def transition_queue_item(
 ) -> Transition | None:
     """Conditionally change a persisted item, or raise without writing it.
 
-    The caller's transaction takes the job's printer lock here, if it hasn't
-    already. Same-status writes still check the stored status; ``conditions``
-    add further checks, and ``values`` change atomically with the status.
+    A lifecycle writer orders writes for the bound printer. Same-status writes
+    still check the stored status; ``conditions`` add further checks, and
+    ``values`` change atomically with the status.
     Integer IDs let the legacy upgrade use its own connection. On conflict
     nothing is written or queued. This never commits or rolls back, and ORM
     sync never flushes a second status UPDATE. A session gets back the
-    written change.
+    written change. Callers changing a printer-bound job must already own its
+    explicit lifecycle writer; this helper never acquires one after the
+    database transaction has begun.
     """
     upgrading = migration and isinstance(db, AsyncConnection) and status in LEGACY_TRANSITIONS.get(expected_status, ())
     _check(expected_status, status, action, upgrading)
@@ -268,14 +245,18 @@ async def transition_queue_item(
         # A deadline belongs to one state: leaving it ends the wait.
         metadata.setdefault("deadline_at", None)
         metadata.setdefault("deadline_kind", None)
+    if expected_status == "dispatching" and status != "dispatching":
+        metadata.setdefault("dispatch_stage", None)
     item_id = item if isinstance(item, int) else item.id
-    if isinstance(db, AsyncSession) and not isinstance(item, int):
-        if expected_status in HOLDING_STATUSES or status in HOLDING_STATUSES:
-            await hold_printer(db, metadata.get("printer_id", item.printer_id))
+    session = isinstance(db, AsyncSession)
+    printer_id = metadata.get("printer_id", item.printer_id if not isinstance(item, int) else None)
+    if session and printer_id is not None and not owns_writer(printer_id):
+        raise RuntimeError(f"Lifecycle writes for printer {printer_id} require lifecycle.writer()")
     if status == "dispatching" and expected_status != status and not upgrading:
         if metadata.get("printer_id", item.printer_id if not isinstance(item, int) else None) is None:
             raise InvalidQueueTransition("Dispatch requires a selected printer")
-    session = isinstance(db, AsyncSession)
+    if action == "cancel_unsent" and expected_status in ("preheating", "dispatching"):
+        conditions = (*conditions, PrintQueueItem.dispatched_at.is_(None))
     if session and (expected_status != status or confirmed):
         if status in AWAITING_PLATE_CLEAR_STATUSES and action not in ("cancel", "dispatch_failure"):
             await _record_physical_outcome(db, item_id, status, metadata, confirmed, archive_failure_reason)
@@ -307,8 +288,6 @@ async def transition_queue_item(
             .execution_options(autoflush=False)
         )
     if result.rowcount != 1:
-        if expected_status in HOLDING_STATUSES:
-            _violation(f"conflict: queue job {item_id} left {expected_status} under another writer")
         raise QueueTransitionConflict(f"Queue item {item_id} no longer matches expected status {expected_status}")
     if not isinstance(item, int):
         set_committed_value(item, "status", status)
@@ -363,6 +342,18 @@ async def _written(change: Transition) -> None:
             row.archive_id,
             physical_outcome=after_outcome,
         )
+    # Auto Off is a job outcome, and only a printer-confirmed end can request
+    # it. An unsent dispatch failure or an unconfirmed Stop is not proof that
+    # the printer has finished this job.
+    confirmed_end = (
+        change.action == "printer_report"
+        and change.before == change.after
+        and change.values.get("physical_outcome") is not None
+    )
+    if after_outcome is not None and (
+        (entered and change.after in ("finished", "failed", "cancelled")) or confirmed_end
+    ):
+        effects.queue_auto_off(change.db, change.item_id, row.printer_id)
     if entered and change.before in _EXITS:
         await import_module(_EXITS[change.before]).on_exit(change, row)
     if entered and (enter := _step(change.after, "on_enter")):
@@ -395,17 +386,13 @@ async def lock_queue_items(
     db: AsyncSession,
     expected_printers: Mapping[int, int | None],
 ) -> dict[int, PrintQueueItem | None]:
-    """Lock and refresh jobs in ID order after their printer locks have been acquired.
+    """Conditionally lock and refresh queue-edit targets in ID order.
 
     The conditional no-op UPDATE is a row lock on PostgreSQL and SQLite's write
-    lock. Its printer predicate makes a changed assignment a conflict instead
-    of allowing the transaction to acquire a printer lock after writing.
-    Missing rows remain missing, matching the single-job helper's behavior.
+    lock. Bulk queue edits retain this database safeguard until their callers
+    use fully conditional queued/unbound writes. The printer predicate makes a
+    changed assignment a conflict. Missing rows remain missing.
     """
-    held_printers = db.sync_session.info.get("held_printer_ids", set())
-    missing_locks = set(expected_printers.values()) - {None} - held_printers
-    if missing_locks:
-        raise RuntimeError(f"lifecycle job rows locked before printer locks: {sorted(missing_locks)}")
     locked: dict[int, PrintQueueItem | None] = {}
     with db.no_autoflush:  # Pending work, such as an unlinked copy, stays unflushed until the caller's write.
         for item_id in sorted(expected_printers):
@@ -434,40 +421,38 @@ async def lock_queue_items(
 
 
 async def lock_queue_item(db: AsyncSession, item_id: int) -> PrintQueueItem | None:
-    """Take the job's printer lock and a row write lock on both SQLite and PostgreSQL, then discard stale ORM state."""
-    with db.no_autoflush:
-        snapshot = await db.execute(
-            select(
-                PrintQueueItem.id,
-                func.coalesce(PrintQueueItem.printer_id, PrintQueueItem.assigned_printer_id).label("printer_id"),
-            ).where(PrintQueueItem.id == item_id)
-        )
-        row = snapshot.first()
-        if row is None:
-            return None
-        await hold_printer(db, row.printer_id)
-        return (await lock_queue_items(db, {item_id: row.printer_id}))[item_id]
+    """Refresh one job under a database row lock; writes still use conditional transitions."""
+    return await db.scalar(
+        select(PrintQueueItem)
+        .where(PrintQueueItem.id == item_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
 
 
-async def transfer_hold(db: AsyncSession, held: PrintQueueItem, identity: str) -> bool:
-    """Transfer hold under the lifecycle transition rules."""
+async def settle_replaced_hold(db: AsyncSession, held: PrintQueueItem, identity: str) -> bool:
+    """End an old plate hold before adopting a different external print."""
     from backend.app.services.lifecycle.final import end
 
     if held.status not in AWAITING_PLATE_CLEAR_STATUSES or (held.status == "failed" and held.physical_outcome is None):
         return False
-    reason = f"Printer hold transferred to externally started print {identity}"
+    reason = f"Plate hold released after external print {identity} replaced this job"
     message = f"{held.error_message}; {reason}" if held.error_message else reason
-    await end(db, held, "hold_transferred", error_message=message)
+    await end(db, held, "external_replacement", error_message=message)
     return True
 
 
 async def release_printer(db: AsyncSession, printer: Printer) -> None:
     """Release printer under the lifecycle transition rules."""
+    async with writer(printer.id):
+        await _release_printer_locked(db, printer)
+
+
+async def _release_printer_locked(db: AsyncSession, printer: Printer) -> None:
     from backend.app.services.lifecycle.dispatching import is_soaking
     from backend.app.services.lifecycle.final import end
     from backend.app.services.printer_manager import printer_manager
 
-    await hold_printer(db, printer.id)
     held = (
         PrintQueueItem.printer_id == printer.id,
         physical_holding_clause(PrintQueueItem.status, PrintQueueItem.physical_outcome),

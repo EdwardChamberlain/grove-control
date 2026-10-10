@@ -12,13 +12,14 @@ durable; nothing about a waiting job lives in memory.
 import asyncio
 import json
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import set_committed_value
 
 from backend.app.core.config import settings
@@ -30,7 +31,12 @@ from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant, ph
 from backend.app.models.printer import Printer
 from backend.app.schemas.print_queue import PrintQueueItemUpdate
 from backend.app.services.filament_requirements import build_queue_filament_overrides, extract_filament_requirements
-from backend.app.services.lifecycle.engine import QueueTransitionConflict, lock_queue_item, transition_queue_item
+from backend.app.services.lifecycle.engine import (
+    QueueTransitionConflict,
+    lock_queue_item,
+    transition_queue_item,
+    writer,
+)
 from backend.app.services.lifecycle.preheating import abort_heat_soak
 from backend.app.services.notification_service import notification_service
 from backend.app.services.printer_manager import printer_manager
@@ -108,7 +114,37 @@ async def create_job(
 
 
 async def create_retry_job(db: AsyncSession, item: PrintQueueItem) -> PrintQueueItem:
-    """Create one history-free replacement at the front of its queue."""
+    """Create one history-free replacement at the front of its queue.
+
+    Automatic and manual retries share the same reset/copy rules. ``None``
+    means none of the snapshotted sources is still available; automatic retry
+    then leaves the failed job for review instead of creating an unusable row.
+    """
+    from backend.app.utils.safe_path import safe_join_under
+
+    def source_available(source) -> bool:
+        if source is None or source.deleted_at is not None:
+            return False
+        path = Path(source.file_path)
+        path = path if path.is_absolute() else safe_join_under(settings.base_dir, source.file_path, http=False)
+        return path.is_file()
+
+    variants = list(
+        (
+            await db.scalars(
+                select(PrintQueueVariant)
+                .where(PrintQueueVariant.queue_item_id == item.id)
+                .options(selectinload(PrintQueueVariant.library_file))
+                .order_by(PrintQueueVariant.position, PrintQueueVariant.id)
+            )
+        ).all()
+    )
+    variants = [variant for variant in variants if source_available(variant.library_file)]
+    source = await db.get(LibraryFile, item.library_file_id) if item.library_file_id is not None else None
+    archive = await db.get(PrintArchive, item.archive_id) if item.archive_id is not None else None
+    if not variants and not source_available(source) and not source_available(archive):
+        return None
+
     retry_excluded = {
         "id",
         "created_at",
@@ -132,6 +168,7 @@ async def create_retry_job(db: AsyncSession, item: PrintQueueItem) -> PrintQueue
         "stop_requested_at",
         "been_jumped",
         "retry_on_failure",
+        "dispatch_stage",
     }
     values = {
         column.name: getattr(item, column.name)
@@ -142,6 +179,7 @@ async def create_retry_job(db: AsyncSession, item: PrintQueueItem) -> PrintQueue
         printer_id=None,
         assigned_printer_id=item.assigned_printer_id,
         retry_on_failure=False,
+        dispatch_stage=None,
         manual_start=False,
         preheat_requested_at=None,
         preheat_started_at=None,
@@ -159,15 +197,6 @@ async def create_retry_job(db: AsyncSession, item: PrintQueueItem) -> PrintQueue
         stop_requested_at=None,
         been_jumped=False,
     )
-    variants = list(
-        (
-            await db.scalars(
-                select(PrintQueueVariant)
-                .where(PrintQueueVariant.queue_item_id == item.id)
-                .order_by(PrintQueueVariant.position, PrintQueueVariant.id)
-            )
-        ).all()
-    )
     variant_values = [
         {
             column.name: getattr(variant, column.name)
@@ -178,8 +207,8 @@ async def create_retry_job(db: AsyncSession, item: PrintQueueItem) -> PrintQueue
     ]
     if variant_values:
         values.update(
-            archive_id=None,
             library_file_id=None,
+            archive_id=None,
             target_model=variant_values[0]["target_model"],
             cleanup_library_after_dispatch=False,
         )
@@ -192,6 +221,15 @@ async def create_retry_job(db: AsyncSession, item: PrintQueueItem) -> PrintQueue
         values["ams_mapping"] = None
         for variant in variant_values:
             variant["ams_mapping"] = None
+    elif variant_values:
+        # The replacement will select one of these original library files.
+        # The old dispatch Archive belongs only to the completed attempt.
+        values["archive_id"] = None
+    elif source_available(source):
+        values["archive_id"] = None if item.library_file_id is not None else item.archive_id
+    else:
+        values["library_file_id"] = None
+        values["cleanup_library_after_dispatch"] = False
     created = await create_job(db, [values], at="top", variants=variant_values)
     return created[0]
 
@@ -352,18 +390,36 @@ class Workers:
             reserved.add(binding.printer_id)
             task = spawn_background_task(self._work(item_id, binding), name=f"queue-upload-{item_id}")
             self.inflight[item_id] = (task, binding.printer_id)
-            task.add_done_callback(lambda _task, item_id=item_id: self.inflight.pop(item_id, None))
+            task.add_done_callback(lambda done, item_id=item_id: self._forget(item_id, done))
 
-    def adopt(self, item_id: int, printer_id: int, work) -> None:
-        """Track a worker started outside the queue (a soak's dispatch), so Stop cancels it like any other."""
-        task = spawn_background_task(work, name=f"heat-soak-dispatch-{item_id}")
+    def track_io(self, item_id: int, printer_id: int, work: Callable[[], Awaitable], *, name: str) -> bool:
+        """Track one persisted stage's currently running I/O for Stop and recovery."""
+        current = self.inflight.get(item_id)
+        task = asyncio.current_task()
+        if current and not current[0].done() and current[0] is not task:
+            return False
+        task = spawn_background_task(work(), name=name)
         self.inflight[item_id] = (task, printer_id)
-        task.add_done_callback(lambda _task: self.inflight.pop(item_id, None))
+        task.add_done_callback(lambda done: self._forget(item_id, done))
+        return True
+
+    def _forget(self, item_id: int, done: asyncio.Task) -> None:
+        current = self.inflight.get(item_id)
+        if current and current[0] is done:
+            self.inflight.pop(item_id, None)
 
     def cancel(self, item_id: int) -> bool:
         """Cancel a worker after its job has been cancelled or deleted."""
         task = self.inflight.get(item_id, (None,))[0]
         return bool(task and not task.done() and task.cancel())
+
+    async def cancel_and_wait(self, item_id: int) -> None:
+        """Drain an active upload before its cleanup effect can remove the remote file."""
+        task = self.inflight.get(item_id, (None,))[0]
+        if task is None or task.done() or task is asyncio.current_task():
+            return
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
     async def _work(self, item_id: int, binding: _DispatchBinding) -> None:
         """Leave the queue in its own session; the hold itself checks the job is unchanged since selection."""
@@ -430,13 +486,25 @@ class Workers:
 async def _settle(db: AsyncSession, item_id: int) -> None:
     """After an unexpected worker error, park a job still queued, or end a soak whose start failed."""
     try:
-        item = await lock_queue_item(db, item_id)
-        if item and item.status == "queued":
-            await stay(db, item, "Dispatch preparation failed; check the logs, then start it again", park=True)
-        elif item and item.status == "preheating":
-            await abort_heat_soak(db, item, "Heat soak failed to start; inspect the printer before retrying")
-        else:
-            await db.rollback()
+        snapshot = await db.get(PrintQueueItem, item_id)
+        printer_id = snapshot.printer_id if snapshot is not None else None
+        await db.rollback()
+        if printer_id is None:
+            async with writer(None):
+                item = await lock_queue_item(db, item_id)
+                if item and item.status == "queued":
+                    await stay(db, item, "Dispatch preparation failed; check the logs, then start it again", park=True)
+                else:
+                    await db.rollback()
+            return
+        async with writer(printer_id):
+            item = await lock_queue_item(db, item_id)
+            if item and item.status == "queued":
+                await stay(db, item, "Dispatch preparation failed; check the logs, then start it again", park=True)
+            elif item and item.status == "preheating":
+                await abort_heat_soak(db, item, "Heat soak failed to start; inspect the printer before retrying")
+            else:
+                await db.rollback()
     except Exception:
         await db.rollback()
         logger.exception("Could not settle queue item %s after an exit worker failure", item_id)

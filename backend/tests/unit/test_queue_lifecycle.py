@@ -32,6 +32,7 @@ from backend.app.services.lifecycle.engine import (
     InvalidQueueTransition,
     hold_printers,
     transition_queue_item,
+    writer,
 )
 from backend.app.services.printer_manager import PrinterManager
 from backend.app.services.queue_actions import cancel_job
@@ -80,7 +81,8 @@ async def test_only_successful_physical_completion_clears_automatically(sessions
         item = PrintQueueItem(printer_id=1, status="printing")
         db.add(item)
         await db.commit()
-        await transition_queue_item(db, item, "printing", status)
+        async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+            await transition_queue_item(db, item, "printing", status)
         await db.commit()
         assert item.status == ("successful" if status == "finished" and confirmation == "false" else status)
         if item.status in AWAITING_PLATE_CLEAR_STATUSES:
@@ -123,10 +125,12 @@ async def test_system_cannot_release_waiting_or_active_jobs(sessions, status):
         db.add(item)
         await db.commit()
         with pytest.raises(InvalidQueueTransition):
-            await transition_queue_item(db, item, status, "unsuccessful")
+            async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+                await transition_queue_item(db, item, status, "unsuccessful")
         if status != "queued":
             with pytest.raises(InvalidQueueTransition):
-                await transition_queue_item(db, item, status, "queued")
+                async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+                    await transition_queue_item(db, item, status, "queued")
 
 
 async def test_plate_view_updates_after_commit_and_not_on_rollback_or_queued_cancel(sessions):
@@ -137,12 +141,14 @@ async def test_plate_view_updates_after_commit_and_not_on_rollback_or_queued_can
             queued = PrintQueueItem(assigned_printer_id=1, status="queued")
             db.add_all([item, queued])
             await db.commit()
-            await transition_queue_item(db, item, "printing", "failed")
+            async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+                await transition_queue_item(db, item, "printing", "failed")
             assert not manager.is_awaiting_plate_clear(1)
             await db.rollback()
             assert not manager.is_awaiting_plate_clear(1)
             await db.refresh(item)
-            await transition_queue_item(db, item, "printing", "failed")
+            async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+                await transition_queue_item(db, item, "printing", "failed")
             await db.commit()
             assert manager.is_awaiting_plate_clear(1)
             await db.refresh(queued)
@@ -201,7 +207,8 @@ async def test_auto_clear_keeps_the_outcome_and_hold_if_another_print_is_already
         db.add_all([old, Settings(key="require_plate_clear", value="false")])
         await db.commit()
         with patch("backend.app.services.printer_manager.printer_manager.get_status", return_value=live):
-            await transition_queue_item(db, old, "printing", "finished")
+            async with writer(getattr(old, "printer_id", None) or getattr(old, "assigned_printer_id", None)):
+                await transition_queue_item(db, old, "printing", "finished")
             await db.commit()
         assert old.status == "finished"
 

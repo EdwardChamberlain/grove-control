@@ -19,7 +19,7 @@ from backend.app.services.lifecycle import (
     preheating as heat,
 )
 from backend.app.services.lifecycle.awaiting import clear_job_plate
-from backend.app.services.lifecycle.engine import transition_queue_item
+from backend.app.services.lifecycle.engine import transition_queue_item, writer
 from backend.app.services.lifecycle.printing import observe_print
 from backend.app.services.print_scheduler import PrintScheduler, scheduler
 from backend.app.services.printer_manager import printer_manager
@@ -37,7 +37,6 @@ async def test_clear_plate_cleans_sent_upload_after_offline_stop(alignment, monk
     live = SimpleNamespace(connected=False, state="IDLE", job_telemetry_ready=False)
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
     monkeypatch.setattr(printer_manager, "stop_print", lambda _id: False)
-    monkeypatch.setattr("backend.app.services.lifecycle.intake._user_stopped_printers", set())
     monkeypatch.setattr(scheduler.workers, "cancel", lambda _id: False)
     notified, powered_off = AsyncMock(), AsyncMock()
     deleted = AsyncMock(side_effect=OSError("offline") if outcome == "ftp_failure" else None, return_value=True)
@@ -47,13 +46,14 @@ async def test_clear_plate_cleans_sent_upload_after_offline_stop(alignment, monk
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
         await hold_and_link(db, job)
-        await transition_queue_item(
-            db,
-            job,
-            "dispatching",
-            status,
-            values={"dispatch_subtask_id": "123", "dispatched_at": datetime.now(timezone.utc)},
-        )
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(
+                db,
+                job,
+                "dispatching",
+                status,
+                values={"dispatch_subtask_id": "123", "dispatched_at": datetime.now(timezone.utc)},
+            )
         job.auto_off_after = True
         await db.commit()
         for started in pending:  # Entering printing publishes its start; this test is about Stop.
@@ -127,7 +127,8 @@ async def test_database_failure_in_one_effect_does_not_skip_later_cleanup(alignm
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
         if failing_step == "notification_source":
-            await transition_queue_item(db, job, "queued", "dispatching")
+            async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+                await transition_queue_item(db, job, "queued", "dispatching")
         else:
             await hold_and_link(db, job)
         job.auto_off_after = True
@@ -136,7 +137,8 @@ async def test_database_failure_in_one_effect_does_not_skip_later_cleanup(alignm
         await db.commit()
         attempt = await db.get(PrintArchive, job.archive_id) if job.archive_id else None
         remote_name = attempt.extra_data["remote_filename"] if attempt else None
-        await transition_queue_item(db, job, "dispatching", "failed")
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "dispatching", "failed")
         await db.commit()
     assert len(committed) == 1
     engine = alignment.sessions.kw["bind"]
@@ -205,7 +207,8 @@ async def test_failed_dispatch_effects_run_only_after_commit(alignment, monkeypa
         await db.commit()
         archive = await db.get(PrintArchive, job.archive_id)
         remote_name = archive.extra_data["remote_filename"]
-        await transition_queue_item(db, job, "dispatching", "failed", values={"error_message": "Upload failed"})
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "dispatching", "failed", values={"error_message": "Upload failed"})
         notified.assert_not_awaited()
         powered_off.assert_not_awaited()
         deleted.assert_not_awaited()
@@ -255,7 +258,8 @@ async def test_delayed_failure_cannot_shut_down_a_new_external_print(alignment, 
         await hold_and_link(db, job)
         job.preheat_requested_at = heat.utcnow()
         await db.commit()
-        await transition_queue_item(db, job, "dispatching", "failed")
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "dispatching", "failed")
         await db.commit()
     await asyncio.wait_for(entered.wait(), 2)
     try:
@@ -293,7 +297,8 @@ async def test_cancelled_job_skips_failure_notice_and_sd_cleanup(alignment, monk
         await hold_and_link(db, job)
         job.auto_off_after = True
         await db.commit()
-        await transition_queue_item(db, job, "dispatching", "cancelled", values={"error_message": "Stop requested"})
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "dispatching", "cancelled", values={"error_message": "Stop requested"})
         await db.commit()
     await asyncio.wait_for(done.wait(), 2)
     powered_off.assert_awaited_once()

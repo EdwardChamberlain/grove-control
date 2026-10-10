@@ -88,9 +88,6 @@ class NotificationProvider(Base):
     # Event triggers - Home Assistant sensors bound to a storage location (#82)
     on_location_ha_sensor_alert = Column(Boolean, default=False)
 
-    # Event triggers - Build plate detection
-    on_plate_not_empty = Column(Boolean, default=True)  # Objects detected on plate before print
-
     # Event triggers - Bed cooled after print
     on_bed_cooled = Column(Boolean, default=False)  # Bed cooled below threshold after print
     on_first_layer_complete = Column(Boolean, default=False)  # First layer finished printing

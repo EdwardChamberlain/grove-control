@@ -18,6 +18,7 @@ from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.models.settings import Settings
 from backend.app.services.lifecycle import dispatching as lifecycle_dispatching, dispatching as scheduler_module
+from backend.app.services.lifecycle.engine import writer
 from backend.app.services.print_scheduler import PrintScheduler, scheduler
 
 
@@ -260,8 +261,10 @@ async def _finish_and_clear(ctx):
     with patch.object(scheduler_module.settings, "base_dir", ctx.base_dir):
         async with ctx.session_maker() as db:
             item = await db.get(PrintQueueItem, ctx.queue_item_id)
-            await transition_queue_item(db, item, "dispatching", "printing")
-            await transition_queue_item(db, item, "printing", "finished")
+            async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+                await transition_queue_item(db, item, "dispatching", "printing")
+            async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+                await transition_queue_item(db, item, "printing", "finished")
             await db.commit()
             assert ctx.source_path.exists()
             await clear_job_plate(db, item)
@@ -331,7 +334,8 @@ async def test_archive_preparation_is_unsent_and_cancellation_still_fences_mqtt(
             assert item.status == "dispatching" and item.dispatch_subtask_id is None
             assert item.dispatched_at is None and not needs_dispatch_resolution(item)
             if cancelled:
-                await transition_queue_item(db, item, "dispatching", "cancelled", action="cancel")
+                async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+                    await transition_queue_item(db, item, "dispatching", "cancelled", action="cancel")
                 await db.commit()
         preparation_finished = datetime.now(timezone.utc)
 
@@ -408,7 +412,6 @@ async def test_old_completion_cannot_delete_a_later_upload(queue_factory, record
     with (
         patch.object(intake, "async_session", ctx.session_maker),
         patch.object(print_effects, "async_session", ctx.session_maker),
-        patch.object(intake, "_completed_job_events", {}),
         patch.object(main.printer_manager, "get_status", return_value=state),
         patch.object(main.printer_manager, "is_connected", return_value=True),
         patch.object(scheduler_module.settings, "base_dir", ctx.base_dir),

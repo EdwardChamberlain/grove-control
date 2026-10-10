@@ -20,6 +20,7 @@ from backend.app.services.lifecycle.engine import (
     InvalidQueueTransition,
     QueueTransitionConflict,
     transition_queue_item,
+    writer,
 )
 from backend.app.services.print_scheduler import PrintScheduler
 from backend.tests.unit.test_lifecycle_preheating import enter_preheating
@@ -79,21 +80,34 @@ async def test_existing_workflows_keep_their_status_paths(sessions, path):
             if after == "preheating":
                 await enter_preheating(db, item)
             else:
-                await transition_queue_item(
-                    db,
-                    item,
-                    before,
-                    after,
-                    action="cancel"
-                    if before == "queued" and after == "unsuccessful"
-                    else "clear_plate"
-                    if before in ("finished", "failed", "cancelled")
-                    else None,
-                )
+                async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+                    await transition_queue_item(
+                        db,
+                        item,
+                        before,
+                        after,
+                        action="cancel"
+                        if before == "queued" and after == "unsuccessful"
+                        else "clear_plate"
+                        if before in ("finished", "failed", "cancelled")
+                        else None,
+                    )
                 await db.commit()
             assert item.status == after
             await db.refresh(item)
             assert item.status == after
+
+
+async def test_bound_transition_requires_an_explicit_writer(sessions):
+    item_id = await make_item(sessions)
+    async with sessions() as db:
+        item = await db.get(PrintQueueItem, item_id)
+        async with writer(item.assigned_printer_id):
+            await transition_queue_item(db, item, "queued", "dispatching")
+            await db.commit()
+        await db.refresh(item)
+        with pytest.raises(RuntimeError, match="require lifecycle.writer"):
+            await transition_queue_item(db, item, "dispatching", "printing")
 
 
 @pytest.mark.parametrize(
@@ -112,17 +126,18 @@ async def test_invalid_edges_leave_database_unchanged(sessions, before, after):
     async with sessions() as db:
         item = await db.get(PrintQueueItem, item_id)
         with pytest.raises(InvalidQueueTransition):
-            await transition_queue_item(
-                db,
-                item,
-                before,
-                after,
-                action="cancel"
-                if before == "queued" and after == "unsuccessful"
-                else "clear_plate"
-                if before in ("finished", "failed", "cancelled")
-                else None,
-            )
+            async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+                await transition_queue_item(
+                    db,
+                    item,
+                    before,
+                    after,
+                    action="cancel"
+                    if before == "queued" and after == "unsuccessful"
+                    else "clear_plate"
+                    if before in ("finished", "failed", "cancelled")
+                    else None,
+                )
         await db.commit()
         await db.refresh(item)
         assert item.status == before
@@ -134,18 +149,20 @@ async def test_cancellation_wins_against_stale_dispatch_and_its_metadata(session
         stale = await worker.get(PrintQueueItem, item_id)
         await worker.commit()  # Retain the stale ORM snapshot, release the read transaction.
         current = await user.get(PrintQueueItem, item_id)
-        await transition_queue_item(
-            user, current, "queued", "unsuccessful", action="cancel", values={"error_message": "Cancelled"}
-        )
+        async with writer(getattr(current, "printer_id", None) or getattr(current, "assigned_printer_id", None)):
+            await transition_queue_item(
+                user, current, "queued", "unsuccessful", action="cancel", values={"error_message": "Cancelled"}
+            )
         await user.commit()
         with pytest.raises(QueueTransitionConflict):
-            await transition_queue_item(
-                worker,
-                stale,
-                "queued",
-                "dispatching",
-                values={"dispatch_subtask_id": "123"},
-            )
+            async with writer(getattr(stale, "printer_id", None) or getattr(stale, "assigned_printer_id", None)):
+                await transition_queue_item(
+                    worker,
+                    stale,
+                    "queued",
+                    "dispatching",
+                    values={"dispatch_subtask_id": "123"},
+                )
         await worker.rollback()
     async with sessions() as db:
         item = await db.get(PrintQueueItem, item_id)
@@ -159,20 +176,22 @@ async def test_deleted_item_cannot_be_transitioned(sessions):
         await db.delete(item)
         await db.commit()
         with pytest.raises(QueueTransitionConflict):
-            await transition_queue_item(db, item, "queued", "dispatching")
+            async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+                await transition_queue_item(db, item, "queued", "dispatching")
 
 
 async def test_status_and_metadata_share_callers_transaction(sessions):
     item_id = await make_item(sessions)
     async with sessions() as db:
         item = await db.get(PrintQueueItem, item_id)
-        await transition_queue_item(
-            db,
-            item,
-            "queued",
-            "dispatching",
-            values={"error_message": "Upload failed"},
-        )
+        async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+            await transition_queue_item(
+                db,
+                item,
+                "queued",
+                "dispatching",
+                values={"error_message": "Upload failed"},
+            )
         item.completed_at = datetime.now()
         await db.flush()
         # Writer must not have committed independently.
@@ -186,11 +205,13 @@ async def test_transition_log_records_only_committed_edges(sessions, caplog):
     with caplog.at_level(logging.INFO, logger="backend.app.services.lifecycle.engine"):
         async with sessions() as db:
             item = await db.get(PrintQueueItem, item_id)
-            await transition_queue_item(db, item, "queued", "dispatching")
+            async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+                await transition_queue_item(db, item, "queued", "dispatching")
             assert f"Queue job {item_id}: queued -> dispatching" not in caplog.text
             await db.rollback()
             item = await db.get(PrintQueueItem, item_id)
-            await transition_queue_item(db, item, "queued", "dispatching")
+            async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+                await transition_queue_item(db, item, "queued", "dispatching")
             await db.commit()
     assert caplog.text.count(f"Queue job {item_id}: queued -> dispatching") == 1
 
@@ -208,7 +229,8 @@ async def test_flush_does_not_emit_an_unconditional_status_write(sessions):
 
         event.listen(engine, "before_cursor_execute", capture)
         try:
-            await transition_queue_item(db, item, "queued", "dispatching")
+            async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+                await transition_queue_item(db, item, "queued", "dispatching")
             item.error_message = "Upload failed"
             await db.commit()
         finally:
@@ -244,7 +266,8 @@ async def test_late_scheduler_failure_cannot_overwrite_cancel_or_power_off(sessi
         stale = await worker.get(PrintQueueItem, item_id)
         await worker.commit()
         current = await user.get(PrintQueueItem, item_id)
-        await transition_queue_item(user, current, "queued", "unsuccessful", action="cancel")
+        async with writer(getattr(current, "printer_id", None) or getattr(current, "assigned_printer_id", None)):
+            await transition_queue_item(user, current, "queued", "unsuccessful", action="cancel")
         await user.commit()
         with (
             patch("backend.app.services.lifecycle.dispatching.printer_manager.is_connected", return_value=False),
@@ -263,9 +286,10 @@ async def test_conflict_does_not_autoflush_dirty_metadata(sessions):
         stale = await worker.get(PrintQueueItem, item_id)
         await worker.commit()
         current = await user.get(PrintQueueItem, item_id)
-        await transition_queue_item(
-            user, current, "queued", "unsuccessful", action="cancel", values={"error_message": "Stopped by user"}
-        )
+        async with writer(getattr(current, "printer_id", None) or getattr(current, "assigned_printer_id", None)):
+            await transition_queue_item(
+                user, current, "queued", "unsuccessful", action="cancel", values={"error_message": "Stopped by user"}
+            )
         await user.commit()
         stale.error_message = "Stale upload failure"
 
@@ -277,7 +301,8 @@ async def test_conflict_does_not_autoflush_dirty_metadata(sessions):
         event.listen(engine, "before_cursor_execute", capture)
         try:
             with pytest.raises(QueueTransitionConflict):
-                await transition_queue_item(worker, stale, "queued", "dispatching")
+                async with writer(getattr(stale, "printer_id", None) or getattr(stale, "assigned_printer_id", None)):
+                    await transition_queue_item(worker, stale, "queued", "dispatching")
         finally:
             event.remove(engine, "before_cursor_execute", capture)
             await worker.rollback()
@@ -296,7 +321,8 @@ async def test_drying_reservation_release_cannot_overwrite_cancellation(sessions
         stale = await worker.get(PrintQueueItem, item_id)
         await worker.commit()
         current = await user.get(PrintQueueItem, item_id)
-        await transition_queue_item(user, current, "dispatching", "cancelled")
+        async with writer(getattr(current, "printer_id", None) or getattr(current, "assigned_printer_id", None)):
+            await transition_queue_item(user, current, "dispatching", "cancelled")
         await user.commit()
         with pytest.raises(QueueTransitionConflict):
             await PrintScheduler().dispatcher._dry(worker, stale, (0,))
@@ -320,7 +346,10 @@ def _cancel_after_first_select(sessions, db, item_id, *, marker=None):
             raced.append(True)
             async with sessions() as user:
                 current = await user.get(PrintQueueItem, item_id)
-                await transition_queue_item(user, current, current.status, "cancelled")
+                async with writer(
+                    getattr(current, "printer_id", None) or getattr(current, "assigned_printer_id", None)
+                ):
+                    await transition_queue_item(user, current, current.status, "cancelled")
                 await user.commit()
         return result
 

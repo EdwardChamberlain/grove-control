@@ -51,15 +51,33 @@ async def on_exit(change, row) -> None:
 async def clear_job_plate(db: AsyncSession, item: PrintQueueItem | int, *, automatic: bool = False) -> None:
     """Exit for Clear Plate, refused while the printer runs another print."""
     from backend.app.services.job_identity import printer_active
+    from backend.app.services.lifecycle.engine import lock_queue_item, owns_writer, writer
 
     if isinstance(item, int):
-        item = await db.get(PrintQueueItem, item)
-    if item is None or item.status not in AWAITING_PLATE_CLEAR_STATUSES:
+        item_id = item
+        snapshot = await db.get(PrintQueueItem, item_id)
+    else:
+        item_id = item.id
+        snapshot = item
+    if snapshot is None or snapshot.printer_id is None:
         raise InvalidQueueTransition("This job is not awaiting plate clear")
-    if item.status == "failed" and item.physical_outcome is None:
-        raise InvalidQueueTransition("This dispatch failed before the print command; there is no plate hold to clear")
-    if printer_active(item.printer_id):
-        if automatic:
-            return  # Keep the physical outcome and hold if another print is already active.
-        raise InvalidQueueTransition("The printer is still active. Stop or finish its print before clearing the plate")
-    await end(db, item, "clear_plate")
+    printer_id = snapshot.printer_id
+    if not owns_writer(printer_id):
+        await db.rollback()
+    async with writer(printer_id):
+        item = await lock_queue_item(db, item_id)
+        if item is None or item.status not in AWAITING_PLATE_CLEAR_STATUSES:
+            raise InvalidQueueTransition("This job is not awaiting plate clear")
+        if item.status == "failed" and item.physical_outcome is None:
+            raise InvalidQueueTransition(
+                "This dispatch failed before the print command; there is no plate hold to clear"
+            )
+        if printer_active(item.printer_id):
+            if automatic:
+                return  # Keep the physical outcome and hold if another print is already active.
+            raise InvalidQueueTransition(
+                "The printer is still active. Stop or finish its print before clearing the plate"
+            )
+        await end(db, item, "clear_plate")
+        if not automatic:
+            await db.commit()

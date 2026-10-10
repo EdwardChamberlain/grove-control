@@ -101,6 +101,9 @@ class PrintQueueItem(Base):
     library_file_id: Mapped[int | None] = mapped_column(
         ForeignKey("library_files.id", ondelete="CASCADE"), nullable=True
     )
+    # Durable source name for an externally started print whose Archive file
+    # has not been attached yet; queue jobs use their linked source rows.
+    source_filename: Mapped[str | None] = mapped_column(String(512), nullable=True)
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
     # Scheduling
     position: Mapped[int] = mapped_column(Integer, default=0)  # Queue order
@@ -208,6 +211,9 @@ class PrintQueueItem(Base):
     # item is only promoted from ``dispatching`` to ``printing`` once printer
     # telemetry reports an active print state.
     dispatched_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Durable progress through the one pre-send dispatch. I/O results are
+    # accepted only while the job remains in the stage that launched them.
+    dispatch_stage: Mapped[str | None] = mapped_column(String(24), nullable=True)
     # The submission id embedded in the MQTT project_file command. It is
     # persisted before dispatch so terminal printer telemetry can still be
     # attributed to this exact attempt after an application restart.

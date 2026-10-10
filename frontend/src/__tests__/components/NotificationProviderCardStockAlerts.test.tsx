@@ -44,7 +44,6 @@ function buildProvider(overrides: Partial<NotificationProvider> = {}): Notificat
     on_ams_temperature_high: false,
     on_ams_ht_humidity_high: false,
     on_ams_ht_temperature_high: false,
-    on_plate_not_empty: false,
     on_bed_cooled: false,
     on_first_layer_complete: false,
     on_queue_job_added: false,

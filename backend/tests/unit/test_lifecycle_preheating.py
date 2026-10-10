@@ -25,6 +25,7 @@ from backend.app.services.lifecycle.engine import (
     ALLOWED_TRANSITIONS,
     QueueTransitionConflict,
     transition_queue_item,
+    writer,
 )
 from backend.tests.unit.test_chamber_heat_soak import soak  # noqa: F401
 
@@ -33,7 +34,8 @@ REQUESTED = datetime(2026, 1, 1, 12, 0)
 
 async def enter_preheating(db, job, values=None) -> None:
     """Hold a queued job in preheating, for tests that start from a soak whose heaters are on, as ``values`` says."""
-    await transition_queue_item(db, job, "queued", "preheating", values=values)
+    async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+        await transition_queue_item(db, job, "queued", "preheating", values=values)
     await db.commit()
 
 
@@ -116,7 +118,8 @@ async def test_a_transition_outside_preheating_does_not_load_deferred_columns(so
     soak.db.expunge(soak.item)
     item = await soak.db.scalar(select(PrintQueueItem).options(defer(PrintQueueItem.chamber_heat_soak)))
     assert "chamber_heat_soak" in inspect(item).unloaded
-    await transition_queue_item(soak.db, item, "queued", "dispatching")
+    async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+        await transition_queue_item(soak.db, item, "queued", "dispatching")
     await soak.db.commit()
     assert item.status == "dispatching"
     soak.client.set_bed_temperature.assert_not_called()

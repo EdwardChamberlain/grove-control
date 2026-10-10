@@ -14,7 +14,7 @@ from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services.lifecycle import effects as lifecycle_effects
-from backend.app.services.lifecycle.engine import QueueTransitionConflict, transition_queue_item
+from backend.app.services.lifecycle.engine import QueueTransitionConflict, transition_queue_item, writer
 from backend.app.services.lifecycle.printing import bind_observed_id, observe_print, sync_print_state
 from backend.app.services.print_scheduler import PrintScheduler
 
@@ -26,7 +26,6 @@ async def sessions(tmp_path):
     from backend.app.services.lifecycle import intake
 
     intake._started_job_effects.clear()
-    intake._completed_job_events.clear()
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'paused.db'}")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -173,7 +172,8 @@ async def test_cancel_winning_a_pause_observation_cannot_be_overwritten(sessions
         item = await stale.get(PrintQueueItem, item_id)
         async with sessions() as cancel:
             current = await cancel.get(PrintQueueItem, item_id)
-            await transition_queue_item(cancel, current, "printing", "cancelled")
+            async with writer(getattr(current, "printer_id", None) or getattr(current, "assigned_printer_id", None)):
+                await transition_queue_item(cancel, current, "printing", "cancelled")
             await cancel.commit()
         with pytest.raises(QueueTransitionConflict):
             await sync_print_state(stale, item, telemetry())
@@ -198,7 +198,8 @@ async def test_print_start_skips_a_stop_that_wins_after_the_job_is_read(sessions
         started_at = item.started_at
         async with sessions() as cancel:
             current = await cancel.get(PrintQueueItem, item_id)
-            await transition_queue_item(cancel, current, initial, "cancelled")
+            async with writer(getattr(current, "printer_id", None) or getattr(current, "assigned_printer_id", None)):
+                await transition_queue_item(cancel, current, initial, "cancelled")
             await cancel.commit()
         # SQLite serializes writers at the printer lock. Supply the pre-Stop
         # snapshot to exercise the stale-read conflict possible on PostgreSQL.
@@ -295,7 +296,8 @@ async def test_mqtt_manager_and_callbacks_persist_pause_resume_without_repeated_
         # can restore a printing row even though the last known state was PAUSE.
         async with sessions() as db:
             job = await db.get(PrintQueueItem, job_id)
-            await transition_queue_item(db, job, "paused", "printing")
+            async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+                await transition_queue_item(db, job, "paused", "printing")
             await db.commit()
         client.state.connected = False
         client.on_state_change(client.state)

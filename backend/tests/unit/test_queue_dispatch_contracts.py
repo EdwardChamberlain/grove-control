@@ -22,7 +22,7 @@ from backend.app.services.lifecycle import (
     preheating as heat,
     queued as lifecycle_queued,
 )
-from backend.app.services.lifecycle.engine import InvalidQueueTransition, hold_printers, transition_queue_item
+from backend.app.services.lifecycle.engine import InvalidQueueTransition, hold_printers, transition_queue_item, writer
 from backend.app.services.print_scheduler import PrintScheduler, scheduler
 from backend.app.services.queue_archive import link_dispatch_archive, prepare_dispatch_archive
 from backend.tests.unit.test_lifecycle_preheating import enter_preheating
@@ -140,7 +140,8 @@ async def test_dispatch_entry_holds_the_printer_before_creating_an_attempt(align
         job = await db.get(PrintQueueItem, alignment.job_id)
         if before == "preheating":
             await enter_preheating(db, job)
-        await transition_queue_item(db, job, before, "dispatching")
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, before, "dispatching")
         await db.commit()
         await db.refresh(job)
         assert job.status == "dispatching" and job.archive_id is None
@@ -155,12 +156,15 @@ async def test_dispatch_entry_rejects_another_jobs_prepared_archive(alignment):
         db.add(other)
         await db.commit()
         await hold_printers(db, [job.assigned_printer_id, other.assigned_printer_id])
-        await transition_queue_item(db, job, "queued", "dispatching")
-        await transition_queue_item(db, other, "queued", "dispatching")
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "queued", "dispatching")
+        async with writer(getattr(other, "printer_id", None) or getattr(other, "assigned_printer_id", None)):
+            await transition_queue_item(db, other, "queued", "dispatching")
         await db.commit()
         attempt = await prepare_dispatch_archive(db, other)
         with pytest.raises(InvalidQueueTransition, match="does not belong"):
-            await link_dispatch_archive(db, job, attempt)
+            async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+                await link_dispatch_archive(db, job, attempt)
         await db.rollback()
     assert not list(settings.archive_dir.rglob("*.3mf"))
 
@@ -169,7 +173,8 @@ async def test_dispatch_entry_rejects_explicitly_clearing_the_selected_printer(a
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
         with pytest.raises(InvalidQueueTransition, match="selected printer"):
-            await transition_queue_item(db, job, "queued", "dispatching", values={"printer_id": None})
+            async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+                await transition_queue_item(db, job, "queued", "dispatching", values={"printer_id": None})
         await db.rollback()
     async with alignment.sessions() as observer:
         job = await observer.get(PrintQueueItem, alignment.job_id)

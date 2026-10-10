@@ -2020,10 +2020,6 @@ class TestAbortedStatusNormalisation:
         from sqlalchemy.ext.asyncio import async_sessionmaker
 
         from backend.app.main import on_print_complete
-        from backend.app.services.lifecycle.intake import _completed_job_events, _user_stopped_printers
-
-        _completed_job_events.clear()
-        _user_stopped_printers.clear()
         from backend.app.services.bambu_ftp import DeleteResult
 
         session_maker = async_sessionmaker(test_engine, expire_on_commit=False)

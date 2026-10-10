@@ -22,7 +22,7 @@ from backend.app.models.settings import Settings
 from backend.app.services.archive import ArchiveService
 from backend.app.services.lifecycle import dispatching as lifecycle_dispatching
 from backend.app.services.lifecycle.awaiting import clear_job_plate
-from backend.app.services.lifecycle.engine import QueueTransitionConflict, hold_printer, transition_queue_item
+from backend.app.services.lifecycle.engine import QueueTransitionConflict, hold_printer, transition_queue_item, writer
 from backend.app.services.queue_actions import cancel_job
 from backend.app.services.queue_archive import link_dispatch_archive, prepare_dispatch_archive
 from backend.app.services.queue_source_cleanup import remove_queue_only_source_if_unused
@@ -78,10 +78,12 @@ async def alignment(tmp_path, monkeypatch):
 
 async def hold_and_link(db, job, before="queued"):
     values = {"printer_id": job.assigned_printer_id} if before == "queued" else None
-    await transition_queue_item(db, job, before, "dispatching", values=values)
+    async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+        await transition_queue_item(db, job, before, "dispatching", values=values)
     await db.commit()
     prepared = await prepare_dispatch_archive(db, job)
-    await link_dispatch_archive(db, job, prepared)
+    async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+        await link_dispatch_archive(db, job, prepared)
     return prepared
 
 
@@ -90,8 +92,10 @@ async def hold_and_link(db, job, before="queued"):
 async def test_owned_archive_restores_missing_queue_link_before_outcome(alignment, terminal, clear):
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
-        await transition_queue_item(db, job, "queued", "dispatching")
-        await transition_queue_item(db, job, "dispatching", "printing")
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "queued", "dispatching")
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "dispatching", "printing")
         # An external Archive creation committed, but its Queue link failed.
         attempt = PrintArchive(
             printer_id=job.printer_id,
@@ -107,7 +111,8 @@ async def test_owned_archive_restores_missing_queue_link_before_outcome(alignmen
         if terminal == "cancelled":
             await cancel_job(db, job)
         else:
-            await transition_queue_item(db, job, "printing", terminal)
+            async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+                await transition_queue_item(db, job, "printing", terminal)
             await db.commit()
         if clear:
             await clear_job_plate(db, job)
@@ -163,7 +168,8 @@ async def test_proven_unsent_failure_creates_one_fresh_top_retry(alignment, monk
         assert retry.library_file_id == parent.library_file_id
 
         # A retry-created job has no history link and cannot create a chain.
-        await transition_queue_item(db, retry, "queued", "dispatching")
+        async with writer(getattr(retry, "printer_id", None) or getattr(retry, "assigned_printer_id", None)):
+            await transition_queue_item(db, retry, "queued", "dispatching")
         await db.commit()
         await fail(db, retry, "Upload failed again")
         assert await db.scalar(select(func.count()).select_from(PrintQueueItem)) == 2
@@ -229,13 +235,15 @@ async def test_hold_commits_before_archive_link_and_same_state_never_copies_agai
             await enter_preheating(db, job)
             assert await db.scalar(select(PrintArchive.id)) is None
         values = {"printer_id": job.assigned_printer_id} if before == "queued" else None
-        await transition_queue_item(db, job, before, "dispatching", values=values)
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, before, "dispatching", values=values)
         await db.commit()
         async with alignment.sessions() as observer:
             assert (await observer.get(PrintQueueItem, job.id)).status == "dispatching"
             assert await observer.scalar(select(PrintArchive.id)) is None
         prepared = await prepare_dispatch_archive(db, job)
-        await link_dispatch_archive(db, job, prepared)
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await link_dispatch_archive(db, job, prepared)
         attempt = await db.get(PrintArchive, job.archive_id)
         copied = settings.base_dir / attempt.file_path
         assert copied.read_bytes() == alignment.source_path.read_bytes()
@@ -244,7 +252,8 @@ async def test_hold_commits_before_archive_link_and_same_state_never_copies_agai
             assert (await observer.get(PrintQueueItem, job.id)).status == "dispatching"
             assert await observer.scalar(select(PrintArchive.id)) is None
         await db.commit()
-        await transition_queue_item(db, job, "dispatching", "dispatching", values={"dispatch_subtask_id": "123"})
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "dispatching", "dispatching", values={"dispatch_subtask_id": "123"})
         await db.commit()
         assert attempt.subtask_id == "123"
         assert list(await db.scalars(select(PrintArchive.id))) == [attempt.id]
@@ -255,10 +264,12 @@ async def test_hold_commits_before_archive_link_and_same_state_never_copies_agai
 async def test_rollback_discards_archive_row_and_prepared_files(alignment, close_only):
     db = alignment.sessions()
     job = await db.get(PrintQueueItem, alignment.job_id)
-    await transition_queue_item(db, job, "queued", "dispatching", values={"printer_id": job.assigned_printer_id})
+    async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+        await transition_queue_item(db, job, "queued", "dispatching", values={"printer_id": job.assigned_printer_id})
     await db.commit()
     prepared = await prepare_dispatch_archive(db, job)
-    await link_dispatch_archive(db, job, prepared)
+    async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+        await link_dispatch_archive(db, job, prepared)
     attempt = await db.get(PrintArchive, job.archive_id)
     copied = settings.base_dir / attempt.file_path
     assert copied.exists()
@@ -282,9 +293,12 @@ async def test_outcome_commits_on_entry_and_plate_clear_does_not_rewrite_it(alig
         db.add(Settings(key="require_plate_clear", value="false" if automatic else "true"))
         await hold_and_link(db, job)
         now = datetime.now(timezone.utc)
-        await transition_queue_item(db, job, "dispatching", "printing", values={"started_at": now})
-        await transition_queue_item(db, job, "printing", "paused")
-        await transition_queue_item(db, job, "paused", outcome, values={"error_message": "HMS 0700_8012"})
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "dispatching", "printing", values={"started_at": now})
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "printing", "paused")
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "paused", outcome, values={"error_message": "HMS 0700_8012"})
         await db.commit()
         attempt = await db.get(PrintArchive, job.archive_id)
         assert attempt.status == archived and attempt.completed_at is not None
@@ -305,21 +319,23 @@ async def test_completed_print_corrects_cancelled_attempt_archive(alignment):
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
         await hold_and_link(db, job)
-        await transition_queue_item(db, job, "dispatching", "printing")
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "dispatching", "printing")
         await db.commit()
         await cancel_job(db, job)
         attempt = await db.get(PrintArchive, job.archive_id)
         assert job.status == "cancelled" and job.physical_outcome is None
         assert attempt.status == "aborted"
 
-        await transition_queue_item(
-            db,
-            job,
-            "cancelled",
-            "finished",
-            action="printer_report",
-            values={"error_message": None, "completed_at": datetime.now(timezone.utc)},
-        )
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(
+                db,
+                job,
+                "cancelled",
+                "finished",
+                action="printer_report",
+                values={"error_message": None, "completed_at": datetime.now(timezone.utc)},
+            )
         await db.commit()
         assert job.status == "finished" and job.physical_outcome == "completed"
         assert attempt.status == "completed" and attempt.failure_reason is None
@@ -330,17 +346,20 @@ async def test_cancelled_job_records_abort_only_after_matching_terminal_report(a
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
         await hold_and_link(db, job)
-        await transition_queue_item(db, job, "dispatching", "printing")
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "dispatching", "printing")
         await db.commit()
         await cancel_job(db, job)
         assert job.physical_outcome is None
-        await transition_queue_item(db, job, "cancelled", "cancelled", action="printer_report")
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "cancelled", "cancelled", action="printer_report")
         await db.commit()
         assert job.physical_outcome == "aborted" and job.physical_completed_at is not None
         attempt = await db.get(PrintArchive, job.archive_id)
         assert attempt.status == "aborted" and attempt.completed_at == job.physical_completed_at.replace(tzinfo=None)
         with pytest.raises(QueueTransitionConflict):
-            await transition_queue_item(db, job, "cancelled", "finished", action="printer_report")
+            async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+                await transition_queue_item(db, job, "cancelled", "finished", action="printer_report")
 
 
 async def test_reprint_source_is_immutable_and_outcome_uses_both_link_columns(alignment):
@@ -358,7 +377,8 @@ async def test_reprint_source_is_immutable_and_outcome_uses_both_link_columns(al
                 select(PrintQueueItem.__table__.c.archive_id).where(PrintQueueItem.__table__.c.id == job.id)
             )
         assert linked_id == attempt.id
-        await transition_queue_item(db, job, "dispatching", "failed", values={"error_message": "Upload failed"})
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "dispatching", "failed", values={"error_message": "Upload failed"})
         await db.commit()
         await db.refresh(source)
         assert attempt.id != source.id and attempt.status == "failed"
@@ -367,7 +387,8 @@ async def test_reprint_source_is_immutable_and_outcome_uses_both_link_columns(al
         other = PrintQueueItem(archive_id=attempt.id, status="printing")
         db.add(other)
         await db.flush()
-        await transition_queue_item(db, other, "printing", "finished")
+        async with writer(getattr(other, "printer_id", None) or getattr(other, "assigned_printer_id", None)):
+            await transition_queue_item(db, other, "printing", "finished")
         await db.commit()
         assert attempt.status == "failed"
 
@@ -385,7 +406,8 @@ async def test_any_nonfinal_variant_reference_retains_a_hidden_upload(alignment,
         db.add(PrintQueueVariant(queue_item_id=other.id, library_file_id=alignment.source_id, target_model="X1C"))
         await db.commit()
         assert await remove_queue_only_source_if_unused(db, alignment.source_id) == []
-        await transition_queue_item(db, job, "queued", "unsuccessful", action="cancel")
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "queued", "unsuccessful", action="cancel")
         await db.commit()
         assert alignment.source_path.exists()
         assert await db.get(LibraryFile, alignment.source_id) is not None
@@ -397,7 +419,8 @@ async def test_final_variant_releases_all_its_sources_after_commit(alignment):
         job.library_file_id = None
         db.add(PrintQueueVariant(queue_item_id=job.id, library_file_id=alignment.source_id, target_model="X1C"))
         await db.commit()
-        await transition_queue_item(db, job, "queued", "unsuccessful", action="cancel")
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "queued", "unsuccessful", action="cancel")
         assert alignment.source_path.exists()
         await db.commit()
         assert not alignment.source_path.exists()
@@ -408,7 +431,8 @@ async def test_preheat_failure_creates_no_archive_or_early_source_cleanup(alignm
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
         await enter_preheating(db, job)
-        await transition_queue_item(db, job, "preheating", "failed", values={"error_message": "Heater failed"})
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "preheating", "failed", values={"error_message": "Heater failed"})
         await db.commit()
         assert await db.scalar(select(PrintArchive.id)) is None
         assert alignment.source_path.exists()
@@ -457,7 +481,8 @@ async def test_late_external_archive_association_uses_the_jobs_committed_state(a
         await db.commit()
         archive = await ArchiveService(db).archive_print(None, alignment.source_path, print_data={"status": "printing"})
         archive.dispatched_queue_item_id = job.id
-        await transition_queue_item(db, job, state, state, values={"archive_id": archive.id})
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, state, state, values={"archive_id": archive.id})
         await db.commit()
         assert archive.status == archived
 
@@ -475,16 +500,17 @@ async def test_retry_does_not_inherit_physical_outcome_even_when_cancelled_while
             db.add(PrintQueueVariant(queue_item_id=old.id, library_file_id=alignment.source_id, target_model="X1C"))
             await db.commit()
         await hold_and_link(db, old)
-        await transition_queue_item(
-            db,
-            old,
-            "dispatching",
-            outcome,
-            values={
-                "error_message": "Original outcome",
-                "completed_at": datetime.now(timezone.utc).replace(tzinfo=None),
-            },
-        )
+        async with writer(getattr(old, "printer_id", None) or getattr(old, "assigned_printer_id", None)):
+            await transition_queue_item(
+                db,
+                old,
+                "dispatching",
+                outcome,
+                values={
+                    "error_message": "Original outcome",
+                    "completed_at": datetime.now(timezone.utc).replace(tzinfo=None),
+                },
+            )
         await db.commit()
         original_facts = (old.physical_outcome, old.physical_completed_at, old.physical_failure_reason)
         assert all(original_facts)
@@ -561,26 +587,28 @@ async def test_late_archive_uses_immutable_outcome_after_restart_and_display_upd
         db.add(job)
         await db.commit()
         job_id = job.id
-        await transition_queue_item(
-            db,
-            job,
-            "printing",
-            outcome,
-            values={"completed_at": completed, "error_message": "Detailed printer error"},
-            archive_failure_reason="HMS 0700_8012",
-        )
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(
+                db,
+                job,
+                "printing",
+                outcome,
+                values={"completed_at": completed, "error_message": "Detailed printer error"},
+                archive_failure_reason="HMS 0700_8012",
+            )
         await db.commit()
     async with alignment.sessions() as user:
         job = await user.get(PrintQueueItem, job_id)
         await clear_job_plate(user, job)
         # Later bookkeeping/display metadata must not become a new outcome.
-        await transition_queue_item(
-            user,
-            job,
-            job.status,
-            job.status,
-            values={"error_message": "Printer hold transferred", "completed_at": completed + timedelta(seconds=5)},
-        )
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(
+                user,
+                job,
+                job.status,
+                job.status,
+                values={"error_message": "Printer hold transferred", "completed_at": completed + timedelta(seconds=5)},
+            )
         await user.commit()
     async with alignment.sessions() as restarted:
         job = await restarted.get(PrintQueueItem, job_id)
@@ -588,7 +616,8 @@ async def test_late_archive_uses_immutable_outcome_after_restart_and_display_upd
             None, alignment.source_path, print_data={"status": "printing"}
         )
         archive.dispatched_queue_item_id = job.id
-        await transition_queue_item(restarted, job, job.status, job.status, values={"archive_id": archive.id})
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(restarted, job, job.status, job.status, values={"archive_id": archive.id})
         await restarted.commit()
         assert (archive.status, archive.started_at, archive.completed_at) == (archived, started, completed)
         assert archive.failure_reason == (

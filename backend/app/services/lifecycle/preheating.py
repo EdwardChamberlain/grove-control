@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,9 +22,9 @@ from backend.app.models.print_queue import ACTIVE_STATUSES, PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services.lifecycle import clock
 from backend.app.services.lifecycle.engine import (
-    hold_printer,
     lock_queue_item,
     transition_queue_item,
+    writer,
 )
 from backend.app.services.printer_manager import printer_manager, supports_chamber_heater
 
@@ -119,8 +119,11 @@ async def shut_down_inherited(change, row) -> None:
 
 async def cleanup_heat_soak_shutdown(db: AsyncSession, printer_id: int) -> bool:
     """Retry a committed shutdown only while no new job is using the printer."""
-    await hold_printer(db, printer_id)
-    await db.execute(update(Printer).where(Printer.id == printer_id).values(id=Printer.id))
+    async with writer(printer_id):
+        return await _cleanup_heat_soak_shutdown_locked(db, printer_id)
+
+
+async def _cleanup_heat_soak_shutdown_locked(db: AsyncSession, printer_id: int) -> bool:
     printer = await db.get(Printer, printer_id, populate_existing=True)
     if not printer or not printer.heat_soak_shutdown_pending:
         await db.commit()
@@ -166,12 +169,24 @@ async def start_heating(db: AsyncSession, item_id: int) -> bool:
     Re-lock first, so that a Stop committed since then is never followed by
     heater-on commands. Only a soak that hasn't started is heated.
     """
+    snapshot = await db.get(PrintQueueItem, item_id)
+    if snapshot is None or snapshot.printer_id is None:
+        await db.rollback()
+        return False
+    printer_id = snapshot.printer_id
+    await db.rollback()
+    async with writer(printer_id):
+        return await _start_heating_locked(db, item_id, printer_id)
+
+
+async def _start_heating_locked(db: AsyncSession, item_id: int, printer_id: int) -> bool:
     item = await lock_queue_item(db, item_id)
     if not item or item.status != "preheating" or item.preheat_started_at is not None:
         await db.rollback()
         return False
-    printer_id = item.printer_id
-    await db.execute(update(Printer).where(Printer.id == printer_id).values(id=Printer.id))
+    if item.printer_id != printer_id:
+        await db.rollback()
+        return False
     printer = await db.get(Printer, printer_id, populate_existing=True)
     client = printer_manager.get_client(printer_id)
     if not printer or printer.heat_soak_shutdown_pending or not client or not _dispatch_ready(printer_id):
@@ -261,83 +276,119 @@ class SkipHeatSoakResult(str, Enum):
 
 async def _hand_off(db: AsyncSession, item: PrintQueueItem, values: Mapping[str, Any]) -> None:
     """Exit to dispatching; dispatching's entry starts the dispatch once this commits."""
-    await transition_queue_item(db, item, "preheating", "dispatching", values={"dispatched_at": None, **values})
+    await transition_queue_item(
+        db,
+        item,
+        "preheating",
+        "dispatching",
+        values={"dispatched_at": None, "dispatch_stage": "copying", **values},
+    )
     await db.commit()
 
 
 async def skip_heat_soak(db: AsyncSession, item: PrintQueueItem) -> SkipHeatSoakResult:
-    """Exit to dispatching now, for Skip heat soak. The caller has locked the preheating job."""
-    if not _dispatch_ready(item.printer_id):
+    """Exit to dispatching now, for Skip heat soak, under the bound printer's writer."""
+    item_id, printer_id = item.id, item.printer_id
+    if printer_id is None:
         await db.rollback()
-        return SkipHeatSoakResult.PRINTER_NOT_READY
-    values = {"chamber_heat_soak": False, "manual_start": False, "error_message": None, "completed_at": None}
-    await _hand_off(db, item, values)
-    return SkipHeatSoakResult.SKIPPED
+        return SkipHeatSoakResult.SOAK_CHANGED
+    await db.rollback()
+    async with writer(printer_id):
+        item = await lock_queue_item(db, item_id)
+        if not item or item.status != "preheating" or item.printer_id != printer_id:
+            await db.rollback()
+            return SkipHeatSoakResult.SOAK_CHANGED
+        if not _dispatch_ready(printer_id):
+            await db.rollback()
+            return SkipHeatSoakResult.PRINTER_NOT_READY
+        values = {"chamber_heat_soak": False, "manual_start": False, "error_message": None, "completed_at": None}
+        await _hand_off(db, item, values)
+        return SkipHeatSoakResult.SKIPPED
 
 
 async def soak_ended(db: AsyncSession, item_id: int) -> None:
     """The ``soak_end`` deadline: hand off to dispatching once the printer is idle."""
-    item = await lock_queue_item(db, item_id)
-    if not item or item.status != "preheating" or item.deadline_kind != "soak_end":
-        await db.rollback()
+    snapshot = await db.get(PrintQueueItem, item_id)
+    printer_id = snapshot.printer_id if snapshot is not None else None
+    await db.rollback()
+    if printer_id is None:
         return
-    if _dispatch_ready(item.printer_id):
-        await _hand_off(db, item, {})
-        return
-    values = {"deadline_at": utcnow() + RETRY_HANDOFF, "deadline_kind": "soak_end"}
-    await transition_queue_item(db, item, "preheating", "preheating", values=values)
-    await db.commit()
+    async with writer(printer_id):
+        item = await lock_queue_item(db, item_id)
+        if not item or item.status != "preheating" or item.deadline_kind != "soak_end":
+            await db.rollback()
+            return
+        if _dispatch_ready(printer_id):
+            await _hand_off(db, item, {})
+            return
+        values = {"deadline_at": utcnow() + RETRY_HANDOFF, "deadline_kind": "soak_end"}
+        await transition_queue_item(db, item, "preheating", "preheating", values=values)
+        await db.commit()
 
 
 async def watch(db: AsyncSession) -> None:
     """Each tick: retry pending heater shutdowns, and end live soaks whose printer became unavailable."""
     shutting_down = select(Printer.id).where(Printer.heat_soak_shutdown_pending.is_(True))
     for printer_id in list(await db.scalars(shutting_down)):
+        await db.rollback()
         await cleanup_heat_soak_shutdown(db, printer_id)
-    live = select(PrintQueueItem.id).where(
+    live = select(PrintQueueItem.id, PrintQueueItem.printer_id).where(
         PrintQueueItem.status == "preheating", PrintQueueItem.deadline_at.is_not(None)
     )
-    for item_id in list(await db.scalars(live)):
-        item = await lock_queue_item(db, item_id)
-        if not item or item.status != "preheating" or item.deadline_at is None:
+    rows = list((await db.execute(live)).all())
+    await db.rollback()
+    for item_id, printer_id in rows:
+        if printer_id is None:
+            continue
+        async with writer(printer_id):
+            item = await lock_queue_item(db, item_id)
+            if not item or item.status != "preheating" or item.deadline_at is None:
+                await db.rollback()
+                continue
+            printer = await db.get(Printer, printer_id)
+            state = printer_manager.get_status(printer_id)
+            requested = item.preheat_requested_at
+            disconnected_at = getattr(state, "heat_soak_disconnected_at", 0) if state else 0
+            if (
+                not printer
+                or not printer.is_active
+                or not state
+                or not printer_manager.is_connected(printer_id)
+                or not requested
+                or disconnected_at >= requested.replace(tzinfo=timezone.utc).timestamp()
+                or state.state not in ("IDLE", "FINISH", "FAILED")
+            ):
+                await abort_heat_soak(
+                    db, item, "Printer disconnected or became unavailable during heat soak; retry required"
+                )
+                continue
             await db.rollback()
-            continue
-        printer_id = item.printer_id
-        printer = await db.get(Printer, printer_id)
-        state = printer_manager.get_status(printer_id)
-        requested = item.preheat_requested_at
-        disconnected_at = getattr(state, "heat_soak_disconnected_at", 0) if state else 0
-        if (
-            not printer
-            or not printer.is_active
-            or not state
-            or not printer_manager.is_connected(printer_id)
-            or not requested
-            or disconnected_at >= requested.replace(tzinfo=timezone.utc).timestamp()
-            or state.state not in ("IDLE", "FINISH", "FAILED")
-        ):
-            await abort_heat_soak(
-                db, item, "Printer disconnected or became unavailable during heat soak; retry required"
-            )
-            continue
-        await db.rollback()
-        client = printer_manager.get_client(printer_id)
-        if client:
-            client.request_status_update()
+            client = printer_manager.get_client(printer_id)
+            if client:
+                client.request_status_update()
 
 
 async def interrupt(db: AsyncSession) -> None:
     """At startup: soaks the previous process was running are interrupted. Turn their heaters off, keep the hold."""
-    live = select(PrintQueueItem.id).where(PrintQueueItem.status == "preheating").order_by(PrintQueueItem.id)
-    for item_id in list(await db.scalars(live)):
-        item = await lock_queue_item(db, item_id)
-        if not item or item.status != "preheating":
-            await db.rollback()
+    live = (
+        select(PrintQueueItem.id, PrintQueueItem.printer_id)
+        .where(PrintQueueItem.status == "preheating")
+        .order_by(PrintQueueItem.id)
+    )
+    rows = list((await db.execute(live)).all())
+    await db.rollback()
+    for item_id, printer_id in rows:
+        if printer_id is None:
             continue
-        values = {"deadline_at": None, "deadline_kind": None, "error_message": INTERRUPTED}
-        await transition_queue_item(db, item, "preheating", "preheating", values=values)
-        await request_heater_shutdown(db, item.printer_id)
-        await db.commit()
+        async with writer(printer_id):
+            item = await lock_queue_item(db, item_id)
+            if not item or item.status != "preheating":
+                await db.rollback()
+                continue
+            values = {"deadline_at": None, "deadline_kind": None, "error_message": INTERRUPTED}
+            await transition_queue_item(db, item, "preheating", "preheating", values=values)
+            await request_heater_shutdown(db, printer_id)
+            await db.commit()
 
 
 class ChamberHeatSoak:
@@ -350,6 +401,11 @@ class ChamberHeatSoak:
         "Any machine" job must still be unassigned, any other must still
         require that printer.
         """
+        printer_id = binding.printer_id if binding is not None else item.printer_id or item.assigned_printer_id
+        async with writer(printer_id):
+            return await self._enter_locked(db, item, binding, printer_id)
+
+    async def _enter_locked(self, db: AsyncSession, item: PrintQueueItem, binding, printer_id: int) -> bool:
         if binding is None and item.printer_id is None and item.assigned_printer_id is not None:
             from backend.app.services.lifecycle.queued import _DispatchBinding
 
@@ -360,7 +416,6 @@ class ChamberHeatSoak:
             _bind_in_memory(item, binding.printer_id, binding.ams_mapping)
         item_id, printer_id = item.id, item.printer_id
         unassigned = bool(binding and binding.unassigned)
-        await hold_printer(db, printer_id)  # The selected printer, before any write.
         item = await lock_queue_item(db, item_id)
         expected_assignment = None if unassigned else printer_id
         if (

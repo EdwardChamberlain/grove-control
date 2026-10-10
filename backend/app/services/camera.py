@@ -622,7 +622,7 @@ async def capture_camera_frame_bytes(
 
     This coalesces; it does not cache. A call that arrives after the previous
     capture finished always captures fresh. Two consumers of these frames —
-    plate detection and the finish-photo path — decide things about a running
+    the finish-photo path decides things about a running
     print from them, and a stale frame there is worse than a slow one: the
     whole of #1397 was a finish photo taken seconds late showing the bed
     already lowered.

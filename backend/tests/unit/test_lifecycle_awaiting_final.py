@@ -29,6 +29,7 @@ from backend.app.services.lifecycle.engine import (
     InvalidQueueTransition,
     QueueTransitionConflict,
     transition_queue_item,
+    writer,
 )
 from backend.tests.unit.test_chamber_heat_soak import soak  # noqa: F401
 
@@ -89,14 +90,16 @@ async def test_awaiting_and_final_steps_run_only_after_the_conditional_write(
     async with sessions() as db:
         item = await db.get(PrintQueueItem, item_id)
         with pytest.raises(QueueTransitionConflict):
-            await transition_queue_item(
-                db, item, before, after, action=action, conditions=(PrintQueueItem.printer_id == 2,)
-            )
+            async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+                await transition_queue_item(
+                    db, item, before, after, action=action, conditions=(PrintQueueItem.printer_id == 2,)
+                )
         await db.rollback()
         effects.queue_outcome_effect.assert_not_called()
         remove.assert_not_awaited()
         item = await db.get(PrintQueueItem, item_id)
-        await transition_queue_item(db, item, before, after, action=action)
+        async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+            await transition_queue_item(db, item, before, after, action=action)
         await db.commit()
     if after in FINAL_STATUSES:
         remove.assert_awaited_once_with(db, 7)
@@ -127,7 +130,11 @@ async def test_only_clear_plate_on_an_ended_attempt_removes_its_sent_upload(
     monkeypatch.setattr(queue_source_cleanup, "remove_queue_only_source_if_unused", AsyncMock(return_value=[]))
     item_id = await job(sessions, before)
     async with sessions() as db:
-        await transition_queue_item(db, await db.get(PrintQueueItem, item_id), before, after, action=action)
+        async with writer(
+            getattr(await db.get(PrintQueueItem, item_id), "printer_id", None)
+            or getattr(await db.get(PrintQueueItem, item_id), "assigned_printer_id", None)
+        ):
+            await transition_queue_item(db, await db.get(PrintQueueItem, item_id), before, after, action=action)
         await db.commit()
     removed = [call.args[1] for call in effects.queue_outcome_effect.call_args_list if call.args[1].clean_sd_copy]
     # Awaiting's exit removes it; entering final (from queued too) never does.
@@ -142,7 +149,8 @@ async def test_automatic_clear_plate_belongs_to_the_finishing_transaction(sessio
         db.add(Settings(key="require_plate_clear", value="false"))
         await db.commit()
         item = await db.get(PrintQueueItem, item_id)
-        await transition_queue_item(db, item, "printing", "finished")
+        async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+            await transition_queue_item(db, item, "printing", "finished")
         assert item.status == "successful"
         await db.rollback()
     async with sessions() as db:
@@ -158,7 +166,8 @@ async def test_only_an_ended_job_passes_its_hold_to_a_new_external_print(session
         held = await db.get(PrintQueueItem, item_id)
         if ended:
             values = {"error_message": "Nozzle clog"} if status == "failed" else {}
-            await transition_queue_item(db, held, "printing", status, values=values)
+            async with writer(getattr(held, "printer_id", None) or getattr(held, "assigned_printer_id", None)):
+                await transition_queue_item(db, held, "printing", status, values=values)
             await db.commit()
         outcome = held.physical_outcome
         assert await lifecycle_engine.transfer_hold(db, held, "new-run") is ended

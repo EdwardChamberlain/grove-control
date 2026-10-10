@@ -105,7 +105,6 @@ import { PrinterHealthMenu } from '../components/printer/PrinterHealthMenu';
 import { FirmwareUpdateModal } from '../components/printer/FirmwareUpdateModal';
 import { PrinterThermalControls } from '../components/printer/PrinterThermalControls';
 import { PrinterAirductControl } from '../components/printer/PrinterAirductControl';
-import { PrinterPlateDetectionControl } from '../components/printer/PrinterPlateDetectionControl';
 import { PrinterStopPrintConfirmation } from '../components/printer/PrinterStopPrintConfirmation';
 import {
   AmsDryingControl,
@@ -2398,14 +2397,6 @@ function SinglePrinterCockpit({
         >
           <ChamberLight on={!!status?.chamber_light} className="h-4 w-4" />
         </button>
-        <PrinterPlateDetectionControl
-          printer={printer}
-          status={status}
-          connected={!!status?.connected}
-          canUpdate={hasPermission('printers:update')}
-          iconControlClass={iconControlClass}
-          inactiveClassName="bg-bambu-dark-tertiary/70 text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white"
-        />
         <button
           type="button"
           onClick={() => canControl && isPrintingOrPaused && setStatusControlMenu(statusControlMenu === 'speed' ? null : 'speed')}
@@ -4846,15 +4837,6 @@ function PrinterCard({
                           </div>
                         );
                       })()}
-
-                      <PrinterPlateDetectionControl
-                        printer={printer}
-                        status={status}
-                        connected={status.connected}
-                        canUpdate={hasPermission('printers:update')}
-                        iconControlClass={iconControlClass}
-                        iconClassName="w-4 h-4"
-                      />
 
                       {/* Print Speed */}
                       {(() => (

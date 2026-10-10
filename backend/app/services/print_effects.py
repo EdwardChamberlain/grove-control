@@ -40,7 +40,7 @@ from backend.app.services.bambu_ftp import (
 )
 from backend.app.services.homeassistant import homeassistant_service
 from backend.app.services.job_identity import event_identity, telemetry_identity
-from backend.app.services.lifecycle.engine import lock_queue_item, transition_queue_item
+from backend.app.services.lifecycle.engine import lock_queue_item, transition_queue_item, writer
 from backend.app.services.mqtt_relay import mqtt_relay
 from backend.app.services.notification_service import notification_service
 from backend.app.services.printer_manager import parse_plate_id, printer_manager
@@ -596,7 +596,7 @@ def _load_objects_from_archive(archive, printer_id: int, logger, *, reset_skippe
 
 async def _link_observed_archive(printer_id: int, item_id: int, identity: str) -> int | None:
     """Link the owned attempt, or a single unowned legacy Archive with this ID."""
-    async with async_session() as db:
+    async with writer(printer_id), async_session() as db:
         item = await db.get(PrintQueueItem, item_id)
         if item is None:
             return None
@@ -1444,7 +1444,6 @@ async def print_completed(c, *, memory) -> None:
     photo = spawn_background_task(
         _capture_finish_photo(printer_id, archive_id, data, memory=memory), name="background-finish-photo"
     )
-    spawn_background_task(_smart_plug_completed(printer_id, status), name="background-smart-plug")
     spawn_background_task(_check_maintenance(printer_id, status), name="background-maintenance-check")
     spawn_background_task(_notify_after_photo(c, usage_results, photo), name="photo-then-notify")
     spawn_background_task(_finish_layer_timelapse(printer_id, archive_id, status), name="background-layer-timelapse")
@@ -1517,12 +1516,7 @@ async def _clean_sd_card(c) -> None:
 
 
 async def _queue_completed(c, name: str) -> None:
-    """Publish the job's end, notify once the queue empties, and schedule a completed job's Auto Off.
-
-    Failed and stopped jobs schedule Auto Off on entering their awaiting
-    state. The smart-plug manager honours each plug's strategy, is cancelled
-    by a new print, and never cuts power on a loaded print (#1890).
-    """
+    """Publish the job's end and notify once the queue empties."""
     with suppress(Exception):
         info = printer_manager.get_printer(c.printer_id)
         await mqtt_relay.on_queue_job_completed(
@@ -1544,12 +1538,6 @@ async def _queue_completed(c, name: str) -> None:
                     )
                 )
                 await notification_service.on_queue_completed(completed_count=completed.scalar() or 1, db=db)
-    if c.auto_off and c.queue_status == "completed":
-        try:
-            async with async_session() as db:
-                await smart_plug_manager.schedule_off_after_queue_job(c.printer_id, db)
-        except Exception as e:
-            logger.warning("Failed to schedule queue auto-off for printer %s: %s", c.printer_id, e)
 
 
 async def _await_bed_cooldown(printer_id: int, name: str, *, memory) -> None:
@@ -1913,16 +1901,6 @@ async def _capture_finish_photo(printer_id: int, archive_id: int, data: dict, *,
     except Exception as e:
         logger.warning("[PHOTO-BG] Failed: %s", e)
         return None
-
-
-async def _smart_plug_completed(printer_id: int, status: str) -> None:
-    try:
-        logger.info("[AUTO-OFF-BG] Starting smart plug automation for printer %s", printer_id)
-        async with async_session() as db:
-            await smart_plug_manager.on_print_complete(printer_id, status, db)
-            logger.info("[AUTO-OFF-BG] Completed")
-    except Exception as e:
-        logger.warning("[AUTO-OFF-BG] Failed: %s", e)
 
 
 async def _check_maintenance(printer_id: int, status: str) -> None:

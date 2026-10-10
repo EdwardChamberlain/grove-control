@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.services.lifecycle import effects as lifecycle_effects
-from backend.app.services.lifecycle.engine import transition_queue_item
+from backend.app.services.lifecycle.engine import transition_queue_item, writer
 from backend.app.services.print_scheduler import PrintScheduler
 from backend.app.services.queue_archive import link_dispatch_archive, prepare_dispatch_archive
 
@@ -50,10 +50,12 @@ async def db_session(tmp_path, monkeypatch):
 
 
 async def hold_and_link(db, item):
-    await transition_queue_item(db, item, item.status, "dispatching")
+    async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+        await transition_queue_item(db, item, item.status, "dispatching")
     await db.commit()
     prepared = await prepare_dispatch_archive(db, item)
-    await link_dispatch_archive(db, item, prepared)
+    async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+        await link_dispatch_archive(db, item, prepared)
 
 
 def _status(state: str, subtask_id: str | None = None, gcode_file: str | None = None):

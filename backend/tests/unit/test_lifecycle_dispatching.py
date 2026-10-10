@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services.lifecycle import dispatching, effects, preheating
-from backend.app.services.lifecycle.engine import transition_queue_item
+from backend.app.services.lifecycle.engine import transition_queue_item, writer
 from backend.app.services.print_scheduler import PrintScheduler
 from backend.tests.unit.test_queue_archive_alignment import alignment  # noqa: F401
 from backend.tests.unit.test_queue_dispatch_races import handoff  # noqa: F401
@@ -29,9 +29,11 @@ async def test_start_delivery_sees_committed_state_and_is_awaited(alignment):
 
     async with alignment.sessions() as db:
         item = await db.get(PrintQueueItem, alignment.job_id)
-        await transition_queue_item(db, item, "queued", "dispatching")
+        async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+            await transition_queue_item(db, item, "queued", "dispatching")
         await db.commit()
-        await transition_queue_item(db, item, "dispatching", "printing")
+        async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+            await transition_queue_item(db, item, "dispatching", "printing")
         started = effects.queue_job_started(db, item.id, publish=publish)
         assert started == [] and observed == []
         await db.commit()
@@ -74,9 +76,11 @@ async def test_dispatch_exit_rolls_back_its_shutdown_and_failure_effect(alignmen
     monkeypatch.setattr(effects, "run_queue_outcome_effects", run)
     async with alignment.sessions() as db:
         item = await db.get(PrintQueueItem, alignment.job_id)
-        await transition_queue_item(db, item, "queued", "dispatching", values={"chamber_heat_soak": True})
+        async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+            await transition_queue_item(db, item, "queued", "dispatching", values={"chamber_heat_soak": True})
         await db.commit()
-        await transition_queue_item(db, item, "dispatching", "failed")
+        async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+            await transition_queue_item(db, item, "dispatching", "failed")
         assert (await db.get(Printer, 1)).heat_soak_shutdown_pending
         await db.rollback()
     async with alignment.sessions() as db:
@@ -92,13 +96,17 @@ async def test_an_outcome_runs_its_exit_and_entry_effects_together(alignment, mo
     monkeypatch.setattr(effects, "_spawn_outcome", lambda _engine, effect: spawned.append(effect))
     async with alignment.sessions() as db:
         item = await db.get(PrintQueueItem, alignment.job_id)
-        await transition_queue_item(db, item, "queued", "dispatching", values={"chamber_heat_soak": True})
+        async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+            await transition_queue_item(db, item, "queued", "dispatching", values={"chamber_heat_soak": True})
         if before != "dispatching":
-            await transition_queue_item(db, item, "dispatching", "printing")
+            async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+                await transition_queue_item(db, item, "dispatching", "printing")
         if before == "paused":
-            await transition_queue_item(db, item, "printing", "paused")
+            async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+                await transition_queue_item(db, item, "printing", "paused")
         await db.commit()
-        await transition_queue_item(db, item, before, after, action=action)
+        async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
+            await transition_queue_item(db, item, before, after, action=action)
         await db.commit()
         assert (await db.get(Printer, 1)).heat_soak_shutdown_pending
     # The exit shuts down the inherited soak, and a dispatch that Grove failed removes its upload;

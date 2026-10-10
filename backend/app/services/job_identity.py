@@ -59,7 +59,9 @@ def needs_dispatch_resolution(item: PrintQueueItem) -> bool:
     ):
         return False
     sent = item.dispatched_at
-    return (clock.now() - sent.replace(tzinfo=timezone.utc)).total_seconds() >= 270
+    from backend.app.services.lifecycle.dispatching import ACK_WINDOW
+
+    return (clock.now() - sent.replace(tzinfo=timezone.utc)).total_seconds() >= ACK_WINDOW.total_seconds()
 
 
 async def find_job(db: AsyncSession, printer_id: int, identity: str | None, statuses=ACTIVE_STATUSES):

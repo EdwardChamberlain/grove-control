@@ -187,6 +187,44 @@ def queue_outcome_effect(db: AsyncSession, effect: QueueOutcomeEffect) -> None:
     after_commit(db, partial(_spawn_outcome, db.bind, effect), key=key)
 
 
+def queue_auto_off(db: AsyncSession, job_id: int, printer_id: int | None) -> None:
+    """Schedule the one Auto Off policy from the lifecycle's committed end state."""
+    if printer_id is None:
+        return
+
+    def spawn() -> None:
+        from backend.app.core.tasks import spawn_background_task
+
+        spawn_background_task(
+            run_queue_auto_off(db.bind, job_id, printer_id),
+            name=f"queue-auto-off-{job_id}",
+        )
+
+    after_commit(db, spawn, key=("queue_auto_off", job_id))
+
+
+async def run_queue_auto_off(engine: AsyncEngine, job_id: int, printer_id: int) -> None:
+    """Recheck the job before handing its delayed printer effect to the power controller."""
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with sessions() as db:
+            job = await db.get(PrintQueueItem, job_id)
+            if (
+                job is None
+                or job.printer_id != printer_id
+                or not job.auto_off_after
+                or job.status not in (*AWAITING_PLATE_CLEAR_STATUSES, "successful", "unsuccessful")
+            ):
+                return
+            await smart_plug_manager.schedule_off_after_queue_job(
+                printer_id,
+                db,
+                job_id=job.id,
+            )
+    except Exception:
+        logger.exception("Queue job %s: auto power-off scheduling failed", job_id)
+
+
 _FLAGS = ("shut_down_heaters", "notify_failure", "clean_sd_copy")
 
 
@@ -209,7 +247,6 @@ async def run_queue_outcome_effects(engine: AsyncEngine, effect: QueueOutcomeEff
         attempt = archive if archive and archive.dispatched_queue_item_id == job.id else None
         remote_filename = (attempt.extra_data or {}).get("remote_filename") if attempt else None
         connection = (printer.ip_address, printer.access_code, printer.model) if printer else None
-        auto_off = bool(job.auto_off_after)
         filename = archive.filename if archive else None
         library_file_id = job.library_file_id
         printer_name = printer.name if printer else None
@@ -233,13 +270,6 @@ async def run_queue_outcome_effects(engine: AsyncEngine, effect: QueueOutcomeEff
                 )
         except Exception:
             logger.exception("Queue job %s: failure notification failed", effect.job_id)
-
-    if auto_off and effect.new_state in ("failed", "cancelled") and effect.printer_id is not None:
-        try:
-            async with sessions() as db:
-                await smart_plug_manager.schedule_off_after_queue_job(effect.printer_id, db)
-        except Exception:
-            logger.exception("Queue job %s: auto power-off scheduling failed", effect.job_id)
 
     if effect.shut_down_heaters and effect.printer_id is not None:
         await _shut_down_heaters(engine, effect.printer_id)

@@ -23,7 +23,7 @@ from backend.app.services.lifecycle import (
     queued as lifecycle_queued,
 )
 from backend.app.services.lifecycle.dispatching import Dispatcher
-from backend.app.services.lifecycle.engine import QueueTransitionConflict, transition_queue_item
+from backend.app.services.lifecycle.engine import QueueTransitionConflict, transition_queue_item, writer
 from backend.app.services.print_scheduler import PrintScheduler, scheduler
 from backend.app.services.printer_manager import printer_manager
 from backend.app.services.queue_actions import cancel_job
@@ -199,12 +199,14 @@ async def test_pool_copy_failure_notifies_failure_without_assignment(alignment, 
 async def test_transition_uses_prepared_attempt_without_file_io(alignment, monkeypatch):
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
-        await transition_queue_item(db, job, "queued", "dispatching")
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "queued", "dispatching")
         await db.commit()
         attempt = await prepare_dispatch_archive(db, job)
         copy = AsyncMock(side_effect=AssertionError("The writer must not prepare files"))
         monkeypatch.setattr(ArchiveService, "archive_print", copy)
-        await link_dispatch_archive(db, job, attempt)
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await link_dispatch_archive(db, job, attempt)
         await db.commit()
         assert job.archive_id == attempt.id and attempt.dispatched_queue_item_id == job.id
         copy.assert_not_awaited()
@@ -213,7 +215,8 @@ async def test_transition_uses_prepared_attempt_without_file_io(alignment, monke
 async def test_session_close_discards_an_attempt_before_cas(alignment):
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
-        await transition_queue_item(db, job, "queued", "dispatching")
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "queued", "dispatching")
         await db.commit()
         attempt = await prepare_dispatch_archive(db, job)
         directory = settings.base_dir / attempt.file_path
@@ -235,7 +238,8 @@ async def test_same_state_metadata_write_does_not_read_archive_or_full_job(align
         engine = db.bind.sync_engine
         event.listen(engine, "before_cursor_execute", capture)
         try:
-            await transition_queue_item(db, job, "queued", "queued", values={"waiting_reason": "Printer offline"})
+            async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+                await transition_queue_item(db, job, "queued", "queued", values={"waiting_reason": "Printer offline"})
             await db.commit()
         finally:
             event.remove(engine, "before_cursor_execute", capture)
@@ -269,7 +273,8 @@ async def test_requested_snippets_use_settings_helper_and_warn_on_no_result(alig
     monkeypatch.setattr(queue_archive, "inject_gcode_into_3mf", lambda *_args: None)
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
-        await transition_queue_item(db, job, "queued", "dispatching")
+        async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+            await transition_queue_item(db, job, "queued", "dispatching")
         await db.commit()
         await db.refresh(job)
         job.gcode_injection = True
@@ -288,13 +293,17 @@ async def test_print_start_does_not_take_association_lock_without_a_candidate(al
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
         if linked:
-            await transition_queue_item(db, job, "queued", "dispatching")
+            async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+                await transition_queue_item(db, job, "queued", "dispatching")
             await db.commit()
             attempt = await prepare_dispatch_archive(db, job)
-            await link_dispatch_archive(db, job, attempt)
-            await transition_queue_item(db, job, "dispatching", "printing", values={"dispatch_subtask_id": "123"})
+            async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+                await link_dispatch_archive(db, job, attempt)
+            async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+                await transition_queue_item(db, job, "dispatching", "printing", values={"dispatch_subtask_id": "123"})
         else:
-            await transition_queue_item(db, job, "queued", "unsuccessful", action="cancel")
+            async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
+                await transition_queue_item(db, job, "queued", "unsuccessful", action="cancel")
         await db.commit()
     live = SimpleNamespace(state="RUNNING", connected=True, job_telemetry_ready=True, submission_id="123")
     monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)

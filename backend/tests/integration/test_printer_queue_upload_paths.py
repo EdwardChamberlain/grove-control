@@ -52,7 +52,6 @@ async def upload_case(db_session, printer_factory, archive_factory, tmp_path, mo
     clear_3mf_cache(printer.id, delete_files=False)
 
 
-@pytest.mark.parametrize("cached", [False, True])
 async def test_cover_uses_recorded_queue_upload_with_original_display_name(async_client, upload_case, cached):
     case = upload_case
     if cached:

@@ -17,7 +17,7 @@ from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.schemas.print_queue import DispatchResolution
 from backend.app.services.job_identity import event_identity, find_job, needs_dispatch_resolution
-from backend.app.services.lifecycle.engine import HOLDING_STATUSES, transition_queue_item
+from backend.app.services.lifecycle.engine import HOLDING_STATUSES, transition_queue_item, writer
 from backend.app.services.lifecycle.printing import bind_observed_id, observe_print
 from backend.app.services.print_scheduler import PrintScheduler
 from backend.app.services.printer_manager import PrinterManager
@@ -29,9 +29,7 @@ async def sessions(tmp_path):
     from backend.app.services import print_effects
     from backend.app.services.lifecycle import intake
 
-    intake._completed_job_events.clear()
     intake._started_job_effects.clear()
-    intake._user_stopped_printers.clear()
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'jobs.db'}")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -41,7 +39,6 @@ async def sessions(tmp_path):
         db.add(Printer(id=1, name="Printer", serial_number="TEST", ip_address="127.0.0.1", access_code="12345678"))
         await db.commit()
     yield maker
-    intake._user_stopped_printers.clear()
     await engine.dispose()
 
 
@@ -254,7 +251,8 @@ async def test_external_start_is_one_job_and_cannot_take_a_dispatch(sessions):
         assert first.status == "printing"
         assert first.created_by_id is None
         assert await observe_print(db, 1, "different") == (None, False)
-        await transition_queue_item(db, first, "printing", "finished")
+        async with writer(getattr(first, "printer_id", None) or getattr(first, "assigned_printer_id", None)):
+            await transition_queue_item(db, first, "printing", "finished")
         from backend.app.services.lifecycle.awaiting import clear_job_plate
 
         await clear_job_plate(db, first)
@@ -476,7 +474,8 @@ async def test_touchscreen_print_takes_over_the_hold_without_releasing_the_print
         async with sessions() as db:
             new = await find_job(db, 1, "touchscreen")
             live.state = "FINISH"
-            await transition_queue_item(db, new, "printing", "finished")
+            async with writer(getattr(new, "printer_id", None) or getattr(new, "assigned_printer_id", None)):
+                await transition_queue_item(db, new, "printing", "finished")
             await db.commit()
             assert manager.is_awaiting_plate_clear(1)
             await clear_queue_plate(new.id, db, None)

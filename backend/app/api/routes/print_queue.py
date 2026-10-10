@@ -46,19 +46,18 @@ from backend.app.services.lifecycle.dispatching import unsent
 from backend.app.services.lifecycle.engine import (
     InvalidQueueTransition,
     QueueTransitionConflict,
-    hold_printers,
     lock_queue_item,
     lock_queue_items,
     transition_queue_item,
+    writer,
 )
 from backend.app.services.lifecycle.preheating import SkipHeatSoakResult, heat_soak_dispatch_started, skip_heat_soak
-from backend.app.services.lifecycle.queued import create_job, filament_contract
+from backend.app.services.lifecycle.queued import create_job, create_retry_job, filament_contract
 from backend.app.services.notification_service import notification_service
 from backend.app.services.queue_source_cleanup import (
     remove_queue_only_source_if_unused,
 )
 from backend.app.utils.printer_models import is_gcode_compatible
-from backend.app.utils.safe_path import safe_join_under
 from backend.app.utils.threemf_tools import (
     extract_bed_type_from_3mf,
     extract_filament_usage_from_3mf,
@@ -877,8 +876,8 @@ async def bulk_update_queue_items(
     if "printer_id" in update_data:
         update_data["assigned_printer_id"] = update_data.pop("printer_id")
 
-    # Discover assignments without row locks, then take every source and
-    # destination printer lock before the batch's ordered job row locks.
+    # Discover assignments first; the conditional queue-row locks below reject
+    # any item whose assignment changes before this batch edits it.
     result = await db.execute(
         select(
             PrintQueueItem.id,
@@ -889,7 +888,6 @@ async def bulk_update_queue_items(
     target_printer_id = update_data.get("assigned_printer_id")
     await db.rollback()  # Do not carry a stale SQLite read snapshot while waiting for printer locks.
     try:
-        await hold_printers(db, [*expected_printers.values(), target_printer_id])
         if target_printer_id is not None:
             printer_exists = await db.scalar(select(Printer.id).where(Printer.id == target_printer_id))
             if printer_exists is None:
@@ -1013,7 +1011,6 @@ async def update_queue_item(
     target_printer_id = update_data.get("assigned_printer_id", expected_printer_id)
     await db.rollback()  # Start lock acquisition without retaining a stale SQLite read snapshot.
     try:
-        await hold_printers(db, [expected_printer_id, target_printer_id])
         if target_printer_id is not None:
             printer_exists = await db.scalar(select(Printer.id).where(Printer.id == target_printer_id))
             if printer_exists is None:
@@ -1269,10 +1266,8 @@ async def reorder_queue(
         if any(item.assigned_printer_id != queue_printer_id for item in discovered_items):
             raise HTTPException(400, "Queue items must belong to the same printer")
 
-        # The printer lock fences queue creation and reassignment while the
-        # contiguous interval is refreshed and its rows are discovered.
+        # Refresh the selected rows before discovering the contiguous queue interval.
         await db.rollback()  # Do not retain a stale SQLite snapshot while waiting for the printer lock.
-        await hold_printers(db, [queue_printer_id])
         refreshed = await db.execute(
             select(PrintQueueItem).where(PrintQueueItem.id.in_(item_ids)).execution_options(populate_existing=True)
         )
@@ -1298,8 +1293,7 @@ async def reorder_queue(
         pending_result = await db.execute(pending_query)
         pending = {item.id: item for item in pending_result.scalars().all()}
     else:
-        await db.rollback()  # Release the discovery snapshot before waiting for multiple printer locks.
-        await hold_printers(db, list(initial_printers.values()))
+        await db.rollback()  # Release the discovery snapshot before refreshing selected rows.
         refreshed = await db.execute(
             select(PrintQueueItem).where(PrintQueueItem.id.in_(item_ids)).execution_options(populate_existing=True)
         )
@@ -1316,7 +1310,6 @@ async def reorder_queue(
         **{item_id: item.assigned_printer_id for item_id, item in pending.items()},
     }
     try:
-        await hold_printers(db, list(expected_printers.values()))
         items_by_id = await lock_queue_items(db, expected_printers)
     except QueueTransitionConflict as exc:
         await db.rollback()
@@ -1367,7 +1360,7 @@ async def cancel_queue_item(
     from backend.app.services.queue_actions import cancel_job
 
     user, can_modify_all = auth_result
-    item = await lock_queue_item(db, item_id)
+    item = await db.get(PrintQueueItem, item_id)
     if item is None:
         raise HTTPException(404, "Queue item not found")
     if user is not None and not can_modify_all and item.created_by_id != user.id:
@@ -1389,11 +1382,11 @@ async def clear_queue_plate(
     db: AsyncSession = Depends(get_db),
     _: User | None = RequirePermissionIfAuthEnabled(Permission.PRINTERS_CLEAR_PLATE),
 ):
-    item = await lock_queue_item(db, item_id)
+    item = await db.get(PrintQueueItem, item_id)
     if item is None:
         raise HTTPException(404, "Queue item not found")
     try:
-        await clear_job_plate(db, item)
+        await clear_job_plate(db, item_id)
     except InvalidQueueTransition as exc:
         raise HTTPException(409, str(exc)) from exc
     await db.commit()
@@ -1412,115 +1405,31 @@ async def retry_queue_item(
     user, can_modify_all = auth_result
     if user is not None and not user.has_permission(Permission.QUEUE_INSERT_TOP.value):
         raise HTTPException(403, "Retry requires permission to insert at the top of the queue")
-    old = await lock_queue_item(db, item_id)
-    if old is None:
+    snapshot = await db.get(PrintQueueItem, item_id)
+    if snapshot is None:
         raise HTTPException(404, "Queue item not found")
-    if user is not None and not can_modify_all and old.created_by_id != user.id:
-        raise HTTPException(403, "You can only retry your own queue items")
-    if old.status not in ("failed", "cancelled") and not unsent(old):
-        raise HTTPException(
-            409, "Only failed or cancelled jobs awaiting plate clear, or unsent dispatches, can be retried"
-        )
-    excluded = {
-        "id",
-        "printer_id",
-        "status",
-        "created_at",
-        "position",
-        "started_at",
-        "completed_at",
-        "physical_outcome",
-        "physical_completed_at",
-        "physical_failure_reason",
-        "stop_requested_at",
-        "manual_start",
-        "dispatched_at",
-        "dispatch_subtask_id",
-        "error_message",
-        "waiting_reason",
-        "been_jumped",
-        "preheat_requested_at",
-        "preheat_started_at",
-        "deadline_at",
-        "deadline_kind",
-        "retry_on_failure",
-    }
-    values = {
-        column.name: getattr(old, column.name)
-        for column in PrintQueueItem.__table__.columns
-        if column.name not in excluded
-    }
-    values.update(printer_id=None, retry_on_failure=False)
-
-    def source_available(source: LibraryFile | PrintArchive | None) -> bool:
-        if source is None or source.deleted_at is not None:
-            return False
-        path = Path(source.file_path)
-        path = path if path.is_absolute() else safe_join_under(settings.base_dir, source.file_path, http=False)
-        return path.is_file()
-
-    candidates = list(
-        (
-            await db.scalars(
-                select(PrintQueueVariant)
-                .where(PrintQueueVariant.queue_item_id == old.id)
-                .options(selectinload(PrintQueueVariant.library_file))
-                .order_by(PrintQueueVariant.position)
+    printer_id = snapshot.printer_id
+    await db.rollback()
+    async with writer(printer_id):
+        old = await lock_queue_item(db, item_id)
+        if old is None:
+            raise HTTPException(404, "Queue item not found")
+        if old.printer_id != printer_id:
+            raise HTTPException(409, "The job's printer changed; refresh and retry")
+        if user is not None and not can_modify_all and old.created_by_id != user.id:
+            raise HTTPException(403, "You can only retry your own queue items")
+        if old.status not in ("failed", "cancelled") and not unsent(old):
+            raise HTTPException(
+                409, "Only failed or cancelled jobs awaiting plate clear, or unsent dispatches, can be retried"
             )
-        ).all()
-    )
-    candidates = [candidate for candidate in candidates if source_available(candidate.library_file)]
-    if candidates:
-        # Retry the user's original choices, rather than only the winning
-        # slice folded onto the old job at dispatch. Keep per-file snapshots
-        # intact; a new job starts with fresh candidate attempt counts.
-        values.update(
-            library_file_id=None,
-            archive_id=None,
-            printer_id=None,
-            assigned_printer_id=None,
-            target_model=candidates[0].target_model,
-            cleanup_library_after_dispatch=False,
-        )
-        for field in ("plate_id", "ams_mapping", "nozzle_mapping", "filament_overrides", "required_filament_types"):
-            values[field] = getattr(candidates[0], field)
-        # Variant retries return to the printer pool. Their previous tray IDs
-        # belong to the printer that handled the old job; choose a fresh
-        # mapping once the scheduler selects a printer for this replacement.
-        values["ams_mapping"] = None
-    else:
-        library = await db.get(LibraryFile, old.library_file_id) if old.library_file_id is not None else None
-        if source_available(library):
-            values["archive_id"] = None
-        else:
-            archive = await db.get(PrintArchive, old.archive_id) if old.archive_id is not None else None
-            if not source_available(archive):
-                raise HTTPException(409, "The print source is no longer available")
-            values["library_file_id"] = None
-            values["cleanup_library_after_dispatch"] = False
-        if old.target_model:
-            # An "Any machine" retry returns to the pool. The printer and the
-            # tray mapping bound for it at dispatch are chosen again.
-            values["printer_id"] = None
-            values["assigned_printer_id"] = None
-            values["ams_mapping"] = None
+        new = await create_retry_job(db, old)
+        if new is None:
+            raise HTTPException(409, "The print source is no longer available")
+        if unsent(old):
+            from backend.app.services.print_scheduler import scheduler
 
-    variants = [
-        {
-            column.name: getattr(candidate, column.name)
-            for column in PrintQueueVariant.__table__.columns
-            if column.name not in {"id", "queue_item_id", "created_at", "attempt_count"}
-        }
-        for candidate in candidates
-    ]
-    for variant in variants:
-        variant["ams_mapping"] = None
-    [new] = await create_job(db, [values], at="top", variants=variants)
-    if unsent(old):
-        from backend.app.services.print_scheduler import scheduler
-
-        await scheduler.dispatcher.withdraw(db, old)  # After the new job references the source.
-    await db.commit()
+            await scheduler.dispatcher.withdraw(db, old)  # After the new job references the source.
+        await db.commit()
     await ws_manager.send_queue_work_changed()
     return await get_queue_item(new.id, db, (user, can_modify_all))
 

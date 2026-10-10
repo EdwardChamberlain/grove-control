@@ -17,7 +17,7 @@ behind `_maybe_start_layer_timelapse(printer, printer_id, archive_id)`,
 which gates on the same `external_camera_enabled and external_camera_url`
 check. Testing the helper directly (instead of driving the whole
 on_print_start flow) keeps this regression locked in without dragging in
-unrelated side effects (plate detection, DB queries, MQTT relay, etc.).
+unrelated side effects (database queries, MQTT relay, etc.).
 """
 
 from types import SimpleNamespace
