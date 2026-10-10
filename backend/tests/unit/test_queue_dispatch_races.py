@@ -30,88 +30,84 @@ from backend.app.services.queue_actions import cancel_job
 from backend.app.services.queue_archive import link_dispatch_archive, prepare_dispatch_archive
 from backend.tests.unit.test_lifecycle_preheating import enter_preheating
 from backend.tests.unit.test_queue_archive_alignment import alignment, hold_and_link  # noqa: F401
-from backend.tests.unit.test_scheduler_cleanup_library import _dispatch_library_item, queue_factory  # noqa: F401
+from backend.tests.unit.test_scheduler_cleanup_library import (
+    _dispatch_library_item,
+    _wait_for_dispatch,
+    queue_factory,
+)  # noqa: F401
 
 
 @pytest.mark.parametrize("phase", ["copy", "upload"])
-@pytest.mark.parametrize("previous_id", ["firmware-id", "local-run-id"])
-@pytest.mark.parametrize("reconnect", ["idle", "unavailable", "different-id", "active"])
-async def test_reconnect_during_dispatch_waits_for_evidence(queue_factory, monkeypatch, phase, previous_id, reconnect):
+@pytest.mark.parametrize("telemetry", ["idle", "unavailable", "active"])
+async def test_dispatch_resumes_only_after_fresh_idle_telemetry(queue_factory, monkeypatch, phase, telemetry):
     from backend.app.services.bambu_mqtt import PrinterState
 
     ctx = await queue_factory(cleanup=False)
-    live = PrinterState(connected=True, job_telemetry_ready=True, state="IDLE", submission_id=previous_id)
-    monkeypatch.setattr(scheduling, "DISPATCH_TELEMETRY_WAIT_SECONDS", 0.03)
-    async with ctx.session_maker() as db:
-        job = await db.get(PrintQueueItem, ctx.queue_item_id)
-        job.auto_off_after = True
-        await db.commit()
+    live = PrinterState(connected=True, job_telemetry_ready=True, state="IDLE", submission_id="old-print")
 
-    async def disconnect():
-        # These are the identity and freshness resets performed by MQTT reconnect.
+    async def lose_telemetry():
         live.submission_id = None
         live.subtask_id = None
         live.job_telemetry_ready = False
-        if reconnect in ("different-id", "active"):
-            live.job_telemetry_ready = True
-            live.state = "RUNNING" if reconnect == "active" else "IDLE"
-            live.submission_id = "another-print"
 
-    waits = []
-    original_wait = Dispatcher._wait_for_telemetry
-
-    async def wait(self, *args, **kwargs):
-        if not live.job_telemetry_ready:
-            waits.append(1)
-            if reconnect == "idle":
-
-                async def restore():
-                    await asyncio.sleep(0)
-                    live.job_telemetry_ready = True
-                    live.state = "IDLE"  # A local firmware print has no ID after reconnect.
-
-                task = asyncio.create_task(restore())
-                try:
-                    return await original_wait(self, *args, **kwargs)
-                finally:
-                    await task
-        return await original_wait(self, *args, **kwargs)
-
-    monkeypatch.setattr(Dispatcher, "_wait_for_telemetry", wait)
     if phase == "upload":
 
         async def upload(*args, **kwargs):
-            await disconnect()
+            await lose_telemetry()
             return True
 
         ctx.upload.side_effect = upload
-    # queue_factory already replaces effects while its in-memory connection is
-    # shared. Use that mock without nesting another patch with different teardown.
+    # A committed copy remains held until fresh telemetry is available again.
     from backend.app.services.lifecycle.effects import run_queue_outcome_effects as effects
 
-    await _dispatch_library_item(ctx, printer_status=live, during_archive=disconnect if phase == "copy" else None)
-    await asyncio.sleep(0)
+    await _dispatch_library_item(ctx, printer_status=live, during_archive=lose_telemetry if phase == "copy" else None)
 
     async with ctx.session_maker() as db:
         job = await db.get(PrintQueueItem, ctx.queue_item_id)
         archive = await db.get(PrintArchive, job.archive_id)
         assert archive is not None and archive.dispatched_queue_item_id == job.id
-        if reconnect in ("different-id", "active"):
-            assert job.status == "failed" and archive.status == "failed"
-            assert effects.await_args.args[1].new_state == "failed"
-        elif reconnect == "unavailable":
-            assert waits and job.status == "failed" and archive.status == "failed"
-            assert job.physical_outcome is None
+        if telemetry == "unavailable":
+            assert job.status == "dispatching" and job.deadline_kind == "dispatch_ready"
             assert job.dispatched_at is None and job.dispatch_subtask_id is None
-            assert "telemetry unavailable" in job.error_message
-            retry = await db.scalar(select(PrintQueueItem).where(PrintQueueItem.id != job.id))
-            assert retry is not None and retry.status == "queued" and retry.retry_on_failure is False
-            assert effects.await_args.args[1].new_state == "failed"
+            ctx.start_print.assert_not_called()
+            effects.assert_not_awaited()
         else:
-            assert waits and job.status == "dispatching"
-            assert archive.status == "dispatching"
-            effects.assert_not_awaited()  # No failure notice, Auto Off, or heater shutdown.
-    assert ctx.start_print.call_count == int(reconnect == "idle")
+            live.job_telemetry_ready = True
+            live.state = "IDLE" if telemetry == "idle" else "RUNNING"
+            live.submission_id = None if telemetry == "idle" else "another-print"
+            with monkeypatch.context() as patch:
+                patch.setattr(scheduling, "async_session", ctx.session_maker)
+                patch.setattr(lifecycle_queued, "async_session", ctx.session_maker)
+                patch.setattr(printer_manager, "get_status", lambda _id: live)
+                patch.setattr(printer_manager, "is_connected", lambda _id: True)
+                patch.setattr(printer_manager, "is_awaiting_plate_clear", lambda _id: False)
+                patch.setattr(printer_manager, "start_print", ctx.start_print)
+                patch.setattr(scheduling, "upload_file_async", ctx.upload)
+                patch.setattr(scheduling, "delete_file_async", AsyncMock(return_value=True))
+                patch.setattr(scheduling, "get_ftp_retry_settings", AsyncMock(return_value=(False, 0, 0, 1.0)))
+                patch.setattr(scheduling, "cache_3mf_download", MagicMock())
+                if telemetry == "idle":
+                    ctx.upload.side_effect = None
+                await PrintScheduler().dispatcher.ready_due(db, job.id)
+                if telemetry == "idle":
+                    await _wait_for_dispatch(ctx)
+        await db.refresh(job)
+        await db.refresh(archive)
+        if telemetry == "active":
+            assert job.status == "failed" and archive.status == "failed"
+            assert job.physical_outcome is None and job.dispatched_at is None and job.dispatch_subtask_id is None
+            assert effects.await_args.args[1].new_state == "failed"
+            ctx.start_print.assert_not_called()
+        elif telemetry == "idle":
+            assert job.status == "dispatching" and archive.status == "dispatching"
+            assert job.dispatched_at is not None and job.dispatch_subtask_id is not None
+            ctx.start_print.assert_called_once()
+        else:
+            assert job.status == "dispatching" and archive.status == "dispatching"
+            assert job.dispatched_at is None and job.dispatch_subtask_id is None
+            assert job.physical_outcome is None
+            ctx.start_print.assert_not_called()
+            effects.assert_not_awaited()
 
 
 @pytest.fixture
@@ -148,6 +144,7 @@ async def handoff(alignment, monkeypatch):
 async def test_cancellation_cleanup_keeps_a_copy_after_the_persisted_send_boundary(alignment, monkeypatch, status):
     deleted = AsyncMock()
     monkeypatch.setattr(scheduling, "delete_file_async", deleted)
+    monkeypatch.setattr(scheduling, "async_session", alignment.sessions)
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
         await hold_and_link(db, job)
@@ -157,11 +154,13 @@ async def test_cancellation_cleanup_keeps_a_copy_after_the_persisted_send_bounda
             .values(status=status, dispatched_at=datetime.now(timezone.utc))
         )
         await db.commit()
-        await PrintScheduler().dispatcher._remove_unsent_upload(db, job.id)
+        await PrintScheduler().dispatcher._cleanup_unsent_upload(job.id)
     deleted.assert_not_awaited()
 
 
 async def test_pool_copy_failure_notifies_failure_without_assignment(alignment, monkeypatch):
+    from backend.app.services.print_scheduler import scheduler as process_scheduler
+
     monkeypatch.setattr(
         printer_manager,
         "get_status",
@@ -171,6 +170,8 @@ async def test_pool_copy_failure_notifies_failure_without_assignment(alignment, 
     monkeypatch.setattr(printer_manager, "is_awaiting_plate_clear", lambda _id: False)
     monkeypatch.setattr(ArchiveService, "archive_print", AsyncMock(side_effect=OSError("Disk full")))
     scheduler = PrintScheduler()
+    monkeypatch.setattr(scheduling, "async_session", alignment.sessions)
+    monkeypatch.setattr(process_scheduler.dispatcher, "schedule_stage", alignment.schedule_stage)
     assigned, failed, upload = AsyncMock(), AsyncMock(), AsyncMock()
     monkeypatch.setattr(lifecycle_queued, "notify_assignment", assigned)
     notified = asyncio.Event()
@@ -188,6 +189,8 @@ async def test_pool_copy_failure_notifies_failure_without_assignment(alignment, 
         await db.commit()
         binding = lifecycle_queued._DispatchBinding.for_item(job, 1, None, unassigned=True)
         await scheduler.workers.leave(db, job, binding=binding)
+        await _wait_for_dispatch(SimpleNamespace(queue_item_id=job.id))
+        await db.refresh(job)
         assert job.status == "failed" and job.printer_id == 1
         assigned.assert_not_awaited()
         await asyncio.wait_for(notified.wait(), 2)

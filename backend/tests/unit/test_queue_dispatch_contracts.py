@@ -3,6 +3,7 @@
 import asyncio
 import errno
 from datetime import timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -78,6 +79,10 @@ async def test_source_removed_after_eligibility_read_fails_the_committed_hold(
     handoff, monkeypatch, source_kind, remove
 ):
     from backend.app.services import queue_archive
+    from backend.app.services.print_scheduler import scheduler as process_scheduler
+    from backend.tests.unit.test_scheduler_cleanup_library import _wait_for_dispatch
+
+    monkeypatch.setattr(process_scheduler.dispatcher, "schedule_stage", handoff.schedule_stage)
 
     model = PrintArchive if source_kind == "archive" else LibraryFile
     assigned = AsyncMock()
@@ -115,6 +120,7 @@ async def test_source_removed_after_eligibility_read_fails_the_committed_hold(
         job = await db.get(PrintQueueItem, handoff.job_id, populate_existing=True)
         binding = lifecycle_queued._DispatchBinding.for_item(job, 1, None, unassigned=True)
         await handoff.scheduler.workers.leave(db, job, binding=binding)
+        await _wait_for_dispatch(SimpleNamespace(queue_item_id=handoff.job_id))
         await db.refresh(job)
         assert job.status == "failed" and job.printer_id == 1
         cause = "Dispatch source was deleted" if remove == "trash" else "Dispatch source no longer exists"

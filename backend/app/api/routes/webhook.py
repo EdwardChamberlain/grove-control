@@ -196,6 +196,9 @@ async def webhook_stop_print(
     """
     check_permission(api_key, "control_printer")
     check_printer_access(api_key, printer_id)
+    state = printer_manager.get_status(printer_id)
+    if not state or not state.connected:
+        raise HTTPException(status_code=503, detail="Printer is not connected")
 
     try:
         from backend.app.services.lifecycle.engine import InvalidQueueTransition
@@ -220,6 +223,9 @@ async def webhook_cancel_print(
     """
     check_permission(api_key, "control_printer")
     check_printer_access(api_key, printer_id)
+    state = printer_manager.get_status(printer_id)
+    if not state or not state.connected:
+        raise HTTPException(status_code=503, detail="Printer is not connected")
 
     try:
         from backend.app.services.lifecycle.engine import InvalidQueueTransition

@@ -168,7 +168,7 @@ def test_nozzle_rack_ignores_non_rack_and_unparseable_entries():
 @pytest.fixture
 async def archive_case(tmp_path):
     """Build an archive-based queue item on a real in-memory DB + on-disk 3MF."""
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'nozzle.db'}", echo=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
@@ -247,6 +247,8 @@ async def _run_start_print(ctx, *, installed_nozzles, nozzle_rack=None):
     # DB session, not our in-memory one, so they must be stubbed).
     patches = [
         patch.object(scheduler_module.settings, "base_dir", ctx.base_dir),
+        patch("backend.app.services.lifecycle.dispatching.async_session", ctx.session_maker),
+        patch("backend.app.services.lifecycle.queued.async_session", ctx.session_maker),
         patch("backend.app.services.lifecycle.dispatching.printer_manager.is_connected", MagicMock(return_value=True)),
         patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", MagicMock(return_value=status)),
         patch("backend.app.services.lifecycle.dispatching.printer_manager.is_awaiting_plate_clear", return_value=False),
@@ -255,7 +257,6 @@ async def _run_start_print(ctx, *, installed_nozzles, nozzle_rack=None):
         patch("backend.app.services.lifecycle.dispatching.upload_file_async", ctx.upload),
         patch("backend.app.services.lifecycle.dispatching.delete_file_async", AsyncMock(return_value=True)),
         patch("backend.app.services.lifecycle.dispatching.cache_3mf_download", MagicMock()),
-        patch("backend.app.services.lifecycle.dispatching.spawn_background_task", MagicMock()),
         patch(
             "backend.app.services.lifecycle.dispatching.get_ftp_retry_settings",
             AsyncMock(return_value=(False, 0, 0, 1.0)),
@@ -270,6 +271,9 @@ async def _run_start_print(ctx, *, installed_nozzles, nozzle_rack=None):
         async with ctx.session_maker() as db:
             item = await db.get(PrintQueueItem, ctx.queue_item_id)
             await scheduler.workers.leave(db, item)
+        from backend.tests.unit.test_scheduler_cleanup_library import _wait_for_dispatch
+
+        await _wait_for_dispatch(ctx)
 
 
 @pytest.mark.asyncio

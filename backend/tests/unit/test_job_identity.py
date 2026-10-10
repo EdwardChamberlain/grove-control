@@ -15,6 +15,7 @@ from backend.app.core.database import Base, _migrate_queue_lifecycle
 from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import HOLDING_STATUSES, PrintQueueItem
 from backend.app.models.printer import Printer
+from backend.app.models.settings import Settings
 from backend.app.schemas.print_queue import DispatchResolution
 from backend.app.services.job_identity import event_identity, find_job, needs_dispatch_resolution
 from backend.app.services.lifecycle.engine import transition_queue_item, writer
@@ -37,6 +38,7 @@ async def sessions(tmp_path):
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
         db.add(Printer(id=1, name="Printer", serial_number="TEST", ip_address="127.0.0.1", access_code="12345678"))
+        db.add(Settings(key="require_plate_clear", value="true"))
         await db.commit()
     yield maker
     await engine.dispose()
@@ -58,12 +60,23 @@ async def add_job(sessions, status="dispatching", **kwargs):
         return item.id
 
 
+async def add_awaiting_resolution_job(sessions):
+    from backend.app.services.lifecycle.dispatching import _DISPATCH_REVIEW_MESSAGE
+
+    return await add_job(
+        sessions,
+        dispatch_stage="awaiting_ack",
+        error_message=_DISPATCH_REVIEW_MESSAGE,
+    )
+
+
 async def add_linked_job(sessions, identity, status="printing", with_archive=True):
     async with sessions() as db:
         item = PrintQueueItem(
             printer_id=1,
             status=status,
             dispatch_subtask_id=identity,
+            dispatched_at=datetime.now(timezone.utc) if status == "dispatching" else None,
             physical_outcome={"failed": "failed"}.get(status),
             physical_completed_at=datetime.now(timezone.utc) if status == "failed" else None,
         )
@@ -253,6 +266,7 @@ async def test_external_start_is_one_job_and_cannot_take_a_dispatch(sessions):
         assert await observe_print(db, 1, "different") == (None, False)
         async with writer(getattr(first, "printer_id", None) or getattr(first, "assigned_printer_id", None)):
             await transition_queue_item(db, first, "printing", "finished")
+        await db.commit()
         from backend.app.services.lifecycle.awaiting import clear_job_plate
 
         await clear_job_plate(db, first)
@@ -278,7 +292,7 @@ async def test_start_requires_exact_dispatch_id_and_uses_transition(sessions):
 
 @pytest.mark.parametrize("outcome", ["printing", "failed"])
 async def test_user_resolution_commits_and_keeps_failed_plate_gate(sessions, outcome):
-    item_id = await add_job(sessions)
+    item_id = await add_awaiting_resolution_job(sessions)
     manager = MagicMock()
     manager.get_status.return_value = None
     with (
@@ -297,18 +311,39 @@ async def test_user_resolution_commits_and_keeps_failed_plate_gate(sessions, out
         assert publish.await_count == (outcome == "printing")
 
 
-@pytest.mark.parametrize("seconds, expected", [(0, False), (269, False), (271, True)])
-def test_dispatch_confirmation_prompt_requires_a_finished_send_attempt(seconds, expected):
+@pytest.mark.parametrize(
+    "stage, deadline_kind, deadline_pending, review_marker, expected",
+    [
+        ("uploading", None, False, False, False),
+        ("awaiting_ack", "dispatch_ack", True, False, False),
+        ("awaiting_ack", None, False, True, True),
+        ("awaiting_ack", None, False, False, False),
+    ],
+)
+def test_dispatch_confirmation_prompt_uses_the_settled_persisted_deadline(
+    stage, deadline_kind, deadline_pending, review_marker, expected
+):
+    from backend.app.services.lifecycle.dispatching import _DISPATCH_REVIEW_MESSAGE
+
+    now = datetime.now(timezone.utc)
     item = PrintQueueItem(
         status="dispatching",
+        dispatch_stage=stage,
         dispatch_subtask_id="123",
-        dispatched_at=datetime.now(timezone.utc) - timedelta(seconds=seconds),
+        dispatched_at=now,
+        deadline_kind=deadline_kind,
+        deadline_at=now + timedelta(seconds=270) if deadline_pending else None,
+        error_message=_DISPATCH_REVIEW_MESSAGE
+        if review_marker
+        else "Other dispatch error"
+        if stage == "awaiting_ack"
+        else None,
     )
     assert needs_dispatch_resolution(item) is expected
 
 
 async def test_resolution_rejects_other_owner_and_conflicting_live_job(sessions):
-    item_id = await add_job(sessions)
+    item_id = await add_awaiting_resolution_job(sessions)
     async with sessions() as db:
         with pytest.raises(HTTPException) as forbidden:
             await resolve_queue_dispatch(
@@ -693,7 +728,8 @@ async def test_external_archive_is_linked_by_identity_not_name(sessions):
         archive = await db.get(PrintArchive, item.archive_id)
         assert archive.subtask_id == "external"
         assert archive.dispatched_queue_item_id == item.id
-        await bind_observed_id(db, 1, "firmware", "external")
+        async with writer(1):
+            await bind_observed_id(db, 1, "firmware", "external")
         await db.commit()
         assert item.dispatch_subtask_id == "firmware"
         assert archive.subtask_id == "firmware"

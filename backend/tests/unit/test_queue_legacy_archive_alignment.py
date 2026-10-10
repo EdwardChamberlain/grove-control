@@ -230,6 +230,7 @@ async def test_legacy_link_and_outcome_commit_through_independent_lifecycle_path
             completed = datetime.now(timezone.utc).replace(tzinfo=None)
             async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
                 await transition_queue_item(db, job, "printing", "failed", values={"completed_at": completed})
+            await db.commit()
             await clear_job_plate(db, job)
             await db.commit()
     async with legacy.sessions() as observer:
@@ -238,7 +239,7 @@ async def test_legacy_link_and_outcome_commit_through_independent_lifecycle_path
         assert archive.dispatched_queue_item_id == job.id
         assert (
             archive.status
-            == {"stop": "aborted", "recovery": "failed", "pause": "completed", "clear_plate": "failed"}[path]
+            == {"stop": "cancelled", "recovery": "failed", "pause": "completed", "clear_plate": "failed"}[path]
         )
         assert archive.completed_at == (job.completed_at if path == "stop" else job.physical_completed_at)
 
@@ -271,14 +272,15 @@ async def test_stale_completion_cannot_rewrite_a_legacy_stop_outcome(legacy):
     async with legacy.sessions() as observer:
         job = await observer.get(PrintQueueItem, legacy.job_id)
         archive = await observer.get(PrintArchive, legacy.archive_id)
-        assert job.status == "cancelled" and archive.status == "aborted"
+        assert job.status == "cancelled" and archive.status == "cancelled"
         assert archive.dispatched_queue_item_id == job.id
         assert job.physical_outcome is None and archive.completed_at == job.completed_at
 
 
 async def test_late_firmware_identity_binds_the_legacy_archive_in_the_same_transaction(legacy):
     async with legacy.sessions() as db:
-        await bind_observed_id(db, 1, "456", "123")
+        async with writer(1):
+            await bind_observed_id(db, 1, "456", "123")
         job = await db.get(PrintQueueItem, legacy.job_id)
         archive = await db.get(PrintArchive, legacy.archive_id)
         assert job.dispatch_subtask_id == archive.subtask_id == "456"
@@ -504,6 +506,7 @@ async def test_duplicate_modern_completion_needs_no_write_transaction(alignment,
         awaiting = "finished" if status in ("finished", "successful") else "failed"
         async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
             await transition_queue_item(db, job, "printing", awaiting, values={"error_message": "Original reason"})
+        await db.commit()
         if status in ("successful", "unsuccessful"):
             await clear_job_plate(db, job)
         await db.commit()

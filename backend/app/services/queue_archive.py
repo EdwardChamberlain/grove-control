@@ -22,7 +22,7 @@ from backend.app.models.print_queue import AWAITING_PLATE_CLEAR_STATUSES, FINAL_
 from backend.app.models.printer import Printer
 from backend.app.services.archive import ArchiveService
 from backend.app.services.lifecycle import effects
-from backend.app.services.lifecycle.engine import ARCHIVE_OUTCOMES, physical_failure_reason
+from backend.app.services.lifecycle.engine import physical_failure_reason
 from backend.app.utils.filename import derive_queue_remote_filename
 from backend.app.utils.safe_path import safe_join_under
 from backend.app.utils.threemf_tools import inject_gcode_into_3mf
@@ -64,17 +64,27 @@ async def align_attempt(change: "Transition") -> None:
         change.before != status or change.action == "printer_report"
     )
     if recorded or (attaching and status in (*AWAITING_PLATE_CLEAR_STATUSES, *FINAL_STATUSES)):
-        outcome = row.physical_outcome or ARCHIVE_OUTCOMES.get(status)
-        if outcome is None and status == "successful":
-            outcome = "completed"  # Unambiguous legacy final state.
-        if outcome is None and status == "unsuccessful" and row.stop_requested_at is not None:
-            outcome = "aborted"  # The attempt was stopped; printer confirmation remains unknown.
+        # The Archive is a projection of the job, but a Stop request is not
+        # proof that the printer stopped. Keep that distinction through a
+        # crash: only a recorded physical outcome may project "aborted".
+        outcome = row.physical_outcome
+        if outcome is None:
+            outcome = {
+                "finished": "completed",
+                "failed": "failed",  # Includes a proven-unsent dispatch failure.
+                "cancelled": "cancelled",  # Intent only; the printer may still be running.
+                "successful": "completed",  # Unambiguous legacy final state.
+            }.get(status)
+            if status == "unsuccessful" and row.stop_requested_at is not None:
+                outcome = "cancelled"
         if outcome is not None:
             attempt.status = outcome
             attempt.completed_at = row.physical_completed_at or row.completed_at
             attempt.failure_reason = (
                 row.physical_failure_reason
                 if row.physical_outcome is not None
+                else "User cancelled"
+                if outcome == "cancelled"
                 else physical_failure_reason(outcome, row.error_message)
             )
             if attaching and row.started_at is not None:
@@ -94,6 +104,9 @@ async def link_dispatch_archive(
         transition_queue_item,
     )
 
+    # Preparation can be autoflushed by another query before the conditional
+    # job link runs. Session membership accepts both that persistent row and
+    # the usual pending row, while rejecting an Archive from another session.
     if (
         item.status != "dispatching"
         or archive not in db

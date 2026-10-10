@@ -20,7 +20,7 @@ from backend.app.services.print_scheduler import PrintScheduler
 
 
 @pytest.fixture
-async def sessions(tmp_path):
+async def sessions(tmp_path, monkeypatch):
     import backend.app.main as main
     from backend.app.services import print_effects
     from backend.app.services.lifecycle import intake
@@ -30,6 +30,13 @@ async def sessions(tmp_path):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     maker = async_sessionmaker(engine, expire_on_commit=False)
+    from backend.app.services.lifecycle import dispatching, intake, queued
+    from backend.app.services.print_scheduler import scheduler
+
+    monkeypatch.setattr(dispatching, "async_session", maker)
+    monkeypatch.setattr(intake, "async_session", maker)
+    monkeypatch.setattr(queued, "async_session", maker)
+    monkeypatch.setattr(scheduler.dispatcher, "schedule_stage", lambda *_args, **_kwargs: None)
     async with maker() as db:
         db.add(Printer(id=1, name="Printer", serial_number="TEST", ip_address="127.0.0.1", access_code="code"))
         await db.commit()
@@ -97,7 +104,8 @@ async def test_pause_observation_keeps_the_same_job_and_archive(sessions, initia
 async def test_late_firmware_identity_binds_a_paused_external_job_and_archive(sessions):
     item_id, archive_id = await add_job(sessions, "paused", "local-session")
     async with sessions() as db:
-        await bind_observed_id(db, 1, "123", "local-session")
+        async with writer(1):
+            await bind_observed_id(db, 1, "123", "local-session")
         await db.commit()
         item = await db.get(PrintQueueItem, item_id)
         archive = await db.get(PrintArchive, archive_id)
@@ -176,7 +184,8 @@ async def test_cancel_winning_a_pause_observation_cannot_be_overwritten(sessions
                 await transition_queue_item(cancel, current, "printing", "cancelled")
             await cancel.commit()
         with pytest.raises(QueueTransitionConflict):
-            await sync_print_state(stale, item, telemetry())
+            async with writer(1):
+                await sync_print_state(stale, item, telemetry())
         await stale.rollback()
     async with sessions() as db:
         item = await db.get(PrintQueueItem, item_id)

@@ -24,7 +24,7 @@ from backend.app.services.print_scheduler import PrintScheduler, scheduler
 
 @pytest.fixture
 async def queue_factory(tmp_path):
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'jobs.db'}", echo=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -111,10 +111,8 @@ async def queue_factory(tmp_path):
             )
 
     try:
-        # This fixture uses one in-memory SQLite connection across sessions.
-        # Outcome effects have file-backed coverage elsewhere; running a fresh
-        # effect session concurrently here would share and roll back that
-        # connection's unrelated test transaction.
+        # Dispatch stages use their own sessions. Keep the test database
+        # file-backed so those sessions have independent SQLite connections.
         with patch("backend.app.services.lifecycle.effects.run_queue_outcome_effects", new=AsyncMock()):
             yield make_case
     finally:
@@ -202,6 +200,10 @@ async def _dispatch_library_item(
     )
     patches = [
         patch.object(scheduler_module.settings, "base_dir", ctx.base_dir),
+        patch("backend.app.services.lifecycle.dispatching.async_session", ctx.session_maker),
+        patch("backend.app.services.lifecycle.queued.async_session", ctx.session_maker),
+        patch("backend.app.services.lifecycle.intake.async_session", ctx.session_maker),
+        patch("backend.app.services.print_effects.async_session", ctx.session_maker),
         patch("backend.app.services.archive.ArchiveService.archive_print", new=archive_print),
         patch(
             "backend.app.services.lifecycle.dispatching.printer_manager.is_connected", MagicMock(return_value=connected)
@@ -246,12 +248,34 @@ async def _dispatch_library_item(
         if binding is not None:
             # The real worker path: bind only at the hold.
             await scheduler.workers._work(ctx.queue_item_id, binding)
+            await _wait_for_dispatch(ctx)
             return
         async with ctx.session_maker() as db:
             item = await db.get(PrintQueueItem, ctx.queue_item_id)
             if before_reservation:
                 await before_reservation(db, item)
             await scheduler.workers.leave(db, item)
+        await _wait_for_dispatch(ctx)
+
+
+async def _wait_for_dispatch(ctx):
+    """Drain the tracked stage chain started by a committed dispatch transition."""
+    from backend.app.services.print_scheduler import scheduler as process_scheduler
+
+    deadline = asyncio.get_running_loop().time() + 10
+    while asyncio.get_running_loop().time() < deadline:
+        current = process_scheduler.workers.inflight.get(ctx.queue_item_id)
+        if current is None:
+            await asyncio.sleep(0)
+            if ctx.queue_item_id not in process_scheduler.workers.inflight:
+                return
+            continue
+        task = current[0]
+        if task.done():
+            await asyncio.sleep(0)
+        else:
+            await asyncio.wait_for(asyncio.shield(task), deadline - asyncio.get_running_loop().time())
+    raise TimeoutError(f"Dispatch stages for queue item {ctx.queue_item_id} did not settle")
 
 
 async def _finish_and_clear(ctx):

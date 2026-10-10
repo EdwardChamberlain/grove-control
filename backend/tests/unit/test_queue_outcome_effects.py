@@ -66,7 +66,7 @@ async def test_clear_plate_cleans_sent_upload_after_offline_stop(alignment, monk
         assert "Stop command not sent" in job.error_message
     assert len(pending) == 1
     await pending.pop()
-    powered_off.assert_awaited_once()
+    powered_off.assert_not_awaited()  # Stop intent is not proof that the printer ended the job.
     deleted.assert_not_awaited()  # The sent file is retained until the operator clears the plate.
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
@@ -87,7 +87,7 @@ async def test_clear_plate_cleans_sent_upload_after_offline_stop(alignment, monk
         assert deleted.call_args.args[2] == f"/{remote_filename}"
     else:
         deleted.assert_not_awaited()
-    powered_off.assert_awaited_once()  # Clearing the plate does not replay completion effects.
+    powered_off.assert_not_awaited()  # An unconfirmed Stop never authorizes Auto Off.
     notified.assert_not_awaited()
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
@@ -138,7 +138,7 @@ async def test_database_failure_in_one_effect_does_not_skip_later_cleanup(alignm
         attempt = await db.get(PrintArchive, job.archive_id) if job.archive_id else None
         remote_name = attempt.extra_data["remote_filename"] if attempt else None
         async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
-            await transition_queue_item(db, job, "dispatching", "failed")
+            await transition_queue_item(db, job, "dispatching", "failed", action="dispatch_failure")
         await db.commit()
     assert len(committed) == 1
     engine = alignment.sessions.kw["bind"]
@@ -259,7 +259,7 @@ async def test_delayed_failure_cannot_shut_down_a_new_external_print(alignment, 
         job.preheat_requested_at = heat.utcnow()
         await db.commit()
         async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
-            await transition_queue_item(db, job, "dispatching", "failed")
+            await transition_queue_item(db, job, "dispatching", "failed", action="dispatch_failure")
         await db.commit()
     await asyncio.wait_for(entered.wait(), 2)
     try:
@@ -295,10 +295,25 @@ async def test_cancelled_job_skips_failure_notice_and_sd_cleanup(alignment, monk
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
         await hold_and_link(db, job)
+        async with writer(job.printer_id):
+            await transition_queue_item(
+                db,
+                job,
+                "dispatching",
+                "dispatching",
+                values={"dispatched_at": datetime.now(timezone.utc), "dispatch_subtask_id": "123"},
+            )
         job.auto_off_after = True
         await db.commit()
         async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
-            await transition_queue_item(db, job, "dispatching", "cancelled", values={"error_message": "Stop requested"})
+            await transition_queue_item(
+                db,
+                job,
+                "dispatching",
+                "cancelled",
+                action="printer_report",
+                values={"error_message": "Stop confirmed"},
+            )
         await db.commit()
     await asyncio.wait_for(done.wait(), 2)
     powered_off.assert_awaited_once()
@@ -306,31 +321,53 @@ async def test_cancelled_job_skips_failure_notice_and_sd_cleanup(alignment, monk
     deleted.assert_not_awaited()
 
 
-async def test_incompatible_uploaded_dispatch_uses_only_committed_cleanup(alignment, monkeypatch):
+async def test_incompatible_uploaded_dispatch_cleans_up_only_after_failure_commit(alignment, monkeypatch):
+    from backend.app.services.lifecycle import dispatching as dispatch_stages
+
     deleted = AsyncMock(return_value=True)
-    inline_delete = AsyncMock()
     done = asyncio.Event()
+    upload = AsyncMock(return_value=True)
 
     async def delete_and_signal(*args, **kwargs):
+        async with alignment.sessions() as observer:
+            parent = await observer.get(PrintQueueItem, alignment.job_id)
+            assert parent.status == "failed"
         await deleted(*args, **kwargs)
         done.set()
         return True
 
     monkeypatch.setattr(queue_outcome_effects, "delete_file_async", delete_and_signal)
-    monkeypatch.setattr(print_scheduler, "delete_file_async", inline_delete)
+    monkeypatch.setattr(dispatch_stages, "delete_file_async", AsyncMock(return_value=True))
+    monkeypatch.setattr(dispatch_stages, "upload_file_async", upload)
+    monkeypatch.setattr(dispatch_stages, "get_ftp_retry_settings", AsyncMock(return_value=(False, 0, 0, 1.0)))
+    monkeypatch.setattr(
+        printer_manager,
+        "get_status",
+        lambda _id: SimpleNamespace(state="IDLE", connected=True, job_telemetry_ready=True, raw_data={}),
+    )
+    monkeypatch.setattr(dispatch_stages, "_incompatible_sliced_model_reason", lambda *_args: "Wrong printer model")
     monkeypatch.setattr(queue_outcome_effects.notification_service, "on_queue_job_failed", AsyncMock())
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
         await hold_and_link(db, job)
-        await db.commit()
-        printer = await db.get(Printer, job.printer_id)
+        async with writer(job.printer_id):
+            await transition_queue_item(
+                db,
+                job,
+                "dispatching",
+                "dispatching",
+                values={"dispatch_stage": "uploading"},
+            )
         archive = await db.get(PrintArchive, job.archive_id)
+        archive.sliced_for_model = "A1"
         remote_path = f"/{archive.extra_data['remote_filename']}"
-        attempt = print_scheduler._Attempt(db, job, printer, None, None)
-        attempt.sliced_for, attempt.remote_filename = "A1", archive.extra_data["remote_filename"]
-        assert not await PrintScheduler().dispatcher._still_fits(attempt)
+        await db.commit()
+        await PrintScheduler().dispatcher._upload_stage(job.id)
+        await asyncio.wait_for(done.wait(), 2)
         assert job.status == "failed"
-    await asyncio.wait_for(done.wait(), 2)
+        assert job.physical_outcome is None
+        retry = await db.scalar(select(PrintQueueItem).where(PrintQueueItem.id != job.id))
+        assert retry is not None and retry.status == "queued" and retry.retry_on_failure is False
+    upload.assert_awaited_once()
     deleted.assert_awaited_once()
     assert deleted.call_args.args[2] == remote_path
-    inline_delete.assert_not_awaited()

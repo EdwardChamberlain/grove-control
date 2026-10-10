@@ -30,6 +30,7 @@ from backend.app.services.job_identity import telemetry_identity
 from backend.app.services.lifecycle import clock, effects, preheating, printing, queued
 from backend.app.services.lifecycle.engine import (
     InvalidQueueTransition,
+    QueueTransitionConflict,
     lock_queue_item,
     transition_queue_item,
     writer,
@@ -155,18 +156,30 @@ class Dispatcher:
         except asyncio.CancelledError:
             await self._cleanup_unsent_upload(item_id)
             raise
+        except QueueTransitionConflict:
+            logger.debug("Dispatch stage result for job %s was stale", item_id)
+            return
         except Exception as error:
-            logger.exception("Dispatch stage failed for job %s", item_id)
-            await self._fail_unsent(
-                item_id,
-                f"Dispatch failed; inspect the printer before retrying: {error}",
-                expected_stage=expected_stage,
-            )
+            message = f"Dispatch failed; inspect the printer before retrying: {error}"
+            if expected_stage == "copying":
+                from backend.app.services.queue_archive import (
+                    DispatchPreparationError,
+                    DispatchSourceUnavailable,
+                    dispatch_copy_error,
+                )
+
+                message = dispatch_copy_error(error)
+                if isinstance(error, (DispatchPreparationError, DispatchSourceUnavailable, OSError)):
+                    logger.warning("Dispatch copy failed for job %s: %s", item_id, message)
+                else:
+                    logger.exception("Dispatch copy failed for job %s", item_id)
+            else:
+                logger.exception("Dispatch stage failed for job %s", item_id)
+            await self._fail_unsent(item_id, message, expected_stage=expected_stage)
 
     async def _copy_stage(self, item_id: int) -> None:
         from backend.app.services.queue_archive import (
             discard_prepared_archive,
-            dispatch_copy_error,
             link_dispatch_archive,
             prepare_dispatch_archive,
         )
@@ -201,9 +214,9 @@ class Dispatcher:
                     conditions=(PrintQueueItem.dispatch_stage == "copying",),
                 )
                 await db.commit()
-            except Exception as error:
+            except Exception:
                 await db.rollback()
-                raise RuntimeError(dispatch_copy_error(error)) from error
+                raise
         self.schedule_stage(item_id, printer_id, "uploading")
 
     async def _upload_stage(self, item_id: int) -> None:

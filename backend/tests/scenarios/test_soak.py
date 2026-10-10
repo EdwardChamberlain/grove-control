@@ -52,7 +52,7 @@ async def test_stop_during_soak_turns_the_heaters_off(app):
     await app.action(job_id, "stop")
     await app.run()
 
-    assert (await app.job(job_id)).status == "cancelled"
+    assert (await app.job(job_id)).status == "unsuccessful"
     assert "M140 S0" in gcode(printer)
     assert "M141 S0" in gcode(printer)
     assert printer.sent("project_file") == []
@@ -73,7 +73,7 @@ async def test_soak_interrupted_by_restart_turns_heaters_off_and_keeps_the_hold(
 
     await app.action(job_id, "stop")
     await app.run()
-    assert (await app.job(job_id)).status == "cancelled"
+    assert (await app.job(job_id)).status == "unsuccessful"
 
 
 async def _persist_unstarted_soak(app):
@@ -172,7 +172,7 @@ async def test_stop_as_the_soak_hands_off_sends_nothing_and_turns_heaters_off(ap
     await running
     await app.run()
 
-    assert (await app.job(job_id)).status == "cancelled"
+    assert (await app.job(job_id)).status == "unsuccessful"
     assert printer.sent("project_file") == []
     assert "M140 S0" in gcode(printer)
 
@@ -258,7 +258,6 @@ async def test_a_file_lost_during_the_soak_fails_the_dispatch_and_cools_the_prin
     job_id = await app.queue(printer, await app.add_file("lost.3mf"), **SOAK)
     await app.run()
     os.remove(app.tmp_path / "library" / "lost.3mf")
-    app.allowed_errors += ["failed to copy dispatch Archive"]
 
     await app.advance(11 * 60)
 

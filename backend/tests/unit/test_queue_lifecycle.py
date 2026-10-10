@@ -1,6 +1,7 @@
 """Stage 3's physical holds, user actions and one-time upgrade on real SQLite."""
 
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -89,28 +90,33 @@ async def test_only_successful_physical_completion_clears_automatically(sessions
         assert item.status == ("successful" if status == "finished" else "unsuccessful")
 
 
-async def test_stop_succeeds_when_auto_off_cannot_be_scheduled(sessions):
+async def test_unconfirmed_stop_does_not_schedule_auto_off(sessions):
     async with sessions() as db:
-        item = PrintQueueItem(printer_id=1, status="printing", auto_off_after=True)
+        item = PrintQueueItem(
+            printer_id=1,
+            status="printing",
+            auto_off_after=True,
+            dispatch_subtask_id="123",
+            dispatched_at=datetime.now(timezone.utc),
+        )
         db.add(item)
         await db.commit()
-        attempted = asyncio.Event()
-
-        async def fail_plug(*_args, **_kwargs):
-            attempted.set()
-            raise RuntimeError("plug unreachable")
-
-        failing_plug = AsyncMock(side_effect=fail_plug)
+        off = AsyncMock()
         with (
             patch("backend.app.services.printer_manager.printer_manager.stop_print") as stop,
             patch(
                 "backend.app.services.smart_plug_manager.smart_plug_manager.schedule_off_after_queue_job",
-                failing_plug,
+                off,
+            ),
+            patch(
+                "backend.app.services.printer_manager.printer_manager.get_status",
+                return_value=SimpleNamespace(
+                    connected=True, job_telemetry_ready=True, state="RUNNING", submission_id="123"
+                ),
             ),
         ):
-            await cancel_job(db, item)  # Does not raise after the committed stop.
-            await asyncio.wait_for(attempted.wait(), 2)
-        failing_plug.assert_awaited_once()
+            await cancel_job(db, item)
+        off.assert_not_awaited()
         stop.assert_called_once_with(1)
         await db.refresh(item)
         assert item.status == "cancelled"
@@ -366,9 +372,9 @@ async def test_migration_preserves_exact_hold_creates_missing_job_and_runs_once(
         assert jobs[ids[2]].error_message is None
         synthetic = next(item for item in jobs.values() if item.printer_id == 2)
         assert synthetic.status == "finished"
-        await clear_job_plate(db, jobs[held.id])
-        await clear_job_plate(db, synthetic)
-        await db.commit()
+        held_id, synthetic_id = held.id, synthetic.id
+        await clear_job_plate(db, await db.get(PrintQueueItem, held_id))
+        await clear_job_plate(db, await db.get(PrintQueueItem, synthetic_id))
     async with engine.begin() as conn:
         await _migrate_queue_lifecycle(conn)
         assert await conn.scalar(select(Settings.value).where(Settings.key == "queue_lifecycle_version")) == "4"

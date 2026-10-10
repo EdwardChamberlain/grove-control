@@ -41,8 +41,12 @@ async def test_upgrade_backfills_only_proven_outcomes_and_runs_once():
                         (6, "unsuccessful", "Print failed"),
                         (7, "unsuccessful", "Stopped"),
                         (8, "printing", None),
+                        (9, "failed", "Confirmed printer failure"),
                     )
                 ],
+            )
+            await conn.execute(
+                text("UPDATE print_queue SET started_at = :started WHERE id = 9"), {"started": completed}
             )
             archives = PrintArchive.__table__
             await conn.execute(
@@ -87,14 +91,15 @@ async def test_upgrade_backfills_only_proven_outcomes_and_runs_once():
             await _migrate_queue_archive_outcomes(conn)
             rows = {row.id: row for row in (await conn.execute(select(PrintQueueItem.__table__))).all()}
             assert {i: row.physical_outcome for i, row in rows.items()} == {
-                1: "failed",
-                2: "aborted",
+                1: None,
+                2: None,
                 3: "completed",
                 4: None,
                 5: "failed",
                 6: None,
                 7: "aborted",
                 8: None,
+                9: "failed",
             }
             assert rows[5].physical_failure_reason == "HMS 0700_8012"
             assert rows[5].physical_completed_at == completed

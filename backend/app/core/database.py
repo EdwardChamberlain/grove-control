@@ -1193,7 +1193,7 @@ async def _migrate_queue_legacy_archive_links(conn) -> None:
     from backend.app.models.print_queue import PrintQueueItem
     from backend.app.models.settings import Settings
     from backend.app.services.job_identity import normalize_id
-    from backend.app.services.lifecycle.engine import ARCHIVE_OUTCOMES, physical_failure_reason
+    from backend.app.services.lifecycle.engine import physical_failure_reason
 
     version_key = "queue_legacy_archive_link_version"
     # Version 1 ran before outcome backfill and missed terminal legacy jobs.
@@ -1231,11 +1231,15 @@ async def _migrate_queue_legacy_archive_links(conn) -> None:
             )
         ):
             continue
-        outcome = row["physical_outcome"] or ARCHIVE_OUTCOMES.get(row["status"])
-        if outcome is None and row["status"] == "successful":
-            outcome = "completed"
-        if outcome is None and row["status"] == "unsuccessful" and row["stop_requested_at"] is not None:
-            outcome = "aborted"
+        outcome = row["physical_outcome"]
+        if outcome is None:
+            outcome = {
+                "finished": "completed",
+                "successful": "completed",
+                "cancelled": "cancelled",
+            }.get(row["status"])
+            if row["status"] == "unsuccessful" and row["stop_requested_at"] is not None:
+                outcome = "cancelled"
         values = {"dispatched_queue_item_id": row["id"]}
         if outcome is not None:
             values.update(
@@ -1243,6 +1247,8 @@ async def _migrate_queue_legacy_archive_links(conn) -> None:
                 completed_at=row["physical_completed_at"] or row["completed_at"],
                 failure_reason=row["physical_failure_reason"]
                 if row["physical_outcome"] is not None
+                else "User cancelled"
+                if outcome == "cancelled"
                 else physical_failure_reason(outcome, row["error_message"]),
             )
         if row["started_at"] is not None:
@@ -1289,7 +1295,7 @@ async def _migrate_queue_archive_outcomes(conn) -> None:
     from backend.app.models.archive import PrintArchive
     from backend.app.models.print_queue import PrintQueueItem
     from backend.app.models.settings import Settings
-    from backend.app.services.lifecycle.engine import ARCHIVE_OUTCOMES, physical_failure_reason
+    from backend.app.services.lifecycle.engine import physical_failure_reason
 
     version_key = "queue_archive_outcome_version"
     if await conn.scalar(select(Settings.value).where(Settings.key == version_key)) == "1":
@@ -1318,7 +1324,7 @@ async def _migrate_queue_archive_outcomes(conn) -> None:
                         and_(
                             archives.c.id == table.c.archive_id,
                             archives.c.dispatched_queue_item_id == table.c.id,
-                            archives.c.status.in_(("completed", "failed", "aborted", "cancelled")),
+                            archives.c.status.in_(("completed", "failed", "aborted")),
                         ),
                     )
                 )
@@ -1330,13 +1336,14 @@ async def _migrate_queue_archive_outcomes(conn) -> None:
     )
     for row in rows:
         attempt_status = row["attempt_status"]
-        outcome = (
-            ("aborted" if attempt_status == "cancelled" else attempt_status)
-            if attempt_status is not None
-            else ARCHIVE_OUTCOMES.get(row["status"])
-        )
-        if outcome is None and row["status"] == "successful":
-            outcome = "completed"
+        outcome = attempt_status
+        if outcome is None:
+            outcome = {
+                "finished": "completed",
+                "successful": "completed",
+            }.get(row["status"])
+            if row["status"] == "failed" and row["started_at"] is not None:
+                outcome = "failed"
         if outcome is None:
             continue  # A legacy unsuccessful job alone cannot prove failure vs Stop.
         reason = (

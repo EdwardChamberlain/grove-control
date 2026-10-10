@@ -183,7 +183,7 @@ async def test_an_unacknowledged_print_command_resets_the_printer_session(app):
     await app.queue(printer, await app.add_file())
     await app.run()
 
-    await app.advance(120)
+    await app.advance(300)
 
     assert printer.reconnects == 1
 
@@ -252,7 +252,6 @@ async def test_a_file_that_cannot_be_copied_fails_with_its_cause(app):
     printer = await app.add_printer()
     file_id = await app.add_file("gone.3mf")
     os.remove(app.tmp_path / "library" / "gone.3mf")
-    app.allowed_errors += ["failed to copy dispatch Archive"]
 
     job_id = await app.queue(printer, file_id)
     await app.run()

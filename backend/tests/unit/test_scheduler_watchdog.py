@@ -36,6 +36,13 @@ async def db_session(tmp_path, monkeypatch):
         await conn.run_sync(Base.metadata.create_all)
         await _migrate_queue_lifecycle(conn)
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    from backend.app.services.lifecycle import dispatching, intake, queued
+    from backend.app.services.print_scheduler import scheduler as process_scheduler
+
+    monkeypatch.setattr(dispatching, "async_session", session_maker)
+    monkeypatch.setattr(intake, "async_session", session_maker)
+    monkeypatch.setattr(queued, "async_session", session_maker)
+    monkeypatch.setattr(process_scheduler.dispatcher, "schedule_stage", lambda *_args, **_kwargs: None)
 
     async with session_maker() as db:
         db.add(Printer(id=42, name="Test", serial_number="TEST", ip_address="127.0.0.1", access_code="code"))

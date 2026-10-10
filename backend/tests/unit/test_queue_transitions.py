@@ -36,6 +36,13 @@ async def sessions(tmp_path, monkeypatch):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     maker = async_sessionmaker(engine, expire_on_commit=False)
+    from backend.app.services.lifecycle import dispatching, intake, queued
+    from backend.app.services.print_scheduler import scheduler as process_scheduler
+
+    monkeypatch.setattr(dispatching, "async_session", maker)
+    monkeypatch.setattr(intake, "async_session", maker)
+    monkeypatch.setattr(queued, "async_session", maker)
+    monkeypatch.setattr(process_scheduler.dispatcher, "schedule_stage", lambda *_args, **_kwargs: None)
     yield maker
     await engine.dispose()
 
@@ -315,18 +322,27 @@ async def test_conflict_does_not_autoflush_dirty_metadata(sessions):
         assert (item.status, item.error_message) == ("unsuccessful", "Stopped by user")
 
 
-async def test_drying_reservation_release_cannot_overwrite_cancellation(sessions):
-    item_id = await make_item(sessions, "dispatching", wait_for_drying_complete=True)
+async def test_stale_dispatch_ready_callback_cannot_overwrite_cancellation(sessions):
+    async with sessions() as db:
+        printer = Printer(name="Printer", ip_address="127.0.0.1", serial_number="TEST", access_code="code")
+        db.add(printer)
+        await db.commit()
+        printer_id = printer.id
+    item_id = await make_item(
+        sessions,
+        "dispatching",
+        printer_id=printer_id,
+        dispatch_stage="uploading",
+        deadline_kind="dispatch_ready",
+        deadline_at=datetime.now(),
+        wait_for_drying_complete=True,
+    )
     async with sessions() as worker, sessions() as user:
-        stale = await worker.get(PrintQueueItem, item_id)
-        await worker.commit()
         current = await user.get(PrintQueueItem, item_id)
-        async with writer(getattr(current, "printer_id", None) or getattr(current, "assigned_printer_id", None)):
+        async with writer(printer_id):
             await transition_queue_item(user, current, "dispatching", "cancelled")
         await user.commit()
-        with pytest.raises(QueueTransitionConflict):
-            await PrintScheduler().dispatcher._dry(worker, stale, (0,))
-        await worker.rollback()
+        await PrintScheduler().dispatcher.ready_due(worker, item_id)
     async with sessions() as db:
         item = await db.get(PrintQueueItem, item_id)
         assert (item.status, item.waiting_reason) == ("cancelled", None)
