@@ -124,6 +124,26 @@ def reset_printer_locks():
     engine._printer_locks.clear()
 
 
+@pytest.fixture(autouse=True)
+async def cleanup_application_database_resources():
+    """Close app-engine connections and owned tasks before a test loop ends.
+
+    Some tests exercise application services without the ``async_client``
+    fixture, so its engine/task cleanup does not run for them. The shared
+    application engine must not carry an aiosqlite connection into the next
+    function-scoped event loop.
+    """
+    yield
+    await cancel_background_tasks()
+    from backend.app.core.database import engine
+
+    pool = engine.sync_engine.pool
+    had_connections = any(getattr(pool, method, lambda: 0)() for method in ("checkedin", "checkedout"))
+    await engine.dispose()
+    if had_connections:
+        await asyncio.sleep(0.05)
+
+
 @pytest.fixture(scope="session")
 def event_loop():
     """Create an instance of the default event loop for each test session."""
