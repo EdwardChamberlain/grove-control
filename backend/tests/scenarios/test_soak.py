@@ -308,7 +308,7 @@ async def test_an_any_machine_soak_holds_the_printer_it_was_given(app):
     assert (await app.job(job_id)).status == "printing"
 
 
-async def test_telemetry_lost_after_the_soak_retries_as_a_fresh_heat_soak(app):
+async def test_telemetry_lost_after_the_soak_retries_without_delayed_heater_shutdown(app):
     printer, job_id = await soaking_job(app)
     printer.upload_gate = asyncio.Event()
     await app.advance(9 * 60)
@@ -324,7 +324,9 @@ async def test_telemetry_lost_after_the_soak_retries_as_a_fresh_heat_soak(app):
     job = await app.job(job_id)
     assert job.status == "failed" and job.physical_outcome is None
     assert printer.sent("project_file") == []
-    assert "M140 S0" in gcode(printer)
+    # The failed attempt's best-effort shutdown cannot reach a disconnected
+    # printer; the fresh retry starts a new soak instead of replaying a delayed off.
+    assert "M140 S0" not in gcode(printer)
     from sqlalchemy import select
 
     from backend.app.models.print_queue import PrintQueueItem

@@ -248,7 +248,7 @@ async def _observe_print(
 
 
 async def _settle_replaced_active_job(db, held: PrintQueueItem, identity: str, observed_state) -> bool:
-    """Close a different active attempt before adopting the printer's live job."""
+    """Close a proven-unsent or superseded attempt before adopting a live external print."""
     from backend.app.services.lifecycle.final import end as end_final
     from backend.app.services.lifecycle.intake import print_memory
 
@@ -265,7 +265,11 @@ async def _settle_replaced_active_job(db, held: PrintQueueItem, identity: str, o
         await end_final(db, held, "external_replacement", error_message=reason)
         return True
 
-    if held.status not in ("dispatching", "printing", "paused", "cancelled") or not superseded_by(held, observed_state):
+    # Once the print command was sent, a different telemetry identity cannot
+    # prove whether that attempt started. Keep its reservation and plate hold.
+    if held.status == "dispatching":
+        return False
+    if held.status not in ("printing", "paused", "cancelled") or not superseded_by(held, observed_state):
         return False
     old_identity = normalize_id(held.dispatch_subtask_id)
     filename = ""
