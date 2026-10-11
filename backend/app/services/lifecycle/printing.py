@@ -298,6 +298,7 @@ async def end(db: AsyncSession, job: PrintQueueItem, data: dict, *, memory) -> N
     Completion effects run once the caller commits.
     """
     from backend.app.services.print_effects import (
+        _clean_sd_card,
         _format_hms_error_summary,
         derive_failure_reason,
         print_completed,
@@ -361,6 +362,11 @@ async def end(db: AsyncSession, job: PrintQueueItem, data: dict, *, memory) -> N
             "plate_id": job.plate_id if job.plate_id is not None else data.get("plate_id"),
         },
     )
+    # Delete the uploaded file while the printer is still powered. Queue Auto
+    # Off after that cleanup but before the remaining completion bookkeeping.
+    effects.after_commit_task(db, partial(_clean_sd_card, completion), key=("print_sd_cleanup", job.id))
+    if job.physical_outcome == "completed" and job.auto_off_after:
+        effects.queue_auto_off(db, job.id, printer_id)
     effects.after_commit_task(db, partial(print_completed, completion, memory=memory), key=("print_complete", job.id))
 
 

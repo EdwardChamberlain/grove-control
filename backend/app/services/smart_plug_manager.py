@@ -315,6 +315,23 @@ class SmartPlugManager:
 
             for plug, service in services:
                 try:
+                    if plug.controls_printer_power:
+                        # Accessory switches can take time to respond. A
+                        # directly started print may appear while one is
+                        # switching, so recheck immediately before cutting
+                        # printer power.
+                        state = printer_manager.get_status(printer_id)
+                        if (
+                            not state
+                            or not state.connected
+                            or not getattr(state, "job_telemetry_ready", False)
+                            or state.state not in ("IDLE", "FINISH", "FAILED")
+                        ):
+                            logger.info(
+                                "Skipping printer power-off for %s: current state is not safely idle",
+                                printer_id,
+                            )
+                            continue
                     if await service.turn_off(plug):
                         await self._mark_auto_off_executed(plug.id)
                         if plug.controls_printer_power:

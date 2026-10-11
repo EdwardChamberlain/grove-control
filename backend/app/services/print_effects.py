@@ -1456,7 +1456,6 @@ async def print_completed(c, *, memory) -> None:
                 status,
             )
     logger.info("Printer %s: print %s ended as %s", printer_id, name, status)
-    await _clean_sd_card(c)
     await _queue_completed(c, name)
     if status == "completed":
         await _await_bed_cooldown(printer_id, name, memory=memory)
