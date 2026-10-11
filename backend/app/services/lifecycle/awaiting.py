@@ -13,12 +13,13 @@ async def on_enter(change, row) -> None:
     """Enter: clear a finished plate at once when confirmation is off, or queue a failed or stopped job's effects.
 
     A failure notification runs unless the printer reported the failure, whose
-    completion notifies instead. Auto Off was requested when the physical
-    outcome left the printing or dispatching state.
+    completion notifies instead. Auto Off runs only when the printer reports completion.
     """
     from backend.app.services.lifecycle import effects, queued
 
     if change.after == "finished":
+        if row.physical_outcome == "completed" and row.auto_off_after and row.printer_id is not None:
+            effects.queue_auto_off(change.db, change.item_id, row.printer_id)
         confirmation = await change.db.scalar(select(Settings.value).where(Settings.key == "require_plate_clear"))
         if confirmation is not None and confirmation.lower() in ("false", "0"):
             await clear_job_plate(change.db, change.item, automatic=True)

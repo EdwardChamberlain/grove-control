@@ -21,22 +21,22 @@ async def test_auto_off_is_requested_once_after_the_job(app):
     assert len(plug_offs(app, printer)) == 1
 
 
-async def test_auto_off_is_requested_once_after_a_failed_job(app):
+async def test_auto_off_is_not_requested_after_a_failed_job(app):
     printer, job_id = await printing_job(app, auto_off_after=True)
 
     printer.fail()
     await app.run()
 
-    assert len(plug_offs(app, printer)) == 1
+    assert plug_offs(app, printer) == []
 
 
-async def test_auto_off_is_requested_once_after_stop(app):
+async def test_auto_off_is_not_requested_after_stop(app):
     printer, job_id = await printing_job(app, auto_off_after=True)
 
     await app.action(job_id, "stop")
     await app.run()
 
-    assert len(plug_offs(app, printer)) == 1
+    assert plug_offs(app, printer) == []
 
 
 async def test_no_auto_off_without_the_option(app):

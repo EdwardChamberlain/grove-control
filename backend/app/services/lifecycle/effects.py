@@ -164,19 +164,10 @@ def queue_outcome_effect(db: AsyncSession, effect: QueueOutcomeEffect) -> None:
 
 
 def queue_auto_off(db: AsyncSession, job_id: int, printer_id: int | None) -> None:
-    """Turn off immediately after a committed print outcome, if its queue is empty."""
+    """Turn off after a committed successful print, if its queue is empty."""
     if printer_id is None:
         return
-
-    def spawn() -> None:
-        from backend.app.core.tasks import spawn_background_task
-
-        spawn_background_task(
-            run_queue_auto_off(db.bind, job_id, printer_id),
-            name=f"queue-auto-off-{job_id}",
-        )
-
-    after_commit(db, spawn, key=("queue_auto_off", job_id))
+    after_commit_task(db, partial(run_queue_auto_off, db.bind, job_id, printer_id), key=("queue_auto_off", job_id))
 
 
 async def run_queue_auto_off(engine: AsyncEngine, job_id: int, printer_id: int) -> None:

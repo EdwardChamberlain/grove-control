@@ -277,14 +277,30 @@ class SmartPlugManager:
                 job is None
                 or job.printer_id != printer_id
                 or not job.auto_off_after
-                or job.physical_outcome is None
-                or job.status not in ("finished", "failed", "cancelled", "successful", "unsuccessful")
+                or job.physical_outcome != "completed"
+                or job.status not in ("finished", "successful")
             ):
                 return
             if await printer_has_queue_work(db, printer_id):
                 logger.info("Queue job %s requested auto-off, but printer %s still has queue work", job_id, printer_id)
                 return
 
+            plugs = await self._get_plugs_for_printer(printer_id, db)
+            await db.commit()
+            services = []
+            for plug in plugs:
+                if not plug.enabled or (
+                    plug.plug_type == "homeassistant" and plug.ha_entity_id and plug.ha_entity_id.startswith("script.")
+                ):
+                    continue
+                try:
+                    service = await self.get_service_for_plug(plug, db)
+                    services.append((plug, service))
+                except Exception:
+                    logger.exception("Could not prepare plug '%s' for queue job %s auto-off", plug.name, job_id)
+
+            # Service setup can await database work. Refresh printer state only
+            # after it, immediately before issuing any power command.
             state = printer_manager.get_status(printer_id)
             if (
                 not state
@@ -297,15 +313,8 @@ class SmartPlugManager:
                 )
                 return
 
-            plugs = await self._get_plugs_for_printer(printer_id, db)
-            await db.commit()
-            for plug in plugs:
-                if not plug.enabled or (
-                    plug.plug_type == "homeassistant" and plug.ha_entity_id and plug.ha_entity_id.startswith("script.")
-                ):
-                    continue
+            for plug, service in services:
                 try:
-                    service = await self.get_service_for_plug(plug, db)
                     if await service.turn_off(plug):
                         await self._mark_auto_off_executed(plug.id)
                         if plug.controls_printer_power:

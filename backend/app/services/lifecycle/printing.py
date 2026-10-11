@@ -286,13 +286,12 @@ async def _settle_replaced_active_job(db, held: PrintQueueItem, identity: str, o
             "raw_data": {"subtask_id": old_identity},
         },
         memory=print_memory,
-        allow_auto_off=False,
     )
     await end_final(db, held, "external_replacement", error_message=reason)
     return True
 
 
-async def end(db: AsyncSession, job: PrintQueueItem, data: dict, *, memory, allow_auto_off: bool = True) -> None:
+async def end(db: AsyncSession, job: PrintQueueItem, data: dict, *, memory) -> None:
     """Exit for the printer's report that the print ended, into the awaiting state for its outcome.
 
     The job row records Grove Stop intent so attribution survives restarts.
@@ -313,9 +312,6 @@ async def end(db: AsyncSession, job: PrintQueueItem, data: dict, *, memory, allo
     # printer's own name for notifications and integrations.
     reported_status = "cancelled" if grove_stop and reported in ("failed", "aborted") else reported
     destination = "finished" if queue_status == "completed" else queue_status
-    request_auto_off = bool(
-        allow_auto_off and job.auto_off_after and printer_id is not None and job.physical_outcome is None
-    )
     if job.status == "dispatching" and destination == "finished":
         # Exact terminal identity also proves this dispatch was accepted.
         await transition_queue_item(db, job, "dispatching", "printing")
@@ -336,8 +332,6 @@ async def end(db: AsyncSession, job: PrintQueueItem, data: dict, *, memory, allo
             values={"completed_at": now if completing_cancelled else job.completed_at or now, "error_message": reason},
             archive_failure_reason=derive_failure_reason(reported_status, data.get("hms_errors")),
         )
-    if request_auto_off:
-        effects.queue_auto_off(db, job.id, printer_id)
     remote_filename = archive_filename = None
     if job.archive_id:
         attempt = await db.scalar(

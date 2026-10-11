@@ -336,6 +336,7 @@ async def _written(change: Transition) -> None:
         "preheat_requested_at",
         "chamber_heat_soak",
         "auto_off_after",
+        "physical_outcome",
     )
     row = (await db.execute(select(*(table.c[name] for name in names)).where(table.c.id == change.item_id))).one()
     if entered or change.action is not None:
