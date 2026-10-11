@@ -186,11 +186,6 @@ class PrintQueueItem(Base):
     # Persisted status changes go through its transition_queue_item.
     status: Mapped[str] = mapped_column(String(20), default="queued")
 
-    # Durable dispatch claim. A queue worker stamps this before slow source
-    # preparation or FTP I/O so pending rows cannot be reassigned or selected
-    # by another worker. The claim is cleared when the worker exits; startup
-    # reconciliation clears claims left by a process restart.
-
     # Set by the dispatch scheduler when the assigned spool can't satisfy
     # this print's per-slot filament weight (#1496). Display-only flag — the
     # actual deficit is recomputed live every time the user clicks ▶, so

@@ -191,30 +191,13 @@ async def create_retry_job(db: AsyncSession, item: PrintQueueItem) -> PrintQueue
         return None
 
     values = {field: getattr(item, field) for field in _RETRY_JOB_FIELDS}
-    values.update(
-        printer_id=None,
-        retry_on_failure=False,
-        dispatch_stage=None,
-        manual_start=False,
-        preheat_requested_at=None,
-        preheat_started_at=None,
-        deadline_at=None,
-        deadline_kind=None,
-        dispatched_at=None,
-        dispatch_subtask_id=None,
-        dispatch_baseline_subtask_id=None,
-        started_at=None,
-        completed_at=None,
-        error_message=None,
-        waiting_reason=None,
-        physical_outcome=None,
-        physical_completed_at=None,
-        physical_failure_reason=None,
-        stop_requested_at=None,
-        been_jumped=False,
-    )
+    # Execution state is deliberately absent from the copy list, so the new
+    # row receives model defaults instead of a growing collection of resets.
+    values.update(retry_on_failure=False, manual_start=False)
     variant_values = [{field: getattr(variant, field) for field in _RETRY_VARIANT_FIELDS} for variant in variants]
     if variant_values:
+        # Variants are the retry's complete source set; the old selected file
+        # or attempt Archive must not leak into the replacement job.
         values.update(
             library_file_id=None,
             archive_id=None,
@@ -223,6 +206,18 @@ async def create_retry_job(db: AsyncSession, item: PrintQueueItem) -> PrintQueue
         )
         for field in ("plate_id", "ams_mapping", "nozzle_mapping", "filament_overrides", "required_filament_types"):
             values[field] = variant_values[0].get(field)
+    elif source_available(source):
+        # A live library row is the preferred single source when no variants
+        # remain. Keep its cleanup behavior for queue-owned temporary uploads.
+        values["library_file_id"] = source.id
+        values["archive_id"] = None
+    else:
+        # The Archive copy is the final fallback if the original library file
+        # disappeared. It is a stable source, not a disposable queue upload.
+        values["library_file_id"] = None
+        values["archive_id"] = archive.id
+        values["cleanup_library_after_dispatch"] = False
+
     if item.assigned_printer_id is None:
         # This job will be matched to a printer again. Tray indices belong to
         # that printer, so don't carry the previous dispatch's mapping into
@@ -230,15 +225,6 @@ async def create_retry_job(db: AsyncSession, item: PrintQueueItem) -> PrintQueue
         values["ams_mapping"] = None
         for variant in variant_values:
             variant["ams_mapping"] = None
-    elif variant_values:
-        # The replacement will select one of these original library files.
-        # The old dispatch Archive belongs only to the completed attempt.
-        values["archive_id"] = None
-    elif source_available(source):
-        values["archive_id"] = None if item.library_file_id is not None else item.archive_id
-    else:
-        values["library_file_id"] = None
-        values["cleanup_library_after_dispatch"] = False
     created = await create_job(db, [values], at="top", variants=variant_values)
     return created[0]
 
