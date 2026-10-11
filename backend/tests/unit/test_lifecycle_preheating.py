@@ -170,4 +170,4 @@ async def test_other_heat_soak_exit_turns_heaters_off_after_commit(soak, monkeyp
         await transition_queue_item(soak.db, item, "preheating", "failed", action="dispatch_failure")
     shutdown.assert_not_called()
     await soak.db.commit()
-    shutdown.assert_called_once_with(item.printer_id, "X1C")
+    shutdown.assert_called_once_with(item.printer_id, "H2D")
