@@ -300,8 +300,7 @@ async def test_cancelled_job_skips_failure_notice_and_sd_cleanup(alignment, monk
 
     pending = []
     monkeypatch.setattr(tasks, "spawn_background_task", lambda coro, **kwargs: pending.append(coro))
-    # This test covers the immediate printing-exit power action, not the
-    # independent completion notification task.
+    # This test covers a stopped job reported as failed; it must not power off.
     monkeypatch.setattr(queue_outcome_effects, "after_commit_task", lambda *args, **kwargs: [])
     notified = AsyncMock()
     deleted = AsyncMock()
@@ -341,7 +340,7 @@ async def test_cancelled_job_skips_failure_notice_and_sd_cleanup(alignment, monk
         await db.commit()
 
     await asyncio.gather(*pending)
-    powered_off.assert_awaited_once()
+    powered_off.assert_not_awaited()
     notified.assert_not_awaited()
     deleted.assert_not_awaited()
 
