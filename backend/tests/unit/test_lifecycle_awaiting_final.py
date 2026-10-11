@@ -5,7 +5,8 @@ committed, and the writer refuses to enter such a state any other way. A
 refused transition runs no step; the step's own errors are raised. Awaiting
 and final own their entry and exit steps, which run in the transition's
 transaction after the conditional write; a state cleans up on its own exit.
-An external print can replace only an ended job on the same printer.
+An external print can replace an ended job or a proven-unsent dispatch attempt
+on the same printer.
 """
 
 from importlib import import_module
@@ -159,7 +160,7 @@ async def test_automatic_clear_plate_belongs_to_the_finishing_transaction(sessio
 
 
 @pytest.mark.parametrize("status", ["dispatching", "printing", "paused", "finished", "failed", "cancelled"])
-async def test_external_start_only_replaces_an_ended_job_and_keeps_its_binding(sessions, status):
+async def test_external_start_replaces_only_ended_or_proven_unsent_jobs(sessions, status):
     from types import SimpleNamespace
 
     from backend.app.services.lifecycle.printing import observe_print
@@ -190,6 +191,15 @@ async def test_external_start_only_replaces_an_ended_job_and_keeps_its_binding(s
     async with sessions() as db:
         row = await db.get(PrintQueueItem, item_id)
         all_jobs = list(await db.scalars(select(PrintQueueItem).order_by(PrintQueueItem.id)))
+    if status == "dispatching":
+        assert row.status == "unsuccessful"
+        assert row.error_message == (
+            "Printer started a different print (new-run) before this job was confirmed complete"
+        )
+        assert observed is not None and observed.id != row.id and observed.status == "printing"
+        assert not confirmed
+        assert len(all_jobs) == 2 and all(item.printer_id == 1 for item in all_jobs)
+        return
     if not ended:
         assert (row.status, row.error_message) == (status, None)
         assert observed is None and not confirmed
