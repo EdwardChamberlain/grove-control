@@ -64,7 +64,11 @@ async def on_exit(change, row) -> None:
 
 def queue_auto_off_on_report(change, row) -> None:
     """Apply the job's immediate Auto Off option only to a printer-reported end."""
-    if row.auto_off_after and change.action == "printer_report" and change.values.get("physical_outcome") is not None:
+    if (
+        getattr(row, "auto_off_after", False)
+        and change.action == "printer_report"
+        and change.values.get("physical_outcome") is not None
+    ):
         effects.queue_auto_off(change.db, change.item_id, row.printer_id)
 
 
