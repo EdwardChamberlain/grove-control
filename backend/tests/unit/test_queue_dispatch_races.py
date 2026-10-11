@@ -39,8 +39,7 @@ from backend.tests.unit.test_scheduler_cleanup_library import (
 
 @pytest.mark.parametrize("phase", ["copy", "upload"])
 @pytest.mark.parametrize("telemetry", ["idle", "unavailable", "active", "expired"])
-@pytest.mark.parametrize("recovery", ["deadline", "tick"])
-async def test_dispatch_resumes_only_after_fresh_idle_telemetry(queue_factory, monkeypatch, phase, telemetry, recovery):
+async def test_dispatch_waits_for_fresh_idle_telemetry(queue_factory, monkeypatch, phase, telemetry):
     from backend.app.services.bambu_mqtt import PrinterState
     from backend.app.services.lifecycle import intake
 
@@ -96,10 +95,7 @@ async def test_dispatch_resumes_only_after_fresh_idle_telemetry(queue_factory, m
             patch.setattr(scheduling, "cache_3mf_download", MagicMock())
             if telemetry == "idle":
                 ctx.upload.side_effect = None
-            if recovery == "deadline":
-                await PrintScheduler().dispatcher.ready_due(db, job.id)
-            else:
-                await PrintScheduler().dispatcher.recover(db)
+            await PrintScheduler().dispatcher.ready_due(db, job.id)
             if telemetry == "idle":
                 await _wait_for_dispatch(ctx)
         await db.refresh(job)
@@ -121,6 +117,42 @@ async def test_dispatch_resumes_only_after_fresh_idle_telemetry(queue_factory, m
             assert job.physical_outcome is None
             ctx.start_print.assert_not_called()
             effects.assert_not_awaited()
+
+
+async def test_restart_fails_unsent_attempt_and_creates_a_fresh_retry(queue_factory, monkeypatch):
+    from sqlalchemy import update
+
+    ctx = await queue_factory(cleanup=False)
+    async with ctx.session_maker() as db:
+        await db.execute(
+            update(PrintQueueItem)
+            .where(PrintQueueItem.id == ctx.queue_item_id)
+            .values(
+                printer_id=ctx.printer_id,
+                assigned_printer_id=None,
+                status="dispatching",
+                dispatch_stage="uploading",
+                dispatched_at=None,
+                dispatch_subtask_id=None,
+            )
+        )
+        await db.commit()
+
+    monkeypatch.setattr(scheduling, "async_session", ctx.session_maker)
+    dispatcher = PrintScheduler().dispatcher
+    schedule = MagicMock()
+    monkeypatch.setattr(dispatcher, "schedule_stage", schedule)
+    monkeypatch.setattr(lifecycle_effects, "_spawn_outcome", MagicMock())
+    await dispatcher.start()
+
+    async with ctx.session_maker() as db:
+        jobs = list(await db.scalars(select(PrintQueueItem).order_by(PrintQueueItem.id)))
+    original = next(job for job in jobs if job.id == ctx.queue_item_id)
+    retry = next(job for job in jobs if job.id != original.id)
+    assert original.status == "failed" and original.dispatched_at is None
+    assert retry.status == "queued" and retry.printer_id is None
+    assert retry.assigned_printer_id == ctx.printer_id and retry.retry_on_failure is False
+    schedule.assert_not_called()
 
 
 @pytest.fixture

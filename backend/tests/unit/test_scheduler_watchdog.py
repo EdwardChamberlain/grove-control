@@ -96,7 +96,7 @@ class TestDurableDispatchingState:
                 patch("backend.app.services.lifecycle.dispatching.spawn_background_task", side_effect=spawn),
                 patch.object(lifecycle_effects, "publish_queue_job_started", new=publish),
             ):
-                await scheduler.dispatcher.recover(db)
+                await scheduler.dispatcher.reconcile_printer_reports(db)
                 await asyncio.gather(*tasks)
 
             item = await db.get(PrintQueueItem, 1)
@@ -118,7 +118,7 @@ class TestDurableDispatchingState:
                 "backend.app.services.lifecycle.dispatching.printer_manager.get_status",
                 return_value=_status("RUNNING", "other-job"),
             ):
-                await PrintScheduler().dispatcher.recover(db)
+                await PrintScheduler().dispatcher.reconcile_printer_reports(db)
 
             item = await db.get(PrintQueueItem, 1)
             assert item.status == "dispatching"
@@ -138,7 +138,7 @@ class TestDurableDispatchingState:
                 "backend.app.services.lifecycle.dispatching.printer_manager.get_status",
                 return_value=_status("RUNNING"),
             ):
-                await PrintScheduler().dispatcher.recover(db)
+                await PrintScheduler().dispatcher.reconcile_printer_reports(db)
 
             item = await db.get(PrintQueueItem, 1)
             assert item.status == "dispatching"

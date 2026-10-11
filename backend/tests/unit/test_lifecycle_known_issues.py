@@ -43,38 +43,34 @@ async def printing_job(db, alignment, identity: str = "111", **values) -> PrintQ
 
 
 @pytest.mark.parametrize("state", ["RUNNING", "FINISH"])
-async def test_recovery_ends_a_print_the_printer_has_replaced(alignment, monkeypatch, state):
-    """A different live print ID proves the old print ended while Grove wasn't watching (#204)."""
+async def test_different_live_print_does_not_guess_the_held_jobs_outcome(alignment, monkeypatch, state):
+    """A different identity cannot complete this job or adopt a replacement by inference."""
     observe = AsyncMock()
     monkeypatch.setattr("backend.app.services.lifecycle.intake.print_started", observe)
     monkeypatch.setattr(dispatching.printer_manager, "get_status", lambda _: live(state, "222"))
     async with alignment.sessions() as db:
         job = await printing_job(db, alignment)
-        await PrintScheduler().dispatcher.recover(db)
+        await PrintScheduler().dispatcher.reconcile_printer_reports(db)
         await db.refresh(job)
-        assert job.status == "failed" and "222" in job.error_message
-        assert job.auto_off_after is False  # Auto Off would power off the print that replaced it.
+        assert job.status == "printing" and job.error_message is None
+        assert job.auto_off_after is True
     await asyncio.sleep(0.01)
-    if state == "RUNNING":
-        observe.assert_awaited_once()
-        assert observe.await_args.args[1]["submission_id"] == "222"
-    else:
-        observe.assert_not_awaited()
+    observe.assert_not_awaited()
 
 
-async def test_recovery_leaves_a_replaced_print_to_its_completion_in_flight(alignment, monkeypatch):
+async def test_printer_report_reconciliation_waits_behind_completion(alignment, monkeypatch):
     monkeypatch.setattr(dispatching.printer_manager, "get_status", lambda _: live("RUNNING", "222"))
     async with alignment.sessions() as db:
         job = await printing_job(db, alignment)
         recovery_started = asyncio.Event()
 
-        async def recover():
+        async def reconcile():
             recovery_started.set()
-            async with alignment.sessions() as recovery_db:
-                await PrintScheduler().dispatcher.recover(recovery_db)
+            async with alignment.sessions() as report_db:
+                await PrintScheduler().dispatcher.reconcile_printer_reports(report_db)
 
         async with writer(job.printer_id):  # A completion owns the printer while recovery waits.
-            recovery = asyncio.create_task(recover())
+            recovery = asyncio.create_task(reconcile())
             await recovery_started.wait()
             await asyncio.sleep(0.01)
             await transition_queue_item(
@@ -94,12 +90,14 @@ async def test_recovery_leaves_a_replaced_print_to_its_completion_in_flight(alig
     "ours,theirs,state",
     [("111", "111", "RUNNING"), ("111", "222", "IDLE"), ("a" * 32, "222", "RUNNING"), ("111", "b" * 32, "RUNNING")],
 )
-async def test_recovery_keeps_a_print_nothing_proves_has_ended(alignment, monkeypatch, ours, theirs, state):
+async def test_report_reconciliation_keeps_a_print_nothing_proves_has_ended(
+    alignment, monkeypatch, ours, theirs, state
+):
     """The same ID, an idle printer, or a session-local ID on either side proves nothing."""
     monkeypatch.setattr(dispatching.printer_manager, "get_status", lambda _: live(state, theirs))
     async with alignment.sessions() as db:
         job = await printing_job(db, alignment, ours)
-        await PrintScheduler().dispatcher.recover(db)
+        await PrintScheduler().dispatcher.reconcile_printer_reports(db)
         await db.refresh(job)
         assert job.status == "printing"
 

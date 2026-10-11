@@ -42,7 +42,6 @@ async def enter_preheating(db, job, values=None) -> None:
 async def sessions(tmp_path, monkeypatch):
     # After-commit effects are specified elsewhere; record them instead of running them.
     monkeypatch.setattr(effects, "queue_outcome_effect", MagicMock())
-    monkeypatch.setattr(effects, "shut_down_heaters", MagicMock())
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'preheating.db'}")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -128,3 +127,42 @@ async def test_a_transition_outside_preheating_does_not_load_deferred_columns(so
     await soak.db.commit()
     assert item.status == "dispatching"
     soak.client.set_bed_temperature.assert_not_called()
+
+
+async def test_dispatch_handoff_keeps_soak_heaters_on(soak, monkeypatch):
+    shutdown = MagicMock()
+    monkeypatch.setattr(preheating, "_heaters_off", shutdown)
+    item = soak.item
+    async with writer(item.printer_id):
+        await transition_queue_item(
+            soak.db,
+            item,
+            "queued",
+            "preheating",
+            values={"chamber_heat_soak": True, "preheat_requested_at": REQUESTED},
+        )
+    await soak.db.commit()
+    async with writer(item.printer_id):
+        await transition_queue_item(soak.db, item, "preheating", "dispatching")
+    await soak.db.commit()
+    shutdown.assert_not_called()
+
+
+async def test_other_heat_soak_exit_turns_heaters_off_after_commit(soak, monkeypatch):
+    shutdown = MagicMock()
+    monkeypatch.setattr(preheating, "_heaters_off", shutdown)
+    item = soak.item
+    async with writer(item.printer_id):
+        await transition_queue_item(
+            soak.db,
+            item,
+            "queued",
+            "preheating",
+            values={"chamber_heat_soak": True, "preheat_requested_at": REQUESTED},
+        )
+    await soak.db.commit()
+    async with writer(item.printer_id):
+        await transition_queue_item(soak.db, item, "preheating", "failed", action="dispatch_failure")
+    shutdown.assert_not_called()
+    await soak.db.commit()
+    shutdown.assert_called_once_with(item.printer_id, "X1C")

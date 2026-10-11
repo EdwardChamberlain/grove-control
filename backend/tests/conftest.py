@@ -423,9 +423,6 @@ def smart_plug_factory(db_session):
             "enabled": True,
             "auto_on": True,
             "auto_off": True,
-            "off_delay_mode": "time",
-            "off_delay_minutes": 5,
-            "off_temp_threshold": 70,
             "schedule_enabled": False,
             "power_alert_enabled": False,
         }

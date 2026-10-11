@@ -255,7 +255,7 @@ class AmsDrying:
             if not state:
                 logger.debug("Auto-drying: printer %d skipped — no state", pid)
                 continue
-            if getattr(state, "preheating", False) is True or printer.heat_soak_shutdown_pending is True:
+            if getattr(state, "preheating", False) is True:
                 continue
             model = printer_manager.get_model(pid)
             firmware = state.firmware_version

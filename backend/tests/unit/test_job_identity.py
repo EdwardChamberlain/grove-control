@@ -99,6 +99,16 @@ async def add_linked_job(sessions, identity, status="printing", with_archive=Tru
         return item.id, item.archive_id
 
 
+def external_state(identity: str, state: str = "RUNNING"):
+    return SimpleNamespace(
+        connected=True,
+        job_telemetry_ready=True,
+        state=state,
+        submission_id=identity,
+        raw_data={"gcode_state": state},
+    )
+
+
 @pytest.mark.parametrize("status", ["dispatching", "printing"])
 @pytest.mark.parametrize("stop_outcome", ["sent", "offline", "error"])
 @pytest.mark.parametrize("with_archive", [True, False])
@@ -235,7 +245,7 @@ async def test_mqtt_id_loss_cannot_complete_or_recover_the_previous_job(sessions
         client._process_message({"print": {"gcode_state": "FINISH", "subtask_id": "0"}})
         assert await main.on_print_complete(1, finishes[-1]) is False
         async with sessions() as db:
-            await PrintScheduler().dispatcher.recover(db)
+            await PrintScheduler().dispatcher.reconcile_printer_reports(db)
         manager.set_awaiting_plate_clear.assert_not_called()
         websocket.send_print_complete.assert_not_awaited()
     async with sessions() as db:
@@ -259,7 +269,8 @@ async def test_missing_ids_never_match_a_job(sessions, value):
 
 async def test_external_start_is_one_job_and_cannot_take_a_dispatch(sessions):
     async with sessions() as db:
-        first, confirmed = await observe_print(db, 1, "external")
+        live = external_state("external")
+        first, confirmed = await observe_print(db, 1, "external", observed_state=live)
         await db.commit()
         again, confirmed = await observe_print(db, 1, "external")
         assert again.id == first.id
@@ -273,7 +284,8 @@ async def test_external_start_is_one_job_and_cannot_take_a_dispatch(sessions):
 
         await clear_job_plate(db, first)
         await db.commit()
-        following, confirmed = await observe_print(db, 1, "next")
+        following_live = external_state("next")
+        following, confirmed = await observe_print(db, 1, "next", observed_state=following_live)
         await db.commit()
         assert following.id != first.id
         assert len((await db.scalars(select(PrintQueueItem))).all()) == 2
@@ -390,12 +402,14 @@ async def test_external_observation_survives_callbacks_and_restart(sessions):
     from backend.app.services.lifecycle import intake
 
     intake.print_memory.started_job_effects.clear()
+    live = external_state("external")
     with (
         patch.object(intake, "async_session", sessions),
         patch.object(print_effects, "async_session", sessions),
         patch.object(print_effects, "_archive_print_start", AsyncMock()) as archive,
         patch.object(print_effects, "_begin_new_print", AsyncMock()) as begin,
         patch.object(print_effects, "_finish_new_print", AsyncMock()) as finish,
+        patch.object(intake.printer_manager, "get_status", return_value=live),
     ):
         await main.on_print_start(1, {"submission_id": "external", "filename": "same.3mf"})
         await main.on_print_start(1, {"submission_id": "external", "filename": "renamed.3mf"})
@@ -416,12 +430,14 @@ async def test_failed_archive_start_is_retried_for_the_same_job(sessions):
     from backend.app.services.lifecycle import intake
 
     archive = AsyncMock(side_effect=[RuntimeError("start WebSocket failed"), True])
+    live = external_state("external")
     with (
         patch.object(intake, "async_session", sessions),
         patch.object(print_effects, "async_session", sessions),
         patch.object(print_effects, "_archive_print_start", archive),
         patch.object(print_effects, "_begin_new_print", AsyncMock()) as begin,
         patch.object(print_effects, "_finish_new_print", AsyncMock()) as finish,
+        patch.object(intake.printer_manager, "get_status", return_value=live),
     ):
         event = {"submission_id": "external", "filename": "same.3mf"}
         with pytest.raises(RuntimeError, match="start WebSocket failed"):
@@ -613,10 +629,12 @@ async def test_partial_start_waits_for_file_metadata_before_archiving(sessions):
     from backend.app.services import print_effects
     from backend.app.services.lifecycle import intake
 
+    live = external_state("external")
     with (
         patch.object(intake, "async_session", sessions),
         patch.object(print_effects, "async_session", sessions),
         patch.object(print_effects, "_archive_print_start", AsyncMock()) as archive,
+        patch.object(intake.printer_manager, "get_status", return_value=live),
     ):
         await main.on_print_start(1, {"submission_id": "external"})
         archive.assert_not_awaited()
@@ -693,6 +711,7 @@ async def test_external_archive_is_linked_by_identity_not_name(sessions):
     from backend.app.services.lifecycle import intake
 
     intake.print_memory.started_job_effects.clear()
+    live = external_state("external")
 
     async def archive_worker(printer_id, data, **kwargs):
         async with sessions() as db:
@@ -723,6 +742,7 @@ async def test_external_archive_is_linked_by_identity_not_name(sessions):
         patch.object(intake, "async_session", sessions),
         patch.object(print_effects, "async_session", sessions),
         patch.object(print_effects, "_archive_print_start", archive_worker),
+        patch.object(intake.printer_manager, "get_status", return_value=live),
     ):
         await main.on_print_start(1, {"submission_id": "external", "filename": "same.3mf"})
     async with sessions() as db:

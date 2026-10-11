@@ -45,9 +45,6 @@ const createMockPlug = (overrides: Partial<SmartPlug> = {}): SmartPlug => ({
   auto_on: true,
   auto_off: true,
   auto_off_persistent: false,
-  off_delay_mode: 'time',
-  off_delay_minutes: 5,
-  off_temp_threshold: 70,
   username: null,
   password: null,
   power_alert_enabled: false,
@@ -115,48 +112,16 @@ describe('SmartPlugCard', () => {
       });
     });
 
-    it('shows cooldown options for queue jobs that request Auto Off', async () => {
+    it('does not expose print auto-off delay or temperature settings', async () => {
       const user = userEvent.setup();
-      const plug = createMockPlug({ auto_off: true });
+      const plug = createMockPlug();
       render(<SmartPlugCard plug={plug} onEdit={mockOnEdit} />);
 
-      // Expand settings
       await user.click(screen.getByText('Automation Settings'));
 
       await waitFor(() => {
-        expect(screen.getByText('Turn Off Delay Mode')).toBeInTheDocument();
-        expect(screen.getByText('Time')).toBeInTheDocument();
-        expect(screen.getByText('Temp')).toBeInTheDocument();
-      });
-    });
-
-    it('keeps cooldown options available when plug-level auto_off is disabled', async () => {
-      const user = userEvent.setup();
-      const plug = createMockPlug({ auto_off: false });
-      render(<SmartPlugCard plug={plug} onEdit={mockOnEdit} />);
-
-      // Expand settings
-      await user.click(screen.getByText('Automation Settings'));
-
-      await waitFor(() => {
-        expect(screen.getByText('Turn Off Delay Mode')).toBeInTheDocument();
-        expect(screen.getByText('Time')).toBeInTheDocument();
-        expect(screen.getByText('Temp')).toBeInTheDocument();
-      });
-    });
-
-    it('shows delay mode options when auto_off is enabled', async () => {
-      const user = userEvent.setup();
-      const plug = createMockPlug({ auto_off: true, off_delay_mode: 'time' });
-      render(<SmartPlugCard plug={plug} onEdit={mockOnEdit} />);
-
-      // Expand settings
-      await user.click(screen.getByText('Automation Settings'));
-
-      await waitFor(() => {
-        // Should show delay mode buttons
-        expect(screen.getByText('Time')).toBeInTheDocument();
-        expect(screen.getByText('Temp')).toBeInTheDocument();
+        expect(screen.queryByText('Turn Off Delay Mode')).not.toBeInTheDocument();
+        expect(screen.queryByText('Temperature threshold (°C)')).not.toBeInTheDocument();
       });
     });
 

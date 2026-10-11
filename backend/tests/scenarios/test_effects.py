@@ -9,7 +9,7 @@ from backend.tests.scenarios.test_print import printing_job
 
 
 def plug_offs(app, printer) -> list:
-    return [e for e in app.plug_events if e.event == "schedule_off_after_queue_job" and printer.printer_id in e.args]
+    return [e for e in app.plug_events if e.event == "turn_off_after_queue_job" and printer.printer_id in e.args]
 
 
 async def test_auto_off_is_requested_once_after_the_job(app):

@@ -10,7 +10,6 @@ from sqlalchemy.orm import selectinload
 from backend.app.core.database import async_session
 from backend.app.core.tasks import spawn_background_task
 from backend.app.models.print_queue import PrintQueueItem, PrintQueueVariant, physical_holding_clause
-from backend.app.models.printer import Printer
 from backend.app.models.settings import Settings, bool_setting
 from backend.app.services.ams_drying import AmsDrying
 from backend.app.services.ams_mapping import AmsMapping
@@ -70,15 +69,9 @@ class PrintScheduler:
             self.workers.cancel(item_id)
         logger.info("Print scheduler stopped")
 
-    async def _shutdown_printers(self, db: AsyncSession) -> set[int]:
-        """Printers unavailable for selection while their heaters are shutting down."""
-        return set((await db.scalars(select(Printer.id).where(Printer.heat_soak_shutdown_pending.is_(True)))).all())
-
     async def check_queue(self) -> bool:
         """Check for prints ready to start and report whether to tick quickly."""
         async with async_session() as db:
-            shutdown_printers = await self._shutdown_printers(db)
-
             # Check if shortest-job-first scheduling is enabled
             sjf_enabled = await self._get_bool_setting(db, "queue_shortest_first")
 
@@ -119,8 +112,6 @@ class PrintScheduler:
                 .where(PrintQueueItem.printer_id.is_not(None))
             )
             busy_printers: set[int] = {pid for (pid,) in busy_result.all() if pid is not None}
-
-            busy_printers.update(shutdown_printers)
 
             # The durable status does not change until the upload completes;
             # reserve each worker's printer in memory for the same interval.

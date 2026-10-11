@@ -843,7 +843,7 @@ class TestPrintQueueAPI:
 
         from backend.app.services.printer_manager import printer_manager
 
-        stale = "Heat soak interrupted; inspect the printer, then stop or skip heat soak"
+        stale = "Heat soak interrupted by a restart; inspect the printer before retrying"
         item = await queue_item_factory(status="preheating", chamber_heat_soak=True, error_message=stale)
         live = SimpleNamespace(state="IDLE", connected=True, job_telemetry_ready=False)
         monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
@@ -861,10 +861,7 @@ class TestPrintQueueAPI:
     async def test_preheating_actions_preserve_dispatch_safety(
         self, async_client, queue_item_factory, db_session, action
     ):
-        from backend.app.models.printer import Printer
-
         item = await queue_item_factory(status="preheating", chamber_heat_soak=True)
-        printer_id = item.printer_id
         url = f"/api/v1/queue/{item.id}"
         if action == "edit":
             response = await async_client.patch(url, json={"heat_soak_minutes": 45})
@@ -873,7 +870,6 @@ class TestPrintQueueAPI:
         else:
             response = await async_client.post(f"{url}/{action}")
         await db_session.refresh(item)
-        printer = await db_session.get(Printer, printer_id, populate_existing=True)
         if action in ("edit", "delete"):
             assert response.status_code == (400 if action == "edit" else 409), response.text
             assert item.status == "preheating"
@@ -881,8 +877,6 @@ class TestPrintQueueAPI:
             assert response.status_code == 200, response.text
             assert item.status == "unsuccessful"
             assert item.physical_outcome is None
-            assert printer.heat_soak_shutdown_pending
-            assert printer.heat_soak_shutdown_at
 
 
 class TestQueueStartEndpoint:

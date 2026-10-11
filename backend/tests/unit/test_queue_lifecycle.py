@@ -112,7 +112,7 @@ async def test_unconfirmed_stop_does_not_schedule_auto_off(sessions):
         with (
             patch("backend.app.services.printer_manager.printer_manager.stop_print") as stop,
             patch(
-                "backend.app.services.smart_plug_manager.smart_plug_manager.schedule_off_after_queue_job",
+                "backend.app.services.smart_plug_manager.smart_plug_manager.turn_off_after_queue_job",
                 off,
             ),
             patch(
@@ -302,31 +302,26 @@ async def test_deleting_printer_ends_holding_job_and_leaves_waiting_job_to_retar
         assert waiting.status == "queued" and waiting.printer_id is None
 
 
-@pytest.mark.parametrize("state", ["preheating", "soak-dispatching", "shutdown-pending"])
+@pytest.mark.parametrize("state", ["preheating", "soak-dispatching"])
 @pytest.mark.parametrize("connected", [True, False])
-async def test_deleting_printer_waits_for_heat_soak_shutdown_while_reachable(sessions, state, connected):
+async def test_deleting_printer_waits_for_active_heat_soak_while_reachable(sessions, state, connected):
     from fastapi import HTTPException
 
     async with sessions() as db:
-        printer = await db.get(Printer, 1)
-        if state == "shutdown-pending":
-            printer.heat_soak_shutdown_pending = True
-        else:
-            db.add(
-                PrintQueueItem(
-                    printer_id=1,
-                    status="preheating" if state == "preheating" else "dispatching",
-                    chamber_heat_soak=True,
-                )
+        db.add(
+            PrintQueueItem(
+                printer_id=1,
+                status="preheating" if state == "preheating" else "dispatching",
+                chamber_heat_soak=True,
             )
+        )
         await db.commit()
         with (
             patch("backend.app.api.routes.printers.printer_manager.is_connected", return_value=connected),
             patch("backend.app.api.routes.printers.printer_manager.disconnect_printer") as disconnect,
         ):
             if connected:
-                # Heaters may be on and only this printer row can retry their
-                # shutdown until telemetry confirms it: stop and wait first.
+                # An active heat soak owns the printer until it exits.
                 with pytest.raises(HTTPException) as refused:
                     await delete_printer(1, delete_archives=False, db=db, _=None)
                 assert refused.value.status_code == 409

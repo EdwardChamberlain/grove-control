@@ -71,9 +71,10 @@ async def test_uncommitted_dispatch_start_never_allocates_a_task(alignment, monk
     spawn.assert_not_called()
 
 
-async def test_dispatch_exit_rolls_back_its_shutdown_and_failure_effect(alignment, monkeypatch):
-    run = AsyncMock()
-    monkeypatch.setattr(effects, "run_queue_outcome_effects", run)
+async def test_failed_dispatch_sends_heater_off_only_after_commit(alignment, monkeypatch):
+    heater_off = MagicMock()
+    monkeypatch.setattr(preheating, "_heaters_off", heater_off)
+    monkeypatch.setattr(effects, "_spawn_outcome", MagicMock())
     async with alignment.sessions() as db:
         item = await db.get(PrintQueueItem, alignment.job_id)
         async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
@@ -81,12 +82,15 @@ async def test_dispatch_exit_rolls_back_its_shutdown_and_failure_effect(alignmen
         await db.commit()
         async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
             await transition_queue_item(db, item, "dispatching", "failed")
-        assert (await db.get(Printer, 1)).heat_soak_shutdown_pending
+        heater_off.assert_not_called()
         await db.rollback()
     async with alignment.sessions() as db:
         assert (await db.get(PrintQueueItem, alignment.job_id)).status == "dispatching"
-        assert not (await db.get(Printer, 1)).heat_soak_shutdown_pending
-    run.assert_not_awaited()
+        async with writer(1):
+            item = await db.get(PrintQueueItem, alignment.job_id)
+            await transition_queue_item(db, item, "dispatching", "failed")
+        await db.commit()
+    heater_off.assert_called_once_with(1, "X1C")
 
 
 @pytest.mark.parametrize("before", ["dispatching", "printing", "paused"])
@@ -108,10 +112,9 @@ async def test_an_outcome_runs_its_exit_and_entry_effects_together(alignment, mo
         async with writer(getattr(item, "printer_id", None) or getattr(item, "assigned_printer_id", None)):
             await transition_queue_item(db, item, before, after, action=action)
         await db.commit()
-        assert (await db.get(Printer, 1)).heat_soak_shutdown_pending
     # The exit shuts down the inherited soak, and a dispatch that Grove failed removes its upload;
     # awaiting's entry notifies any failure the printer didn't report, whatever the state before.
     unreported = after == "failed" and action is None
-    assert [(e.shut_down_heaters, e.notify_failure, e.clean_sd_copy) for e in spawned] == [
-        (True, unreported, unreported and before == "dispatching")
+    assert [(e.notify_failure, e.clean_sd_copy) for e in spawned] == [
+        (unreported, unreported and before == "dispatching")
     ]

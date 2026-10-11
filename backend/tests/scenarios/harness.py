@@ -239,7 +239,7 @@ class Harness:
 
         from backend.app.services.smart_plug_manager import smart_plug_manager
 
-        for name in ("on_print_start", "schedule_off_after_queue_job"):
+        for name in ("on_print_start", "turn_off_after_queue_job"):
 
             async def plug(*args, _event=name, **kwargs):
                 self.plug_events.append(Notice(_event, args, kwargs))

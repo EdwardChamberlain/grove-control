@@ -12,8 +12,9 @@ from backend.app.services.lifecycle.final import end
 async def on_enter(change, row) -> None:
     """Enter: clear a finished plate at once when confirmation is off, or queue a failed or stopped job's effects.
 
-    Those are Auto Off, and a failure notification unless the printer reported
-    the failure, whose completion notifies instead.
+    A failure notification runs unless the printer reported the failure, whose
+    completion notifies instead. Auto Off was requested when the physical
+    outcome left the printing or dispatching state.
     """
     from backend.app.services.lifecycle import effects, queued
 

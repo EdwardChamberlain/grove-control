@@ -28,7 +28,6 @@ from backend.app.models.printer import Printer
 from backend.app.services import job_identity
 from backend.app.services.bambu_ftp import delete_file_async
 from backend.app.services.notification_service import notification_service
-from backend.app.services.queue_work import printer_has_queue_work
 from backend.app.services.smart_plug_manager import smart_plug_manager
 
 logger = logging.getLogger(__name__)
@@ -146,35 +145,11 @@ def publish_queue_work_changed(db: AsyncSession) -> None:
     after_commit(db, spawn, key="queue_work_changed")
 
 
-def shut_down_heaters(db: AsyncSession, printer_id: int) -> None:
-    """Retry the printer's recorded heater shutdown once this transaction commits."""
-    engine = db.bind
-
-    def spawn() -> None:
-        from backend.app.core.tasks import spawn_background_task
-
-        spawn_background_task(_shut_down_heaters(engine, printer_id), name=f"queue-heater-effects-{printer_id}")
-
-    after_commit(db, spawn, key=("heaters", printer_id))
-
-
-async def _shut_down_heaters(engine: AsyncEngine, printer_id: int) -> None:
-    from backend.app.services.lifecycle.preheating import _show_preheating, cleanup_heat_soak_shutdown
-
-    try:
-        async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-            if await cleanup_heat_soak_shutdown(db, printer_id):
-                _show_preheating(printer_id, False)
-    except Exception:
-        logger.exception("Printer %s: heater shutdown failed", printer_id)
-
-
 @dataclass(frozen=True)
 class QueueOutcomeEffect:
     job_id: int
     new_state: str
     printer_id: int | None
-    shut_down_heaters: bool = False
     notify_failure: bool = False
     clean_sd_copy: bool = False
 
@@ -189,7 +164,7 @@ def queue_outcome_effect(db: AsyncSession, effect: QueueOutcomeEffect) -> None:
 
 
 def queue_auto_off(db: AsyncSession, job_id: int, printer_id: int | None) -> None:
-    """Schedule the one Auto Off policy from the lifecycle's committed end state."""
+    """Turn off immediately after a committed print outcome, if its queue is empty."""
     if printer_id is None:
         return
 
@@ -205,31 +180,16 @@ def queue_auto_off(db: AsyncSession, job_id: int, printer_id: int | None) -> Non
 
 
 async def run_queue_auto_off(engine: AsyncEngine, job_id: int, printer_id: int) -> None:
-    """Recheck the job before handing its delayed printer effect to the power controller."""
+    """Recheck the committed job before issuing its immediate power command."""
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     try:
         async with sessions() as db:
-            job = await db.get(PrintQueueItem, job_id)
-            if (
-                job is None
-                or job.printer_id != printer_id
-                or not job.auto_off_after
-                or job.status not in (*AWAITING_PLATE_CLEAR_STATUSES, "successful", "unsuccessful")
-            ):
-                return
-            if await printer_has_queue_work(db, printer_id):
-                logger.info("Queue job %s requested auto-off, but printer %s still has queued work", job_id, printer_id)
-                return
-            await smart_plug_manager.schedule_off_after_queue_job(
-                printer_id,
-                db,
-                job_id=job.id,
-            )
+            await smart_plug_manager.turn_off_after_queue_job(printer_id, job_id, db)
     except Exception:
-        logger.exception("Queue job %s: auto power-off scheduling failed", job_id)
+        logger.exception("Queue job %s: immediate auto power-off failed", job_id)
 
 
-_FLAGS = ("shut_down_heaters", "notify_failure", "clean_sd_copy")
+_FLAGS = ("notify_failure", "clean_sd_copy")
 
 
 def _spawn_outcome(engine: AsyncEngine, effect: QueueOutcomeEffect) -> None:
@@ -274,9 +234,6 @@ async def run_queue_outcome_effects(engine: AsyncEngine, effect: QueueOutcomeEff
                 )
         except Exception:
             logger.exception("Queue job %s: failure notification failed", effect.job_id)
-
-    if effect.shut_down_heaters and effect.printer_id is not None:
-        await _shut_down_heaters(engine, effect.printer_id)
 
     if effect.clean_sd_copy and remote_filename and connection is not None:
         if effect.new_state == "unsuccessful" and job_identity.printer_active(effect.printer_id):

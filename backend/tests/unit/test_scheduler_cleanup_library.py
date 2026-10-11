@@ -329,7 +329,7 @@ async def test_live_upload_is_not_a_dispatch_confirmation_prompt(queue_factory):
                 )
             assert conflict.value.status_code == 409
             await db.rollback()
-            await dispatch_scheduler.dispatcher.recover(db)
+            await dispatch_scheduler.dispatcher.reconcile_printer_reports(db)
             assert (await db.get(PrintQueueItem, ctx.queue_item_id)).error_message is None
         return True
 

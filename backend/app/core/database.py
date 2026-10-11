@@ -1686,14 +1686,6 @@ async def run_migrations(conn):
     ):
         sql_type = _QUEUE_INSERT_COLUMN_DEFINITIONS[column][0 if is_sqlite() else 1]
         await _safe_execute(conn, f"ALTER TABLE print_queue ADD COLUMN {column} {sql_type}")
-    boolean_default = "0" if is_sqlite() else "false"
-    await _safe_execute(
-        conn, f"ALTER TABLE printers ADD COLUMN heat_soak_shutdown_pending BOOLEAN DEFAULT {boolean_default}"
-    )
-
-    timestamp_type = "DATETIME" if is_sqlite() else "TIMESTAMP"
-    await _safe_execute(conn, f"ALTER TABLE printers ADD COLUMN heat_soak_shutdown_at {timestamp_type}")
-
     # Migration: Add wiki_url column to maintenance_types for documentation links
     await _safe_execute(conn, "ALTER TABLE maintenance_types ADD COLUMN wiki_url VARCHAR(500)")
 
@@ -1933,9 +1925,6 @@ async def run_migrations(conn):
                         auto_on BOOLEAN NOT NULL DEFAULT 1,
                         auto_off BOOLEAN NOT NULL DEFAULT 1,
                         auto_off_persistent BOOLEAN NOT NULL DEFAULT 0,
-                        off_delay_mode VARCHAR(20) NOT NULL DEFAULT 'time',
-                        off_delay_minutes INTEGER NOT NULL DEFAULT 5,
-                        off_temp_threshold INTEGER NOT NULL DEFAULT 70,
                         username VARCHAR(50),
                         password VARCHAR(100),
                         power_alert_enabled BOOLEAN NOT NULL DEFAULT 0,
@@ -1951,6 +1940,7 @@ async def run_migrations(conn):
                         auto_off_executed BOOLEAN NOT NULL DEFAULT 0,
                         auto_off_pending BOOLEAN DEFAULT 0,
                         auto_off_pending_since DATETIME,
+                        auto_off_pending_job_id INTEGER,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
                         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
                     )
@@ -1962,11 +1952,11 @@ async def run_migrations(conn):
                     SELECT id, name, ip_address,
                            COALESCE(plug_type, 'tasmota'), ha_entity_id, printer_id,
                            enabled, auto_on, auto_off, COALESCE(auto_off_persistent, 0),
-                           off_delay_mode, off_delay_minutes, off_temp_threshold,
                            username, password, power_alert_enabled, power_alert_high, power_alert_low,
                            power_alert_last_triggered, schedule_enabled, schedule_on_time, schedule_off_time,
                            COALESCE(show_in_switchbar, 0), last_state, last_checked, auto_off_executed,
-                           COALESCE(auto_off_pending, 0), auto_off_pending_since, created_at, updated_at
+                           COALESCE(auto_off_pending, 0), auto_off_pending_since, auto_off_pending_job_id,
+                           created_at, updated_at
                     FROM smart_plugs
                 """)
                 )
@@ -2229,9 +2219,6 @@ async def run_migrations(conn):
                         auto_on BOOLEAN NOT NULL DEFAULT 1,
                         auto_off BOOLEAN NOT NULL DEFAULT 1,
                         auto_off_persistent BOOLEAN NOT NULL DEFAULT 0,
-                        off_delay_mode VARCHAR(20) NOT NULL DEFAULT 'time',
-                        off_delay_minutes INTEGER NOT NULL DEFAULT 5,
-                        off_temp_threshold INTEGER NOT NULL DEFAULT 70,
                         username VARCHAR(50),
                         password VARCHAR(100),
                         power_alert_enabled BOOLEAN NOT NULL DEFAULT 0,
@@ -2247,6 +2234,7 @@ async def run_migrations(conn):
                         auto_off_executed BOOLEAN NOT NULL DEFAULT 0,
                         auto_off_pending BOOLEAN DEFAULT 0,
                         auto_off_pending_since DATETIME,
+                        auto_off_pending_job_id INTEGER,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
                         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
                     )
@@ -2259,11 +2247,10 @@ async def run_migrations(conn):
                     SELECT id, name, ip_address, plug_type, ha_entity_id, ha_power_entity,
                            ha_energy_today_entity, ha_energy_total_entity, printer_id, enabled,
                            auto_on, auto_off, COALESCE(auto_off_persistent, 0),
-                           off_delay_mode, off_delay_minutes, off_temp_threshold,
                            username, password, power_alert_enabled, power_alert_high, power_alert_low,
                            power_alert_last_triggered, schedule_enabled, schedule_on_time, schedule_off_time,
                            show_in_switchbar, last_state, last_checked, auto_off_executed,
-                           auto_off_pending, auto_off_pending_since, created_at, updated_at
+                           auto_off_pending, auto_off_pending_since, auto_off_pending_job_id, created_at, updated_at
                     FROM smart_plugs
                 """)
                 )

@@ -438,7 +438,7 @@ async def test_restart_recovery_skips_an_item_changed_mid_pass(sessions):
             patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", telemetry.get),
             patch("backend.app.services.lifecycle.dispatching.spawn_background_task", lambda coro, **_: coro.close()),
         ):
-            await scheduler.dispatcher.recover(db)
+            await scheduler.dispatcher.reconcile_printer_reports(db)
 
     async with sessions() as db:
         statuses = {item.id: item.status for item in (await db.scalars(select(PrintQueueItem))).all()}

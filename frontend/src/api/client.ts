@@ -1759,9 +1759,6 @@ export interface SmartPlug {
   auto_on: boolean;
   auto_off: boolean;
   auto_off_persistent: boolean;
-  off_delay_mode: 'time' | 'temperature';
-  off_delay_minutes: number;
-  off_temp_threshold: number;
   // #1349: auto-off after AMS drying completes.
   auto_off_after_drying: boolean;
   off_delay_after_drying_minutes: number;
@@ -1837,9 +1834,6 @@ export interface SmartPlugCreate {
   auto_on?: boolean;
   auto_off?: boolean;
   auto_off_persistent?: boolean;
-  off_delay_mode?: 'time' | 'temperature';
-  off_delay_minutes?: number;
-  off_temp_threshold?: number;
   // #1349
   auto_off_after_drying?: boolean;
   off_delay_after_drying_minutes?: number;
@@ -1907,9 +1901,6 @@ export interface SmartPlugUpdate {
   auto_on?: boolean;
   auto_off?: boolean;
   auto_off_persistent?: boolean;
-  off_delay_mode?: 'time' | 'temperature';
-  off_delay_minutes?: number;
-  off_temp_threshold?: number;
   // #1349
   auto_off_after_drying?: boolean;
   off_delay_after_drying_minutes?: number;

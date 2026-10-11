@@ -74,9 +74,6 @@ class SmartPlugBase(BaseModel):
     auto_on: bool = True
     auto_off: bool = True
     auto_off_persistent: bool = False
-    off_delay_mode: Literal["time", "temperature"] = "time"
-    off_delay_minutes: int = Field(default=5, ge=0, le=60)
-    off_temp_threshold: int = Field(default=70, ge=30, le=150)
     # #1349: auto-off after AMS drying completes. Independent of `auto_off`
     # (print-finish). Fires whenever any AMS on the linked printer finishes
     # a dry cycle.
@@ -170,9 +167,6 @@ class SmartPlugUpdate(BaseModel):
     auto_on: bool | None = None
     auto_off: bool | None = None
     auto_off_persistent: bool | None = None
-    off_delay_mode: Literal["time", "temperature"] | None = None
-    off_delay_minutes: int | None = Field(default=None, ge=0, le=60)
-    off_temp_threshold: int | None = Field(default=None, ge=30, le=150)
     # #1349: per-plug drying auto-off.
     auto_off_after_drying: bool | None = None
     off_delay_after_drying_minutes: int | None = Field(default=None, ge=0, le=120)

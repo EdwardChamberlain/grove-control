@@ -139,7 +139,7 @@ async def test_restart_recovery_applies_pause_resume_without_restarting_the_job(
     ):
         async with sessions() as db:
             before = (await db.get(PrintQueueItem, item_id)).started_at
-            await scheduler.dispatcher.recover(db)
+            await scheduler.dispatcher.reconcile_printer_reports(db)
         for task in tasks:
             await task
     async with sessions() as db:

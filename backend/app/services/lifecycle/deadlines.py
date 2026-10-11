@@ -1,10 +1,4 @@
-"""The lifecycle loop (#217): a job's wait is a deadline on its row, and one loop serves them all.
-
-Each tick runs the deadlines that are due, then recovery against live
-telemetry and the heater-shutdown retries. The loop sleeps until the next
-deadline or the 30-second recovery tick, whichever is sooner, and wakes early
-when a commit sets a deadline or a printer connects or disconnects.
-"""
+"""The lifecycle loop: run job deadlines and the small remaining soak/archive checks."""
 
 import asyncio
 import logging
@@ -52,7 +46,7 @@ async def start(dispatcher) -> None:
 
 
 async def tick(dispatcher) -> None:
-    """Run due deadlines, then recovery and heater shutdowns."""
+    """Run deadlines and reconcile printer reports without restarting dispatch work."""
     from backend.app.services.lifecycle import preheating
 
     handlers = _handlers(dispatcher)
@@ -73,11 +67,20 @@ async def tick(dispatcher) -> None:
             await run_with_retry(partial(_run, handler, item_id), label=f"{kind} deadline for queue item {item_id}")
         except Exception:
             logger.exception("Queue item %s: %s deadline failed", item_id, kind)
-    for step in (dispatcher.recover, preheating.watch):
+    for step, label in (
+        (dispatcher.reconcile_printer_reports, "printer-report reconciliation"),
+        (preheating.watch, "heat-soak state check"),
+    ):
         try:
-            await run_with_retry(step, label=step.__qualname__, session_factory=database.async_session)
+            await run_with_retry(step, label=label, session_factory=database.async_session)
         except Exception:
-            logger.exception("Lifecycle step %s failed", step.__qualname__)
+            logger.exception("Lifecycle step %s failed", label)
+    try:
+        from backend.app.services.lifecycle.intake import reconcile_print_archives
+
+        await reconcile_print_archives()
+    except Exception:
+        logger.exception("Archive reconciliation failed")
 
 
 async def _run(handler, item_id: int, db) -> None:

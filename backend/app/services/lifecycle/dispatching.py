@@ -3,7 +3,6 @@
 import asyncio
 import json
 import logging
-from copy import deepcopy
 from datetime import timedelta
 from secrets import randbelow
 
@@ -13,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.config import settings
 from backend.app.core.database import async_session
-from backend.app.core.tasks import spawn_background_task
 from backend.app.models.archive import PrintArchive
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
@@ -36,7 +34,7 @@ from backend.app.services.lifecycle.engine import (
     transition_queue_item,
     writer,
 )
-from backend.app.services.lifecycle.printing import superseded_by, sync_print_state
+from backend.app.services.lifecycle.printing import sync_print_state
 from backend.app.services.printer_manager import printer_manager
 from backend.app.services.printer_selection import _incompatible_sliced_model_reason, _queue_start_waiting_reason
 
@@ -621,7 +619,7 @@ class Dispatcher:
             await transition_queue_item(db, held, "dispatching", "unsuccessful", action="withdrawn", values=values)
 
     async def start(self) -> None:
-        """At startup, fail every interrupted pre-send stage; it cannot resume under this job ID."""
+        """Fail interrupted pre-send attempts; a new queue row owns any retry."""
         try:
             async with async_session() as db:
                 item_ids = list(
@@ -641,116 +639,72 @@ class Dispatcher:
                         dispatch_subtask_id=None,
                         dispatch_stage=None,
                     )
+            # Compatibility for archives created before every observed print
+            # had a queue row. This is a one-time startup adoption, not a
+            # recurring dispatch recovery path.
+            async with async_session() as db:
+                await printing.adopt_legacy_prints(db)
         except Exception:
-            logger.exception("Failed to settle dispatches interrupted by the restart")
+            logger.exception("Failed to settle interrupted dispatches or adopt legacy prints")
 
-    async def recover(self, db: AsyncSession) -> None:
-        """Schedule persisted pre-send stages and reconcile sent jobs from fresh telemetry."""
-        await printing.adopt_legacy_prints(db)
+    async def reconcile_printer_reports(self, db: AsyncSession) -> None:
+        """Apply current printer reports to sent or printing jobs; never restart dispatch work."""
         active = PrintQueueItem.status.in_(("dispatching", "printing", "paused"))
-        job_ids = list(
-            await db.scalars(
-                select(PrintQueueItem.id).where(active).order_by(PrintQueueItem.printer_id, PrintQueueItem.id)
-            )
-        )
+        item_ids = list(await db.scalars(select(PrintQueueItem.id).where(active).order_by(PrintQueueItem.printer_id)))
         await db.rollback()
-        for item_id in job_ids:
-            if queued.in_flight(item_id):
-                continue
-            try:
-                await self._recover(db, item_id)
-            except Exception:
+        for item_id in item_ids:
+            snapshot = await db.get(PrintQueueItem, item_id)
+            if snapshot is None or snapshot.printer_id is None:
                 await db.rollback()
-                logger.exception("Queue item %s: recovery failed", item_id)
-        from backend.app.services.lifecycle.intake import reconcile_print_archives
-
-        await reconcile_print_archives()
-
-    async def _recover(self, db: AsyncSession, item_id: int) -> None:
-        snapshot = await db.get(PrintQueueItem, item_id)
-        if snapshot is None or snapshot.printer_id is None:
-            return await db.rollback()
-        printer_id = snapshot.printer_id
-        await db.rollback()
-        async with writer(printer_id):
-            item = await lock_queue_item(db, item_id)
-            if not item or item.status not in ("dispatching", "printing", "paused"):
-                return await db.rollback()
-            dispatching = item.status == "dispatching"
-            if dispatching and item.dispatched_at is None:
-                # Startup settles interrupted attempts in start(). A runtime
-                # tick can find a live stage parked at its telemetry gate.
-                stage = item.dispatch_stage
-                if stage not in ("copying", "uploading", "uploaded"):
-                    await fail(db, item, "Dispatch has no valid preparation stage")
+                continue
+            printer_id = snapshot.printer_id
+            await db.rollback()
+            async with writer(printer_id):
+                item = await lock_queue_item(db, item_id)
+                if (
+                    not item
+                    or item.status not in ("dispatching", "printing", "paused")
+                    or (item.status == "dispatching" and item.dispatched_at is None)
+                ):
+                    await db.rollback()
+                    continue
+                state = printer_manager.get_status(printer_id)
+                if not state or not state.connected or not getattr(state, "job_telemetry_ready", False):
+                    await db.rollback()
+                    continue
+                observed = telemetry_status(state, item.dispatch_subtask_id)
+                if observed in ("completed", "failed"):
+                    data = {
+                        "status": observed,
+                        "filename": getattr(state, "gcode_file", None) or "",
+                        "subtask_name": getattr(state, "subtask_name", "") or "",
+                        "submission_id": item.dispatch_subtask_id,
+                        "raw_data": {
+                            **(getattr(state, "raw_data", None) or {}),
+                            "subtask_id": item.dispatch_subtask_id,
+                        },
+                    }
+                    if not data["filename"] and item.archive_id is not None:
+                        archive = await db.get(PrintArchive, item.archive_id)
+                        data["filename"] = archive.filename if archive else ""
+                    await printing.end(db, item, data, memory=printing_memory())
                     await db.commit()
-                elif stage == "copying" and item.deadline_kind != "dispatch_ready":
-                    ready = self._telemetry(printer_id, item.dispatch_baseline_subtask_id)
-                    if ready is False:
-                        await fail(db, item, "Printer activity changed before the print command")
+                elif observed == "printing":
+                    if item.status == "dispatching":
+                        await transition_queue_item(
+                            db,
+                            item,
+                            "dispatching",
+                            "printing",
+                            values={"started_at": clock.now(), "error_message": None},
+                        )
+                        await db.commit()
+                    elif await sync_print_state(db, item, state):
                         await db.commit()
                     else:
                         await db.rollback()
-                        self.schedule_stage(item_id, printer_id, stage)
-                else:
-                    ready = await self._ready_locked(db, item)
-                    await db.commit()
-                    if ready:
-                        # Recovery only schedules a worker. Release its row
-                        # lock before returning; the worker rechecks under its
-                        # own writer at each stage, including immediately
-                        # before the send-intent commit.
-                        self.schedule_stage(item_id, printer_id, stage)
-                return
-
-            state = printer_manager.get_status(item.printer_id)
-            if not state or not state.connected or not getattr(state, "job_telemetry_ready", True):
-                return await db.rollback()
-            observed = telemetry_status(state, item.dispatch_subtask_id)
-            now = clock.now()
-            if observed in ("completed", "failed"):
-                data = {
-                    "status": observed,
-                    "filename": getattr(state, "gcode_file", None) or "",
-                    "subtask_name": getattr(state, "subtask_name", "") or "",
-                    "subtask_id": item.dispatch_subtask_id,
-                    "raw_data": {
-                        **deepcopy(getattr(state, "raw_data", None) or {}),
-                        "subtask_id": item.dispatch_subtask_id,
-                    },
-                }
-                if not data["filename"] and item.archive_id is not None:
-                    archive = await db.get(PrintArchive, item.archive_id)
-                    data["filename"] = archive.filename if archive else ""
-                await printing.end(db, item, data, memory=printing_memory())
-                await db.commit()
-                return
-            if observed == "printing":
-                if dispatching:
-                    await transition_queue_item(
-                        db,
-                        item,
-                        "dispatching",
-                        "printing",
-                        values={"started_at": now, "error_message": None},
-                    )
-                changed = await sync_print_state(db, item, state)
-                if dispatching or changed:
-                    await db.commit()
                 else:
                     await db.rollback()
-                return
-
-            if not dispatching and (other := superseded_by(item, state)):
-                reason = f"The printer started print {other} while this one was unobserved; its outcome is unknown"
-                values = {"completed_at": now, "error_message": reason, "auto_off_after": False}
-                await transition_queue_item(db, item, item.status, "failed", action="superseded", values=values)
-                printer_id = item.printer_id
-                await db.commit()
-                if state.state in _ACTIVE_PRINT_STATES:
-                    spawn_background_task(_observe_replacement(printer_id, state), name=f"observe-print-{printer_id}")
-                return
-            await db.rollback()
 
 
 def printing_memory():
@@ -781,22 +735,6 @@ def unsent(item: PrintQueueItem) -> bool:
     )
 
 
-async def _observe_replacement(printer_id: int, state) -> None:
-    """Observe the print that replaced an unobserved one, as intake does for a print running at startup."""
-    from backend.app.services.lifecycle.intake import print_started
-
-    data = {
-        "submission_id": telemetry_identity(state),
-        "filename": state.gcode_file or getattr(state, "current_print", None),
-        "subtask_name": getattr(state, "subtask_name", None),
-        "raw_data": dict(state.raw_data or {}),
-    }
-    try:
-        await print_started(printer_id, data, recovering=True)
-    except Exception:
-        logger.exception("Printer %s: could not observe its replacement print", printer_id)
-
-
 async def on_enter(change, row) -> None:
     """Schedule the first persisted stage after a job enters dispatching."""
     from backend.app.services.print_scheduler import scheduler
@@ -811,6 +749,7 @@ async def on_enter(change, row) -> None:
 
 async def on_exit(change, row) -> None:
     """Exit: a failed or stopped attempt shuts down an inherited soak; a failed or withdrawn one removes its upload."""
+    printing.queue_auto_off_on_report(change, row)
     await preheating.shut_down_inherited(change, row)
     if (change.after == "failed" and change.action != "printer_report") or change.action in (
         "withdrawn",

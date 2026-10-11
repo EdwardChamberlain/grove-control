@@ -349,18 +349,6 @@ async def _written(change: Transition) -> None:
             row.archive_id,
             physical_outcome=after_outcome,
         )
-    # Auto Off is a job outcome, and only a printer-confirmed end can request
-    # it. An unsent dispatch failure or an unconfirmed Stop is not proof that
-    # the printer has finished this job.
-    confirmed_end = (
-        change.action == "printer_report"
-        and change.before == change.after
-        and change.values.get("physical_outcome") is not None
-    )
-    if after_outcome is not None and (
-        (entered and change.after in ("finished", "failed", "cancelled")) or confirmed_end
-    ):
-        effects.queue_auto_off(change.db, change.item_id, row.printer_id)
     if entered and change.before in _EXITS:
         await import_module(_EXITS[change.before]).on_exit(change, row)
     if entered and (enter := _step(change.after, "on_enter")):
@@ -483,11 +471,9 @@ async def _release_printer_locked(db: AsyncSession, printer: Printer) -> None:
     holding = list(
         (await db.scalars(select(PrintQueueItem).where(*held).order_by(PrintQueueItem.id).with_for_update())).all()
     )
-    soaking = printer.heat_soak_shutdown_pending or any(holds_heat_soak_printer(item) for item in holding)
+    soaking = any(holds_heat_soak_printer(item) for item in holding)
     if soaking and printer_manager.is_connected(printer.id):
-        raise InvalidQueueTransition(
-            "Stop the heat soak and wait for heater shutdown to be confirmed before deleting this printer"
-        )
+        raise InvalidQueueTransition("Stop the heat soak before deleting this printer")
     for item in holding:
         # A finished print keeps its outcome; only an unsuccessful end is
         # explained by the deletion. Jobs that already ended keep their time.

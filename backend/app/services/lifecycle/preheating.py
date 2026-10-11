@@ -1,10 +1,10 @@
 """Preheating (#204): hold the printer and heat it for a bounded soak, then hand off to dispatching.
 
 A live soak carries a ``soak_end`` deadline (#217). When it falls due the soak
-hands off to dispatching, once the printer is idle. A soak without a deadline
-was interrupted by a restart: its heaters are turned off and its hold waits
-for Stop or Skip heat soak. While a soak is live, each tick of the lifecycle
-loop ends it if its printer becomes unavailable.
+hands off to dispatching, once the printer is idle. A soak interrupted by a
+restart fails and can create a fresh retry. On a non-dispatch exit, the state
+sends heater-off commands immediately. While a soak is live, each tick of the
+lifecycle loop ends it if its printer becomes unavailable.
 """
 
 import logging
@@ -18,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.tasks import spawn_background_task
-from backend.app.models.print_queue import ACTIVE_STATUSES, PrintQueueItem
+from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services.job_identity import telemetry_identity
 from backend.app.services.lifecycle import clock
@@ -32,8 +32,7 @@ from backend.app.services.printer_manager import printer_manager, supports_airdu
 from backend.app.services.printer_selection import _queue_start_waiting_reason
 
 logger = logging.getLogger(__name__)
-INTERRUPTED = "Heat soak interrupted and its heaters turned off; inspect the printer, then stop or skip heat soak"
-TELEMETRY_TIMEOUT = 60
+INTERRUPTED = "Heat soak interrupted by a restart; inspect the printer before retrying"
 RETRY_HANDOFF = timedelta(seconds=30)  # A soak that ends while its printer is busy tries again.
 
 
@@ -53,16 +52,6 @@ def holds_heat_soak_printer(item: PrintQueueItem) -> bool:
         and has_heat_soak(item)
         and item.dispatched_at is None
         and item.dispatch_subtask_id is None
-    )
-
-
-def _reported(state, key: str, value: int, since: datetime) -> bool:
-    report = getattr(state, "heat_soak_reports", {}).get(key)
-    return bool(
-        report
-        and report[0] == value
-        and report[1] >= since.replace(tzinfo=timezone.utc).timestamp()
-        and 0 <= clock.now().timestamp() - report[1] < TELEMETRY_TIMEOUT
     )
 
 
@@ -86,95 +75,40 @@ def _dispatch_ready(printer_id: int) -> bool:
     )
 
 
-def _heaters_off(printer: Printer) -> bool:
-    client = printer_manager.get_client(printer.id)
+def _heaters_off(printer_id: int, model: str | None) -> bool:
+    client = printer_manager.get_client(printer_id)
     # A failed soak can outlive its hold. Never turn off a subsequent print's
     # heaters, including while reconnect telemetry still describes an old run.
-    if not client or not _dispatch_ready(printer.id):
+    if not client or not _dispatch_ready(printer_id):
         return False
     # Attempt every shutdown command even if another one fails.
     commands = [(client.set_bed_temperature, 0)]
-    if supports_chamber_heater(printer.model):
+    if supports_chamber_heater(model):
         commands.append((client.set_chamber_temperature, 0))
-    if supports_airduct(printer.model):
+    if supports_airduct(model):
         commands.append((client.set_airduct_mode, "cooling"))
     for command, value in commands:
         try:
             command(value)
         except Exception:
-            logger.exception("Heat-soak heater shutdown failed for printer %s", printer.id)
+            logger.exception("Heat-soak heater shutdown failed for printer %s", printer_id)
     return True
-
-
-async def request_heater_shutdown(db: AsyncSession, printer_id: int) -> None:
-    """Record a durable heater shutdown; the lifecycle loop retries it until telemetry confirms it."""
-    from backend.app.services.lifecycle import deadlines, effects
-
-    printer = await db.get(Printer, printer_id)
-    if printer is not None:
-        printer.heat_soak_shutdown_pending = True
-        printer.heat_soak_shutdown_at = clock.now()
-        effects.after_commit(db, deadlines.wake, key="lifecycle_wake")
 
 
 async def shut_down_inherited(change, row) -> None:
-    """A later state's exit: a failed or stopped attempt shuts down the heaters its soak left on.
-
-    The shutdown is durable, and runs with the outcome's other effects.
-    """
-    from backend.app.services.lifecycle import effects
-
+    """A failed or stopped attempt shuts down the heaters its soak left on."""
     soaked = has_heat_soak(row)
     if change.after in ("failed", "cancelled", "unsuccessful") and soaked and row.printer_id is not None:
-        await request_heater_shutdown(change.db, row.printer_id)
-        effect = effects.QueueOutcomeEffect(change.item_id, change.after, row.printer_id, shut_down_heaters=True)
-        effects.queue_outcome_effect(change.db, effect)
+        printer = await change.db.get(Printer, row.printer_id)
+        if printer is not None:
+            from backend.app.services.lifecycle import effects
 
-
-async def cleanup_heat_soak_shutdown(db: AsyncSession, printer_id: int) -> bool:
-    """Retry a committed shutdown only while no new job is using the printer."""
-    async with writer(printer_id):
-        return await _cleanup_heat_soak_shutdown_locked(db, printer_id)
-
-
-async def _cleanup_heat_soak_shutdown_locked(db: AsyncSession, printer_id: int) -> bool:
-    printer = await db.get(Printer, printer_id, populate_existing=True)
-    if not printer or not printer.heat_soak_shutdown_pending:
-        await db.commit()
-        return False
-    from backend.app.services.lifecycle.queued import in_flight
-
-    active = await db.scalars(
-        select(PrintQueueItem).where(
-            PrintQueueItem.printer_id == printer_id, PrintQueueItem.status.in_(ACTIVE_STATUSES)
-        )
-    )
-    # An interrupted soak, and an unsent dispatch whose worker has stopped,
-    # can cool while their hold remains. A live soak, an upload or a
-    # potentially sent job cannot.
-    busy = any(
-        job.status not in ("preheating", "dispatching")
-        or (job.status == "preheating" and job.deadline_at is not None)
-        or in_flight(job.id)
-        or job.dispatched_at is not None
-        for job in active
-    )
-    if busy or not _heaters_off(printer):
-        await db.commit()
-        return False
-    client = printer_manager.get_client(printer_id)
-    if client:
-        client.request_status_update()
-    state = printer_manager.get_status(printer_id)
-    since = printer.heat_soak_shutdown_at
-    confirmed = bool(_dispatch_ready(printer_id) and since and _reported(state, "bed_target", 0, since))
-    if supports_chamber_heater(printer.model):
-        confirmed = confirmed and _reported(state, "chamber_target", 0, since)
-    if confirmed:
-        printer.heat_soak_shutdown_pending = False
-        printer.heat_soak_shutdown_at = None
-    await db.commit()
-    return True
+            printer_model = printer.model
+            effects.after_commit(
+                change.db,
+                lambda: _heaters_off(row.printer_id, printer_model),
+                key=("heat-soak-off", row.printer_id),
+            )
 
 
 async def start_heating(db: AsyncSession, item_id: int) -> bool:
@@ -203,8 +137,8 @@ async def _start_heating_locked(db: AsyncSession, item_id: int, printer_id: int)
         return False
     printer = await db.get(Printer, printer_id, populate_existing=True)
     client = printer_manager.get_client(printer_id)
-    if not printer or printer.heat_soak_shutdown_pending or not client or not _dispatch_ready(printer_id):
-        await abort_heat_soak(db, item, "Heat soak could not start: printer unavailable or heater shutdown pending")
+    if not printer or not client or not _dispatch_ready(printer_id):
+        await abort_heat_soak(db, item, "Heat soak could not start: printer unavailable")
         return False
     # The soak duration is measured from the heater command, not from a
     # later telemetry update. Target telemetry can lag or be omitted by
@@ -235,9 +169,8 @@ async def _start_heating_locked(db: AsyncSession, item_id: int, printer_id: int)
 async def on_exit(change, row) -> None:
     """Exit: leave preheating for ``change.after``, for the reason ``change.action``.
 
-    Dispatching inherits the soak and its heaters. Any other exit records a
-    heater shutdown that survives a disconnect or deletion of the job. A
-    deleted printer has nothing left to shut down.
+    Dispatching inherits the soak and its heaters. Every other exit sends
+    heater-off commands once after the lifecycle write commits.
     """
     from backend.app.services.lifecycle import effects
 
@@ -247,8 +180,14 @@ async def on_exit(change, row) -> None:
         return
     await change.write(preheat_started_at=None)
     if row.printer_id is not None and change.action != "printer_deleted":
-        await request_heater_shutdown(change.db, row.printer_id)
-        effects.shut_down_heaters(change.db, row.printer_id)
+        printer = await change.db.get(Printer, row.printer_id)
+        if printer is not None:
+            printer_model = printer.model
+            effects.after_commit(
+                change.db,
+                lambda: _heaters_off(row.printer_id, printer_model),
+                key=("heat-soak-off", row.printer_id),
+            )
 
 
 async def abort_heat_soak(
@@ -259,7 +198,7 @@ async def abort_heat_soak(
     status: str = "failed",
     commit: bool = True,
 ) -> None:
-    """Exit with a reason. Caller holds the job's printer; heater shutdown survives deletion of the job."""
+    """Exit with a reason. Caller holds the job's printer while the exit acts."""
     action = (
         "dispatch_failure"
         if status == "failed" and item.dispatched_at is None and item.dispatch_subtask_id is None
@@ -352,11 +291,7 @@ async def soak_ended(db: AsyncSession, item_id: int) -> None:
 
 
 async def watch(db: AsyncSession) -> None:
-    """Each tick: retry pending heater shutdowns, and end live soaks whose printer became unavailable."""
-    shutting_down = select(Printer.id).where(Printer.heat_soak_shutdown_pending.is_(True))
-    for printer_id in list(await db.scalars(shutting_down)):
-        await db.rollback()
-        await cleanup_heat_soak_shutdown(db, printer_id)
+    """End a live soak if its printer becomes unavailable."""
     live = select(PrintQueueItem.id, PrintQueueItem.printer_id).where(
         PrintQueueItem.status == "preheating", PrintQueueItem.deadline_at.is_not(None)
     )
@@ -394,7 +329,7 @@ async def watch(db: AsyncSession) -> None:
 
 
 async def interrupt(db: AsyncSession) -> None:
-    """At startup: soaks the previous process was running are interrupted. Turn their heaters off, keep the hold."""
+    """At startup, fail a soak interrupted by restart; its exit sends heater-off commands once."""
     live = (
         select(PrintQueueItem.id, PrintQueueItem.printer_id)
         .where(PrintQueueItem.status == "preheating")
@@ -410,10 +345,7 @@ async def interrupt(db: AsyncSession) -> None:
             if not item or item.status != "preheating":
                 await db.rollback()
                 continue
-            values = {"deadline_at": None, "deadline_kind": None, "error_message": INTERRUPTED}
-            await transition_queue_item(db, item, "preheating", "preheating", values=values)
-            await request_heater_shutdown(db, printer_id)
-            await db.commit()
+            await abort_heat_soak(db, item, INTERRUPTED)
 
 
 class ChamberHeatSoak:

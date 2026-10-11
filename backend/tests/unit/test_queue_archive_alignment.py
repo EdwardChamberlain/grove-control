@@ -622,7 +622,7 @@ async def test_archive_copy_failure_retries_without_auto_off(alignment, monkeypa
     scheduler = PrintScheduler()
     off = AsyncMock()
     upload = AsyncMock()
-    monkeypatch.setattr(smart_plug_manager, "schedule_off_after_queue_job", off)
+    monkeypatch.setattr(smart_plug_manager, "turn_off_after_queue_job", off)
     monkeypatch.setattr(sched, "upload_file_async", upload)
     from backend.app.services.print_scheduler import scheduler as process_scheduler
 

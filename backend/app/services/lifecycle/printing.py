@@ -55,8 +55,17 @@ async def on_exit(change, row) -> None:
 
     A print that ends in the transaction that confirmed it announces only its
     end: the queue start re-reads the job after commit and finds it ended.
+    The job's Auto Off flag is applied here, after the printer reports its
+    physical outcome; dispatch failures and unconfirmed Stops cannot request it.
     """
+    queue_auto_off_on_report(change, row)
     await shut_down_inherited(change, row)
+
+
+def queue_auto_off_on_report(change, row) -> None:
+    """Apply the job's immediate Auto Off option only to a printer-reported end."""
+    if row.auto_off_after and change.action == "printer_report" and change.values.get("physical_outcome") is not None:
+        effects.queue_auto_off(change.db, change.item_id, row.printer_id)
 
 
 async def owner_of(db: AsyncSession, item: PrintQueueItem) -> tuple[int, str] | None:
@@ -201,6 +210,19 @@ async def _observe_print(
     )
     if ended is not None:
         return None, False  # A duplicate/delayed start cannot revive a finished job.
+    # The sole external-entry case must be a live, identity-matched printer
+    # report. A delayed event on its own cannot create a job for a stale print.
+    live_start = bool(
+        observed_state is not None
+        and observed_state.connected
+        and getattr(observed_state, "job_telemetry_ready", False)
+        and telemetry_identity(observed_state) == identity
+        and (
+            observed_state.state in ACTIVE or (active_snapshot and observed_state.state in ("FINISH", "FAILED", "IDLE"))
+        )
+    )
+    if not live_start:
+        return None, False
     held = await db.scalar(
         select(PrintQueueItem)
         .where(
@@ -343,7 +365,7 @@ async def adopt_legacy_prints(db: AsyncSession) -> None:
         if not identity or len(archive_ids) != 1 or not live or telemetry_identity(state) != identity:
             continue
         async with writer(printer_id):
-            job, _ = await observe_print(db, printer_id, identity)
+            job, _ = await observe_print(db, printer_id, identity, observed_state=state, active_snapshot=True)
             archive = await db.get(PrintArchive, archive_ids[0])
             if job is None or job.archive_id is not None or archive is None or archive.dispatched_queue_item_id:
                 await db.rollback()

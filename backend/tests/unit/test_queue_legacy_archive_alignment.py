@@ -216,7 +216,6 @@ async def test_restored_active_archive_follows_real_completion_callback(legacy, 
 
 @pytest.mark.parametrize("path", ["stop", "recovery", "pause", "clear_plate"])
 async def test_legacy_link_and_outcome_commit_through_independent_lifecycle_paths(legacy, monkeypatch, path):
-    from backend.app.services.lifecycle import dispatching as scheduling
     from backend.app.services.printer_manager import printer_manager
 
     async with legacy.sessions() as db:
@@ -228,8 +227,7 @@ async def test_legacy_link_and_outcome_commit_through_independent_lifecycle_path
                 connected=True, job_telemetry_ready=True, state="FAILED", submission_id="123", raw_data={}
             )
             monkeypatch.setattr(printer_manager, "get_status", lambda _id: live)
-            monkeypatch.setattr(scheduling, "spawn_background_task", lambda coroutine, **_kwargs: coroutine.close())
-            await PrintScheduler().dispatcher.recover(db)
+            await PrintScheduler().dispatcher.reconcile_printer_reports(db)
         elif path == "pause":
             async with writer(getattr(job, "printer_id", None) or getattr(job, "assigned_printer_id", None)):
                 await transition_queue_item(db, job, "printing", "paused")
