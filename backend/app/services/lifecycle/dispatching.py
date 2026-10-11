@@ -66,7 +66,7 @@ def telemetry_status(printer_status, dispatch_subtask_id: str | None) -> str | N
 
 
 async def fail(db: AsyncSession, item: PrintQueueItem, message: str, **values) -> None:
-    """Commit a failed attempt, retrying only when the print command is proven unsent."""
+    """Record a failed attempt; the caller commits it with the surrounding operation."""
     values = {"error_message": message, "completed_at": clock.now(), **values}
     values.setdefault("dispatch_baseline_subtask_id", None)
     dispatched_at = values.get("dispatched_at", item.dispatched_at)
@@ -74,7 +74,6 @@ async def fail(db: AsyncSession, item: PrintQueueItem, message: str, **values) -
     action = "dispatch_failure" if dispatched_at is None and subtask_id is None else None
     values["dispatch_stage"] = None
     await transition_queue_item(db, item, item.status, "failed", action=action, values=values)
-    await db.commit()
 
 
 class Dispatcher:
@@ -350,6 +349,7 @@ class Dispatcher:
                 await db.rollback()
                 raise RuntimeError("Dispatch Archive or printer is missing")
             if not await self._ready_locked(db, item):
+                await db.commit()
                 return
             if reason := await self._drying._drying_reason(item, printer_id):
                 await fail(db, item, reason)
@@ -428,6 +428,7 @@ class Dispatcher:
                         dispatched_at=None,
                         dispatch_subtask_id=None,
                     )
+                    await db.commit()
                 else:
                     await db.rollback()
                 logger.error("Queue item %s: printer %s refused the print command", item_id, printer_id)
@@ -448,10 +449,12 @@ class Dispatcher:
             if not self._is_stage(item, stage):
                 await db.rollback()
                 return False
-            return await self._ready_locked(db, item)
+            ready = await self._ready_locked(db, item)
+            await db.commit()
+            return ready
 
     async def _ready_locked(self, db: AsyncSession, item: PrintQueueItem) -> bool:
-        """Apply the persisted telemetry gate; leave a ready transaction to its caller."""
+        """Apply the telemetry gate without ending the caller-owned transaction."""
         ready = self._telemetry(item.printer_id, item.dispatch_baseline_subtask_id)
         if ready is True:
             if item.deadline_kind == "dispatch_ready":
@@ -462,7 +465,6 @@ class Dispatcher:
                     "dispatching",
                     values={"deadline_at": None, "deadline_kind": None},
                 )
-                await db.commit()
             return True
         if ready is False:
             await fail(db, item, "Printer activity changed before the print command")
@@ -470,13 +472,12 @@ class Dispatcher:
         if item.deadline_kind == "dispatch_ready":
             if item.deadline_at is None or item.deadline_at <= clock.naive_now():
                 await fail(db, item, _TELEMETRY_UNAVAILABLE)
-            else:
-                await db.rollback()
             return False
         await self._defer_ready_locked(db, item)
         return False
 
     async def _defer_ready_locked(self, db: AsyncSession, item: PrintQueueItem) -> None:
+        """Persist the telemetry wait in the transaction owned by the caller."""
         await transition_queue_item(
             db,
             item,
@@ -487,7 +488,6 @@ class Dispatcher:
                 "deadline_kind": "dispatch_ready",
             },
         )
-        await db.commit()
 
     async def ready_due(self, db: AsyncSession, item_id: int) -> None:
         """Resolve the persisted wait for fresh idle telemetry before upload/send."""
@@ -506,7 +506,9 @@ class Dispatcher:
             ):
                 await db.rollback()
                 return
-            if await self._ready_locked(db, item):
+            ready = await self._ready_locked(db, item)
+            await db.commit()
+            if ready:
                 self.schedule_stage(item.id, item.printer_id, item.dispatch_stage)
 
     @staticmethod
@@ -548,6 +550,7 @@ class Dispatcher:
                 and (expected_stage is None or item.dispatch_stage == expected_stage)
             ):
                 await fail(db, item, message, **values)
+                await db.commit()
             else:
                 await db.rollback()
 
@@ -680,20 +683,23 @@ class Dispatcher:
                 stage = item.dispatch_stage
                 if stage not in ("copying", "uploading", "uploaded"):
                     await fail(db, item, "Dispatch has no valid preparation stage")
+                    await db.commit()
                 elif stage == "copying" and item.deadline_kind != "dispatch_ready":
                     ready = self._telemetry(printer_id, item.dispatch_baseline_subtask_id)
                     if ready is False:
                         await fail(db, item, "Printer activity changed before the print command")
+                        await db.commit()
                     else:
                         await db.rollback()
                         self.schedule_stage(item_id, printer_id, stage)
                 else:
-                    if await self._ready_locked(db, item):
+                    ready = await self._ready_locked(db, item)
+                    await db.commit()
+                    if ready:
                         # Recovery only schedules a worker. Release its row
                         # lock before returning; the worker rechecks under its
                         # own writer at each stage, including immediately
                         # before the send-intent commit.
-                        await db.rollback()
                         self.schedule_stage(item_id, printer_id, stage)
                 return
 

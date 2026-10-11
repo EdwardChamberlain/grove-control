@@ -21,6 +21,10 @@ async def test_retry_clears_legacy_manual_start_after_heat_soak_abort(
         chamber_heat_soak=True,
         heat_soak_minutes=10,
         manual_start=True,
+        auto_off_after=True,
+        wait_for_drying_complete=True,
+        bed_levelling="off",
+        plate_id=2,
     )
     db_session.add(old)
     await db_session.commit()
@@ -30,6 +34,8 @@ async def test_retry_clears_legacy_manual_start_after_heat_soak_abort(
     assert retry["manual_start"] is False
     assert retry["status"] == "queued"
     assert retry["chamber_heat_soak"] is True and retry["heat_soak_minutes"] == 10
+    assert retry["auto_off_after"] is True and retry["wait_for_drying_complete"] is True
+    assert retry["bed_levelling"] == "off" and retry["plate_id"] == 2
     assert retry["id"] != old.id
     await db_session.refresh(old)
     assert old.status == "failed" and old.manual_start is True

@@ -188,6 +188,7 @@ async def test_proven_unsent_failure_creates_one_fresh_top_retry(alignment, monk
         await hold_and_link(db, original)
         async with writer(original.printer_id):
             await fail(db, original, "Upload failed")
+            await db.commit()
 
         rows = list((await db.scalars(select(PrintQueueItem).order_by(PrintQueueItem.id))).all())
         parent, retry = rows
@@ -205,8 +206,30 @@ async def test_proven_unsent_failure_creates_one_fresh_top_retry(alignment, monk
         await db.commit()
         async with writer(retry.printer_id):
             await fail(db, retry, "Upload failed again")
+            await db.commit()
         assert await db.scalar(select(func.count()).select_from(PrintQueueItem)) == 2
         assert retry.status == "failed" and retry.physical_outcome is None
+
+
+async def test_failure_transition_leaves_commit_to_dispatch_operation(alignment, monkeypatch):
+    from sqlalchemy import func
+
+    from backend.app.services.lifecycle.dispatching import fail
+
+    monkeypatch.setattr(lifecycle_dispatching.effects, "queue_outcome_effect", MagicMock())
+    async with alignment.sessions() as db:
+        original = await db.get(PrintQueueItem, alignment.job_id)
+        original_id = original.id
+        await hold_and_link(db, original)
+        async with writer(original.printer_id):
+            await fail(db, original, "Upload failed")
+            await db.rollback()
+
+        async with alignment.sessions() as check:
+            persisted = await check.get(PrintQueueItem, original_id)
+            count = await check.scalar(select(func.count()).select_from(PrintQueueItem))
+            assert persisted.status == "dispatching"
+            assert count == 1
 
 
 async def test_unassigned_automatic_retry_drops_printer_specific_ams_mappings(alignment):
@@ -259,6 +282,7 @@ async def test_send_intent_failure_keeps_hold_and_does_not_create_retry(alignmen
         await db.commit()
         async with writer(item.printer_id):
             await fail(db, item, "Send result is ambiguous")
+            await db.commit()
         await db.refresh(item)
         assert item.status == "failed" and item.physical_outcome == "failed"
         assert await db.scalar(select(func.count()).select_from(PrintQueueItem)) == 1

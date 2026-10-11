@@ -49,6 +49,51 @@ from backend.app.services.printer_selection import (
 logger = logging.getLogger(__name__)
 _EDITABLE_FIELDS = tuple(name for name in PrintQueueItemUpdate.model_fields if name in PrintQueueItem.__table__.columns)
 
+# A retry is a new queue job. Preserve deliberate settings and stable metadata;
+# source rows and execution state are rebuilt below.
+_RETRY_JOB_FIELDS = (
+    "assigned_printer_id",
+    "target_model",
+    "target_location",
+    "required_filament_types",
+    "source_filename",
+    "project_id",
+    "scheduled_time",
+    "wait_for_drying_complete",
+    "chamber_heat_soak",
+    "heat_soak_temperature",
+    "heat_soak_minutes",
+    "auto_off_after",
+    "ams_mapping",
+    "filament_overrides",
+    "force_color_match",
+    "plate_id",
+    "print_time_seconds",
+    "gcode_injection",
+    "nozzle_mapping",
+    "cleanup_library_after_dispatch",
+    "bed_levelling",
+    "flow_cali",
+    "vibration_cali",
+    "layer_inspect",
+    "timelapse",
+    "use_ams",
+    "nozzle_offset_cali",
+    "skip_filament_check",
+    "created_by_id",
+)
+_RETRY_VARIANT_FIELDS = (
+    "position",
+    "library_file_id",
+    "target_model",
+    "plate_id",
+    "ams_mapping",
+    "nozzle_mapping",
+    "filament_overrides",
+    "required_filament_types",
+    "print_time_seconds",
+)
+
 
 def filament_contract(
     source: Path | None,
@@ -145,40 +190,9 @@ async def create_retry_job(db: AsyncSession, item: PrintQueueItem) -> PrintQueue
     if not variants and not source_available(source) and not source_available(archive):
         return None
 
-    retry_excluded = {
-        "id",
-        "created_at",
-        "printer_id",
-        "status",
-        "position",
-        "manual_start",
-        "preheat_requested_at",
-        "preheat_started_at",
-        "deadline_at",
-        "deadline_kind",
-        "dispatched_at",
-        "dispatch_subtask_id",
-        "dispatch_baseline_subtask_id",
-        "started_at",
-        "completed_at",
-        "error_message",
-        "waiting_reason",
-        "physical_outcome",
-        "physical_completed_at",
-        "physical_failure_reason",
-        "stop_requested_at",
-        "been_jumped",
-        "retry_on_failure",
-        "dispatch_stage",
-    }
-    values = {
-        column.name: getattr(item, column.name)
-        for column in PrintQueueItem.__table__.columns
-        if column.name not in retry_excluded
-    }
+    values = {field: getattr(item, field) for field in _RETRY_JOB_FIELDS}
     values.update(
         printer_id=None,
-        assigned_printer_id=item.assigned_printer_id,
         retry_on_failure=False,
         dispatch_stage=None,
         manual_start=False,
@@ -199,14 +213,7 @@ async def create_retry_job(db: AsyncSession, item: PrintQueueItem) -> PrintQueue
         stop_requested_at=None,
         been_jumped=False,
     )
-    variant_values = [
-        {
-            column.name: getattr(variant, column.name)
-            for column in PrintQueueVariant.__table__.columns
-            if column.name not in {"id", "queue_item_id", "created_at", "attempt_count"}
-        }
-        for variant in variants
-    ]
+    variant_values = [{field: getattr(variant, field) for field in _RETRY_VARIANT_FIELDS} for variant in variants]
     if variant_values:
         values.update(
             library_file_id=None,
