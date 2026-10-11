@@ -66,10 +66,16 @@ async def hold_and_link(db, item):
 
 
 def _status(state: str, subtask_id: str | None = None, gcode_file: str | None = None):
-    return SimpleNamespace(connected=True, state=state, subtask_id=subtask_id, gcode_file=gcode_file)
+    return SimpleNamespace(
+        connected=True,
+        job_telemetry_ready=True,
+        state=state,
+        subtask_id=subtask_id,
+        gcode_file=gcode_file,
+    )
 
 
-class TestDurableDispatchingState:
+class TestSentJobReportReconciliation:
     @pytest.mark.asyncio
     async def test_active_report_reconciliation_publishes_the_normal_start_event(self, db_session):
         async with db_session() as db:

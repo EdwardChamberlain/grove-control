@@ -428,8 +428,8 @@ async def test_printer_report_reconciliation_skips_an_item_changed_mid_pass(sess
         **{**dispatch_values, "dispatch_subtask_id": "222"},
     )
     telemetry = {
-        1: SimpleNamespace(connected=True, state="RUNNING", subtask_id="111"),
-        2: SimpleNamespace(connected=True, state="RUNNING", subtask_id="222"),
+        1: SimpleNamespace(connected=True, job_telemetry_ready=True, state="RUNNING", subtask_id="111"),
+        2: SimpleNamespace(connected=True, job_telemetry_ready=True, state="RUNNING", subtask_id="222"),
     }
     scheduler = PrintScheduler()
     async with sessions() as db:

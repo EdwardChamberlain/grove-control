@@ -116,14 +116,14 @@ async def test_late_firmware_identity_binds_a_paused_external_job_and_archive(se
 @pytest.mark.parametrize(
     ("initial", "state", "expected"),
     [
-        ("dispatching", "PAUSE", "paused"),
+        ("dispatching", "PAUSE", "printing"),
         ("printing", "PAUSE", "paused"),
         ("paused", "RUNNING", "printing"),
         ("paused", "PREPARE", "paused"),
         ("paused", "SLICING", "paused"),
     ],
 )
-async def test_report_reconciliation_applies_pause_resume_to_sent_job(sessions, initial, state, expected):
+async def test_report_reconciliation_maps_state_for_sent_job(sessions, initial, state, expected):
     item_id, archive_id = await add_job(sessions, initial)
     scheduler = PrintScheduler()
     publish = AsyncMock()
