@@ -295,17 +295,20 @@ async def test_delayed_failure_cannot_shut_down_a_new_external_print(alignment, 
 
 
 async def test_cancelled_job_skips_failure_notice_and_sd_cleanup(alignment, monkeypatch):
+    from backend.app.core import tasks
+    from backend.app.services.lifecycle.printing import end as end_print
+
+    pending = []
+    monkeypatch.setattr(tasks, "spawn_background_task", lambda coro, **kwargs: pending.append(coro))
+    # This test covers the immediate printing-exit power action, not the
+    # independent completion notification task.
+    monkeypatch.setattr(queue_outcome_effects, "after_commit_task", lambda *args, **kwargs: [])
     notified = AsyncMock()
     deleted = AsyncMock()
     powered_off = AsyncMock()
-    done = asyncio.Event()
-
-    async def power_and_signal(*args, **kwargs):
-        await powered_off(*args, **kwargs)
-        done.set()
 
     monkeypatch.setattr(queue_outcome_effects.notification_service, "on_queue_job_failed", notified)
-    monkeypatch.setattr(queue_outcome_effects.smart_plug_manager, "turn_off_after_queue_job", power_and_signal)
+    monkeypatch.setattr(queue_outcome_effects.smart_plug_manager, "turn_off_after_queue_job", powered_off)
     monkeypatch.setattr(queue_outcome_effects, "delete_file_async", deleted)
     async with alignment.sessions() as db:
         job = await db.get(PrintQueueItem, alignment.job_id)
@@ -326,11 +329,18 @@ async def test_cancelled_job_skips_failure_notice_and_sd_cleanup(alignment, monk
                 job,
                 "dispatching",
                 "cancelled",
-                action="printer_report",
-                values={"error_message": "Stop confirmed"},
+                action="cancel",
+                values={"error_message": "Stop requested", "stop_requested_at": datetime.now(timezone.utc)},
+            )
+            await end_print(
+                db,
+                job,
+                {"status": "failed", "submission_id": "123", "raw_data": {"subtask_id": "123"}},
+                memory=None,
             )
         await db.commit()
-    await asyncio.wait_for(done.wait(), 2)
+
+    await asyncio.gather(*pending)
     powered_off.assert_awaited_once()
     notified.assert_not_awaited()
     deleted.assert_not_awaited()
