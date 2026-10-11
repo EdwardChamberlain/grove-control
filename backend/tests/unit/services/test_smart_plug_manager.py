@@ -727,8 +727,9 @@ class TestPendingAutoOffPersistence:
             mock_schedule.assert_called_once_with(mock_plug, 1, 70, origin_job_id=4)
 
     @pytest.mark.asyncio
-    async def test_resume_pending_auto_offs_time_mode_immediate_off(self, manager):
-        """Verify time-based pending auto-offs turn off immediately on resume."""
+    @pytest.mark.parametrize("ready", [False, True])
+    async def test_resume_pending_auto_offs_time_mode_waits_for_telemetry(self, manager, ready):
+        """Startup must wait for fresh telemetry before replaying a pending off."""
         mock_plug = MagicMock()
         mock_plug.id = 1
         mock_plug.name = "Test Plug"
@@ -746,9 +747,8 @@ class TestPendingAutoOffPersistence:
             patch("backend.app.services.smart_plug_manager.tasmota_service") as mock_tasmota,
             patch.object(manager, "_mark_auto_off_executed", new_callable=AsyncMock) as mock_mark,
             patch.object(manager, "get_service_for_plug", new_callable=AsyncMock) as mock_get_service,
-            patch.object(
-                manager, "_turn_off_for_queue_job", new_callable=AsyncMock, return_value=True
-            ) as mock_turn_off,
+            patch.object(manager, "_schedule_delayed_off") as mock_schedule,
+            patch.object(manager, "_printer_has_active_work", new_callable=AsyncMock, return_value=False),
             patch.object(manager, "_queue_off_was_superseded", new_callable=AsyncMock, return_value=False),
             patch("backend.app.services.smart_plug_manager.printer_manager") as mock_pm,
         ):
@@ -763,6 +763,7 @@ class TestPendingAutoOffPersistence:
             mock_tasmota.turn_off = AsyncMock(return_value=True)
             mock_get_service.return_value = mock_tasmota
             mock_pm.is_print_active.return_value = False  # printer idle on restart
+            mock_pm.get_status.return_value = SimpleNamespace(connected=True, job_telemetry_ready=ready, state="IDLE")
             mock_db.get = AsyncMock(
                 return_value=SimpleNamespace(
                     id=4,
@@ -776,9 +777,15 @@ class TestPendingAutoOffPersistence:
 
             await manager.resume_pending_auto_offs()
 
-            mock_turn_off.assert_awaited_once_with(mock_tasmota, mock_plug, 1, 4)
-            mock_tasmota.turn_off.assert_not_awaited()
-            mock_mark.assert_called_once_with(1)
+            if ready:
+                mock_tasmota.turn_off.assert_awaited_once_with(mock_plug)
+                mock_mark.assert_awaited_once_with(1)
+                mock_schedule.assert_not_called()
+            else:
+                mock_tasmota.turn_off.assert_not_awaited()
+                mock_mark.assert_not_awaited()
+                mock_schedule.assert_called_once_with(mock_plug, 1, 0, origin_job_id=4)
+                assert mock_plug.auto_off_pending
 
     @pytest.mark.asyncio
     async def test_resume_pending_auto_off_skipped_when_printing(self, manager):
@@ -839,6 +846,79 @@ class TestActivePrintGuard:
     @pytest.fixture
     def manager(self):
         return SmartPlugManager()
+
+    @pytest.mark.parametrize("strategy", ["time", "temperature"])
+    @pytest.mark.parametrize("unavailable", ["missing", "disconnected", "stale", "unknown_state"])
+    @pytest.mark.parametrize("later_print", [False, True])
+    async def test_queue_auto_off_waits_for_fresh_telemetry_and_rechecks_job(
+        self, manager, queue_sessions, db_session, printer_factory, monkeypatch, strategy, unavailable, later_print
+    ):
+        from backend.app.services.printer_manager import printer_manager
+
+        printer = await printer_factory()
+        ended_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        origin = PrintQueueItem(
+            printer_id=printer.id,
+            status="finished",
+            completed_at=ended_at,
+            physical_outcome="completed",
+            auto_off_after=True,
+        )
+        db_session.add(origin)
+        await db_session.commit()
+        state = SimpleNamespace(
+            connected=unavailable != "disconnected",
+            job_telemetry_ready=unavailable != "stale",
+            state="UNKNOWN" if unavailable == "unknown_state" else "IDLE",
+            temperatures={"nozzle": 30},
+        )
+        live = [None if unavailable == "missing" else state]
+        monkeypatch.setattr(printer_manager, "get_status", lambda _id: live[0])
+        monkeypatch.setattr(printer_manager, "mark_printer_offline", MagicMock())
+        service = SimpleNamespace(turn_off=AsyncMock(return_value=True))
+        monkeypatch.setattr(manager, "get_service_for_plug", AsyncMock(return_value=service))
+        monkeypatch.setattr(manager, "_mark_auto_off_pending", AsyncMock())
+        monkeypatch.setattr(manager, "_mark_auto_off_executed", AsyncMock())
+
+        async def fresh_report(seconds):
+            if seconds == 0:  # Initial time delay, before checking telemetry.
+                return
+            assert seconds == 10
+            service.turn_off.assert_not_awaited()
+            live[0] = SimpleNamespace(
+                connected=True, job_telemetry_ready=True, state="IDLE", temperatures={"nozzle": 30}
+            )
+            if later_print:
+                # A later job that has already ended still supersedes this off.
+                db_session.add(
+                    PrintQueueItem(
+                        printer_id=printer.id,
+                        status="successful",
+                        started_at=ended_at + timedelta(seconds=1),
+                    )
+                )
+                await db_session.commit()
+
+        with patch(
+            "backend.app.services.smart_plug_manager.asyncio.sleep", AsyncMock(side_effect=fresh_report)
+        ) as sleep:
+            if strategy == "time":
+                await manager._delayed_off(
+                    1, "tasmota", "1.2.3.4", None, None, None, printer.id, 0, origin_job_id=origin.id
+                )
+            else:
+                await manager._temp_based_off(
+                    1, "tasmota", "1.2.3.4", None, None, None, printer.id, 55, origin_job_id=origin.id
+                )
+        sleep.assert_any_await(10)
+        if later_print:
+            service.turn_off.assert_not_awaited()
+            manager._mark_auto_off_executed.assert_not_awaited()
+            manager._mark_auto_off_pending.assert_awaited_once_with(1, False)
+        else:
+            service.turn_off.assert_awaited_once()
+            manager._mark_auto_off_executed.assert_awaited_once_with(1)
+            manager._mark_auto_off_pending.assert_not_awaited()
 
     @pytest.mark.parametrize("strategy", ["time", "temperature"])
     @pytest.mark.parametrize(

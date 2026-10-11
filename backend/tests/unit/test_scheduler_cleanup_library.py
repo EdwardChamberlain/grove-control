@@ -925,13 +925,15 @@ async def test_specific_machine_edit_after_selection_is_honoured(queue_factory):
 
 @pytest.mark.asyncio
 async def test_unedited_job_with_a_start_time_is_dispatched_with_its_decision(queue_factory):
-    from datetime import datetime, timedelta
+    from datetime import timedelta
+
+    from backend.app.services.lifecycle import clock
 
     ctx = await queue_factory(cleanup=False)
     await _make_any_machine_job(ctx)
     async with ctx.session_maker() as db:
         item = await db.get(PrintQueueItem, ctx.queue_item_id)
-        item.scheduled_time = datetime.now() - timedelta(minutes=5)  # Due; compared after a reload.
+        item.scheduled_time = clock.naive_now() - timedelta(minutes=5)  # Due; compared after a reload.
         await db.commit()
     binding = await _selection_binding(ctx, ctx.printer_id, "[4]", unassigned=True)
 

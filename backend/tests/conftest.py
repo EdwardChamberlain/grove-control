@@ -124,19 +124,16 @@ def reset_printer_locks():
     engine._printer_locks.clear()
 
 
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create the session loop used by async tests and fixtures."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
+@pytest.fixture(scope="session", autouse=True)
+async def cleanup_shared_async_resources():
+    """Release session resources before pytest-asyncio closes its runner."""
+    yield
     # Stop DB-using background work and dispose the shared engine on the same
     # loop it used throughout this worker's test session.
-    loop.run_until_complete(cancel_background_tasks())
+    await cancel_background_tasks()
     from backend.app.core.database import engine
 
-    loop.run_until_complete(engine.dispose())
-    loop.run_until_complete(asyncio.sleep(0.05))
-    loop.close()
+    await engine.dispose()
 
 
 @pytest.fixture

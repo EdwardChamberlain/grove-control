@@ -77,21 +77,28 @@ def test_every_exit_belongs_to_a_lifecycle_state_module():
 
 async def test_soaking_statuses_match_the_state_predicate(sessions):
     rows = [
-        ("queued", True, None),
-        ("preheating", True, None),
-        ("dispatching", True, None),
-        ("dispatching", True, "sent"),
-        ("dispatching", False, None),
-        ("printing", True, None),
-        ("failed", True, None),
+        ("queued", True, None, None, None),
+        ("preheating", True, None, None, None),
+        ("dispatching", True, None, None, None),
+        ("dispatching", True, "sent", None, REQUESTED),
+        ("dispatching", False, None, None, None),
+        ("dispatching", False, None, REQUESTED, None),
+        ("dispatching", False, "sent", REQUESTED, REQUESTED),
+        ("printing", True, None, REQUESTED, REQUESTED),
+        ("failed", True, None, REQUESTED, None),
     ]
     async with sessions() as db:
         # No printer, so the holding index does not limit the rows to one per printer.
-        db.add_all(PrintQueueItem(status=s, chamber_heat_soak=c, dispatch_subtask_id=d) for s, c, d in rows)
+        db.add_all(
+            PrintQueueItem(
+                status=s, chamber_heat_soak=c, dispatch_subtask_id=d, preheat_requested_at=p, dispatched_at=t
+            )
+            for s, c, d, p, t in rows
+        )
         await db.commit()
         items = list(await db.scalars(select(PrintQueueItem).order_by(PrintQueueItem.id)))
     soaking = {item.id for item in items if is_soaking(item)}
-    assert [item.status for item in items if item.id in soaking] == ["preheating", "dispatching"]
+    assert [item.id for item in items if item.id in soaking] == [items[i].id for i in (1, 2, 5)]
 
 
 async def test_failed_reservation_commit_never_enters_heating(soak):

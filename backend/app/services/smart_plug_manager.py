@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
+from enum import Enum
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
@@ -19,6 +20,12 @@ if TYPE_CHECKING:
     from backend.app.models.smart_plug import SmartPlug
 
 logger = logging.getLogger(__name__)
+_AUTO_OFF_CHECK_INTERVAL = 10
+_AUTO_OFF_MAX_WAIT = 3600
+
+
+class _AutoOffDecision(Enum):
+    DEFER = "defer"
 
 
 class SmartPlugManager:
@@ -427,16 +434,39 @@ class SmartPlugManager:
             logger.exception("Could not check active Queue work for printer %s; deferring auto-off", printer_id)
             return True
 
-    async def _turn_off_for_queue_job(self, service, plug, printer_id: int, job_id: int):
-        """Serialize the last identity/work check with any new queue printer action."""
+    async def _turn_off_for_queue_job(
+        self, service, plug, printer_id: int, job_id: int
+    ) -> bool | None | _AutoOffDecision:
+        """Under the writer, reject stale jobs (None) or defer until telemetry is safe."""
         from backend.app.services.lifecycle.engine import writer
 
         async with writer(printer_id):
             if await self._queue_off_was_superseded(printer_id, job_id):
                 return None
-            if printer_manager.is_print_active(printer_id) or await self._printer_has_active_work(printer_id):
+            if await self._printer_has_active_work(printer_id):
                 return None
+            # Read again after the database awaits: an offline/stale cache
+            # cannot prove that a touchscreen print has not started.
+            state = printer_manager.get_status(printer_id)
+            if not state or not state.connected or not getattr(state, "job_telemetry_ready", False):
+                return _AutoOffDecision.DEFER
+            if state.state in printer_manager.ACTIVE_PRINT_STATES:
+                return None
+            if state.state not in ("IDLE", "FINISH", "FAILED"):
+                return _AutoOffDecision.DEFER
             return await service.turn_off(plug)
+
+    async def _wait_for_queue_job_off(
+        self, service, plug, printer_id: int, job_id: int
+    ) -> bool | None | _AutoOffDecision:
+        """Wait outside the writer, rechecking both job and telemetry each time."""
+        for _ in range(0, _AUTO_OFF_MAX_WAIT, _AUTO_OFF_CHECK_INTERVAL):
+            result = await self._turn_off_for_queue_job(service, plug, printer_id, job_id)
+            if result is not _AutoOffDecision.DEFER:
+                return result
+            await asyncio.sleep(_AUTO_OFF_CHECK_INTERVAL)
+        logger.warning("Auto-off for queue job %s timed out waiting for fresh printer telemetry", job_id)
+        return _AutoOffDecision.DEFER  # Keep the durable pending request for recovery.
 
     async def _queue_off_was_superseded(self, printer_id: int, origin_job_id: int | None) -> bool:
         """Reject power-off if the originating job is stale or a later print has started."""
@@ -530,7 +560,9 @@ class SmartPlugManager:
                 await self._mark_auto_off_pending(plug_id, False)
                 return
             if origin_job_id is not None:
-                success = await self._turn_off_for_queue_job(service, plug_info, printer_id, origin_job_id)
+                success = await self._wait_for_queue_job_off(service, plug_info, printer_id, origin_job_id)
+                if success is _AutoOffDecision.DEFER:
+                    return
                 if success is None:
                     logger.info("Skipping delayed auto-off for queue job %s; printer work changed", origin_job_id)
                     await self._mark_auto_off_pending(plug_id, False)
@@ -614,8 +646,8 @@ class SmartPlugManager:
         For dual-extruder printers (H2 series), checks both nozzles.
         """
         try:
-            check_interval = 10  # seconds
-            max_wait = 3600  # 1 hour max
+            check_interval = _AUTO_OFF_CHECK_INTERVAL
+            max_wait = _AUTO_OFF_MAX_WAIT
             elapsed = 0
 
             while elapsed < max_wait:
@@ -684,6 +716,10 @@ class SmartPlugManager:
                             continue
                         if origin_job_id is not None:
                             success = await self._turn_off_for_queue_job(service, plug_info, printer_id, origin_job_id)
+                            if success is _AutoOffDecision.DEFER:
+                                await asyncio.sleep(check_interval)
+                                elapsed += check_interval
+                                continue
                             if success is None:
                                 logger.info(
                                     "Skipping temperature auto-off for queue job %s; printer work changed",
@@ -871,7 +907,9 @@ class SmartPlugManager:
 
                         service = await self.get_service_for_plug(plug, db)
                         success = await self._turn_off_for_queue_job(service, plug, plug.printer_id, job_id)
-                        if success:
+                        if success is _AutoOffDecision.DEFER:
+                            self._schedule_delayed_off(plug, plug.printer_id, 0, origin_job_id=job_id)
+                        elif success:
                             await self._mark_auto_off_executed(plug.id)
                             if plug.controls_printer_power:
                                 printer_manager.mark_printer_offline(plug.printer_id)

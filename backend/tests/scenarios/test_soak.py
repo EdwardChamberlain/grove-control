@@ -46,6 +46,29 @@ async def test_skip_soak_prints_at_once(app):
     assert (await app.job(job_id)).status == "printing"
 
 
+async def test_skip_soak_retains_heater_guard_until_dispatch_ends(app):
+    printer, job_id = await soaking_job(app)
+    printer.upload_gate = asyncio.Event()
+    try:
+        response = await app.action(job_id, "skip-heat-soak")
+        assert response.status_code == 200, response.text
+        await app.until(lambda: printer.uploading)
+
+        response = await app.http.delete(f"/printers/{printer.printer_id}")
+        assert response.status_code == 409, response.text
+
+        await app.action(job_id, "stop")
+        await app.settle()
+        assert "M140 S0" in gcode(printer)
+        assert "M141 S0" in gcode(printer)
+        await app.advance(60)  # Confirm the zero targets before deleting the shutdown request.
+        response = await app.http.delete(f"/printers/{printer.printer_id}")
+        assert response.status_code == 200, response.text
+        assert printer.sent("project_file") == []
+    finally:
+        printer.upload_gate.set()
+
+
 async def test_stop_during_soak_turns_the_heaters_off(app):
     printer, job_id = await soaking_job(app)
 

@@ -38,9 +38,11 @@ from backend.tests.unit.test_scheduler_cleanup_library import (
 
 
 @pytest.mark.parametrize("phase", ["copy", "upload"])
-@pytest.mark.parametrize("telemetry", ["idle", "unavailable", "active"])
-async def test_dispatch_resumes_only_after_fresh_idle_telemetry(queue_factory, monkeypatch, phase, telemetry):
+@pytest.mark.parametrize("telemetry", ["idle", "unavailable", "active", "expired"])
+@pytest.mark.parametrize("recovery", ["deadline", "tick"])
+async def test_dispatch_resumes_only_after_fresh_idle_telemetry(queue_factory, monkeypatch, phase, telemetry, recovery):
     from backend.app.services.bambu_mqtt import PrinterState
+    from backend.app.services.lifecycle import intake
 
     ctx = await queue_factory(cleanup=False)
     live = PrinterState(connected=True, job_telemetry_ready=True, state="IDLE", submission_id="old-print")
@@ -66,37 +68,48 @@ async def test_dispatch_resumes_only_after_fresh_idle_telemetry(queue_factory, m
         job = await db.get(PrintQueueItem, ctx.queue_item_id)
         archive = await db.get(PrintArchive, job.archive_id)
         assert archive is not None and archive.dispatched_queue_item_id == job.id
-        if telemetry == "unavailable":
+        if telemetry in ("unavailable", "expired"):
             assert job.status == "dispatching" and job.deadline_kind == "dispatch_ready"
             assert job.dispatched_at is None and job.dispatch_subtask_id is None
             ctx.start_print.assert_not_called()
             effects.assert_not_awaited()
-        else:
+        if telemetry == "expired":
+            job.deadline_at = scheduling.clock.naive_now() - timedelta(seconds=1)
+            await db.commit()
+        if telemetry not in ("unavailable", "expired"):
             live.job_telemetry_ready = True
             live.state = "IDLE" if telemetry == "idle" else "RUNNING"
             live.submission_id = None if telemetry == "idle" else "another-print"
-            with monkeypatch.context() as patch:
-                patch.setattr(scheduling, "async_session", ctx.session_maker)
-                patch.setattr(lifecycle_queued, "async_session", ctx.session_maker)
-                patch.setattr(printer_manager, "get_status", lambda _id: live)
-                patch.setattr(printer_manager, "is_connected", lambda _id: True)
-                patch.setattr(printer_manager, "is_awaiting_plate_clear", lambda _id: False)
-                patch.setattr(printer_manager, "start_print", ctx.start_print)
-                patch.setattr(scheduling, "upload_file_async", ctx.upload)
-                patch.setattr(scheduling, "delete_file_async", AsyncMock(return_value=True))
-                patch.setattr(scheduling, "get_ftp_retry_settings", AsyncMock(return_value=(False, 0, 0, 1.0)))
-                patch.setattr(scheduling, "cache_3mf_download", MagicMock())
-                if telemetry == "idle":
-                    ctx.upload.side_effect = None
+        with monkeypatch.context() as patch:
+            patch.setattr(scheduling, "async_session", ctx.session_maker)
+            patch.setattr(lifecycle_queued, "async_session", ctx.session_maker)
+            patch.setattr(intake, "async_session", ctx.session_maker)
+            patch.setattr(intake, "reconcile_print_archives", AsyncMock())
+            patch.setattr(printer_manager, "get_status", lambda _id: live)
+            patch.setattr(printer_manager, "get_client", lambda _id: None)
+            patch.setattr(printer_manager, "is_connected", lambda _id: True)
+            patch.setattr(printer_manager, "is_awaiting_plate_clear", lambda _id: False)
+            patch.setattr(printer_manager, "start_print", ctx.start_print)
+            patch.setattr(scheduling, "upload_file_async", ctx.upload)
+            patch.setattr(scheduling, "delete_file_async", AsyncMock(return_value=True))
+            patch.setattr(scheduling, "get_ftp_retry_settings", AsyncMock(return_value=(False, 0, 0, 1.0)))
+            patch.setattr(scheduling, "cache_3mf_download", MagicMock())
+            if telemetry == "idle":
+                ctx.upload.side_effect = None
+            if recovery == "deadline":
                 await PrintScheduler().dispatcher.ready_due(db, job.id)
-                if telemetry == "idle":
-                    await _wait_for_dispatch(ctx)
+            else:
+                await PrintScheduler().dispatcher.recover(db)
+            if telemetry == "idle":
+                await _wait_for_dispatch(ctx)
         await db.refresh(job)
         await db.refresh(archive)
-        if telemetry == "active":
+        if telemetry in ("active", "expired"):
             assert job.status == "failed" and archive.status == "failed"
             assert job.physical_outcome is None and job.dispatched_at is None and job.dispatch_subtask_id is None
             assert effects.await_args.args[1].new_state == "failed"
+            if telemetry == "expired":
+                assert job.error_message == scheduling._TELEMETRY_UNAVAILABLE
             ctx.start_print.assert_not_called()
         elif telemetry == "idle":
             assert job.status == "dispatching" and archive.status == "dispatching"
