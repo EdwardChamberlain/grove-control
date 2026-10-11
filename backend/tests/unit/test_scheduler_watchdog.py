@@ -71,7 +71,7 @@ def _status(state: str, subtask_id: str | None = None, gcode_file: str | None = 
 
 class TestDurableDispatchingState:
     @pytest.mark.asyncio
-    async def test_restart_recovery_publishes_the_normal_start_event(self, db_session):
+    async def test_active_report_reconciliation_publishes_the_normal_start_event(self, db_session):
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
             await hold_and_link(db, item)
@@ -93,7 +93,7 @@ class TestDurableDispatchingState:
                     "backend.app.services.lifecycle.dispatching.printer_manager.get_status",
                     return_value=_status("RUNNING", "12345"),
                 ),
-                patch("backend.app.services.lifecycle.dispatching.spawn_background_task", side_effect=spawn),
+                patch("backend.app.core.tasks.spawn_background_task", side_effect=spawn),
                 patch.object(lifecycle_effects, "publish_queue_job_started", new=publish),
             ):
                 await scheduler.dispatcher.reconcile_printer_reports(db)
@@ -105,7 +105,7 @@ class TestDurableDispatchingState:
         publish.assert_awaited_once_with(1)
 
     @pytest.mark.asyncio
-    async def test_restart_recovery_does_not_promote_an_active_print_with_another_submission_id(self, db_session):
+    async def test_report_reconciliation_does_not_promote_another_submission_id(self, db_session):
         """An unrelated manual print must not acknowledge a durable dispatch."""
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)
@@ -125,7 +125,7 @@ class TestDurableDispatchingState:
             assert item.started_at is None
 
     @pytest.mark.asyncio
-    async def test_restart_recovery_does_not_treat_missing_ids_as_a_match(self, db_session):
+    async def test_report_reconciliation_does_not_treat_missing_ids_as_a_match(self, db_session):
         """Legacy rows without an id must not accept an uncorrelated active print."""
         async with db_session() as db:
             item = await db.get(PrintQueueItem, 1)

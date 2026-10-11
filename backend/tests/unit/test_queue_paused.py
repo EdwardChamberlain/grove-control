@@ -123,7 +123,7 @@ async def test_late_firmware_identity_binds_a_paused_external_job_and_archive(se
         ("paused", "SLICING", "paused"),
     ],
 )
-async def test_restart_recovery_applies_pause_resume_without_restarting_the_job(sessions, initial, state, expected):
+async def test_report_reconciliation_applies_pause_resume_to_sent_job(sessions, initial, state, expected):
     item_id, archive_id = await add_job(sessions, initial)
     scheduler = PrintScheduler()
     publish = AsyncMock()
@@ -134,7 +134,7 @@ async def test_restart_recovery_applies_pause_resume_without_restarting_the_job(
 
     with (
         patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", return_value=telemetry(state)),
-        patch("backend.app.services.lifecycle.dispatching.spawn_background_task", side_effect=spawn),
+        patch("backend.app.core.tasks.spawn_background_task", side_effect=spawn),
         patch.object(lifecycle_effects, "publish_queue_job_started", publish),
     ):
         async with sessions() as db:

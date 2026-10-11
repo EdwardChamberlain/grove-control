@@ -95,6 +95,12 @@ def _heaters_off(printer_id: int, model: str | None) -> bool:
     return True
 
 
+def _end_inherited_heat_soak(printer_id: int, model: str | None) -> None:
+    """Clear the soak indicator and switch heaters off after a later failure."""
+    _show_preheating(printer_id, False)
+    _heaters_off(printer_id, model)
+
+
 async def shut_down_inherited(change, row) -> None:
     """A failed or stopped attempt shuts down the heaters its soak left on."""
     soaked = has_heat_soak(row)
@@ -106,7 +112,7 @@ async def shut_down_inherited(change, row) -> None:
             printer_model = printer.model
             effects.after_commit(
                 change.db,
-                lambda: _heaters_off(row.printer_id, printer_model),
+                lambda: _end_inherited_heat_soak(row.printer_id, printer_model),
                 key=("heat-soak-off", row.printer_id),
             )
 

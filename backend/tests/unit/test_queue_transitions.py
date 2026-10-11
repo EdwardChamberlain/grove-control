@@ -408,7 +408,7 @@ def _cancel_after_first_select(sessions, db, item_id, *, marker=None):
     return patch.object(db, "execute", execute_then_cancel)
 
 
-async def test_restart_recovery_skips_an_item_changed_mid_pass(sessions):
+async def test_printer_report_reconciliation_skips_an_item_changed_mid_pass(sessions):
     from types import SimpleNamespace
 
     sent = datetime.now()
@@ -436,7 +436,7 @@ async def test_restart_recovery_skips_an_item_changed_mid_pass(sessions):
         with (
             _cancel_after_first_select(sessions, db, raced),
             patch("backend.app.services.lifecycle.dispatching.printer_manager.get_status", telemetry.get),
-            patch("backend.app.services.lifecycle.dispatching.spawn_background_task", lambda coro, **_: coro.close()),
+            patch("backend.app.core.tasks.spawn_background_task", lambda coro, **_: coro.close()),
         ):
             await scheduler.dispatcher.reconcile_printer_reports(db)
 

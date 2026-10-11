@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.app.services.lifecycle.dispatching import Dispatcher
 from backend.app.services.print_scheduler import PrintScheduler
 
 
@@ -48,16 +47,6 @@ def _queue_results(item):
 @pytest.fixture
 def scheduler():
     return PrintScheduler()
-
-
-@pytest.fixture(autouse=True)
-def skip_dispatch_recovery():
-    """These queue-selection tests provide only pending-item query fixtures."""
-    with (
-        patch.object(Dispatcher, "recover", new=AsyncMock()),
-        patch.object(PrintScheduler, "_shutdown_printers", new=AsyncMock(return_value=set())),
-    ):
-        yield
 
 
 def test_strict_colour_mapping_never_falls_back_across_nozzles(scheduler):
