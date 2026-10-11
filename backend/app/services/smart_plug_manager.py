@@ -434,6 +434,18 @@ class SmartPlugManager:
             logger.exception("Could not check active Queue work for printer %s; deferring auto-off", printer_id)
             return True
 
+    async def _printer_has_queue_work(self, printer_id: int) -> bool:
+        """Treat any assigned or model-matched queue work as a reason to stay on."""
+        from backend.app.core.database import async_session
+        from backend.app.services.queue_work import printer_has_queue_work
+
+        try:
+            async with async_session() as db:
+                return await printer_has_queue_work(db, printer_id)
+        except Exception:
+            logger.exception("Could not check queued work for printer %s; deferring auto-off", printer_id)
+            return True
+
     async def _turn_off_for_queue_job(
         self, service, plug, printer_id: int, job_id: int
     ) -> bool | None | _AutoOffDecision:
@@ -444,6 +456,8 @@ class SmartPlugManager:
             if await self._queue_off_was_superseded(printer_id, job_id):
                 return None
             if await self._printer_has_active_work(printer_id):
+                return None
+            if await self._printer_has_queue_work(printer_id):
                 return None
             # Read again after the database awaits: an offline/stale cache
             # cannot prove that a touchscreen print has not started.

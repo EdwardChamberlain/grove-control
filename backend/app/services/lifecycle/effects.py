@@ -28,6 +28,7 @@ from backend.app.models.printer import Printer
 from backend.app.services import job_identity
 from backend.app.services.bambu_ftp import delete_file_async
 from backend.app.services.notification_service import notification_service
+from backend.app.services.queue_work import printer_has_queue_work
 from backend.app.services.smart_plug_manager import smart_plug_manager
 
 logger = logging.getLogger(__name__)
@@ -215,6 +216,9 @@ async def run_queue_auto_off(engine: AsyncEngine, job_id: int, printer_id: int) 
                 or not job.auto_off_after
                 or job.status not in (*AWAITING_PLATE_CLEAR_STATUSES, "successful", "unsuccessful")
             ):
+                return
+            if await printer_has_queue_work(db, printer_id):
+                logger.info("Queue job %s requested auto-off, but printer %s still has queued work", job_id, printer_id)
                 return
             await smart_plug_manager.schedule_off_after_queue_job(
                 printer_id,

@@ -26,6 +26,33 @@ from backend.app.services.queue_actions import cancel_job
 from backend.tests.unit.test_queue_archive_alignment import alignment, hold_and_link  # noqa: F401
 
 
+@pytest.mark.parametrize("queue_preference", ["printer", "model"])
+async def test_auto_off_is_not_scheduled_while_queue_work_remains(alignment, monkeypatch, queue_preference):
+    powered_off = AsyncMock()
+    monkeypatch.setattr(queue_outcome_effects.smart_plug_manager, "schedule_off_after_queue_job", powered_off)
+    async with alignment.sessions() as db:
+        job = await db.get(PrintQueueItem, alignment.job_id)
+        printer = await db.get(Printer, job.assigned_printer_id)
+        printer_id = printer.id
+        job.assigned_printer_id = None
+        job.printer_id = printer_id
+        job.status = "successful"
+        job.physical_outcome = "completed"
+        job.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        job.auto_off_after = True
+        queued = PrintQueueItem(status="queued", library_file_id=alignment.source_id)
+        if queue_preference == "printer":
+            queued.assigned_printer_id = printer_id
+        else:
+            queued.target_model = printer.model
+        db.add(queued)
+        await db.commit()
+
+    await queue_outcome_effects.run_queue_auto_off(alignment.sessions.kw["bind"], job.id, printer_id)
+
+    powered_off.assert_not_awaited()
+
+
 @pytest.mark.parametrize("status", ["dispatching", "printing"])
 @pytest.mark.parametrize("outcome", ["commit", "ftp_failure", "reconnected"])
 async def test_clear_plate_cleans_sent_upload_after_offline_stop(alignment, monkeypatch, status, outcome):

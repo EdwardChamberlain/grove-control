@@ -1031,6 +1031,43 @@ class TestActivePrintGuard:
         assert result is None
         service.turn_off.assert_not_awaited()
 
+    @pytest.mark.parametrize("queue_preference", ["printer", "model"])
+    async def test_queue_job_auto_off_is_skipped_while_queue_work_remains(
+        self, manager, queue_sessions, db_session, printer_factory, monkeypatch, queue_preference
+    ):
+        from backend.app.services.printer_manager import printer_manager
+
+        printer = await printer_factory()
+        ended_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        origin = PrintQueueItem(
+            printer_id=printer.id,
+            status="finished",
+            completed_at=ended_at,
+            physical_outcome="completed",
+            auto_off_after=True,
+        )
+        queued = PrintQueueItem(status="queued")
+        if queue_preference == "printer":
+            queued.assigned_printer_id = printer.id
+        else:
+            queued.target_model = printer.model
+        db_session.add_all([origin, queued])
+        await db_session.commit()
+
+        monkeypatch.setattr(printer_manager, "is_print_active", lambda _id: False)
+        monkeypatch.setattr(
+            printer_manager,
+            "get_status",
+            lambda _id: SimpleNamespace(connected=True, job_telemetry_ready=True, state="IDLE"),
+        )
+        monkeypatch.setattr(manager, "_printer_has_active_work", AsyncMock(return_value=False))
+        service = SimpleNamespace(turn_off=AsyncMock(return_value=True))
+
+        result = await manager._turn_off_for_queue_job(service, MagicMock(), printer.id, origin.id)
+
+        assert result is None
+        service.turn_off.assert_not_awaited()
+
     @pytest.fixture
     def mock_plug(self):
         plug = MagicMock()

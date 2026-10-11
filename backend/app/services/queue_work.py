@@ -1,6 +1,7 @@
-"""The printer-facing queue-work signal used by the Print/Queue action."""
+"""Printer queue-work matching shared by Print/Queue and per-job Auto Off."""
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, literal, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models.print_queue import ACTIVE_STATUSES, PrintQueueItem, PrintQueueVariant
 from backend.app.models.printer import Printer
@@ -35,4 +36,15 @@ def has_queue_work(printer_id, model, location):
         )
         .exists()
         .correlate(Printer)
+    )
+
+
+async def printer_has_queue_work(db: AsyncSession, printer_id: int) -> bool:
+    """Whether queued or active jobs are assigned to, or eligible for, a printer."""
+    printer = await db.get(Printer, printer_id)
+    if printer is None:
+        # Unknown printer state is not evidence that powering it off is safe.
+        return True
+    return bool(
+        await db.scalar(select(has_queue_work(literal(printer.id), literal(printer.model), literal(printer.location))))
     )
