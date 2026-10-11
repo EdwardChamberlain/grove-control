@@ -404,9 +404,8 @@ async def release_queue_references(db: AsyncSession, file_ids: list[int]) -> int
         return 0
     # A live heat-soak must be aborted through its service so heater shutdown,
     # reservation cleanup, and queue status are persisted together.
-    from backend.app.services.lifecycle.dispatching import is_soaking
     from backend.app.services.lifecycle.engine import lock_queue_items, writer
-    from backend.app.services.lifecycle.preheating import abort_heat_soak
+    from backend.app.services.lifecycle.preheating import abort_heat_soak, holds_heat_soak_printer
 
     references = await db.execute(
         select(
@@ -429,8 +428,9 @@ async def release_queue_references(db: AsyncSession, file_ids: list[int]) -> int
             item = items[item_id]
             if item is None or item.library_file_id not in file_ids:
                 continue
-            if item.archive_id is None and (item.status == "queued" or is_soaking(item)):
-                if is_soaking(item):
+            soaking = holds_heat_soak_printer(item)
+            if item.archive_id is None and (item.status == "queued" or soaking):
+                if soaking:
                     await abort_heat_soak(
                         db,
                         item,

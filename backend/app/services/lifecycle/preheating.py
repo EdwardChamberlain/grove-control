@@ -28,7 +28,7 @@ from backend.app.services.lifecycle.engine import (
     transition_queue_item,
     writer,
 )
-from backend.app.services.printer_manager import printer_manager, supports_chamber_heater
+from backend.app.services.printer_manager import printer_manager, supports_airduct, supports_chamber_heater
 from backend.app.services.printer_selection import _queue_start_waiting_reason
 
 logger = logging.getLogger(__name__)
@@ -41,8 +41,19 @@ def utcnow() -> datetime:
     return clock.naive_now()
 
 
-def supports_airduct(model: str | None) -> bool:
-    return supports_chamber_heater(model) or (model or "").strip().upper() in {"P2S", "N7"}
+def has_heat_soak(item: PrintQueueItem) -> bool:
+    """Whether this job's persisted data says Grove requested a heat soak."""
+    return item.preheat_requested_at is not None or bool(item.chamber_heat_soak)
+
+
+def holds_heat_soak_printer(item: PrintQueueItem) -> bool:
+    """Whether this job can still have soak heaters running on its printer."""
+    return item.status == "preheating" or (
+        item.status == "dispatching"
+        and has_heat_soak(item)
+        and item.dispatched_at is None
+        and item.dispatch_subtask_id is None
+    )
 
 
 def _reported(state, key: str, value: int, since: datetime) -> bool:
@@ -113,7 +124,7 @@ async def shut_down_inherited(change, row) -> None:
     """
     from backend.app.services.lifecycle import effects
 
-    soaked = row.preheat_requested_at is not None or row.chamber_heat_soak
+    soaked = has_heat_soak(row)
     if change.after in ("failed", "cancelled", "unsuccessful") and soaked and row.printer_id is not None:
         await request_heater_shutdown(change.db, row.printer_id)
         effect = effects.QueueOutcomeEffect(change.item_id, change.after, row.printer_id, shut_down_heaters=True)

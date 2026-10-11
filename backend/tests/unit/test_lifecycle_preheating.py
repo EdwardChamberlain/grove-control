@@ -20,7 +20,6 @@ from backend.app.core.database import Base
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.printer import Printer
 from backend.app.services.lifecycle import effects, engine as lifecycle_engine, preheating
-from backend.app.services.lifecycle.dispatching import is_soaking
 from backend.app.services.lifecycle.engine import (
     ALLOWED_TRANSITIONS,
     QueueTransitionConflict,
@@ -97,7 +96,7 @@ async def test_soaking_statuses_match_the_state_predicate(sessions):
         )
         await db.commit()
         items = list(await db.scalars(select(PrintQueueItem).order_by(PrintQueueItem.id)))
-    soaking = {item.id for item in items if is_soaking(item)}
+    soaking = {item.id for item in items if preheating.holds_heat_soak_printer(item)}
     assert [item.id for item in items if item.id in soaking] == [items[i].id for i in (1, 2, 5)]
 
 

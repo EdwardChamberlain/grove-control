@@ -123,6 +123,16 @@ def supports_chamber_heater(model: str | None) -> bool:
     return model.strip().upper() in CHAMBER_HEATER_MODELS
 
 
+AIRDUCT_MODELS = CHAMBER_HEATER_MODELS | frozenset({"P2S", "N7"})
+
+
+def supports_airduct(model: str | None) -> bool:
+    """Check if a printer model has an airduct mode control for heat soak."""
+    if not model:
+        return False
+    return model.strip().upper() in AIRDUCT_MODELS
+
+
 def has_stg_cur_idle_bug(model: str | None) -> bool:
     """Check if a printer model may incorrectly report stg_cur=0 when idle.
 

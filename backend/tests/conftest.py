@@ -1,6 +1,5 @@
 """Shared test fixtures for Grove Control backend tests."""
 
-import asyncio
 import atexit
 import json
 import logging
@@ -197,10 +196,6 @@ async def test_engine(test_database_url):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
     await engine.dispose()
-    # Allow aiosqlite's background thread to finish processing the close
-    # response before the per-function event loop shuts down, preventing
-    # "RuntimeError: Event loop is closed" in call_soon_threadsafe.
-    await asyncio.sleep(0.1)
 
 
 @pytest.fixture
@@ -247,16 +242,8 @@ async def async_client(test_engine, db_session) -> AsyncGenerator[AsyncClient, N
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             yield client
 
-        # Background tasks may own aiosqlite worker threads. Finish their
-        # cancellation before disposing the engine or closing this test loop.
+        # Cancel request-owned tasks before the function-scoped test engine is disposed.
         await cancel_background_tasks()
-
-        # The app lifespan called init_db() which used the module-level engine
-        # (not the test engine), creating aiosqlite connections. Dispose those
-        # connections so their background threads finish before the event loop closes.
-        from backend.app.core.database import engine as real_engine
-
-        await real_engine.dispose()
 
     app.dependency_overrides.clear()
 

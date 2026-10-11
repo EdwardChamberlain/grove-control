@@ -472,8 +472,8 @@ async def release_printer(db: AsyncSession, printer: Printer) -> None:
 
 
 async def _release_printer_locked(db: AsyncSession, printer: Printer) -> None:
-    from backend.app.services.lifecycle.dispatching import is_soaking
     from backend.app.services.lifecycle.final import end
+    from backend.app.services.lifecycle.preheating import holds_heat_soak_printer
     from backend.app.services.printer_manager import printer_manager
 
     held = (
@@ -483,7 +483,7 @@ async def _release_printer_locked(db: AsyncSession, printer: Printer) -> None:
     holding = list(
         (await db.scalars(select(PrintQueueItem).where(*held).order_by(PrintQueueItem.id).with_for_update())).all()
     )
-    soaking = printer.heat_soak_shutdown_pending or any(is_soaking(item) for item in holding)
+    soaking = printer.heat_soak_shutdown_pending or any(holds_heat_soak_printer(item) for item in holding)
     if soaking and printer_manager.is_connected(printer.id):
         raise InvalidQueueTransition(
             "Stop the heat soak and wait for heater shutdown to be confirmed before deleting this printer"
