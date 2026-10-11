@@ -749,7 +749,6 @@ async def on_enter(change, row) -> None:
 
 async def on_exit(change, row) -> None:
     """Exit: a failed or stopped attempt shuts down an inherited soak; a failed or withdrawn one removes its upload."""
-    printing.queue_auto_off_on_report(change, row)
     await preheating.shut_down_inherited(change, row)
     if (change.after == "failed" and change.action != "printer_report") or change.action in (
         "withdrawn",

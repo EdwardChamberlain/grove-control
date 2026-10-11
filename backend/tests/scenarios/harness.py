@@ -302,9 +302,9 @@ class Harness:
         from backend.app.services.lifecycle import deadlines
 
         deadlines._next_archive_repair = 0.0
-        await deadlines.start(self.scheduler.dispatcher)
         for printer in self.printers.values():
             await self._connect(printer)
+        await deadlines.start(self.scheduler.dispatcher)
 
     async def shutdown(self, abrupt: bool = False) -> None:
         """Stop the app: background work ends and in-process memory is lost.

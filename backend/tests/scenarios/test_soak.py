@@ -82,21 +82,24 @@ async def test_stop_during_soak_turns_the_heaters_off(app):
     assert printer.sent("stop") == []  # A soak has no print to stop.
 
 
-async def test_soak_interrupted_by_restart_turns_heaters_off_and_keeps_the_hold(app):
+async def test_restart_fails_interrupted_soak_and_creates_one_fresh_retry(app):
     printer, job_id = await soaking_job(app)
 
     await app.restart()
     await app.advance(5 * 60)
 
     job = await app.job(job_id)
-    assert job.status == "preheating"
+    assert job.status == "failed"
     assert job.error_message
     assert "M140 S0" in gcode(printer)
     assert printer.sent("project_file") == []
+    retries = [item for item in await app.jobs(printer) if item.id != job_id]
+    assert len(retries) == 1
+    assert (retries[0].status, retries[0].retry_on_failure) == ("preheating", False)
 
-    await app.action(job_id, "stop")
+    await app.action(retries[0].id, "stop")
     await app.run()
-    assert (await app.job(job_id)).status == "unsuccessful"
+    assert (await app.job(retries[0].id)).status == "unsuccessful"
 
 
 async def _persist_unstarted_soak(app):
@@ -117,21 +120,23 @@ async def _persist_unstarted_soak(app):
     return printer, job_id
 
 
-async def test_restart_after_the_preheating_hold_but_before_heating_keeps_the_job_parked(app):
+async def test_restart_after_the_preheating_hold_fails_once_and_retries_once(app):
     printer, job_id = await _persist_unstarted_soak(app)
 
     await app.restart(abrupt=True)
     await app.run()
 
     job = await app.job(job_id)
-    assert job.status == "preheating"
-    assert job.deadline_at is None
+    assert job.status == "failed"
     assert job.error_message
     assert "M140 S0" in gcode(printer)
     assert printer.sent("project_file") == []
+    retries = [item for item in await app.jobs(printer) if item.id != job_id]
+    assert len(retries) == 1
+    assert (retries[0].status, retries[0].retry_on_failure) == ("preheating", False)
 
 
-async def test_restart_after_heater_commands_before_deadline_commit_requests_shutdown(app, monkeypatch):
+async def test_restart_after_heater_commands_fails_once_and_does_not_chain_retries(app, monkeypatch):
     printer, job_id = await _persist_unstarted_soak(app)
 
     from backend.app.services.lifecycle import preheating
@@ -165,10 +170,10 @@ async def test_restart_after_heater_commands_before_deadline_commit_requests_shu
     await app.restart(abrupt=True)
     await app.run()
 
-    job = await app.job(job_id)
-    assert job.status == "preheating"
-    assert job.deadline_at is None
-    assert job.error_message
+    jobs = await app.jobs(printer)
+    assert len(jobs) == 2
+    assert all(job.status == "failed" and job.error_message for job in jobs)
+    assert jobs[1].retry_on_failure is False
     assert "M140 S0" in gcode(printer)
     assert printer.sent("project_file") == []
 
@@ -210,7 +215,7 @@ async def test_a_touchscreen_print_during_the_soak_ends_it(app):
     assert printer.sent("project_file") == []
 
 
-async def test_heaters_stay_on_for_a_print_started_after_an_interrupted_soak(app):
+async def test_interrupted_soak_does_not_cool_a_new_external_print(app):
     printer, job_id = await soaking_job(app)
     await app.shutdown()
     printer.report.update(gcode_state="RUNNING", gcode_file="other.3mf", subtask_name="other", subtask_id="904")
@@ -222,10 +227,10 @@ async def test_heaters_stay_on_for_a_print_started_after_an_interrupted_soak(app
 
     printer.finish()
     await app.advance(60)
-    assert "M140 S0" in gcode(printer)
+    assert "M140 S0" not in gcode(printer)  # No delayed heater-recovery action runs after the external print.
 
 
-async def test_heater_shutdown_is_retried_until_the_printer_reports_it(app):
+async def test_offline_heater_shutdown_is_not_retried(app):
     printer, job_id = await soaking_job(app)
     printer.disconnect()
     await app.action(job_id, "stop")
@@ -235,8 +240,8 @@ async def test_heater_shutdown_is_retried_until_the_printer_reports_it(app):
     printer.push()  # Back online.
     await app.advance(60)
 
-    assert "M140 S0" in gcode(printer)
-    assert printer.report["bed_target_temper"] == 0
+    assert "M140 S0" not in gcode(printer)
+    assert printer.report["bed_target_temper"] == 45
 
 
 async def test_a_long_upload_after_the_soak_is_not_reported_as_an_interrupted_soak(app):
