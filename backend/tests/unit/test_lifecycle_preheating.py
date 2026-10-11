@@ -26,6 +26,7 @@ from backend.app.services.lifecycle.engine import (
     transition_queue_item,
     writer,
 )
+from backend.app.services.print_scheduler import scheduler
 from backend.tests.unit.test_chamber_heat_soak import soak  # noqa: F401
 
 REQUESTED = datetime(2026, 1, 1, 12, 0)
@@ -118,7 +119,8 @@ async def test_failed_reservation_commit_never_enters_heating(soak):
     soak.client.set_airduct_mode.assert_not_called()
 
 
-async def test_a_transition_outside_preheating_does_not_load_deferred_columns(soak):
+async def test_a_transition_outside_preheating_does_not_load_deferred_columns(soak, monkeypatch):
+    monkeypatch.setattr(scheduler.dispatcher, "schedule_stage", MagicMock())
     soak.db.expunge(soak.item)
     item = await soak.db.scalar(select(PrintQueueItem).options(defer(PrintQueueItem.chamber_heat_soak)))
     assert "chamber_heat_soak" in inspect(item).unloaded
@@ -132,8 +134,10 @@ async def test_a_transition_outside_preheating_does_not_load_deferred_columns(so
 async def test_dispatch_handoff_keeps_soak_heaters_on(soak, monkeypatch):
     shutdown = MagicMock()
     monkeypatch.setattr(preheating, "_heaters_off", shutdown)
+    monkeypatch.setattr(scheduler.dispatcher, "schedule_stage", MagicMock())
     item = soak.item
-    async with writer(item.printer_id):
+    printer_id = item.printer_id or item.assigned_printer_id
+    async with writer(printer_id):
         await transition_queue_item(
             soak.db,
             item,
@@ -142,7 +146,7 @@ async def test_dispatch_handoff_keeps_soak_heaters_on(soak, monkeypatch):
             values={"chamber_heat_soak": True, "preheat_requested_at": REQUESTED},
         )
     await soak.db.commit()
-    async with writer(item.printer_id):
+    async with writer(printer_id):
         await transition_queue_item(soak.db, item, "preheating", "dispatching")
     await soak.db.commit()
     shutdown.assert_not_called()
@@ -152,7 +156,8 @@ async def test_other_heat_soak_exit_turns_heaters_off_after_commit(soak, monkeyp
     shutdown = MagicMock()
     monkeypatch.setattr(preheating, "_heaters_off", shutdown)
     item = soak.item
-    async with writer(item.printer_id):
+    printer_id = item.printer_id or item.assigned_printer_id
+    async with writer(printer_id):
         await transition_queue_item(
             soak.db,
             item,
@@ -161,7 +166,7 @@ async def test_other_heat_soak_exit_turns_heaters_off_after_commit(soak, monkeyp
             values={"chamber_heat_soak": True, "preheat_requested_at": REQUESTED},
         )
     await soak.db.commit()
-    async with writer(item.printer_id):
+    async with writer(printer_id):
         await transition_queue_item(soak.db, item, "preheating", "failed", action="dispatch_failure")
     shutdown.assert_not_called()
     await soak.db.commit()
