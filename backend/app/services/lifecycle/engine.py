@@ -427,6 +427,22 @@ async def lock_queue_items(
     return locked
 
 
+async def lock_queued_item(db: AsyncSession, item_id: int) -> PrintQueueItem | None:
+    """Reserve the database write before checking a queued job's dispatch/soak gates."""
+    with db.no_autoflush:
+        if db.get_bind().dialect.name == "sqlite":
+            # SQLite ignores FOR UPDATE. Reserve its write lock before the
+            # read so an accepted queue edit cannot land between this refresh
+            # and the dispatch/preheating hold that uses it.
+            await db.execute(
+                update(PrintQueueItem)
+                .where(PrintQueueItem.id == item_id, PrintQueueItem.status == "queued")
+                .values(id=PrintQueueItem.id)
+                .execution_options(synchronize_session=False)
+            )
+        return await lock_queue_item(db, item_id)
+
+
 async def lock_queue_item(db: AsyncSession, item_id: int) -> PrintQueueItem | None:
     """Refresh one job under a database row lock; writes still use conditional transitions."""
     return await db.scalar(

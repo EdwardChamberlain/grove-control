@@ -32,6 +32,7 @@ from backend.app.services.lifecycle.engine import (
     InvalidQueueTransition,
     QueueTransitionConflict,
     lock_queue_item,
+    lock_queued_item,
     transition_queue_item,
     writer,
 )
@@ -119,7 +120,7 @@ class Dispatcher:
         item_id, printer_id = item.id, item.printer_id
         unassigned = bool(binding and binding.unassigned)
         async with writer(printer_id):
-            held = await lock_queue_item(db, item_id)
+            held = await lock_queued_item(db, item_id)
             if (
                 not held
                 or held.status != "queued"

@@ -1,12 +1,13 @@
 """Exercise the actual status writer and transaction boundaries on a database."""
 
+import asyncio
 import logging
 import zipfile
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy import event, select
+from sqlalchemy import event, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import backend.app.models  # noqa: F401
@@ -19,6 +20,7 @@ from backend.app.services.lifecycle import dispatching as lifecycle_dispatching,
 from backend.app.services.lifecycle.engine import (
     InvalidQueueTransition,
     QueueTransitionConflict,
+    lock_queued_item,
     transition_queue_item,
     writer,
 )
@@ -67,6 +69,39 @@ async def make_item(sessions, status="queued", **kwargs):
         db.add(item)
         await db.commit()
         return item.id
+
+
+async def test_sqlite_job_lock_blocks_a_queue_edit_until_the_hold_commits(sessions):
+    item_id = await make_item(sessions)
+    editing_started = asyncio.Event()
+
+    async def edit():
+        async with sessions() as db:
+            editing_started.set()
+            result = await db.execute(
+                update(PrintQueueItem)
+                .where(PrintQueueItem.id == item_id, PrintQueueItem.status == "queued")
+                .values(manual_start=True)
+            )
+            await db.commit()
+            return result.rowcount
+
+    async with writer(1), sessions() as db:
+        held = await lock_queued_item(db, item_id)
+        editing = asyncio.create_task(edit())
+        try:
+            await editing_started.wait()
+            done, _ = await asyncio.wait({editing}, timeout=0.1)
+            assert not done, "An edit committed between the reservation read and its hold"
+            await transition_queue_item(db, held, "queued", "dispatching")
+            await db.commit()
+            assert await editing == 0  # The queued-state predicate now rejects the stale edit.
+        finally:
+            await db.rollback()
+            await editing
+    async with sessions() as db:
+        job = await db.get(PrintQueueItem, item_id)
+        assert job.status == "dispatching" and job.manual_start is False
 
 
 @pytest.mark.parametrize(

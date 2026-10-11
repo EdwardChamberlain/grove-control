@@ -24,6 +24,7 @@ from backend.app.services.job_identity import telemetry_identity
 from backend.app.services.lifecycle import clock
 from backend.app.services.lifecycle.engine import (
     lock_queue_item,
+    lock_queued_item,
     transition_queue_item,
     writer,
 )
@@ -429,7 +430,7 @@ class ChamberHeatSoak:
             _bind_in_memory(item, binding.printer_id, binding.ams_mapping)
         item_id, printer_id = item.id, item.printer_id
         unassigned = bool(binding and binding.unassigned)
-        item = await lock_queue_item(db, item_id)
+        item = await lock_queued_item(db, item_id)
         expected_assignment = None if unassigned else printer_id
         if (
             not item
