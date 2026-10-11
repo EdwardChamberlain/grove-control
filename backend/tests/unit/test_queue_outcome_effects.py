@@ -31,21 +31,20 @@ async def test_auto_off_is_not_scheduled_while_queue_work_remains(alignment, mon
     powered_off = AsyncMock()
     monkeypatch.setattr(queue_outcome_effects.smart_plug_manager, "schedule_off_after_queue_job", powered_off)
     async with alignment.sessions() as db:
-        job = await db.get(PrintQueueItem, alignment.job_id)
-        printer = await db.get(Printer, job.assigned_printer_id)
+        queued = await db.get(PrintQueueItem, alignment.job_id)
+        printer = await db.get(Printer, queued.assigned_printer_id)
         printer_id = printer.id
-        job.assigned_printer_id = None
-        job.printer_id = printer_id
-        job.status = "successful"
-        job.physical_outcome = "completed"
-        job.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
-        job.auto_off_after = True
-        queued = PrintQueueItem(status="queued", library_file_id=alignment.source_id)
-        if queue_preference == "printer":
-            queued.assigned_printer_id = printer_id
-        else:
+        if queue_preference == "model":
+            queued.assigned_printer_id = None
             queued.target_model = printer.model
-        db.add(queued)
+        job = PrintQueueItem(
+            printer_id=printer_id,
+            status="successful",
+            physical_outcome="completed",
+            completed_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            auto_off_after=True,
+        )
+        db.add(job)
         await db.commit()
 
     await queue_outcome_effects.run_queue_auto_off(alignment.sessions.kw["bind"], job.id, printer_id)
